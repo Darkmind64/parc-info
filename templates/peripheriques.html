@@ -124,6 +124,25 @@
     font-family: inherit; font-style: italic;
 }
 .spec-tip-empty { color: var(--text-muted); font-style: italic; font-size: .73rem; }
+
+/* Infobulles actions (contrats) */
+.action-tip {
+    position:fixed; z-index:3000; background:#0f1825; border:1px solid var(--border-glow);
+    border-radius:5px; padding:.6rem .85rem; font-size:.75rem; color:var(--text-secondary);
+    pointer-events:none; max-width:280px; box-shadow:0 4px 20px rgba(0,0,0,.6);
+    display:none; line-height:1.5;
+}
+.action-tip.show { display:block; }
+.action-tip-title { color:var(--accent); font-weight:700; font-size:.72rem;
+    letter-spacing:1px; text-transform:uppercase; margin-bottom:.35rem; }
+.action-tip-item { display:flex; align-items:baseline; gap:.4rem; padding:.1rem 0; }
+.action-tip-icon { flex-shrink:0; width:14px; }
+.action-tip-empty { color:var(--text-muted); font-style:italic; font-size:.72rem; }
+
+.qa-blue  { color: var(--accent); border-color: rgba(0,201,255,.3); }
+.qa-blue:hover  { background: rgba(0,201,255,.1); }
+.qa-purple { color: #a78bfa; border-color: rgba(167,139,250,.3); }
+.qa-purple:hover { background: rgba(167,139,250,.1); }
 </style>
 {% endblock %}
 
@@ -294,7 +313,10 @@
                 </td>
                 <td>
                     {% if p.nb_contrats %}
-                    <a href="/contrats" style="color:#a78bfa;text-decoration:none;font-size:.82rem;">
+                    <a class="qa-btn qa-purple" href="/contrats?peripherique={{ p.id }}"
+                       onmouseenter="afficherTipContratsPeripherique(event, {{ p.id }})"
+                       onmouseleave="masquerTip()"
+                       style="color:#a78bfa;text-decoration:none;font-size:.82rem;padding:.35rem .6rem;border:1px solid #a78bfa40;border-radius:4px;display:inline-flex;align-items:center;gap:.3rem;transition:all .15s;">
                         📋 {{ p.nb_contrats }} contrat{% if p.nb_contrats > 1 %}s{% endif %}
                     </a>
                     {% else %}
@@ -339,6 +361,10 @@
     </div>
     <div id="st-body"></div>
 </div>
+
+<!-- INFOBULLES CONTRATS -->
+<div class="action-tip" id="action-tip"></div>
+
 {% endblock %}
 
 {% block extra_scripts %}
@@ -580,6 +606,65 @@ function naviguerFiltreApp() {
     if (FILTER_STATE_P.stat) params.set('statut', FILTER_STATE_P.stat);
     if (app_) params.set('appareil', app_);
     window.location.href = '/peripheriques?' + params.toString();
+}
+
+// ── INFOBULLES CONTRATS (PÉRIPHÉRIQUES) ──────────────────────────────────
+const tipCache = {};
+
+function positionnerTip(e) {
+    const tip = document.getElementById('action-tip');
+    if (!tip) return;
+    const x = e.clientX + 14, y = e.clientY + 14;
+    tip.style.left = Math.min(x, window.innerWidth - 300) + 'px';
+    tip.style.top  = Math.min(y, window.innerHeight - 200) + 'px';
+}
+
+function masquerTip() {
+    const tip = document.getElementById('action-tip');
+    if (tip) tip.classList.remove('show');
+}
+
+async function afficherTipContratsPeripherique(e, perId) {
+    const tip = document.getElementById('action-tip');
+    if (!tip) return;
+
+    positionnerTip(e);
+    tip.classList.add('show');
+
+    if (tipCache['ctr_' + perId]) {
+        tip.innerHTML = tipCache['ctr_' + perId];
+        return;
+    }
+
+    tip.innerHTML = '<div class="action-tip-title">📋 Contrats liés</div><div class="action-tip-empty">Chargement…</div>';
+
+    try {
+        const r = await fetch('/api/contrats/peripherique/' + perId);
+        const ctrs = await r.json();
+
+        let html = '<div class="action-tip-title">📋 Contrats liés</div>';
+        if (!ctrs.length) {
+            html += '<div class="action-tip-empty">Aucun contrat associé</div>';
+        } else {
+            ctrs.slice(0, 5).forEach(ct => {
+                const ico = ct.expire_depasse ? '🔴' : ct.expire_bientot ? '🟡' : '🟢';
+                html += `<div class="action-tip-item"><span class="action-tip-icon">${ico}</span><span>${escH(ct.titre)}</span></div>`;
+                if (ct.date_fin_fmt) {
+                    html += `<div style="font-size:.68rem;color:var(--text-muted);padding-left:18px;margin-top:-2px;">Échéance : ${escH(ct.date_fin_fmt)}</div>`;
+                }
+            });
+            if (ctrs.length > 5) html += `<div class="action-tip-empty">+ ${ctrs.length - 5} autre(s)</div>`;
+            html += `<div style="margin-top:.4rem;font-size:.68rem;color:var(--accent);border-top:1px solid var(--border);padding-top:.3rem;">Cliquer pour voir tous les contrats →</div>`;
+        }
+        tipCache['ctr_' + perId] = html;
+        tip.innerHTML = html;
+    } catch (err) {
+        tip.innerHTML = '<div class="action-tip-title">📋 Contrats liés</div><div class="action-tip-empty">Erreur de chargement</div>';
+    }
+}
+
+function escH(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 </script>
 {% endblock %}
