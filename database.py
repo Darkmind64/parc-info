@@ -12,6 +12,21 @@ UPLOAD_FOLDER: str = ''
 _tl = threading.local()
 
 
+# ─── INITIALISATION DES CHEMINS ────────────────────────────────────────────────
+
+def init_paths(db_path: str, upload_path: str) -> None:
+    """Initialise les chemins DATABASE et UPLOAD_FOLDER de façon centralisée et robuste.
+
+    DOIT être appelée une seule fois au démarrage (par app.py ou launcher.py).
+    Résout le problème de fragmentation des chemins en deux endroits.
+    """
+    global DATABASE, UPLOAD_FOLDER
+    DATABASE = db_path
+    UPLOAD_FOLDER = upload_path
+    logger = __import__('logging').getLogger('parcinfo')
+    logger.debug(f'Database initialized: {DATABASE}')
+
+
 # ─── CONNEXION PRINCIPALE ────────────────────────────────────────────────────
 
 def get_db():
@@ -51,12 +66,16 @@ def _ip_sort_key(ip):
 def _local_db():
     import database as _self
     import os
+    import logging
 
     # Déterminer le chemin de la base de données
     db_path = _self.DATABASE
     if not db_path:
         # Si DATABASE n'est pas initialisé, chercher parc_info.db dans le répertoire courant
         db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'parc_info.db')
+        # Log warning: init_paths() n'a pas été appelée (bug potentiel)
+        logger = logging.getLogger('parcinfo')
+        logger.warning(f'DATABASE not initialized via init_paths(), using fallback: {db_path}')
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row

@@ -65,17 +65,17 @@ def main():
 
     # Importer app — à ce stade DATABASE n'est pas encore défini
     import app as flask_app
+    from database import init_paths as db_init_paths
 
-    # Surcharger DATABASE et UPLOAD_FOLDER après import
-    flask_app.DATABASE      = db_path
-    flask_app.UPLOAD_FOLDER = uploads_path
+    # Initialiser les chemins de façon centralisée (robuste et non-fragile)
+    db_init_paths(db_path, uploads_path)
 
     # Surcharger les dossiers de l'app Flask si frozen
     if getattr(sys, 'frozen', False):
         flask_app.app.template_folder = res('templates')
         flask_app.app.static_folder   = res('static')
 
-    # Initialiser la DB (utilise maintenant DATABASE surchargé)
+    # Initialiser la DB (utilise maintenant les chemins inicializados)
     flask_app.init_db()
 
     # Ouvrir le navigateur après démarrage de Flask

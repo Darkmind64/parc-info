@@ -33,11 +33,9 @@ UPLOAD_FOLDER = os.path.join(_data_base, 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ─── MODULES UTILITAIRES ──────────────────────────────────────────────────────
-import database as _db_module
-_db_module.DATABASE      = DATABASE
-_db_module.UPLOAD_FOLDER = UPLOAD_FOLDER
-
-from database       import get_db, row_to_dict
+from database       import get_db, row_to_dict, init_paths
+# Initialiser les chemins de la base de données de façon centralisée et robuste
+init_paths(DATABASE, UPLOAD_FOLDER)
 from auth_utils     import (hash_pwd as _hash_pwd, check_pwd as _check_pwd,
                              get_auth_user, login_required,
                              get_csrf_token as _get_csrf_token,
