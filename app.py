@@ -1349,22 +1349,15 @@ def selectionner_client(id):
 
 # ─── ROUTES PRINCIPALES ──────────────────────────────────────────────────────
 
-@app.route('/')
-@login_required
-def index():
-    cid = get_client_id()
-    if not cid:
-        return redirect(url_for('nouveau_client'))
-    conn = get_db()
-    today = date.today()
-
-    # Utiliser retry_db_query pour les requêtes critiques qui peuvent être verrouillées
-    parc    = row_to_dict(retry_db_query(lambda: conn.execute('SELECT * FROM parc_general WHERE client_id=?', (cid,)).fetchone() or {}))
-    client  = row_to_dict(retry_db_query(lambda: conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {}))
+def _compute_client_dashboard_stats(conn, cid, today):
+    """
+    Calcule les statistiques du dashboard pour un client spécifique.
+    Retourne un dictionnaire avec tous les compteurs et données agrégées.
+    """
     appareils = fmt_appareils([row_to_dict(r) for r in retry_db_query(lambda: conn.execute(
         'SELECT * FROM appareils WHERE client_id=? ORDER BY adresse_ip', (cid,)).fetchall())])
 
-    # ── Compteurs principaux ──────────────────────────────────────────────────
+    # Compteurs principaux
     nb_en_ligne   = sum(1 for a in appareils if a.get('en_ligne'))
     nb_hors_ligne = sum(1 for a in appareils if not a.get('en_ligne') and a.get('statut') == 'actif')
     nb_garantie   = sum(1 for a in appareils if a.get('garantie_active'))
@@ -1372,14 +1365,95 @@ def index():
     nb_contrats   = retry_db_query(lambda: conn.execute("SELECT COUNT(*) FROM contrats WHERE client_id=? AND statut='actif'", (cid,)).fetchone()[0])
     nb_identifiants = retry_db_query(lambda: conn.execute('SELECT COUNT(*) FROM identifiants WHERE client_id=?', (cid,)).fetchone()[0])
 
-    # ── Répartition par type ──────────────────────────────────────────────────
+    # Répartition par type
     repartition_rows = retry_db_query(lambda: conn.execute(
         "SELECT type_appareil, COUNT(*) as nb FROM appareils WHERE client_id=? GROUP BY type_appareil ORDER BY nb DESC",
         (cid,)).fetchall())
     repartition = [{'type': r[0] or 'Autre', 'nb': r[1]} for r in repartition_rows]
 
-    # ── Alertes : contrats expirant bientôt ou expirés ───────────────────────
+    # Statistiques périphériques
+    periph_stats = {
+        'actif': conn.execute("SELECT COUNT(*) FROM peripheriques WHERE client_id=? AND statut='actif'", (cid,)).fetchone()[0],
+        'stock': conn.execute("SELECT COUNT(*) FROM peripheriques WHERE client_id=? AND statut='stock'", (cid,)).fetchone()[0],
+        'hs':    conn.execute("SELECT COUNT(*) FROM peripheriques WHERE client_id=? AND statut='hors_service'", (cid,)).fetchone()[0],
+    }
+
+    # Calculs dérivés
+    nb_app_total = len(appareils)
+    taux_dispo   = round(nb_en_ligne / nb_app_total * 100) if nb_app_total else 0
+
+    # Montant annuel des contrats
+    montant_annuel = 0.0
+    _period_map = {'mensuel':12,'trimestriel':4,'semestriel':2,'annuel':1,'pluriannuel':0.5,'unique':0}
+    for ct in conn.execute("SELECT montant_ht,periodicite FROM contrats WHERE client_id=? AND statut='actif'", (cid,)).fetchall():
+        try:
+            if ct[0]: montant_annuel += float(ct[0]) * _period_map.get(ct[1] or 'annuel', 1)
+        except: pass
+
+    # Graphiques
+    types_chart = [(r['type'], r['nb']) for r in repartition]
+    _p_cats = conn.execute(
+        'SELECT categorie, COUNT(*) as n FROM peripheriques WHERE client_id=? GROUP BY categorie ORDER BY n DESC',
+        (cid,)).fetchall()
+    periph_chart = [(r[0], r[1]) for r in _p_cats]
+
+    # Appareils récents
+    recents = [row_to_dict(r) for r in conn.execute(
+        "SELECT * FROM appareils WHERE client_id=? ORDER BY date_maj DESC LIMIT 5", (cid,)).fetchall()]
+
+    # Derniers périphériques et contrats
+    derniers_periph = [row_to_dict(r) for r in conn.execute(
+        'SELECT * FROM peripheriques WHERE client_id=? ORDER BY date_creation DESC LIMIT 3', (cid,)).fetchall()]
+    derniers_contrats = [row_to_dict(r) for r in conn.execute(
+        'SELECT * FROM contrats WHERE client_id=? ORDER BY date_creation DESC LIMIT 3', (cid,)).fetchall()]
+
+    # Nombre d'utilisateurs
+    nb_users = conn.execute('SELECT COUNT(*) FROM utilisateurs WHERE client_id=?', (cid,)).fetchone()[0]
+
+    # Nombre hors service
+    nb_hors_service = conn.execute("SELECT COUNT(*) FROM appareils WHERE client_id=? AND statut='hors_service'", (cid,)).fetchone()[0]
+
+    # Activités récentes
+    hist_recent = []
+    try:
+        hist_recent = [row_to_dict(r) for r in conn.execute(
+            "SELECT entite, entite_nom, action, date_action FROM historique "
+            "WHERE client_id=? ORDER BY id DESC LIMIT 6", (cid,)).fetchall()]
+    except Exception:
+        pass
+
+    return {
+        'appareils': appareils,
+        'nb_en_ligne': nb_en_ligne,
+        'nb_hors_ligne': nb_hors_ligne,
+        'nb_garantie': nb_garantie,
+        'nb_periph': nb_periph,
+        'nb_contrats': nb_contrats,
+        'nb_identifiants': nb_identifiants,
+        'repartition': repartition,
+        'periph_stats': periph_stats,
+        'nb_app_total': nb_app_total,
+        'taux_dispo': taux_dispo,
+        'montant_annuel': montant_annuel,
+        'types_chart': types_chart,
+        'periph_chart': periph_chart,
+        'recents': recents,
+        'derniers_periph': derniers_periph,
+        'derniers_contrats': derniers_contrats,
+        'nb_users': nb_users,
+        'nb_hors_service': nb_hors_service,
+        'hist_recent': hist_recent,
+    }
+
+
+def _compute_alerts_for_client(conn, cid, today):
+    """
+    Calcule les alertes (contrats, garanties, antivirus) pour un client.
+    Retourne un dictionnaire avec les différentes listes d'alertes.
+    """
     alerte_jours = int(cfg_get('garantie_alerte_jours', '90'))
+
+    # Alertes contrats
     contrats_alertes = []
     for row in retry_db_query(lambda: conn.execute("SELECT * FROM contrats WHERE client_id=? AND statut='actif' AND date_fin!='' ORDER BY date_fin", (cid,)).fetchall()):
         ct = row_to_dict(row)
@@ -1395,11 +1469,15 @@ def index():
                 contrats_alertes.append(ct)
         except: pass
 
-    # ── Alertes garanties appareils ───────────────────────────────────────────
+    # Alertes garanties
+    appareils = [row_to_dict(r) for r in conn.execute(
+        'SELECT * FROM appareils WHERE client_id=? ORDER BY adresse_ip', (cid,)).fetchall()]
+    appareils = fmt_appareils(appareils)
+
     garanties_alertes = []
     for a in appareils:
         if not a.get('date_fin_garantie'): continue
-        if a.get('garantie_alerte_ignoree'): continue  # Alerte explicitement ignorée
+        if a.get('garantie_alerte_ignoree'): continue
         try:
             df = date.fromisoformat(a['date_fin_garantie'])
             delta = (df - today).days
@@ -1410,11 +1488,7 @@ def index():
         except: pass
     garanties_alertes.sort(key=lambda x: x.get('garantie_jours', 9999))
 
-    # ── Appareils récents (dernière modification) ─────────────────────────────
-    recents = [row_to_dict(r) for r in conn.execute(
-        "SELECT * FROM appareils WHERE client_id=? ORDER BY date_maj DESC LIMIT 5", (cid,)).fetchall()]
-
-    # ── Prochains contrats à renouveler ──────────────────────────────────────
+    # Prochains contrats à renouveler
     prochains_renouvellements = []
     for row in conn.execute(
         "SELECT * FROM contrats WHERE client_id=? AND statut='actif' AND date_fin!='' ORDER BY date_fin LIMIT 5",
@@ -1427,42 +1501,7 @@ def index():
             prochains_renouvellements.append(ct)
         except: pass
 
-    # ── Statistiques périphériques ────────────────────────────────────────────
-    periph_stats = {
-        'actif': conn.execute("SELECT COUNT(*) FROM peripheriques WHERE client_id=? AND statut='actif'", (cid,)).fetchone()[0],
-        'stock': conn.execute("SELECT COUNT(*) FROM peripheriques WHERE client_id=? AND statut='stock'", (cid,)).fetchone()[0],
-        'hs':    conn.execute("SELECT COUNT(*) FROM peripheriques WHERE client_id=? AND statut='hors_service'", (cid,)).fetchone()[0],
-    }
-
-    # ── Logiciels & antivirus (depuis parc_general) ───────────────────────────
-    logiciels = [l.strip() for l in (parc.get('logiciels_metier') or '').splitlines() if l.strip()]
-
-
-    nb_app_total = len(appareils)
-    taux_dispo   = round(nb_en_ligne / nb_app_total * 100) if nb_app_total else 0
-    valeur_parc  = sum(a.get('prix_achat') or 0 for a in appareils)
-    periph_chart = [(r['type'] if 'type' in r else r.get('categorie',''), r.get('nb', 0))
-                    for r in conn.execute(
-                        'SELECT categorie, COUNT(*) as nb FROM peripheriques WHERE client_id=? GROUP BY categorie ORDER BY nb DESC',
-                        (cid,)).fetchall()] if False else []
-    types_chart  = [(r['type'], r['nb']) for r in repartition]
-    derniers_periph = [row_to_dict(r) for r in conn.execute(
-        'SELECT * FROM peripheriques WHERE client_id=? ORDER BY date_creation DESC LIMIT 3', (cid,)).fetchall()]
-    derniers_contrats = [row_to_dict(r) for r in conn.execute(
-        'SELECT * FROM contrats WHERE client_id=? ORDER BY date_creation DESC LIMIT 3', (cid,)).fetchall()]
-    montant_annuel = 0.0
-    _period_map = {'mensuel':12,'trimestriel':4,'semestriel':2,'annuel':1,'pluriannuel':0.5,'unique':0}
-    for ct in conn.execute("SELECT montant_ht,periodicite FROM contrats WHERE client_id=? AND statut='actif'", (cid,)).fetchall():
-        try:
-            if ct[0]: montant_annuel += float(ct[0]) * _period_map.get(ct[1] or 'annuel', 1)
-        except: pass
-    # Periph chart from periph_stats categories
-    _p_cats = conn.execute(
-        'SELECT categorie, COUNT(*) as n FROM peripheriques WHERE client_id=? GROUP BY categorie ORDER BY n DESC',
-        (cid,)).fetchall()
-    periph_chart = [(r[0], r[1]) for r in _p_cats]
-
-    # ── AV urgents (30 jours) ─────────────────────────────────────────────────
+    # Antivirus urgents (30 jours)
     today_iso    = date.today().isoformat()
     seuil_av_iso = (date.today() + timedelta(days=30)).isoformat()
     av_urgents = []
@@ -1474,37 +1513,201 @@ def index():
         _item['expire_depasse'] = _item.get('av_date_fin', '') < today_iso
         av_urgents.append(_item)
 
-    # ── Activités récentes (historique) ───────────────────────────────────────
-    hist_recent = []
+    return {
+        'contrats_alertes': contrats_alertes[:5],
+        'garanties_alertes': garanties_alertes[:5],
+        'prochains_renouvellements': prochains_renouvellements,
+        'av_urgents': av_urgents,
+    }
+
+
+def single_client_dashboard(cid):
+    """
+    Affiche le dashboard pour un seul client (vue classique).
+    """
+    conn = get_db()
+    today = date.today()
+
     try:
-        hist_recent = [row_to_dict(r) for r in conn.execute(
-            "SELECT entite, entite_nom, action, date_action FROM historique "
-            "WHERE client_id=? ORDER BY id DESC LIMIT 6", (cid,)).fetchall()]
-    except Exception:
-        pass
+        # Fetch parc and client info
+        parc    = row_to_dict(retry_db_query(lambda: conn.execute('SELECT * FROM parc_general WHERE client_id=?', (cid,)).fetchone() or {}))
+        client  = row_to_dict(retry_db_query(lambda: conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {}))
 
-    # ── Nombre d'utilisateurs ─────────────────────────────────────────────────
-    nb_users = conn.execute('SELECT COUNT(*) FROM utilisateurs WHERE client_id=?', (cid,)).fetchone()[0]
+        # Get dashboard stats
+        stats = _compute_client_dashboard_stats(conn, cid, today)
 
-    # ── Nombre hors service ───────────────────────────────────────────────────
-    nb_hors_service = conn.execute("SELECT COUNT(*) FROM appareils WHERE client_id=? AND statut='hors_service'", (cid,)).fetchone()[0]
+        # Get alerts
+        alerts = _compute_alerts_for_client(conn, cid, today)
 
-    conn.close()
-    return render_template('index.html',
-        parc=parc, client=client, appareils=appareils,
-        nb_en_ligne=nb_en_ligne, nb_hors_ligne=nb_hors_ligne,
-        nb_actifs=nb_en_ligne, nb_garantie=nb_garantie,
-        nb_app_total=nb_app_total, taux_dispo=taux_dispo, valeur_parc=valeur_parc,
-        nb_periph=nb_periph, nb_contrats=nb_contrats, nb_identifiants=nb_identifiants,
-        repartition=repartition, types_chart=types_chart, periph_chart=periph_chart,
-        contrats_alertes=contrats_alertes[:5],
-        garanties_alertes=garanties_alertes[:5],
-        prochains_renouvellements=prochains_renouvellements,
-        periph_stats=periph_stats, montant_annuel=montant_annuel,
-        recents=recents, derniers_periph=derniers_periph, derniers_contrats=derniers_contrats,
-        logiciels=logiciels,
-        av_urgents=av_urgents, hist_recent=hist_recent, nb_users=nb_users, nb_hors_service=nb_hors_service,
-        clients=get_clients(), client_actif_id=cid)
+        # Logiciels & antivirus (depuis parc_general)
+        logiciels = [l.strip() for l in (parc.get('logiciels_metier') or '').splitlines() if l.strip()]
+
+        # Calcul valeur parc
+        valeur_parc = sum(a.get('prix_achat') or 0 for a in stats['appareils'])
+
+        # Combine all data for template
+        template_data = {
+            'parc': parc,
+            'client': client,
+            'appareils': stats['appareils'],
+            'nb_en_ligne': stats['nb_en_ligne'],
+            'nb_hors_ligne': stats['nb_hors_ligne'],
+            'nb_actifs': stats['nb_en_ligne'],
+            'nb_garantie': stats['nb_garantie'],
+            'nb_app_total': stats['nb_app_total'],
+            'taux_dispo': stats['taux_dispo'],
+            'valeur_parc': valeur_parc,
+            'nb_periph': stats['nb_periph'],
+            'nb_contrats': stats['nb_contrats'],
+            'nb_identifiants': stats['nb_identifiants'],
+            'repartition': stats['repartition'],
+            'types_chart': stats['types_chart'],
+            'periph_chart': stats['periph_chart'],
+            'contrats_alertes': alerts['contrats_alertes'],
+            'garanties_alertes': alerts['garanties_alertes'],
+            'prochains_renouvellements': alerts['prochains_renouvellements'],
+            'periph_stats': stats['periph_stats'],
+            'montant_annuel': stats['montant_annuel'],
+            'recents': stats['recents'],
+            'derniers_periph': stats['derniers_periph'],
+            'derniers_contrats': stats['derniers_contrats'],
+            'logiciels': logiciels,
+            'av_urgents': alerts['av_urgents'],
+            'hist_recent': stats['hist_recent'],
+            'nb_users': stats['nb_users'],
+            'nb_hors_service': stats['nb_hors_service'],
+            'clients': get_clients(),
+            'client_actif_id': cid,
+        }
+
+        return render_template('client_dashboard.html', **template_data)
+    finally:
+        conn.close()
+
+
+def user_dashboard():
+    """
+    Affiche le dashboard utilisateur avec vue d'ensemble de tous les clients accessibles.
+    Agrège les statistiques et les alertes par client.
+    """
+    user = get_auth_user()
+    clients = get_clients()
+    conn = get_db()
+    today = date.today()
+
+    try:
+        # Agrégation des données par client
+        clients_data = []
+        all_alerts = []
+
+        for client in clients:
+            cid = client['id']
+
+            # Récupérer les stats du client
+            stats = _compute_client_dashboard_stats(conn, cid, today)
+            alerts = _compute_alerts_for_client(conn, cid, today)
+
+            # Compter les alertes pour ce client
+            alert_count = (
+                len(alerts['contrats_alertes']) +
+                len(alerts['garanties_alertes']) +
+                len(alerts['av_urgents'])
+            )
+
+            # Données du client pour le template
+            client_summary = {
+                'client': client,
+                'stats': stats,
+                'alerts': alerts,
+                'alert_count': alert_count,
+            }
+            clients_data.append(client_summary)
+
+            # Ajouter les alertes à la liste consolidée avec contexte du client
+            for contract_alert in alerts['contrats_alertes']:
+                all_alerts.append({
+                    'type': 'contract',
+                    'client_id': cid,
+                    'client_nom': client['nom'],
+                    'description': contract_alert.get('description', f"Contrat: {contract_alert.get('numero_contrat', 'N/A')}"),
+                    'days_remaining': contract_alert.get('jours_restants', 999),
+                    'date': contract_alert.get('date_fin', ''),
+                    'expired': contract_alert.get('expire_depasse', False),
+                    'object': contract_alert,
+                })
+
+            for warranty_alert in alerts['garanties_alertes']:
+                all_alerts.append({
+                    'type': 'warranty',
+                    'client_id': cid,
+                    'client_nom': client['nom'],
+                    'description': warranty_alert.get('nom_machine', 'Appareil'),
+                    'days_remaining': warranty_alert.get('garantie_jours', 999),
+                    'date': warranty_alert.get('date_fin_garantie', ''),
+                    'expired': warranty_alert.get('garantie_jours', 0) < 0,
+                    'object': warranty_alert,
+                })
+
+            for av_alert in alerts['av_urgents']:
+                all_alerts.append({
+                    'type': 'antivirus',
+                    'client_id': cid,
+                    'client_nom': client['nom'],
+                    'description': av_alert.get('nom_machine', 'Appareil'),
+                    'days_remaining': 0,
+                    'date': av_alert.get('av_date_fin', ''),
+                    'expired': av_alert.get('expire_depasse', False),
+                    'object': av_alert,
+                })
+
+        # Trier les alertes par urgence (jours restants croissant)
+        all_alerts.sort(key=lambda x: (x['expired'] == False, x['days_remaining']))
+
+        # Calculs globaux
+        total_devices = sum(s['stats']['nb_app_total'] for s in clients_data)
+        total_online = sum(s['stats']['nb_en_ligne'] for s in clients_data)
+        total_contracts = sum(s['stats']['nb_contrats'] for s in clients_data)
+        total_peripherals = sum(s['stats']['nb_periph'] for s in clients_data)
+        total_alerts_count = len(all_alerts)
+
+        return render_template('user_dashboard.html',
+                             user=user,
+                             clients_data=clients_data,
+                             all_alerts=all_alerts[:20],  # Top 20 most urgent alerts
+                             total_devices=total_devices,
+                             total_online=total_online,
+                             total_contracts=total_contracts,
+                             total_peripherals=total_peripherals,
+                             total_alerts_count=total_alerts_count,
+                             clients=clients)
+    finally:
+        conn.close()
+
+
+@app.route('/')
+@login_required
+def index():
+    """
+    Route dashboard intelligente qui détecte le nombre de clients accessibles.
+    - Zéro clients: redirection vers création
+    - Un client: affiche le dashboard single-client classique
+    - Plusieurs clients: affiche le dashboard multi-client avec vue d'ensemble
+    """
+    user = get_auth_user()
+    clients = get_clients()  # Récupère tous les clients accessibles (respects ACL)
+
+    # Cas 1: Pas de clients accessibles
+    if not clients:
+        return redirect(url_for('nouveau_client'))
+
+    # Cas 2: Un seul client accessible -> affiche le dashboard classique
+    if len(clients) == 1:
+        cid = clients[0]['id']
+        session['client_id'] = cid
+        return single_client_dashboard(cid)
+
+    # Cas 3: Plusieurs clients accessibles -> affiche le dashboard utilisateur
+    return user_dashboard()
 
 @app.route('/parc', methods=['GET','POST'])
 def parc_general():

@@ -1,0 +1,350 @@
+{% extends "base.html" %}
+{% block title %}Your IT Infrastructure Overview{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* ── GRILLE ── */
+.dash-row    { display:grid; gap:1.2rem; margin-bottom:1.2rem; }
+.cols-6      { grid-template-columns: repeat(6,1fr); }
+.cols-3      { grid-template-columns: repeat(3,1fr); }
+.cols-2      { grid-template-columns: 1fr 1fr; }
+.cols-1-2    { grid-template-columns: 1fr 2fr; }
+.cols-2-1    { grid-template-columns: 2fr 1fr; }
+@media(max-width:1200px){ .cols-6{grid-template-columns:repeat(3,1fr);} .cols-3{grid-template-columns:1fr 1fr;} }
+@media(max-width:800px) { .cols-6,.cols-3,.cols-2,.cols-1-2,.cols-2-1{grid-template-columns:1fr;} }
+
+/* ── KPI ── */
+.kpi {
+    background:var(--bg-card); border:1px solid var(--border); border-radius:6px;
+    padding:.9rem 1.1rem; position:relative; overflow:hidden; transition:border-color .2s;
+    cursor:default;
+}
+.kpi:hover { border-color:var(--border-glow); }
+.kpi-top  { display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem; margin-bottom:.5rem; }
+.kpi-icon { font-size:1.4rem; line-height:1; flex-shrink:0; }
+.kpi-val  { font-family:'Share Tech Mono',monospace; font-size:2rem; font-weight:700; line-height:1; }
+.kpi-lbl  { font-size:.62rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text-muted); margin-top:.25rem; }
+.kpi-sub  { font-size:.72rem; color:var(--text-secondary); margin-top:.3rem; }
+.kpi-bar  { height:3px; background:var(--bg-secondary); border-radius:2px; margin-top:.5rem; overflow:hidden; }
+.kpi-bar-fill { height:100%; border-radius:2px; transition:width 1s ease; }
+.kpi.accent .kpi-val  { color:var(--accent); }
+.kpi.green  .kpi-val  { color:var(--accent-green); }
+.kpi.red    .kpi-val  { color:var(--accent-red); }
+.kpi.orange .kpi-val  { color:var(--accent-orange); }
+.kpi.purple .kpi-val  { color:#a78bfa; }
+
+/* ── SECTION HEADER ── */
+.s-head {
+    font-family:'Rajdhani',sans-serif; font-size:.7rem; font-weight:700;
+    letter-spacing:2.5px; text-transform:uppercase; color:var(--accent);
+    margin-bottom:.7rem; display:flex; align-items:center; justify-content:space-between;
+}
+.s-head::before { content:''; display:inline-block; width:10px; height:2px; background:var(--accent); margin-right:.5rem; }
+.s-head a { font-weight:400; letter-spacing:.5px; color:var(--text-muted); text-decoration:none; font-size:.68rem; }
+.s-head a:hover { color:var(--accent); }
+
+/* ── ALERTES ── */
+.alert-strip {
+    display:flex; align-items:center; gap:.7rem;
+    padding:.55rem .9rem; border-radius:4px; margin-bottom:.4rem;
+    font-size:.83rem; border-left:3px solid; cursor:pointer;
+    text-decoration:none; transition:filter .15s; color:var(--text-primary);
+}
+.alert-strip:hover { filter:brightness(1.1); }
+.alert-strip.danger { background:rgba(255,51,85,.07);   border-color:var(--accent-red); }
+.alert-strip.warn   { background:rgba(255,140,0,.07);   border-color:var(--accent-orange); }
+.alert-strip.info   { background:rgba(0,201,255,.06);   border-color:var(--accent); }
+.alert-strip.success { background:rgba(0,200,83,.06);   border-color:var(--accent-green); }
+.as-label { flex:1; font-weight:600; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.as-sub   { font-size:.75rem; color:var(--text-secondary); flex-shrink:0; margin:0 .3rem; }
+.as-pill  {
+    font-family:'Share Tech Mono',monospace; font-size:.65rem; font-weight:700;
+    padding:.15rem .5rem; border-radius:10px; border:1px solid; flex-shrink:0;
+}
+.as-pill.danger { color:var(--accent-red);    border-color:var(--accent-red)55; }
+.as-pill.warn   { color:var(--accent-orange); border-color:var(--accent-orange)55; }
+.as-pill.ok     { color:var(--accent-green);  border-color:var(--accent-green)44; }
+
+/* ── CLIENT CARDS ── */
+.client-card {
+    background:var(--bg-card); border:1px solid var(--border); border-radius:6px;
+    padding:1rem; transition:border-color .2s, transform .2s;
+    display:flex; flex-direction:column; gap:.7rem;
+}
+.client-card:hover { border-color:var(--border-glow); transform:translateY(-2px); }
+.client-card-header {
+    display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem;
+}
+.client-card-title {
+    flex:1; font-weight:700; font-size:1.1rem;
+}
+.client-card-title a {
+    color:var(--text-primary); text-decoration:none;
+}
+.client-card-title a:hover {
+    color:var(--accent);
+}
+.client-alert-badge {
+    font-size:.65rem; font-weight:700; padding:.25rem .6rem;
+    border-radius:3px; background:var(--bg-secondary);
+    color:var(--text-secondary); white-space:nowrap;
+}
+.client-alert-badge.critical {
+    background:rgba(255,51,85,.15); color:var(--accent-red);
+}
+.client-alert-badge.warning {
+    background:rgba(255,140,0,.15); color:var(--accent-orange);
+}
+.client-stats-grid {
+    display:grid; grid-template-columns:repeat(2,1fr); gap:.5rem;
+}
+.client-stat {
+    background:var(--bg-secondary); border-radius:4px; padding:.4rem .6rem;
+    font-size:.78rem; display:flex; align-items:center; gap:.4rem;
+}
+.client-stat-icon { font-size:1rem; flex-shrink:0; }
+.client-stat-value { flex:1; }
+.client-stat-label { font-size:.65rem; color:var(--text-secondary); display:block; }
+.client-stat-number { font-weight:700; font-family:'Share Tech Mono',monospace; }
+
+.client-action {
+    display:inline-flex; align-items:center; justify-content:center; gap:.4rem;
+    font-size:.78rem; padding:.35rem .7rem; border-radius:3px;
+    background:var(--accent); color:var(--bg-card); text-decoration:none;
+    transition:opacity .2s; font-weight:600;
+}
+.client-action:hover { opacity:.85; }
+
+/* ── CLIENTS GRID ── */
+.clients-grid {
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+    gap:1rem; margin:1.5rem 0;
+}
+@media(max-width:800px) {
+    .clients-grid { grid-template-columns:1fr; }
+}
+
+/* ── NO ALERTS STATE ── */
+.no-content-state {
+    text-align:center; padding:2rem; color:var(--text-secondary);
+}
+.no-content-icon { font-size:2.5rem; margin-bottom:.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- PAGE HEADER -->
+<div class="page-header">
+    <div>
+        <h1>Your IT Infrastructure</h1>
+        <p>Complete overview of all your clients and IT parks</p>
+    </div>
+</div>
+
+<!-- ══ TOTAL STATISTICS ════════════════════════════════════════════════════════ -->
+<div class="dash-row cols-6" style="margin-bottom:1.5rem;">
+    <div class="kpi accent">
+        <div class="kpi-top">
+            <div><span class="kpi-icon">🖥</span></div>
+        </div>
+        <div class="kpi-val">{{ total_devices }}</div>
+        <div class="kpi-lbl">Total Devices</div>
+        <div class="kpi-sub">{{ total_online }} online</div>
+    </div>
+
+    <div class="kpi green">
+        <div class="kpi-top">
+            <div><span class="kpi-icon">✓</span></div>
+        </div>
+        <div class="kpi-val">{{ total_online }}</div>
+        <div class="kpi-lbl">Online Devices</div>
+        {% set offline = total_devices - total_online %}
+        <div class="kpi-sub">{{ offline }} offline</div>
+    </div>
+
+    <div class="kpi purple">
+        <div class="kpi-top">
+            <div><span class="kpi-icon">📋</span></div>
+        </div>
+        <div class="kpi-val">{{ total_contracts }}</div>
+        <div class="kpi-lbl">Active Contracts</div>
+        <div class="kpi-sub">{{ clients|length }} clients</div>
+    </div>
+
+    <div class="kpi orange">
+        <div class="kpi-top">
+            <div><span class="kpi-icon">⚠</span></div>
+        </div>
+        <div class="kpi-val">{{ total_alerts_count }}</div>
+        <div class="kpi-lbl">Alerts</div>
+        {% if total_alerts_count > 0 %}
+        <div class="kpi-sub">Action required</div>
+        {% else %}
+        <div class="kpi-sub">All clear</div>
+        {% endif %}
+    </div>
+
+    <div class="kpi accent">
+        <div class="kpi-top">
+            <div><span class="kpi-icon">🔌</span></div>
+        </div>
+        <div class="kpi-val">{{ total_peripherals }}</div>
+        <div class="kpi-lbl">Peripherals</div>
+        <div class="kpi-sub">All clients</div>
+    </div>
+
+    <div class="kpi">
+        <div class="kpi-top">
+            <div><span class="kpi-icon">👥</span></div>
+        </div>
+        <div class="kpi-val">{{ clients|length }}</div>
+        <div class="kpi-lbl">Clients</div>
+        <div class="kpi-sub">Accessible</div>
+    </div>
+</div>
+
+<!-- ══ CRITICAL ALERTS ════════════════════════════════════════════════════════ -->
+{% if all_alerts %}
+<div style="margin-bottom:1.5rem;">
+    <div class="s-head" style="color:var(--accent-red);">
+        <span>⚠ {{ total_alerts_count }} alert{{ 's' if total_alerts_count != 1 }} across all clients</span>
+        <a href="#" onclick="document.querySelector('#alerts-section').scrollIntoView({behavior:'smooth'});return false;">View all</a>
+    </div>
+
+    <div id="alerts-section">
+    {% for alert in all_alerts %}
+        {% if alert.type == 'contract' %}
+        <a href="/contrat/{{ alert.object.id }}" class="alert-strip {% if alert.expired %}danger{% else %}warn{% endif %}">
+            <span>📋</span>
+            <span class="as-label">Contract: {{ alert.object.titre or alert.description }}</span>
+            <span class="as-sub">{{ alert.client_nom }}</span>
+            <span class="as-sub">{{ alert.object.fournisseur or '' }}</span>
+            {% if alert.expired %}
+            <span class="as-pill danger">Expired {{ alert.days_remaining|abs }}d ago</span>
+            {% else %}
+            <span class="as-pill warn">{{ alert.days_remaining }}d left</span>
+            {% endif %}
+        </a>
+        {% elif alert.type == 'warranty' %}
+        <a href="/appareil/{{ alert.object.id }}" class="alert-strip {% if alert.expired %}danger{% elif alert.days_remaining < 30 %}warn{% else %}info{% endif %}">
+            <span>🔒</span>
+            <span class="as-label">Warranty: {{ alert.description }}</span>
+            <span class="as-sub">{{ alert.client_nom }}</span>
+            <span class="as-sub">{{ alert.object.marque or '' }} {{ alert.object.modele or '' }}</span>
+            {% if alert.expired %}
+            <span class="as-pill danger">Expired {{ alert.days_remaining|abs }}d ago</span>
+            {% else %}
+            <span class="as-pill warn">{{ alert.days_remaining }}d left</span>
+            {% endif %}
+        </a>
+        {% elif alert.type == 'antivirus' %}
+        <a href="/appareil/{{ alert.object.id }}" class="alert-strip {% if alert.expired %}danger{% else %}warn{% endif %}">
+            <span>🛡</span>
+            <span class="as-label">Antivirus: {{ alert.description }}</span>
+            <span class="as-sub">{{ alert.client_nom }}</span>
+            <span class="as-sub">{{ alert.object.av_nom or alert.object.av_marque or 'Antivirus' }}</span>
+            {% if alert.expired %}
+            <span class="as-pill danger">EXPIRED</span>
+            {% else %}
+            <span class="as-pill warn">Expires soon</span>
+            {% endif %}
+        </a>
+        {% endif %}
+    {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ══ CLIENT CARDS GRID ══════════════════════════════════════════════════════ -->
+<div style="margin:2rem 0 1rem;">
+    <div class="s-head">All Accessible Clients</div>
+</div>
+
+<div class="clients-grid">
+{% for cd in clients_data %}
+    {% set client = cd.client %}
+    {% set stats = cd.stats %}
+    {% set alerts = cd.alerts %}
+    {% set alert_count = cd.alert_count %}
+
+    <div class="client-card">
+        <div class="client-card-header">
+            <div>
+                <div class="client-card-title">
+                    <a href="{{ url_for('selectionner_client', id=client.id) }}">{{ client.nom }}</a>
+                </div>
+                {% if client.couleur %}
+                <div style="display:inline-block;width:6px;height:6px;border-radius:50%;background:{{ client.couleur }};margin-top:.3rem;"></div>
+                {% endif %}
+            </div>
+            {% if alert_count > 0 %}
+            <div class="client-alert-badge {% if alert_count > 2 %}critical{% else %}warning{% endif %}">
+                {{ alert_count }} alert{{ 's' if alert_count != 1 }}
+            </div>
+            {% else %}
+            <div class="client-alert-badge" style="background:rgba(0,200,83,.15);color:var(--accent-green);">
+                ✓ Healthy
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="client-stats-grid">
+            <div class="client-stat">
+                <div class="client-stat-icon">🖥</div>
+                <div class="client-stat-value">
+                    <span class="client-stat-label">Devices</span>
+                    <span class="client-stat-number">{{ stats.nb_app_total }}</span>
+                </div>
+            </div>
+
+            <div class="client-stat">
+                <div class="client-stat-icon">✓</div>
+                <div class="client-stat-value">
+                    <span class="client-stat-label">Online</span>
+                    <span class="client-stat-number">{{ stats.nb_en_ligne }}</span>
+                </div>
+            </div>
+
+            <div class="client-stat">
+                <div class="client-stat-icon">📋</div>
+                <div class="client-stat-value">
+                    <span class="client-stat-label">Contracts</span>
+                    <span class="client-stat-number">{{ stats.nb_contrats }}</span>
+                </div>
+            </div>
+
+            <div class="client-stat">
+                <div class="client-stat-icon">🔌</div>
+                <div class="client-stat-value">
+                    <span class="client-stat-label">Peripherals</span>
+                    <span class="client-stat-number">{{ stats.nb_periph }}</span>
+                </div>
+            </div>
+        </div>
+
+        <a href="{{ url_for('selectionner_client', id=client.id) }}" class="client-action">
+            View Dashboard →
+        </a>
+    </div>
+{% endfor %}
+</div>
+
+{% if not clients_data %}
+<div class="no-content-state">
+    <div class="no-content-icon">👥</div>
+    <p><strong>No accessible clients</strong></p>
+    <p style="font-size:.9rem;margin-top:.5rem;">You don't have access to any IT parks yet.</p>
+    <a href="{{ url_for('nouveau_client') }}" class="btn btn-primary btn-sm" style="margin-top:1rem;">+ Create a new client</a>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Auto-refresh alerts every 5 minutes
+setTimeout(function() {
+    location.reload();
+}, 5 * 60 * 1000);
+</script>
+{% endblock %}
