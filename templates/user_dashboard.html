@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Your IT Infrastructure Overview{% endblock %}
+{% block title %}Vue d'ensemble de votre infrastructure informatique{% endblock %}
 
 {% block extra_styles %}
 <style>
@@ -136,8 +136,8 @@
 <!-- PAGE HEADER -->
 <div class="page-header">
     <div>
-        <h1>Your IT Infrastructure</h1>
-        <p>Complete overview of all your clients and IT parks</p>
+        <h1>Votre Infrastructure Informatique</h1>
+        <p>Vue complète de tous vos clients et parcs informatiques</p>
     </div>
 </div>
 
@@ -148,8 +148,8 @@
             <div><span class="kpi-icon">🖥</span></div>
         </div>
         <div class="kpi-val">{{ total_devices }}</div>
-        <div class="kpi-lbl">Total Devices</div>
-        <div class="kpi-sub">{{ total_online }} online</div>
+        <div class="kpi-lbl">Appareils Total</div>
+        <div class="kpi-sub">{{ total_online }} en ligne</div>
     </div>
 
     <div class="kpi green">
@@ -157,9 +157,9 @@
             <div><span class="kpi-icon">✓</span></div>
         </div>
         <div class="kpi-val">{{ total_online }}</div>
-        <div class="kpi-lbl">Online Devices</div>
+        <div class="kpi-lbl">Appareils En Ligne</div>
         {% set offline = total_devices - total_online %}
-        <div class="kpi-sub">{{ offline }} offline</div>
+        <div class="kpi-sub">{{ offline }} hors ligne</div>
     </div>
 
     <div class="kpi purple">
@@ -167,7 +167,7 @@
             <div><span class="kpi-icon">📋</span></div>
         </div>
         <div class="kpi-val">{{ total_contracts }}</div>
-        <div class="kpi-lbl">Active Contracts</div>
+        <div class="kpi-lbl">Contrats Actifs</div>
         <div class="kpi-sub">{{ clients|length }} clients</div>
     </div>
 
@@ -176,11 +176,11 @@
             <div><span class="kpi-icon">⚠</span></div>
         </div>
         <div class="kpi-val">{{ total_alerts_count }}</div>
-        <div class="kpi-lbl">Alerts</div>
+        <div class="kpi-lbl">Alertes</div>
         {% if total_alerts_count > 0 %}
-        <div class="kpi-sub">Action required</div>
+        <div class="kpi-sub">Action requise</div>
         {% else %}
-        <div class="kpi-sub">All clear</div>
+        <div class="kpi-sub">Tout est OK</div>
         {% endif %}
     </div>
 
@@ -189,8 +189,8 @@
             <div><span class="kpi-icon">🔌</span></div>
         </div>
         <div class="kpi-val">{{ total_peripherals }}</div>
-        <div class="kpi-lbl">Peripherals</div>
-        <div class="kpi-sub">All clients</div>
+        <div class="kpi-lbl">Périphériques</div>
+        <div class="kpi-sub">Tous les clients</div>
     </div>
 
     <div class="kpi">
@@ -199,7 +199,7 @@
         </div>
         <div class="kpi-val">{{ clients|length }}</div>
         <div class="kpi-lbl">Clients</div>
-        <div class="kpi-sub">Accessible</div>
+        <div class="kpi-sub">Accessibles</div>
     </div>
 </div>
 
@@ -207,8 +207,8 @@
 {% if all_alerts %}
 <div style="margin-bottom:1.5rem;">
     <div class="s-head" style="color:var(--accent-red);">
-        <span>⚠ {{ total_alerts_count }} alert{{ 's' if total_alerts_count != 1 }} across all clients</span>
-        <a href="#" onclick="document.querySelector('#alerts-section').scrollIntoView({behavior:'smooth'});return false;">View all</a>
+        <span>⚠ {{ total_alerts_count }} alerte{{ 's' if total_alerts_count != 1 }} sur tous les clients</span>
+        <a href="#" onclick="document.querySelector('#alerts-section').scrollIntoView({behavior:'smooth'});return false;">Voir tout</a>
     </div>
 
     <div id="alerts-section">
@@ -216,37 +216,37 @@
         {% if alert.type == 'contract' %}
         <a href="/contrat/{{ alert.object.id }}" class="alert-strip {% if alert.expired %}danger{% else %}warn{% endif %}">
             <span>📋</span>
-            <span class="as-label">Contract: {{ alert.object.titre or alert.description }}</span>
+            <span class="as-label">Contrat : {{ alert.object.titre or alert.description }}</span>
             <span class="as-sub">{{ alert.client_nom }}</span>
             <span class="as-sub">{{ alert.object.fournisseur or '' }}</span>
             {% if alert.expired %}
-            <span class="as-pill danger">Expired {{ alert.days_remaining|abs }}d ago</span>
+            <span class="as-pill danger">Expiré il y a {{ alert.days_remaining|abs }}j</span>
             {% else %}
-            <span class="as-pill warn">{{ alert.days_remaining }}d left</span>
+            <span class="as-pill warn">{{ alert.days_remaining }}j restant{{ 's' if alert.days_remaining > 1 }}</span>
             {% endif %}
         </a>
         {% elif alert.type == 'warranty' %}
         <a href="/appareil/{{ alert.object.id }}" class="alert-strip {% if alert.expired %}danger{% elif alert.days_remaining < 30 %}warn{% else %}info{% endif %}">
             <span>🔒</span>
-            <span class="as-label">Warranty: {{ alert.description }}</span>
+            <span class="as-label">Garantie : {{ alert.description }}</span>
             <span class="as-sub">{{ alert.client_nom }}</span>
             <span class="as-sub">{{ alert.object.marque or '' }} {{ alert.object.modele or '' }}</span>
             {% if alert.expired %}
-            <span class="as-pill danger">Expired {{ alert.days_remaining|abs }}d ago</span>
+            <span class="as-pill danger">Expirée il y a {{ alert.days_remaining|abs }}j</span>
             {% else %}
-            <span class="as-pill warn">{{ alert.days_remaining }}d left</span>
+            <span class="as-pill warn">{{ alert.days_remaining }}j restant{{ 's' if alert.days_remaining > 1 }}</span>
             {% endif %}
         </a>
         {% elif alert.type == 'antivirus' %}
         <a href="/appareil/{{ alert.object.id }}" class="alert-strip {% if alert.expired %}danger{% else %}warn{% endif %}">
             <span>🛡</span>
-            <span class="as-label">Antivirus: {{ alert.description }}</span>
+            <span class="as-label">Antivirus : {{ alert.description }}</span>
             <span class="as-sub">{{ alert.client_nom }}</span>
             <span class="as-sub">{{ alert.object.av_nom or alert.object.av_marque or 'Antivirus' }}</span>
             {% if alert.expired %}
-            <span class="as-pill danger">EXPIRED</span>
+            <span class="as-pill danger">EXPIRÉ</span>
             {% else %}
-            <span class="as-pill warn">Expires soon</span>
+            <span class="as-pill warn">Expire bientôt</span>
             {% endif %}
         </a>
         {% endif %}
@@ -257,7 +257,7 @@
 
 <!-- ══ CLIENT CARDS GRID ══════════════════════════════════════════════════════ -->
 <div style="margin:2rem 0 1rem;">
-    <div class="s-head">All Accessible Clients</div>
+    <div class="s-head">Tous les Clients Accessibles</div>
 </div>
 
 <div class="clients-grid">
@@ -279,11 +279,11 @@
             </div>
             {% if alert_count > 0 %}
             <div class="client-alert-badge {% if alert_count > 2 %}critical{% else %}warning{% endif %}">
-                {{ alert_count }} alert{{ 's' if alert_count != 1 }}
+                {{ alert_count }} alerte{{ 's' if alert_count != 1 }}
             </div>
             {% else %}
             <div class="client-alert-badge" style="background:rgba(0,200,83,.15);color:var(--accent-green);">
-                ✓ Healthy
+                ✓ Sain
             </div>
             {% endif %}
         </div>
@@ -292,7 +292,7 @@
             <div class="client-stat">
                 <div class="client-stat-icon">🖥</div>
                 <div class="client-stat-value">
-                    <span class="client-stat-label">Devices</span>
+                    <span class="client-stat-label">Appareils</span>
                     <span class="client-stat-number">{{ stats.nb_app_total }}</span>
                 </div>
             </div>
@@ -300,7 +300,7 @@
             <div class="client-stat">
                 <div class="client-stat-icon">✓</div>
                 <div class="client-stat-value">
-                    <span class="client-stat-label">Online</span>
+                    <span class="client-stat-label">En ligne</span>
                     <span class="client-stat-number">{{ stats.nb_en_ligne }}</span>
                 </div>
             </div>
@@ -308,7 +308,7 @@
             <div class="client-stat">
                 <div class="client-stat-icon">📋</div>
                 <div class="client-stat-value">
-                    <span class="client-stat-label">Contracts</span>
+                    <span class="client-stat-label">Contrats</span>
                     <span class="client-stat-number">{{ stats.nb_contrats }}</span>
                 </div>
             </div>
@@ -316,14 +316,14 @@
             <div class="client-stat">
                 <div class="client-stat-icon">🔌</div>
                 <div class="client-stat-value">
-                    <span class="client-stat-label">Peripherals</span>
+                    <span class="client-stat-label">Périphériques</span>
                     <span class="client-stat-number">{{ stats.nb_periph }}</span>
                 </div>
             </div>
         </div>
 
         <a href="/client/{{ client.id }}/dashboard" class="client-action">
-            View Dashboard →
+            Voir Dashboard →
         </a>
     </div>
 {% endfor %}
@@ -332,9 +332,9 @@
 {% if not clients_data %}
 <div class="no-content-state">
     <div class="no-content-icon">👥</div>
-    <p><strong>No accessible clients</strong></p>
-    <p style="font-size:.9rem;margin-top:.5rem;">You don't have access to any IT parks yet.</p>
-    <a href="{{ url_for('nouveau_client') }}" class="btn btn-primary btn-sm" style="margin-top:1rem;">+ Create a new client</a>
+    <p><strong>Aucun client accessible</strong></p>
+    <p style="font-size:.9rem;margin-top:.5rem;">Vous n'avez pas accès à de parc informatique pour le moment.</p>
+    <a href="{{ url_for('nouveau_client') }}" class="btn btn-primary btn-sm" style="margin-top:1rem;">+ Créer un nouveau client</a>
 </div>
 {% endif %}
 

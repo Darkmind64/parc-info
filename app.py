@@ -1685,7 +1685,8 @@ def user_dashboard():
                              total_contracts=total_contracts,
                              total_peripherals=total_peripherals,
                              total_alerts_count=total_alerts_count,
-                             clients=clients)
+                             clients=clients,
+                             client_actif_id=None)  # No active client on user dashboard
     finally:
         conn.close()
 
