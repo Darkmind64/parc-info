@@ -61,15 +61,18 @@ def paginate(query: str, params: tuple, page: int, per_page: int = None):
             per_page = 50
     from database import get_db
     conn = get_db()
-    total = conn.execute(f'SELECT COUNT(*) FROM ({query})', params).fetchone()[0]
-    pages = max(1, (total + per_page - 1) // per_page)
-    page  = max(1, min(page, pages))
-    rows  = conn.execute(
-        f'{query} LIMIT ? OFFSET ?',
-        params + (per_page, (page - 1) * per_page)
-    ).fetchall()
-    conn.close()
-    return rows, {'page': page, 'pages': pages, 'per_page': per_page, 'total': total}
+    try:
+        count_row = conn.execute(f'SELECT COUNT(*) FROM ({query})', params).fetchone()
+        total = count_row[0] if count_row else 0
+        pages = max(1, (total + per_page - 1) // per_page)
+        page  = max(1, min(page, pages))
+        rows  = conn.execute(
+            f'{query} LIMIT ? OFFSET ?',
+            params + (per_page, (page - 1) * per_page)
+        ).fetchall()
+        return rows, {'page': page, 'pages': pages, 'per_page': per_page, 'total': total}
+    finally:
+        conn.close()
 
 
 # ─── ACCÈS CLIENTS ────────────────────────────────────────────────────────────
@@ -80,21 +83,21 @@ def get_client_access(client_id) -> str | None:
     if not uid:
         return None
     conn = get_db()
-    role_row = conn.execute('SELECT role FROM auth_users WHERE id=?', (uid,)).fetchone()
-    role = role_row[0] if role_row else 'user'
-    if role == 'admin':
+    try:
+        role_row = conn.execute('SELECT role FROM auth_users WHERE id=?', (uid,)).fetchone()
+        role = role_row[0] if role_row else 'user'
+        if role == 'admin':
+            return 'proprietaire'
+        own = conn.execute(
+            'SELECT id FROM clients WHERE id=? AND auth_user_id=?', (client_id, uid)).fetchone()
+        if own:
+            return 'proprietaire'
+        shared = conn.execute(
+            'SELECT niveau FROM client_partages WHERE client_id=? AND auth_user_id=?',
+            (client_id, uid)).fetchone()
+        return shared[0] if shared else None
+    finally:
         conn.close()
-        return 'proprietaire'
-    own = conn.execute(
-        'SELECT id FROM clients WHERE id=? AND auth_user_id=?', (client_id, uid)).fetchone()
-    if own:
-        conn.close()
-        return 'proprietaire'
-    shared = conn.execute(
-        'SELECT niveau FROM client_partages WHERE client_id=? AND auth_user_id=?',
-        (client_id, uid)).fetchone()
-    conn.close()
-    return shared[0] if shared else None
 
 
 def can_write(client_id=None) -> bool:
@@ -108,11 +111,13 @@ def can_write(client_id=None) -> bool:
 def get_client_with_acces(cid) -> dict:
     from database import get_db, row_to_dict
     conn = get_db()
-    cl = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
-    conn.close()
-    if cl:
-        cl['acces'] = get_client_access(cid) or 'lecture'
-    return cl
+    try:
+        cl = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+        if cl:
+            cl['acces'] = get_client_access(cid) or 'lecture'
+        return cl
+    finally:
+        conn.close()
 
 
 def get_client_id():
@@ -120,35 +125,35 @@ def get_client_id():
     from database import get_db
     uid = session.get('auth_user_id')
     conn = get_db()
-    role = (conn.execute('SELECT role FROM auth_users WHERE id=?', (uid,)).fetchone()
-            or ['user'])[0] if uid else 'user'
-    cid = session.get('client_id')
-    if cid:
+    try:
+        role = (conn.execute('SELECT role FROM auth_users WHERE id=?', (uid,)).fetchone()
+                or ['user'])[0] if uid else 'user'
+        cid = session.get('client_id')
+        if cid:
+            if role == 'admin':
+                if conn.execute('SELECT id FROM clients WHERE id=?', (cid,)).fetchone():
+                    return cid
+            else:
+                own    = conn.execute('SELECT id FROM clients WHERE id=? AND auth_user_id=?', (cid, uid)).fetchone()
+                shared = conn.execute('SELECT id FROM client_partages WHERE client_id=? AND auth_user_id=?',
+                                      (cid, uid)).fetchone() if uid else None
+                if own or shared:
+                    return cid
         if role == 'admin':
-            if conn.execute('SELECT id FROM clients WHERE id=?', (cid,)).fetchone():
-                conn.close()
-                return cid
+            first = conn.execute('SELECT id FROM clients ORDER BY id LIMIT 1').fetchone()
+        elif uid:
+            first = conn.execute('SELECT id FROM clients WHERE auth_user_id=? ORDER BY id LIMIT 1', (uid,)).fetchone()
+            if not first:
+                first = conn.execute(
+                    'SELECT c.id FROM clients c JOIN client_partages cp ON c.id=cp.client_id '
+                    'WHERE cp.auth_user_id=? ORDER BY c.id LIMIT 1', (uid,)).fetchone()
         else:
-            own    = conn.execute('SELECT id FROM clients WHERE id=? AND auth_user_id=?', (cid, uid)).fetchone()
-            shared = conn.execute('SELECT id FROM client_partages WHERE client_id=? AND auth_user_id=?',
-                                  (cid, uid)).fetchone() if uid else None
-            if own or shared:
-                conn.close()
-                return cid
-    if role == 'admin':
-        first = conn.execute('SELECT id FROM clients ORDER BY id LIMIT 1').fetchone()
-    elif uid:
-        first = conn.execute('SELECT id FROM clients WHERE auth_user_id=? ORDER BY id LIMIT 1', (uid,)).fetchone()
-        if not first:
-            first = conn.execute(
-                'SELECT c.id FROM clients c JOIN client_partages cp ON c.id=cp.client_id '
-                'WHERE cp.auth_user_id=? ORDER BY c.id LIMIT 1', (uid,)).fetchone()
-    else:
-        first = conn.execute('SELECT id FROM clients ORDER BY id LIMIT 1').fetchone()
-    conn.close()
-    if first:
-        session['client_id'] = first[0]
-        return first[0]
+            first = conn.execute('SELECT id FROM clients ORDER BY id LIMIT 1').fetchone()
+        if first:
+            session['client_id'] = first[0]
+            return first[0]
+    finally:
+        conn.close()
     return None
 
 
@@ -159,32 +164,33 @@ def get_clients() -> list:
     if not uid:
         return []
     conn = get_db()
-    role_row = conn.execute('SELECT role FROM auth_users WHERE id=?', (uid,)).fetchone()
-    role = role_row[0] if role_row else 'user'
-    if role == 'admin':
-        all_cl = [row_to_dict(r) for r in conn.execute(
-            """SELECT c.*, au.login as owner_login, au.nom as owner_nom,
-               CASE WHEN c.auth_user_id=? THEN 'proprietaire'
-                    ELSE COALESCE((SELECT niveau FROM client_partages
-                                   WHERE client_id=c.id AND auth_user_id=?), 'admin')
-               END as acces
-               FROM clients c LEFT JOIN auth_users au ON c.auth_user_id=au.id ORDER BY c.nom""",
-            (uid, uid)).fetchall()]
+    try:
+        role_row = conn.execute('SELECT role FROM auth_users WHERE id=?', (uid,)).fetchone()
+        role = role_row[0] if role_row else 'user'
+        if role == 'admin':
+            all_cl = [row_to_dict(r) for r in conn.execute(
+                """SELECT c.*, au.login as owner_login, au.nom as owner_nom,
+                   CASE WHEN c.auth_user_id=? THEN 'proprietaire'
+                        ELSE COALESCE((SELECT niveau FROM client_partages
+                                       WHERE client_id=c.id AND auth_user_id=?), 'admin')
+                   END as acces
+                   FROM clients c LEFT JOIN auth_users au ON c.auth_user_id=au.id ORDER BY c.nom""",
+                (uid, uid)).fetchall()]
+            return all_cl
+        own = [row_to_dict(r) for r in conn.execute(
+            "SELECT *, 'proprietaire' as acces FROM clients WHERE auth_user_id=? ORDER BY nom",
+            (uid,)).fetchall()]
+        shared = [row_to_dict(r) for r in conn.execute(
+            "SELECT c.*, cp.niveau as acces FROM clients c "
+            "JOIN client_partages cp ON c.id=cp.client_id WHERE cp.auth_user_id=? ORDER BY c.nom",
+            (uid,)).fetchall()]
+        seen = set(); result = []
+        for cl in own + shared:
+            if cl['id'] not in seen:
+                seen.add(cl['id']); result.append(cl)
+        return result
+    finally:
         conn.close()
-        return all_cl
-    own = [row_to_dict(r) for r in conn.execute(
-        "SELECT *, 'proprietaire' as acces FROM clients WHERE auth_user_id=? ORDER BY nom",
-        (uid,)).fetchall()]
-    shared = [row_to_dict(r) for r in conn.execute(
-        "SELECT c.*, cp.niveau as acces FROM clients c "
-        "JOIN client_partages cp ON c.id=cp.client_id WHERE cp.auth_user_id=? ORDER BY c.nom",
-        (uid,)).fetchall()]
-    conn.close()
-    seen = set(); result = []
-    for cl in own + shared:
-        if cl['id'] not in seen:
-            seen.add(cl['id']); result.append(cl)
-    return result
 
 
 # ─── AUDIT ────────────────────────────────────────────────────────────────────
