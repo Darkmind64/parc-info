@@ -52,6 +52,30 @@ from client_helpers import (paginate, get_client_access, can_write,
                              log_history, log_error, garantie_active, human_size,
                              fmt_appareils, fmt_garantie_periph, fmt_contrat)
 
+# ─── HELPER: Retry pour requêtes DB verrouillées ─────────────────────────────
+def retry_db_query(query_func, max_retries=5):
+    """
+    Exécute une fonction de requête DB avec retry automatique si verrouillée.
+    Utilisé pour les requêtes critiques dans /index (dashboard).
+
+    Utilisation:
+        result = retry_db_query(lambda: conn.execute('SELECT ...').fetchall())
+    """
+    retry_delay = 0.05  # 50ms initial
+
+    for attempt in range(max_retries):
+        try:
+            return query_func()
+        except sqlite3.OperationalError as e:
+            if 'locked' in str(e).lower() and attempt < max_retries - 1:
+                # Database verrouillée → retry avec backoff exponentiel
+                time.sleep(retry_delay * (2 ** attempt))
+                continue
+            else:
+                raise e
+        except Exception as e:
+            raise e
+
 @app.context_processor
 def inject_auth_context():
     """Injecte les variables auth dans tous les templates."""
