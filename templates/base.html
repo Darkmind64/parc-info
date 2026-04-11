@@ -652,7 +652,7 @@
     <div class="client-select-wrap">
         {% set active_cl = clients | selectattr('id','eq', client_actif_id) | first | default(None) %}
         <span class="client-dot" style="color:{{ active_cl.couleur if active_cl else '#00c9ff' }}; background:{{ active_cl.couleur if active_cl else '#00c9ff' }};"></span>
-        <select id="client-dropdown" onchange="changerClient(this.value)">
+        <select id="client-dropdown" onchange="changerClientAvecConfirmation(this)">
             {% for cl in clients %}
             <option value="{{ cl.id }}" {% if cl.id == client_actif_id %}selected{% endif %}>{{ cl.nom }}</option>
             {% endfor %}
@@ -879,6 +879,28 @@ window._flashMessages = [
 
 
 <script>
+function changerClientAvecConfirmation(selectElement) {
+    /**
+     * Demande confirmation avant de basculer vers un autre client.
+     * Restaure la valeur précédente si l'utilisateur annule.
+     */
+    const id = selectElement.value;
+    const clientName = selectElement.options[selectElement.selectedIndex].text;
+
+    const confirmed = confirm('Basculer vers le client "' + clientName + '" ?');
+
+    if (confirmed) {
+        // Navigation approuvée
+        changerClient(id);
+    } else {
+        // Restaurer la sélection précédente
+        const prevOption = selectElement.querySelector('option[selected]');
+        if (prevOption) {
+            selectElement.value = prevOption.value;
+        }
+    }
+}
+
 function changerClient(id) {
     sessionStorage.setItem('parc_last_path', window.location.pathname);
     window.location.href = '/client/' + id + '/selectionner?next=' + encodeURIComponent(window.location.pathname);
