@@ -1343,15 +1343,14 @@ def supprimer_client(id):
 
 @app.route('/client/<int:id>/selectionner')
 def selectionner_client(id):
+    """
+    Sélectionne un client et redirige vers son dashboard.
+    Fonctionne depuis n'importe quelle page (user_dashboard ou dashboard d'un autre client).
+    """
     session['client_id'] = id
-    next_url = request.args.get('next', '/')
-
-    # Si on vient du user_dashboard (next=/) ou sans page spécifique,
-    # rediriger vers le dashboard du client au lieu du user_dashboard
-    if next_url in ('/', '') or '?' in next_url:
-        return redirect(url_for('client_dashboard_view', cid=id))
-
-    return redirect(next_url)
+    # Toujours rediriger vers le dashboard du client sélectionné
+    # pour une UX cohérente (quand on sélectionne un client, on voit son dashboard)
+    return redirect(url_for('client_dashboard_view', cid=id))
 
 # ─── ROUTES PRINCIPALES ──────────────────────────────────────────────────────
 
