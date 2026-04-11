@@ -1345,6 +1345,12 @@ def supprimer_client(id):
 def selectionner_client(id):
     session['client_id'] = id
     next_url = request.args.get('next', '/')
+
+    # Si on vient du user_dashboard (next=/) ou sans page spécifique,
+    # rediriger vers le dashboard du client au lieu du user_dashboard
+    if next_url in ('/', '') or '?' in next_url:
+        return redirect(url_for('client_dashboard_view', cid=id))
+
     return redirect(next_url)
 
 # ─── ROUTES PRINCIPALES ──────────────────────────────────────────────────────
@@ -1708,6 +1714,25 @@ def index():
 
     # Cas 3: Plusieurs clients accessibles -> affiche le dashboard utilisateur
     return user_dashboard()
+
+
+@app.route('/client/<int:cid>/dashboard')
+@login_required
+def client_dashboard_view(cid):
+    """
+    Affiche le dashboard pour un client spécifique.
+    Vérifie d'abord que l'utilisateur a accès au client.
+    """
+    # Vérifier l'accès
+    if not get_client_access(cid):
+        flash('Accès refusé à ce client', 'danger')
+        return redirect(url_for('index'))
+
+    # Définir le client actif dans la session
+    session['client_id'] = cid
+
+    # Afficher le dashboard du client
+    return single_client_dashboard(cid)
 
 @app.route('/parc', methods=['GET','POST'])
 def parc_general():

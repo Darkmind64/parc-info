@@ -271,7 +271,7 @@
         <div class="client-card-header">
             <div>
                 <div class="client-card-title">
-                    <a href="{{ url_for('selectionner_client', id=client.id) }}">{{ client.nom }}</a>
+                    <a href="/client/{{ client.id }}/dashboard">{{ client.nom }}</a>
                 </div>
                 {% if client.couleur %}
                 <div style="display:inline-block;width:6px;height:6px;border-radius:50%;background:{{ client.couleur }};margin-top:.3rem;"></div>
@@ -322,7 +322,7 @@
             </div>
         </div>
 
-        <a href="{{ url_for('selectionner_client', id=client.id) }}" class="client-action">
+        <a href="/client/{{ client.id }}/dashboard" class="client-action">
             View Dashboard →
         </a>
     </div>
