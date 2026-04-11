@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block title %}{{ action }} périphérique — ParcInfo
+async function loadHistoriquePer() {
+    const r = await fetch('/api/historique/entite/peripherique/{{ peripherique.id }}');
+    const items = await r.json();
+    const el = document.getElementById('hist-list');
+    if (!items.length) { el.textContent = 'Aucune modification enregistrée.'; return; }
+    const icons = { Création: '🟢', Modification: '🔵', Suppression: '🔴' };
+    el.innerHTML = items.map(h => `
+        <div style="display:flex;align-items:center;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <span>${icons[h.action] || '●'}</span>
+            <span style="flex:1;color:var(--text-secondary);">${h.action}</span>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--text-muted);">${(h.date_action||'').slice(0,16).replace('T',' ')}</span>
+        </div>`).join('');
+}
+
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ action }} un <span>Périphérique</span></h1>
+    <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span></p>
+</div>
+
+<form method="POST" id="form-periph" style="max-width:900px;">
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Identification</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Catégorie *</label>
+                <select name="categorie" required onchange="updateIcon(this.value)">
+                    <option value="">— Sélectionner —</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat }}" {% if peripherique and peripherique.categorie == cat %}selected{% endif %}>{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Marque</label>
+                <input type="text" name="marque" value="{{ peripherique.marque if peripherique else '' }}"
+                       placeholder="Ex: Dell, HP, Logitech...">
+            </div>
+            <div class="form-group">
+                <label>Modèle</label>
+                <input type="text" name="modele" value="{{ peripherique.modele if peripherique else '' }}"
+                       placeholder="Ex: UltraSharp U2722D">
+            </div>
+        </div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Description</label>
+                <input type="text" name="description"
+                       value="{{ peripherique.description if peripherique else '' }}"
+                       placeholder="Ex: Ecran 27 pouces 4K, clavier AZERTY filaire...">
+            </div>
+            <div class="form-group">
+                <label>Numéro de série</label>
+                <input type="text" name="numero_serie"
+                       value="{{ peripherique.numero_serie if peripherique else '' }}"
+                       placeholder="S/N" class="mono">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Affectation</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Statut</label>
+                <select name="statut">
+                    <option value="actif"        {% if not peripherique or peripherique.statut == 'actif' %}selected{% endif %}>✅ En service</option>
+                    <option value="stock"        {% if peripherique and peripherique.statut == 'stock' %}selected{% endif %}>📦 En stock</option>
+                    <option value="hors_service" {% if peripherique and peripherique.statut == 'hors_service' %}selected{% endif %}>🚫 Hors service</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Utilisateur</label>
+                <select name="utilisateur_id">
+                    <option value="">— Aucun —</option>
+                    {% for u in utilisateurs %}
+                    <option value="{{ u.id }}" {% if peripherique and peripherique.utilisateur_id == u.id %}selected{% endif %}>
+                        {{ u.prenom }} {{ u.nom }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Localisation / Bureau</label>
+                <input type="text" name="localisation"
+                       value="{{ peripherique.localisation if peripherique else '' }}"
+                       placeholder="Ex: Bureau 204, Salle de réunion A...">
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Appareils associés</label>
+            {% if not appareils %}
+            <div style="color:var(--text-muted);font-size:.8rem;padding:.25rem 0;">Aucun appareil dans ce client.</div>
+            {% else %}
+            <div style="display:flex;flex-wrap:wrap;gap:.4rem;padding:.35rem 0;">
+                {% for a in appareils %}
+                {% set ck = a.type_appareil|type_css %}
+                <label class="badge type-{{ ck }}" style="display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;font-size:.72rem;padding:.25rem .55rem;opacity:{% if a.id in (linked_app_ids or []) %}1{% else %}.45{% endif %};transition:opacity .15s,box-shadow .15s;">
+                    <input type="checkbox" name="appareil_ids" value="{{ a.id }}"
+                           {% if a.id in (linked_app_ids or []) %}checked{% endif %}
+                           style="accent-color:currentColor;margin:0;width:.8rem;height:.8rem;"
+                           onchange="this.closest('label').style.opacity=this.checked?'1':'.45'">
+                    {{ a.nom_machine }}
+                </label>
+                {% endfor %}
+            </div>
+            <div style="font-size:.7rem;color:var(--text-muted);margin-top:.1rem;">Cliquez sur un badge pour associer / dissocier la machine.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Achat &amp; Garantie</div>
+        <div class="form-row cols-4">
+            <div class="form-group">
+                <label>Date d'achat</label>
+                <input type="date" name="date_achat"
+                       value="{{ peripherique.date_achat if peripherique and peripherique.date_achat else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Garantie (mois)</label>
+                <input type="number" name="duree_garantie" min="0"
+                       value="{{ peripherique.duree_garantie if peripherique else '' }}" placeholder="Ex: 24">
+            </div>
+            <div class="form-group">
+                <label>Date fin garantie</label>
+                <input type="date" name="date_fin_garantie"
+                       value="{{ peripherique.date_fin_garantie if peripherique and peripherique.date_fin_garantie else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Prix d'achat (€)</label>
+                <input type="number" step="0.01" name="prix_achat"
+                       value="{{ peripherique.prix_achat if peripherique and peripherique.prix_achat else '' }}"
+                       placeholder="0.00">
+            </div>
+        </div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Fournisseur</label>
+                <input type="text" name="fournisseur"
+                       value="{{ peripherique.fournisseur if peripherique else '' }}"
+                       placeholder="Ex: LDLC, Amazon...">
+            </div>
+            <div class="form-group">
+                <label>N° commande</label>
+                <input type="text" name="numero_commande"
+                       value="{{ peripherique.numero_commande if peripherique else '' }}"
+                       placeholder="Ex: CMD-2024-1234">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Notes</div>
+        <div class="form-group">
+            <textarea name="notes" rows="3"
+                      placeholder="Observations, état, historique...">{{ peripherique.notes if peripherique else '' }}</textarea>
+        </div>
+    </div>
+
+    <!-- CONTRATS ASSOCIES AU PERIPHERIQUE -->
+    {% if peripherique and peripherique.id %}
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Contrats / Abonnements liés</div>
+        <div id="contrats-per-list"><div style="color:var(--text-muted);font-size:.82rem;">Chargement...</div></div>
+        <a href="/contrat/nouveau" class="btn btn-primary btn-sm" style="margin-top:.6rem;">+ Associer à un contrat</a>
+    </div>
+    {% endif %}
+
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+        <button type="submit" class="btn btn-success">&#10003; {{ action }} le périphérique</button>
+        <a href="/peripheriques" class="btn btn-primary">← Retour</a>
+    </div>
+</form>
+
+    {% if action == 'Modifier' and peripherique and peripherique.id %}
+    <div class="form-section" id="section-documents" style="margin-top:1.5rem;">
+        <div class="form-section-title">&#9632; Documents joints
+            <span style="font-size:.7rem;font-weight:400;color:var(--text-muted);margin-left:.5rem;">
+                {{ documents|length if documents else 0 }} fichier{{ 's' if documents and documents|length != 1 else '' }}
+            </span>
+        </div>
+
+        {% if documents %}
+        <div class="docs-list" style="margin-bottom:1rem;">
+            {% for doc in documents %}
+            {% set ext = doc.nom_fichier.rsplit('.',1)[-1].lower() if doc.nom_fichier else '' %}
+            {% set is_img = ext in ['png','jpg','jpeg','gif','webp'] %}
+            {% set is_pdf = ext == 'pdf' %}
+            <div class="doc-row">
+                <div class="doc-icon">{% if is_img %}🖼{% elif is_pdf %}📄{% else %}📎{% endif %}</div>
+                <div class="doc-info">
+                    <div class="doc-nom">{{ doc.nom or doc.nom_fichier }}</div>
+                    <div class="doc-meta">{{ doc.taille_fmt }} · {{ doc.date_upload[:10] if doc.date_upload else '' }}{% if doc.description %} · {{ doc.description }}{% endif %}</div>
+                </div>
+                <div class="doc-actions">
+                    {% if is_img or is_pdf %}
+                    <a href="/doc-peripherique/{{ doc.id }}/apercu" target="_blank" class="btn btn-sm btn-primary">👁 Aperçu</a>
+                    {% endif %}
+                    <a href="/doc-peripherique/{{ doc.id }}/telecharger" class="btn btn-sm btn-primary">⬇ DL</a>
+                    <form method="POST" action="/doc-peripherique/{{ doc.id }}/supprimer" style="display:inline;"
+                          onsubmit="return confirm('Supprimer ce document ?')">
+                        <button type="submit" class="btn btn-sm btn-danger">✕</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="color:var(--text-muted);font-size:.83rem;margin-bottom:.8rem;">Aucun document joint.</div>
+        {% endif %}
+
+        <details class="upload-panel">
+            <summary class="btn btn-primary btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;list-style:none;">
+                ➕ Ajouter un document
+            </summary>
+            <form method="POST" action="/peripherique/{{ peripherique.id }}/documents/upload"
+                  enctype="multipart/form-data" style="margin-top:.8rem;padding:.8rem;background:var(--bg-secondary);border-radius:4px;border:1px solid var(--border);">
+                <div class="form-row cols-2" style="margin-bottom:.5rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Nom du document</label>
+                        <input type="text" name="nom" placeholder="Ex: Facture, Photo...">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Type</label>
+                        <select name="type_doc">
+                            <option value="">— Choisir —</option>
+                            <option>Facture</option><option>Bon de commande</option>
+                            <option>Photo</option><option>Manuel</option><option>Autre</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom:.5rem;">
+                    <label>Fichier <span style="color:var(--text-muted);font-size:.72rem;">(tous types — max 16 Mo)</span></label>
+                    <input type="file" name="fichier" accept="*" required>
+                </div>
+                <button type="submit" class="btn btn-success btn-sm">⬆ Envoyer</button>
+            </form>
+        </details>
+    </div>
+    {% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+{% if peripherique and peripherique.id %}
+async function loadContratsPerif() {
+    const r = await fetch('/api/contrats/peripherique/{{ peripherique.id }}');
+    const items = await r.json();
+    const el = document.getElementById('contrats-per-list');
+    if (!items.length) {
+        el.innerHTML = '<span style="color:var(--text-muted);font-size:.82rem;">Aucun contrat lié</span>'; return;
+    }
+    el.innerHTML = items.map(ct => {
+        const col = ct.expire_depasse ? 'var(--accent-red)' : ct.expire_bientot ? 'var(--accent-orange)' : 'var(--accent-green)';
+        return `<div style="display:flex;align-items:center;gap:.7rem;padding:.4rem .6rem;border-bottom:1px solid rgba(30,58,95,.3);font-size:.85rem;">
+            <span style="color:${col};">●</span>
+            <div style="flex:1;"><strong>${ct.titre}</strong>
+                <span style="color:var(--text-secondary);font-size:.75rem;"> — ${ct.fournisseur||''}</span>
+                ${ct.date_fin_fmt ? `<div style="font-size:.72rem;color:var(--text-muted);">Fin : ${ct.date_fin_fmt}</div>` : ''}
+            </div>
+            <a href="/contrat/${ct.id}" style="color:var(--accent);font-size:.75rem;">Voir</a>
+        </div>`;
+    }).join('');
+}
+loadContratsPerif();
+{% endif %}
+</script>
+<script>
+// Auto-calcul date fin de garantie
+document.querySelector('[name="date_achat"]').addEventListener('change', calcFin);
+document.querySelector('[name="duree_garantie"]').addEventListener('change', calcFin);
+function calcFin() {
+    const da = document.querySelector('[name="date_achat"]').value;
+    const dm = parseInt(document.querySelector('[name="duree_garantie"]').value);
+    if (da && dm) {
+        const d = new Date(da);
+        d.setMonth(d.getMonth() + dm);
+        document.querySelector('[name="date_fin_garantie"]').value = d.toISOString().split('T')[0];
+    }
+}
+</script>
+<script src="/static/js/form_tools.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    FormTools.init('form-periph', { draftKey: 'draft_per' });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ParcInfo — Flask Dev Server",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["app.py"],
+      "port": 5000
+    },
+    {
+      "name": "ParcInfo — Launcher (port auto)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["launcher.py"],
+      "port": 5000
+    }
+  ]
+}

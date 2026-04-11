@@ -1,0 +1,3 @@
+- [Project Overview](project_overview.md) — Flask app for IT inventory management
+- [Architecture & Conventions](architecture.md) — Code patterns, security, multi-client ACL
+- [Development Checklist](dev_checklist.md) — Security, CSRF, history logging, tests

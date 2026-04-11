@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% block title %}Tableau de bord — {{ client.nom }}{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* ── GRILLE KPI ── */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.8rem;
+    margin-bottom: 1.5rem;
+}
+.kpi-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    transition: border-color .15s, box-shadow .15s;
+    text-decoration: none;
+    color: inherit;
+}
+.kpi-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 12px rgba(0,201,255,.12);
+}
+.kpi-icon { font-size: 1.4rem; }
+.kpi-val  { font-size: 1.8rem; font-weight: 700; color: var(--text-primary); line-height: 1; }
+.kpi-lbl  { font-size: .72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .8px; }
+.kpi-sub  { font-size: .75rem; color: var(--text-secondary); margin-top: .2rem; }
+
+/* ── SECTIONS ── */
+.dash-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1.2rem;
+}
+@media (max-width: 900px) { .dash-cols { grid-template-columns: 1fr; } }
+
+.dash-section-title {
+    font-size: .65rem; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--text-muted);
+    padding-bottom: .4rem; margin-bottom: .7rem;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: .4rem;
+}
+
+/* ── BARRE ÉTAT ── */
+.status-bar {
+    display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: 1.2rem;
+}
+.status-chip {
+    display: inline-flex; align-items: center; gap: .4rem;
+    padding: .3rem .8rem; border-radius: 20px; font-size: .78rem;
+    border: 1px solid; font-weight: 600; text-decoration: none;
+    transition: all .15s;
+}
+.status-chip:hover { filter: brightness(1.15); }
+
+/* ── RÉPARTITION TYPES ── */
+.type-bars { display: flex; flex-direction: column; gap: .45rem; }
+.type-bar-row { display: flex; align-items: center; gap: .6rem; font-size: .82rem; }
+.type-bar-lbl { width: 130px; flex-shrink: 0; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.type-bar-track { flex: 1; height: 8px; background: rgba(255,255,255,.06); border-radius: 4px; overflow: hidden; }
+.type-bar-fill  { height: 100%; border-radius: 4px; transition: width .4s; }
+.type-bar-nb    { font-size: .72rem; color: var(--text-muted); width: 24px; text-align: right; flex-shrink: 0; }
+
+/* ── LISTE URGENCES ── */
+.alert-list { display: flex; flex-direction: column; gap: .4rem; }
+.alert-item {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .45rem .65rem; border-radius: 5px;
+    background: rgba(255,255,255,.03); border: 1px solid var(--border);
+    font-size: .82rem;
+}
+.alert-item-nom { flex: 1; font-weight: 600; color: var(--text-primary); }
+.alert-item-sub { font-size: .72rem; color: var(--text-secondary); }
+.alert-item-date { font-size: .72rem; font-family: 'Share Tech Mono', monospace; color: var(--text-muted); flex-shrink: 0; }
+.alert-empty { color: var(--text-muted); font-size: .82rem; font-style: italic; }
+
+/* ── HISTORIQUE RÉCENT ── */
+.hist-mini { display: flex; flex-direction: column; gap: 0; }
+.hist-mini-row {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .35rem 0; border-bottom: 1px solid var(--border);
+    font-size: .8rem;
+}
+.hist-mini-row:last-child { border: none; }
+.hist-mini-ent { color: var(--accent); font-size: .65rem; text-transform: uppercase; letter-spacing: .8px; flex-shrink: 0; width: 60px; }
+.hist-mini-nom { flex: 1; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-mini-act { font-size: .7rem; color: var(--text-muted); flex-shrink: 0; }
+.hist-mini-ts  { font-size: .65rem; color: var(--text-muted); font-family: 'Share Tech Mono', monospace; flex-shrink: 0; }
+
+/* ── AV STATUS CHIPS ── */
+.av-kpi-row { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Tableau de <span>Bord</span></h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        — Vue synthétique du parc informatique
+    </p>
+</div>
+
+<!-- ── BARRE STATUTS EN LIGNE ── -->
+<div class="status-bar">
+    <a href="/appareils" class="status-chip" style="color:#00ff88;border-color:rgba(0,255,136,.3);background:rgba(0,255,136,.07);">
+        🟢 {{ stats.nb_en_ligne }} en ligne
+    </a>
+    <a href="/appareils" class="status-chip" style="color:var(--accent);border-color:rgba(0,201,255,.3);background:rgba(0,201,255,.07);">
+        🖥 {{ stats.nb_actifs }} actifs
+    </a>
+    {% if stats.nb_hors_service %}
+    <a href="/appareils?statut=hors_service" class="status-chip" style="color:#ff3355;border-color:rgba(255,51,85,.3);background:rgba(255,51,85,.07);">
+        ⚠ {{ stats.nb_hors_service }} hors service
+    </a>
+    {% endif %}
+</div>
+
+<!-- ── KPI PRINCIPAUX ── -->
+<div class="kpi-grid">
+    <a class="kpi-card" href="/appareils">
+        <span class="kpi-icon">🖥</span>
+        <span class="kpi-val">{{ stats.nb_appareils }}</span>
+        <span class="kpi-lbl">Appareils</span>
+        <span class="kpi-sub">{{ stats.nb_actifs }} actifs · {{ stats.nb_hors_service }} h.s.</span>
+    </a>
+    <a class="kpi-card" href="/peripheriques">
+        <span class="kpi-icon">🖱</span>
+        <span class="kpi-val">{{ stats.nb_periph }}</span>
+        <span class="kpi-lbl">Périphériques</span>
+    </a>
+    <a class="kpi-card" href="/contrats">
+        <span class="kpi-icon">📋</span>
+        <span class="kpi-val">{{ stats.nb_contrats }}</span>
+        <span class="kpi-lbl">Contrats</span>
+    </a>
+    <a class="kpi-card" href="/identifiants">
+        <span class="kpi-icon">🔑</span>
+        <span class="kpi-val">{{ stats.nb_identifiants }}</span>
+        <span class="kpi-lbl">Identifiants</span>
+    </a>
+    <a class="kpi-card" href="/appareils">
+        <span class="kpi-icon">🛡</span>
+        <span class="kpi-val" style="color:
+            {% if stats.av_expire > 0 %}#ff3355
+            {% elif stats.av_expirant > 0 %}#ff8c00
+            {% else %}#00ff88{% endif %};">
+            {{ stats.av_actif }}
+        </span>
+        <span class="kpi-lbl">AV actifs</span>
+        <span class="kpi-sub">
+            {% if stats.av_expire %}⚠ {{ stats.av_expire }} expirés · {% endif %}
+            {% if stats.av_expirant %}🕐 {{ stats.av_expirant }} bientôt · {% endif %}
+            {{ stats.av_aucun }} sans AV
+        </span>
+    </a>
+    <a class="kpi-card" href="/appareils">
+        <span class="kpi-icon">🔒</span>
+        <span class="kpi-val" style="color:
+            {% if stats.garanties_expirees > 0 %}#ff3355
+            {% elif stats.garanties_expirant > 0 %}#ff8c00
+            {% else %}#00ff88{% endif %};">
+            {{ stats.garanties_actives }}
+        </span>
+        <span class="kpi-lbl">Garanties actives</span>
+        <span class="kpi-sub">
+            {% if stats.garanties_expirant %}⚠ {{ stats.garanties_expirant }} bientôt expirent · {% endif %}
+            {% if stats.garanties_expirees %}✗ {{ stats.garanties_expirees }} expirées{% endif %}
+        </span>
+    </a>
+</div>
+
+<!-- ── COLONNES PRINCIPALES ── -->
+<div class="dash-cols">
+
+    <!-- Répartition par type -->
+    <div class="card" style="padding:1rem 1.2rem;">
+        <div class="dash-section-title">🖥 Répartition par type</div>
+        {% if types_repartition %}
+        {% set max_nb = types_repartition[0][1] %}
+        <div class="type-bars">
+        {% for row in types_repartition %}
+        {% set type_key = row[0]|type_css %}
+        {% set color = cfg.get('type_color_' ~ type_key, '#94a3b8') %}
+        <div class="type-bar-row">
+            <span class="type-bar-lbl" title="{{ row[0] }}">{{ row[0] or 'Inconnu' }}</span>
+            <div class="type-bar-track">
+                <div class="type-bar-fill" style="width:{{ ((row[1] / max_nb) * 100)|int }}%;background:{{ color }};"></div>
+            </div>
+            <span class="type-bar-nb">{{ row[1] }}</span>
+        </div>
+        {% endfor %}
+        </div>
+        {% else %}
+        <span class="alert-empty">Aucun appareil enregistré.</span>
+        {% endif %}
+    </div>
+
+    <!-- Activités récentes -->
+    <div class="card" style="padding:1rem 1.2rem;">
+        <div class="dash-section-title">🕐 Activités récentes</div>
+        {% if hist_recent %}
+        <div class="hist-mini">
+        {% for h in hist_recent %}
+        {% set action_color = '#00ff88' if h.action == 'Création' else ('#00c9ff' if h.action == 'Modification' else '#ff3355') %}
+        <div class="hist-mini-row">
+            <span class="hist-mini-ent">{{ h.entite }}</span>
+            <span class="hist-mini-nom" title="{{ h.entite_nom }}">{{ h.entite_nom }}</span>
+            <span class="hist-mini-act" style="color:{{ action_color }};">{{ h.action }}</span>
+            <span class="hist-mini-ts">{{ h.date_action[:16].replace('T', ' ') if h.date_action else '' }}</span>
+        </div>
+        {% endfor %}
+        </div>
+        <a href="/historique" style="display:block;margin-top:.7rem;font-size:.75rem;color:var(--accent);text-decoration:none;">Voir tout l'historique →</a>
+        {% else %}
+        <span class="alert-empty">Aucune activité enregistrée.</span>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- ── ALERTES ── -->
+<div class="dash-cols">
+
+    <!-- AV expirant -->
+    <div class="card" style="padding:1rem 1.2rem;">
+        <div class="dash-section-title" style="color:#ff8c00;border-color:rgba(255,140,0,.25);">🛡 Antivirus à renouveler</div>
+        {% if av_urgents %}
+        <div class="alert-list">
+        {% for a in av_urgents %}
+        <div class="alert-item">
+            <span style="color:{% if a.av_date_fin < today %}#ff3355{% else %}#ff8c00{% endif %};">🛡</span>
+            <div style="flex:1;min-width:0;">
+                <div class="alert-item-nom">{{ a.nom_machine }}</div>
+                <div class="alert-item-sub">{{ a.av_nom or a.av_marque or 'Antivirus' }}</div>
+            </div>
+            <span class="alert-item-date">{{ a.av_date_fin }}</span>
+        </div>
+        {% endfor %}
+        </div>
+        <a href="/appareils" style="display:block;margin-top:.7rem;font-size:.75rem;color:var(--accent-orange);text-decoration:none;">Voir dans l'inventaire →</a>
+        {% else %}
+        <span class="alert-empty">✓ Aucun antivirus expirant dans les 30 prochains jours.</span>
+        {% endif %}
+    </div>
+
+    <!-- Contrats à échéance -->
+    <div class="card" style="padding:1rem 1.2rem;">
+        <div class="dash-section-title" style="color:#c084fc;border-color:rgba(192,132,252,.25);">📋 Contrats à échéance proche</div>
+        {% if contrats_urgents %}
+        <div class="alert-list">
+        {% for ct in contrats_urgents %}
+        <div class="alert-item">
+            <span style="color:{% if ct.expire_depasse %}#ff3355{% else %}#ff8c00{% endif %};">📋</span>
+            <div style="flex:1;min-width:0;">
+                <div class="alert-item-nom">{{ ct.titre }}</div>
+                <div class="alert-item-sub">{{ ct.fournisseur or '' }}</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0;">
+                <div class="alert-item-date">{{ ct.date_fin_fmt }}</div>
+                {% if ct.jours_restants is not none %}
+                <div style="font-size:.68rem;color:{% if ct.jours_restants < 0 %}#ff3355{% elif ct.jours_restants <= 30 %}#ff8c00{% else %}#facc15{% endif %};">
+                    {% if ct.jours_restants < 0 %}Expiré il y a {{ (-ct.jours_restants) }}j{% else %}{{ ct.jours_restants }}j restants{% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+        </div>
+        <a href="/contrats" style="display:block;margin-top:.7rem;font-size:.75rem;color:var(--accent);text-decoration:none;">Voir tous les contrats →</a>
+        {% else %}
+        <span class="alert-empty">✓ Aucun contrat expirant dans les 60 prochains jours.</span>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- ── EXPORTS ── -->
+<div class="card" style="padding:1rem 1.2rem;margin-top:.5rem;">
+    <div class="dash-section-title">📥 Exports rapides</div>
+    <div style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:center;">
+        <a href="/appareils/export.csv" class="btn btn-primary btn-sm">
+            📥 Appareils (CSV)
+        </a>
+        <a href="/peripheriques/export.csv" class="btn btn-primary btn-sm">
+            📥 Périphériques (CSV)
+        </a>
+        <a href="/export/global.json" class="btn btn-primary btn-sm">
+            📦 Sauvegarde JSON
+        </a>
+        <a href="/export/global.zip" class="btn btn-primary btn-sm">
+            🗜 Sauvegarde ZIP
+        </a>
+    </div>
+</div>
+
+{% endblock %}

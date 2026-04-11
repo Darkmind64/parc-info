@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block title %}Droits — {{ utilisateur.prenom }} {{ utilisateur.nom }}{% endblock %}
+
+{% block extra_styles %}
+<style>
+.user-header-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1.5rem; margin-bottom: 1.5rem;
+    display: flex; align-items: center; gap: 1.5rem;
+    position: relative; overflow: hidden;
+}
+.user-header-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg,transparent,var(--color, var(--border-glow)),transparent); }
+.big-avatar {
+    width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Rajdhani', sans-serif; font-weight: 700; font-size: 1.5rem;
+}
+.droit-card {
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 3px; padding: 0.7rem 1rem;
+    display: flex; align-items: flex-start; gap: 0.8rem;
+    transition: border-color 0.15s;
+}
+.droit-card:hover { border-color: var(--border-glow); }
+.droit-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+.niveau-badge {
+    display: inline-block; padding: 1px 7px; border-radius: 2px;
+    font-size: 0.62rem; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+}
+.niv-lecture { background:rgba(0,201,255,.1); color:var(--accent); border:1px solid rgba(0,201,255,.3); }
+.niv-ecriture { background:rgba(255,140,0,.1); color:var(--accent-orange); border:1px solid rgba(255,140,0,.3); }
+.niv-admin { background:rgba(255,51,85,.1); color:var(--accent-red); border:1px solid rgba(255,51,85,.3); }
+.niv-complet { background:rgba(0,255,136,.1); color:var(--accent-green); border:1px solid rgba(0,255,136,.3); }
+.niv-refus { background:rgba(80,80,100,.15); color:var(--text-muted); border:1px solid var(--border); }
+.cat-section { margin-bottom: 2rem; }
+.cat-title {
+    font-family: 'Rajdhani', sans-serif; font-size: 0.72rem; font-weight: 700;
+    letter-spacing: 3px; text-transform: uppercase; color: var(--text-muted);
+    margin-bottom: 0.8rem; display: flex; align-items: center; gap: 0.6rem;
+}
+.cat-title::after { content:''; flex:1; height:1px; background:var(--border); }
+.droits-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0.6rem; }
+.add-panel {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1.5rem; position: sticky; top: 96px;
+}
+.layout-split { display: grid; grid-template-columns: 1fr 340px; gap: 1.5rem; align-items: start; }
+@media(max-width:900px) { .layout-split { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- EN-TÊTE UTILISATEUR -->
+{% set color = utilisateur.service_couleur or '#6a8aaa' %}
+<div class="user-header-card" style="--color:{{ color }}">
+    <div class="big-avatar" style="background:{{ color }}22;color:{{ color }};border:2px solid {{ color }}44;">
+        {{ utilisateur.prenom[0] if utilisateur.prenom else '?' }}{{ utilisateur.nom[0] if utilisateur.nom else '' }}
+    </div>
+    <div style="flex:1;">
+        <div style="font-family:'Rajdhani',sans-serif;font-size:1.6rem;font-weight:700;letter-spacing:1px;">
+            {{ utilisateur.prenom or '' }} <span style="color:{{ color }}">{{ utilisateur.nom or '—' }}</span>
+        </div>
+        <div style="color:var(--text-secondary);font-size:0.88rem;margin-top:2px;">
+            {{ utilisateur.poste or '' }}
+            {% if utilisateur.service_nom %}
+            · <span style="color:{{ color }}">{{ utilisateur.service_nom }}</span>
+            {% endif %}
+        </div>
+        <div style="margin-top:0.5rem;display:flex;gap:1rem;flex-wrap:wrap;">
+            {% if utilisateur.email %}<span style="font-size:0.8rem;">✉ <a href="mailto:{{ utilisateur.email }}" style="color:inherit;">{{ utilisateur.email }}</a></span>{% endif %}
+            {% if utilisateur.login_windows %}<span class="mono" style="font-size:0.78rem;">🪟 {{ utilisateur.login_windows }}</span>{% endif %}
+            {% if utilisateur.login_mail %}<span class="mono" style="font-size:0.78rem;">📧 <a href="mailto:{{ utilisateur.login_mail }}" style="color:inherit;">{{ utilisateur.login_mail }}</a></span>{% endif %}
+        </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:0.5rem;flex-shrink:0;">
+        <a href="/utilisateur/{{ utilisateur.id }}/editer" class="btn btn-primary btn-sm">✏ Modifier</a>
+        <a href="/utilisateurs" class="btn btn-primary btn-sm">← Retour</a>
+    </div>
+</div>
+
+<div class="layout-split">
+    <!-- DROITS EXISTANTS -->
+    <div>
+        <div style="font-family:'Rajdhani',sans-serif;font-size:0.75rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:1.2rem;display:flex;align-items:center;gap:.5rem;">
+            <span style="width:12px;height:2px;background:var(--accent);display:inline-block;"></span>
+            Droits attribués — <span id="nb-droits">{{ nb_droits_total }}</span>
+        </div>
+
+        {% if droits_par_cat %}
+            {% for cat, droits in droits_par_cat.items() %}
+            <div class="cat-section">
+                <div class="cat-title">{{ cat }}</div>
+                <div class="droits-grid" id="grid-{{ cat|replace(' ','_') }}">
+                {% for d in droits %}
+                <div class="droit-card" id="droit-{{ d.id }}">
+                    <span class="droit-icon">{{ d.icone or '🔑' }}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:600;font-size:0.88rem;">{{ d.nom_droit or '—' }}</div>
+                        {% if d.valeur %}<div class="mono" style="font-size:0.78rem;color:var(--accent);word-break:break-all;">{{ d.valeur }}</div>{% endif %}
+                        {% if d.notes %}<div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px;">{{ d.notes }}</div>{% endif %}
+                        <div style="margin-top:4px;">
+                            <span class="niveau-badge niv-{{ d.niveau }}">{{ d.niveau }}</span>
+                        </div>
+                    </div>
+                    <button onclick="supprimerDroit({{ d.id }})" class="btn btn-danger btn-sm" style="padding:2px 7px;flex-shrink:0;">✕</button>
+                </div>
+                {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div id="no-droits" style="color:var(--text-secondary);padding:2rem;text-align:center;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;">
+                Aucun droit attribué. Utilisez le panneau de droite pour en ajouter.
+            </div>
+        {% endif %}
+        <div id="droits-container"></div>
+    </div>
+
+    <!-- PANNEAU AJOUT -->
+    <div class="add-panel">
+        <div class="card-title">+ Ajouter un droit</div>
+
+        <div class="form-group" style="margin-bottom:0.8rem;">
+            <label>Catégorie</label>
+            <select id="new-cat" onchange="filtrerTypes()">
+                <option value="">— Toutes —</option>
+                {% for cat in categories_droits %}
+                <option value="{{ cat }}">{{ cat }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom:0.8rem;">
+            <label>Type de droit (prédéfini)</label>
+            <select id="new-type" onchange="remplirDepuisType()">
+                <option value="">— Saisie libre —</option>
+                {% for t in types %}
+                <option value="{{ t.id }}" data-nom="{{ t.nom }}" data-cat="{{ t.categorie }}" data-icone="{{ t.icone }}">
+                    {{ t.icone }} {{ t.nom }} ({{ t.categorie }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom:0.8rem;">
+            <label>Intitulé du droit *</label>
+            <input type="text" id="new-nom" placeholder="Ex: Dossier Comptabilité, Sage 100...">
+        </div>
+
+        <div class="form-group" style="margin-bottom:0.8rem;">
+            <label>Valeur / Chemin / Détail</label>
+            <input type="text" id="new-valeur" placeholder="Ex: \\\\SRV\Partage\Compta" class="mono">
+        </div>
+
+        <div class="form-group" style="margin-bottom:0.8rem;">
+            <label>Niveau d'accès</label>
+            <select id="new-niveau">
+                <option value="lecture">👁 Lecture seule</option>
+                <option value="ecriture">✏ Lecture / Écriture</option>
+                <option value="complet">✅ Accès complet</option>
+                <option value="admin">🔴 Administrateur</option>
+                <option value="refus">🚫 Refus d'accès</option>
+            </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom:1rem;">
+            <label>Notes</label>
+            <textarea id="new-notes" rows="2" placeholder="Précisions..."></textarea>
+        </div>
+
+        <button onclick="ajouterDroit()" class="btn btn-success" style="width:100%;justify-content:center;">
+            + Ajouter ce droit
+        </button>
+
+        <div style="margin-top:1.2rem;padding-top:1rem;border-top:1px solid var(--border);">
+            <a href="/types-droits" class="btn btn-primary btn-sm" style="width:100%;justify-content:center;">
+                ⚙ Gérer les types de droits
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const UID = {{ utilisateur.id }};
+const TYPES = {{ types | tojson }};
+let nbDroits = {{ nb_droits_total }};
+
+function filtrerTypes() {
+    const cat = document.getElementById('new-cat').value;
+    const sel = document.getElementById('new-type');
+    Array.from(sel.options).forEach(opt => {
+        opt.style.display = (!cat || !opt.dataset.cat || opt.dataset.cat === cat || opt.value === '') ? '' : 'none';
+    });
+    sel.value = '';
+}
+
+function remplirDepuisType() {
+    const sel = document.getElementById('new-type');
+    const opt = sel.options[sel.selectedIndex];
+    if (opt && opt.value) {
+        document.getElementById('new-nom').value = opt.dataset.nom || '';
+        const cat = opt.dataset.cat || '';
+        document.getElementById('new-cat').value = cat;
+    }
+}
+
+async function ajouterDroit() {
+    const nom = document.getElementById('new-nom').value.trim();
+    const cat = document.getElementById('new-cat').value;
+    if (!nom) { document.getElementById('new-nom').focus(); return; }
+    const typeId = document.getElementById('new-type').value || null;
+    const data = {
+        utilisateur_id: UID,
+        categorie: cat || 'Autre',
+        type_droit_id: typeId ? parseInt(typeId) : null,
+        nom_droit: nom,
+        valeur: document.getElementById('new-valeur').value.trim(),
+        niveau: document.getElementById('new-niveau').value,
+        notes: document.getElementById('new-notes').value.trim()
+    };
+    const r = await fetch('/api/droit', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+    const droit = await r.json();
+    afficherDroit(droit);
+    document.getElementById('new-nom').value = '';
+    document.getElementById('new-valeur').value = '';
+    document.getElementById('new-notes').value = '';
+    document.getElementById('no-droits')?.remove();
+    nbDroits++;
+    document.getElementById('nb-droits').textContent = nbDroits;
+}
+
+function niveauClass(niv) {
+    return { lecture:'niv-lecture', ecriture:'niv-ecriture', complet:'niv-complet', admin:'niv-admin', refus:'niv-refus' }[niv] || 'niv-lecture';
+}
+
+function afficherDroit(d) {
+    const cat = d.categorie || 'Autre';
+    const t = TYPES.find(t => t.id === d.type_droit_id);
+    const icone = t ? t.icone : '🔑';
+    const gridId = 'grid-' + cat.replace(/ /g,'_');
+    let grid = document.getElementById(gridId);
+    if (!grid) {
+        const container = document.getElementById('droits-container');
+        const sec = document.createElement('div');
+        sec.className = 'cat-section';
+        sec.innerHTML = `<div class="cat-title">${cat}</div><div class="droits-grid" id="${gridId}"></div>`;
+        container.appendChild(sec);
+        grid = document.getElementById(gridId);
+    }
+    const div = document.createElement('div');
+    div.className = 'droit-card'; div.id = 'droit-' + d.id;
+    div.innerHTML = `<span class="droit-icon">${icone}</span>
+        <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;font-size:.88rem;">${d.nom_droit || '—'}</div>
+            ${d.valeur ? `<div class="mono" style="font-size:.78rem;color:var(--accent);word-break:break-all;">${d.valeur}</div>` : ''}
+            ${d.notes ? `<div style="font-size:.75rem;color:var(--text-secondary);margin-top:2px;">${d.notes}</div>` : ''}
+            <div style="margin-top:4px;"><span class="niveau-badge ${niveauClass(d.niveau)}">${d.niveau}</span></div>
+        </div>
+        <button onclick="supprimerDroit(${d.id})" class="btn btn-danger btn-sm" style="padding:2px 7px;flex-shrink:0;">✕</button>`;
+    grid.appendChild(div);
+}
+
+async function supprimerDroit(id) {
+    if (!confirm('Supprimer ce droit ?')) return;
+    await fetch('/api/droit/' + id, { method:'DELETE' });
+    document.getElementById('droit-' + id)?.remove();
+    nbDroits--;
+    document.getElementById('nb-droits').textContent = nbDroits;
+}
+</script>
+{% endblock %}

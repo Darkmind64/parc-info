@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Utilisateurs — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.user-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Rajdhani', sans-serif; font-weight: 700; font-size: 0.9rem;
+    flex-shrink: 0;
+}
+.svc-pill {
+    display: inline-block; padding: 1px 8px; border-radius: 12px;
+    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.5px;
+    border: 1px solid; white-space: nowrap;
+}
+.filter-chips { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.filter-chip {
+    padding: 0.25rem 0.8rem; border-radius: 20px; border: 1px solid var(--border);
+    font-size: 0.75rem; font-weight: 600; text-decoration: none;
+    color: var(--text-secondary); cursor: pointer; transition: all 0.15s; background: none;
+}
+.filter-chip:hover { border-color: var(--accent); color: var(--accent); }
+.filter-chip.active { background: rgba(0,201,255,.1); border-color: var(--accent); color: var(--accent); }
+.filter-chip.svc-chip.active { color: #000; }
+/* ── TRI ── */
+th[data-col] { cursor: pointer; user-select: none; white-space: nowrap; }
+th[data-col]:hover { color: var(--accent) !important; background: rgba(0,201,255,.06); }
+.sort-bar { display:flex; align-items:center; gap:0.5rem; padding:0.5rem 1rem; font-family:'Share Tech Mono',monospace; font-size:0.65rem; color:var(--text-muted); letter-spacing:1px; border-top:1px solid var(--border); }
+.sort-bar span { color:var(--accent); font-weight:700; }
+.sort-reset { background:none; border:1px solid var(--border); border-radius:2px; color:var(--text-muted); font-size:0.65rem; padding:1px 6px; cursor:pointer; transition:all .15s; }
+.sort-reset:hover { border-color:var(--accent-orange); color:var(--accent-orange); }
+
+.group-header {
+    background: var(--bg-secondary); padding: 0.5rem 1rem;
+    font-family: 'Rajdhani', sans-serif; font-size: 0.7rem; font-weight: 700;
+    letter-spacing: 3px; text-transform: uppercase; color: var(--text-muted);
+    border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.6rem;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Gestion des <span>Utilisateurs</span></h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        — {{ utilisateurs|length }} utilisateur(s)
+    </p>
+</div>
+
+<div class="actions-row">
+    <div style="display:flex; flex-direction:column; gap:0.6rem;">
+        <!-- Filtre statut -->
+        <div class="filter-chips">
+            <span style="font-size:0.7rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;">Statut :</span>
+            <a href="?statut=actif{% if filtre_svc %}&service={{ filtre_svc }}{% endif %}"
+               class="filter-chip {% if filtre_statut == 'actif' %}active{% endif %}">Actifs</a>
+            <a href="?statut=inactif{% if filtre_svc %}&service={{ filtre_svc }}{% endif %}"
+               class="filter-chip {% if filtre_statut == 'inactif' %}active{% endif %}">Inactifs</a>
+            <a href="?statut={% if filtre_svc %}&service={{ filtre_svc }}{% endif %}"
+               class="filter-chip {% if not filtre_statut %}active{% endif %}">Tous</a>
+        </div>
+        <!-- Filtre service -->
+        <div class="filter-chips">
+            <span style="font-size:0.7rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;">Service :</span>
+            <a href="?{% if filtre_statut %}statut={{ filtre_statut }}{% endif %}"
+               class="filter-chip {% if not filtre_svc %}active{% endif %}">Tous</a>
+            {% for svc in services %}
+            <a href="?service={{ svc.id }}{% if filtre_statut %}&statut={{ filtre_statut }}{% endif %}"
+               class="filter-chip svc-chip {% if filtre_svc|string == svc.id|string %}active{% endif %}"
+               style="{% if filtre_svc|string == svc.id|string %}background:{{ svc.couleur }}22;border-color:{{ svc.couleur }};color:{{ svc.couleur }};{% endif %}">
+                {{ svc.nom }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    <div style="display:flex; gap:0.6rem; align-items:flex-start; flex-wrap:wrap;">
+        <input type="text" id="search-users" placeholder="🔍 Rechercher..."
+               oninput="filtrerUsers()" style="width:200px;padding:.35rem .7rem;font-size:.85rem;">
+        <a href="/services" class="btn btn-primary btn-sm">⚙ Services</a>
+        <a href="/types-droits" class="btn btn-primary btn-sm">🔑 Types de droits</a>
+        <a href="/utilisateur/nouveau" class="btn btn-success">+ Nouvel utilisateur</a>
+    </div>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden;">
+{% if utilisateurs %}
+    {% set ns = namespace(cur_svc='__init__') %}
+    <table id="table-utilisateurs">
+        <thead>
+            <tr>
+                <th>Utilisateur</th>
+                <th>Poste</th>
+                <th>Service</th>
+                <th>Contact</th>
+                <th>Logins</th>
+                <th>Statut</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for u in utilisateurs %}
+            {% set svc_nom = u.service_nom or 'Sans service' %}
+            {% if svc_nom != ns.cur_svc %}
+                {% set ns.cur_svc = svc_nom %}
+                <tr>
+                    <td colspan="7" class="group-header">
+                        <span style="width:8px;height:8px;border-radius:50%;background:{{ u.service_couleur or '#3a5570' }};display:inline-block;"></span>
+                        {{ svc_nom }}
+                    </td>
+                </tr>
+            {% endif %}
+            <tr data-search="{{ u.prenom or '' }} {{ u.nom or '' }} {{ u.poste or '' }} {{ u.service_nom or '' }} {{ u.email or '' }} {{ u.login_windows or '' }} {{ u.login_mail or '' }}">
+                <td data-sort="{{ u.nom or '' }} {{ u.prenom or '' }}">
+                    <div style="display:flex;align-items:center;gap:0.8rem;">
+                        <div class="user-avatar"
+                             style="background:{{ u.service_couleur or '#1e3a5f' }}33;color:{{ u.service_couleur or '#6a8aaa' }};border:1px solid {{ u.service_couleur or '#1e3a5f' }}66;">
+                            {{ u.prenom[0] if u.prenom else '?' }}{{ u.nom[0] if u.nom else '' }}
+                        </div>
+                        <div>
+                            <div style="font-weight:700;">{{ u.prenom or '' }} {{ u.nom or '—' }}</div>
+                            {% if u.notes %}<div style="color:var(--text-muted);font-size:0.72rem;">{{ u.notes[:40] }}{% if u.notes|length > 40 %}…{% endif %}</div>{% endif %}
+                        </div>
+                    </div>
+                </td>
+                <td data-sort="{{ u.poste or '' }}" style="color:var(--text-secondary);">{{ u.poste or '—' }}</td>
+                <td data-sort="{{ u.service_nom or '' }}">
+                    {% if u.service_nom %}
+                    <span class="svc-pill" style="color:{{ u.service_couleur or '#6a8aaa' }};border-color:{{ u.service_couleur or '#3a5570' }}44;background:{{ u.service_couleur or '#3a5570' }}11;">
+                        {{ u.service_nom }}
+                    </span>
+                    {% else %}<span style="color:var(--text-muted);">—</span>{% endif %}
+                </td>
+                <td data-sort="{{ u.email or '' }}">
+                    {% if u.email %}<div style="font-size:0.82rem;">✉ <a href="mailto:{{ u.email }}" style="color:inherit;">{{ u.email }}</a></div>{% endif %}
+                    {% if u.telephone %}<div style="font-size:0.82rem;color:var(--text-secondary);">📞 {{ u.telephone }}</div>{% endif %}
+                </td>
+                <td data-sort="{{ u.login_windows or u.login_mail or '' }}">
+                    {% if u.login_windows %}<div class="mono" style="font-size:0.78rem;">🪟 {{ u.login_windows }}</div>{% endif %}
+                    {% if u.login_mail %}<div class="mono" style="font-size:0.78rem;">✉ <a href="mailto:{{ u.login_mail }}" style="color:inherit;">{{ u.login_mail }}</a></div>{% endif %}
+                    {% if not u.login_windows and not u.login_mail %}<span style="color:var(--text-muted);">—</span>{% endif %}
+                </td>
+                <td data-sort="{{ u.statut or '' }}">
+                    {% if u.statut == 'actif' %}<span class="badge badge-green">Actif</span>
+                    {% elif u.statut == 'suspendu' %}<span class="badge badge-orange">Suspendu</span>
+                    {% else %}<span class="badge badge-gray">Inactif</span>{% endif %}
+                </td>
+                <td>
+                    <div class="quick-actions">
+                        <a href="/utilisateur/{{ u.id }}/droits" class="qa-btn qa-purple">🔑 Droits</a>
+                        <a href="/utilisateur/{{ u.id }}/editer" class="qa-btn qa-edit">✏ Éditer</a>
+                        <form method="POST" action="/utilisateur/{{ u.id }}/supprimer"
+                              onsubmit="return confirm('Supprimer {{ u.prenom }} {{ u.nom }} ?')" style="margin:0;">
+                            <button type="submit" class="qa-btn qa-danger">✕ Supprimer</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <div style="text-align:center;padding:3rem;color:var(--text-secondary);">
+        Aucun utilisateur.
+        {% if not services %}
+        <br><br>Commencez par <a href="/services" style="color:var(--accent);">créer les services</a>, puis
+        {% else %}<br><br>{% endif %}
+        <a href="/utilisateur/nouveau" style="color:var(--accent);">ajouter un utilisateur</a>.
+    </div>
+{% endif %}
+</div>
+{% endblock %}
+
+<div id="sort-status-users" class="sort-bar" style="display:none;">
+    Trié par <span id="sort-col-users"></span> <span id="sort-dir-users"></span>
+    <button class="sort-reset" onclick="resetTriUsers()">✕ Réinitialiser</button>
+</div>
+
+{% block extra_scripts %}
+<script src="/static/js/tri.js"></script>
+<script src="/static/js/liste_tools.js"></script>
+<script>
+const COL_NAMES_USERS = ['Nom','Poste','Service','Contact','Logins','Statut','Actions'];
+
+document.addEventListener('DOMContentLoaded', () => {
+    TriTable.init('table-utilisateurs', { skipCols: [3, 6] });
+    ListeTools.init('table-utilisateurs', { storageKey:'users', exportName:'utilisateurs', skipExportCols:[0,7] });
+    updateSortStatusUsers();
+});
+
+function updateSortStatusUsers() {
+    const saved = sessionStorage.getItem('sort_table-utilisateurs');
+    const bar = document.getElementById('sort-status-users');
+    if (!saved) { bar.style.display='none'; return; }
+    const {col, dir} = JSON.parse(saved);
+    document.getElementById('sort-col-users').textContent = COL_NAMES_USERS[col] || '';
+    document.getElementById('sort-dir-users').textContent = dir === 'asc' ? '↑ croissant' : '↓ décroissant';
+    bar.style.display = 'flex';
+}
+
+function resetTriUsers() {
+    sessionStorage.removeItem('sort_table-utilisateurs');
+    location.reload();
+}
+
+document.addEventListener('click', e => {
+    if (e.target.closest('#table-utilisateurs thead th')) setTimeout(updateSortStatusUsers, 50);
+});
+
+function filtrerUsers() {
+    const q = document.getElementById('search-users').value.toLowerCase();
+    document.querySelectorAll('#table-utilisateurs tbody tr[data-search]').forEach(row => {
+        row.style.display = (!q || row.dataset.search.toLowerCase().includes(q)) ? '' : 'none';
+    });
+    // Hide group headers if all rows in group are hidden
+    document.querySelectorAll('#table-utilisateurs tbody tr:not([data-search])').forEach(sep => {
+        let next = sep.nextElementSibling;
+        let allHidden = true;
+        while (next && next.dataset.search !== undefined) {
+            if (next.style.display !== 'none') { allHidden = false; break; }
+            next = next.nextElementSibling;
+        }
+        sep.style.display = allHidden ? 'none' : '';
+    });
+}
+</script>
+{% endblock %}

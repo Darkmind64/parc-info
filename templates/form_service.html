@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ action }} service — ParcInfo{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>{{ action }} un <span>Service</span></h1>
+    <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span></p>
+</div>
+
+<form method="POST" style="max-width:700px;">
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Informations</div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Nom du service *</label>
+                <input type="text" name="nom" value="{{ service.nom if service else '' }}"
+                       placeholder="Ex: Comptabilité, Direction, IT..." required>
+            </div>
+            <div class="form-group">
+                <label>Couleur</label>
+                <div style="display:flex;gap:.6rem;align-items:center;">
+                    <input type="color" name="couleur" value="{{ service.couleur if service else '#00c9ff' }}" style="width:60px;flex-shrink:0;">
+                    <span style="font-size:.8rem;color:var(--text-secondary);">Couleur d'identification du service</span>
+                </div>
+            </div>
+        </div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Responsable</label>
+                <input type="text" name="responsable" value="{{ service.responsable if service else '' }}"
+                       placeholder="Nom du responsable de service">
+            </div>
+            <div class="form-group">
+                <label>Ordre d'affichage</label>
+                <input type="number" name="ordre" value="{{ service.ordre if service else 0 }}" min="0">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Description</label>
+                <textarea name="description" rows="2"
+                          placeholder="Description du rôle de ce service...">{{ service.description if service else '' }}</textarea>
+            </div>
+        </div>
+    </div>
+    <div style="display:flex;gap:1rem;">
+        <button type="submit" class="btn btn-success">&#10003; {{ action }} le service</button>
+        <a href="/services" class="btn btn-primary">← Retour</a>
+    </div>
+</form>
+{% endblock %}

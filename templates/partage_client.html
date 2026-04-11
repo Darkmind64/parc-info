@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Partager {{ client.nom }} — ParcInfo{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Partager <span>{{ client.nom }}</span></h1>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;max-width:900px;">
+    <!-- Partages existants -->
+    <div>
+        <div class="form-section-title" style="margin-bottom:.8rem;">&#9632; Accès partagés</div>
+        {% if partages %}
+        {% for p in partages %}
+        <div class="card" style="padding:.7rem 1rem;margin-bottom:.5rem;display:flex;align-items:center;justify-content:space-between;gap:.8rem;">
+            <div>
+                <strong>{{ p.prenom or '' }} {{ p.nom }}</strong>
+                <span style="font-family:'Share Tech Mono',monospace;font-size:.72rem;color:var(--text-muted);margin-left:.4rem;">{{ p.login }}</span>
+                <div>
+                    <span class="badge {% if p.niveau == 'ecriture' %}badge-green{% else %}badge-orange{% endif %}">
+                        {% if p.niveau == 'ecriture' %}✏ Lecture/Écriture{% else %}👁 Lecture seule{% endif %}
+                    </span>
+                </div>
+            </div>
+            <form method="POST" onsubmit="return confirm('Retirer ce partage ?')" style="margin:0;">
+                <input type="hidden" name="action" value="supprimer">
+                <input type="hidden" name="partage_id" value="{{ p.id }}">
+                <button type="submit" class="qa-btn qa-danger">✕</button>
+            </form>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div style="color:var(--text-muted);font-size:.83rem;padding:1rem 0;">Ce client n'est partagé avec personne.</div>
+        {% endif %}
+    </div>
+
+    <!-- Ajouter un partage -->
+    <div>
+        <div class="form-section-title" style="margin-bottom:.8rem;">&#9632; Ajouter un partage</div>
+        {% if all_users %}
+        <form method="POST">
+            <input type="hidden" name="action" value="ajouter">
+            <div class="form-group">
+                <label>Utilisateur</label>
+                <select name="user_id" required>
+                    <option value="">— Choisir —</option>
+                    {% set partage_ids = partages | map(attribute='auth_user_id') | list %}
+                    {% for usr in all_users %}
+                    {% if usr.id not in partage_ids %}
+                    <option value="{{ usr.id }}">{{ usr.prenom or '' }} {{ usr.nom }} ({{ usr.login }})</option>
+                    {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Niveau d'accès</label>
+                <select name="niveau">
+                    <option value="lecture">👁 Lecture seule</option>
+                    <option value="ecriture">✏ Lecture / Écriture</option>
+                </select>
+            </div>
+            <button type="submit" class="btn btn-success">+ Partager</button>
+        </form>
+        {% else %}
+        <div style="color:var(--text-muted);font-size:.83rem;">Aucun autre utilisateur disponible.</div>
+        {% endif %}
+        <div style="margin-top:1.5rem;">
+            <a href="/clients" class="btn btn-primary btn-sm">← Retour aux clients</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,374 @@
+{% extends "base.html" %}
+{% block title %}Outils — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* ── GRILLE OUTILS ── */
+.outils-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+.outil-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    position: relative;
+    transition: border-color .2s, box-shadow .2s;
+    overflow: hidden;
+}
+.outil-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--border-glow), transparent);
+}
+.outil-card:hover {
+    border-color: var(--border-glow);
+    box-shadow: 0 4px 20px rgba(0,0,0,.3);
+}
+.outil-card.inactif {
+    opacity: .45;
+    filter: grayscale(.6);
+}
+.outil-header {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+}
+.outil-icone {
+    font-size: 1.6rem;
+    flex-shrink: 0;
+    line-height: 1;
+}
+.outil-titre {
+    font-weight: 700;
+    font-size: .92rem;
+    color: var(--text-primary);
+    flex: 1;
+    min-width: 0;
+}
+.outil-cat {
+    font-size: .58rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: .12rem .4rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+.outil-desc {
+    font-size: .78rem;
+    color: var(--text-secondary);
+    line-height: 1.45;
+    flex: 1;
+}
+.outil-url {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: .7rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.outil-actions {
+    display: flex;
+    gap: .4rem;
+    align-items: center;
+    margin-top: .3rem;
+}
+.btn-outil {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .4rem;
+    padding: .5rem .8rem;
+    background: rgba(0,201,255,.08);
+    border: 1px solid rgba(0,201,255,.35);
+    color: var(--accent);
+    border-radius: 4px;
+    font-size: .8rem;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all .15s;
+    letter-spacing: .5px;
+}
+.btn-outil:hover {
+    background: rgba(0,201,255,.18);
+    box-shadow: 0 0 12px rgba(0,201,255,.2);
+}
+.btn-outil-del {
+    background: none;
+    border: 1px solid rgba(255,51,85,.3);
+    color: var(--accent-red);
+    border-radius: 4px;
+    padding: .5rem .6rem;
+    cursor: pointer;
+    font-size: .8rem;
+    transition: all .15s;
+    flex-shrink: 0;
+}
+.btn-outil-del:hover { background: rgba(255,51,85,.1); }
+.btn-outil-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    border-radius: 4px;
+    padding: .5rem .6rem;
+    cursor: pointer;
+    font-size: .75rem;
+    transition: all .15s;
+    flex-shrink: 0;
+}
+.btn-outil-toggle:hover { border-color: var(--accent-orange); color: var(--accent-orange); }
+
+/* ── SECTION PAR CATÉGORIE ── */
+.cat-section { margin-bottom: 2rem; }
+.cat-title {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: .8rem;
+    padding-bottom: .4rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+.cat-title::before {
+    content: '';
+    display: block;
+    width: 12px;
+    height: 2px;
+    background: var(--accent);
+}
+
+/* ── FORMULAIRE AJOUT ── */
+.add-outil-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.2rem 1.4rem;
+    margin-bottom: 2rem;
+    display: none;
+}
+.add-outil-panel.open { display: block; }
+.add-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    gap: .8rem;
+    margin-bottom: .8rem;
+}
+.add-form-row {
+    display: grid;
+    grid-template-columns: 2fr 2fr 1fr;
+    gap: .8rem;
+    margin-bottom: .8rem;
+}
+@media(max-width:768px) {
+    .add-form-grid, .add-form-row { grid-template-columns: 1fr; }
+}
+.add-label {
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: .3rem;
+}
+
+/* ── BADGE ACTIF/INACTIF ── */
+.status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+.status-dot.on  { background: var(--accent-green); box-shadow: 0 0 5px var(--accent-green); }
+.status-dot.off { background: var(--text-muted); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Boîte à <span>Outils</span></h1>
+    <p>Outils web et diagnostics réseau — indépendant du client sélectionné</p>
+</div>
+
+<div class="actions-row">
+    <div></div>
+    <button class="btn btn-success" onclick="togglePanel()">+ Ajouter un outil</button>
+</div>
+
+<!-- ── PANNEAU AJOUT ── -->
+<div class="add-outil-panel" id="add-panel">
+    <div style="font-family:'Rajdhani',sans-serif;font-size:.7rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:1rem;">
+        ＋ Nouvel outil
+    </div>
+    <div class="add-form-grid">
+        <div>
+            <label class="add-label">Icône (emoji)</label>
+            <input type="text" id="add-icone" value="🔧" style="font-size:1.2rem;text-align:center;" maxlength="4">
+        </div>
+        <div>
+            <label class="add-label">Nom</label>
+            <input type="text" id="add-nom" placeholder="Nom de l'outil">
+        </div>
+        <div>
+            <label class="add-label">Catégorie</label>
+            <input type="text" id="add-cat" placeholder="Réseau, DNS, Sécurité…" list="cats-list">
+            <datalist id="cats-list">
+                {% for cat in cats.keys() %}
+                <option value="{{ cat }}">
+                {% endfor %}
+            </datalist>
+        </div>
+    </div>
+    <div class="add-form-row">
+        <div>
+            <label class="add-label">URL</label>
+            <input type="url" id="add-url" placeholder="https://exemple.com">
+        </div>
+        <div>
+            <label class="add-label">Description</label>
+            <input type="text" id="add-desc" placeholder="À quoi ça sert ?">
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:.5rem;">
+            <button class="btn btn-success" onclick="ajouterOutil()" style="flex:1;">✓ Ajouter</button>
+            <button class="btn btn-primary" onclick="togglePanel()">✕</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── LISTE PAR CATÉGORIE ── -->
+<div id="outils-container">
+{% for cat, ols in cats.items() %}
+<div class="cat-section">
+    <div class="cat-title">{{ cat }}</div>
+    <div class="outils-grid">
+    {% for o in ols %}
+    <div class="outil-card {% if not o.actif %}inactif{% endif %}" id="outil-{{ o.id }}">
+        <div class="outil-header">
+            <span class="outil-icone">{{ o.icone or '🔧' }}</span>
+            <span class="outil-titre">{{ o.nom }}</span>
+            <span class="outil-cat">{{ o.categorie }}</span>
+        </div>
+        {% if o.description %}
+        <div class="outil-desc">{{ o.description }}</div>
+        {% endif %}
+        <div class="outil-url">{{ o.url }}</div>
+        <div class="outil-actions">
+            <a href="{{ o.url }}" target="_blank" rel="noopener" class="btn-outil">
+                🚀 Ouvrir
+            </a>
+            <button class="btn-outil-toggle" onclick="toggleOutil({{ o.id }}, this)"
+                title="{% if o.actif %}Désactiver{% else %}Activer{% endif %}">
+                {% if o.actif %}👁{% else %}🚫{% endif %}
+            </button>
+            <button class="btn-outil-del" onclick="supprimerOutil({{ o.id }})" title="Supprimer">✕</button>
+        </div>
+    </div>
+    {% endfor %}
+    </div>
+</div>
+{% endfor %}
+</div>
+
+{% if not outils %}
+<div style="text-align:center;padding:3rem;color:var(--text-secondary);">
+    Aucun outil enregistré. Cliquez sur "+ Ajouter un outil".
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── GESTION OUTILS ────────────────────────────────────────────────────────────
+
+function togglePanel() {
+    const p = document.getElementById('add-panel');
+    p.classList.toggle('open');
+    if (p.classList.contains('open')) {
+        document.getElementById('add-nom').focus();
+    }
+}
+
+async function ajouterOutil() {
+    const nom  = document.getElementById('add-nom').value.trim();
+    const url  = document.getElementById('add-url').value.trim();
+    const desc = document.getElementById('add-desc').value.trim();
+    const cat  = document.getElementById('add-cat').value.trim() || 'Général';
+    const ico  = document.getElementById('add-icone').value.trim() || '🔧';
+
+    if (!nom) { document.getElementById('add-nom').focus(); return; }
+    if (!url) { document.getElementById('add-url').focus(); return; }
+
+    const resp = await fetch('/api/outils/ajouter', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ nom, url, description: desc, categorie: cat, icone: ico })
+    });
+    const d = await resp.json();
+    if (d.ok) {
+        // Reload page to refresh the grid
+        window.location.reload();
+    } else {
+        alert(d.error || 'Erreur lors de l\'ajout');
+    }
+}
+
+async function supprimerOutil(id) {
+    if (!confirm('Supprimer cet outil ?')) return;
+    const resp = await fetch('/api/outils/' + id + '/supprimer', { method: 'POST' });
+    const d = await resp.json();
+    if (d.ok) {
+        const card = document.getElementById('outil-' + id);
+        if (card) {
+            card.style.transition = 'opacity .3s, transform .3s';
+            card.style.opacity = '0';
+            card.style.transform = 'scale(.95)';
+            setTimeout(() => card.remove(), 350);
+        }
+    }
+}
+
+async function toggleOutil(id, btn) {
+    const resp = await fetch('/api/outils/' + id + '/toggle', { method: 'POST' });
+    const d = await resp.json();
+    if (d.ok) {
+        const card = document.getElementById('outil-' + id);
+        if (card) {
+            card.classList.toggle('inactif');
+            const isInactif = card.classList.contains('inactif');
+            btn.textContent = isInactif ? '🚫' : '👁';
+            btn.title = isInactif ? 'Activer' : 'Désactiver';
+        }
+    }
+}
+
+// Entrée pour valider l'ajout
+document.addEventListener('keydown', e => {
+    const panel = document.getElementById('add-panel');
+    if (e.key === 'Enter' && panel.classList.contains('open')) {
+        const active = document.activeElement;
+        if (active && (active.id === 'add-nom' || active.id === 'add-url' || active.id === 'add-desc')) {
+            e.preventDefault();
+            ajouterOutil();
+        }
+    }
+});
+</script>
+{% endblock %}

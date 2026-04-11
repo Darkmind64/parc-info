@@ -1,0 +1,520 @@
+{% extends "base.html" %}
+{% block title %}Scan Réseau — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* ── BARRE SUPÉRIEURE (config + stats + diff) ── */
+.scan-topbar {
+    display:grid;
+    grid-template-columns: 340px 1fr 280px;
+    gap:1rem;
+    margin-bottom:1.2rem;
+    align-items:stretch;   /* hauteur égale */
+}
+@media(max-width:1100px) { .scan-topbar { grid-template-columns:1fr 1fr; } }
+@media(max-width:750px)  { .scan-topbar { grid-template-columns:1fr; } }
+
+.scan-card {
+    background:var(--bg-card); border:1px solid var(--border);
+    border-radius:5px; padding:.9rem 1.1rem;
+    display:flex; flex-direction:column;  /* pour que les enfants s'étirent */
+}
+.scan-card-title {
+    font-family:'Rajdhani',sans-serif; font-size:.7rem; font-weight:700;
+    letter-spacing:2px; text-transform:uppercase; color:var(--accent);
+    margin-bottom:.7rem; display:flex; align-items:center; gap:.5rem;
+    flex-shrink:0;
+}
+
+/* Config */
+.plage-row { display:flex; gap:.4rem; margin-bottom:.4rem; }
+.plage-row input { flex:1; font-family:'Share Tech Mono',monospace; font-size:.82rem; }
+.plage-add {
+    background:none; border:1px dashed var(--border); color:var(--text-muted);
+    border-radius:3px; padding:.25rem .7rem; cursor:pointer; font-size:.72rem;
+    width:100%; transition:all .15s; margin-bottom:.7rem;
+}
+.plage-add:hover { border-color:var(--accent); color:var(--accent); }
+.scan-progress-bar { height:5px; background:var(--bg-secondary); border-radius:3px; overflow:hidden; margin:.6rem 0; }
+.scan-progress-fill { height:100%; background:linear-gradient(90deg,var(--accent),var(--accent-green)); border-radius:3px; transition:width .3s; }
+.scan-status-msg { font-family:'Share Tech Mono',monospace; font-size:.7rem; color:var(--text-muted); }
+
+/* Stats chips */
+.scan-stat-chip {
+    font-size:.72rem; padding:.2rem .55rem; border-radius:3px;
+    background:var(--bg-secondary); color:var(--text-secondary);
+    border:1px solid var(--border); display:inline-block; margin:.15rem .15rem .15rem 0;
+}
+.scan-stat-chip strong { color:var(--text-primary); }
+
+/* Diff */
+.diff-new-badge     { color:var(--accent-green); font-weight:700; }
+.diff-missing-badge { color:var(--accent-red);   font-weight:700; }
+
+/* ── TOOLBAR RÉSULTATS ── */
+.results-toolbar {
+    display:flex; gap:.6rem; align-items:center; flex-wrap:wrap;
+    margin-bottom:.7rem;
+}
+.results-search {
+    flex:1; min-width:160px; font-size:.82rem; padding:.35rem .7rem;
+    background:var(--bg-secondary); border:1px solid var(--border);
+    border-radius:3px; color:var(--text-primary);
+}
+.results-search:focus { border-color:var(--accent); outline:none; }
+
+/* ── TABLEAU ── */
+.scan-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+.scan-table thead th {
+    background:var(--bg-secondary); padding:.45rem .65rem; text-align:left;
+    font-size:.63rem; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+    color:var(--text-secondary); border-bottom:1px solid var(--border);
+    white-space:nowrap; cursor:pointer; user-select:none;
+}
+.scan-table thead th:hover { color:var(--accent); }
+.scan-table thead th.sorted-asc::after  { content:' ↑'; color:var(--accent); }
+.scan-table thead th.sorted-desc::after { content:' ↓'; color:var(--accent); }
+.scan-table tbody tr { border-bottom:1px solid rgba(30,58,95,.25); transition:background .1s; }
+.scan-table tbody tr:hover { background:rgba(0,201,255,.03); }
+.scan-table td { padding:.4rem .65rem; vertical-align:middle; }
+.scan-table td.td-check { width:28px; text-align:center; }
+
+.badge-os { font-size:.6rem; padding:2px 6px; border-radius:8px; font-weight:600; white-space:nowrap; }
+.badge-os-win { background:rgba(8,145,178,.2);  color:#38bdf8; border:1px solid rgba(8,145,178,.3); }
+.badge-os-lin { background:rgba(22,163,74,.2);  color:#4ade80; border:1px solid rgba(22,163,74,.3); }
+.badge-os-net { background:rgba(217,119,6,.2);  color:#fbbf24; border:1px solid rgba(217,119,6,.3); }
+
+.port-chip {
+    display:inline-block; font-family:'Share Tech Mono',monospace;
+    font-size:.58rem; padding:1px 4px; border-radius:2px; margin:1px;
+    background:rgba(0,201,255,.07); color:var(--text-muted);
+    border:1px solid rgba(0,201,255,.15);
+}
+/* Badge inventaire — plus visible */
+.new-badge {
+    background:rgba(0,255,136,.15); color:#00e676;
+    font-size:.68rem; padding:2px 7px; border-radius:8px;
+    border:1px solid rgba(0,255,136,.4); font-weight:600; white-space:nowrap;
+}
+.exists-badge {
+    background:rgba(100,116,139,.15); color:var(--text-muted);
+    font-size:.68rem; padding:2px 7px; border-radius:8px;
+    border:1px solid rgba(100,116,139,.3); white-space:nowrap;
+}
+.diff-new { background:rgba(0,255,136,.04)!important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <div>
+        <h1>Scan <span>Réseau</span></h1>
+        <p style="font-size:.78rem;">Ping · Ports TCP · NetBIOS · Fingerprint OS · Fabricant MAC</p>
+    </div>
+</div>
+
+<!-- ── BARRE SUPÉRIEURE ── -->
+<div class="scan-topbar">
+
+    <!-- CONFIG -->
+    <div class="scan-card">
+        <div class="scan-card-title">⚙ Configuration</div>
+        <div style="font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:.35rem;">Plages IP</div>
+        <div id="plages-wrap"></div>
+        <button class="plage-add" onclick="ajouterPlage()">+ Ajouter une plage</button>
+        <div style="display:flex;gap:.6rem;margin-bottom:.7rem;">
+            <div class="form-group" style="margin:0;flex:1;">
+                <label style="font-size:.7rem;">Threads</label>
+                <select id="scan-threads" style="font-size:.78rem;padding:.25rem .4rem;">
+                    <option value="50">50 — Rapide</option>
+                    <option value="30" selected>30 — Équilibré</option>
+                    <option value="15">15 — Complet</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin:0;flex:1;">
+                <label style="font-size:.7rem;">Profil ports</label>
+                <select id="scan-profile" style="font-size:.78rem;padding:.25rem .4rem;">
+                    <option value="essential">Essentiels</option>
+                    <option value="standard" selected>Standard</option>
+                    <option value="extended">Étendu</option>
+                </select>
+            </div>
+        </div>
+        <div id="scan-btn-wrap">
+            <button onclick="lancerScan()" class="btn btn-success" style="width:100%;" id="btn-scan">▶ Lancer le scan</button>
+        </div>
+        <div id="scan-progress-wrap" style="display:none;margin-top:.6rem;">
+            <div class="scan-progress-bar"><div class="scan-progress-fill" id="prog-fill" style="width:0%"></div></div>
+            <div class="scan-status-msg" id="scan-msg">En cours...</div>
+            <button onclick="arreterScan()" class="btn btn-danger btn-sm" style="margin-top:.4rem;width:100%;font-size:.72rem;">■ Arrêter</button>
+        </div>
+        <!-- Statut base OUI -->
+        <div style="margin-top:.7rem;padding:.5rem .6rem;border-radius:3px;font-size:.7rem;
+            {% if oui_loaded %}background:rgba(0,255,136,.07);border:1px solid rgba(0,255,136,.2);color:var(--accent-green);
+            {% else %}background:rgba(255,140,0,.07);border:1px solid rgba(255,140,0,.2);color:var(--accent-orange);{% endif %}">
+            {% if oui_loaded %}
+            ✓ Base OUI chargée ({{ oui_count }} préfixes) — détection fabricants optimale
+            {% else %}
+            ⚠ Base OUI limitée ({{ oui_count }} préfixes embarqués).<br>
+            Pour une détection complète (~60 000 préfixes) :<br>
+            <code style="font-size:.68rem;">python download_oui.py</code> puis redémarrez.
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- RÉSULTATS + ACTIONS -->
+    <div class="scan-card">
+        <div class="scan-card-title">📊 Résultats</div>
+        <!-- Compteurs principaux -->
+        <div id="scan-stats" style="font-size:.82rem;color:var(--text-muted);margin-bottom:.8rem;">Aucun scan lancé</div>
+        <!-- Bargraph par type — mis à jour en temps réel -->
+        <div id="scan-chart" style="flex:1;display:flex;flex-direction:column;gap:.35rem;"></div>
+        <!-- Boutons -->
+        <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--border);">
+            <button id="btn-select-new"  onclick="selectionnerNouveaux()"  class="btn btn-primary btn-sm" disabled style="font-size:.72rem;">✦ Nouveaux</button>
+            <button id="btn-select-all"  onclick="toutSelectionner()"      class="btn btn-primary btn-sm" disabled style="font-size:.72rem;">☑ Tout</button>
+            <button id="btn-import"      onclick="importerSelection()"     class="btn btn-success btn-sm" disabled style="font-size:.72rem;">⬇ Importer</button>
+        </div>
+    </div>
+
+    <!-- COMPARAISON INVENTAIRE — toujours visible -->
+    <div class="scan-card" id="diff-panel">
+        <div class="scan-card-title">🔍 Comparaison inventaire</div>
+        <div id="diff-summary" style="font-size:.82rem;color:var(--text-muted);">
+            Lancez un scan pour comparer avec l'inventaire existant
+            ({{ appareils_ips|length }} appareil(s) en base).
+        </div>
+        <div id="diff-missing" style="margin-top:.6rem;flex:1;"></div>
+        <!-- Légende badges — séparée, sans superposition -->
+        <div style="margin-top:auto;padding-top:.7rem;border-top:1px solid var(--border);">
+            <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.35rem;">Légende :</div>
+            <div style="display:flex;flex-direction:column;gap:.3rem;">
+                <div style="display:flex;align-items:center;gap:.5rem;">
+                    <span class="new-badge">✦ Nouveau</span>
+                    <span style="font-size:.7rem;color:var(--text-muted);">non présent dans l'inventaire</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:.5rem;">
+                    <span class="exists-badge">↩ Inventaire</span>
+                    <span style="font-size:.7rem;color:var(--text-muted);">déjà référencé</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── TOOLBAR + TABLEAU PLEINE LARGEUR ── -->
+<div class="results-toolbar">
+    <input type="text" class="results-search" id="results-search"
+           placeholder="🔍 Filtrer IP, nom, fabricant, type..."
+           oninput="filtrerResultats()">
+    <select id="filter-type" onchange="filtrerResultats()"
+            style="font-size:.75rem;padding:.3rem .5rem;background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-secondary);border-radius:3px;">
+        <option value="">Tous les types</option>
+        <option>PC (Windows)</option>
+        <option>PC/Serveur (Linux)</option>
+        <option>Serveur</option>
+        <option>Imprimante</option>
+        <option>Switch</option>
+        <option>Routeur/Pare-feu</option>
+        <option>Borne WiFi</option>
+        <option>Équipement réseau</option>
+    </select>
+    <span id="sel-count" style="font-size:.72rem;color:var(--text-muted);white-space:nowrap;"></span>
+</div>
+
+<div id="results-wrap">
+    <div style="text-align:center;padding:2.5rem;color:var(--text-muted);font-size:.83rem;">
+        Lancez un scan pour découvrir les équipements du réseau.
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const INVENTAIRE_IPS = new Set({{ appareils_ips | tojson }});
+let scanResults = [];
+let sortCol = 'ip', sortDir = 1;
+let scanInterval = null;
+
+// ── PLAGES ───────────────────────────────────────────────────────────────────
+const plageWrap = document.getElementById('plages-wrap');
+
+function ajouterPlage(val) {
+    const row = document.createElement('div');
+    row.className = 'plage-row';
+    row.innerHTML = `
+        <input type="text" placeholder="192.168.1.0/24" value="${escH(val||'')}">
+        <button onclick="this.parentElement.remove()"
+            style="background:none;border:1px solid rgba(255,51,85,.3);color:var(--accent-red);border-radius:3px;padding:.25rem .5rem;cursor:pointer;font-size:.72rem;">✕</button>`;
+    plageWrap.appendChild(row);
+}
+
+function getPlages() {
+    return Array.from(plageWrap.querySelectorAll('input'))
+        .map(i => i.value.trim()).filter(Boolean);
+}
+
+ajouterPlage('{{ parc_plage or "192.168.1.0/24" }}');
+
+// ── SCAN ─────────────────────────────────────────────────────────────────────
+async function lancerScan() {
+    const plages = getPlages();
+    if (!plages.length) { alert('Entrez au moins une plage IP'); return; }
+    document.getElementById('scan-progress-wrap').style.display = '';
+    document.getElementById('btn-scan').disabled = true;
+    document.getElementById('prog-fill').style.width = '0%';
+    document.getElementById('scan-msg').textContent = 'Démarrage...';
+    scanResults = [];
+    renderTable([]);
+    // Réinitialiser le panneau diff sans le cacher
+    document.getElementById('diff-summary').innerHTML =
+        '<span style="color:var(--text-muted);">Scan en cours…</span>';
+    document.getElementById('diff-missing').innerHTML = '';
+
+    const r = await fetch('/api/scan/lancer', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ plage_ip: plages, threads: parseInt(document.getElementById('scan-threads').value) })
+    });
+    if (!r.ok) { const e = await r.json(); alert(e.error || 'Erreur'); resetUI(); return; }
+    scanInterval = setInterval(pollStatus, 800);
+}
+
+async function pollStatus() {
+    try {
+        const d = await (await fetch('/api/scan/status')).json();
+        document.getElementById('prog-fill').style.width = d.progress + '%';
+        document.getElementById('scan-msg').textContent = d.message || '';
+        scanResults = d.results || [];
+        renderTable(scanResults);
+        updateStats();
+        showDiff();   // mettre à jour en temps réel pendant le scan
+        if (!d.running) {
+            clearInterval(scanInterval); scanInterval = null;
+            resetUI();
+        }
+    } catch(e) {}
+}
+
+function arreterScan() {
+    clearInterval(scanInterval); scanInterval = null;
+    resetUI();
+}
+
+function resetUI() {
+    document.getElementById('btn-scan').disabled = false;
+    document.getElementById('scan-progress-wrap').style.display = 'none';
+    const hasResults = scanResults.length > 0;
+    ['btn-import','btn-select-all','btn-select-new'].forEach(id =>
+        document.getElementById(id).disabled = !hasResults);
+}
+
+// ── TABLEAU ───────────────────────────────────────────────────────────────────
+function renderTable(results) {
+    const wrap = document.getElementById('results-wrap');
+    if (!results.length) {
+        wrap.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted);font-size:.82rem;">Aucun résultat.</div>';
+        return;
+    }
+    const q   = (document.getElementById('results-search').value||'').toLowerCase();
+    const typ = document.getElementById('filter-type').value;
+
+    const sorted = [...results].sort((a, b) => {
+        let va = a[sortCol]||'', vb = b[sortCol]||'';
+        if (sortCol === 'ip') {
+            va = a.ip.split('.').map(n => n.padStart(3,'0')).join('');
+            vb = b.ip.split('.').map(n => n.padStart(3,'0')).join('');
+        }
+        return (va < vb ? -1 : va > vb ? 1 : 0) * sortDir;
+    });
+
+    const filtered = sorted.filter(h => {
+        const txt = [h.ip, h.display_name||'', h.hostname||'', h.netbios||'',
+                     h.type||'', h.vendor||'', h.mac||''].join(' ').toLowerCase();
+        return (!q || txt.includes(q)) && (!typ || h.type === typ);
+    });
+
+    document.getElementById('sel-count').textContent =
+        `${filtered.length} / ${results.length} hôte${results.length>1?'s':''}`;
+
+    let html = `<div style="overflow-x:auto;"><table class="scan-table" id="scan-tbl">
+    <thead><tr>
+        <th class="td-check"><input type="checkbox" id="chk-all" onchange="toggleAll(this.checked)"></th>
+        <th onclick="trierPar('ip')">IP</th>
+        <th onclick="trierPar('display_name')">Nom / MAC</th>
+        <th onclick="trierPar('type')">Type</th>
+        <th onclick="trierPar('vendor')">Fabricant</th>
+        <th onclick="trierPar('os_guess')">OS</th>
+        <th>Ports ouverts</th>
+        <th onclick="trierPar('statut')">Statut</th>
+    </tr></thead><tbody>`;
+
+    filtered.forEach(h => {
+        const isNew = !INVENTAIRE_IPS.has(h.ip);
+        const osBadge = h.os_guess
+            ? `<span class="badge-os badge-os-${h.os_guess==='Windows'?'win':h.os_guess==='Linux/Unix'?'lin':'net'}">${h.os_guess}</span>`
+            : '—';
+        const ports = (h.ports||[]).slice(0,7).map(p => `<span class="port-chip">${p}</span>`).join('')
+                    + (h.ports&&h.ports.length>7 ? `<span class="port-chip">+${h.ports.length-7}</span>` : '');
+        const macLine = h.mac ? `<div style="font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--text-muted);">${h.mac}</div>` : '';
+        const statusBadge = isNew
+            ? '<span class="new-badge">✦ Nouveau</span>'
+            : '<span class="exists-badge">↩ Inventaire</span>';
+
+        html += `<tr class="${isNew?'diff-new':''}" data-ip="${h.ip}">
+            <td class="td-check"><input type="checkbox" class="chk-host" value="${h.ip}"></td>
+            <td style="font-family:'Share Tech Mono',monospace;font-weight:700;white-space:nowrap;">${h.ip}</td>
+            <td>${escH(h.netbios||h.hostname||'')?`<div style="font-size:.8rem;">${escH(h.netbios||h.hostname||'')}</div>`:''}${macLine}</td>
+            <td style="white-space:nowrap;">${escH(h.type||'—')}</td>
+            <td style="font-size:.75rem;white-space:nowrap;">${escH(h.vendor||'—')}</td>
+            <td>${osBadge}</td>
+            <td>${ports||'—'}</td>
+            <td>${statusBadge}</td>
+        </tr>`;
+    });
+
+    html += '</tbody></table></div>';
+    wrap.innerHTML = html;
+
+    // Marquer colonne triée
+    document.querySelectorAll('.scan-table thead th[onclick]').forEach(th => {
+        const col = th.getAttribute('onclick').replace("trierPar('","").replace("')","");
+        th.classList.remove('sorted-asc','sorted-desc');
+        if (col === sortCol) th.classList.add(sortDir===1?'sorted-asc':'sorted-desc');
+    });
+}
+
+function escH(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function filtrerResultats() { renderTable(scanResults); }
+
+function trierPar(col) {
+    sortDir = (sortCol === col) ? sortDir * -1 : 1;
+    sortCol = col;
+    renderTable(scanResults);
+}
+
+// ── SÉLECTION ─────────────────────────────────────────────────────────────────
+function toggleAll(checked) {
+    document.querySelectorAll('.chk-host').forEach(c => c.checked = checked);
+}
+function toutSelectionner() {
+    document.querySelectorAll('.chk-host').forEach(c => c.checked = true);
+    const ca = document.getElementById('chk-all'); if(ca) ca.checked = true;
+}
+function selectionnerNouveaux() {
+    document.querySelectorAll('.chk-host').forEach(c => c.checked = !INVENTAIRE_IPS.has(c.value));
+}
+
+// ── IMPORT ────────────────────────────────────────────────────────────────────
+async function importerSelection() {
+    const selected = Array.from(document.querySelectorAll('.chk-host:checked')).map(c => c.value);
+    if (!selected.length) { alert('Aucun hôte sélectionné'); return; }
+    const toImport = scanResults.filter(h => selected.includes(h.ip));
+    const r = await fetch('/api/scan/importer', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({appareils: toImport})
+    });
+    const d = await r.json();
+    alert(`Import terminé :\n• ${d.importes} ajouté(s)\n• ${d.mis_a_jour||0} mis à jour`);
+    toImport.forEach(h => INVENTAIRE_IPS.add(h.ip));
+    renderTable(scanResults);
+}
+
+// ── STATS + BARGRAPH ──────────────────────────────────────────────────────────
+const TYPE_COLORS = {
+    'PC (Windows)':       '#38bdf8',
+    'PC/Serveur (Linux)': '#4ade80',
+    'Serveur':            '#a78bfa',
+    'Imprimante':         '#fb923c',
+    'Switch':             '#fbbf24',
+    'Routeur/Pare-feu':   '#f472b6',
+    'Borne WiFi':         '#34d399',
+    'Équipement réseau':  '#94a3b8',
+    'PC':                 '#60a5fa',
+};
+const DEFAULT_COLOR = '#64748b';
+
+function updateStats() {
+    const nb    = scanResults.length;
+    const nbNew = scanResults.filter(h => !INVENTAIRE_IPS.has(h.ip)).length;
+    const byType = {};
+    scanResults.forEach(h => { byType[h.type||'PC'] = (byType[h.type||'PC']||0)+1; });
+
+    // Compteurs texte
+    document.getElementById('scan-stats').innerHTML = nb
+        ? `<strong style="color:var(--text-primary);font-size:1.05rem;">${nb}</strong> hôte(s) &nbsp;·&nbsp; <strong style="color:var(--accent-green);">${nbNew}</strong> nouveau(x)`
+        : '<span style="color:var(--text-muted);">Aucun résultat</span>';
+
+    // Bargraph horizontal par type
+    const chart = document.getElementById('scan-chart');
+    if (!nb) { chart.innerHTML = ''; return; }
+    const sorted = Object.entries(byType).sort((a,b) => b[1]-a[1]);
+    const maxVal = sorted[0][1];
+    chart.innerHTML = sorted.map(([type, count]) => {
+        const pct   = Math.max(4, Math.round(count / maxVal * 100));
+        const color = TYPE_COLORS[type] || DEFAULT_COLOR;
+        const label = type.length > 18 ? type.slice(0,17)+'…' : type;
+        return `<div style="display:flex;align-items:center;gap:.5rem;min-height:1.4rem;">
+            <div style="width:110px;font-size:.68rem;color:var(--text-secondary);text-align:right;
+                        white-space:nowrap;overflow:hidden;flex-shrink:0;">${label}</div>
+            <div style="flex:1;background:var(--bg-secondary);border-radius:3px;overflow:hidden;height:14px;">
+                <div style="width:${pct}%;height:100%;background:${color};border-radius:3px;
+                             transition:width .4s ease;opacity:.85;"></div>
+            </div>
+            <div style="width:22px;font-size:.72rem;font-weight:700;color:${color};flex-shrink:0;">${count}</div>
+        </div>`;
+    }).join('');
+}
+
+// ── DIFF ──────────────────────────────────────────────────────────────────────
+function showDiff() {
+    const foundIPs  = new Set(scanResults.map(h => h.ip));
+    const nouveaux  = scanResults.filter(h => !INVENTAIRE_IPS.has(h.ip));
+    const disparus  = Array.from(INVENTAIRE_IPS).filter(ip => !foundIPs.has(ip));
+    const summary   = document.getElementById('diff-summary');
+    const missing   = document.getElementById('diff-missing');
+
+    summary.innerHTML = `
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem;
+                    padding:.45rem .65rem;border-radius:4px;
+                    background:rgba(0,255,136,.08);border:1px solid rgba(0,255,136,.25);">
+            <span style="font-size:1rem;font-weight:700;color:var(--accent-green);">${nouveaux.length}</span>
+            <span style="font-size:.75rem;color:var(--accent-green);">✦ nouveau(x)</span>
+            <span style="font-size:.72rem;color:var(--text-muted);">non inventoriés</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:.5rem;
+                    padding:.45rem .65rem;border-radius:4px;
+                    background:rgba(255,51,85,.08);border:1px solid rgba(255,51,85,.25);">
+            <span style="font-size:1rem;font-weight:700;color:var(--accent-red);">${disparus.length}</span>
+            <span style="font-size:.75rem;color:var(--accent-red);">✕ absent(s)</span>
+            <span style="font-size:.72rem;color:var(--text-muted);">de l'inventaire non détectés</span>
+        </div>`;
+
+    if (disparus.length) {
+        missing.innerHTML = `<div style="margin-top:.6rem;">
+            <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.3rem;">IPs absentes :</div>
+            <div style="display:flex;flex-wrap:wrap;gap:.25rem;">
+                ${disparus.slice(0,10).map(ip =>
+                    `<span style="font-family:'Share Tech Mono',monospace;font-size:.65rem;
+                                  padding:2px 5px;border-radius:3px;
+                                  background:rgba(255,51,85,.1);border:1px solid rgba(255,51,85,.3);
+                                  color:#ff6b6b;">${ip}</span>`
+                ).join('')}
+                ${disparus.length > 10
+                    ? `<span style="font-size:.68rem;color:var(--text-muted);padding:2px 4px;">+${disparus.length-10} autres</span>`
+                    : ''}
+            </div>
+        </div>`;
+    } else {
+        missing.innerHTML = '';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    ['btn-import','btn-select-all','btn-select-new'].forEach(id =>
+        document.getElementById(id).disabled = true);
+});
+</script>
+{% endblock %}

@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block title %}{{ action }} identifiant — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+#wifi-section { display: none; }
+.qr-preview-wrap { margin-top:.8rem; display:flex; flex-direction:column; align-items:flex-start; gap:.5rem; }
+.qr-preview { background:#fff; padding:8px; border-radius:6px; display:inline-block; border:1px solid var(--border); min-width:100px; min-height:100px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ action }} un <span>Identifiant</span></h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }}; font-weight:700;">{{ client.nom }}</span>
+        — Compte, accès ou mot de passe
+    </p>
+</div>
+
+<form method="POST" id="form-ident" style="max-width:900px;">
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Identification</div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Catégorie</label>
+                <select name="categorie" id="sel-categorie" onchange="onCatChange(this.value)">
+                    {% for cat in categories %}
+                    <option value="{{ cat }}" {% if identifiant and identifiant.categorie == cat %}selected{% endif %}>{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Nom / Intitulé *</label>
+                <input type="text" name="nom" value="{{ identifiant.nom if identifiant else '' }}"
+                       placeholder="Ex: Compte admin routeur, Messagerie direction..." required>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Description</label>
+                <input type="text" name="description" value="{{ identifiant.description if identifiant else '' }}"
+                       placeholder="Ex: Compte administrateur principal du routeur Cisco">
+            </div>
+        </div>
+    </div>
+
+    <!-- Section Wi-Fi (visible si catégorie = Wi-Fi) -->
+    <div class="form-section" id="wifi-section">
+        <div class="form-section-title">&#9632; 📶 Réseau Wi-Fi</div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>SSID (nom du réseau) *</label>
+                <input type="text" name="wifi_ssid" id="wifi_ssid"
+                       value="{{ identifiant.wifi_ssid if identifiant else '' }}"
+                       placeholder="NomDuReseau" oninput="majQRForm()">
+            </div>
+            <div class="form-group">
+                <label>Sécurité</label>
+                <select name="wifi_securite" id="wifi_securite" onchange="majQRForm()">
+                    {% for s in ['WPA2','WPA3','WPA','WEP','Ouvert'] %}
+                    <option value="{{ s }}" {% if identifiant and (identifiant.wifi_securite or 'WPA2') == s %}selected{% endif %}>{{ s }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Mot de passe Wi-Fi</label>
+                <div class="pwd-wrap">
+                    <input type="password" name="mot_de_passe" id="wifi_pwd_form"
+                           value="{{ identifiant.mot_de_passe if identifiant else '' }}"
+                           placeholder="Mot de passe du réseau" oninput="majQRForm()"
+                           autocomplete="new-password">
+                    <button type="button" class="pwd-toggle" onclick="togglePwd(this)">👁</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <div class="qr-preview-wrap">
+                    <div style="font-size:.65rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--text-muted);">QR Code de connexion</div>
+                    <div class="qr-preview" id="qr-form"></div>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="telechargerQRForm()">⬇ PNG</button>
+                </div>
+            </div>
+        </div>
+        <div style="font-size:.75rem;color:var(--text-muted);margin-top:-.5rem;margin-bottom:.5rem;">
+            ℹ Le champ Login ci-dessous sera automatiquement rempli avec le SSID à la sauvegarde.
+        </div>
+    </div>
+
+    <div class="form-section" id="standard-access-section">
+        <div class="form-section-title">&#9632; Accès</div>
+        <div class="form-row cols-2" id="login-row">
+            <div class="form-group">
+                <label>Login / Identifiant</label>
+                <input type="text" name="login" id="login-field"
+                       value="{{ identifiant.login if identifiant else '' }}"
+                       placeholder="Ex: admin, user@domaine.fr" autocomplete="off">
+            </div>
+            <div class="form-group" id="pwd-standard-wrap">
+                <label>Mot de passe</label>
+                <div class="pwd-wrap">
+                    <input type="password" name="mot_de_passe" id="pwd-standard"
+                           value="{{ identifiant.mot_de_passe if identifiant else '' }}"
+                           placeholder="Mot de passe" autocomplete="new-password">
+                    <button type="button" class="pwd-toggle" onclick="togglePwd(this)">👁</button>
+                </div>
+            </div>
+        </div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>URL / Adresse d'accès</label>
+                <input type="text" name="url" value="{{ identifiant.url if identifiant else '' }}"
+                       placeholder="Ex: https://192.168.1.1 ou https://webmail.client.fr">
+            </div>
+            <div class="form-group">
+                <label>Date d'expiration</label>
+                <input type="date" name="date_expiration"
+                       value="{{ identifiant.date_expiration if identifiant else '' }}">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Notes</div>
+        <div class="form-group">
+            <textarea name="notes" rows="3"
+                      placeholder="Informations complémentaires, politique de renouvellement...">{{ identifiant.notes if identifiant else '' }}</textarea>
+        </div>
+    </div>
+
+    <div style="display:flex; gap:1rem;">
+        <button type="submit" class="btn btn-success">&#10003; {{ action }} l'identifiant</button>
+        <a href="/identifiants" class="btn btn-primary">← Retour</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+let _qrFormInst = null;
+
+function onCatChange(val) {
+    const isWifi = val === 'Wi-Fi';
+    document.getElementById('wifi-section').style.display      = isWifi ? 'block' : 'none';
+    // Hide the standard password field when wifi (wifi has its own)
+    document.getElementById('pwd-standard-wrap').style.display = isWifi ? 'none'  : 'block';
+    // Auto-fill login with SSID when wifi
+    if (isWifi) {
+        const ssid = document.getElementById('wifi_ssid').value;
+        if (ssid) document.getElementById('login-field').value = ssid;
+        majQRForm();
+    }
+}
+
+function majQRForm() {
+    const ssid = document.getElementById('wifi_ssid').value.trim();
+    const pwd  = document.getElementById('wifi_pwd_form').value;
+    const sec  = document.getElementById('wifi_securite').value;
+    // Auto-fill login
+    document.getElementById('login-field').value = ssid;
+    const canvas = document.getElementById('qr-form');
+    canvas.innerHTML = '';
+    _qrFormInst = null;
+    if (!ssid) return;
+    function esc(s){ return String(s).replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/"/g,'\\"'); }
+    const t = sec === 'Ouvert' ? 'nopass' : sec;
+    const p = sec === 'Ouvert' ? '' : ';P:' + esc(pwd);
+    const str = 'WIFI:T:' + t + ';S:' + esc(ssid) + p + ';;';
+    try {
+        _qrFormInst = new QRCode(canvas, {
+            text: str, width: 150, height: 150,
+            colorDark: '#000', colorLight: '#fff',
+            correctLevel: QRCode.CorrectLevel.M
+        });
+    } catch(e) {}
+}
+
+function telechargerQRForm() {
+    const cv = document.querySelector('#qr-form canvas');
+    if (!cv) { alert('Renseignez le SSID pour générer le QR.'); return; }
+    const ssid = document.getElementById('wifi_ssid').value;
+    const a = document.createElement('a');
+    a.download = 'wifi_' + ssid.replace(/[^a-z0-9]/gi,'_') + '.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+}
+
+// Init on load
+document.addEventListener('DOMContentLoaded', () => {
+    const cat = document.getElementById('sel-categorie').value;
+    onCatChange(cat);
+});
+</script>
+<script src="/static/js/form_tools.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    FormTools.init('form-ident', { draftKey: 'draft_idn' });
+});
+</script>
+{% endblock %}

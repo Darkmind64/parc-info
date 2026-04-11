@@ -1,0 +1,1059 @@
+{% extends "base.html" %}
+{% block title %}{{ action }} un appareil — ParcInfo
+async function loadHistorique() {
+    const r = await fetch('/api/historique/entite/appareil/{{ appareil.id }}');
+    const items = await r.json();
+    const el = document.getElementById('hist-list');
+    if (!items.length) { el.textContent = 'Aucune modification enregistrée.'; return; }
+    const icons = { Création: '🟢', Modification: '🔵', Suppression: '🔴' };
+    el.innerHTML = items.map(h => `
+        <div style="display:flex;align-items:center;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <span>${icons[h.action] || '●'}</span>
+            <span style="flex:1;color:var(--text-secondary);">${h.action}</span>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--text-muted);">${(h.date_action||'').slice(0,16).replace('T',' ')}</span>
+        </div>`).join('');
+}
+
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+.aer-tabs {
+    display: flex;
+    gap: .35rem;
+    margin-bottom: .9rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: .45rem;
+}
+.aer-tab {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: .3rem .85rem;
+    border-radius: 6px 6px 0 0;
+    font-size: .81rem;
+    font-family: inherit;
+    transition: background .15s, color .15s, border-color .15s;
+    position: relative;
+    white-space: nowrap;
+}
+.aer-tab:hover {
+    background: rgba(255,255,255,.05);
+    color: var(--text);
+}
+.aer-tab.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+.aer-tab-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #00ff88;
+    margin-left: .35rem;
+    vertical-align: middle;
+    position: relative;
+    top: -1px;
+}
+.aer-tab.active .aer-tab-dot {
+    background: rgba(255,255,255,.75);
+}
+.aer-panel { padding: .4rem 0 0; }
+
+/* ── Logiciels installés ────────────────────────────────────────────────────── */
+.sw-group { margin-bottom: 1rem; }
+.sw-group-title {
+    font-size: .74rem; font-weight: 600; color: var(--text-secondary);
+    text-transform: uppercase; letter-spacing: .06em;
+    margin-bottom: .45rem; display: flex; align-items: center; gap: .5rem;
+}
+.sw-group-hint { font-weight: 400; font-size: .68rem; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+.sw-badges { display: flex; flex-wrap: wrap; gap: .3rem; min-height: .5rem; }
+.sw-badge {
+    display: inline-flex; align-items: center; gap: .28rem; cursor: pointer;
+    padding: .22rem .62rem; border-radius: 4px; font-size: .79rem;
+    border: 1px solid var(--border); color: var(--text-secondary);
+    background: transparent; user-select: none; line-height: 1.4;
+    transition: background .1s, color .1s, border-color .1s;
+}
+.sw-badge:hover { border-color: var(--accent); color: var(--text); }
+.sw-badge.selected { background: rgba(0,180,216,.16); color: var(--accent); border-color: var(--accent); font-weight: 500; }
+.sw-badge-metier.selected { background: rgba(124,58,237,.16); color: #a78bfa; border-color: #7c3aed; }
+.sw-badge-custom.selected { background: rgba(0,255,136,.1); color: #00e57a; border-color: #00ff8860; }
+.sw-remove { font-size: .72rem; opacity: .55; line-height: 1; padding: 0 .05rem; }
+.sw-remove:hover { opacity: 1; color: #ff3355; }
+
+/* ── Licences logiciels ─────────────────────────────────────────────────────── */
+.lic-row {
+    display: flex; align-items: flex-end; gap: .55rem;
+    padding: .55rem .65rem; margin-bottom: .45rem;
+    background: rgba(255,255,255,.025);
+    border: 1px solid var(--border); border-radius: 6px;
+}
+.lic-fields { display: flex; flex: 1; gap: .5rem; flex-wrap: wrap; }
+.lic-fields .form-group { flex: 1; min-width: 130px; margin: 0; }
+.lic-fields .form-group label { font-size: .72rem; margin-bottom: .2rem; display: block; }
+.lic-fields .form-group input,
+.lic-fields .form-group select { margin: 0; }
+.lic-fields .lic-cle { font-family: 'Share Tech Mono', monospace; font-size: .82rem; letter-spacing: .04em; }
+.lic-remove {
+    flex-shrink: 0; background: transparent;
+    border: 1px solid rgba(255,51,85,.4); color: #ff3355;
+    border-radius: 4px; padding: .28rem .55rem; cursor: pointer;
+    font-size: .82rem; align-self: flex-end; transition: background .12s;
+}
+.lic-remove:hover { background: rgba(255,51,85,.12); }
+.lic-empty { color: var(--text-muted); font-size: .82rem; font-style: italic; padding: .3rem 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ action }} un <span>Appareil</span></h1>
+    <p>Fiche individuelle de l'équipement informatique</p>
+</div>
+
+<form method="POST" id="form-appareil">
+    <!-- IDENTIFICATION -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Identification</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Nom de la machine</label>
+                <input type="text" name="nom_machine" value="{{ appareil.nom_machine if appareil else '' }}" placeholder="Ex: PC-DUPONT-01">
+            </div>
+            <div class="form-group">
+                <label>Type d'appareil</label>
+                <select name="type_appareil">
+                    {% for t in types_appareils %}
+                    <option value="{{ t }}" {% if appareil and appareil.type_appareil == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Statut</label>
+                <select name="statut">
+                    <option value="actif" {% if not appareil or appareil.statut == 'actif' %}selected{% endif %}>Actif</option>
+                    <option value="inactif" {% if appareil and appareil.statut == 'inactif' %}selected{% endif %}>Inactif</option>
+                    <option value="hors_service" {% if appareil and appareil.statut == 'hors_service' %}selected{% endif %}>Hors service</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Marque</label>
+                <input type="text" name="marque" value="{{ appareil.marque if appareil else '' }}" placeholder="Ex: Dell, HP, Lenovo...">
+            </div>
+            <div class="form-group">
+                <label>Modèle</label>
+                <input type="text" name="modele" value="{{ appareil.modele if appareil else '' }}" placeholder="Ex: OptiPlex 7090">
+            </div>
+            <div class="form-group">
+                <label>Numéro de série</label>
+                <input type="text" name="numero_serie" value="{{ appareil.numero_serie if appareil else '' }}" placeholder="S/N">
+            </div>
+        </div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Utilisateur</label>
+                <input type="text" name="utilisateur" value="{{ appareil.utilisateur if appareil else '' }}" placeholder="Nom de l'utilisateur">
+            </div>
+            <div class="form-group">
+                <label>Service / Département</label>
+                <input type="text" name="service" value="{{ appareil.service if appareil else '' }}" placeholder="Ex: Comptabilité">
+            </div>
+            <div class="form-group">
+                <label>Localisation / Bureau</label>
+                <input type="text" name="localisation" value="{{ appareil.localisation if appareil else '' }}" placeholder="Ex: Bureau 204">
+            </div>
+        </div>
+    </div>
+
+    <!-- RÉSEAU -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Paramètres réseau</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Adresse IP</label>
+                <input type="text" name="adresse_ip" value="{{ appareil.adresse_ip if appareil else '' }}" placeholder="Ex: 192.168.1.10" class="mono">
+            </div>
+            <div class="form-group">
+                <label>Adresse MAC</label>
+                <input type="text" name="adresse_mac" value="{{ appareil.adresse_mac if appareil else '' }}" placeholder="Ex: AA:BB:CC:DD:EE:FF" class="mono">
+            </div>
+            <div class="form-group">
+                <label>Nom DNS / Hostname</label>
+                <input type="text" name="nom_dns" value="{{ appareil.nom_dns if appareil else '' }}" placeholder="Ex: pc-dupont.local">
+            </div>
+        </div>
+        {% if appareil and appareil.ports_ouverts %}
+        <div class="form-row">
+            <div class="form-group">
+                <label>Ports ouverts détectés</label>
+                <input type="text" name="ports_ouverts" value="{{ appareil.ports_ouverts }}" class="mono">
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- SYSTÈME -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Système &amp; matériel</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Système d'exploitation</label>
+                <select name="os">
+                    <option value="">— Sélectionner —</option>
+                    {% for os in ['Windows 11 Pro', 'Windows 11 Home', 'Windows 10 Pro', 'Windows 10 Home', 'Windows Server 2022', 'Windows Server 2019', 'Windows Server 2016', 'Ubuntu 22.04', 'Ubuntu 20.04', 'Debian 12', 'Debian 11', 'macOS Sonoma', 'macOS Ventura', 'Autre'] %}
+                    <option value="{{ os }}" {% if appareil and appareil.os == os %}selected{% endif %}>{{ os }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Version OS</label>
+                <input type="text" name="version_os" value="{{ appareil.version_os if appareil else '' }}" placeholder="Ex: 22H2">
+            </div>
+            <div class="form-group">
+                <label>RAM</label>
+                <select name="ram">
+                    <option value="">—</option>
+                    {% for r in ['2 Go', '4 Go', '8 Go', '16 Go', '32 Go', '64 Go', '128 Go'] %}
+                    <option value="{{ r }}" {% if appareil and appareil.ram == r %}selected{% endif %}>{{ r }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Processeur (CPU)</label>
+                <input type="text" name="cpu" value="{{ appareil.cpu if appareil else '' }}" placeholder="Ex: Intel Core i5-12400">
+            </div>
+            <div class="form-group">
+                <label>Stockage</label>
+                <input type="text" name="stockage" value="{{ appareil.stockage if appareil else '' }}" placeholder="Ex: SSD 512 Go NVMe">
+            </div>
+            <div class="form-group">
+                <label>Carte graphique (GPU)</label>
+                <input type="text" name="carte_graphique" value="{{ appareil.carte_graphique if appareil else '' }}" placeholder="Ex: NVIDIA RTX 3060, Intel UHD 770">
+            </div>
+        </div>
+    </div>
+
+    <!-- ACHAT & GARANTIE -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Achat &amp; Garantie</div>
+        <div class="form-row cols-4">
+            <div class="form-group">
+                <label>Date d'achat</label>
+                <input type="date" name="date_achat" value="{{ appareil.date_achat if appareil and appareil.date_achat else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Durée garantie (mois)</label>
+                <input type="number" name="duree_garantie" value="{{ appareil.duree_garantie if appareil else '' }}" placeholder="Ex: 36" min="0">
+            </div>
+            <div class="form-group">
+                <label>Date fin de garantie</label>
+                <input type="date" name="date_fin_garantie" value="{{ appareil.date_fin_garantie if appareil and appareil.date_fin_garantie else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Prix d'achat (€)</label>
+                <input type="number" name="prix_achat" step="0.01" value="{{ appareil.prix_achat if appareil and appareil.prix_achat else '' }}" placeholder="0.00">
+            </div>
+        </div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Fournisseur / Revendeur</label>
+                <input type="text" name="fournisseur" value="{{ appareil.fournisseur if appareil else '' }}" placeholder="Ex: LDLC, Inmac Wstore...">
+            </div>
+            <div class="form-group">
+                <label>N° commande / Bon de livraison</label>
+                <input type="text" name="numero_commande" value="{{ appareil.numero_commande if appareil else '' }}" placeholder="Ex: CMD-2024-1234">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;font-weight:normal;">
+                    <input type="checkbox" name="garantie_alerte_ignoree" value="1"
+                           {% if appareil and appareil.garantie_alerte_ignoree %}checked{% endif %}
+                           style="width:auto;margin:0;cursor:pointer;">
+                    Ignorer les alertes d'expiration de garantie
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- ANTIVIRUS / EDR / RMM -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Antivirus / EDR / RMM</div>
+        <div class="aer-tabs">
+            <button type="button" class="aer-tab" id="aer-tab-av" onclick="switchAerTab('av',this)">🛡 Antivirus</button>
+            <button type="button" class="aer-tab" id="aer-tab-edr" onclick="switchAerTab('edr',this)">🔍 EDR</button>
+            <button type="button" class="aer-tab" id="aer-tab-rmm" onclick="switchAerTab('rmm',this)">📡 RMM</button>
+        </div>
+
+        <!-- AV -->
+        <div id="aer-panel-av" class="aer-panel">
+            <div class="form-row cols-2">
+                <div class="form-group">
+                    <label>Marque</label>
+                    <input type="text" name="av_marque" id="av_marque" list="list-marques-av" autocomplete="off"
+                           value="{{ appareil.av_marque if appareil else '' }}"
+                           placeholder="Ex: Bitdefender, ESET…">
+                    <datalist id="list-marques-av">
+                        {% for m in (marques_av or []) %}<option value="{{ m }}">{% endfor %}
+                    </datalist>
+                </div>
+                <div class="form-group">
+                    <label>Produit / Solution</label>
+                    <input type="text" name="av_nom" list="list-noms-av" autocomplete="off"
+                           value="{{ appareil.av_nom if appareil else '' }}"
+                           placeholder="Ex: ESET Endpoint Security…">
+                    <datalist id="list-noms-av">
+                        {% for n in (noms_av or []) %}<option value="{{ n }}">{% endfor %}
+                    </datalist>
+                </div>
+            </div>
+            <div class="form-row cols-3">
+                <div class="form-group">
+                    <label>Date de souscription</label>
+                    <input type="date" name="av_date_debut"
+                           value="{{ appareil.av_date_debut if appareil and appareil.av_date_debut else '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Date de fin d'abonnement</label>
+                    <input type="date" name="av_date_fin"
+                           value="{{ appareil.av_date_fin if appareil and appareil.av_date_fin else '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Contrat / Abonnement associé</label>
+                    <select name="av_contrat_id">
+                        <option value="">— Aucun —</option>
+                        {% for ct in (contrats or []) %}
+                        <option value="{{ ct.id }}"
+                            {% if appareil and appareil.av_contrat_id and appareil.av_contrat_id|int == ct.id %}selected{% endif %}>
+                            {{ ct.titre }}{% if ct.fournisseur %} — {{ ct.fournisseur }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- EDR -->
+        <div id="aer-panel-edr" class="aer-panel" style="display:none;">
+            <div class="form-row cols-2">
+                <div class="form-group">
+                    <label>Marque</label>
+                    <input type="text" name="edr_marque" list="list-marques-edr" autocomplete="off"
+                           value="{{ appareil.edr_marque if appareil else '' }}"
+                           placeholder="Ex: CrowdStrike, SentinelOne…">
+                    <datalist id="list-marques-edr">
+                        {% for m in (marques_edr or []) %}<option value="{{ m }}">{% endfor %}
+                        <option value="CrowdStrike"><option value="SentinelOne">
+                        <option value="Microsoft Defender"><option value="Trellix">
+                        <option value="Palo Alto Cortex"><option value="Sophos Intercept X">
+                        <option value="Carbon Black"><option value="Cybereason">
+                    </datalist>
+                </div>
+                <div class="form-group">
+                    <label>Produit / Solution</label>
+                    <input type="text" name="edr_nom" list="list-noms-edr" autocomplete="off"
+                           value="{{ appareil.edr_nom if appareil else '' }}"
+                           placeholder="Ex: Falcon Endpoint, Singularity…">
+                    <datalist id="list-noms-edr">
+                        {% for n in (noms_edr or []) %}<option value="{{ n }}">{% endfor %}
+                        <option value="CrowdStrike Falcon"><option value="SentinelOne Singularity">
+                        <option value="Microsoft Defender for Endpoint"><option value="Trellix Endpoint">
+                        <option value="Cortex XDR"><option value="Sophos Intercept X">
+                    </datalist>
+                </div>
+            </div>
+            <div class="form-row cols-3">
+                <div class="form-group">
+                    <label>Date de fin de licence</label>
+                    <input type="date" name="edr_date_fin"
+                           value="{{ appareil.edr_date_fin if appareil and appareil.edr_date_fin else '' }}">
+                </div>
+                <div class="form-group" style="grid-column:span 2;">
+                    <label>Contrat / Abonnement associé</label>
+                    <select name="edr_contrat_id">
+                        <option value="">— Aucun —</option>
+                        {% for ct in (contrats or []) %}
+                        <option value="{{ ct.id }}"
+                            {% if appareil and appareil.edr_contrat_id and appareil.edr_contrat_id|int == ct.id %}selected{% endif %}>
+                            {{ ct.titre }}{% if ct.fournisseur %} — {{ ct.fournisseur }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- RMM -->
+        <div id="aer-panel-rmm" class="aer-panel" style="display:none;">
+            <div class="form-row cols-2">
+                <div class="form-group">
+                    <label>Marque / Éditeur</label>
+                    <input type="text" name="rmm_marque" list="list-marques-rmm" autocomplete="off"
+                           value="{{ appareil.rmm_marque if appareil else '' }}"
+                           placeholder="Ex: NinjaRMM, Atera, N-able…">
+                    <datalist id="list-marques-rmm">
+                        {% for m in (marques_rmm or []) %}<option value="{{ m }}">{% endfor %}
+                        <option value="NinjaRMM"><option value="Atera"><option value="N-able">
+                        <option value="ConnectWise Automate"><option value="Datto RMM">
+                        <option value="Kaseya VSA"><option value="Syncro"><option value="Pulseway">
+                    </datalist>
+                </div>
+                <div class="form-group">
+                    <label>Solution / Agent</label>
+                    <input type="text" name="rmm_nom" list="list-noms-rmm" autocomplete="off"
+                           value="{{ appareil.rmm_nom if appareil else '' }}"
+                           placeholder="Ex: NinjaRMM Agent…">
+                    <datalist id="list-noms-rmm">
+                        {% for n in (noms_rmm or []) %}<option value="{{ n }}">{% endfor %}
+                    </datalist>
+                </div>
+            </div>
+            <div class="form-row cols-3">
+                <div class="form-group">
+                    <label>ID de l'agent</label>
+                    <input type="text" name="rmm_agent_id" autocomplete="off"
+                           value="{{ appareil.rmm_agent_id if appareil else '' }}"
+                           placeholder="Identifiant dans la console RMM">
+                </div>
+                <div class="form-group">
+                    <label>Date de fin de licence</label>
+                    <input type="date" name="rmm_date_fin"
+                           value="{{ appareil.rmm_date_fin if appareil and appareil.rmm_date_fin else '' }}">
+                </div>
+                <div class="form-group">
+                    <label>Contrat associé</label>
+                    <select name="rmm_contrat_id">
+                        <option value="">— Aucun —</option>
+                        {% for ct in (contrats or []) %}
+                        <option value="{{ ct.id }}"
+                            {% if appareil and appareil.rmm_contrat_id and appareil.rmm_contrat_id|int == ct.id %}selected{% endif %}>
+                            {{ ct.titre }}{% if ct.fournisseur %} — {{ ct.fournisseur }}{% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- IDENTIFIANTS APPAREIL -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Identifiants &amp; Connexions à distance</div>
+
+        <!-- Utilisateur -->
+        <div class="form-section-subtitle">Compte utilisateur</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Login utilisateur</label>
+                <input type="text" name="user_login" value="{{ appareil.user_login if appareil else '' }}"
+                       placeholder="Ex: jdupont" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label>Mot de passe utilisateur</label>
+                <div class="pwd-wrap">
+                    <input type="password" name="user_password" value="{{ appareil.user_password if appareil else '' }}"
+                           placeholder="Mot de passe session" autocomplete="new-password">
+                    <button type="button" class="pwd-toggle" onclick="togglePwd(this)">👁</button>
+                    <button type="button" class="pwd-toggle" onclick="copyChamp(this)" title="Copier">📋</button>
+                </div>
+            </div>
+            <div class="form-group" style="justify-content:flex-end; padding-top:1.5rem;">
+                {% if appareil and appareil.id and appareil.adresse_ip %}
+                <a href="/appareil/{{ appareil.id }}/rdp"
+                   class="btn btn-rdp" style="width:100%; justify-content:center;" title="Lancer une session RDP">
+                   🖥 RDP — Utilisateur
+                </a>
+                {% else %}
+                <button type="button" class="btn btn-rdp" style="width:100%;justify-content:center;opacity:0.4;" disabled title="Saisissez une adresse IP d'abord">
+                   🖥 RDP — Utilisateur
+                </button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Administrateur -->
+        <div class="form-section-subtitle" style="margin-top:0.5rem;">Compte administrateur</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Login administrateur</label>
+                <input type="text" name="admin_login" value="{{ appareil.admin_login if appareil else '' }}"
+                       placeholder="Ex: Administrator" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label>Mot de passe administrateur</label>
+                <div class="pwd-wrap">
+                    <input type="password" name="admin_password" value="{{ appareil.admin_password if appareil else '' }}"
+                           placeholder="Mot de passe admin" autocomplete="new-password">
+                    <button type="button" class="pwd-toggle" onclick="togglePwd(this)">👁</button>
+                    <button type="button" class="pwd-toggle" onclick="copyChamp(this)" title="Copier">📋</button>
+                </div>
+            </div>
+            <div class="form-group" style="justify-content:flex-end; padding-top:1.5rem;">
+                {% if appareil and appareil.id and appareil.adresse_ip %}
+                <a href="/appareil/{{ appareil.id }}/rdp"
+                   class="btn btn-rdp" style="width:100%; justify-content:center;" title="Lancer une session RDP">
+                   🖥 RDP — Admin
+                </a>
+                {% else %}
+                <button type="button" class="btn btn-rdp" style="width:100%;justify-content:center;opacity:0.4;" disabled title="Saisissez une adresse IP d'abord">
+                   🖥 RDP — Admin
+                </button>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- AnyDesk -->
+        <div class="form-section-subtitle" style="margin-top:0.5rem;">AnyDesk</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>ID AnyDesk</label>
+                <div class="pwd-wrap">
+                    <input type="text" name="anydesk_id" value="{{ appareil.anydesk_id if appareil else '' }}"
+                           placeholder="Ex: 123 456 789" autocomplete="off" class="mono">
+                    <button type="button" class="pwd-toggle" onclick="copyChamp(this)" title="Copier l'ID AnyDesk">📋</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Mot de passe AnyDesk</label>
+                <div class="pwd-wrap">
+                    <input type="password" name="anydesk_password" value="{{ appareil.anydesk_password if appareil else '' }}"
+                           placeholder="Mot de passe accès non-supervisé" autocomplete="new-password">
+                    <button type="button" class="pwd-toggle" onclick="togglePwd(this)">👁</button>
+                    <button type="button" class="pwd-toggle" onclick="copyChamp(this)" title="Copier">📋</button>
+                </div>
+            </div>
+            <div class="form-group" style="justify-content:flex-end; padding-top:1.5rem;">
+                {% if appareil and appareil.anydesk_id %}
+                <a href="anydesk:{{ appareil.anydesk_id|replace(' ','') }}"
+                   class="btn btn-anydesk" style="width:100%; justify-content:center;">
+                   📡 Ouvrir AnyDesk
+                </a>
+                {% else %}
+                <button type="button" class="btn btn-anydesk" style="width:100%;justify-content:center;opacity:0.4;" disabled>
+                   📡 Ouvrir AnyDesk
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- LICENCES LOGICIELS -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Licences logiciels</div>
+        <div id="licences-list">
+            {% if licences %}
+            {% for lic in licences %}
+            <div class="lic-row">
+                <div class="lic-fields">
+                    <div class="form-group">
+                        <label>Éditeur</label>
+                        <input type="text" name="lic_editeur" value="{{ lic.editeur or '' }}" placeholder="Ex : Microsoft, Adobe…">
+                    </div>
+                    <div class="form-group" style="flex:1.2;">
+                        <label>Produit</label>
+                        <input type="text" name="lic_produit" value="{{ lic.produit or '' }}" placeholder="Ex : Windows 11 Pro">
+                    </div>
+                    <div class="form-group" style="flex:1.8;">
+                        <label>Clé de licence</label>
+                        <input type="text" name="lic_cle" value="{{ lic.cle_licence or '' }}"
+                               placeholder="XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" class="lic-cle">
+                    </div>
+                    <div class="form-group" style="flex:1.3;">
+                        <label>Contrat lié</label>
+                        <select name="lic_contrat_id">
+                            <option value="">— Aucun —</option>
+                            {% for ct in (contrats or []) %}
+                            <option value="{{ ct.id }}"
+                                {% if lic.contrat_id and lic.contrat_id == ct.id %}selected{% endif %}>
+                                {{ ct.titre }}{% if ct.fournisseur %} — {{ ct.fournisseur }}{% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <button type="button" class="lic-remove" onclick="this.closest('.lic-row').remove()" title="Supprimer cette licence">✕</button>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="lic-empty" id="lic-empty-msg">Aucune licence enregistrée.</div>
+            {% endif %}
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="addLicenceRow()" style="margin-top:.55rem;">+ Ajouter une licence</button>
+    </div>
+
+    <!-- NOTES -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Notes</div>
+        <div class="form-group">
+            <textarea name="notes" rows="3" placeholder="Observations, interventions, incidents...">{{ appareil.notes if appareil else '' }}</textarea>
+        </div>
+    </div>
+
+    <!-- LOGICIELS INSTALLÉS -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Logiciels installés</div>
+
+        {% if logiciels_metier_list %}
+        <!-- Logiciels métier (depuis la config du parc) -->
+        <div class="sw-group">
+            <div class="sw-group-title">Logiciels métier
+                <span class="sw-group-hint">Définis dans la configuration du parc</span>
+            </div>
+            <div class="sw-badges">
+                {% for sw in logiciels_metier_list %}
+                <label class="sw-badge sw-badge-metier{% if sw in sw_sel %} selected{% endif %}">
+                    <input type="checkbox" name="logiciels" value="{{ sw|e }}"
+                           {% if sw in sw_sel %}checked{% endif %} style="display:none;">{{ sw }}
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Logiciels courants par catégorie -->
+        {% for grp_name, grp_items in sw_courants_groups %}
+        <div class="sw-group">
+            <div class="sw-group-title">{{ grp_name }}</div>
+            <div class="sw-badges">
+                {% for sw in grp_items %}
+                <label class="sw-badge{% if sw in sw_sel %} selected{% endif %}">
+                    <input type="checkbox" name="logiciels" value="{{ sw|e }}"
+                           {% if sw in sw_sel %}checked{% endif %} style="display:none;">{{ sw }}
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+
+        <!-- Logiciels personnalisés -->
+        <div class="sw-group">
+            <div class="sw-group-title">Autres / personnalisés</div>
+            <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.45rem;flex-wrap:wrap;">
+                <input type="text" id="sw-custom-input" placeholder="Nom du logiciel…"
+                       style="width:230px;margin:0;"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomSw();}">
+                <button type="button" class="btn btn-primary btn-sm" onclick="addCustomSw()">+ Ajouter</button>
+            </div>
+            <div class="sw-badges" id="sw-custom-badges">
+                {% for sw in sw_custom_sel %}
+                <label class="sw-badge sw-badge-custom selected">
+                    <input type="checkbox" name="logiciels" value="{{ sw|e }}" checked style="display:none;">{{ sw }}<span class="sw-remove" title="Retirer">×</span>
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- CONTRATS ASSOCIES -->
+    {% if appareil and appareil.id %}
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Contrats / Abonnements liés</div>
+        <div id="contrats-app-list"><div style="color:var(--text-muted);font-size:.82rem;">Chargement...</div></div>
+        <a href="/contrat/nouveau" class="btn btn-primary btn-sm" style="margin-top:.6rem;">+ Associer à un contrat</a>
+    </div>
+    {% endif %}
+
+
+    <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+        <button type="submit" class="btn btn-success">&#10003; {{ action }} l'appareil</button>
+        <a href="/appareils" class="btn btn-primary">← Retour</a>
+        {% if action == 'Modifier' and appareil and appareil.id %}
+        <form method="POST" action="/appareil/{{ appareil.id }}/supprimer"
+              onsubmit="return confirm('Supprimer « {{ appareil.nom_machine|e }} » ? Cette action est irréversible.')"
+              style="margin:0;margin-left:auto;">
+            <button type="submit" class="btn btn-danger">✕ Supprimer cet appareil</button>
+        </form>
+        {% endif %}
+    </div>
+</form>
+
+    {% if action == 'Modifier' and appareil and appareil.id %}
+    <div class="form-section" id="section-documents" style="margin-top:1.5rem;">
+        <div class="form-section-title">&#9632; Documents joints
+            <span style="font-size:.7rem;font-weight:400;color:var(--text-muted);margin-left:.5rem;">
+                {{ documents|length }} fichier{{ 's' if documents|length != 1 else '' }}
+            </span>
+        </div>
+
+        <!-- Liste des documents existants -->
+        {% if documents %}
+        <div class="docs-list" style="margin-bottom:1rem;">
+            {% for doc in documents %}
+            {% set ext = doc.nom_fichier.rsplit('.',1)[-1].lower() if doc.nom_fichier else '' %}
+            {% set is_img = ext in ['png','jpg','jpeg','gif','webp'] %}
+            {% set is_pdf = ext == 'pdf' %}
+            <div class="doc-row">
+                <div class="doc-icon">{% if is_img %}🖼{% elif is_pdf %}📄{% else %}📎{% endif %}</div>
+                <div class="doc-info">
+                    <div class="doc-nom">{{ doc.nom or doc.nom_fichier }}</div>
+                    <div class="doc-meta">{{ doc.taille_fmt }} · {{ doc.date_upload[:10] if doc.date_upload else '' }}{% if doc.description %} · {{ doc.description }}{% endif %}</div>
+                </div>
+                <div class="doc-actions">
+                    {% if is_img or is_pdf %}
+                    <a href="/document/{{ doc.id }}/apercu" target="_blank" class="btn btn-sm btn-primary">👁 Aperçu</a>
+                    {% endif %}
+                    <a href="/document/{{ doc.id }}/telecharger" class="btn btn-sm btn-primary">⬇ DL</a>
+                    <form method="POST" action="/document/{{ doc.id }}/supprimer" style="display:inline;"
+                          onsubmit="return confirm('Supprimer ce document ?')">
+                        <input type="hidden" name="next" value="/appareil/{{ appareil.id }}/editer">
+                        <button type="submit" class="btn btn-sm btn-danger">✕</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="color:var(--text-muted);font-size:.83rem;margin-bottom:.8rem;">Aucun document joint.</div>
+        {% endif %}
+
+        <!-- Formulaire d'upload -->
+        <details class="upload-panel">
+            <summary class="btn btn-primary btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;list-style:none;">
+                ➕ Ajouter un document
+            </summary>
+            <form method="POST" action="/appareil/{{ appareil.id }}/documents/upload"
+                  enctype="multipart/form-data" style="margin-top:.8rem;padding:.8rem;background:var(--bg-secondary);border-radius:4px;border:1px solid var(--border);">
+                <input type="hidden" name="next" value="/appareil/{{ appareil.id }}/editer">
+                <div class="form-row cols-2" style="margin-bottom:.5rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Nom du document</label>
+                        <input type="text" name="nom" placeholder="Ex: Facture d'achat, Photo rack...">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Type</label>
+                        <select name="type_doc">
+                            <option value="">— Choisir —</option>
+                            <option>Facture</option><option>Bon de commande</option>
+                            <option>Contrat</option><option>Photo</option>
+                            <option>Manuel</option><option>Autre</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom:.5rem;">
+                    <label>Fichier <span style="color:var(--text-muted);font-size:.72rem;">(tous types — max 16 Mo)</span></label>
+                    <input type="file" name="fichier" accept="*" required>
+                </div>
+                <button type="submit" class="btn btn-success btn-sm">⬆ Envoyer</button>
+            </form>
+        </details>
+    </div>
+    {% endif %}
+
+    {% if action == 'Modifier' and appareil and appareil.id %}
+    <!-- HISTORIQUE INLINE -->
+    <div class="form-section" id="section-historique" style="margin-top:1rem;">
+        <div class="form-section-title">&#9632; Historique des modifications</div>
+        <div id="hist-list" style="color:var(--text-muted);font-size:.82rem;">Chargement…</div>
+        <a href="/historique?entite=appareil" style="font-size:.72rem;color:var(--text-muted);text-decoration:none;display:inline-block;margin-top:.5rem;">Voir tout le journal →</a>
+    </div>
+    {% endif %}
+
+{% block extra_scripts %}
+<script>
+{% if appareil and appareil.id %}
+async function loadContrats() {
+    const r = await fetch('/api/contrats/appareil/{{ appareil.id }}');
+    const items = await r.json();
+    const el = document.getElementById('contrats-app-list');
+    if (!items.length) {
+        el.innerHTML = '<span style="color:var(--text-muted);font-size:.82rem;">Aucun contrat lié</span>'; return;
+    }
+    el.innerHTML = items.map(ct => {
+        const col = ct.expire_depasse ? 'var(--accent-red)' : ct.expire_bientot ? 'var(--accent-orange)' : 'var(--accent-green)';
+        return `<div style="display:flex;align-items:center;gap:.7rem;padding:.4rem .6rem;border-bottom:1px solid rgba(30,58,95,.3);font-size:.85rem;">
+            <span style="color:${col};">●</span>
+            <div style="flex:1;"><strong>${ct.titre}</strong>
+                <span style="color:var(--text-secondary);font-size:.75rem;"> — ${ct.fournisseur||''}</span>
+                ${ct.date_fin_fmt ? `<div style="font-size:.72rem;color:var(--text-muted);">Fin : ${ct.date_fin_fmt}</div>` : ''}
+            </div>
+            <a href="/contrat/${ct.id}" style="color:var(--accent);font-size:.75rem;">Voir</a>
+        </div>`;
+    }).join('');
+}
+loadContrats();
+{% endif %}
+
+{% if appareil and appareil.id %}
+async function loadPeriph() {
+    const r = await fetch('/api/peripheriques/appareil/{{ appareil.id }}');
+    const items = await r.json();
+    const el = document.getElementById('periph-list');
+    if (!items.length) {
+        el.innerHTML = '<span style="color:var(--text-muted);font-size:.82rem;">Aucun périphérique associé</span>';
+        return;
+    }
+    const ICONS = {
+        'Ecran':'🖥','Clavier':'⌨','Souris':'🖱','Webcam':'📷',
+        'Casque / Micro':'🎧','Imprimante':'🖨','Onduleur / UPS':'🔋',
+        'Disque dur externe':'💾','Telephone fixe IP':'☎','Telephone mobile':'📱'
+    };
+    el.innerHTML = items.map(p => {
+        const ico = ICONS[p.categorie] || '📦';
+        const stat = p.statut === 'actif' ? '#00ff88' : p.statut === 'stock' ? '#ff8c00' : '#ff3355';
+        return `<div style="display:flex;align-items:center;gap:.7rem;padding:.4rem .6rem;border-bottom:1px solid rgba(30,58,95,.3);font-size:.85rem;">
+            <span>${ico}</span>
+            <div style="flex:1;">
+                <strong>${p.marque || ''} ${p.modele || p.categorie}</strong>
+                ${p.description ? `<span style="color:var(--text-secondary);font-size:.78rem;"> — ${p.description}</span>` : ''}
+                ${p.numero_serie ? `<div class="mono" style="font-size:.7rem;color:var(--text-muted);">${p.numero_serie}</div>` : ''}
+            </div>
+            <span style="font-size:.7rem;color:${stat};">&#9679; ${p.statut === 'actif' ? 'En service' : p.statut === 'stock' ? 'Stock' : 'H.S.'}</span>
+            <a href="/peripherique/${p.id}/editer" style="color:var(--accent);font-size:.75rem;text-decoration:none;">✏</a>
+        </div>`;
+    }).join('');
+}
+loadPeriph();
+{% endif %}
+</script>
+<script>
+// Calcul automatique de la date de fin de garantie
+document.querySelector('[name="date_achat"]').addEventListener('change', calcFinGarantie);
+document.querySelector('[name="duree_garantie"]').addEventListener('change', calcFinGarantie);
+
+function calcFinGarantie() {
+    const dateAchat = document.querySelector('[name="date_achat"]').value;
+    const duree = parseInt(document.querySelector('[name="duree_garantie"]').value);
+    if (dateAchat && duree) {
+        const d = new Date(dateAchat);
+        d.setMonth(d.getMonth() + duree);
+        document.querySelector('[name="date_fin_garantie"]').value = d.toISOString().split('T')[0];
+    }
+}
+</script>
+<script src="/static/js/form_tools.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    FormTools.init('form-appareil', { draftKey: 'draft_app' });
+});
+</script>
+<script>
+// ── COPIER DANS LE PRESSE-PAPIERS ────────────────────────────────────────────
+function copyChamp(btn) {
+    const wrap = btn.closest('.pwd-wrap');
+    if (!wrap) return;
+    const inp = wrap.querySelector('input');
+    if (!inp) return;
+    const val = inp.value;
+    if (!val) return;
+    navigator.clipboard.writeText(val).then(() => {
+        const orig = btn.textContent;
+        btn.textContent = '✓';
+        btn.style.color = '#00ff88';
+        setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 1400);
+    }).catch(() => {
+        // Fallback: selection manuelle
+        const t = inp.type;
+        inp.type = 'text';
+        inp.select();
+        document.execCommand('copy');
+        inp.type = t;
+        const orig = btn.textContent;
+        btn.textContent = '✓';
+        btn.style.color = '#00ff88';
+        setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 1400);
+    });
+}
+
+// ── FILTRAGE DYNAMIQUE DES PRODUITS AV PAR MARQUE ───────────────────────────
+const AV_BRAND_MAP = {
+{% for m in (marques_av or []) %}    "{{ m }}": [{% for n in (noms_av or []) %}{% if m.lower().split('/')[0].strip() in n.lower() or n.lower().startswith(m.lower().split('/')[0].strip()[:4]) %}"{{ n }}", {% endif %}{% endfor %}],
+{% endfor %}};
+
+function filtrerNomsAV() {
+    const marque = document.querySelector('[name="av_marque"]').value.trim();
+    const dl = document.getElementById('list-noms-av');
+    if (!dl) return;
+    // Trouver les produits correspondants
+    let produits = [];
+    for (const [brand, prods] of Object.entries(AV_BRAND_MAP)) {
+        if (marque && brand.toLowerCase().includes(marque.toLowerCase())) {
+            produits = produits.concat(prods);
+        }
+    }
+    // Si aucune correspondance, afficher tous
+    if (!produits.length) {
+        produits = {{ noms_av | tojson if noms_av else '[]' }};
+    }
+    dl.innerHTML = produits.map(p => `<option value="${p.replace(/"/g,'&quot;')}">`).join('');
+}
+
+const avMarqueInput = document.querySelector('[name="av_marque"]');
+if (avMarqueInput) {
+    avMarqueInput.addEventListener('input', filtrerNomsAV);
+    avMarqueInput.addEventListener('change', filtrerNomsAV);
+}
+</script>
+<script>
+// ── LICENCES LOGICIELS ───────────────────────────────────────────────────────
+window._LIC_CONTRATS = [
+    {% for ct in (contrats or []) %}
+    {id: {{ ct.id }}, label: "{{ (ct.titre or '')|e }}{% if ct.fournisseur %} — {{ ct.fournisseur|e }}{% endif %}"},
+    {% endfor %}
+];
+
+function _licEscHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _buildLicSelect(selectedId) {
+    let o = '<option value="">— Aucun —</option>';
+    (window._LIC_CONTRATS || []).forEach(ct => {
+        const sel = selectedId && String(ct.id) === String(selectedId) ? ' selected' : '';
+        o += `<option value="${ct.id}"${sel}>${_licEscHtml(ct.label)}</option>`;
+    });
+    return `<select name="lic_contrat_id" style="margin:0;">${o}</select>`;
+}
+
+function addLicenceRow(editeur, produit, cle, contratId) {
+    // Masquer le message "aucune licence"
+    const empty = document.getElementById('lic-empty-msg');
+    if (empty) empty.remove();
+
+    const row = document.createElement('div');
+    row.className = 'lic-row';
+    row.innerHTML = `
+        <div class="lic-fields">
+            <div class="form-group" style="margin:0;">
+                <label style="font-size:.72rem;margin-bottom:.2rem;display:block;">Éditeur</label>
+                <input type="text" name="lic_editeur" value="${_licEscHtml(editeur)}"
+                       placeholder="Ex : Microsoft, Adobe…" style="margin:0;">
+            </div>
+            <div class="form-group" style="flex:1.2;margin:0;">
+                <label style="font-size:.72rem;margin-bottom:.2rem;display:block;">Produit</label>
+                <input type="text" name="lic_produit" value="${_licEscHtml(produit)}"
+                       placeholder="Ex : Windows 11 Pro" style="margin:0;">
+            </div>
+            <div class="form-group" style="flex:1.8;margin:0;">
+                <label style="font-size:.72rem;margin-bottom:.2rem;display:block;">Clé de licence</label>
+                <input type="text" name="lic_cle" value="${_licEscHtml(cle)}"
+                       placeholder="XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off"
+                       class="lic-cle" style="margin:0;">
+            </div>
+            <div class="form-group" style="flex:1.3;margin:0;">
+                <label style="font-size:.72rem;margin-bottom:.2rem;display:block;">Contrat lié</label>
+                ${_buildLicSelect(contratId)}
+            </div>
+        </div>
+        <button type="button" class="lic-remove"
+                onclick="this.closest('.lic-row').remove()" title="Supprimer cette licence">✕</button>`;
+    document.getElementById('licences-list').appendChild(row);
+    row.querySelector('input[name="lic_editeur"]').focus();
+}
+
+// ── LOGICIELS INSTALLÉS ──────────────────────────────────────────────────────
+(function() {
+    // Synchro visuelle sur les badges déjà rendus (pré-cochés au chargement)
+    document.querySelectorAll('.sw-badge input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', function() {
+            this.closest('.sw-badge').classList.toggle('selected', this.checked);
+        });
+    });
+
+    // Boutons de suppression des logiciels personnalisés pré-rendus
+    document.querySelectorAll('#sw-custom-badges .sw-remove').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            this.closest('.sw-badge').remove();
+        });
+    });
+})();
+
+const _SW_COURANTS_ALL = new Set({{ sw_courants_all | tojson }});
+const _SW_METIER_ALL   = new Set({{ logiciels_metier_list | tojson }});
+
+function addCustomSw() {
+    const inp = document.getElementById('sw-custom-input');
+    const val = (inp.value || '').trim();
+    if (!val) return;
+
+    // Si déjà dans la liste standard ou métier, trouver et cocher le badge existant
+    if (_SW_COURANTS_ALL.has(val) || _SW_METIER_ALL.has(val)) {
+        document.querySelectorAll('.sw-badge input[type="checkbox"]').forEach(cb => {
+            if (cb.value === val && !cb.checked) {
+                cb.checked = true;
+                cb.closest('.sw-badge').classList.add('selected');
+            }
+        });
+        inp.value = '';
+        return;
+    }
+    // Éviter les doublons dans les custom
+    if (document.querySelector('#sw-custom-badges input[value="' + val.replace(/"/g,'\\"') + '"]')) {
+        inp.value = '';
+        return;
+    }
+
+    const label = document.createElement('label');
+    label.className = 'sw-badge sw-badge-custom selected';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.name = 'logiciels'; cb.value = val;
+    cb.checked = true; cb.style.display = 'none';
+    cb.addEventListener('change', function() {
+        label.classList.toggle('selected', this.checked);
+    });
+
+    const txt = document.createTextNode(val);
+
+    const rm = document.createElement('span');
+    rm.className = 'sw-remove'; rm.textContent = '×'; rm.title = 'Retirer';
+    rm.addEventListener('click', function(e) { e.preventDefault(); label.remove(); });
+
+    label.appendChild(cb);
+    label.appendChild(txt);
+    label.appendChild(rm);
+    document.getElementById('sw-custom-badges').appendChild(label);
+    inp.value = '';
+    inp.focus();
+}
+
+// ── ONGLETS ANTIVIRUS / EDR / RMM ────────────────────────────────────────────
+function switchAerTab(name, btn) {
+    ['av','edr','rmm'].forEach(t => {
+        document.getElementById('aer-panel-'+t).style.display = (t === name) ? '' : 'none';
+        document.getElementById('aer-tab-'+t).classList.toggle('active', t === name);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Vérifie si un panneau contient des données saisies
+    function hasPanelData(panelId) {
+        const panel = document.getElementById(panelId);
+        if (!panel) return false;
+        return [...panel.querySelectorAll('input[type="text"],input[type="date"]')]
+               .some(inp => inp.value.trim() !== '');
+    }
+
+    // Ajoute un point sur les onglets qui ont des données
+    let autoTab = 'av';
+    ['av','edr','rmm'].forEach(t => {
+        if (hasPanelData('aer-panel-'+t)) {
+            const tab = document.getElementById('aer-tab-'+t);
+            if (tab && !tab.querySelector('.aer-tab-dot')) {
+                const dot = document.createElement('span');
+                dot.className = 'aer-tab-dot';
+                tab.appendChild(dot);
+            }
+        }
+    });
+
+    // Si l'onglet AV est vide mais EDR ou RMM a des données, sélectionner le premier non-vide
+    if (!hasPanelData('aer-panel-av')) {
+        if (hasPanelData('aer-panel-edr'))      autoTab = 'edr';
+        else if (hasPanelData('aer-panel-rmm')) autoTab = 'rmm';
+    }
+    switchAerTab(autoTab, document.getElementById('aer-tab-'+autoTab));
+});
+</script>
+{% endblock %}
+
+{% endblock %}

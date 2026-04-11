@@ -1,0 +1,494 @@
+{% extends "base.html" %}
+{% block title %}Base de connaissances — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* ── LAYOUT ── */
+.kb-wrap { display:flex; gap:1.5rem; align-items:flex-start; }
+@media(max-width:900px) { .kb-wrap { flex-direction:column; } }
+
+/* ── SIDEBAR ── */
+.kb-sidebar {
+    width:210px; flex-shrink:0;
+    background:var(--bg-card); border:1px solid var(--border); border-radius:4px;
+    padding:.6rem 0; position:sticky; top:1rem;
+}
+@media(max-width:900px) { .kb-sidebar { width:100%; position:static; } }
+.kb-sidebar-title {
+    font-family:'Rajdhani',sans-serif; font-size:.65rem; font-weight:700;
+    letter-spacing:2px; text-transform:uppercase; color:var(--text-muted);
+    padding:.4rem 1rem .3rem; margin-bottom:.2rem;
+}
+.kb-cat-link {
+    display:flex; align-items:center; gap:.5rem; padding:.4rem 1rem;
+    font-size:.82rem; color:var(--text-secondary); cursor:pointer;
+    border-left:2px solid transparent; transition:all .12s;
+    text-decoration:none; width:100%; box-sizing:border-box; background:none; border-top:none; border-right:none; border-bottom:none;
+}
+.kb-cat-link:hover { color:var(--text-primary); background:rgba(0,201,255,.05); border-left-color:var(--border); }
+.kb-cat-link.active { color:var(--accent); background:rgba(0,201,255,.07); border-left-color:var(--accent); }
+.kb-cat-count { margin-left:auto; font-size:.65rem; color:var(--text-muted);
+    background:var(--bg-secondary); padding:1px 5px; border-radius:8px; }
+.kb-sidebar-add { padding:.5rem 1rem; margin-top:.4rem; border-top:1px solid var(--border); }
+
+/* ── MAIN CONTENT ── */
+.kb-main { flex:1; min-width:0; }
+.kb-topbar { display:flex; align-items:center; gap:.8rem; margin-bottom:1.2rem; flex-wrap:wrap; }
+.kb-search {
+    flex:1; min-width:180px; font-size:.85rem; padding:.4rem .8rem;
+    background:var(--bg-secondary); border:1px solid var(--border);
+    border-radius:4px; color:var(--text-primary); outline:none; font-family:'Exo 2',sans-serif;
+}
+.kb-search:focus { border-color:var(--accent); }
+
+/* ── ARTICLES ── */
+.kb-section { margin-bottom:2rem; }
+.kb-section-title {
+    display:flex; align-items:center; gap:.6rem;
+    font-family:'Rajdhani',sans-serif; font-size:.85rem; font-weight:700;
+    letter-spacing:2px; text-transform:uppercase; color:var(--accent);
+    border-bottom:1px solid var(--border); padding-bottom:.5rem; margin-bottom:.8rem;
+}
+.kb-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:.7rem; }
+.kb-card {
+    background:var(--bg-card); border:1px solid var(--border); border-radius:5px;
+    padding:.8rem 1rem; cursor:pointer; transition:all .15s;
+}
+.kb-card:hover { border-color:var(--accent); background:rgba(0,201,255,.03); }
+.kb-card-title { font-weight:700; font-size:.85rem; color:var(--text-primary); margin-bottom:.3rem; }
+.kb-card-tags { display:flex; gap:.3rem; flex-wrap:wrap; margin-top:.4rem; }
+.kb-tag { font-size:.62rem; padding:1px 6px; border-radius:8px;
+    background:rgba(0,201,255,.08); color:var(--text-muted); border:1px solid rgba(0,201,255,.15); }
+.kb-card-meta { font-size:.68rem; color:var(--text-muted); margin-top:.4rem; }
+
+/* ── MODAL ARTICLE ── */
+.kb-modal-overlay {
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,.8);
+    backdrop-filter:blur(4px); z-index:2600; align-items:flex-start; justify-content:center;
+    padding:2rem 1rem; overflow-y:auto;
+}
+.kb-modal-overlay.open { display:flex; }
+.kb-modal {
+    background:var(--bg-card); border:1px solid var(--border-glow); border-radius:8px;
+    width:860px; max-width:100%; box-shadow:0 20px 60px rgba(0,0,0,.7);
+    display:flex; flex-direction:column;
+}
+.kb-modal-header {
+    padding:.9rem 1.2rem; border-bottom:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between; gap:1rem;
+}
+.kb-modal-title { font-family:'Rajdhani',sans-serif; font-size:1rem; font-weight:700;
+    letter-spacing:1.5px; text-transform:uppercase; color:var(--accent); }
+.kb-modal-body { padding:1.2rem; overflow-y:auto; max-height:70vh; }
+.kb-modal-footer { padding:.8rem 1.2rem; border-top:1px solid var(--border);
+    display:flex; gap:.5rem; justify-content:flex-end; }
+
+/* ── CONTENU MARKDOWN RENDU ── */
+.kb-content { font-size:.87rem; line-height:1.7; color:var(--text-secondary); }
+.kb-content h1,.kb-content h2,.kb-content h3 {
+    color:var(--text-primary); font-family:'Rajdhani',sans-serif; font-weight:700;
+    margin:.8rem 0 .3rem; letter-spacing:1px;
+}
+.kb-content pre {
+    background:#0a0e14; border:1px solid #1a2a3a; border-radius:4px;
+    padding:.7rem 1rem; overflow-x:auto; margin:.5rem 0;
+}
+.kb-content code {
+    font-family:'Share Tech Mono',monospace; font-size:.82rem; color:#7dd3fc;
+}
+.kb-content pre code { color:#e2e8f0; }
+.kb-content table { border-collapse:collapse; width:100%; margin:.5rem 0; font-size:.82rem; }
+.kb-content th { background:var(--bg-secondary); color:var(--text-secondary);
+    padding:.4rem .7rem; text-align:left; border:1px solid var(--border); }
+.kb-content td { padding:.35rem .7rem; border:1px solid var(--border); color:var(--text-secondary); }
+.kb-content blockquote {
+    border-left:3px solid var(--accent); padding:.3rem .8rem;
+    background:rgba(0,201,255,.05); border-radius:0 3px 3px 0; margin:.5rem 0;
+    font-size:.82rem; color:var(--text-muted);
+}
+.kb-content strong { color:var(--text-primary); }
+
+/* ── EDITEUR ── */
+.kb-editor { display:none; }
+.kb-editor.open { display:block; }
+.kb-editor textarea {
+    width:100%; min-height:280px; background:#0a0e14; border:1px solid var(--border);
+    color:#e2e8f0; font-family:'Share Tech Mono',monospace; font-size:.82rem;
+    padding:.7rem; border-radius:3px; resize:vertical; outline:none;
+    box-sizing:border-box;
+}
+.kb-editor textarea:focus { border-color:var(--accent); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <div>
+        <h1>Base de <span>Connaissances</span></h1>
+        <p>{{ articles|length }} article{{ 's' if articles|length != 1 }} · {{ cats|length }} catégorie{{ 's' if cats|length != 1 }}</p>
+    </div>
+    <button class="btn btn-success" onclick="KB.nouvelArticle()">+ Nouvel article</button>
+</div>
+
+<div class="kb-wrap">
+    <!-- SIDEBAR -->
+    <aside class="kb-sidebar">
+        <div class="kb-sidebar-title">Catégories</div>
+        <a class="kb-cat-link active" data-cat="all" onclick="KB.filtrerCat('all',this)">
+            📋 Tous les articles
+            <span class="kb-cat-count">{{ articles|length }}</span>
+        </a>
+        {% for cat in cats %}
+        {% set nb = articles | selectattr('categorie_id','eq',cat.id) | list | length %}
+        <a class="kb-cat-link" data-cat="{{ cat.id }}" onclick="KB.filtrerCat({{ cat.id }},this)">
+            {{ cat.icone }} {{ cat.nom }}
+            <span class="kb-cat-count">{{ nb }}</span>
+        </a>
+        {% endfor %}
+        <div class="kb-sidebar-add">
+            <button class="btn btn-primary btn-sm" style="width:100%;font-size:.72rem;"
+                    onclick="KB.nouvelleCategorie()">+ Catégorie</button>
+        </div>
+    </aside>
+
+    <!-- MAIN -->
+    <div class="kb-main">
+        <!-- Barre de recherche -->
+        <div class="kb-topbar">
+            <input type="text" class="kb-search" id="kb-search"
+                   placeholder="🔍 Rechercher dans la base de connaissances..."
+                   oninput="KB.rechercher(this.value)">
+            <span id="kb-search-count" style="font-size:.75rem;color:var(--text-muted);"></span>
+        </div>
+
+        <!-- Articles par catégorie -->
+        <div id="kb-content">
+            {% for cat in cats %}
+            {% set cat_articles = articles | selectattr('categorie_id','eq',cat.id) | list %}
+            {% if cat_articles %}
+            <div class="kb-section" data-cat-section="{{ cat.id }}">
+                <div class="kb-section-title">
+                    <span>{{ cat.icone }}</span>
+                    {{ cat.nom }}
+                    <span style="font-size:.65rem;color:var(--text-muted);font-weight:400;">{{ cat_articles|length }} article{{ 's' if cat_articles|length != 1 }}</span>
+                    <button class="btn btn-primary btn-sm" style="margin-left:auto;padding:1px 7px;font-size:.65rem;"
+                            onclick="KB.nouvelArticle({{ cat.id }})">+</button>
+                    <button onclick="KB.supprimerCategorie({{ cat.id }},'{{ cat.nom|e }}')"
+                            style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:.7rem;padding:0 3px;"
+                            title="Supprimer la catégorie">✕</button>
+                </div>
+                <div class="kb-grid">
+                    {% for a in cat_articles %}
+                    <div class="kb-card" data-id="{{ a.id }}" data-cat="{{ a.categorie_id }}"
+                         data-search="{{ a.titre|lower }} {{ a.tags|lower }} {{ a.contenu|lower }}"
+                         onclick="KB.ouvrirArticle({{ a.id }})">
+                        <div class="kb-card-title">{{ a.titre }}</div>
+                        {% if a.tags %}
+                        <div class="kb-card-tags">
+                            {% for tag in a.tags.split(',') %}{% if tag.strip() %}
+                            <span class="kb-tag">{{ tag.strip() }}</span>
+                            {% endif %}{% endfor %}
+                        </div>
+                        {% endif %}
+                        <div class="kb-card-meta">{{ a.date_maj[:10] if a.date_maj else '' }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+
+        <!-- Message aucun résultat -->
+        <div id="kb-no-results" style="display:none;text-align:center;padding:3rem;color:var(--text-muted);">
+            Aucun article ne correspond à cette recherche.
+        </div>
+    </div>
+</div>
+
+<!-- MODAL ARTICLE (lecture + édition) -->
+<div class="kb-modal-overlay" id="kb-modal" onclick="KB.fermerSiOverlay(event)">
+    <div class="kb-modal">
+        <div class="kb-modal-header">
+            <div class="kb-modal-title" id="kb-modal-title">Article</div>
+            <div style="display:flex;gap:.4rem;">
+                <button class="btn btn-primary btn-sm" id="kb-btn-edit" onclick="KB.editerArticle()">✏ Éditer</button>
+                <button class="btn btn-danger btn-sm" id="kb-btn-delete" onclick="KB.supprimerArticle()">✕ Supprimer</button>
+                <button onclick="KB.fermerModal()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .6rem;cursor:pointer;">✕</button>
+            </div>
+        </div>
+        <div class="kb-modal-body">
+            <!-- Vue lecture -->
+            <div id="kb-view">
+                <div class="kb-content" id="kb-rendered"></div>
+                <div id="kb-article-tags" style="margin-top:1rem;"></div>
+            </div>
+            <!-- Vue édition -->
+            <div class="kb-editor" id="kb-editor">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:.7rem;margin-bottom:.7rem;">
+                    <div class="form-group" style="margin:0;">
+                        <label>Titre</label>
+                        <input type="text" id="kb-edit-titre" style="width:100%;">
+                    </div>
+                    <div class="form-group" style="margin:0;">
+                        <label>Catégorie</label>
+                        <select id="kb-edit-cat" style="width:100%;"></select>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom:.7rem;">
+                    <label>Tags (séparés par des virgules)</label>
+                    <input type="text" id="kb-edit-tags" placeholder="windows,cmd,réseau..." style="width:100%;">
+                </div>
+                <div class="form-group" style="margin:0;">
+                    <label>Contenu — Markdown supporté (```code```, **gras**, tableaux, > citations)</label>
+                    <textarea id="kb-edit-contenu"></textarea>
+                </div>
+            </div>
+        </div>
+        <div class="kb-modal-footer" id="kb-modal-footer">
+            <button class="btn btn-primary" onclick="KB.fermerModal()">Fermer</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── DATA ─────────────────────────────────────────────────────────────────────
+let _kbCats = {{ cats | tojson }};
+let _kbCurrentId = null;
+
+// ── MARKDOWN RENDERER (minimal, sans lib externe) ────────────────────────────
+function renderMD(text) {
+    if (!text) return '';
+    let html = text
+        // Code blocks
+        .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+            `<pre><code>${escH(code.trimEnd())}</code></pre>`)
+        // Inline code
+        .replace(/`([^`]+)`/g, (_, c) => `<code>${escH(c)}</code>`)
+        // Bold
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        // Italic
+        .replace(/_(.+?)_/g, '<em>$1</em>')
+        // Tables
+        .replace(/(\|.+\|\n)+/g, (table) => {
+            const rows = table.trim().split('\n');
+            let out = '<table>';
+            rows.forEach((row, i) => {
+                if (/^\|[-| :]+\|$/.test(row.trim())) return;
+                const cells = row.split('|').slice(1,-1).map(c => c.trim());
+                const tag = (i === 0) ? 'th' : 'td';
+                out += '<tr>' + cells.map(c => `<${tag}>${c}</${tag}>`).join('') + '</tr>';
+            });
+            return out + '</table>';
+        })
+        // Blockquote
+        .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+        // Headers
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        // Horizontal rule
+        .replace(/^---$/gm, '<hr>')
+        // Line breaks (paragraphs)
+        .replace(/\n{2,}/g, '</p><p>')
+        .replace(/\n/g, '<br>');
+    return '<p>' + html + '</p>';
+}
+
+function escH(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── KB CONTROLLER ────────────────────────────────────────────────────────────
+const KB = (() => {
+
+    function filtrerCat(catId, el) {
+        document.querySelectorAll('.kb-cat-link').forEach(a => a.classList.remove('active'));
+        if (el) el.classList.add('active');
+        document.getElementById('kb-search').value = '';
+        document.getElementById('kb-search-count').textContent = '';
+        document.querySelectorAll('.kb-section').forEach(s => {
+            s.style.display = (catId === 'all' || s.dataset.catSection == catId) ? '' : 'none';
+        });
+        document.querySelectorAll('.kb-card').forEach(c => c.style.display = '');
+        document.getElementById('kb-no-results').style.display = 'none';
+    }
+
+    function rechercher(q) {
+        q = q.toLowerCase().trim();
+        const cards = document.querySelectorAll('.kb-card');
+        let visible = 0;
+        cards.forEach(card => {
+            const match = !q || card.dataset.search.includes(q);
+            card.style.display = match ? '' : 'none';
+            if (match) visible++;
+        });
+        // Afficher/cacher les sections vides
+        document.querySelectorAll('.kb-section').forEach(sec => {
+            const hasVisible = Array.from(sec.querySelectorAll('.kb-card')).some(c => c.style.display !== 'none');
+            sec.style.display = hasVisible ? '' : 'none';
+        });
+        document.getElementById('kb-no-results').style.display = visible === 0 && q ? '' : 'none';
+        document.getElementById('kb-search-count').textContent = q ? `${visible} résultat${visible !== 1 ? 's' : ''}` : '';
+        // Deselect sidebar
+        if (q) {
+            document.querySelectorAll('.kb-cat-link').forEach(a => a.classList.remove('active'));
+            document.querySelectorAll('.kb-section').forEach(s => s.style.display = 'none');
+            document.querySelectorAll('.kb-card[style*="display: none"]').forEach(() => {});
+            // Re-show sections with results
+            document.querySelectorAll('.kb-section').forEach(sec => {
+                const hasVisible = Array.from(sec.querySelectorAll('.kb-card')).some(c => c.style.display !== 'none');
+                sec.style.display = hasVisible ? '' : 'none';
+            });
+        }
+    }
+
+    async function ouvrirArticle(id) {
+        _kbCurrentId = id;
+        const r = await fetch('/api/kb/article/' + id);
+        const a = await r.json();
+        document.getElementById('kb-modal-title').textContent = a.titre || 'Article';
+        document.getElementById('kb-rendered').innerHTML = renderMD(a.contenu);
+        // Tags
+        const tagsEl = document.getElementById('kb-article-tags');
+        if (a.tags) {
+            tagsEl.innerHTML = a.tags.split(',').filter(t=>t.trim())
+                .map(t => `<span class="kb-tag">${escH(t.trim())}</span>`).join(' ');
+        } else { tagsEl.innerHTML = ''; }
+        // Show view mode
+        document.getElementById('kb-view').style.display = '';
+        document.getElementById('kb-editor').classList.remove('open');
+        document.getElementById('kb-btn-edit').style.display = '';
+        document.getElementById('kb-btn-delete').style.display = '';
+        document.getElementById('kb-modal-footer').innerHTML = '<button class="btn btn-primary" onclick="KB.fermerModal()">Fermer</button>';
+        document.getElementById('kb-modal').classList.add('open');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function editerArticle() {
+        if (!_kbCurrentId) return;
+        fetch('/api/kb/article/' + _kbCurrentId).then(r=>r.json()).then(a => {
+            document.getElementById('kb-edit-titre').value = a.titre || '';
+            document.getElementById('kb-edit-tags').value = a.tags || '';
+            document.getElementById('kb-edit-contenu').value = a.contenu || '';
+            _remplirSelectCat(a.categorie_id);
+            document.getElementById('kb-view').style.display = 'none';
+            document.getElementById('kb-editor').classList.add('open');
+            document.getElementById('kb-btn-edit').style.display = 'none';
+            document.getElementById('kb-btn-delete').style.display = 'none';
+            document.getElementById('kb-modal-footer').innerHTML = `
+                <button class="btn btn-success" onclick="KB.sauvegarder()">✓ Sauvegarder</button>
+                <button class="btn btn-primary" onclick="KB.annulerEdition()">Annuler</button>`;
+        });
+    }
+
+    function annulerEdition() {
+        if (_kbCurrentId) {
+            ouvrirArticle(_kbCurrentId);
+        } else {
+            fermerModal();
+        }
+    }
+
+    function _remplirSelectCat(selectedId) {
+        const sel = document.getElementById('kb-edit-cat');
+        sel.innerHTML = _kbCats.map(c =>
+            `<option value="${c.id}" ${c.id == selectedId ? 'selected' : ''}>${c.icone} ${c.nom}</option>`
+        ).join('');
+    }
+
+    async function sauvegarder() {
+        const payload = {
+            titre:        document.getElementById('kb-edit-titre').value.trim(),
+            contenu:      document.getElementById('kb-edit-contenu').value,
+            tags:         document.getElementById('kb-edit-tags').value.trim(),
+            categorie_id: parseInt(document.getElementById('kb-edit-cat').value),
+        };
+        if (!payload.titre) { alert('Le titre est requis'); return; }
+        let r;
+        if (_kbCurrentId) {
+            r = await fetch('/api/kb/article/' + _kbCurrentId, {
+                method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+            });
+        } else {
+            r = await fetch('/api/kb/article', {
+                method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+            });
+        }
+        if (r.ok) window.location.reload();
+    }
+
+    function nouvelArticle(catId) {
+        _kbCurrentId = null;
+        document.getElementById('kb-modal-title').textContent = 'Nouvel article';
+        document.getElementById('kb-edit-titre').value = '';
+        document.getElementById('kb-edit-tags').value = '';
+        document.getElementById('kb-edit-contenu').value = '';
+        _remplirSelectCat(catId || (_kbCats[0] && _kbCats[0].id));
+        document.getElementById('kb-view').style.display = 'none';
+        document.getElementById('kb-editor').classList.add('open');
+        document.getElementById('kb-btn-edit').style.display = 'none';
+        document.getElementById('kb-btn-delete').style.display = 'none';
+        document.getElementById('kb-modal-footer').innerHTML = `
+            <button class="btn btn-success" onclick="KB.sauvegarder()">✓ Créer l'article</button>
+            <button class="btn btn-primary" onclick="KB.fermerModal()">Annuler</button>`;
+        document.getElementById('kb-modal').classList.add('open');
+        document.body.style.overflow = 'hidden';
+    }
+
+    async function supprimerArticle() {
+        if (!_kbCurrentId) return;
+        const titre = document.getElementById('kb-modal-title').textContent;
+        if (!confirm(`Supprimer "${titre}" ?`)) return;
+        await fetch('/api/kb/article/' + _kbCurrentId, { method:'DELETE' });
+        window.location.reload();
+    }
+
+    async function nouvelleCategorie() {
+        const nom = prompt('Nom de la nouvelle catégorie :');
+        if (!nom || !nom.trim()) return;
+        const icone = prompt('Icône (emoji) :', '📋') || '📋';
+        await fetch('/api/kb/category', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({nom: nom.trim(), icone: icone.trim()})
+        });
+        window.location.reload();
+    }
+
+    async function supprimerCategorie(id, nom) {
+        if (!confirm(`Supprimer la catégorie "${nom}" et tous ses articles ?`)) return;
+        await fetch('/api/kb/category/' + id, { method:'DELETE' });
+        window.location.reload();
+    }
+
+    function fermerModal() {
+        document.getElementById('kb-modal').classList.remove('open');
+        document.body.style.overflow = '';
+        _kbCurrentId = null;
+    }
+
+    function fermerSiOverlay(e) {
+        if (e.target === document.getElementById('kb-modal')) fermerModal();
+    }
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && document.getElementById('kb-modal').classList.contains('open')) fermerModal();
+    });
+
+    // Raccourci clavier : F pour focus recherche
+    document.addEventListener('keydown', e => {
+        if (e.key === 'f' && !e.ctrlKey && !e.metaKey &&
+            !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) {
+            e.preventDefault();
+            document.getElementById('kb-search').focus();
+        }
+    });
+
+    return { filtrerCat, rechercher, ouvrirArticle, editerArticle, annulerEdition,
+             sauvegarder, nouvelArticle, supprimerArticle, nouvelleCategorie,
+             supprimerCategorie, fermerModal, fermerSiOverlay };
+})();
+</script>
+{% endblock %}

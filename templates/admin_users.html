@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Gestion utilisateurs — ParcInfo{% endblock %}
+{% block content %}
+<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;">
+    <div><h1>Gestion des <span>Utilisateurs</span></h1>
+    <p>{{ users|length }} compte(s)</p></div>
+    <a href="/admin/utilisateur/nouveau" class="btn btn-success">+ Nouvel utilisateur</a>
+</div>
+<div class="card" style="padding:0;overflow:hidden;">
+<table style="width:100%;border-collapse:collapse;">
+<thead><tr>
+    <th style="padding:.6rem 1rem;text-align:left;font-size:.65rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-secondary);background:var(--bg-secondary);border-bottom:1px solid var(--border);">Utilisateur</th>
+    <th style="padding:.6rem 1rem;text-align:left;font-size:.65rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-secondary);background:var(--bg-secondary);border-bottom:1px solid var(--border);">Login</th>
+    <th style="padding:.6rem 1rem;text-align:left;font-size:.65rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-secondary);background:var(--bg-secondary);border-bottom:1px solid var(--border);">Rôle</th>
+    <th style="padding:.6rem 1rem;text-align:left;font-size:.65rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-secondary);background:var(--bg-secondary);border-bottom:1px solid var(--border);">Statut</th>
+    <th style="padding:.6rem 1rem;text-align:left;font-size:.65rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-secondary);background:var(--bg-secondary);border-bottom:1px solid var(--border);">Actions</th>
+</tr></thead>
+<tbody>
+{% for usr in users %}
+<tr style="border-bottom:1px solid rgba(30,58,95,.3);">
+    <td style="padding:.7rem 1rem;">
+        {% if usr.logo_fichier %}
+        <img src="/user/logo/{{ usr.logo_fichier }}" style="height:28px;width:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:.5rem;">
+        {% endif %}
+        <strong>{{ usr.prenom or '' }} {{ usr.nom }}</strong>
+        {% if usr.email %}<div style="font-size:.72rem;color:var(--text-muted);">{{ usr.email }}</div>{% endif %}
+    </td>
+    <td style="padding:.7rem 1rem;font-family:'Share Tech Mono',monospace;font-size:.82rem;">{{ usr.login }}</td>
+    <td style="padding:.7rem 1rem;"><span class="badge {% if usr.role == 'admin' %}badge-orange{% else %}badge-green{% endif %}">{{ usr.role }}</span></td>
+    <td style="padding:.7rem 1rem;"><span class="badge {% if usr.actif %}badge-green{% else %}badge-gray{% endif %}">{% if usr.actif %}Actif{% else %}Inactif{% endif %}</span></td>
+    <td style="padding:.7rem 1rem;">
+        <div class="quick-actions">
+            <a href="/admin/utilisateur/{{ usr.id }}/editer" class="qa-btn qa-edit">✏ Éditer</a>
+            <form method="POST" action="/admin/utilisateur/{{ usr.id }}/supprimer"
+                  onsubmit="return confirm('Supprimer {{ usr.login }} ?')" style="margin:0;">
+                <button type="submit" class="qa-btn qa-danger">✕</button>
+            </form>
+        </div>
+    </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,585 @@
+{% extends "base.html" %}
+{% block title %}Périphériques — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+
+.stat-chips { display:flex; gap:.6rem; flex-wrap:wrap; margin-bottom:1.5rem; }
+.stat-chip {
+    display:flex; align-items:center; gap:.5rem;
+    padding:.4rem .9rem; border-radius:20px; border:1px solid;
+    font-size:.78rem; font-weight:600; text-decoration:none; cursor:pointer;
+    transition:all .15s; background:none;
+}
+.sc-all    { color:var(--accent);        border-color:rgba(0,201,255,.35); }
+.sc-all.active   { background:rgba(0,201,255,.1); }
+.sc-actif  { color:var(--accent-green);  border-color:rgba(0,255,136,.35); }
+.sc-actif.active { background:rgba(0,255,136,.08); }
+.sc-stock  { color:var(--accent-orange); border-color:rgba(255,140,0,.35); }
+.sc-stock.active { background:rgba(255,140,0,.08); }
+.sc-hs     { color:var(--accent-red);    border-color:rgba(255,51,85,.35); }
+.sc-hs.active    { background:rgba(255,51,85,.08); }
+.sc-n { font-family:'Share Tech Mono',monospace; font-size:.85rem; font-weight:700; }
+
+.cat-group-header {
+    background:var(--bg-secondary); padding:.5rem 1rem;
+    font-family:'Rajdhani',sans-serif; font-size:.68rem; font-weight:700;
+    letter-spacing:3px; text-transform:uppercase; color:var(--text-muted);
+    border-bottom:1px solid var(--border);
+    display:flex; align-items:center; gap:.6rem;
+}
+.cat-icon { font-size:1rem; }
+
+.filter-row { display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
+.filter-row select, .filter-row input { width:auto; padding:.35rem .7rem; font-size:.85rem; }
+
+/* ── MULTI-SELECT DROPDOWN ─────────────────────────────────────────────── */
+.multisel-wrap { position: relative; display: inline-block; }
+.multisel-btn {
+    padding: .35rem .7rem; font-size: .85rem; cursor: pointer;
+    background: var(--bg-input, #1a2332); border: 1px solid var(--border);
+    color: var(--text-secondary); border-radius: 4px;
+    white-space: nowrap; transition: border-color .15s, color .15s;
+    font-family: inherit;
+}
+.multisel-btn:hover { border-color: var(--accent); }
+.multisel-btn.ms-active { border-color: var(--accent); color: var(--accent); }
+.ms-count {
+    display: inline-block; background: var(--accent); color: #000;
+    border-radius: 10px; padding: 0 5px; font-size: .7rem;
+    font-weight: 700; margin: 0 2px; vertical-align: middle;
+}
+.multisel-dropdown {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 1100;
+    background: var(--bg-card); border: 1px solid var(--border-glow);
+    border-radius: 6px; padding: 0.35rem;
+    min-width: 180px; max-height: 260px; overflow-y: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    display: none;
+}
+.multisel-dropdown.open { display: block; }
+.multisel-item {
+    display: flex; align-items: center; gap: .5rem;
+    padding: .28rem .5rem; border-radius: 3px; cursor: pointer;
+    font-size: .82rem; color: var(--text-primary);
+    transition: background .1s; user-select: none;
+}
+.multisel-item:hover { background: rgba(0,201,255,.08); }
+.multisel-item input[type=checkbox] { width: auto; margin: 0; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
+.multisel-divider { height: 1px; background: var(--border); margin: .3rem .2rem; }
+.btn-apply-filtres {
+    padding: .35rem .6rem; font-size: .82rem; cursor: pointer;
+    background: none; border: 1px solid var(--border);
+    color: var(--text-secondary); border-radius: 4px;
+    transition: all .15s; font-family: inherit;
+}
+.btn-apply-filtres:hover { border-color: var(--accent); color: var(--accent); }
+.btn-reset-filtres {
+    padding: .35rem .6rem; font-size: .82rem; cursor: pointer;
+    background: none; border: 1px solid var(--border);
+    color: var(--text-muted); border-radius: 4px;
+    transition: all .15s; font-family: inherit;
+}
+.btn-reset-filtres:hover { border-color: var(--accent-orange); color: var(--accent-orange); }
+
+/* ── INFOBULLE CARACTÉRISTIQUES PÉRIPHÉRIQUE ── */
+.spec-tip {
+    position: fixed; z-index: 9999;
+    background: var(--bg-card); border: 1px solid var(--border-glow);
+    border-radius: 7px; padding: .7rem 1rem;
+    font-size: .78rem; color: var(--text-primary);
+    box-shadow: 0 8px 28px rgba(0,0,0,.5);
+    pointer-events: none; display: none;
+    min-width: 210px; max-width: 280px; line-height: 1.7;
+}
+.spec-tip-title {
+    font-weight: 700; font-size: .86rem; color: var(--text-primary);
+    margin-bottom: .35rem; padding-bottom: .35rem;
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    display: flex; align-items: center; gap: .4rem;
+}
+.spec-tip-type {
+    font-size: .6rem; letter-spacing: 1.5px; text-transform: uppercase;
+    font-weight: 700;
+    border-radius: 3px; padding: 0 5px; border: 1px solid;
+    /* color, background et border-color sont appliqués dynamiquement par JS */
+}
+.spec-tip-row {
+    display: flex; gap: .5rem; align-items: baseline; padding: .05rem 0;
+}
+.spec-tip-lbl {
+    flex-shrink: 0; width: 76px;
+    font-size: .65rem; letter-spacing: .8px; text-transform: uppercase;
+    color: var(--text-muted);
+}
+.spec-tip-val {
+    font-size: .78rem; color: var(--text-primary);
+    font-family: 'Share Tech Mono', monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px;
+}
+.spec-tip-notes {
+    margin-top: .35rem; padding-top: .35rem;
+    border-top: 1px solid rgba(255,255,255,.06);
+    font-size: .72rem; color: var(--text-secondary); line-height: 1.4;
+    font-family: inherit; font-style: italic;
+}
+.spec-tip-empty { color: var(--text-muted); font-style: italic; font-size: .73rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Inventaire des <span>Périphériques</span></h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        — {{ stats.total }} périphérique(s) enregistré(s)
+    </p>
+</div>
+
+<!-- STAT CHIPS -->
+<div class="stat-chips">
+    <a href="/peripheriques{% if sort_col != 'cat' or sort_dir != 'asc' %}?sort={{ sort_col }}&dir={{ sort_dir }}{% endif %}" class="stat-chip sc-all {% if not filtre_stat %}active{% endif %}">
+        Tous <span class="sc-n">{{ stats.total }}</span>
+    </a>
+    <a href="/peripheriques?statut=actif{% for c in filtre_cats %}&cat={{ c|urlencode }}{% endfor %}{% if sort_col != 'cat' or sort_dir != 'asc' %}&sort={{ sort_col }}&dir={{ sort_dir }}{% endif %}"
+       class="stat-chip sc-actif {% if filtre_stat == 'actif' %}active{% endif %}">
+        ✅ En service <span class="sc-n">{{ stats.actif }}</span>
+    </a>
+    <a href="/peripheriques?statut=stock{% for c in filtre_cats %}&cat={{ c|urlencode }}{% endfor %}{% if sort_col != 'cat' or sort_dir != 'asc' %}&sort={{ sort_col }}&dir={{ sort_dir }}{% endif %}"
+       class="stat-chip sc-stock {% if filtre_stat == 'stock' %}active{% endif %}">
+        📦 En stock <span class="sc-n">{{ stats.stock }}</span>
+    </a>
+    <a href="/peripheriques?statut=hors_service{% for c in filtre_cats %}&cat={{ c|urlencode }}{% endfor %}{% if sort_col != 'cat' or sort_dir != 'asc' %}&sort={{ sort_col }}&dir={{ sort_dir }}{% endif %}"
+       class="stat-chip sc-hs {% if filtre_stat == 'hors_service' %}active{% endif %}">
+        🚫 Hors service <span class="sc-n">{{ stats.hors_service }}</span>
+    </a>
+</div>
+
+<!-- FILTRES + ACTIONS -->
+<div class="actions-row">
+    <div class="filter-row">
+        <input type="text" id="search-p" placeholder="🔍 Rechercher..." oninput="filtrerP()" style="width:200px;">
+
+        <!-- Multi-select Catégories -->
+        <div class="multisel-wrap" id="wrap-filtre-cat">
+            <button type="button" class="multisel-btn" id="btn-filtre-cat"
+                    onclick="toggleMSP('filtre-cat')">Toutes les catégories ▾</button>
+            <div class="multisel-dropdown" id="dd-filtre-cat">
+                <label class="multisel-item">
+                    <input type="checkbox" class="ms-filtre-cat" value="__tout__" onchange="onMSSelectAllPApply('filtre-cat', this)">
+                    <em style="color:var(--text-muted);">Tout sélectionner</em>
+                </label>
+                <div class="multisel-divider"></div>
+                {% for cat in cats_utilisees %}
+                <label class="multisel-item">
+                    <input type="checkbox" class="ms-filtre-cat" value="{{ cat }}" onchange="onMSChangePApply('filtre-cat', 'Toutes les catégories')">
+                    {{ cat }}
+                </label>
+                {% endfor %}
+                <div class="multisel-divider"></div>
+                <button type="button" class="multisel-item" style="width:100%; justify-content:center; background:rgba(0,201,255,.1); border:none;" onclick="document.getElementById('dd-filtre-cat').classList.remove('open'); applyFiltersP()">✓ Appliquer</button>
+            </div>
+        </div>
+
+        <select id="filtre-app-sel" onchange="naviguerFiltreApp()">
+            <option value="">Tous les appareils</option>
+            <option value="0" {% if filtre_app == '0' %}selected{% endif %}>📦 En stock (non attaché)</option>
+            {% for a in appareils %}
+            <option value="{{ a.id }}" {% if filtre_app|string == a.id|string %}selected{% endif %}>
+                {{ a.nom_machine }}{% if a.adresse_ip %} — {{ a.adresse_ip }}{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+        <button type="button" class="btn-apply-filtres" onclick="applyFiltersP()" title="Appliquer les filtres">Filtrer</button>
+        <button id="btn-reset-filtres-p" class="btn-reset-filtres" onclick="resetFiltresP()" title="Réinitialiser les filtres">✕ Réinitialiser</button>
+    </div>
+    <a href="/peripherique/nouveau" class="btn btn-success">+ Ajouter un périphérique</a>
+</div>
+
+<!-- TABLEAU -->
+<div class="card" style="padding:0;overflow:hidden;">
+{% if peripheriques %}
+    {% set ns = namespace(cur_cat='') %}
+    <table id="table-peripheriques">
+        <thead>
+            <tr>
+                <th data-sort-col="marque" onclick="sortByP('marque')" style="cursor:pointer;white-space:nowrap;">Périphérique <span class="sort-ind" id="psi-marque"></span></th>
+                <th data-sort-col="cat" onclick="sortByP('cat')" style="cursor:pointer;white-space:nowrap;">Catégorie <span class="sort-ind" id="psi-cat"></span></th>
+                <th>Attaché à</th>
+                <th data-sort-col="user" onclick="sortByP('user')" style="cursor:pointer;white-space:nowrap;">Utilisateur <span class="sort-ind" id="psi-user"></span></th>
+                <th data-sort-col="loc" onclick="sortByP('loc')" style="cursor:pointer;white-space:nowrap;">Localisation <span class="sort-ind" id="psi-loc"></span></th>
+                <th data-sort-col="garantie" onclick="sortByP('garantie')" style="cursor:pointer;white-space:nowrap;">Garantie <span class="sort-ind" id="psi-garantie"></span></th>
+                <th data-sort-col="statut" onclick="sortByP('statut')" style="cursor:pointer;white-space:nowrap;">Statut <span class="sort-ind" id="psi-statut"></span></th>
+                <th>Contrats</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for p in peripheriques %}
+            {% if p.categorie != ns.cur_cat %}
+                {% set ns.cur_cat = p.categorie %}
+                <tr>
+                    <td colspan="9" class="cat-group-header">
+                        <span class="cat-icon">{{ p.categorie | periph_icon }}</span>
+                        {{ p.categorie or 'Autre' }}
+                    </td>
+                </tr>
+            {% endif %}
+            <tr data-search="{{ p.marque }} {{ p.modele }} {{ p.description }} {{ p.nom_machine or '' }} {{ p.utilisateur_nom or '' }} {{ p.localisation or '' }}" data-cat="{{ p.categorie|e }}">
+                <td>
+                    <div style="font-weight:600; cursor:default;"
+                         onmouseenter="showSpecTip(event, this)"
+                         onmouseleave="hideSpecTip()"
+                         data-nom="{{ ((p.marque or '') ~ ' ' ~ (p.modele or ''))|trim|e }}"
+                         data-cat="{{ p.categorie|e }}"
+                         data-color="{{ cfg.get('periph_color_' ~ (p.categorie|periph_color_key), '#94a3b8') }}"
+                         data-sn="{{ p.numero_serie|e }}"
+                         data-achat="{{ p.date_achat|e }}"
+                         data-garantie="{{ p.date_fin_garantie_fmt|e if p.date_fin_garantie_fmt else '' }}"
+                         data-fourn="{{ p.fournisseur|e }}"
+                         data-prix="{{ p.prix_achat|e if p.prix_achat else '' }}"
+                         data-cmd="{{ p.numero_commande|e }}"
+                         data-app="{{ p.nom_machine|e if p.nom_machine else '' }}"
+                         data-notes="{{ p.notes|e if p.notes else '' }}">
+                        {{ p.marque or '' }} {{ p.modele or '—' }}
+                    </div>
+                    {% if p.description %}
+                    <div style="color:var(--text-secondary);font-size:.78rem;">{{ p.description }}</div>
+                    {% endif %}
+                    {% if p.numero_serie %}
+                    <div class="mono" style="font-size:.7rem;color:var(--text-muted);">{{ p.numero_serie }}</div>
+                    {% endif %}
+                </td>
+                <td>{% set ck = p.categorie|periph_color_key %}{% set pc = cfg.get('periph_color_' ~ ck, '#94a3b8') %}<span class="badge" style="color:{{ pc }};background:{{ pc }}18;border:1px solid {{ pc }}55;font-size:.6rem;">{{ p.categorie or '—' }}</span></td>
+                <td>
+                    {% if p.appareils_lies %}
+                    <div style="display:flex;flex-wrap:wrap;gap:.25rem;">
+                    {% for a in p.appareils_lies %}
+                    <span class="badge type-{{ a.type_appareil|type_css }}" style="font-size:.6rem;">{{ a.nom_machine }}</span>
+                    {% endfor %}
+                    </div>
+                    {% else %}
+                    <span class="badge badge-orange" style="font-size:.6rem;">📦 Stock</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if p.utilisateur_nom and p.utilisateur_nom.strip() %}
+                    <div style="font-size:.85rem;">👤 {{ p.utilisateur_nom }}</div>
+                    {% if p.service_nom %}
+                    <div style="font-size:.72rem;">
+                        <span style="color:{{ p.service_couleur or '#6a8aaa' }};">{{ p.service_nom }}</span>
+                    </div>
+                    {% endif %}
+                    {% else %}
+                    <span style="color:var(--text-muted);">—</span>
+                    {% endif %}
+                </td>
+                <td style="font-size:.85rem;color:var(--text-secondary);">{{ p.localisation or '—' }}</td>
+                <td>
+                    {% if p.garantie_active %}
+                        <span class="badge badge-green">Active</span>
+                        {% if p.date_fin_garantie_fmt %}<div style="font-size:.7rem;color:var(--text-secondary);">↳ {{ p.date_fin_garantie_fmt }}</div>{% endif %}
+                    {% elif p.date_fin_garantie %}
+                        <span class="badge badge-red">Expirée</span>
+                        <div style="font-size:.7rem;color:var(--text-secondary);">{{ p.date_fin_garantie_fmt }}</div>
+                    {% else %}
+                        <span class="badge badge-gray">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if p.statut == 'actif' %}<span class="badge badge-green">En service</span>
+                    {% elif p.statut == 'stock' %}<span class="badge badge-orange">En stock</span>
+                    {% elif p.statut == 'hors_service' %}<span class="badge badge-red">Hors service</span>
+                    {% else %}<span class="badge badge-gray">{{ p.statut }}</span>{% endif %}
+                </td>
+                <td>
+                    {% if p.nb_contrats %}
+                    <a href="/contrats" style="color:#a78bfa;text-decoration:none;font-size:.82rem;">
+                        📋 {{ p.nb_contrats }} contrat{% if p.nb_contrats > 1 %}s{% endif %}
+                    </a>
+                    {% else %}
+                    <span style="color:var(--text-muted);font-size:.78rem;">—</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="quick-actions">
+                        <button class="qa-btn qa-blue"
+                            id="docs-btn-per-{{ p.id }}"
+                            onclick="DocsModal.ouvrir({{ p.id }}, '{{ (p.marque or '') ~ ' ' ~ (p.modele or p.categorie or '') }}', 'peripherique')"
+                            title="Documents joints">📎 Docs{% if p.nb_docs %} <span class="docs-badge" style="background:rgba(96,165,250,.25);padding:0 4px;border-radius:8px;font-size:.7rem;">{{ p.nb_docs }}</span>{% endif %}</button>
+                        <a href="/peripherique/{{ p.id }}/editer" class="qa-btn qa-edit">✏ Éditer</a>
+                        <form method="POST" action="/peripherique/{{ p.id }}/supprimer"
+                              onsubmit="return confirm('Supprimer ce périphérique ?')" style="margin:0;">
+                            <button type="submit" class="qa-btn qa-danger">✕ Supprimer</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <div style="text-align:center;padding:3rem;color:var(--text-secondary);">
+        Aucun périphérique enregistré.<br><br>
+        <a href="/peripherique/nouveau" class="btn btn-success">+ Ajouter le premier périphérique</a>
+    </div>
+{% endif %}
+</div>
+{% set pg_extra_p = '&sort=' ~ sort_col ~ '&dir=' ~ sort_dir %}
+{% for c in filtre_cats %}{% set pg_extra_p = pg_extra_p ~ '&cat=' ~ c|urlencode %}{% endfor %}
+{% if filtre_stat %}{% set pg_extra_p = pg_extra_p ~ '&statut=' ~ filtre_stat|urlencode %}{% endif %}
+{% if filtre_app %}{% set pg_extra_p = pg_extra_p ~ '&appareil=' ~ filtre_app|urlencode %}{% endif %}
+{{ pagination_nav(pagination, pg_extra_p) }}
+
+<!-- INFOBULLE CARACTÉRISTIQUES PÉRIPHÉRIQUE -->
+<div class="spec-tip" id="spec-tip">
+    <div class="spec-tip-title">
+        <span id="st-nom"></span>
+        <span class="spec-tip-type" id="st-type"></span>
+    </div>
+    <div id="st-body"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/tri.js"></script>
+<script src="/static/js/liste_tools.js"></script>
+<script>
+// ── INFOBULLE CARACTÉRISTIQUES PÉRIPHÉRIQUE ──────────────────────────────────
+function showSpecTip(e, el) {
+    const d = el.dataset;
+    document.getElementById('st-nom').textContent  = d.nom  || '—';
+    const stType = document.getElementById('st-type');
+    stType.textContent = d.cat || '';
+    const c = d.color || '#94a3b8';
+    stType.style.color       = c;
+    stType.style.background  = c + '18';
+    stType.style.borderColor = c + '55';
+
+    const rows = [
+        { lbl:'N° série',  val: d.sn       || '' },
+        { lbl:'Machine',   val: d.app      || '' },
+        { lbl:'Achat',     val: d.achat    || '' },
+        { lbl:'Garantie',  val: d.garantie || '' },
+        { lbl:'Fourniss.', val: d.fourn    || '' },
+        { lbl:'Prix HT',   val: d.prix ? d.prix + ' €' : '' },
+        { lbl:'N° cmd',    val: d.cmd      || '' },
+    ].filter(r => r.val);
+
+    let html = '';
+    if (rows.length === 0 && !d.notes) {
+        html = '<span class="spec-tip-empty">Aucune information supplémentaire</span>';
+    } else {
+        html = rows.map(r =>
+            `<div class="spec-tip-row">
+                <span class="spec-tip-lbl">${r.lbl}</span>
+                <span class="spec-tip-val">${r.val}</span>
+            </div>`
+        ).join('');
+        if (d.notes) {
+            const excerpt = d.notes.length > 100 ? d.notes.slice(0, 100) + '…' : d.notes;
+            html += `<div class="spec-tip-notes">${excerpt}</div>`;
+        }
+    }
+    document.getElementById('st-body').innerHTML = html;
+
+    const tip = document.getElementById('spec-tip');
+    tip.style.display = 'block';
+    posSpecTip(e);
+}
+function hideSpecTip() {
+    document.getElementById('spec-tip').style.display = 'none';
+}
+function posSpecTip(e) {
+    const tip = document.getElementById('spec-tip');
+    let x = e.clientX + 16, y = e.clientY - 10;
+    if (x + 295 > window.innerWidth)  x = e.clientX - 300;
+    if (y + 240 > window.innerHeight) y = e.clientY - 245;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+}
+document.addEventListener('mousemove', e => {
+    const tip = document.getElementById('spec-tip');
+    if (tip && tip.style.display === 'block') posSpecTip(e);
+});
+</script>
+<script>
+const SORT_STATE_P = { col: '{{ sort_col }}', dir: '{{ sort_dir }}' };
+const FILTER_STATE_P = { cats: {{ filtre_cats | tojson }}, stat: '{{ filtre_stat }}', app: '{{ filtre_app }}' };
+const _PERIPH_FILTER_KEY = 'parcinfo_periph_filters';
+
+document.addEventListener('DOMContentLoaded', () => {
+    const urlP = new URLSearchParams(window.location.search);
+    const hasState = urlP.has('sort') || urlP.has('dir') || urlP.has('cat') || urlP.has('statut');
+
+    if (!hasState && !urlP.has('page') && !urlP.has('appareil')) {
+        // Pas de paramètres → tenter de restaurer le dernier état
+        const saved = localStorage.getItem(_PERIPH_FILTER_KEY);
+        if (saved) {
+            window.location.replace('/peripheriques?' + saved);
+            return;
+        }
+    } else if (hasState) {
+        // Sauvegarder l'état courant (sans page ni appareil)
+        const toSave = new URLSearchParams();
+        urlP.getAll('cat').forEach(c => toSave.append('cat', c));
+        ['sort', 'dir', 'statut'].forEach(k => { if (urlP.get(k)) toSave.set(k, urlP.get(k)); });
+        localStorage.setItem(_PERIPH_FILTER_KEY, toSave.toString());
+    }
+
+    ListeTools.init('table-peripheriques', { storageKey:'periph', exportName:'peripheriques', skipExportCols:[0,9], exportUrl:'/peripheriques/export.csv', importUrl:'/peripheriques/import' });
+    initSortHeadersP();
+    restoreFilterUIP();
+});
+
+document.addEventListener('click', e => {
+    // Fermer les dropdowns seulement si on clique HORS du multisel-wrap
+    // Cela laisse la dropdown ouverte quand on clique sur les checkboxes à l'intérieur
+    if (!e.target.closest('.multisel-wrap')) {
+        document.querySelectorAll('.multisel-dropdown.open').forEach(d => d.classList.remove('open'));
+    }
+});
+
+function initSortHeadersP() {
+    const SORT_LABELS = { marque:'Périphérique', cat:'Catégorie', user:'Utilisateur', loc:'Localisation', garantie:'Garantie', statut:'Statut' };
+    Object.keys(SORT_LABELS).forEach(col => {
+        const ind = document.getElementById('psi-' + col);
+        if (!ind) return;
+        if (SORT_STATE_P.col === col) {
+            ind.textContent = SORT_STATE_P.dir === 'asc' ? ' ↑' : ' ↓';
+            ind.style.cssText = 'font-size:.7rem;opacity:1;color:var(--accent);';
+            ind.closest('th').style.color = 'var(--accent)';
+        } else {
+            ind.textContent = ' ↕';
+            ind.style.cssText = 'font-size:.7rem;opacity:.3;';
+        }
+    });
+}
+
+function sortByP(col) {
+    const newDir = (SORT_STATE_P.col === col && SORT_STATE_P.dir === 'asc') ? 'desc' : 'asc';
+    const params = new URLSearchParams();
+    params.set('sort', col);
+    params.set('dir', newDir);
+    FILTER_STATE_P.cats.forEach(c => params.append('cat', c));
+    if (FILTER_STATE_P.stat) params.set('statut', FILTER_STATE_P.stat);
+    if (FILTER_STATE_P.app)  params.set('appareil', FILTER_STATE_P.app);
+    window.location.href = '/peripheriques?' + params.toString();
+}
+
+function applyFiltersP() {
+    const cats = getMSValuesP('filtre-cat');
+    const params = new URLSearchParams();
+    if (SORT_STATE_P.col !== 'cat' || SORT_STATE_P.dir !== 'asc') {
+        params.set('sort', SORT_STATE_P.col);
+        params.set('dir', SORT_STATE_P.dir);
+    }
+    cats.forEach(c => params.append('cat', c));
+    if (FILTER_STATE_P.stat) params.set('statut', FILTER_STATE_P.stat);
+    const app_ = document.getElementById('filtre-app-sel').value;
+    if (app_) params.set('appareil', app_);
+    const qs = params.toString();
+    // Mettre à jour localStorage avant de naviguer (exclure 'appareil' du localStorage)
+    const qsForStorage = new URLSearchParams();
+    new URLSearchParams(qs).forEach((v, k) => {
+        if (k !== 'appareil') qsForStorage.append(k, v);
+    });
+    const qsStorage = qsForStorage.toString();
+    if (qsStorage) localStorage.setItem(_PERIPH_FILTER_KEY, qsStorage);
+    else          localStorage.removeItem(_PERIPH_FILTER_KEY);
+    window.location.href = '/peripheriques' + (qs ? '?' + qs : '');
+}
+
+function onMSChangePApply(id, label) {
+    const allCb = document.querySelector(`#dd-${id} input[value="__tout__"]`);
+    if (allCb) allCb.checked = false;
+    updateMSBtnP(id, label);
+}
+
+function onMSSelectAllPApply(id, allCb) {
+    // Exclure le checkbox "Tout sélectionner" lui-même (utiliser :not() pour meilleure compatibilité)
+    document.querySelectorAll(`#dd-${id} input.ms-${id}:not([value="__tout__"])`).forEach(cb => { cb.checked = allCb.checked; });
+    updateMSBtnP(id, id === 'filtre-cat' ? 'Toutes les catégories' : id);
+}
+
+function restoreFilterUIP() {
+    FILTER_STATE_P.cats.forEach(c => {
+        const cb = document.querySelector(`#dd-filtre-cat input.ms-filtre-cat[value="${CSS.escape(c)}"]`);
+        if (cb) cb.checked = true;
+    });
+    // Cocher "Tout sélectionner" si TOUS les types individuels sont cochés
+    const totalCbs = document.querySelectorAll('#dd-filtre-cat input.ms-filtre-cat:not([value="__tout__"])').length;
+    const checkedCbs = document.querySelectorAll('#dd-filtre-cat input.ms-filtre-cat:not([value="__tout__"]):checked').length;
+    const allCb = document.querySelector('#dd-filtre-cat input[value="__tout__"]');
+    if (allCb && totalCbs > 0 && checkedCbs === totalCbs) {
+        allCb.checked = true;
+    }
+    if (FILTER_STATE_P.cats.length) updateMSBtnP('filtre-cat', 'Toutes les catégories');
+    const hasFilter = FILTER_STATE_P.cats.length || FILTER_STATE_P.stat;
+    document.getElementById('btn-reset-filtres-p').style.display = hasFilter ? '' : 'none';
+}
+
+function resetFiltresP() {
+    // Réinitialise tous les filtres ET efface la mémoire
+    localStorage.removeItem(_PERIPH_FILTER_KEY);
+    window.location.href = '/peripheriques';
+}
+
+// ── MULTI-SELECT HELPERS (périphériques) ─────────────────────────────────
+function toggleMSP(id) {
+    const dd = document.getElementById('dd-' + id);
+    const isOpen = dd.classList.contains('open');
+    document.querySelectorAll('.multisel-dropdown.open').forEach(d => d.classList.remove('open'));
+    if (!isOpen) dd.classList.add('open');
+}
+
+function getMSValuesP(id) {
+    return Array.from(
+        document.querySelectorAll(`#dd-${id} input.ms-${id}:checked:not([value="__tout__"])`)
+    ).map(c => c.value);
+}
+
+function updateMSBtnP(id, label) {
+    const vals = getMSValuesP(id);
+    const btn  = document.getElementById('btn-' + id);
+    if (vals.length === 0) {
+        btn.innerHTML = label + ' ▾';
+        btn.classList.remove('ms-active');
+    } else {
+        btn.innerHTML = label + ' <span class="ms-count">' + vals.length + '</span> ▾';
+        btn.classList.add('ms-active');
+    }
+}
+
+// Recherche texte côté client (dans la page courante)
+function filtrerP() {
+    const q = document.getElementById('search-p').value.toLowerCase();
+    document.querySelectorAll('#table-periph tbody tr[data-search]').forEach(r => {
+        r.style.display = !q || r.dataset.search.toLowerCase().includes(q) ? '' : 'none';
+    });
+    document.querySelectorAll('#table-periph tbody tr:not([data-search])').forEach(sep => {
+        let next = sep.nextElementSibling;
+        let allHidden = true;
+        while (next && !next.querySelector('td[colspan]')) {
+            if (next.dataset.search !== undefined && next.style.display !== 'none') { allHidden = false; break; }
+            next = next.nextElementSibling;
+        }
+        sep.style.display = allHidden ? 'none' : '';
+    });
+    ListeTools.onFilter('table-peripheriques');
+}
+
+function naviguerFiltreApp() {
+    const app_ = document.getElementById('filtre-app-sel').value;
+    const params = new URLSearchParams();
+    if (SORT_STATE_P.col !== 'cat' || SORT_STATE_P.dir !== 'asc') {
+        params.set('sort', SORT_STATE_P.col);
+        params.set('dir', SORT_STATE_P.dir);
+    }
+    FILTER_STATE_P.cats.forEach(c => params.append('cat', c));
+    if (FILTER_STATE_P.stat) params.set('statut', FILTER_STATE_P.stat);
+    if (app_) params.set('appareil', app_);
+    window.location.href = '/peripheriques?' + params.toString();
+}
+</script>
+{% endblock %}

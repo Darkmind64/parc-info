@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}{{ contrat.titre }} — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+@media(max-width:800px) { .detail-grid { grid-template-columns:1fr; } }
+.info-row { display:flex; justify-content:space-between; align-items:baseline; padding:.5rem 0; border-bottom:1px solid rgba(30,58,95,.35); font-size:.88rem; }
+.info-row:last-child { border:none; }
+.info-lbl { color:var(--text-secondary); font-size:.78rem; font-weight:600; letter-spacing:.5px; }
+.status-bar {
+    display:flex; align-items:center; gap:1rem; padding:1rem 1.4rem;
+    border-radius:4px; margin-bottom:1.5rem; flex-wrap:wrap;
+}
+.days-big { font-family:'Share Tech Mono',monospace; font-size:2rem; font-weight:700; }
+.doc-row { display:flex; align-items:center; gap:.8rem; padding:.6rem .8rem; border-bottom:1px solid rgba(30,58,95,.35); font-size:.85rem; }
+.doc-row:last-child { border:none; }
+.doc-icon { font-size:1.2rem; flex-shrink:0; }
+.drop-zone {
+    border:2px dashed var(--border); border-radius:4px; padding:1.5rem; text-align:center;
+    cursor:pointer; color:var(--text-muted); transition:all .15s; font-size:.82rem; margin-top:.8rem;
+}
+.drop-zone:hover { border-color:var(--accent); color:var(--accent); }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- HEADER -->
+{% set is_expired = contrat.expire_depasse %}
+{% set is_soon    = contrat.expire_bientot %}
+<div class="page-header">
+    <h1>
+        {% if is_expired %}❌{% elif is_soon %}⚠{% else %}✅{% endif %}
+        <span>{{ contrat.titre }}</span>
+    </h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        · {{ contrat.type_contrat }} · {{ contrat.fournisseur or '—' }}
+    </p>
+</div>
+
+<!-- BARRE STATUT -->
+{% if contrat.date_fin %}
+<div class="status-bar" style="background:{% if is_expired %}rgba(255,51,85,.08);border:1px solid rgba(255,51,85,.3){% elif is_soon %}rgba(255,140,0,.08);border:1px solid rgba(255,140,0,.3){% else %}rgba(0,255,136,.06);border:1px solid rgba(0,255,136,.25){% endif %};">
+    <div>
+        <div class="days-big" style="color:{% if is_expired %}var(--accent-red){% elif is_soon %}var(--accent-orange){% else %}var(--accent-green){% endif %}">
+            {% if is_expired %}−{{ contrat.jours_restants|abs }}{% else %}{{ contrat.jours_restants }}{% endif %}j
+        </div>
+        <div style="font-size:.72rem;color:var(--text-muted);letter-spacing:1px;text-transform:uppercase;">
+            {% if is_expired %}Expiré{% else %}Restants{% endif %}
+        </div>
+    </div>
+    <div style="flex:1;">
+        {% if is_expired %}
+        <strong style="color:var(--accent-red);">Contrat expiré</strong> le {{ contrat.date_fin_fmt }}
+        {% elif is_soon %}
+        <strong style="color:var(--accent-orange);">Expire bientôt</strong> le {{ contrat.date_fin_fmt }}
+        {% if contrat.preavis_jours %} · Préavis : {{ contrat.preavis_jours }} jours{% endif %}
+        {% if contrat.reconduction_auto %} · <em>Reconduction automatique</em>{% endif %}
+        {% else %}
+        <strong style="color:var(--accent-green);">Contrat actif</strong> — expire le {{ contrat.date_fin_fmt }}
+        {% if contrat.reconduction_auto %} · <em>Reconduction automatique</em>{% endif %}
+        {% endif %}
+    </div>
+    <div style="display:flex;gap:.5rem;">
+        <a href="/contrat/{{ contrat.id }}/editer" class="btn btn-primary btn-sm">✏ Modifier</a>
+        <a href="/contrats" class="btn btn-primary btn-sm">← Retour</a>
+    </div>
+</div>
+{% else %}
+<div style="display:flex;gap:.5rem;margin-bottom:1.5rem;">
+    <a href="/contrat/{{ contrat.id }}/editer" class="btn btn-primary btn-sm">✏ Modifier</a>
+    <a href="/contrats" class="btn btn-primary btn-sm">← Retour</a>
+</div>
+{% endif %}
+
+<div class="detail-grid" style="margin-bottom:1.5rem;">
+    <!-- INFOS CONTRAT -->
+    <div class="card">
+        <div class="card-title">Détails du contrat</div>
+        <div class="info-row"><span class="info-lbl">Type</span><span>{{ contrat.type_contrat }}</span></div>
+        <div class="info-row"><span class="info-lbl">Fournisseur</span><span>{{ contrat.fournisseur or '—' }}</span></div>
+        {% if contrat.contact_fournisseur %}<div class="info-row"><span class="info-lbl">Contact</span><span>{{ contrat.contact_fournisseur }}</span></div>{% endif %}
+        {% if contrat.email_fournisseur %}<div class="info-row"><span class="info-lbl">Email</span><span><a href="mailto:{{ contrat.email_fournisseur }}" style="color:inherit;">{{ contrat.email_fournisseur }}</a></span></div>{% endif %}
+        {% if contrat.telephone_fournisseur %}<div class="info-row"><span class="info-lbl">Téléphone</span><span>{{ contrat.telephone_fournisseur }}</span></div>{% endif %}
+        {% if contrat.numero_contrat %}<div class="info-row"><span class="info-lbl">N° contrat</span><span class="mono">{{ contrat.numero_contrat }}</span></div>{% endif %}
+        <div class="info-row"><span class="info-lbl">Début</span><span>{{ contrat.date_debut_fmt or '—' }}</span></div>
+        <div class="info-row"><span class="info-lbl">Fin</span><span>{{ contrat.date_fin_fmt or '—' }}</span></div>
+        {% if contrat.montant_ht %}<div class="info-row"><span class="info-lbl">Montant HT</span><span style="font-family:'Share Tech Mono',monospace;">{{ "%.2f"|format(contrat.montant_ht) }} € / {{ contrat.periodicite }}</span></div>{% endif %}
+        {% if contrat.description %}
+        <div style="margin-top:.8rem;padding-top:.8rem;border-top:1px solid var(--border);font-size:.83rem;color:var(--text-secondary);">{{ contrat.description }}</div>
+        {% endif %}
+    </div>
+
+    <!-- ELEMENTS LIES -->
+    <div>
+        {% if appareils_lies %}
+        <div class="card" style="margin-bottom:1rem;">
+            <div class="card-title">🖥 Appareils couverts ({{ appareils_lies|length }})</div>
+            {% for a in appareils_lies %}
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid rgba(30,58,95,.35);font-size:.85rem;">
+                <div>
+                    <strong>{{ a.nom_machine }}</strong>
+                    <span class="badge badge-blue" style="font-size:.58rem;margin-left:.4rem;">{{ a.type_appareil }}</span>
+                    {% if a.adresse_ip %}<div class="mono" style="font-size:.7rem;color:var(--text-muted);">{{ a.adresse_ip }}</div>{% endif %}
+                </div>
+                <a href="/appareil/{{ a.id }}/editer" style="color:var(--accent);font-size:.75rem;">✏</a>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if periph_lies %}
+        <div class="card">
+            <div class="card-title">🖱 Périphériques couverts ({{ periph_lies|length }})</div>
+            {% for p in periph_lies %}
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:.4rem 0;border-bottom:1px solid rgba(30,58,95,.35);font-size:.85rem;">
+                <div>
+                    <strong>{{ p.marque }} {{ p.modele }}</strong>
+                    <span class="badge badge-gray" style="font-size:.58rem;margin-left:.4rem;">{{ p.categorie }}</span>
+                    {% if p.description %}<div style="font-size:.75rem;color:var(--text-secondary);">{{ p.description }}</div>{% endif %}
+                </div>
+                <a href="/peripherique/{{ p.id }}/editer" style="color:var(--accent);font-size:.75rem;">✏</a>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if not appareils_lies and not periph_lies %}
+        <div class="card" style="text-align:center;padding:2rem;">
+            <p style="color:var(--text-muted);font-size:.85rem;">Aucun élément lié.<br>
+                <a href="/contrat/{{ contrat.id }}/editer" style="color:var(--accent);">Modifier le contrat</a> pour en associer.
+            </p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- DOCUMENTS -->
+<div class="card">
+    <div class="card-title">📎 Documents du contrat</div>
+    {% if docs %}
+    <div>
+    {% for doc in docs %}
+    <div class="doc-row">
+        <span class="doc-icon">
+            {% set ext = doc.nom_fichier.rsplit('.',1)[-1].lower() if '.' in doc.nom_fichier else '' %}
+            {% if ext == 'pdf' %}📄{% elif ext in ['png','jpg','jpeg','gif','webp'] %}🖼{% elif ext in ['doc','docx'] %}📝{% elif ext in ['xls','xlsx'] %}📊{% else %}📎{% endif %}
+        </span>
+        <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;font-size:.88rem;">{{ doc.nom }}</div>
+            {% if doc.description %}<div style="color:var(--text-secondary);font-size:.75rem;">{{ doc.description }}</div>{% endif %}
+            <div style="color:var(--text-muted);font-size:.72rem;">{{ doc.type_doc or '' }} · {{ doc.taille_fmt }} · {{ doc.date_upload[:10] if doc.date_upload else '' }}</div>
+        </div>
+        <div style="display:flex;gap:.4rem;flex-shrink:0;">
+            {% if ext in ['png','jpg','jpeg','gif','webp','pdf'] %}
+            <a href="/contrat/document/{{ doc.id }}/apercu" target="_blank" class="btn btn-primary btn-sm">👁</a>
+            {% endif %}
+            <a href="/contrat/document/{{ doc.id }}/telecharger" class="btn btn-primary btn-sm">⬇</a>
+            <form method="POST" action="/contrat/document/{{ doc.id }}/supprimer"
+                  onsubmit="return confirm('Supprimer ?')" style="margin:0;">
+                <button type="submit" class="btn btn-danger btn-sm">✕</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- UPLOAD DOCUMENT -->
+    <form method="POST" action="/contrat/{{ contrat.id }}/document/upload"
+          enctype="multipart/form-data" id="doc-form">
+        <div class="drop-zone" onclick="document.getElementById('doc-file').click()">
+            <input type="file" id="doc-file" name="fichier" style="display:none;"
+                   accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx,.txt,.zip"
+                   onchange="soumettreDoc(this)">
+            📂 Cliquer pour ajouter un document (contrat PDF, annexe, facture...)
+        </div>
+        <div class="form-row cols-2" style="margin-top:.6rem;">
+            <div class="form-group">
+                <input type="text" name="nom" id="doc-nom" placeholder="Nom du document">
+            </div>
+            <div class="form-group">
+                <select name="type_doc">
+                    <option value="">— Catégorie —</option>
+                    <option>Contrat signé</option><option>Avenant</option>
+                    <option>Facture</option><option>Bon de commande</option>
+                    <option>Conditions générales</option><option>Autre</option>
+                </select>
+            </div>
+        </div>
+        <button type="submit" id="doc-btn" class="btn btn-success btn-sm" disabled>⬆ Envoyer</button>
+    </form>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function soumettreDoc(input) {
+    const f = input.files[0]; if (!f) return;
+    document.getElementById('doc-nom').value = f.name.replace(/\.[^.]+$/,'');
+    document.getElementById('doc-btn').disabled = false;
+}
+</script>
+{% endblock %}

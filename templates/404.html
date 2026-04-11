@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Page introuvable — ParcInfo{% endblock %}
+{% block content %}
+<div style="text-align:center; padding:5rem 2rem; max-width:500px; margin:0 auto;">
+    <div style="font-family:'Share Tech Mono',monospace; font-size:5rem; font-weight:700; color:var(--accent); line-height:1; margin-bottom:1rem;">404</div>
+    <div style="font-family:'Rajdhani',sans-serif; font-size:1.4rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text-primary); margin-bottom:.8rem;">Page introuvable</div>
+    <div style="color:var(--text-secondary); font-size:.9rem; margin-bottom:2rem; line-height:1.6;">
+        La page demandée n'existe pas ou a été déplacée.
+    </div>
+    <div style="display:flex; gap:.8rem; justify-content:center; flex-wrap:wrap;">
+        <a href="/" class="btn btn-primary">🏠 Dashboard</a>
+        <a href="javascript:history.back()" class="btn btn-primary">← Retour</a>
+    </div>
+</div>
+{% endblock %}

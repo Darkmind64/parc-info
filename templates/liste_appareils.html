@@ -1,0 +1,1103 @@
+{% extends "base.html" %}
+{% block title %}Appareils — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.filter-bar { display:flex; gap:0.8rem; flex-wrap:wrap; align-items:center; }
+.filter-bar input, .filter-bar select { width:auto; padding:0.45rem 0.8rem; font-size:0.85rem; }
+
+/* ── PORTS CLIQUABLES (couleurs dans base.html cfg-vars) ── */
+.port-btn {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 7px; border-radius: 3px; border: 1px solid;
+    font-family: 'Share Tech Mono', monospace; font-size: 0.68rem;
+    font-weight: 700; cursor: pointer; text-decoration: none;
+    transition: all 0.15s; white-space: nowrap; margin: 1px;
+    background: none;
+}
+
+/* ── MULTI-SELECT DROPDOWN ─────────────────────────────────────────────── */
+.multisel-wrap { position: relative; display: inline-block; }
+.multisel-btn {
+    padding: 0.45rem 0.8rem; font-size: 0.85rem; cursor: pointer;
+    background: var(--bg-input, #1a2332); border: 1px solid var(--border);
+    color: var(--text-secondary); border-radius: 4px;
+    white-space: nowrap; transition: border-color .15s, color .15s;
+    font-family: inherit;
+}
+.multisel-btn:hover { border-color: var(--accent); }
+.multisel-btn.ms-active { border-color: var(--accent); color: var(--accent); }
+.ms-count {
+    display: inline-block; background: var(--accent); color: #000;
+    border-radius: 10px; padding: 0 5px; font-size: 0.7rem;
+    font-weight: 700; margin: 0 2px; vertical-align: middle;
+}
+.multisel-dropdown {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 1100;
+    background: var(--bg-card); border: 1px solid var(--border-glow);
+    border-radius: 6px; padding: 0.35rem;
+    min-width: 180px; max-height: 260px; overflow-y: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    display: none;
+}
+.multisel-dropdown.open { display: block; }
+.multisel-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.28rem 0.5rem; border-radius: 3px; cursor: pointer;
+    font-size: 0.82rem; color: var(--text-primary);
+    transition: background .1s;
+    user-select: none;
+}
+.multisel-item:hover { background: rgba(0,201,255,.08); }
+.multisel-item input[type=checkbox] {
+    width: auto; margin: 0; cursor: pointer; accent-color: var(--accent);
+    flex-shrink: 0;
+}
+.multisel-divider {
+    height: 1px; background: var(--border); margin: 0.3rem 0.2rem;
+}
+.btn-apply-filtres {
+    padding: .45rem .7rem; font-size: .82rem; cursor: pointer;
+    background: none; border: 1px solid var(--border);
+    color: var(--text-secondary); border-radius: 4px;
+    transition: all .15s;
+    font-family: inherit;
+}
+.btn-apply-filtres:hover { border-color: var(--accent); color: var(--accent); }
+.btn-reset-filtres {
+    padding: .45rem .7rem; font-size: .82rem; cursor: pointer;
+    background: none; border: 1px solid var(--border);
+    color: var(--text-muted); border-radius: 4px;
+    transition: all .15s;
+    font-family: inherit;
+}
+.btn-reset-filtres:hover { border-color: var(--accent-orange); color: var(--accent-orange); }
+
+/* ── TRI ── */
+th[data-col] { position: relative; }
+th[data-col]:hover { color: var(--accent) !important; background: rgba(0,201,255,.06); }
+th[data-col].sorted { color: var(--accent); }
+.sort-bar {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-family: 'Share Tech Mono', monospace; font-size: 0.65rem;
+    color: var(--text-muted); letter-spacing: 1px;
+}
+.sort-bar span { color: var(--accent); font-weight: 700; }
+.sort-reset {
+    background: none; border: 1px solid var(--border); border-radius: 2px;
+    color: var(--text-muted); font-size: 0.65rem; padding: 1px 6px;
+    cursor: pointer; font-family: 'Share Tech Mono', monospace;
+    transition: all .15s;
+}
+.sort-reset:hover { border-color: var(--accent-orange); color: var(--accent-orange); }
+
+/* ── PÉRIPHÉRIQUES ICÔNES — style badge port ── */
+.periph-icons { display:flex; flex-wrap:wrap; gap:2px; max-width:170px; }
+
+.periph-icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 2px 5px; border-radius: 3px; border: 1px solid;
+    font-family: 'Share Tech Mono', monospace; font-size: 0.62rem;
+    font-weight: 700; cursor: pointer; text-decoration: none;
+    transition: all 0.15s; white-space: nowrap;
+    background: none; letter-spacing: 0.5px;
+}
+.periph-icon-btn:hover {
+    box-shadow: 0 0 8px currentColor;
+    filter: brightness(1.2);
+    z-index: 10; position: relative;
+}
+.periph-icon-btn.hs { opacity: .35; }
+
+/* Couleurs périphériques — définies dynamiquement dans base.html cfg-vars */
+
+/* Tooltip périphérique */
+.periph-tip {
+    position: fixed; z-index: 9999;
+    background: var(--bg-card); border: 1px solid var(--border-glow);
+    border-radius: 6px; padding: .65rem 1rem;
+    font-size: .78rem; color: var(--text-primary);
+    box-shadow: 0 6px 24px rgba(0,0,0,.4), 0 0 0 1px var(--accent)11;
+    pointer-events: none; display: none;
+    min-width: 180px; max-width: 240px; line-height: 1.6;
+}
+.periph-tip .pt-header {
+    display: flex; align-items: center; gap: .5rem;
+    margin-bottom: .4rem; padding-bottom: .4rem;
+    border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.periph-tip .pt-icon  { font-size: 1.3rem; }
+.periph-tip .pt-cat   { font-size:.62rem; letter-spacing:1.5px; text-transform:uppercase; color:var(--accent); font-weight:700; }
+.periph-tip .pt-nom   { font-weight:700; font-size:.88rem; color:var(--text-primary); }
+.periph-tip .pt-desc  { font-size:.75rem; color:var(--text-secondary); }
+.periph-tip .pt-sn    { font-family:'Share Tech Mono',monospace; font-size:.68rem; color:var(--text-muted); margin-top:2px; }
+.periph-tip .pt-hs    { color:var(--accent-red); font-size:.72rem; font-weight:600; margin-top:3px; }
+.periph-tip .pt-hint  { font-size:.65rem; color:var(--text-muted); margin-top:.3rem; border-top:1px solid var(--border); padding-top:.3rem; }
+
+/* ── INFOBULLE CARACTÉRISTIQUES APPAREIL ── */
+.spec-tip {
+    position: fixed; z-index: 9999;
+    background: var(--bg-card); border: 1px solid var(--border-glow);
+    border-radius: 7px; padding: .7rem 1rem;
+    font-size: .78rem; color: var(--text-primary);
+    box-shadow: 0 8px 28px rgba(0,0,0,.5);
+    pointer-events: none; display: none;
+    min-width: 210px; max-width: 280px; line-height: 1.7;
+}
+.spec-tip-title {
+    font-weight: 700; font-size: .86rem; color: var(--text-primary);
+    margin-bottom: .35rem; padding-bottom: .35rem;
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    display: flex; align-items: center; gap: .4rem;
+}
+.spec-tip-type {
+    font-size: .6rem; letter-spacing: 1.5px; text-transform: uppercase;
+    font-weight: 700;
+    border-radius: 3px; padding: 0 5px; border: 1px solid;
+    /* color, background et border-color sont appliqués dynamiquement par JS */
+}
+.spec-tip-row {
+    display: flex; gap: .5rem; align-items: baseline;
+    padding: .05rem 0; color: var(--text-secondary);
+}
+.spec-tip-lbl {
+    flex-shrink: 0; width: 70px;
+    font-size: .65rem; letter-spacing: .8px; text-transform: uppercase;
+    color: var(--text-muted);
+}
+.spec-tip-val {
+    font-size: .78rem; color: var(--text-primary);
+    font-family: 'Share Tech Mono', monospace;
+}
+.spec-tip-empty { color: var(--text-muted); font-style: italic; font-size: .73rem; }
+
+/* ── PING LIVE ── */
+.ping-anim { animation: ping-flash 0.6s ease; }
+@keyframes ping-flash { 0%{opacity:1} 50%{opacity:0.3} 100%{opacity:1} }
+
+/* ── TOOLTIP ── */
+.port-tip {
+    position: fixed; z-index: 9999;
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0.5rem 0.8rem;
+    font-size: 0.75rem; color: var(--text-primary);
+    box-shadow: 0 4px 20px rgba(0,0,0,.6);
+    pointer-events: none; display: none; max-width: 220px;
+    line-height: 1.5;
+}
+.port-tip .tip-port { font-family:'Share Tech Mono',monospace; font-weight:700; font-size:0.85rem; }
+.port-tip .tip-action { color: var(--accent-green); font-size:0.72rem; margin-top:2px; }
+
+/* ── CONNEXIONS RAPIDES ── */
+.quick-actions { display:flex; flex-direction:row; flex-wrap:wrap; gap:.35rem; align-items:center; justify-content:flex-start; }
+
+/* Infobulles actions */
+.action-tip {
+    position:fixed; z-index:3000; background:#0f1825; border:1px solid var(--border-glow);
+    border-radius:5px; padding:.6rem .85rem; font-size:.75rem; color:var(--text-secondary);
+    pointer-events:none; max-width:280px; box-shadow:0 4px 20px rgba(0,0,0,.6);
+    display:none; line-height:1.5;
+}
+.action-tip.show { display:block; }
+.action-tip-title { color:var(--accent); font-weight:700; font-size:.72rem;
+    letter-spacing:1px; text-transform:uppercase; margin-bottom:.35rem; }
+.action-tip-item { display:flex; align-items:baseline; gap:.4rem; padding:.1rem 0; }
+.action-tip-icon { flex-shrink:0; width:14px; }
+.action-tip-empty { color:var(--text-muted); font-style:italic; font-size:.72rem; }
+
+.qa-edit  { color: var(--accent); border-color: rgba(0,201,255,.3); }
+.qa-edit:hover  { background: rgba(0,201,255,.1); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Inventaire des <span>Appareils</span></h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        — {{ pagination.total }} appareil(s) enregistré(s)
+        {% if pagination.pages > 1 %}<span style="color:var(--text-muted);font-size:.8rem;"> — page {{ pagination.page }}/{{ pagination.pages }}</span>{% endif %}
+    </p>
+</div>
+
+<div class="actions-row">
+    <div class="filter-bar">
+        <input type="text" id="search" placeholder="🔍 Rechercher..." oninput="filtrer()">
+
+        <!-- Multi-select Types -->
+        <div class="multisel-wrap" id="wrap-filtre-type">
+            <button type="button" class="multisel-btn" id="btn-filtre-type"
+                    onclick="toggleMS('filtre-type')">Tous les types ▾</button>
+            <div class="multisel-dropdown" id="dd-filtre-type">
+                <label class="multisel-item">
+                    <input type="checkbox" class="ms-filtre-type" value="__tout__" onchange="onMSSelectAll('filtre-type', this, 'Tous les types')">
+                    <em style="color:var(--text-muted);">Tout sélectionner</em>
+                </label>
+                <div class="multisel-divider"></div>
+                {% for t in types_appareils_ctx %}
+                <label class="multisel-item">
+                    <input type="checkbox" class="ms-filtre-type" value="{{ t }}" onchange="onMSChange('filtre-type', 'Tous les types')">
+                    {{ t }}
+                </label>
+                {% endfor %}
+                <div class="multisel-divider"></div>
+                <button type="button" class="multisel-item" style="width:100%; justify-content:center; background:rgba(0,201,255,.1); border:none;" onclick="document.getElementById('dd-filtre-type').classList.remove('open'); applyFilters()">✓ Appliquer</button>
+            </div>
+        </div>
+
+        <select id="filtre-statut" title="Filtrer par statut">
+            <option value="" {% if not f_statut %}selected{% endif %}>Tous les statuts</option>
+            <option value="actif" {% if f_statut == 'actif' %}selected{% endif %}>Actif</option>
+            <option value="inactif" {% if f_statut == 'inactif' %}selected{% endif %}>Inactif</option>
+            <option value="hors_service" {% if f_statut == 'hors_service' %}selected{% endif %}>Hors service</option>
+        </select>
+        <select id="filtre-av" title="Filtrer par statut antivirus">
+            <option value="" {% if not f_av %}selected{% endif %}>🛡 Tous antivirus</option>
+            <option value="active" {% if f_av == 'active' %}selected{% endif %}>🛡 AV actif</option>
+            <option value="expiring" {% if f_av == 'expiring' %}selected{% endif %}>🛡 Expire bientôt</option>
+            <option value="expired" {% if f_av == 'expired' %}selected{% endif %}>🛡 Expiré</option>
+            <option value="none" {% if f_av == 'none' %}selected{% endif %}>🛡 Non configuré</option>
+        </select>
+        <button type="button" class="btn-apply-filtres" onclick="applyFilters()" title="Appliquer les filtres">Filtrer</button>
+        <button id="btn-reset-filtres" class="btn-reset-filtres" onclick="resetFiltres()" title="Réinitialiser tous les filtres">✕ Réinitialiser</button>
+    </div>
+    <a href="/appareil/nouveau" class="btn btn-success">+ Ajouter un appareil</a>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden;">
+    <table id="table-appareils">
+        <thead>
+            <tr>
+                <th data-sort-col="nom" onclick="sortBy('nom')" style="cursor:pointer;white-space:nowrap;">Appareil <span class="sort-ind" id="si-nom"></span></th>
+                <th data-sort-col="type" onclick="sortBy('type')" style="cursor:pointer;white-space:nowrap;">Type <span class="sort-ind" id="si-type"></span></th>
+                <th data-sort-col="ip" onclick="sortBy('ip')" style="cursor:pointer;white-space:nowrap;">IP / Réseau <span class="sort-ind" id="si-ip"></span></th>
+                <th data-sort-col="user" onclick="sortBy('user')" style="cursor:pointer;white-space:nowrap;">Utilisateur <span class="sort-ind" id="si-user"></span></th>
+                <th title="Périphériques associés">Périph.</th>
+                <th data-sort-col="garantie" onclick="sortBy('garantie')" style="cursor:pointer;white-space:nowrap;">Garantie <span class="sort-ind" id="si-garantie"></span></th>
+                <th>Ports détectés</th>
+                <th style="white-space:nowrap;" data-sort-col="statut" onclick="sortBy('statut')" style="cursor:pointer;">État <span class="sort-ind" id="si-statut"></span></th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for a in appareils %}
+        <tr data-type="{{ a.type_appareil or 'PC' }}" data-statut="{{ a.statut }}"
+            data-av="{{ a.av_status }}"
+            data-ip="{{ a.adresse_ip or '' }}" data-id="{{ a.id }}">
+            <td data-sort="{{ a.nom_machine or '' }}">
+                <div style="font-weight:600; cursor:default;"
+                     onmouseenter="showSpecTip(event, this)"
+                     onmouseleave="hideSpecTip()"
+                     data-nom="{{ a.nom_machine|e }}"
+                     data-type="{{ a.type_appareil|e }}"
+                     data-color="{{ cfg.get('type_color_' ~ (a.type_appareil|type_css), '#94a3b8') }}"
+                     data-os="{{ a.os|e }}"
+                     data-vos="{{ a.version_os|e }}"
+                     data-cpu="{{ a.cpu|e }}"
+                     data-ram="{{ a.ram|e }}"
+                     data-stockage="{{ a.stockage|e }}"
+                     data-gpu="{{ a.carte_graphique|e if a.carte_graphique is defined else '' }}"
+                     data-loc="{{ a.localisation|e }}"
+                     data-av-status="{{ a.av_status }}"
+                     data-av-nom="{{ (a.av_nom or a.av_marque or '')|e }}"
+                     data-av-fin="{{ a.av_date_fin_fmt|e }}">{{ a.nom_machine or '—' }}{% if a.av_status == 'active' %}<span style="margin-left:.35rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#00ff8815;color:#00ff88;border:1px solid #00ff8840;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.av_nom or a.av_marque or 'Antivirus actif' }}{% if a.av_date_fin_fmt %} · Fin : {{ a.av_date_fin_fmt }}{% endif %}">🛡 AV</span>{% elif a.av_status == 'expiring' %}<span style="margin-left:.35rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff8c0018;color:#ff8c00;border:1px solid #ff8c0045;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.av_nom or a.av_marque or 'Antivirus' }} — Expire le {{ a.av_date_fin_fmt }}">🛡 !</span>{% elif a.av_status == 'expired' %}<span style="margin-left:.35rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff335515;color:#ff3355;border:1px solid #ff335540;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.av_nom or a.av_marque or 'Antivirus' }} — Expiré le {{ a.av_date_fin_fmt }}">🛡 EXP</span>{% elif a.type_appareil|type_css in ['pc','linux','laptop','mac','serveur','nas'] %}<span style="margin-left:.35rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#64748b12;color:#64748b;border:1px solid #64748b35;vertical-align:middle;" title="Aucun antivirus configuré">🛡</span>{% endif %}{% if a.edr_status == 'active' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#00ff8815;color:#00ff88;border:1px solid #00ff8840;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.edr_nom or a.edr_marque or 'EDR actif' }}{% if a.edr_date_fin_fmt %} · Fin : {{ a.edr_date_fin_fmt }}{% endif %}">🔍 EDR</span>{% elif a.edr_status == 'expiring' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff8c0018;color:#ff8c00;border:1px solid #ff8c0045;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.edr_nom or a.edr_marque or 'EDR' }} — Expire le {{ a.edr_date_fin_fmt }}">🔍 !</span>{% elif a.edr_status == 'expired' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff335515;color:#ff3355;border:1px solid #ff335540;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.edr_nom or a.edr_marque or 'EDR' }} — Expiré le {{ a.edr_date_fin_fmt }}">🔍 EXP</span>{% endif %}{% if a.rmm_status == 'active' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#00b4d815;color:#00b4d8;border:1px solid #00b4d840;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.rmm_nom or a.rmm_marque or 'RMM actif' }}{% if a.rmm_date_fin_fmt %} · Fin : {{ a.rmm_date_fin_fmt }}{% endif %}">📡 RMM</span>{% elif a.rmm_status == 'expiring' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff8c0018;color:#ff8c00;border:1px solid #ff8c0045;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.rmm_nom or a.rmm_marque or 'RMM' }} — Expire le {{ a.rmm_date_fin_fmt }}">📡 !</span>{% elif a.rmm_status == 'expired' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff335515;color:#ff3355;border:1px solid #ff335540;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.rmm_nom or a.rmm_marque or 'RMM' }} — Expiré le {{ a.rmm_date_fin_fmt }}">📡 EXP</span>{% endif %}</div>
+                <div style="color:var(--text-secondary);font-size:0.77rem;">
+                    {{ a.marque or '' }} {{ a.modele or '' }}
+                    {% if a.numero_serie %}<span class="mono" style="font-size:0.7rem;"> · {{ a.numero_serie }}</span>{% endif %}
+                </div>
+            </td>
+            <td data-sort="{{ a.type_appareil or '' }}"><span class="badge type-{{ a.type_appareil|type_css }}" title="{{ a.type_appareil|type_description or 'PC' }}">{{ a.type_appareil|type_badge }}</span></td>
+            <td data-sort="{{ a.adresse_ip or '' }}">
+                <div class="mono" style="font-size:0.88rem;">{{ a.adresse_ip or '—' }}</div>
+                {% if a.adresse_mac %}
+                <div class="mono" style="font-size:0.7rem;color:var(--text-muted);">{{ a.adresse_mac }}</div>
+                {% endif %}
+            </td>
+            <td data-sort="{{ a.utilisateur or '' }}">
+                <div>{{ a.utilisateur or '—' }}</div>
+                {% if a.service %}<div style="color:var(--text-secondary);font-size:0.78rem;">{{ a.service }}</div>{% endif %}
+            </td>
+            <td>
+                {% if a.peripheriques %}
+                <div class="periph-icons">
+                {% for p in a.peripheriques %}
+                <a href="/peripherique/{{ p.id }}/editer"
+                   class="periph-icon-btn {{ p.categorie|periph_css }}{% if p.statut == 'hors_service' %} hs{% endif %}"
+                   data-cat="{{ p.categorie|e }}"
+                   data-nom="{{ p.marque|e }} {{ p.modele|e }}"
+                   data-desc="{{ p.description|e }}"
+                   data-sn="{{ p.numero_serie|e }}"
+                   data-hs="{{ '1' if p.statut == 'hors_service' else '0' }}"
+                   onmouseenter="showPeriphTip(event, this)"
+                   onmouseleave="hidePeriphTip()">{{ p.categorie|periph_icon }}</a>
+                {% endfor %}
+                </div>
+                {% else %}
+                <span style="color:var(--text-muted);font-size:.7rem;">—</span>
+                {% endif %}
+            </td>
+            <td data-sort="{{ a.date_fin_garantie or 'zzz' }}">
+                {% if a.garantie_active %}
+                    <span class="badge badge-green">Active</span>
+                    {% if a.date_fin_garantie_fmt %}
+                    <div style="color:var(--text-secondary);font-size:0.72rem;margin-top:2px;">↳ {{ a.date_fin_garantie_fmt }}</div>
+                    {% endif %}
+                {% elif a.date_fin_garantie %}
+                    <span class="badge badge-red">Expirée</span>
+                    <div style="color:var(--text-secondary);font-size:0.72rem;margin-top:2px;">{{ a.date_fin_garantie_fmt }}</div>
+                {% else %}
+                    <span class="badge badge-gray">—</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if a.ports_ouverts %}
+                    <div style="display:flex;flex-wrap:wrap;gap:1px;max-width:200px;">
+                    {% for port_str in a.ports_ouverts.split(',') %}
+                        {% set p = port_str.strip() %}
+                        {% if p %}
+                            {% if p == '3389' %}
+                                <!-- Port RDP : utiliser un lien direct vers l'endpoint /rdp -->
+                                <a href="/appareil/{{ a.id }}/rdp"
+                                   class="port-btn port-{{ p|port_class }} port-num-{{ p }}"
+                                   data-port="{{ p }}"
+                                   data-ip="{{ a.adresse_ip or '' }}"
+                                   data-info="{{ p|port_info }}"
+                                   data-action="{{ p|port_action }}"
+                                   onmouseenter="showTip(event, {{ p }})"
+                                   onmouseleave="hideTip()"
+                                   style="text-decoration:none;cursor:pointer;display:inline-flex;align-items:center;">
+                                    {{ p|port_icon }} {{ p|port_name }}
+                                </a>
+                            {% else %}
+                                <span class="port-btn port-{{ p|port_class }} port-num-{{ p }}"
+                                      data-port="{{ p }}"
+                                      data-ip="{{ a.adresse_ip or '' }}"
+                                      data-info="{{ p|port_info }}"
+                                      data-action="{{ p|port_action }}"
+                                      onclick="lancerPort('{{ a.adresse_ip or '' }}', {{ p }}, {{ a.id }})"
+                                      onmouseenter="showTip(event, {{ p }})"
+                                      onmouseleave="hideTip()">
+                                    {{ p|port_icon }} {{ p|port_name }}
+                                </span>
+                            {% endif %}
+                        {% endif %}
+                    {% endfor %}
+                    </div>
+                {% else %}
+                    <span style="color:var(--text-muted);font-size:0.8rem;">—</span>
+                {% endif %}
+            </td>
+            <td data-sort="{{ a.statut or '' }}" id="cell-stat-{{ a.id }}">
+                <div>
+                    {% if a.statut == 'actif' %}<span class="badge badge-green">Actif</span>
+                    {% elif a.statut == 'hors_service' %}<span class="badge badge-red">Hors service</span>
+                    {% else %}<span class="badge badge-orange">Inactif</span>{% endif %}
+                </div>
+                <div style="margin-top:3px;" id="online-{{ a.id }}">
+                    {% if a.en_ligne %}<span class="online-badge" style="font-size:0.72rem;color:var(--accent-green);white-space:nowrap;">&#9679; En ligne</span>
+                    {% else %}<span class="online-badge" style="font-size:0.72rem;color:var(--accent-red);white-space:nowrap;">&#9679; Hors ligne</span>{% endif %}
+                </div>
+                <div style="color:var(--text-muted);font-size:0.68rem;" id="ping-ts-{{ a.id }}">{{ a.dernier_ping_fmt or '' }}</div>
+            </td>
+            <td>
+                <div class="quick-actions">
+                    <button class="qa-btn qa-blue"
+                       id="docs-btn-{{ a.id }}"
+                       onclick="DocsModal.ouvrir({{ a.id }}, '{{ a.nom_machine|e }}')"
+                       onmouseenter="afficherTipDocs(event, {{ a.id }})"
+                       onmouseleave="masquerTip()"
+                       title="">📎 Docs{% if a.nb_docs %} <span class="docs-badge" style="background:rgba(96,165,250,.25);padding:0 4px;border-radius:8px;font-size:.7rem;">{{ a.nb_docs }}</span>{% endif %}</button>
+                    {% if a.nb_contrats %}
+                    <a class="qa-btn qa-purple" href="/contrats?appareil={{ a.id }}"
+                       onmouseenter="afficherTipContrats(event, {{ a.id }})"
+                       onmouseleave="masquerTip()"
+                       title="">📋 Contrats <span style="background:rgba(167,139,250,.2);padding:0 4px;border-radius:8px;font-size:.7rem;">{{ a.nb_contrats }}</span></a>
+                    {% endif %}
+                    <button class="qa-btn qa-orange" onclick="pingAppareil({{ a.id }}, this)"
+                            title="Ping maintenant">📡 Ping</button>
+                    <a class="qa-btn qa-edit" href="/appareil/{{ a.id }}/editer">✏ Éditer</a>
+                    <form method="POST" action="/appareil/{{ a.id }}/supprimer"
+                          onsubmit="return confirm('Supprimer « {{ a.nom_machine|e }} » ? Cette action est irréversible.')"
+                          style="margin:0;">
+                        <button type="submit" class="qa-btn qa-danger">✕ Supprimer</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="8" style="text-align:center;padding:3rem;color:var(--text-secondary);">
+                Aucun appareil enregistré.
+                <a href="/appareil/nouveau" style="color:var(--accent);">Ajouter un appareil</a> ou
+                <a href="/scan" style="color:var(--accent);">lancer un scan</a>.
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+
+
+<!-- INFOBULLE CARACTÉRISTIQUES APPAREIL -->
+<div class="spec-tip" id="spec-tip">
+    <div class="spec-tip-title">
+        <span id="st-nom"></span>
+        <span class="spec-tip-type" id="st-type"></span>
+    </div>
+    <div id="st-body"></div>
+</div>
+
+<!-- TOOLTIP PÉRIPHÉRIQUES -->
+<div class="periph-tip" id="periph-tip">
+    <div class="pt-cat" id="pt-cat"></div>
+    <div class="pt-nom" id="pt-nom"></div>
+    <div class="pt-desc" id="pt-desc"></div>
+    <div class="pt-sn"  id="pt-sn"></div>
+    <div class="pt-hs"  id="pt-hs"></div>
+    <div class="pt-hint">↗ Voir la fiche</div>
+</div>
+
+<!-- TOOLTIP PORTS -->
+<div class="port-tip" id="port-tip">
+    <div class="tip-port" id="tip-port"></div>
+    <div id="tip-info"></div>
+    <div class="tip-action" id="tip-action"></div>
+</div>
+
+<!-- INFOBULLES ACTIONS -->
+<div class="action-tip" id="action-tip"></div>
+
+{% if pagination.pages > 1 %}
+{% set pg_extra = '&sort=' ~ sort_col ~ '&dir=' ~ sort_dir %}
+{% for t in f_types %}{% set pg_extra = pg_extra ~ '&type=' ~ t|urlencode %}{% endfor %}
+{% if f_statut %}{% set pg_extra = pg_extra ~ '&statut=' ~ f_statut|urlencode %}{% endif %}
+{% if f_av %}{% set pg_extra = pg_extra ~ '&av=' ~ f_av|urlencode %}{% endif %}
+<div style="display:flex;align-items:center;justify-content:center;gap:.5rem;padding:1rem;border-top:1px solid var(--border);flex-wrap:wrap;">
+    {% if pagination.page > 1 %}
+    <a href="?page={{ pagination.page - 1 }}{{ pg_extra }}" class="btn btn-sm" style="border-color:var(--border);color:var(--text-secondary);">← Précédent</a>
+    {% endif %}
+    {% for p in range(1, pagination.pages + 1) %}
+        {% if p == pagination.page %}
+        <span style="padding:.3rem .7rem;background:var(--accent);color:#000;border-radius:3px;font-size:.82rem;font-weight:700;">{{ p }}</span>
+        {% elif p == 1 or p == pagination.pages or (p >= pagination.page - 2 and p <= pagination.page + 2) %}
+        <a href="?page={{ p }}{{ pg_extra }}" style="padding:.3rem .7rem;border:1px solid var(--border);border-radius:3px;font-size:.82rem;color:var(--text-secondary);text-decoration:none;">{{ p }}</a>
+        {% elif p == pagination.page - 3 or p == pagination.page + 3 %}
+        <span style="color:var(--text-muted);">…</span>
+        {% endif %}
+    {% endfor %}
+    {% if pagination.page < pagination.pages %}
+    <a href="?page={{ pagination.page + 1 }}{{ pg_extra }}" class="btn btn-sm" style="border-color:var(--border);color:var(--text-secondary);">Suivant →</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}
+
+<div id="sort-status" class="sort-bar" style="padding:0.5rem 1rem;border-top:1px solid var(--border);display:none;">
+    Trié par <span id="sort-col-name"></span> <span id="sort-dir-name"></span>
+    <button class="sort-reset" onclick="resetTri()">✕ Réinitialiser</button>
+</div>
+
+{% block extra_scripts %}
+<script src="/static/js/tri.js"></script>
+<script src="/static/js/liste_tools.js"></script>
+<script>
+// ── WATCHDOG LIVE STATUS ────────────────────────────────────────────────────
+
+const REFRESH_MS = 15000;  // rafraîchissement UI toutes les 15s
+let wdTimer = null;
+let lastCycle = null;
+
+function formatTs(iso) {
+    if (!iso) return '';
+    try {
+        const d = new Date(iso);
+        return d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    } catch(e) { return iso.substring(11,19) || ''; }
+}
+
+async function rafraichirStatuts() {
+    try {
+        const r = await fetch('/api/ping/statuts');
+        if (!r.ok) return;
+        const data = await r.json();
+        const statuts = data.statuts || {};
+        let nbOnline = 0, nbTotal = 0;
+
+        Object.entries(statuts).forEach(([id, s]) => {
+            nbTotal++;
+            if (s.en_ligne) nbOnline++;
+            updateRowStatus(parseInt(id), s.en_ligne, s.ts);
+        });
+
+        // Mise à jour de la barre watchdog globale (dans base.html)
+        const bar = document.getElementById('wd-global-bar');
+        const txt = document.getElementById('wd-global-text');
+        const wrap = document.getElementById('wd-global-countdown-wrap');
+        const ctel = document.getElementById('wd-global-countdown');
+        const cycleTs = data.last_cycle ? formatTs(data.last_cycle) : '—';
+        const interval = data.interval || 60;
+        if (bar) bar.className = 'wd-topbar ' + (data.last_cycle ? 'active' : 'idle');
+        if (txt) txt.textContent = `${nbOnline}/${nbTotal} en ligne · dernier cycle : ${cycleTs}`;
+        if (wrap && ctel && data.last_cycle) {
+            wrap.style.display = '';
+            // Réinitialiser le décompte
+            if (typeof _wdCountdown !== 'undefined') {
+                _wdCountdown = interval;
+                ctel.textContent = _wdCountdown;
+            }
+        }
+
+        // Prochain refresh automatique
+        clearTimeout(wdTimer);
+        wdTimer = setTimeout(rafraichirStatuts, REFRESH_MS);
+
+    } catch(e) {
+        clearTimeout(wdTimer);
+        wdTimer = setTimeout(rafraichirStatuts, REFRESH_MS * 2);
+    }
+}
+
+function updateRowStatus(id, enLigne, ts) {
+    const onlineEl = document.getElementById('online-' + id);
+    const tsEl     = document.getElementById('ping-ts-' + id);
+
+    if (onlineEl) {
+        const cur = onlineEl.querySelector('.online-badge');
+        const wasOnline = cur && cur.style.color.includes('accent-green') || (cur && cur.textContent.includes('En ligne'));
+
+        // Clignotement si changement d'état
+        if (cur && (enLigne !== wasOnline)) onlineEl.classList.add('ping-anim');
+        setTimeout(() => onlineEl.classList.remove('ping-anim'), 700);
+
+        onlineEl.innerHTML = enLigne
+            ? '<span class="online-badge" style="font-size:.72rem;color:var(--accent-green);white-space:nowrap;">&#9679; En ligne</span>'
+            : '<span class="online-badge" style="font-size:.72rem;color:var(--accent-red);white-space:nowrap;">&#9679; Hors ligne</span>';
+    }
+
+    if (tsEl && ts) {
+        tsEl.textContent = formatTs(ts);
+    }
+}
+
+async function pingAppareil(id, btn) {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '⟳';
+    btn.disabled = true;
+    btn.style.opacity = '.5';
+    try {
+        const r = await fetch('/api/ping/appareil/' + id);
+        if (r.ok) {
+            const d = await r.json();
+            updateRowStatus(id, d.en_ligne, d.ts);
+        }
+    } catch(e) {}
+    btn.innerHTML = orig;
+    btn.disabled = false;
+    btn.style.opacity = '1';
+}
+
+async function forcerPing() {
+    const bar = document.getElementById('wd-global-bar');
+    const txt = document.getElementById('wd-global-text');
+    if (txt) txt.textContent = 'Cycle de ping en cours...';
+    if (bar) bar.className = 'wd-topbar active';
+    await fetch('/api/ping/force', { method: 'POST' });
+    setTimeout(rafraichirStatuts, 5000);
+}
+
+// Démarrer le rafraîchissement automatique au chargement
+document.addEventListener('DOMContentLoaded', () => {
+    wdTimer = setTimeout(rafraichirStatuts, 2000); // premier refresh 2s après chargement
+});
+
+</script>
+<script>
+// ── DÉFINITION DES PORTS ──────────────────────────────────────────────────
+const PORTS_DEF = {
+    21:   { label:'FTP',     icon:'📁', cls:'ftp',    action:'ftp',    info:'Transfert de fichiers FTP' },
+    22:   { label:'SSH',     icon:'⌨',  cls:'ssh',    action:'ssh',    info:'Accès terminal sécurisé SSH' },
+    23:   { label:'Telnet',  icon:'⚠',  cls:'telnet', action:'telnet', info:'Terminal non sécurisé (déprécié)' },
+    25:   { label:'SMTP',    icon:'✉',  cls:'other',  action:'info',   info:'Serveur mail sortant SMTP' },
+    53:   { label:'DNS',     icon:'🔍', cls:'other',  action:'info',   info:'Service DNS' },
+    80:   { label:'HTTP',    icon:'🌐', cls:'http',   action:'http',   info:'Serveur web HTTP' },
+    110:  { label:'POP3',    icon:'✉',  cls:'other',  action:'info',   info:'Messagerie POP3' },
+    135:  { label:'RPC',     icon:'⚙',  cls:'smb',    action:'info',   info:'Remote Procedure Call (Windows)' },
+    139:  { label:'NetBIOS', icon:'🗂', cls:'smb',    action:'smb',    info:'Partage réseau Windows NetBIOS' },
+    143:  { label:'IMAP',    icon:'✉',  cls:'other',  action:'info',   info:'Messagerie IMAP' },
+    443:  { label:'HTTPS',   icon:'🔒', cls:'https',  action:'https',  info:'Serveur web sécurisé HTTPS' },
+    445:  { label:'SMB',     icon:'🗂', cls:'smb',    action:'smb',    info:'Partage de fichiers Windows SMB' },
+    631:  { label:'IPP',     icon:'🖨', cls:'print',  action:'print',  info:'Service d\'impression IPP' },
+    3389: { label:'RDP',     icon:'🖥', cls:'rdp',    action:'rdp',    info:'Bureau à distance Windows RDP' },
+    5900: { label:'VNC',     icon:'🖥', cls:'rdp',    action:'vnc',    info:'Bureau à distance VNC' },
+    8080: { label:'HTTP-alt',icon:'🌐', cls:'http',   action:'http8080',info:'Serveur web alternatif HTTP' },
+    8443: { label:'HTTPS-alt',icon:'🔒',cls:'https',  action:'https8443',info:'Serveur web sécurisé alternatif' },
+    9100: { label:'Print',   icon:'🖨', cls:'print',  action:'print',  info:'Impression directe (JetDirect)' },
+};
+
+function getPortDef(port) {
+    return PORTS_DEF[parseInt(port)] || { label:'Port '+port, icon:'◈', cls:'other', action:'info', info:'Port TCP ouvert' };
+}
+
+// ── TOOLTIP ───────────────────────────────────────────────────────────────
+function showTip(e, port) {
+    const element = e.currentTarget || e.target;
+    const d = getPortDef(port);
+    const tip = document.getElementById('port-tip');
+
+    // Récupérer l'info depuis l'attribut data-info (contient la description configurée)
+    const dataInfo = element.getAttribute('data-info') || d.info;
+
+    document.getElementById('tip-port').textContent = d.icon + ' ' + port + ' — ' + d.label;
+    document.getElementById('tip-info').textContent = dataInfo;
+    const actions = { ssh:'Cliquer pour ouvrir un terminal SSH', http:'Cliquer pour ouvrir dans le navigateur',
+        https:'Cliquer pour ouvrir en HTTPS', http8080:'Cliquer pour ouvrir HTTP:8080',
+        https8443:'Cliquer pour ouvrir HTTPS:8443', rdp:'Cliquer pour lancer une session RDP',
+        vnc:'Cliquer pour lancer VNC', ftp:'Cliquer pour ouvrir FTP',
+        telnet:'⚠ Connexion non sécurisée', smb:'Partage réseau Windows', print:'Service d\'impression', info:'' };
+    document.getElementById('tip-action').textContent = actions[d.action] || '';
+    tip.style.display = 'block';
+    moveTip(e);
+}
+
+function moveTip(e) {
+    const tip = document.getElementById('port-tip');
+    let x = e.clientX + 14, y = e.clientY - 10;
+    if (x + 230 > window.innerWidth) x = e.clientX - 235;
+    if (y + 80 > window.innerHeight) y = e.clientY - 85;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+}
+
+document.addEventListener('mousemove', e => {
+    if (document.getElementById('port-tip').style.display === 'block') moveTip(e);
+});
+
+function hideTip() {
+    document.getElementById('port-tip').style.display = 'none';
+}
+
+// ── LANCEMENT D'UNE CONNEXION ─────────────────────────────────────────────
+function lancerPort(ip, port, deviceId) {
+    if (!ip) return;
+    const d = getPortDef(port);
+    const actions = {
+        ssh:       () => window.location.href = 'ssh://'+ip,
+        http:      () => window.open('http://'+ip, '_blank'),
+        http8080:  () => window.open('http://'+ip+':8080', '_blank'),
+        https:     () => window.open('https://'+ip, '_blank'),
+        https8443: () => window.open('https://'+ip+':8443', '_blank'),
+        rdp:       () => {
+            // Utiliser le protocole natif Windows RDP
+            if (ip && ip.trim()) {
+                // Note: mstsc: est un protocole Windows qui ouvre Remote Desktop Client
+                // Limitation: fonctionne seulement sur Windows avec Remote Desktop Client installé
+                const cleanIp = ip.trim();
+                window.location.href = 'mstsc:' + cleanIp;
+            } else {
+                alert('⚠ Adresse IP non disponible');
+            }
+        },
+        vnc:       () => window.location.href = 'vnc://'+ip,
+        ftp:       () => window.open('ftp://'+ip, '_blank'),
+        telnet:    () => window.location.href = 'telnet://'+ip,
+        smb:       () => window.open('\\\\'+ip, '_blank') || (window.location.href = 'file://'+ip),
+        print:     () => alert('🖨 Imprimante sur '+ip+'\nAccès via http://'+ip),
+        info:      () => {}
+    };
+    const fn = actions[d.action];
+    if (fn) fn();
+}
+
+
+
+// ── TOOLTIPS PÉRIPHÉRIQUES ───────────────────────────────────────────────────
+
+const PERIPH_ICONS_MAP = {
+    'Ecran':'🖥','Clavier':'⌨','Souris':'🖱','Webcam':'📷',
+    'Casque / Micro':'🎧','Haut-parleurs':'🔊',
+    'Imprimante':'🖨','Scanner':'📠','Imprimante multifonction':'🖨',
+    'Onduleur / UPS':'🔋','Multiprise parafoudre':'🔌',
+    'Disque dur externe':'💾','Cle USB':'🗂','Hub USB':'🔗',
+    'Lecteur de cartes':'💳','Docking station':'🖧',
+    'Adaptateur reseau':'🌐','Switch USB':'🔀',
+    'Telephone fixe IP':'☎','Telephone mobile':'📱',
+    'Badge / Lecteur de badge':'🏷','Autre':'📦'
+};
+
+// ── INFOBULLE CARACTÉRISTIQUES APPAREIL ──────────────────────────────────────
+function showSpecTip(e, el) {
+    const d = el.dataset;
+    const tip = document.getElementById('spec-tip');
+    document.getElementById('st-nom').textContent  = d.nom  || '—';
+    const stType = document.getElementById('st-type');
+    stType.textContent = d.type || '';
+    const c = d.color || '#94a3b8';
+    stType.style.color       = c;
+    stType.style.background  = c + '18';
+    stType.style.borderColor = c + '55';
+
+    // AV status line
+    let avVal = '';
+    const avStatus = d.avStatus || 'none';
+    const avNom    = d.avNom  || '';
+    const avFin    = d.avFin  || '';
+    if (avStatus === 'active')   avVal = '🛡 ' + (avNom || 'Actif') + (avFin ? ' · Fin ' + avFin : '');
+    else if (avStatus === 'expiring') avVal = '⚠ ' + (avNom || 'Antivirus') + ' — expire le ' + avFin;
+    else if (avStatus === 'expired')  avVal = '✗ ' + (avNom || 'Antivirus') + ' — expiré le '  + avFin;
+    else avVal = '';
+
+    const rows = [
+        { lbl:'OS',        val: d.os  ? (d.os + (d.vos ? ' ' + d.vos : '')) : '' },
+        { lbl:'CPU',       val: d.cpu       || '' },
+        { lbl:'RAM',       val: d.ram       || '' },
+        { lbl:'Stockage',  val: d.stockage  || '' },
+        { lbl:'GPU',       val: d.gpu       || '' },
+        { lbl:'Loc.',      val: d.loc       || '' },
+        { lbl:'N° série',  val: d.sn        || '' },
+    ].filter(r => r.val);
+
+    const avColors = { active:'#00ff88', expiring:'#ff8c00', expired:'#ff3355', none:'#64748b' };
+    const avColor  = avColors[avStatus] || '#64748b';
+
+    let bodyHtml = '';
+    if (rows.length === 0 && !avVal) {
+        bodyHtml = '<span class="spec-tip-empty">Aucune caractéristique renseignée</span>';
+    } else {
+        bodyHtml = rows.map(r =>
+            `<div class="spec-tip-row">
+                <span class="spec-tip-lbl">${r.lbl}</span>
+                <span class="spec-tip-val">${escH(r.val)}</span>
+            </div>`
+        ).join('');
+    }
+    if (avVal) {
+        bodyHtml += `<div class="spec-tip-row" style="margin-top:.3rem;padding-top:.3rem;border-top:1px solid rgba(255,255,255,.06);">
+            <span class="spec-tip-lbl">Antivirus</span>
+            <span class="spec-tip-val" style="color:${avColor};font-family:inherit;font-size:.75rem;">${escH(avVal)}</span>
+        </div>`;
+    }
+    document.getElementById('st-body').innerHTML = bodyHtml;
+
+    tip.style.display = 'block';
+    posSpecTip(e);
+}
+function hideSpecTip() {
+    document.getElementById('spec-tip').style.display = 'none';
+}
+function posSpecTip(e) {
+    const tip = document.getElementById('spec-tip');
+    let x = e.clientX + 16, y = e.clientY - 10;
+    if (x + 290 > window.innerWidth)  x = e.clientX - 295;
+    if (y + 220 > window.innerHeight) y = e.clientY - 225;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+}
+document.addEventListener('mousemove', e => {
+    const tip = document.getElementById('spec-tip');
+    if (tip && tip.style.display === 'block') posSpecTip(e);
+});
+
+function showPeriphTip(e, el) {
+    const tip = document.getElementById('periph-tip');
+    document.getElementById('pt-cat').textContent  = el.dataset.cat || '';
+    document.getElementById('pt-nom').textContent  = el.dataset.nom || '';
+    document.getElementById('pt-desc').textContent = el.dataset.desc || '';
+    document.getElementById('pt-sn').textContent   = el.dataset.sn ? '# ' + el.dataset.sn : '';
+    document.getElementById('pt-hs').textContent   = el.dataset.hs === '1' ? '⚠ Hors service' : '';
+    tip.style.display = 'block';
+    posPeriphTip(e);
+}
+
+function hidePeriphTip() {
+    document.getElementById('periph-tip').style.display = 'none';
+}
+
+function posPeriphTip(e) {
+    const tip = document.getElementById('periph-tip');
+    let x = e.clientX + 14, y = e.clientY - 10;
+    if (x + 210 > window.innerWidth)  x = e.clientX - 215;
+    if (y + 90  > window.innerHeight) y = e.clientY - 80;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+}
+
+document.addEventListener('mousemove', e => {
+    const tip = document.getElementById('periph-tip');
+    if (tip && tip.style.display === 'block') posPeriphTip(e);
+});
+
+// ── INIT TRI ─────────────────────────────────────────────────────────────
+const COL_NAMES_APP = ['Appareil','Type','IP / Réseau','Utilisateur','Garantie','Ports','État','Connexions'];
+
+const _APP_FILTER_KEY = 'parcinfo_app_filters';
+
+document.addEventListener('DOMContentLoaded', () => {
+    const urlP = new URLSearchParams(window.location.search);
+    const hasState = urlP.has('sort') || urlP.has('dir') || urlP.has('type') || urlP.has('statut') || urlP.has('av');
+
+    if (!hasState && !urlP.has('page')) {
+        // Pas de paramètres → tenter de restaurer le dernier état depuis localStorage
+        const saved = localStorage.getItem(_APP_FILTER_KEY);
+        if (saved) {
+            window.location.replace('/appareils?' + saved);
+            return; // la page va se recharger avec les paramètres sauvegardés
+        }
+    } else if (hasState) {
+        // Paramètres présents → les sauvegarder (sans le numéro de page)
+        const toSave = new URLSearchParams();
+        urlP.getAll('type').forEach(t => toSave.append('type', t));
+        ['sort', 'dir', 'statut', 'av'].forEach(k => { if (urlP.get(k)) toSave.set(k, urlP.get(k)); });
+        localStorage.setItem(_APP_FILTER_KEY, toSave.toString());
+    }
+
+    // Pas de TriTable.init — le tri est côté serveur
+    ListeTools.init('table-appareils', { storageKey:'appareils', exportName:'appareils', skipExportCols:[0,8,9], exportUrl:'/appareils/export.csv', importUrl:'/appareils/import' });
+    initSortHeaders();
+    restoreFilterUI();
+});
+
+// ── INFOBULLES ACTIONS ────────────────────────────────────────────────────────
+const tipCache = {};
+
+function positionnerTip(e) {
+    const tip = document.getElementById('action-tip');
+    const x = e.clientX + 14, y = e.clientY + 14;
+    tip.style.left = Math.min(x, window.innerWidth - 300) + 'px';
+    tip.style.top  = Math.min(y, window.innerHeight - 200) + 'px';
+}
+
+function masquerTip() {
+    document.getElementById('action-tip').classList.remove('show');
+}
+
+async function afficherTipDocs(e, appId) {
+    const tip = document.getElementById('action-tip');
+    positionnerTip(e);
+    tip.classList.add('show');
+
+    if (tipCache['docs_' + appId]) {
+        tip.innerHTML = tipCache['docs_' + appId];
+        return;
+    }
+
+    tip.innerHTML = '<div class="action-tip-title">📎 Documents</div><div class="action-tip-empty">Chargement…</div>';
+
+    const r = await fetch('/api/appareil/' + appId + '/documents');
+    const docs = await r.json();
+
+    let html = '<div class="action-tip-title">📎 Documents</div>';
+    if (!docs.length) {
+        html += '<div class="action-tip-empty">Aucun document joint</div>';
+    } else {
+        docs.slice(0, 6).forEach(d => {
+            const ext = (d.nom_fichier || '').split('.').pop().toLowerCase();
+            const ico = ['png','jpg','jpeg','gif','webp'].includes(ext) ? '🖼' : ext === 'pdf' ? '📄' : '📎';
+            html += `<div class="action-tip-item"><span class="action-tip-icon">${ico}</span><span>${escH(d.nom || d.nom_fichier)}</span></div>`;
+        });
+        if (docs.length > 6) html += `<div class="action-tip-empty">+ ${docs.length - 6} autre(s)</div>`;
+    }
+    tipCache['docs_' + appId] = html;
+    tip.innerHTML = html;
+}
+
+async function afficherTipContrats(e, appId) {
+    const tip = document.getElementById('action-tip');
+    positionnerTip(e);
+    tip.classList.add('show');
+
+    if (tipCache['ctr_' + appId]) {
+        tip.innerHTML = tipCache['ctr_' + appId];
+        return;
+    }
+
+    tip.innerHTML = '<div class="action-tip-title">📋 Contrats liés</div><div class="action-tip-empty">Chargement…</div>';
+
+    const r = await fetch('/api/contrats/appareil/' + appId);
+    const ctrs = await r.json();
+
+    let html = '<div class="action-tip-title">📋 Contrats liés</div>';
+    if (!ctrs.length) {
+        html += '<div class="action-tip-empty">Aucun contrat associé</div>';
+    } else {
+        ctrs.slice(0, 5).forEach(ct => {
+            const ico = ct.expire_depasse ? '🔴' : ct.expire_bientot ? '🟡' : '🟢';
+            html += `<div class="action-tip-item"><span class="action-tip-icon">${ico}</span><span>${escH(ct.titre)}</span></div>`;
+            if (ct.date_fin_fmt) {
+                html += `<div style="font-size:.68rem;color:var(--text-muted);padding-left:18px;margin-top:-2px;">Échéance : ${escH(ct.date_fin_fmt)}</div>`;
+            }
+        });
+        if (ctrs.length > 5) html += `<div class="action-tip-empty">+ ${ctrs.length - 5} autre(s)</div>`;
+        html += `<div style="margin-top:.4rem;font-size:.68rem;color:var(--accent);border-top:1px solid var(--border);padding-top:.3rem;">Cliquer pour voir tous les contrats →</div>`;
+    }
+    tipCache['ctr_' + appId] = html;
+    tip.innerHTML = html;
+}
+
+function escH(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// État de tri courant (depuis le serveur via Jinja2)
+const SORT_STATE = { col: '{{ sort_col }}', dir: '{{ sort_dir }}' };
+const FILTER_STATE = {
+    types:  {{ f_types | tojson }},
+    statut: '{{ f_statut }}',
+    av:     '{{ f_av }}',
+};
+
+function initSortHeaders() {
+    const SORT_LABELS = { nom:'Appareil', type:'Type', ip:'IP / Réseau', user:'Utilisateur', garantie:'Garantie', statut:'État' };
+    Object.keys(SORT_LABELS).forEach(col => {
+        const ind = document.getElementById('si-' + col);
+        if (!ind) return;
+        if (SORT_STATE.col === col) {
+            ind.textContent = SORT_STATE.dir === 'asc' ? ' ↑' : ' ↓';
+            ind.style.cssText = 'font-size:.7rem;opacity:1;color:var(--accent);';
+            ind.closest('th').style.color = 'var(--accent)';
+        } else {
+            ind.textContent = ' ↕';
+            ind.style.cssText = 'font-size:.7rem;opacity:.3;';
+        }
+    });
+    // Barre de statut de tri
+    const bar = document.getElementById('sort-status');
+    if (!bar) return;
+    const SORT_LABELS2 = { nom:'Appareil', type:'Type', ip:'IP / Réseau', user:'Utilisateur', garantie:'Garantie', statut:'État', marque:'Marque', os:'OS' };
+    if (SORT_STATE.col !== 'ip' || SORT_STATE.dir !== 'asc') {
+        document.getElementById('sort-col-name').textContent = SORT_LABELS2[SORT_STATE.col] || SORT_STATE.col;
+        document.getElementById('sort-dir-name').textContent = SORT_STATE.dir === 'asc' ? '↑ croissant' : '↓ décroissant';
+        bar.style.display = 'flex';
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+function sortBy(col) {
+    const newDir = (SORT_STATE.col === col && SORT_STATE.dir === 'asc') ? 'desc' : 'asc';
+    const params = new URLSearchParams();
+    params.set('sort', col);
+    params.set('dir', newDir);
+    FILTER_STATE.types.forEach(t => params.append('type', t));
+    if (FILTER_STATE.statut) params.set('statut', FILTER_STATE.statut);
+    if (FILTER_STATE.av)     params.set('av',     FILTER_STATE.av);
+    window.location.href = '/appareils?' + params.toString();
+}
+
+function resetTri() {
+    // Supprime le tri mais garde les filtres
+    const params = new URLSearchParams();
+    FILTER_STATE.types.forEach(t => params.append('type', t));
+    if (FILTER_STATE.statut) params.set('statut', FILTER_STATE.statut);
+    if (FILTER_STATE.av)     params.set('av',     FILTER_STATE.av);
+    const qs = params.toString();
+    // Mettre à jour localStorage (sans le tri)
+    if (qs) localStorage.setItem(_APP_FILTER_KEY, qs);
+    else    localStorage.removeItem(_APP_FILTER_KEY);
+    window.location.href = '/appareils' + (qs ? '?' + qs : '');
+}
+
+document.addEventListener('click', e => {
+    // Fermer les dropdowns seulement si on clique HORS du multisel-wrap
+    // Cela laisse la dropdown ouverte quand on clique sur les checkboxes à l'intérieur
+    if (!e.target.closest('.multisel-wrap')) {
+        document.querySelectorAll('.multisel-dropdown.open').forEach(d => d.classList.remove('open'));
+    }
+});
+
+// ── MULTI-SELECT HELPERS ──────────────────────────────────────────────────
+function toggleMS(id) {
+    const dd = document.getElementById('dd-' + id);
+    const isOpen = dd.classList.contains('open');
+    document.querySelectorAll('.multisel-dropdown.open').forEach(d => d.classList.remove('open'));
+    if (!isOpen) dd.classList.add('open');
+}
+
+function getMSValues(id) {
+    return Array.from(
+        document.querySelectorAll(`#dd-${id} input.ms-${id}:checked:not([value="__tout__"])`)
+    ).map(c => c.value);
+}
+
+function updateMSBtn(id, label) {
+    const vals = getMSValues(id);
+    const btn  = document.getElementById('btn-' + id);
+    if (vals.length === 0) {
+        btn.innerHTML = label + ' ▾';
+        btn.classList.remove('ms-active');
+    } else {
+        btn.innerHTML = `${escH(label)} <span class="ms-count">${vals.length}</span> ▾`;
+        btn.classList.add('ms-active');
+    }
+}
+
+function onMSChange(id, label) {
+    // Décocher "Tout sélectionner" si une option individuelle est décochée
+    const allCb = document.querySelector(`#dd-${id} input[value="__tout__"]`);
+    if (allCb) allCb.checked = false;
+    updateMSBtn(id, label);
+}
+
+function onMSSelectAll(id, allCb, label) {
+    const checked = allCb.checked;
+    // Exclure le checkbox "Tout sélectionner" lui-même (utiliser :not() pour meilleure compatibilité)
+    document.querySelectorAll(`#dd-${id} input.ms-${id}:not([value="__tout__"])`).forEach(cb => { cb.checked = checked; });
+    updateMSBtn(id, label || 'Tous les types');
+}
+
+// ── FILTRES ───────────────────────────────────────────────────────────────
+function restoreFilterUI() {
+    // Restaurer les coches du multi-select depuis les params serveur
+    FILTER_STATE.types.forEach(t => {
+        const cb = document.querySelector(`#dd-filtre-type input.ms-filtre-type[value="${CSS.escape(t)}"]`);
+        if (cb) cb.checked = true;
+    });
+    // Cocher "Tout sélectionner" si TOUS les types individuels sont cochés
+    const totalCbs = document.querySelectorAll('#dd-filtre-type input.ms-filtre-type:not([value="__tout__"])').length;
+    const checkedCbs = document.querySelectorAll('#dd-filtre-type input.ms-filtre-type:not([value="__tout__"]):checked').length;
+    const allCb = document.querySelector('#dd-filtre-type input[value="__tout__"]');
+    if (allCb && totalCbs > 0 && checkedCbs === totalCbs) {
+        allCb.checked = true;
+    }
+    if (FILTER_STATE.types.length) updateMSBtn('filtre-type', 'Tous les types');
+    // Afficher le bouton réinitialiser si des filtres sont actifs
+    const hasFilter = FILTER_STATE.types.length || FILTER_STATE.statut || FILTER_STATE.av;
+    document.getElementById('btn-reset-filtres').style.display = hasFilter ? '' : 'none';
+}
+
+function resetFiltres() {
+    // Réinitialise tous les filtres ET efface la mémoire
+    localStorage.removeItem(_APP_FILTER_KEY);
+    window.location.href = '/appareils';
+}
+
+function applyFilters() {
+    const types  = getMSValues('filtre-type');
+    const statut = document.getElementById('filtre-statut').value;
+    const av     = document.getElementById('filtre-av').value;
+    const params = new URLSearchParams();
+    if (SORT_STATE.col !== 'ip' || SORT_STATE.dir !== 'asc') {
+        params.set('sort', SORT_STATE.col);
+        params.set('dir', SORT_STATE.dir);
+    }
+    types.forEach(t => params.append('type', t));
+    if (statut) params.set('statut', statut);
+    if (av)     params.set('av',     av);
+    const qs = params.toString();
+    // Mettre à jour localStorage avant de naviguer
+    if (qs) localStorage.setItem(_APP_FILTER_KEY, qs);
+    else    localStorage.removeItem(_APP_FILTER_KEY);
+    window.location.href = '/appareils' + (qs ? '?' + qs : '');
+}
+
+// ── RECHERCHE TEXTE (côté client, dans la page courante uniquement) ───────
+function filtrer() {
+    const search = document.getElementById('search').value.toLowerCase();
+    document.querySelectorAll('#table-appareils tbody tr[data-type]').forEach(row => {
+        row.style.display = !search || row.innerText.toLowerCase().includes(search) ? '' : 'none';
+    });
+    ListeTools.onFilter('table-appareils');
+}
+</script>
+{% endblock %}

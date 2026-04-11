@@ -1,0 +1,2347 @@
+{% extends "base.html" %}
+{% block title %}{{ plan.nom }} — Plan{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* Override main padding for full-height editor */
+main { padding: 0 !important; max-width: none !important; display: flex; flex-direction: column; height: calc(100vh - 92px); overflow: hidden; }
+
+/* ── TOOLBAR ── */
+#editor-toolbar {
+    display: flex; align-items: center; gap: 0.4rem; padding: 0 0.8rem;
+    background: var(--bg-card); border-bottom: 1px solid var(--border);
+    height: 46px; flex-shrink: 0; overflow-x: auto; overflow-y: hidden;
+    user-select: none;
+}
+#plan-name-input {
+    font-family: 'Rajdhani', sans-serif; font-size: 1rem; font-weight: 700;
+    letter-spacing: 1px; background: transparent; border: none; border-bottom: 1px solid transparent;
+    color: var(--text-primary); padding: 0.2rem 0.4rem; width: 150px; max-width: 150px; outline: none;
+    transition: border-color .2s;
+}
+#plan-name-input:hover, #plan-name-input:focus { border-bottom-color: var(--accent); }
+.tb-sep { width: 1px; background: var(--border); height: 28px; margin: 0 0.3rem; flex-shrink: 0; }
+.tb-btn {
+    display: inline-flex; align-items: center; gap: 0.3rem;
+    padding: 0.28rem 0.6rem; border: 1px solid var(--border); border-radius: 3px;
+    background: transparent; color: var(--text-secondary); cursor: pointer;
+    font-family: 'Share Tech Mono', monospace; font-size: 0.72rem; letter-spacing: 0.5px;
+    transition: all .15s; white-space: nowrap; flex-shrink: 0;
+}
+.tb-btn:hover { border-color: var(--accent); color: var(--accent); }
+.tb-btn.active { background: rgba(0,201,255,.15); border-color: var(--accent); color: var(--accent); }
+.tb-btn.btn-save { border-color: var(--accent-green); color: var(--accent-green); }
+.tb-btn.btn-save:hover { background: rgba(0,255,136,.12); }
+.tb-btn.btn-export { border-color: var(--border-glow); color: var(--text-secondary); }
+#unsaved-indicator {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.65rem;
+    color: var(--accent-orange); letter-spacing: 1px; opacity: 0;
+    transition: opacity .3s; white-space: nowrap; flex-shrink: 0;
+}
+#unsaved-indicator.visible { opacity: 1; }
+.tb-zoom-info {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.65rem;
+    color: var(--text-muted); min-width: 42px; text-align: center; flex-shrink: 0;
+}
+
+/* ── EDITOR BODY ── */
+#editor-body {
+    display: flex; flex: 1; overflow: hidden; position: relative;
+}
+
+/* ── LEFT PANEL ── */
+#left-panel {
+    width: 185px; min-width: 185px; background: var(--bg-card);
+    border-right: 1px solid var(--border); display: flex; flex-direction: column;
+    overflow: hidden; flex-shrink: 0; transition: width .2s, min-width .2s;
+}
+#left-panel.collapsed { width: 0; min-width: 0; overflow: hidden; }
+.panel-header {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.62rem; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--accent); padding: 0.5rem 0.4rem;
+    border-bottom: 1px solid var(--border); display: flex; align-items: center;
+    justify-content: space-between; flex-shrink: 0; gap: 0.5rem;
+}
+
+.panel-tab-btn {
+    flex: 1; padding: 0.4rem 0.5rem; background: transparent; border: 1px solid var(--border);
+    border-radius: 3px; color: var(--text-secondary); font-family: 'Share Tech Mono', monospace;
+    font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer;
+    transition: all .15s; white-space: nowrap;
+}
+.panel-tab-btn:hover { border-color: var(--accent); color: var(--accent); }
+.panel-tab-btn.active { background: rgba(0,201,255,.15); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+
+.panel-tab-content {
+    display: none; flex: 1; overflow-y: auto;
+}
+.panel-tab-content.active { display: flex; flex-direction: column; }
+
+.palette-item {
+    display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.6rem;
+    background: rgba(0,201,255,.05); border: 1px solid transparent; border-radius: 3px;
+    cursor: grab; transition: all .15s; user-select: none;
+}
+.palette-item:hover {
+    background: rgba(0,201,255,.12); border-color: var(--accent);
+}
+.palette-item:active { cursor: grabbing; }
+.palette-item span:first-child { font-size: 1.2rem; flex-shrink: 0; }
+.palette-item span:last-child { color: var(--text-secondary); font-size: 0.75rem; flex: 1; }
+.panel-toggle-btn {
+    background: none; border: none; color: var(--text-muted); cursor: pointer;
+    font-size: 0.75rem; padding: 0; line-height: 1;
+}
+.panel-toggle-btn:hover { color: var(--accent); }
+#device-search {
+    margin: 0.5rem 0.6rem; padding: 0.3rem 0.6rem; font-size: 0.78rem;
+    background: var(--bg-secondary, #0f1520); border: 1px solid var(--border);
+    border-radius: 3px; color: var(--text-primary); outline: none; width: calc(100% - 1.2rem);
+}
+#device-search:focus { border-color: var(--accent); }
+#device-list {
+    overflow-y: auto; flex: 1; padding: 0.25rem 0.5rem 0.5rem;
+}
+.device-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.35rem 0.45rem; border-radius: 3px; cursor: grab;
+    border: 1px solid transparent; transition: all .15s; margin-bottom: 2px;
+    font-size: 0.78rem;
+}
+.device-item:hover { background: rgba(0,201,255,.07); border-color: var(--border); }
+.device-item:active { cursor: grabbing; }
+.device-abbrev {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.62rem; font-weight: 700;
+    background: rgba(255,255,255,.08); padding: 1px 4px; border-radius: 2px;
+    color: var(--text-secondary); flex-shrink: 0;
+}
+.device-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.device-name {
+    color: var(--text-secondary); font-size: 0.75rem; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+
+/* ── CANVAS AREA ── */
+#canvas-wrap {
+    flex: 1; position: relative; overflow: hidden;
+    background: #0f1923; cursor: default;
+}
+#main-canvas { display: block; position: absolute; top: 0; left: 0; }
+
+/* Text input overlay */
+#text-input-overlay {
+    display: none; position: absolute; z-index: 100;
+    background: var(--bg-card); border: 2px solid var(--accent);
+    border-radius: 3px; padding: 4px 8px;
+    font-family: Arial, sans-serif; font-size: 13px; color: var(--text-primary);
+    outline: none; min-width: 100px; max-width: 300px; width: auto; height: auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    box-sizing: border-box; line-height: 1.3;
+}
+#text-input-overlay:focus {
+    outline: 2px solid var(--accent-glow, #00e5ff);
+    outline-offset: 1px;
+}
+
+/* ── RIGHT PROPERTIES PANEL ── */
+#props-panel {
+    width: 210px; min-width: 210px; background: var(--bg-card);
+    border-left: 1px solid var(--border); display: flex; flex-direction: column;
+    overflow-y: auto; flex-shrink: 0; transition: width .2s, min-width .2s;
+}
+#props-panel.hidden { width: 0; min-width: 0; overflow: hidden; }
+.props-header {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.62rem; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--accent); padding: 0.65rem 0.8rem 0.5rem;
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.props-empty {
+    padding: 1rem 0.8rem; font-size: 0.78rem; color: var(--text-muted); text-align: center;
+}
+.prop-row { padding: 0.45rem 0.8rem; border-bottom: 1px solid rgba(30,58,95,.4); }
+.prop-label {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.6rem; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--text-muted); margin-bottom: 0.25rem;
+}
+.prop-input {
+    width: 100%; padding: 0.28rem 0.5rem; font-size: 0.8rem;
+    background: var(--bg-secondary, #0f1520); border: 1px solid var(--border);
+    border-radius: 3px; color: var(--text-primary); outline: none; font-family: inherit;
+}
+.prop-input:focus { border-color: var(--accent); }
+.prop-input[type="color"] { padding: 2px; height: 30px; cursor: pointer; }
+.prop-value {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.78rem;
+    color: var(--text-secondary); padding: 0.15rem 0;
+}
+.prop-link {
+    font-size: 0.75rem; color: var(--accent); text-decoration: none;
+}
+.prop-link:hover { text-decoration: underline; }
+.prop-del-btn {
+    width: calc(100% - 1.6rem); margin: 0.8rem 0.8rem;
+    padding: 0.4rem; background: rgba(255,51,85,.08); border: 1px solid var(--accent-red);
+    border-radius: 3px; color: var(--accent-red); cursor: pointer; font-family: 'Rajdhani', sans-serif;
+    font-size: 0.8rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+    transition: background .15s;
+}
+.prop-del-btn:hover { background: rgba(255,51,85,.18); }
+select.prop-input option { background: #131c2b; }
+
+/* ── SWATCH PICKER ── */
+.swatch-row { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 3px; }
+.swatch {
+    width: 15px; height: 15px; border-radius: 2px; border: 1px solid rgba(255,255,255,.1);
+    cursor: pointer; flex-shrink: 0; transition: transform .1s;
+}
+.swatch:hover { transform: scale(1.25); border-color: rgba(255,255,255,.5); }
+.swatch.swatch-active { border: 2px solid #fff; transform: scale(1.15); }
+.swatch-custom { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+
+/* ── ICON PICKER ── */
+.icon-picker { display: flex; flex-wrap: wrap; gap: 2px; max-height: 100px; overflow-y: auto; background: rgba(0,0,0,.2); border-radius: 3px; padding: 3px; }
+.icon-item { width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 13px; border: 1px solid transparent; border-radius: 3px; cursor: pointer; }
+.icon-item:hover { border-color: var(--accent); background: rgba(0,201,255,.1); }
+.icon-item.icon-active { border-color: var(--accent); background: rgba(0,201,255,.2); }
+
+/* ── SWING SELECTOR ── */
+.swing-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.swing-btn { padding: 3px 2px; font-size: 10px; border: 1px solid var(--border); border-radius: 3px; background: transparent; color: var(--text-secondary); cursor: pointer; text-align: center; line-height: 1.3; }
+.swing-btn:hover { border-color: var(--accent); color: var(--accent); }
+.swing-btn.active { background: rgba(0,201,255,.15); border-color: var(--accent); color: var(--accent); }
+
+/* ── LOCK / TOGGLE BUTTON ── */
+.prop-toggle-btn { width: 100%; padding: 4px 8px; background: transparent; border: 1px solid var(--border); border-radius: 3px; color: var(--text-secondary); cursor: pointer; font-size: 0.75rem; text-align: left; transition: all .15s; }
+.prop-toggle-btn:hover { border-color: var(--accent); color: var(--accent); }
+.prop-toggle-btn.active { border-color: var(--accent-green); color: var(--accent-green); background: rgba(0,255,136,.1); }
+
+/* ── IT SYMBOLS ── */
+.it-symbols { display: flex; flex-wrap: wrap; gap: 2px; }
+.it-sym { width: 21px; height: 21px; display: flex; align-items: center; justify-content: center; font-size: 11px; border: 1px solid var(--border); border-radius: 2px; cursor: pointer; transition: all .1s; }
+.it-sym:hover { border-color: var(--accent); background: rgba(0,201,255,.1); }
+
+/* Panel toggle tab */
+#left-toggle-tab {
+    position: absolute; left: 185px; top: 50%; transform: translateY(-50%);
+    width: 14px; height: 40px; background: var(--bg-card);
+    border: 1px solid var(--border); border-left: none; border-radius: 0 3px 3px 0;
+    cursor: pointer; z-index: 10; display: flex; align-items: center; justify-content: center;
+    font-size: 0.6rem; color: var(--text-muted); transition: left .2s, color .15s;
+}
+#left-toggle-tab:hover { color: var(--accent); }
+#left-panel.collapsed ~ #left-toggle-tab { left: 0; }
+
+/* ── GRID SETTINGS PANEL ── */
+#grid-settings-panel {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    display: none; z-index: 100; min-width: 280px;
+}
+#grid-settings-panel.visible { display: block; animation: slideUp .2s ease-out; }
+@keyframes slideUp { from { transform: translateX(-50%) translateY(20px); opacity: 0; } to { transform: translateX(-50%) translateY(0); opacity: 1; } }
+
+.grid-setting-row {
+    display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.8rem;
+}
+.grid-setting-row:last-child { margin-bottom: 0; }
+
+.grid-setting-label {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.75rem;
+    color: var(--text-secondary); min-width: 100px; text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.grid-setting-control {
+    flex: 1; display: flex; gap: 0.5rem; align-items: center;
+}
+
+.grid-size-slider {
+    flex: 1; height: 6px; border-radius: 3px;
+    background: var(--bg-secondary); appearance: none;
+    -webkit-appearance: none; outline: none; cursor: pointer;
+}
+.grid-size-slider::-webkit-slider-thumb {
+    appearance: none; -webkit-appearance: none;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--accent); cursor: pointer;
+    border: 2px solid var(--bg-card); box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    transition: background .15s;
+}
+.grid-size-slider::-webkit-slider-thumb:hover { background: var(--accent-glow, #00e5ff); }
+.grid-size-slider::-moz-range-thumb {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--accent); cursor: pointer;
+    border: 2px solid var(--bg-card); box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    transition: background .15s;
+}
+.grid-size-slider::-moz-range-thumb:hover { background: var(--accent-glow, #00e5ff); }
+
+.grid-size-value {
+    font-family: 'Share Tech Mono', monospace; font-size: 0.8rem;
+    color: var(--accent); min-width: 35px; text-align: center;
+    padding: 0.3rem 0.6rem; background: rgba(0,201,255,.1);
+    border: 1px solid var(--border); border-radius: 3px;
+}
+
+.grid-toggle-btn {
+    flex: 1; padding: 0.4rem 0.8rem;
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 3px; color: var(--text-secondary);
+    font-family: 'Share Tech Mono', monospace; font-size: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    cursor: pointer; transition: all .15s; white-space: nowrap;
+}
+.grid-toggle-btn:hover {
+    border-color: var(--accent); color: var(--accent);
+}
+.grid-toggle-btn.active {
+    background: rgba(0,201,255,.15); border-color: var(--accent);
+    color: var(--accent); font-weight: 700;
+}
+
+.grid-close-btn {
+    position: absolute; top: 0.5rem; right: 0.5rem;
+    background: none; border: none; color: var(--text-muted);
+    font-size: 1rem; cursor: pointer; padding: 0; line-height: 1;
+    transition: color .15s;
+}
+.grid-close-btn:hover { color: var(--accent); }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- TOOLBAR -->
+<div id="editor-toolbar">
+    <a href="{{ url_for('liste_plans') }}" class="tb-btn" title="Retour aux plans" style="text-decoration:none;">← Plans</a>
+    <div class="tb-sep"></div>
+    <input type="text" id="plan-name-input" value="{{ plan.nom }}" title="Cliquer pour renommer">
+    <div class="tb-sep"></div>
+
+    <!-- Tools -->
+    <button class="tb-btn active" id="tool-select" data-tool="select" title="Sélectionner (S)">▶ SEL</button>
+    <button class="tb-btn" id="tool-wall" data-tool="wall" title="Mur (W)">▬ MUR</button>
+    <button class="tb-btn" id="tool-door" data-tool="door" title="Porte (D)">⌒ PTE</button>
+    <button class="tb-btn" id="tool-window" data-tool="window" title="Fenêtre (N)">≡ FEN</button>
+    <button class="tb-btn" id="tool-desk" data-tool="desk" title="Meuble (F)">□ MBL</button>
+    <button class="tb-btn" id="tool-text" data-tool="text" title="Texte (T)">T TXT</button>
+    <button class="tb-btn" id="tool-connect" data-tool="connect" title="Connexion (C)">⬡ CNX</button>
+    <button class="tb-btn active" id="btn-toggle-connections" title="Afficher/masquer les connexions">👁 CNX</button>
+
+    <div class="tb-sep"></div>
+
+    <!-- Grid + Undo/Redo -->
+    <button class="tb-btn active" id="btn-grid" title="Grille (G) — Cliquer pour config">⊞ GRID</button>
+    <button class="tb-btn" id="btn-grid-settings" title="Paramètres grille">⚙</button>
+    <button class="tb-btn" id="btn-undo" title="Annuler (Ctrl+Z)">↩</button>
+    <button class="tb-btn" id="btn-redo" title="Rétablir (Ctrl+Y)">↪</button>
+
+    <div class="tb-sep"></div>
+
+    <!-- Z-Index (Layering) -->
+    <button class="tb-btn" id="btn-to-front" title="Apporter à l'avant (Ctrl+↑)" disabled>⬆</button>
+    <button class="tb-btn" id="btn-to-back" title="Envoyer à l'arrière (Ctrl+↓)" disabled>⬇</button>
+
+    <div class="tb-sep"></div>
+
+    <!-- Zoom -->
+    <button class="tb-btn" id="btn-zoom-out" title="Dézoomer (Ctrl+-)">−</button>
+    <span class="tb-zoom-info" id="zoom-label">100%</span>
+    <button class="tb-btn" id="btn-zoom-in" title="Zoomer (Ctrl+=)">+</button>
+    <button class="tb-btn" id="btn-zoom-reset" title="Réinitialiser le zoom">FIT</button>
+
+    <div class="tb-sep"></div>
+
+    <span id="unsaved-indicator">● NON SAUVEGARDÉ</span>
+
+    <div style="flex:1;"></div>
+
+    <button class="tb-btn btn-export" id="btn-export" title="Exporter en PNG">↓ PNG</button>
+    <button class="tb-btn btn-save" id="btn-save" title="Sauvegarder (Ctrl+S)">💾 SAUVEGARDER</button>
+</div>
+
+<!-- EDITOR BODY -->
+<div id="editor-body">
+
+    <!-- LEFT PANEL -->
+    <div id="left-panel">
+        <div class="panel-header">
+            <div style="display: flex; gap: 0.5rem; flex: 1;">
+                <button class="panel-tab-btn active" id="tab-devices" data-tab="devices" title="Appareils">📱 APPAREILS</button>
+                <button class="panel-tab-btn" id="tab-objects" data-tab="objects" title="Objets">⚙ OBJETS</button>
+            </div>
+            <button class="panel-toggle-btn" id="left-panel-toggle" title="Masquer">◀</button>
+        </div>
+
+        <!-- DEVICES TAB -->
+        <div id="panel-devices-tab" class="panel-tab-content active">
+            <input type="text" id="device-search" placeholder="Rechercher…" autocomplete="off">
+            <div id="device-list">
+            {% for ap in appareils %}
+            <div class="device-item"
+                 draggable="true"
+                 data-id="{{ ap.id }}"
+                 data-nom="{{ ap.nom_machine }}"
+                 data-type="{{ ap.type_appareil }}"
+                 data-color="{{ ap.color or '#2563eb' }}"
+                 data-status="{{ ap.en_ligne or 0 }}">
+                <span class="badge device-abbrev" style="color:{{ ap.color or '#2563eb' }};background:{{ ap.color or '#2563eb' }}15;border-color:{{ ap.color or '#2563eb' }}55;">{{ ap.type_appareil[:3].upper() }}</span>
+                <span class="device-name" title="{{ ap.nom_machine }}">{{ ap.nom_machine }}</span>
+            </div>
+            {% endfor %}
+            </div>
+        </div>
+
+        <!-- OBJECTS TAB -->
+        <div id="panel-objects-tab" class="panel-tab-content">
+            <div id="objects-list" style="padding: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
+                <!-- Réseau & Infra -->
+                <div class="palette-item" draggable="true" data-type="switch" data-label="Switch réseau" title="Switch réseau — glisser-déposer">
+                    <span style="font-size: 1rem;">🔀</span> <span>Switch</span>
+                </div>
+
+                <!-- Audio -->
+                <div class="palette-item" draggable="true" data-type="mixer" data-label="Console de mixage" title="Console de mixage — glisser-déposer">
+                    <span style="font-size: 1rem;">🎚</span> <span>Mixer</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="amplifier" data-label="Amplificateur audio" title="Amplificateur — glisser-déposer">
+                    <span style="font-size: 1rem;">📯</span> <span>Ampli</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="speaker" data-label="Enceinte audio" title="Enceinte — glisser-déposer">
+                    <span style="font-size: 1rem;">🔊</span> <span>Enceinte</span>
+                </div>
+
+                <!-- Éclairage -->
+                <div class="palette-item" draggable="true" data-type="par56" data-label="Projecteur PAR56" title="PAR56 — glisser-déposer">
+                    <span style="font-size: 1rem;">💡</span> <span>PAR56</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="par64" data-label="Projecteur PAR64" title="PAR64 — glisser-déposer">
+                    <span style="font-size: 1rem;">💡</span> <span>PAR64</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="lyre" data-label="Lyre/Moving Head" title="Lyre — glisser-déposer">
+                    <span style="font-size: 1rem;">🎯</span> <span>Lyre</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="laser" data-label="Laser" title="Laser — glisser-déposer">
+                    <span style="font-size: 1rem;">🔴</span> <span>Laser</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="scan" data-label="Scan light" title="Scan light — glisser-déposer">
+                    <span style="font-size: 1rem;">🟡</span> <span>Scan</span>
+                </div>
+
+                <!-- Divers -->
+                <div class="palette-item" draggable="true" data-type="alarm" data-label="Alarme" title="Alarme — glisser-déposer">
+                    <span style="font-size: 1rem;">🚨</span> <span>Alarme</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="camera" data-label="Caméra" title="Caméra — glisser-déposer">
+                    <span style="font-size: 1rem;">📹</span> <span>Caméra</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="projector" data-label="Projecteur vidéo" title="Projecteur — glisser-déposer">
+                    <span style="font-size: 1rem;">📽</span> <span>Projecteur</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="clock" data-label="Horloge" title="Horloge — glisser-déposer">
+                    <span style="font-size: 1rem;">🕐</span> <span>Horloge</span>
+                </div>
+                <div class="palette-item" draggable="true" data-type="box" data-label="Boîte vide" title="Boîte vide — glisser-déposer">
+                    <span style="font-size: 1rem;">📦</span> <span>Boîte</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LEFT PANEL TOGGLE TAB -->
+    <div id="left-toggle-tab" title="Afficher/masquer les appareils">◀</div>
+
+    <!-- CANVAS AREA -->
+    <div id="canvas-wrap">
+        <canvas id="main-canvas"></canvas>
+        <input type="text" id="text-input-overlay" placeholder="Texte…">
+
+        <!-- GRID SETTINGS PANEL -->
+        <div id="grid-settings-panel">
+            <button class="grid-close-btn" id="grid-panel-close">✕</button>
+
+            <div class="grid-setting-row">
+                <span class="grid-setting-label">MAGNÉTISME</span>
+                <div class="grid-setting-control">
+                    <button class="grid-toggle-btn active" id="grid-magnetism-toggle">
+                        ◉ ACTIF
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid-setting-row">
+                <span class="grid-setting-label">TAILLE</span>
+                <div class="grid-setting-control">
+                    <input type="range" id="grid-size-slider" class="grid-size-slider"
+                           min="5" max="100" value="20" step="5">
+                    <span class="grid-size-value" id="grid-size-display">20 px</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT PROPERTIES PANEL -->
+    <div id="props-panel" class="hidden">
+        <div class="props-header">Propriétés</div>
+        <div id="props-content">
+            <div class="props-empty">Sélectionnez un élément</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function() {
+'use strict';
+
+// ── DATA ──────────────────────────────────────────────────────────────────────
+const PLAN_ID = {{ plan.id }};
+const INITIAL_CONTENU = {{ plan.contenu | tojson }};
+
+const TYPE_ABBREVS = {
+    'PC':'PC','PC (Windows)':'PC','PC/Serveur (Linux)':'LNX',
+    'Laptop':'LAP','MacBook':'MAC','Serveur':'SRV','NAS':'NAS',
+    'Imprimante':'IMP','Imprimante multifonction':'IMP',
+    'Switch':'SW','Switch/AP':'SW','Routeur/Pare-feu':'RTR',
+    'Telephone IP':'TEL','Tablette':'TAB','Camera IP':'CAM','Borne Wi-Fi':'WIF'
+};
+
+const TYPE_ICONS = {
+    'PC':'🖥️','PC (Windows)':'🖥️','PC/Serveur (Linux)':'🐧',
+    'Laptop':'💻','MacBook':'🍎','Serveur':'🗄️','NAS':'💾',
+    'Imprimante':'🖨️','Imprimante multifonction':'🖨️',
+    'Switch':'🔀','Switch/AP':'📡','Routeur/Pare-feu':'🛡️',
+    'Telephone IP':'📞','Tablette':'📱','Camera IP':'📷','Borne Wi-Fi':'📶'
+};
+
+const ICON_LIBRARY = [
+    {i:'🖥️',l:'PC Bureau'},{i:'💻',l:'Laptop'},{i:'🗄️',l:'Serveur'},{i:'💾',l:'NAS'},
+    {i:'🖨️',l:'Imprimante'},{i:'🔀',l:'Switch'},{i:'📡',l:'Antenne'},{i:'🛡️',l:'Firewall'},
+    {i:'📞',l:'Tél. IP'},{i:'📱',l:'Tablette'},{i:'📷',l:'Caméra'},{i:'📶',l:'Wi-Fi'},
+    {i:'🐧',l:'Linux'},{i:'🍎',l:'Mac'},{i:'🔌',l:'Prise'},{i:'⚡',l:'Alim.'},
+    {i:'🔧',l:'Config'},{i:'🔒',l:'Sécurité'},{i:'📦',l:'Boîte'},{i:'📺',l:'Écran'},
+    {i:'🔋',l:'Batterie'},{i:'🌐',l:'Internet'},{i:'☁️',l:'Cloud'},{i:'🔐',l:'VPN'},
+    {i:'💿',l:'Disque'},{i:'⚙️',l:'Engrenage'},{i:'🖱️',l:'Souris'},{i:'⌨️',l:'Clavier'},
+    {i:'📟',l:'Pager'},{i:'🖲️',l:'UPS'}
+];
+
+const COLOR_PALETTE = [
+    '#ff3355','#ff6b35','#ff9f00','#ffd700','#aaff00','#00ff88',
+    '#00e5ff','#00c9ff','#4488ff','#6c63ff','#c850c0','#ff69b4',
+    '#ffffff','#c8d6e5','#8395a7','#576574','#2d3436','#1e3a5f',
+    '#546e7a','#8b6914','#2563eb','#16a085','#8e44ad','#e74c3c',
+    '#e67e22','#27ae60','#2980b9','#7f8c8d','#34495e','#000000'
+];
+
+const IT_SYMBOLS = [
+    '⚡','🔌','📡','🌐','🔒','🔐','☁️','⚙️','🛡️','🔧',
+    '✓','✗','→','←','↑','↓','↔','⟳','★','●',
+    '○','□','▪','▶','⏸','⏹','⚠️','ℹ️','❓','🔴','🟢','🟡'
+];
+
+function getAbbrev(type) {
+    return TYPE_ABBREVS[type] || (type ? type.substring(0,3).toUpperCase() : '???');
+}
+
+// ── PLAN EDITOR CLASS ─────────────────────────────────────────────────────────
+class PlanEditor {
+    constructor() {
+        this.canvas = document.getElementById('main-canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.wrap = document.getElementById('canvas-wrap');
+
+        // Viewport transform
+        this.offsetX = 0;
+        this.offsetY = 0;
+        this.scale = 1;
+
+        // State
+        this.elements = [];
+        this.selectedId = null;
+        this.hoverId = null;
+        this.tool = 'select';
+        this.gridSnap = true;
+        this.gridSize = 20;
+        this.dirty = false;
+
+        // Undo/Redo
+        this.undoStack = [];
+        this.redoStack = [];
+        this.MAX_UNDO = 30;
+
+        // Interaction state
+        this.isPanning = false;
+        this.spaceDown = false;
+        this.panStart = null;
+        this.isDrawing = false;
+        this.drawStart = null;
+        this.drawRect = null;
+        this.isDraggingElement = false;
+        this.dragStartPos = null;
+        this.dragElementOrigin = null;
+        this.isResizing = false;
+        this.resizeHandle = null;
+        this.resizeOrigin = null;
+        this.connectFirst = null;
+
+        // Visibility toggles
+        this.showConnections = true;
+
+        // Rotation state
+        this.isRotating = false;
+        this.rotateCenter = null;
+        this.rotateStartAngle = 0;
+        this.rotateElementOrigin = 0;
+
+        // Auto-save
+        this.autoSaveTimer = null;
+
+        this.loadElements();
+        this.initCanvas();
+        this.initToolbar();
+        this.initLeftPanel();
+        this.initDragDrop();
+        this.initKeyboard();
+        this.initAutoSave();
+        this.render();
+    }
+
+    // ── LOADING ───────────────────────────────────────────────────────────────
+    loadElements() {
+        const c = INITIAL_CONTENU;
+        this.elements = (c && Array.isArray(c.elements)) ? c.elements : [];
+        // Load grid settings from saved plan
+        if (c && typeof c.gridSize === 'number') {
+            this.gridSize = Math.max(5, Math.min(100, c.gridSize));
+        }
+        if (c && typeof c.gridSnap === 'boolean') {
+            this.gridSnap = c.gridSnap;
+        }
+    }
+
+    // ── CANVAS SETUP ──────────────────────────────────────────────────────────
+    initCanvas() {
+        this.resizeCanvas();
+        new ResizeObserver(() => this.resizeCanvas()).observe(this.wrap);
+        this.centerView();
+
+        const cv = this.canvas;
+        cv.addEventListener('mousedown', e => this.onMouseDown(e));
+        cv.addEventListener('mousemove', e => this.onMouseMove(e));
+        cv.addEventListener('mouseup', e => this.onMouseUp(e));
+        cv.addEventListener('mouseleave', () => { this.hoverId = null; this.render(); });
+        cv.addEventListener('wheel', e => this.onWheel(e), { passive: false });
+        cv.addEventListener('contextmenu', e => {
+            e.preventDefault();
+            // Clic droit : passer en mode sélection
+            this.setTool('select');
+        });
+        cv.addEventListener('dblclick', e => {
+            if (this.selectedId && this.tool === 'select') {
+                const el = this.getElement(this.selectedId);
+                if (el && el.type === 'text') {
+                    const sc = this.clientToCanvas(e);
+                    const wc = this.screenToWorld(sc.x, sc.y);
+                    this.showTextInput(sc.x, sc.y, el.x, el.y, el);
+                }
+            }
+        });
+    }
+
+    resizeCanvas() {
+        const r = this.wrap.getBoundingClientRect();
+        this.canvas.width = r.width;
+        this.canvas.height = r.height;
+        this.render();
+    }
+
+    centerView() {
+        this.offsetX = this.canvas.width / 2;
+        this.offsetY = this.canvas.height / 2;
+    }
+
+    // ── COORD HELPERS ─────────────────────────────────────────────────────────
+    screenToWorld(sx, sy) {
+        return {
+            x: (sx - this.offsetX) / this.scale,
+            y: (sy - this.offsetY) / this.scale
+        };
+    }
+
+    worldToScreen(wx, wy) {
+        return {
+            x: wx * this.scale + this.offsetX,
+            y: wy * this.scale + this.offsetY
+        };
+    }
+
+    snap(v) {
+        if (!this.gridSnap) return v;
+        return Math.round(v / this.gridSize) * this.gridSize;
+    }
+
+    clientToCanvas(e) {
+        const r = this.canvas.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    // ── ELEMENT HELPERS ───────────────────────────────────────────────────────
+    newId() {
+        return 'e' + Date.now() + Math.floor(Math.random() * 1000);
+    }
+
+    getElement(id) {
+        return this.elements.find(e => e.id === id);
+    }
+
+    // Unrotated (local) bounds — for drawing and local-space operations
+    getLocalBounds(el) {
+        if (el.type === 'connection') return null;
+        if (el.type === 'text') {
+            const w = (el.text || '').length * (el.fontSize || 13) * 0.6 + 16;
+            const h = (el.fontSize || 13) + 10;
+            return { x: el.x, y: el.y, w, h };
+        }
+        return { x: el.x, y: el.y, w: el.w || 80, h: el.h || 40 };
+    }
+
+    // Axis-aligned bounding box (accounts for rotation) — for hover, selection display
+    elementBounds(el) {
+        const lb = this.getLocalBounds(el);
+        if (!lb) return null;
+        if (!el.rotation) return lb;
+        const { x, y, w, h } = lb;
+        const cx = x + w/2, cy = y + h/2;
+        const r = el.rotation * Math.PI / 180;
+        const cos = Math.abs(Math.cos(r)), sin = Math.abs(Math.sin(r));
+        const nw = w * cos + h * sin, nh = w * sin + h * cos;
+        return { x: cx - nw/2, y: cy - nh/2, w: nw, h: nh };
+    }
+
+    // World position of the rotation handle (above element, in rotated space)
+    getRotationHandlePos(el) {
+        if (!el || el.type === 'connection') return null;
+        const lb = this.getLocalBounds(el);
+        if (!lb) return null;
+        const cx = lb.x + lb.w/2, cy = lb.y + lb.h/2;
+        const r = (el.rotation || 0) * Math.PI / 180;
+        const d = lb.h/2 + 22/this.scale;
+        return { x: cx + d * Math.sin(r), y: cy - d * Math.cos(r) };
+    }
+
+    elementCenter(el) {
+        if (el.type === 'connection') {
+            const f = this.getElement(el.fromId);
+            const t = this.getElement(el.toId);
+            if (!f || !t) return null;
+            const fb = this.elementBounds(f), tb = this.elementBounds(t);
+            return {
+                x: (fb.x + fb.w/2 + tb.x + tb.w/2) / 2,
+                y: (fb.y + fb.h/2 + tb.y + tb.h/2) / 2
+            };
+        }
+        const b = this.elementBounds(el);
+        if (!b) return null;
+        return { x: b.x + b.w/2, y: b.y + b.h/2 };
+    }
+
+    hitTest(wx, wy) {
+        for (let i = this.elements.length - 1; i >= 0; i--) {
+            const el = this.elements[i];
+            if (el.type === 'connection') continue;
+            const lb = this.getLocalBounds(el);
+            if (!lb) continue;
+            let tx = wx, ty = wy;
+            if (el.rotation) {
+                const cx = lb.x + lb.w/2, cy = lb.y + lb.h/2;
+                const r = -el.rotation * Math.PI / 180;
+                const dx = wx - cx, dy = wy - cy;
+                tx = dx * Math.cos(r) - dy * Math.sin(r) + cx;
+                ty = dx * Math.sin(r) + dy * Math.cos(r) + cy;
+            }
+            if (tx >= lb.x && tx <= lb.x + lb.w && ty >= lb.y && ty <= lb.y + lb.h) {
+                return el.id;
+            }
+        }
+        for (let i = this.elements.length - 1; i >= 0; i--) {
+            const el = this.elements[i];
+            if (el.type !== 'connection') continue;
+            const c = this.elementCenter(el);
+            if (!c) continue;
+            if (Math.abs(wx - c.x) < 15 && Math.abs(wy - c.y) < 15) return el.id;
+        }
+        return null;
+    }
+
+    getResizeHandle(el, sx, sy) {
+        const lb = this.getLocalBounds(el);
+        if (!lb) return null;
+        // Transform mouse to local element space if rotated
+        let tx = sx, ty = sy;
+        if (el.rotation) {
+            const cx = lb.x + lb.w/2, cy = lb.y + lb.h/2;
+            const r = -el.rotation * Math.PI / 180;
+            const dx = sx - cx, dy = sy - cy;
+            tx = dx * Math.cos(r) - dy * Math.sin(r) + cx;
+            ty = dx * Math.sin(r) + dy * Math.cos(r) + cy;
+        }
+        const handles = this.getHandlePositions(lb);
+        const thresh = 7 / this.scale;
+        for (const [name, hx, hy] of handles) {
+            if (Math.abs(tx - hx) <= thresh && Math.abs(ty - hy) <= thresh) return name;
+        }
+        return null;
+    }
+
+    getHandlePositions(b) {
+        const { x, y, w, h } = b;
+        return [
+            ['nw', x, y], ['n', x+w/2, y], ['ne', x+w, y],
+            ['e', x+w, y+h/2],
+            ['se', x+w, y+h], ['s', x+w/2, y+h], ['sw', x, y+h],
+            ['w', x, y+h/2]
+        ];
+    }
+
+    applyResize(el, handle, dx, dy) {
+        // Transform drag delta into element local space
+        let ldx = dx, ldy = dy;
+        if (el.rotation) {
+            const r = -el.rotation * Math.PI / 180;
+            ldx = dx * Math.cos(r) - dy * Math.sin(r);
+            ldy = dx * Math.sin(r) + dy * Math.cos(r);
+        }
+        const o = this.resizeOrigin;
+        let { x, y, w, h } = o;
+        if (handle.includes('e')) { w = Math.max(10, o.w + ldx); }
+        if (handle.includes('s')) { h = Math.max(10, o.h + ldy); }
+        if (handle.includes('w')) { x = o.x + ldx; w = Math.max(10, o.w - ldx); }
+        if (handle.includes('n')) { y = o.y + ldy; h = Math.max(10, o.h - ldy); }
+        el.x = this.snap(x); el.y = this.snap(y);
+        el.w = this.snap(w); el.h = this.snap(h);
+    }
+
+    connectionCount(elId) {
+        return this.elements.filter(e => e.type === 'connection' && (e.fromId === elId || e.toId === elId)).length;
+    }
+
+    // ── UNDO/REDO ─────────────────────────────────────────────────────────────
+    snapshot() {
+        const state = JSON.stringify(this.elements);
+        this.undoStack.push(state);
+        if (this.undoStack.length > this.MAX_UNDO) this.undoStack.shift();
+        this.redoStack = [];
+    }
+
+    undo() {
+        if (!this.undoStack.length) return;
+        this.redoStack.push(JSON.stringify(this.elements));
+        this.elements = JSON.parse(this.undoStack.pop());
+        this.selectedId = null;
+        this.markDirty();
+        this.render();
+        this.updatePropsPanel();
+    }
+
+    redo() {
+        if (!this.redoStack.length) return;
+        this.undoStack.push(JSON.stringify(this.elements));
+        this.elements = JSON.parse(this.redoStack.pop());
+        this.selectedId = null;
+        this.markDirty();
+        this.render();
+        this.updatePropsPanel();
+    }
+
+    // ── DIRTY / SAVE ──────────────────────────────────────────────────────────
+    markDirty() {
+        this.dirty = true;
+        document.getElementById('unsaved-indicator').classList.add('visible');
+    }
+
+    clearDirty() {
+        this.dirty = false;
+        document.getElementById('unsaved-indicator').classList.remove('visible');
+    }
+
+    async save() {
+        const planName = document.getElementById('plan-name-input').value.trim() || document.title;
+        const body = {
+            nom: planName,
+            contenu: {
+                elements: this.elements,
+                gridSize: this.gridSize,
+                gridSnap: this.gridSnap
+            }
+        };
+        try {
+            const res = await fetch(`/api/plan/${PLAN_ID}/sauvegarder`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                },
+                body: JSON.stringify(body)
+            });
+            if (res.ok) {
+                this.clearDirty();
+                this.showToast('Plan sauvegardé', 'green');
+            } else {
+                this.showToast('Erreur lors de la sauvegarde', 'red');
+            }
+        } catch(e) {
+            this.showToast('Erreur réseau', 'red');
+        }
+    }
+
+    showToast(msg, color) {
+        let t = document.getElementById('editor-toast');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = 'editor-toast';
+            Object.assign(t.style, {
+                position:'fixed', bottom:'2rem', right:'2rem', zIndex:'9999',
+                padding:'.6rem 1.2rem', borderRadius:'4px', fontFamily:"'Share Tech Mono',monospace",
+                fontSize:'.8rem', fontWeight:'700', letterSpacing:'1px',
+                transition:'opacity .3s', pointerEvents:'none'
+            });
+            document.body.appendChild(t);
+        }
+        const colors = { green:'#00ff88', red:'#ff3355', orange:'#ff8c00' };
+        t.style.background = color === 'green' ? 'rgba(0,255,136,.15)' : 'rgba(255,51,85,.15)';
+        t.style.border = `1px solid ${colors[color] || colors.green}`;
+        t.style.color = colors[color] || colors.green;
+        t.textContent = msg;
+        t.style.opacity = '1';
+        clearTimeout(t._timer);
+        t._timer = setTimeout(() => { t.style.opacity = '0'; }, 2500);
+    }
+
+    initAutoSave() {
+        this.autoSaveTimer = setInterval(() => {
+            if (this.dirty) this.save();
+        }, 60000);
+    }
+
+    // ── EXPORT PNG ────────────────────────────────────────────────────────────
+    exportPNG() {
+        // Render to offscreen canvas with white-ish background
+        const bounds = this.getContentBounds();
+        if (!bounds) { this.showToast('Aucun élément à exporter', 'orange'); return; }
+        const pad = 40;
+        const oc = document.createElement('canvas');
+        oc.width = bounds.w + pad*2;
+        oc.height = bounds.h + pad*2;
+        const octx = oc.getContext('2d');
+        const savedScale = this.scale;
+        const savedOX = this.offsetX;
+        const savedOY = this.offsetY;
+        this.scale = 1;
+        this.offsetX = -bounds.x + pad;
+        this.offsetY = -bounds.y + pad;
+        const savedCtx = this.ctx;
+        this.canvas = oc; this.ctx = octx;
+        this.renderBackground(octx, oc.width, oc.height);
+        this.elements.forEach(el => this.drawElement(octx, el));
+        this.canvas = document.getElementById('main-canvas');
+        this.ctx = savedCtx;
+        this.scale = savedScale; this.offsetX = savedOX; this.offsetY = savedOY;
+        const link = document.createElement('a');
+        link.download = (document.getElementById('plan-name-input').value || 'plan') + '.png';
+        link.href = oc.toDataURL('image/png');
+        link.click();
+    }
+
+    getContentBounds() {
+        const rects = this.elements
+            .filter(e => e.type !== 'connection')
+            .map(e => this.elementBounds(e))
+            .filter(Boolean);
+        if (!rects.length) return null;
+        const minX = Math.min(...rects.map(r => r.x));
+        const minY = Math.min(...rects.map(r => r.y));
+        const maxX = Math.max(...rects.map(r => r.x + r.w));
+        const maxY = Math.max(...rects.map(r => r.y + r.h));
+        return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }
+
+    // ── Z-INDEX / LAYERING ────────────────────────────────────────────────────
+    toFront() {
+        if (!this.selectedId) return;
+        const el = this.getElement(this.selectedId);
+        if (!el || el.type === 'connection') return;
+
+        this.snapshot();
+        const idx = this.elements.indexOf(el);
+        if (idx >= 0 && idx < this.elements.length - 1) {
+            // Swap with next element
+            [this.elements[idx], this.elements[idx + 1]] = [this.elements[idx + 1], this.elements[idx]];
+            this.markDirty();
+            this.render();
+        }
+    }
+
+    toBack() {
+        if (!this.selectedId) return;
+        const el = this.getElement(this.selectedId);
+        if (!el || el.type === 'connection') return;
+
+        this.snapshot();
+        const idx = this.elements.indexOf(el);
+        if (idx > 0) {
+            // Swap with previous element
+            [this.elements[idx], this.elements[idx - 1]] = [this.elements[idx - 1], this.elements[idx]];
+            this.markDirty();
+            this.render();
+        }
+    }
+
+    updateLayeringButtons() {
+        const btnFront = document.getElementById('btn-to-front');
+        const btnBack = document.getElementById('btn-to-back');
+
+        if (!this.selectedId) {
+            btnFront.disabled = true;
+            btnBack.disabled = true;
+            return;
+        }
+
+        const el = this.getElement(this.selectedId);
+        if (!el || el.type === 'connection') {
+            btnFront.disabled = true;
+            btnBack.disabled = true;
+            return;
+        }
+
+        const idx = this.elements.indexOf(el);
+        btnFront.disabled = idx >= this.elements.length - 1;
+        btnBack.disabled = idx <= 0;
+    }
+
+    // ── TOOLBAR ───────────────────────────────────────────────────────────────
+    initToolbar() {
+        document.querySelectorAll('.tb-btn[data-tool]').forEach(btn => {
+            btn.addEventListener('click', () => this.setTool(btn.dataset.tool));
+        });
+        document.getElementById('btn-grid').addEventListener('click', () => this.toggleGrid());
+        document.getElementById('btn-grid-settings').addEventListener('click', () => this.toggleGridPanel());
+        document.getElementById('btn-to-front').addEventListener('click', () => this.toFront());
+        document.getElementById('btn-to-back').addEventListener('click', () => this.toBack());
+        document.getElementById('btn-undo').addEventListener('click', () => this.undo());
+        document.getElementById('btn-redo').addEventListener('click', () => this.redo());
+        document.getElementById('btn-zoom-in').addEventListener('click', () => this.zoomBy(1.25));
+        document.getElementById('btn-zoom-out').addEventListener('click', () => this.zoomBy(0.8));
+        document.getElementById('btn-zoom-reset').addEventListener('click', () => this.fitView());
+        document.getElementById('btn-save').addEventListener('click', () => this.save());
+        document.getElementById('btn-export').addEventListener('click', () => this.exportPNG());
+        document.getElementById('plan-name-input').addEventListener('input', () => this.markDirty());
+        document.getElementById('btn-toggle-connections').addEventListener('click', () => this.toggleConnections());
+
+        // Grid settings panel controls
+        const magnetismBtn = document.getElementById('grid-magnetism-toggle');
+        const sizeSlider = document.getElementById('grid-size-slider');
+        const sizeDisplay = document.getElementById('grid-size-display');
+        const closeBtn = document.getElementById('grid-panel-close');
+
+        magnetismBtn.addEventListener('click', () => this.toggleGridMagnetism());
+        sizeSlider.addEventListener('input', (e) => this.setGridSize(parseInt(e.target.value)));
+        closeBtn.addEventListener('click', () => this.toggleGridPanel());
+
+        // Sync initial state
+        magnetismBtn.classList.toggle('active', this.gridSnap);
+        magnetismBtn.textContent = this.gridSnap ? '◉ ACTIF' : '◯ INACTIF';
+        sizeSlider.value = this.gridSize;
+        sizeDisplay.textContent = this.gridSize + ' px';
+    }
+
+    setTool(tool) {
+        this.tool = tool;
+        this.connectFirst = null;
+        document.querySelectorAll('.tb-btn[data-tool]').forEach(b => {
+            b.classList.toggle('active', b.dataset.tool === tool);
+        });
+        this.updateCursor();
+        this.render();
+    }
+
+    toggleGrid() {
+        this.gridSnap = !this.gridSnap;
+        document.getElementById('btn-grid').classList.toggle('active', this.gridSnap);
+        document.getElementById('grid-magnetism-toggle').classList.toggle('active', this.gridSnap);
+        this.render();
+    }
+
+    toggleGridPanel() {
+        const panel = document.getElementById('grid-settings-panel');
+        panel.classList.toggle('visible');
+    }
+
+    toggleGridMagnetism() {
+        this.gridSnap = !this.gridSnap;
+        const btn = document.getElementById('grid-magnetism-toggle');
+        btn.classList.toggle('active', this.gridSnap);
+        btn.textContent = this.gridSnap ? '◉ ACTIF' : '◯ INACTIF';
+        document.getElementById('btn-grid').classList.toggle('active', this.gridSnap);
+        this.render();
+    }
+
+    toggleConnections() {
+        this.showConnections = !this.showConnections;
+        const btn = document.getElementById('btn-toggle-connections');
+        btn.classList.toggle('active', this.showConnections);
+        this.render();
+    }
+
+    setGridSize(size) {
+        this.gridSize = Math.max(5, Math.min(100, size));
+        document.getElementById('grid-size-slider').value = this.gridSize;
+        document.getElementById('grid-size-display').textContent = this.gridSize + ' px';
+        this.markDirty();
+        this.render();
+    }
+
+    updateCursor() {
+        const cursors = {
+            select: 'default', wall: 'crosshair', desk: 'crosshair',
+            door: 'crosshair', window: 'crosshair', text: 'text', connect: 'cell'
+        };
+        this.wrap.style.cursor = cursors[this.tool] || 'default';
+    }
+
+    // ── ZOOM ──────────────────────────────────────────────────────────────────
+    zoomBy(factor, cx, cy) {
+        const newScale = Math.min(5, Math.max(0.1, this.scale * factor));
+        if (cx === undefined) { cx = this.canvas.width / 2; cy = this.canvas.height / 2; }
+        this.offsetX = cx - (cx - this.offsetX) * (newScale / this.scale);
+        this.offsetY = cy - (cy - this.offsetY) * (newScale / this.scale);
+        this.scale = newScale;
+        document.getElementById('zoom-label').textContent = Math.round(this.scale * 100) + '%';
+        this.render();
+    }
+
+    fitView() {
+        const bounds = this.getContentBounds();
+        if (!bounds) { this.scale = 1; this.centerView(); this.render(); return; }
+        const pad = 60;
+        const sw = this.canvas.width - pad*2;
+        const sh = this.canvas.height - pad*2;
+        this.scale = Math.min(5, Math.max(0.1, Math.min(sw / bounds.w, sh / bounds.h)));
+        this.offsetX = pad + (sw - bounds.w * this.scale) / 2 - bounds.x * this.scale;
+        this.offsetY = pad + (sh - bounds.h * this.scale) / 2 - bounds.y * this.scale;
+        document.getElementById('zoom-label').textContent = Math.round(this.scale * 100) + '%';
+        this.render();
+    }
+
+    // ── KEYBOARD ──────────────────────────────────────────────────────────────
+    initKeyboard() {
+        window.addEventListener('keydown', e => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+            if (e.key === ' ') { e.preventDefault(); this.spaceDown = true; this.wrap.style.cursor = 'grab'; }
+            if (e.ctrlKey) {
+                if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); this.undo(); }
+                if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); this.redo(); }
+                if (e.key === 's' || e.key === 'S') { e.preventDefault(); this.save(); }
+                if (e.key === '=' || e.key === '+') { e.preventDefault(); this.zoomBy(1.25); }
+                if (e.key === '-') { e.preventDefault(); this.zoomBy(0.8); }
+                if (e.key === 'ArrowUp') { e.preventDefault(); this.toFront(); }
+                if (e.key === 'ArrowDown') { e.preventDefault(); this.toBack(); }
+            }
+            if (!e.ctrlKey) {
+                const toolKeys = { s:'select', w:'wall', d:'door', n:'window', f:'desk', t:'text', c:'connect' };
+                if (toolKeys[e.key.toLowerCase()]) this.setTool(toolKeys[e.key.toLowerCase()]);
+                if (e.key === 'g' || e.key === 'G') this.toggleGrid();
+                if ((e.key === 'Delete' || e.key === 'Backspace') && this.selectedId) {
+                    this.deleteElement(this.selectedId);
+                }
+                if (e.key === 'Escape') {
+                    this.connectFirst = null;
+                    this.selectedId = null;
+                    this.cancelTextInput();
+                    this.render();
+                    this.updatePropsPanel();
+                }
+            }
+        });
+        window.addEventListener('keyup', e => {
+            if (e.key === ' ') {
+                this.spaceDown = false;
+                if (!this.isPanning) this.updateCursor();
+            }
+        });
+    }
+
+    // ── MOUSE EVENTS ─────────────────────────────────────────────────────────
+    onMouseDown(e) {
+        const sc = this.clientToCanvas(e);
+        const wc = this.screenToWorld(sc.x, sc.y);
+
+        // Middle mouse or space+drag = pan
+        if (e.button === 1 || (e.button === 0 && this.spaceDown)) {
+            e.preventDefault();
+            this.isPanning = true;
+            this.panStart = { sx: sc.x, sy: sc.y, ox: this.offsetX, oy: this.offsetY };
+            this.wrap.style.cursor = 'grabbing';
+            return;
+        }
+        if (e.button !== 0) return;
+
+        const tool = this.tool;
+
+        if (tool === 'select') {
+            // Check rotation handle first
+            if (this.selectedId) {
+                const sel = this.getElement(this.selectedId);
+                if (sel && !sel.locked) {
+                    const rh = this.getRotationHandlePos(sel);
+                    if (rh && Math.hypot(wc.x - rh.x, wc.y - rh.y) < 10/this.scale) {
+                        this.snapshot();
+                        this.isRotating = true;
+                        const lb = this.getLocalBounds(sel);
+                        this.rotateCenter = { x: lb.x + lb.w/2, y: lb.y + lb.h/2 };
+                        this.rotateElementOrigin = sel.rotation || 0;
+                        this.rotateStartAngle = Math.atan2(wc.y - this.rotateCenter.y, wc.x - this.rotateCenter.x);
+                        return;
+                    }
+                }
+            }
+            // Check resize handles
+            if (this.selectedId) {
+                const sel = this.getElement(this.selectedId);
+                if (sel && sel.type !== 'connection' && sel.type !== 'text' && !sel.locked) {
+                    const handle = this.getResizeHandle(sel, wc.x, wc.y);
+                    if (handle) {
+                        this.snapshot();
+                        this.isResizing = true;
+                        this.resizeHandle = handle;
+                        const lb = this.getLocalBounds(sel);
+                        this.resizeOrigin = { ...lb };
+                        this.dragStartPos = { x: wc.x, y: wc.y };
+                        return;
+                    }
+                }
+            }
+            const hitId = this.hitTest(wc.x, wc.y);
+            if (hitId) {
+                if (hitId !== this.selectedId) {
+                    this.selectedId = hitId;
+                    this.updatePropsPanel();
+                }
+                const el = this.getElement(hitId);
+                if (el && el.type !== 'connection' && !el.locked) {
+                    this.snapshot();
+                    this.isDraggingElement = true;
+                    this.dragStartPos = { x: wc.x, y: wc.y };
+                    this.dragElementOrigin = { x: el.x, y: el.y };
+                }
+            } else {
+                // Click on empty background: deselect + start pan on drag
+                this.selectedId = null;
+                this.updatePropsPanel();
+                this.isPanning = true;
+                this.panStart = { sx: sc.x, sy: sc.y, ox: this.offsetX, oy: this.offsetY };
+                this.wrap.style.cursor = 'grabbing';
+            }
+            this.render();
+            return;
+        }
+
+        if (tool === 'connect') {
+            const hitId = this.hitTest(wc.x, wc.y);
+            if (!hitId) { this.connectFirst = null; this.render(); return; }
+            if (!this.connectFirst) {
+                this.connectFirst = hitId;
+                this.render();
+                return;
+            }
+            if (this.connectFirst === hitId) { this.connectFirst = null; this.render(); return; }
+            this.snapshot();
+            const conn = {
+                id: this.newId(), type: 'connection',
+                fromId: this.connectFirst, toId: hitId,
+                color: '#00c9ff', style: 'solid', arrowStyle: 'arrow', thickness: 2, label: ''
+            };
+            this.elements.push(conn);
+            this.connectFirst = null;
+            this.selectedId = conn.id;
+            this.markDirty();
+            this.render();
+            this.updatePropsPanel();
+            return;
+        }
+
+        if (tool === 'text') {
+            this.showTextInput(sc.x, sc.y, wc.x, wc.y);
+            return;
+        }
+
+        if (tool === 'door') {
+            this.snapshot();
+            const wx = this.snap(wc.x), wy = this.snap(wc.y);
+            const el = { id: this.newId(), type: 'door', x: wx, y: wy, w: 60, h: 15, color: '#546e7a', swing: 0 };
+            this.elements.push(el);
+            this.selectedId = el.id;
+            this.markDirty();
+            this.render();
+            this.updatePropsPanel();
+            return;
+        }
+
+        if (tool === 'window') {
+            this.snapshot();
+            const wx = this.snap(wc.x), wy = this.snap(wc.y);
+            const el = { id: this.newId(), type: 'window', x: wx, y: wy, w: 60, h: 15, color: '#90caf9' };
+            this.elements.push(el);
+            this.selectedId = el.id;
+            this.markDirty();
+            this.render();
+            this.updatePropsPanel();
+            return;
+        }
+
+        // Wall / Desk — start drawing
+        if (tool === 'wall' || tool === 'desk') {
+            this.isDrawing = true;
+            this.drawStart = { x: this.snap(wc.x), y: this.snap(wc.y) };
+            this.drawRect = null;
+            return;
+        }
+    }
+
+    onMouseMove(e) {
+        const sc = this.clientToCanvas(e);
+        const wc = this.screenToWorld(sc.x, sc.y);
+
+        if (this.isPanning) {
+            this.offsetX = this.panStart.ox + (sc.x - this.panStart.sx);
+            this.offsetY = this.panStart.oy + (sc.y - this.panStart.sy);
+            this.render();
+            return;
+        }
+
+        if (this.isRotating && this.selectedId) {
+            const el = this.getElement(this.selectedId);
+            if (el) {
+                const curAngle = Math.atan2(wc.y - this.rotateCenter.y, wc.x - this.rotateCenter.x);
+                let deg = this.rotateElementOrigin + (curAngle - this.rotateStartAngle) * 180 / Math.PI;
+                // Magnetic snap: every 15°, with ±5° attraction zone
+                const snapDeg = Math.round(deg / 15) * 15;
+                if (Math.abs(deg - snapDeg) < 5) deg = snapDeg;
+                el.rotation = (((Math.round(deg)) % 360) + 360) % 360;
+                this.markDirty(); this.render(); this.updatePropsPanel();
+            }
+            return;
+        }
+
+        if (this.isResizing && this.selectedId) {
+            const el = this.getElement(this.selectedId);
+            if (el) {
+                const dx = wc.x - this.dragStartPos.x;
+                const dy = wc.y - this.dragStartPos.y;
+                this.applyResize(el, this.resizeHandle, dx, dy);
+                this.markDirty();
+                this.render();
+                this.updatePropsPanel();
+            }
+            return;
+        }
+
+        if (this.isDraggingElement && this.selectedId) {
+            const el = this.getElement(this.selectedId);
+            if (el && el.type !== 'connection') {
+                const dx = wc.x - this.dragStartPos.x;
+                const dy = wc.y - this.dragStartPos.y;
+                el.x = this.snap(this.dragElementOrigin.x + dx);
+                el.y = this.snap(this.dragElementOrigin.y + dy);
+                this.markDirty();
+                this.render();
+                this.updatePropsPanel();
+            }
+            return;
+        }
+
+        if (this.isDrawing && this.drawStart) {
+            const ex = this.snap(wc.x), ey = this.snap(wc.y);
+            this.drawRect = {
+                x: Math.min(this.drawStart.x, ex),
+                y: Math.min(this.drawStart.y, ey),
+                w: Math.abs(ex - this.drawStart.x),
+                h: Math.abs(ey - this.drawStart.y)
+            };
+            this.render();
+            return;
+        }
+
+        // Hover
+        const prevHover = this.hoverId;
+        this.hoverId = this.hitTest(wc.x, wc.y);
+        if (this.hoverId !== prevHover) this.render();
+
+        // Rotation / resize cursor
+        if (this.tool === 'select' && this.selectedId) {
+            const sel = this.getElement(this.selectedId);
+            if (sel) {
+                // Rotation handle hover
+                const rh = this.getRotationHandlePos(sel);
+                if (rh && Math.hypot(wc.x - rh.x, wc.y - rh.y) < 10/this.scale) {
+                    this.wrap.style.cursor = 'crosshair'; return;
+                }
+                // Resize handle hover
+                if (sel.type !== 'connection' && sel.type !== 'text') {
+                    const handle = this.getResizeHandle(sel, wc.x, wc.y);
+                    const cursors = {
+                        n:'n-resize', s:'s-resize', e:'e-resize', w:'w-resize',
+                        ne:'ne-resize', nw:'nw-resize', se:'se-resize', sw:'sw-resize'
+                    };
+                    if (handle) { this.wrap.style.cursor = cursors[handle] || 'pointer'; return; }
+                }
+            }
+        }
+        if (!this.spaceDown) this.updateCursor();
+    }
+
+    onMouseUp(e) {
+        if (this.isPanning) {
+            this.isPanning = false;
+            this.wrap.style.cursor = this.spaceDown ? 'grab' : '';
+            this.updateCursor();
+            return;
+        }
+
+        if (this.isRotating) { this.isRotating = false; this.render(); return; }
+        if (this.isResizing) { this.isResizing = false; this.resizeHandle = null; return; }
+        if (this.isDraggingElement) { this.isDraggingElement = false; return; }
+
+        if (this.isDrawing && this.drawRect && this.drawStart) {
+            this.isDrawing = false;
+            const r = this.drawRect;
+            if (r.w >= 10 && r.h >= 10) {
+                this.snapshot();
+                const tool = this.tool;
+                const el = {
+                    id: this.newId(),
+                    type: tool,
+                    x: r.x, y: r.y, w: r.w, h: r.h,
+                    color: tool === 'wall' ? '#546e7a' : '#8b6914',
+                    label: tool === 'desk' ? '' : undefined
+                };
+                if (tool !== 'wall') el.label = '';
+                this.elements.push(el);
+                this.selectedId = el.id;
+                this.markDirty();
+                this.updatePropsPanel();
+            }
+            this.drawRect = null;
+            this.render();
+        }
+    }
+
+    onWheel(e) {
+        e.preventDefault();
+        const sc = this.clientToCanvas(e);
+        const factor = e.deltaY < 0 ? 1.1 : 0.9;
+        this.zoomBy(factor, sc.x, sc.y);
+    }
+
+    // ── TEXT INPUT ────────────────────────────────────────────────────────────
+    showTextInput(sx, sy, wx, wy, existingElement = null) {
+        const inp = document.getElementById('text-input-overlay');
+        if (!inp) {
+            console.error('Text input element not found');
+            return;
+        }
+
+        // Nettoyer les anciens listeners
+        if (inp._handlers) {
+            inp.removeEventListener('keydown', inp._handlers.onKey);
+            inp.removeEventListener('blur', inp._handlers.onBlur);
+        }
+
+        inp.style.display = 'block';
+        inp.style.left = Math.round(sx) + 'px';
+        inp.style.top = Math.round(sy) + 'px';
+        inp.value = existingElement ? (existingElement.text || '') : '';
+        inp._wx = wx;
+        inp._wy = wy;
+
+        // Set overlay font size to match element's font size (capped for readability)
+        const fontSize = existingElement ? Math.min(24, (existingElement.fontSize || 13)) : 13;
+        inp.style.fontSize = fontSize + 'px';
+
+        const confirm = () => {
+            const txt = inp.value.trim();
+            if (txt || existingElement) {
+                this.snapshot();
+                if (existingElement) {
+                    // Update existing text element
+                    existingElement.text = txt || existingElement.text;
+                } else if (txt) {
+                    // Create new text element
+                    const el = {
+                        id: this.newId(), type: 'text',
+                        x: this.snap(wx), y: this.snap(wy),
+                        text: txt, fontSize: 13,
+                        color: '#ffffff', bg: '#1e3a5f'
+                    };
+                    this.elements.push(el);
+                    this.selectedId = el.id;
+                }
+                this.markDirty();
+                this.render();
+                this.updatePropsPanel();
+            }
+            inp.style.display = 'none';
+            inp.removeEventListener('keydown', inp._handlers.onKey);
+            inp.removeEventListener('blur', inp._handlers.onBlur);
+            inp._handlers = null;
+            this.setTool('select');
+        };
+
+        const onKey = (ev) => {
+            if (ev.key === 'Enter') { ev.preventDefault(); confirm(); }
+            if (ev.key === 'Escape') {
+                inp.style.display = 'none';
+                inp.removeEventListener('keydown', onKey);
+                inp.removeEventListener('blur', inp._handlers.onBlur);
+                inp._handlers = null;
+                this.setTool('select');
+            }
+        };
+
+        const onBlur = () => confirm();
+
+        inp._handlers = { onKey, onBlur };
+        inp.addEventListener('keydown', onKey);
+        inp.addEventListener('blur', onBlur);
+
+        // Forcer le focus après un délai court pour s'assurer que l'input est rendu
+        setTimeout(() => {
+            inp.focus();
+            inp.select();
+        }, 10);
+    }
+
+    cancelTextInput() {
+        const inp = document.getElementById('text-input-overlay');
+        inp.style.display = 'none';
+    }
+
+    // ── DRAG & DROP (devices from panel) ─────────────────────────────────────
+    initDragDrop() {
+        document.getElementById('device-list').addEventListener('dragstart', e => {
+            const item = e.target.closest('.device-item');
+            if (!item) return;
+            e.dataTransfer.setData('application/x-device', JSON.stringify({
+                id: item.dataset.id,
+                nom: item.dataset.nom,
+                type: item.dataset.type,
+                color: item.dataset.color,
+                status: parseInt(item.dataset.status) || 0
+            }));
+            e.dataTransfer.effectAllowed = 'copy';
+        });
+
+        this.wrap.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+        this.wrap.addEventListener('drop', e => {
+            e.preventDefault();
+            const raw = e.dataTransfer.getData('application/x-device');
+            if (!raw) return;
+            const ap = JSON.parse(raw);
+            const sc = this.clientToCanvas(e);
+            const wc = this.screenToWorld(sc.x, sc.y);
+            this.snapshot();
+            const el = {
+                id: this.newId(), type: 'device',
+                x: this.snap(wc.x - 45), y: this.snap(wc.y - 30),
+                w: 90, h: 60,
+                appareil_id: parseInt(ap.id),
+                nom: ap.nom,
+                type_appareil: ap.type,
+                color: ap.color,
+                status: ap.status !== undefined ? parseInt(ap.status) : 0,
+                icon: TYPE_ICONS[ap.type] || null,
+                fontSize: 9
+            };
+            this.elements.push(el);
+            this.selectedId = el.id;
+            this.markDirty();
+            this.render();
+            this.updatePropsPanel();
+        });
+    }
+
+    // ── LEFT PANEL ────────────────────────────────────────────────────────────
+    initLeftPanel() {
+        // Search functionality
+        document.getElementById('device-search').addEventListener('input', e => {
+            const q = e.target.value.toLowerCase();
+            document.querySelectorAll('.device-item').forEach(item => {
+                const name = item.dataset.nom.toLowerCase();
+                const type = item.dataset.type.toLowerCase();
+                item.style.display = (name.includes(q) || type.includes(q)) ? '' : 'none';
+            });
+        });
+
+        // Panel toggle buttons
+        document.getElementById('left-panel-toggle').addEventListener('click', () => {
+            const panel = document.getElementById('left-panel');
+            panel.classList.toggle('collapsed');
+            const btn = document.getElementById('left-panel-toggle');
+            btn.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+            const tabBtn = document.getElementById('left-toggle-tab');
+            if (tabBtn) tabBtn.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+        });
+
+        // Toggle button on the side (when panel is collapsed)
+        const tabBtn = document.getElementById('left-toggle-tab');
+        if (tabBtn) {
+            tabBtn.addEventListener('click', () => {
+                const panel = document.getElementById('left-panel');
+                panel.classList.toggle('collapsed');
+                const btn = document.getElementById('left-panel-toggle');
+                btn.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+                tabBtn.textContent = panel.classList.contains('collapsed') ? '▶' : '◀';
+            });
+        }
+
+        // Tab switching
+        document.querySelectorAll('.panel-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tabId = btn.dataset.tab;
+                document.querySelectorAll('.panel-tab-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.panel-tab-content').forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(`panel-${tabId}-tab`).classList.add('active');
+            });
+        });
+
+        // Palette items drag and drop
+        document.querySelectorAll('.palette-item').forEach(item => {
+            item.addEventListener('dragstart', e => {
+                e.dataTransfer.effectAllowed = 'copy';
+                e.dataTransfer.setData('application/x-object', JSON.stringify({
+                    type: item.dataset.type,
+                    label: item.dataset.label
+                }));
+            });
+        });
+
+        // Handle object drop
+        this.wrap.addEventListener('dragover', e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+        this.wrap.addEventListener('drop', e => {
+            e.preventDefault();
+            const raw = e.dataTransfer.getData('application/x-object');
+            if (!raw) return;
+            const obj = JSON.parse(raw);
+            const sc = this.clientToCanvas(e);
+            const wc = this.screenToWorld(sc.x, sc.y);
+            this.snapshot();
+            const el = {
+                id: this.newId(), type: 'device',
+                x: this.snap(wc.x - 45), y: this.snap(wc.y - 30),
+                w: 90, h: 60,
+                nom: obj.label,
+                type_appareil: obj.type,
+                color: '#8b6914',
+                status: -1  // Non-referenced
+            };
+            this.elements.push(el);
+            this.selectedId = el.id;
+            this.markDirty();
+            this.render();
+            this.updatePropsPanel();
+        });
+    }
+
+    // ── DELETE ELEMENT ────────────────────────────────────────────────────────
+    deleteElement(id) {
+        this.snapshot();
+        // Also remove connections referencing this element
+        this.elements = this.elements.filter(e => {
+            if (e.id === id) return false;
+            if (e.type === 'connection' && (e.fromId === id || e.toId === id)) return false;
+            return true;
+        });
+        this.selectedId = null;
+        this.markDirty();
+        this.render();
+        this.updatePropsPanel();
+    }
+
+    // ── PROPERTIES PANEL ─────────────────────────────────────────────────────
+    updatePropsPanel() {
+        const panel = document.getElementById('props-panel');
+        const content = document.getElementById('props-content');
+
+        if (!this.selectedId) {
+            panel.classList.add('hidden');
+            content.innerHTML = '<div class="props-empty">Sélectionnez un élément</div>';
+            this.updateLayeringButtons();
+            return;
+        }
+        const el = this.getElement(this.selectedId);
+        if (!el) { panel.classList.add('hidden'); this.updateLayeringButtons(); return; }
+        panel.classList.remove('hidden');
+        this.updateLayeringButtons();
+
+        // ── helpers ──
+        const esc = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+        const row  = (label, inner) => `<div class="prop-row"><div class="prop-label">${label}</div>${inner}</div>`;
+        const valRow = (label, val) => row(label, `<div class="prop-value">${esc(val)}</div>`);
+        const inputText = (name, val, ph='') => `<input type="text" class="prop-input" data-prop="${name}" value="${esc(val)}" placeholder="${ph}">`;
+        const inputNum  = (name, val, min, max, step=1) => `<input type="number" class="prop-input" data-prop="${name}" value="${val||0}" min="${min}" max="${max}" step="${step}" style="width:68px;">`;
+        const inputSel  = (name, val, opts) => `<select class="prop-input" data-prop="${name}">${opts.map(([v,l])=>`<option value="${v}"${v==val?' selected':''}>${l}</option>`).join('')}</select>`;
+
+        // Color swatch palette
+        const swatchPicker = (name, cur) => {
+            const swatches = COLOR_PALETTE.map(c =>
+                `<span class="swatch${c===cur?' swatch-active':''}" data-sp="${name}" data-sc="${c}" style="background:${c}" title="${c}"></span>`
+            ).join('');
+            return `<div class="swatch-row">${swatches}</div>`
+                + `<div class="swatch-custom"><input type="color" class="prop-input" data-prop="${name}" value="${cur||'#ffffff'}" style="width:28px;height:22px;padding:1px;cursor:pointer;" title="Couleur personnalisée"></div>`;
+        };
+
+        // Lock button
+        const lockBtn = () => `<button id="prop-lock-btn" class="prop-toggle-btn${el.locked?' active':''}">${el.locked?'🔒 Verrouillé':'🔓 Déplaçable'}</button>`;
+
+        // Rotation slider (common to all non-connection elements)
+        const rotRow = () => {
+            const deg = el.rotation || 0;
+            return row('Rotation', `<div style="display:flex;align-items:center;gap:5px;">
+                <input type="range" class="prop-input" data-prop="rotation" min="0" max="359" value="${deg}" style="flex:1;padding:0;height:18px;cursor:pointer;">
+                <span id="rot-val" style="font-size:.72rem;color:var(--text-secondary);min-width:30px;text-align:right;">${deg}°</span>
+                <button data-rotsnap="0" title="Réinitialiser" style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:2px;background:transparent;color:var(--text-muted);cursor:pointer;">↺</button>
+            </div>`);
+        };
+
+        let html = '';
+
+        // ── WALL ──────────────────────────────────────────────────────────────
+        if (el.type === 'wall') {
+            html += row('Couleur', swatchPicker('color', el.color || '#546e7a'));
+            html += valRow('L × H', `${Math.round(el.w)} × ${Math.round(el.h)} px`);
+            html += rotRow();
+            html += row('', lockBtn());
+        }
+
+        // ── DOOR ──────────────────────────────────────────────────────────────
+        if (el.type === 'door') {
+            const sw = parseInt(el.swing)||0;
+            const swLabels = ['↙ Gauche-bas','↘ Droite-bas','↖ Gauche-haut','↗ Droite-haut'];
+            const swBtns = swLabels.map((l,i)=>
+                `<button class="swing-btn${i===sw?' active':''}" data-sw="${i}">${l}</button>`).join('');
+            html += row('Battant', `<div class="swing-grid">${swBtns}</div>`);
+            html += row('Couleur', swatchPicker('color', el.color || '#546e7a'));
+            html += valRow('L × H', `${Math.round(el.w)} × ${Math.round(el.h)} px`);
+            html += rotRow();
+            html += row('', lockBtn());
+        }
+
+        // ── WINDOW ────────────────────────────────────────────────────────────
+        if (el.type === 'window') {
+            html += row('Couleur', swatchPicker('color', el.color || '#90caf9'));
+            html += valRow('L × H', `${Math.round(el.w)} × ${Math.round(el.h)} px`);
+            html += rotRow();
+            html += row('', lockBtn());
+        }
+
+        // ── DESK ──────────────────────────────────────────────────────────────
+        if (el.type === 'desk') {
+            html += row('Couleur', swatchPicker('color', el.color || '#8b6914'));
+            html += row('Étiquette', inputText('label', el.label, 'Bureau…'));
+            html += valRow('L × H', `${Math.round(el.w)} × ${Math.round(el.h)} px`);
+            html += rotRow();
+            html += row('', lockBtn());
+        }
+
+        // ── TEXT ──────────────────────────────────────────────────────────────
+        if (el.type === 'text') {
+            html += row('Texte', inputText('text', el.text));
+            html += row('Taille px', inputNum('fontSize', el.fontSize||13, 8, 72));
+            html += row('Couleur', swatchPicker('color', el.color || '#ffffff'));
+            html += row('Fond', swatchPicker('bg', el.bg || '#1e3a5f'));
+            const syms = IT_SYMBOLS.map(s=>`<span class="it-sym" data-sym="${s}">${s}</span>`).join('');
+            html += row('Symboles IT', `<div class="it-symbols">${syms}</div>`);
+            html += rotRow();
+            html += row('', lockBtn());
+        }
+
+        // ── DEVICE ────────────────────────────────────────────────────────────
+        if (el.type === 'device') {
+            const st = el.status;
+            const ledC = (st===1||st===true)?'#00ff88':(st===0||st===false)?'#ff3355':'#576574';
+            const ledL = (st===1||st===true)?'En ligne':(st===0||st===false)?'Hors ligne':'Inconnu';
+            html += valRow('Nom', el.nom);
+            html += valRow('Type', el.type_appareil);
+            html += row('Statut', `<span style="display:inline-flex;align-items:center;gap:5px;font-size:.78rem;color:${ledC};"><span style="width:8px;height:8px;border-radius:50%;background:${ledC};display:inline-block;"></span>${ledL}</span>`);
+            html += `<div class="prop-row"><div class="prop-label">Fiche</div><a class="prop-link" href="/appareil/${el.appareil_id}/editer" target="_blank">Ouvrir →</a></div>`;
+            html += valRow('Connexions', this.connectionCount(el.id));
+            html += row('Taille icône', inputNum('iconSize', el.iconSize||22, 8, 60));
+            html += row('Taille nom', inputNum('fontSize', el.fontSize||8, 5, 28));
+            html += row('Couleur', swatchPicker('color', el.color || '#2563eb'));
+            const curIcon = el.icon || TYPE_ICONS[el.type_appareil] || '';
+            const iconGrid = ICON_LIBRARY.map(({i,l})=>
+                `<span class="icon-item${i===curIcon?' icon-active':''}" data-icon="${i}" title="${l}">${i}</span>`).join('');
+            html += row('Icône', `<div class="icon-picker">${iconGrid}</div>`);
+            html += rotRow();
+            html += row('', lockBtn());
+        }
+
+        // ── CONNECTION ────────────────────────────────────────────────────────
+        if (el.type === 'connection') {
+            const fe = this.getElement(el.fromId), te = this.getElement(el.toId);
+            html += valRow('De', fe ? (fe.nom||fe.label||fe.type) : '?');
+            html += valRow('Vers', te ? (te.nom||te.label||te.type) : '?');
+            html += row('Étiquette', inputText('label', el.label, 'RJ45…'));
+            html += row('Couleur', swatchPicker('color', el.color || '#00c9ff'));
+            html += row('Style', inputSel('style', el.style||'solid', [['solid','━ Plein'],['dashed','╌ Tirets'],['dotted','··· Points'],['double','═ Double']]));
+            html += row('Flèches', inputSel('arrowStyle', el.arrowStyle||'arrow', [['none','Aucune'],['arrow','→ Simple'],['bidirectional','↔ Double']]));
+            html += row('Épaisseur', `<div style="display:flex;align-items:center;gap:6px;"><input type="range" class="prop-input" data-prop="thickness" min="1" max="10" value="${el.thickness||2}" style="flex:1;padding:0;height:18px;cursor:pointer;"><span style="font-size:.75rem;color:var(--text-secondary);min-width:18px;">${el.thickness||2}</span></div>`);
+        }
+
+        html += `<button class="prop-del-btn" id="prop-del-btn">Supprimer</button>`;
+        content.innerHTML = html;
+
+        // ── Wire inputs ───────────────────────────────────────────────────────
+        content.querySelectorAll('[data-prop]').forEach(inp => {
+            const update = () => {
+                const p = inp.dataset.prop;
+                el[p] = (inp.type==='number'||inp.type==='range') ? parseFloat(inp.value) : inp.value;
+                // Update range display label
+                if (inp.type==='range') {
+                    const sp = inp.nextElementSibling;
+                    if (sp && sp.tagName !== 'BUTTON') sp.textContent = inp.value + (p === 'rotation' ? '°' : '');
+                }
+                this.markDirty(); this.render();
+            };
+            inp.addEventListener('input', update);
+            inp.addEventListener('change', update);
+        });
+
+        // ── Wire rotation reset button ────────────────────────────────────────
+        content.querySelectorAll('[data-rotsnap]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                el.rotation = parseInt(btn.dataset.rotsnap);
+                const ri = content.querySelector('[data-prop="rotation"]');
+                if (ri) { ri.value = el.rotation; const sp = ri.nextElementSibling; if (sp) sp.textContent = el.rotation + '°'; }
+                this.markDirty(); this.render();
+            });
+        });
+
+        // ── Wire color swatches ───────────────────────────────────────────────
+        content.querySelectorAll('.swatch').forEach(sw => {
+            sw.addEventListener('click', () => {
+                const prop = sw.dataset.sp, color = sw.dataset.sc;
+                el[prop] = color;
+                content.querySelectorAll(`.swatch[data-sp="${prop}"]`).forEach(s =>
+                    s.classList.toggle('swatch-active', s.dataset.sc === color));
+                const ni = content.querySelector(`input[type="color"][data-prop="${prop}"]`);
+                if (ni) ni.value = color;
+                this.markDirty(); this.render();
+            });
+        });
+
+        // ── Wire swing buttons ────────────────────────────────────────────────
+        content.querySelectorAll('.swing-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                el.swing = parseInt(btn.dataset.sw);
+                content.querySelectorAll('.swing-btn').forEach(b =>
+                    b.classList.toggle('active', parseInt(b.dataset.sw) === el.swing));
+                this.markDirty(); this.render();
+            });
+        });
+
+        // ── Wire icon picker ──────────────────────────────────────────────────
+        content.querySelectorAll('.icon-item').forEach(ic => {
+            ic.addEventListener('click', () => {
+                el.icon = ic.dataset.icon;
+                content.querySelectorAll('.icon-item').forEach(i =>
+                    i.classList.toggle('icon-active', i.dataset.icon === el.icon));
+                this.markDirty(); this.render();
+            });
+        });
+
+        // ── Wire IT symbols ───────────────────────────────────────────────────
+        content.querySelectorAll('.it-sym').forEach(sym => {
+            sym.addEventListener('click', () => {
+                const ti = content.querySelector('[data-prop="text"]');
+                if (ti) { ti.value += sym.dataset.sym; el.text = ti.value; this.markDirty(); this.render(); }
+            });
+        });
+
+        // ── Wire lock button ──────────────────────────────────────────────────
+        const lb = document.getElementById('prop-lock-btn');
+        if (lb) {
+            lb.addEventListener('click', () => {
+                el.locked = !el.locked;
+                lb.textContent = el.locked ? '🔒 Verrouillé' : '🔓 Déplaçable';
+                lb.classList.toggle('active', !!el.locked);
+                this.markDirty(); this.render();
+            });
+        }
+
+        // ── Wire delete ───────────────────────────────────────────────────────
+        document.getElementById('prop-del-btn').addEventListener('click', () => {
+            if (confirm('Supprimer cet élément ?')) this.deleteElement(el.id);
+        });
+    }
+
+    // ── RENDERING ─────────────────────────────────────────────────────────────
+    render() {
+        const ctx = this.ctx;
+        const W = this.canvas.width, H = this.canvas.height;
+        ctx.clearRect(0, 0, W, H);
+        this.renderBackground(ctx, W, H);
+
+        ctx.save();
+        ctx.translate(this.offsetX, this.offsetY);
+        ctx.scale(this.scale, this.scale);
+
+        // Draw connections first (below everything) — only if visible
+        if (this.showConnections) {
+            this.elements.filter(e => e.type === 'connection').forEach(el => this.drawElement(ctx, el));
+        }
+        // Draw other elements
+        this.elements.filter(e => e.type !== 'connection').forEach(el => this.drawElement(ctx, el));
+
+        // Draw in-progress rect (wall/desk drawing preview)
+        if (this.drawRect) {
+            const r = this.drawRect;
+            const isWall = this.tool === 'wall';
+            ctx.fillStyle = isWall ? 'rgba(84,110,122,0.5)' : 'rgba(139,105,20,0.4)';
+            ctx.strokeStyle = isWall ? '#546e7a' : '#8b6914';
+            ctx.lineWidth = 2 / this.scale;
+            ctx.beginPath();
+            ctx.rect(r.x, r.y, r.w, r.h);
+            ctx.fill();
+            ctx.setLineDash([4 / this.scale, 4 / this.scale]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // Selection box + handles + rotation handle
+        if (this.selectedId) {
+            const sel = this.getElement(this.selectedId);
+            if (sel && sel.type !== 'connection') {
+                const lb = this.getLocalBounds(sel);
+                if (lb) {
+                    const cx = lb.x + lb.w/2, cy = lb.y + lb.h/2;
+                    const rot = (sel.rotation || 0) * Math.PI / 180;
+                    const pad = 3/this.scale, hs = 6/this.scale;
+
+                    ctx.save();
+                    ctx.translate(cx, cy);
+                    ctx.rotate(rot);
+
+                    // Selection rect (in local space around center)
+                    ctx.strokeStyle = '#00c9ff';
+                    ctx.lineWidth = 2/this.scale;
+                    ctx.setLineDash([]);
+                    ctx.strokeRect(-lb.w/2 - pad, -lb.h/2 - pad, lb.w + pad*2, lb.h + pad*2);
+
+                    // Resize handles at 8 positions
+                    ctx.fillStyle = '#00c9ff';
+                    const hw = lb.w/2 + pad, hh = lb.h/2 + pad;
+                    [[-hw,-hh],[0,-hh],[hw,-hh],[hw,0],[hw,hh],[0,hh],[-hw,hh],[-hw,0]]
+                        .forEach(([px,py]) => ctx.fillRect(px - hs/2, py - hs/2, hs, hs));
+
+                    // Rotation handle stem + circle
+                    const rhy = -lb.h/2 - 22/this.scale;
+                    ctx.strokeStyle = 'rgba(0,255,136,0.55)';
+                    ctx.lineWidth = 1/this.scale;
+                    ctx.beginPath(); ctx.moveTo(0, -lb.h/2 - pad); ctx.lineTo(0, rhy); ctx.stroke();
+                    ctx.fillStyle = this.isRotating ? '#ffdd00' : '#00ff88';
+                    ctx.beginPath(); ctx.arc(0, rhy, 5/this.scale, 0, Math.PI*2); ctx.fill();
+
+                    ctx.restore();
+                }
+            }
+            // Connection selected highlight
+            if (sel && sel.type === 'connection') {
+                const c = this.elementCenter(sel);
+                if (c) {
+                    ctx.beginPath();
+                    ctx.arc(c.x, c.y, 8/this.scale, 0, Math.PI*2);
+                    ctx.fillStyle = 'rgba(0,201,255,0.3)'; ctx.fill();
+                    ctx.strokeStyle = '#00c9ff'; ctx.lineWidth = 2/this.scale; ctx.stroke();
+                }
+            }
+        }
+
+        // Connect tool: first element ring
+        if (this.connectFirst) {
+            const el = this.getElement(this.connectFirst);
+            if (el) {
+                const b = this.elementBounds(el);
+                if (b) {
+                    ctx.beginPath();
+                    const cx = b.x + b.w/2, cy = b.y + b.h/2;
+                    const r = Math.max(b.w, b.h)/2 + 8/this.scale;
+                    ctx.arc(cx, cy, r, 0, Math.PI*2);
+                    ctx.strokeStyle = '#00ff88';
+                    ctx.lineWidth = 2/this.scale;
+                    ctx.setLineDash([4/this.scale, 4/this.scale]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+            }
+        }
+
+        ctx.restore();
+    }
+
+    renderBackground(ctx, W, H) {
+        ctx.fillStyle = '#0f1923';
+        ctx.fillRect(0, 0, W, H);
+        if (this.gridSnap) {
+            const gs = this.gridSize * this.scale;
+            const ox = ((this.offsetX % gs) + gs) % gs;
+            const oy = ((this.offsetY % gs) + gs) % gs;
+            ctx.strokeStyle = 'rgba(0,100,200,0.08)';
+            ctx.lineWidth = 1;
+            for (let x = ox; x < W; x += gs) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+            }
+            for (let y = oy; y < H; y += gs) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+            }
+        }
+    }
+
+    drawElement(ctx, el) {
+        const isHovered = (el.id === this.hoverId && el.id !== this.selectedId);
+
+        // Apply rotation transform around element center
+        const lb = el.type !== 'connection' ? this.getLocalBounds(el) : null;
+        const doRotate = lb && el.rotation;
+        if (doRotate) {
+            ctx.save();
+            const cx = lb.x + lb.w/2, cy = lb.y + lb.h/2;
+            ctx.translate(cx, cy);
+            ctx.rotate(el.rotation * Math.PI / 180);
+            ctx.translate(-cx, -cy);
+        }
+
+        switch(el.type) {
+            case 'wall':       this.drawWall(ctx, el, isHovered); break;
+            case 'door':       this.drawDoor(ctx, el, isHovered); break;
+            case 'window':     this.drawWindow(ctx, el, isHovered); break;
+            case 'desk':       this.drawDesk(ctx, el, isHovered); break;
+            case 'text':       this.drawText(ctx, el, isHovered); break;
+            case 'device':     this.drawDevice(ctx, el, isHovered); break;
+            case 'connection': this.drawConnection(ctx, el); break;
+        }
+
+        if (doRotate) ctx.restore();
+
+        // Lock indicator (at AABB top-left, no rotation applied)
+        if (el.locked && el.type !== 'connection') {
+            const ab = this.elementBounds(el);
+            if (ab) {
+                ctx.save();
+                ctx.font = `${10/this.scale}px sans-serif`;
+                ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+                ctx.fillText('🔒', ab.x + 2/this.scale, ab.y + 2/this.scale);
+                ctx.restore();
+            }
+        }
+    }
+
+    drawWall(ctx, el, hover) {
+        ctx.save();
+        ctx.fillStyle = hover ? '#637e8a' : (el.color || '#546e7a');
+        ctx.fillRect(el.x, el.y, el.w, el.h);
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 1 / this.scale;
+        ctx.strokeRect(el.x, el.y, el.w, el.h);
+        ctx.restore();
+    }
+
+    drawDoor(ctx, el, hover) {
+        ctx.save();
+        const col = el.color || '#546e7a';
+        const sw = (parseInt(el.swing) || 0) % 4;
+        const { x, y, w, h } = el;
+        const isH = w >= h;
+        const R = isH ? w : h;
+
+        // Opening fill
+        ctx.fillStyle = hover ? 'rgba(84,110,122,0.35)' : 'rgba(84,110,122,0.15)';
+        ctx.fillRect(x, y, w, h);
+
+        // Opening border
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2.5 / this.scale;
+        ctx.setLineDash([]);
+        ctx.strokeRect(x, y, w, h);
+
+        // Hinge + panel + swing arc
+        ctx.lineWidth = 1.5 / this.scale;
+        let hx, hy, panelEndX, panelEndY, arcStart, arcEnd, arcCCW;
+
+        if (isH) {
+            // Horizontal door (landscape)
+            panelEndX = (sw === 0 || sw === 2) ? x + w : x;
+            panelEndY = y + h / 2;
+            if (sw === 0)      { hx=x;   hy=y+h/2; arcStart=0;           arcEnd=Math.PI/2;   arcCCW=false; }
+            else if (sw === 1) { hx=x+w; hy=y+h/2; arcStart=Math.PI;     arcEnd=Math.PI/2;   arcCCW=true;  }
+            else if (sw === 2) { hx=x;   hy=y+h/2; arcStart=0;           arcEnd=-Math.PI/2;  arcCCW=true;  }
+            else               { hx=x+w; hy=y+h/2; arcStart=Math.PI;     arcEnd=3*Math.PI/2; arcCCW=false; }
+        } else {
+            // Vertical door (portrait)
+            panelEndX = x + w / 2;
+            panelEndY = (sw === 0 || sw === 2) ? y + h : y;
+            if (sw === 0)      { hx=x+w/2; hy=y;   arcStart=Math.PI/2;   arcEnd=0;           arcCCW=true;  }
+            else if (sw === 1) { hx=x+w/2; hy=y+h; arcStart=3*Math.PI/2; arcEnd=2*Math.PI;   arcCCW=false; }
+            else if (sw === 2) { hx=x+w/2; hy=y;   arcStart=Math.PI/2;   arcEnd=Math.PI;     arcCCW=false; }
+            else               { hx=x+w/2; hy=y+h; arcStart=3*Math.PI/2; arcEnd=Math.PI;     arcCCW=true;  }
+        }
+
+        // Door panel (solid line)
+        ctx.strokeStyle = col;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(hx, hy);
+        ctx.lineTo(panelEndX, panelEndY);
+        ctx.stroke();
+
+        // Swing arc (dashed)
+        ctx.setLineDash([3/this.scale, 3/this.scale]);
+        ctx.beginPath();
+        ctx.arc(hx, hy, R, arcStart, arcEnd, arcCCW);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Hinge dot
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 3.5/this.scale, 0, Math.PI*2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    drawWindow(ctx, el, hover) {
+        ctx.save();
+        ctx.fillStyle = hover ? 'rgba(144,202,249,0.25)' : 'rgba(144,202,249,0.12)';
+        ctx.strokeStyle = el.color || '#90caf9';
+        ctx.lineWidth = 1.5 / this.scale;
+        ctx.fillRect(el.x, el.y, el.w, el.h);
+        ctx.strokeRect(el.x, el.y, el.w, el.h);
+        // 3 parallel lines
+        const lines = [0.25, 0.5, 0.75];
+        lines.forEach(f => {
+            const lx = el.x + el.w * f;
+            ctx.beginPath();
+            ctx.moveTo(lx, el.y + 2/this.scale);
+            ctx.lineTo(lx, el.y + el.h - 2/this.scale);
+            ctx.stroke();
+        });
+        ctx.restore();
+    }
+
+    drawDesk(ctx, el, hover) {
+        ctx.save();
+        const r = 4;
+        ctx.fillStyle = hover ? 'rgba(162,124,28,0.7)' : (el.color ? el.color + 'bb' : 'rgba(139,105,20,0.7)');
+        ctx.strokeStyle = el.color || '#8b6914';
+        ctx.lineWidth = 1.5 / this.scale;
+        this.roundedRect(ctx, el.x, el.y, el.w, el.h, r / this.scale);
+        ctx.fill();
+        ctx.stroke();
+        if (el.label) {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${12/this.scale}px Exo 2, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(el.label, el.x + el.w/2, el.y + el.h/2);
+        }
+        ctx.restore();
+    }
+
+    drawText(ctx, el, hover) {
+        ctx.save();
+        const fontSize = el.fontSize || 13;
+        const fs = fontSize / this.scale;
+        ctx.font = `${fs}px Arial, sans-serif`;
+        const tw = ctx.measureText(el.text || '').width;
+        const pad = 6 / this.scale;
+        const bw = tw + pad*2, bh = fs + pad*2;
+        ctx.fillStyle = hover ? '#2a4a7f' : (el.bg || '#1e3a5f');
+        ctx.fillRect(el.x, el.y, bw, bh);
+        if (hover) {
+            ctx.strokeStyle = '#00c9ff';
+            ctx.lineWidth = 1/this.scale;
+            ctx.strokeRect(el.x, el.y, bw, bh);
+        }
+        ctx.fillStyle = el.color || '#ffffff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(el.text || '', el.x + pad, el.y + bh/2);
+        ctx.restore();
+    }
+
+    drawDevice(ctx, el, hover) {
+        ctx.save();
+        const r = 6 / this.scale;
+        const baseColor = el.color || '#2563eb';
+        ctx.fillStyle = hover ? baseColor + '99' : baseColor + '44';
+        ctx.strokeStyle = baseColor;
+        ctx.lineWidth = 1.5 / this.scale;
+        this.roundedRect(ctx, el.x, el.y, el.w, el.h, r);
+        ctx.fill();
+        ctx.stroke();
+
+        // Icon or abbreviation (upper area)
+        const icon = el.icon || TYPE_ICONS[el.type_appareil] || null;
+        const iconPx = (el.iconSize || 22) / this.scale;   // screen-px → world units
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        if (icon) {
+            ctx.font = `${iconPx}px sans-serif`;
+            ctx.fillText(icon, el.x + el.w/2, el.y + el.h * 0.36);
+        } else {
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${iconPx}px Share Tech Mono, monospace`;
+            ctx.fillText(getAbbrev(el.type_appareil), el.x + el.w/2, el.y + el.h * 0.36);
+        }
+
+        // Device name (small, below icon) — font size in screen px converted to world units
+        const nameFs = (el.fontSize || 8);        // screen pixels desired
+        const nameFontSize = nameFs / this.scale;  // world units (canvas is already scaled)
+        ctx.font = `${nameFontSize}px sans-serif`;
+        ctx.fillStyle = 'rgba(255,255,255,0.88)';
+        const maxW = (el.w - 4);
+        let name = el.nom || '';
+        while (name.length > 1 && ctx.measureText(name).width > maxW) {
+            name = name.slice(0, -2) + '…';
+        }
+        ctx.fillText(name, el.x + el.w/2, el.y + el.h * 0.8);
+
+        // Status LED (top-right corner)
+        const ledR = 4 / this.scale;
+        const ledX = el.x + el.w - ledR - 3/this.scale;
+        const ledY = el.y + ledR + 3/this.scale;
+        const st = el.status;
+        const ledColor = (st === 1 || st === true) ? '#00ff88' : (st === 0 || st === false) ? '#ff3355' : '#576574';
+        ctx.beginPath();
+        ctx.arc(ledX, ledY, ledR, 0, Math.PI*2);
+        ctx.fillStyle = ledColor;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+        ctx.lineWidth = 0.5 / this.scale;
+        ctx.stroke();
+
+        ctx.restore();
+    }
+
+    drawConnection(ctx, el) {
+        const fromEl = this.getElement(el.fromId);
+        const toEl = this.getElement(el.toId);
+        if (!fromEl || !toEl) return;
+        const fb = this.elementBounds(fromEl), tb = this.elementBounds(toEl);
+        if (!fb || !tb) return;
+        const x1 = fb.x + fb.w/2, y1 = fb.y + fb.h/2;
+        const x2 = tb.x + tb.w/2, y2 = tb.y + tb.h/2;
+        const color = el.color || '#00c9ff';
+        const thickness = Math.max(1, el.thickness || 2) / this.scale;
+        const lineStyle = el.style || 'solid';
+        const arrowStyle = el.arrowStyle || 'arrow';
+
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = thickness;
+
+        // Dash pattern
+        if (lineStyle === 'dashed') ctx.setLineDash([8/this.scale, 5/this.scale]);
+        else if (lineStyle === 'dotted') ctx.setLineDash([2/this.scale, 5/this.scale]);
+        else ctx.setLineDash([]);
+
+        const cpx = (x1 + x2) / 2;
+        const cpy1 = y1, cpy2 = y2;
+
+        if (lineStyle === 'double') {
+            // Draw two parallel bezier curves
+            ctx.setLineDash([]);
+            const gap = Math.max(2, thickness * 1.5);
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            const ox = Math.sin(angle) * gap, oy = -Math.cos(angle) * gap;
+            ctx.lineWidth = Math.max(0.8, thickness * 0.6);
+            for (const s of [-1, 1]) {
+                ctx.beginPath();
+                ctx.moveTo(x1 + ox*s, y1 + oy*s);
+                ctx.bezierCurveTo(cpx + ox*s, cpy1 + oy*s, cpx + ox*s, cpy2 + oy*s, x2 + ox*s, y2 + oy*s);
+                ctx.stroke();
+            }
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.bezierCurveTo(cpx, cpy1, cpx, cpy2, x2, y2);
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        // Arrow helper
+        const drawArrow = (tipX, tipY, fromX, fromY) => {
+            const dx = tipX - fromX, dy = tipY - fromY;
+            const angle = Math.atan2(dy, dx);
+            const as = Math.max(8/this.scale, thickness * 2.5);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(tipX, tipY);
+            ctx.lineTo(tipX - as * Math.cos(angle - 0.4), tipY - as * Math.sin(angle - 0.4));
+            ctx.lineTo(tipX - as * Math.cos(angle + 0.4), tipY - as * Math.sin(angle + 0.4));
+            ctx.closePath();
+            ctx.fill();
+        };
+
+        if (arrowStyle === 'arrow' || arrowStyle === 'bidirectional') {
+            drawArrow(x2, y2, cpx, y2);
+        }
+        if (arrowStyle === 'bidirectional') {
+            drawArrow(x1, y1, cpx, y1);
+        }
+
+        // Label at midpoint
+        if (el.label) {
+            const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+            const fs = 11 / this.scale;
+            ctx.font = `${fs}px Exo 2, sans-serif`;
+            const tw = ctx.measureText(el.label).width;
+            const pad = 3 / this.scale;
+            ctx.fillStyle = 'rgba(15,25,35,0.88)';
+            ctx.fillRect(mx - tw/2 - pad, my - fs/2 - pad, tw + pad*2, fs + pad*2);
+            ctx.fillStyle = color;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(el.label, mx, my);
+        }
+
+        ctx.restore();
+    }
+
+    roundedRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+}
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    window.editor = new PlanEditor();
+});
+
+})();
+</script>
+{% endblock %}

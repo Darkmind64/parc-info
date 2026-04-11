@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+{% block title %}Identifiants — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.pwd-cell { display:flex; align-items:flex-start; flex-direction:column; gap:4px; }
+.pwd-hidden  { font-family:'Share Tech Mono',monospace; font-size:0.85rem; letter-spacing:3px; color:var(--text-muted); }
+.pwd-visible { font-family:'Share Tech Mono',monospace; font-size:0.85rem; color:var(--accent-green); word-break:break-all; }
+.copy-btn {
+    background:none; border:1px solid var(--border); border-radius:2px;
+    color:var(--text-muted); font-size:0.7rem; padding:0.15rem 0.5rem; cursor:pointer;
+    transition:all 0.15s; white-space:nowrap;
+}
+.copy-btn:hover { border-color:var(--accent); color:var(--accent); }
+.copy-btn.copied { border-color:var(--accent-green); color:var(--accent-green); }
+.pwd-btns { display:flex; gap:4px; flex-wrap:wrap; }
+.cat-filter { display:flex; gap:0.4rem; flex-wrap:wrap; margin-bottom:1.5rem; }
+.cat-chip { padding:0.25rem 0.8rem; border-radius:20px; border:1px solid var(--border); font-size:0.75rem; font-weight:600; text-decoration:none; color:var(--text-secondary); transition:all 0.15s; }
+.cat-chip:hover { border-color:var(--accent); color:var(--accent); }
+.cat-chip.active { background:rgba(0,201,255,0.1); border-color:var(--accent); color:var(--accent); }
+th[data-col] { cursor:pointer; user-select:none; white-space:nowrap; }
+th[data-col]:hover { color:var(--accent) !important; background:rgba(0,201,255,.06); }
+.sort-bar { display:flex; align-items:center; gap:0.5rem; padding:0.5rem 1rem; font-family:'Share Tech Mono',monospace; font-size:0.65rem; color:var(--text-muted); letter-spacing:1px; border-top:1px solid var(--border); }
+.sort-bar span { color:var(--accent); font-weight:700; }
+.sort-reset { background:none; border:1px solid var(--border); border-radius:2px; color:var(--text-muted); font-size:0.65rem; padding:1px 6px; cursor:pointer; font-family:'Share Tech Mono',monospace; transition:all .15s; }
+.sort-reset:hover { border-color:var(--accent-orange); color:var(--accent-orange); }
+.cat-header { font-family:'Rajdhani',sans-serif; font-size:0.7rem; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:var(--text-muted); padding:0.6rem 1rem; background:var(--bg-secondary); border-bottom:1px solid var(--border); }
+/* QR Modal */
+.qr-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); backdrop-filter:blur(4px); z-index:3000; align-items:center; justify-content:center; }
+.qr-modal-overlay.open { display:flex; }
+.qr-modal-box { background:var(--bg-card); border:1px solid var(--border-glow); border-radius:8px; padding:1.5rem; text-align:center; max-width:320px; width:90vw; }
+.qr-modal-title { font-weight:700; font-size:1rem; margin-bottom:.4rem; color:var(--text-primary); }
+.qr-modal-ssid  { font-family:'Share Tech Mono',monospace; color:var(--accent); font-size:.9rem; margin-bottom:1rem; }
+.qr-modal-canvas { background:#fff; padding:10px; border-radius:6px; display:inline-block; margin-bottom:1rem; min-width:120px; min-height:120px; }
+.qr-modal-actions { display:flex; gap:.5rem; justify-content:center; }
+/* Toast */
+.copy-toast { position:fixed; bottom:1.5rem; left:50%; transform:translateX(-50%) translateY(60px); background:rgba(0,255,136,.12); border:1px solid var(--accent-green); color:var(--accent-green); padding:.4rem 1.2rem; border-radius:4px; font-size:.8rem; font-weight:700; z-index:9999; pointer-events:none; transition:transform .25s ease; white-space:nowrap; }
+.copy-toast.show { transform:translateX(-50%) translateY(0); }
+#clipboard-helper { position:fixed; left:-9999px; top:0; width:1px; height:1px; opacity:0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Gestion des <span>Identifiants</span></h1>
+    <p><span style="color:{{ client.couleur or '#00c9ff' }}; font-weight:700;">{{ client.nom }}</span> — {{ pagination.total }} identifiant(s){% if pagination.pages > 1 %} <span style="color:var(--text-muted);font-size:.8rem;">— page {{ pagination.page }}/{{ pagination.pages }}</span>{% endif %}</p>
+</div>
+
+<div class="actions-row">
+    <div style="display:flex;flex-direction:column;gap:0.6rem;">
+        <div class="cat-filter">
+            <a href="/identifiants" class="cat-chip {% if not filtre_cat %}active{% endif %}">Tous</a>
+            {% for cat in cats_utilisees %}
+            <a href="/identifiants?cat={{ cat|urlencode }}" class="cat-chip {% if filtre_cat == cat %}active{% endif %}">{{ cat }}</a>
+            {% endfor %}
+        </div>
+        <input type="text" id="search-ident" placeholder="🔍 Rechercher..." oninput="filtrerIdents()"
+               style="width:260px;padding:0.4rem 0.8rem;font-size:0.85rem;">
+    </div>
+    <a href="/identifiant/nouveau" class="btn btn-success">+ Ajouter</a>
+</div>
+
+<!-- SECTION WIFI PARC GÉNÉRAL -->
+{% if wifi_parc %}
+<div class="card" style="padding:0;overflow:hidden;margin-bottom:1rem;">
+    <table>
+        <thead>
+            <tr>
+                <th colspan="6" style="background:var(--bg-secondary);font-size:.65rem;letter-spacing:2px;text-transform:uppercase;color:var(--accent);text-align:left;">
+                    📶 Wi-Fi — Parc général
+                    <a href="/parc" style="float:right;font-size:.65rem;color:var(--text-muted);text-decoration:none;font-weight:400;letter-spacing:0;">✏ Modifier →</a>
+                </th>
+            </tr>
+            <tr>
+                <th>SSID</th><th>Sécurité</th><th>Description</th><th>Mot de passe</th><th>QR Code</th><th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for wp in wifi_parc %}
+        <tr>
+            <td><span class="mono">{{ wp.wifi_ssid }}</span></td>
+            <td><span class="badge badge-blue" style="font-size:.6rem;">{{ wp.wifi_securite }}</span></td>
+            <td style="font-size:.82rem;color:var(--text-secondary);">{{ wp.description }}</td>
+            <td>
+                <span class="pwd-hidden" id="wp-span-{{ loop.index }}">••••••••</span>
+                <div class="pwd-btns" style="margin-top:4px;">
+                    <button class="copy-btn" onclick="wpToggle({{ loop.index }}, '{{ wp.mot_de_passe|e }}', this)">👁 Afficher</button>
+                    <button class="copy-btn" onclick="wpCopier('{{ wp.mot_de_passe|e }}', this)">📋 Copier</button>
+                </div>
+            </td>
+            <td>
+                <button class="btn btn-sm" style="background:rgba(0,201,255,.08);border-color:rgba(0,201,255,.35);color:var(--accent);padding:.25rem .5rem;"
+                    data-ssid="{{ wp.wifi_ssid|e }}" data-sec="{{ wp.wifi_securite|e }}" data-pwd="{{ wp.mot_de_passe|e }}"
+                    onclick="ouvrirQR(this)">⬛ QR</button>
+            </td>
+            <td></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<!-- TABLE IDENTIFIANTS -->
+<div class="card" style="padding:0;overflow:hidden;">
+{% if identifiants %}
+    {% set ns = namespace(current_cat='') %}
+    <table id="table-identifiants">
+        <thead>
+            <tr>
+                <th data-col="0">Nom</th>
+                <th data-col="1">Catégorie</th>
+                <th data-col="2">Login</th>
+                <th>Mot de passe</th>
+                <th data-col="4">URL / Accès</th>
+                <th data-col="5">Expiration</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for ident in identifiants %}
+            {% if ident.categorie != ns.current_cat %}
+            {% set ns.current_cat = ident.categorie %}
+            <tr><td colspan="7" class="cat-header">&#9632; {{ ident.categorie or 'Sans catégorie' }}</td></tr>
+            {% endif %}
+            <tr data-cat="{{ ident.categorie or '' }}" data-nom="{{ ident.nom or '' }}" data-login="{{ ident.login or '' }}">
+                <td data-sort="{{ ident.nom or '' }}">
+                    <div style="font-weight:600;">{{ ident.nom or '—' }}</div>
+                    {% if ident.description %}<div style="color:var(--text-secondary);font-size:0.78rem;">{{ ident.description }}</div>{% endif %}
+                </td>
+                <td data-sort="{{ ident.categorie or '' }}">
+                    <span class="badge badge-blue" style="font-size:.62rem;">{{ ident.categorie or '—' }}</span>
+                </td>
+                <td data-sort="{{ ident.login or '' }}">
+                    <span class="mono" id="login-val-{{ ident.id }}">{{ ident.login or '—' }}</span>
+                    {% if ident.login %}
+                    <div style="margin-top:4px;">
+                        <button class="copy-btn" onclick="copierElement('login-val-{{ ident.id }}', this)">📋 Copier</button>
+                    </div>
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="pwd-cell">
+                        <span class="pwd-hidden" id="pwd-{{ ident.id }}">••••••••</span>
+                        <div class="pwd-btns">
+                            <button class="copy-btn" onclick="afficherMdp({{ ident.id }}, this)">👁 Afficher</button>
+                            <button class="copy-btn" onclick="copierMdpBtn({{ ident.id }}, this)">📋 Copier</button>
+                        </div>
+                    </div>
+                </td>
+                <td data-sort="{{ ident.url or '' }}">
+                    {% if ident.url %}
+                    <a href="{{ ident.url }}" target="_blank" style="color:var(--accent);font-size:0.82rem;word-break:break-all;">
+                        {{ ident.url[:40] }}{% if ident.url|length > 40 %}…{% endif %}
+                    </a>
+                    {% else %}—{% endif %}
+                </td>
+                <td data-sort="{{ ident.date_expiration or 'zzz' }}">
+                    {% if ident.expire_depasse %}
+                        <span class="badge badge-red">Expirée</span>
+                        <div style="font-size:0.72rem;color:var(--accent-red);">{{ ident.date_expiration_fmt }}</div>
+                    {% elif ident.expire_bientot %}
+                        <span class="badge badge-orange">Bientôt</span>
+                        <div style="font-size:0.72rem;color:var(--accent-orange);">{{ ident.date_expiration_fmt }}</div>
+                    {% elif ident.date_expiration_fmt %}
+                        <span style="font-size:0.82rem;color:var(--text-secondary);">{{ ident.date_expiration_fmt }}</span>
+                    {% else %}—{% endif %}
+                </td>
+                <td>
+                    <div class="quick-actions">
+                        <button class="qa-btn qa-green"
+                            onclick="ouvrirFenetre('/identifiant/{{ ident.id }}/popup')"
+                            title="Presse-papier rapide">🔑 Presse-papier</button>
+                        {% if ident.wifi_ssid %}
+                        <button class="qa-btn qa-blue"
+                            data-ssid="{{ ident.wifi_ssid|e }}" data-sec="{{ ident.wifi_securite or 'WPA2' }}" data-pwd-id="{{ ident.id }}"
+                            onclick="ouvrirQRAsync(this)" title="QR Code Wi-Fi">⬛ QR Wi-Fi</button>
+                        {% endif %}
+                        <a href="/identifiant/{{ ident.id }}/editer" class="qa-btn qa-edit">✏ Éditer</a>
+                        <form method="POST" action="/identifiant/{{ ident.id }}/supprimer" onsubmit="return confirm('Supprimer ?')" style="margin:0;">
+                            <button type="submit" class="qa-btn qa-danger">✕ Supprimer</button>
+                        </form>
+                    </div>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <div style="text-align:center;padding:3rem;color:var(--text-secondary);">
+        Aucun identifiant enregistré. <br><br>
+        <a href="/identifiant/nouveau" class="btn btn-success">+ Ajouter le premier identifiant</a>
+    </div>
+{% endif %}
+</div>
+
+<!-- SORT BAR -->
+<div id="sort-status-ident" class="sort-bar" style="display:none;">
+    Trié par <span id="sort-col-ident"></span> <span id="sort-dir-ident"></span>
+    <button class="sort-reset" onclick="resetTriIdent()">✕ Réinitialiser</button>
+</div>
+
+<!-- MODAL QR (masquée par défaut) -->
+<div class="qr-modal-overlay" id="qr-modal" onclick="fermerQR(event)">
+    <div class="qr-modal-box" onclick="event.stopPropagation()">
+        <div class="qr-modal-title">📶 QR Code Wi-Fi</div>
+        <div class="qr-modal-ssid" id="qr-modal-ssid"></div>
+        <div class="qr-modal-canvas" id="qr-modal-canvas"></div>
+        <div class="qr-modal-actions">
+            <button class="btn btn-primary btn-sm" onclick="telechargerQR()">⬇ PNG</button>
+            <button class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="fermerQR()">✕ Fermer</button>
+        </div>
+        <div style="margin-top:.6rem;font-size:.7rem;color:var(--text-muted);">Scannez pour vous connecter automatiquement</div>
+    </div>
+</div>
+
+<!-- Presse-papier fallback + toast -->
+<textarea id="clipboard-helper" tabindex="-1" aria-hidden="true" readonly></textarea>
+<div class="copy-toast" id="copy-toast">✓ Copié !</div>
+
+{% if pagination.pages > 1 %}
+<div style="display:flex;align-items:center;justify-content:center;gap:.5rem;padding:1rem;border-top:1px solid var(--border);flex-wrap:wrap;">
+    {% if pagination.page > 1 %}
+    <a href="?cat={{ filtre_cat|urlencode }}&page={{ pagination.page - 1 }}" class="btn btn-sm" style="border-color:var(--border);color:var(--text-secondary);">← Précédent</a>
+    {% endif %}
+    {% for p in range(1, pagination.pages + 1) %}
+        {% if p == pagination.page %}
+        <span style="padding:.3rem .7rem;background:var(--accent);color:#000;border-radius:3px;font-size:.82rem;font-weight:700;">{{ p }}</span>
+        {% elif p == 1 or p == pagination.pages or (p >= pagination.page - 2 and p <= pagination.page + 2) %}
+        <a href="?cat={{ filtre_cat|urlencode }}&page={{ p }}" style="padding:.3rem .7rem;border:1px solid var(--border);border-radius:3px;font-size:.82rem;color:var(--text-secondary);text-decoration:none;">{{ p }}</a>
+        {% elif p == pagination.page - 3 or p == pagination.page + 3 %}
+        <span style="color:var(--text-muted);">…</span>
+        {% endif %}
+    {% endfor %}
+    {% if pagination.page < pagination.pages %}
+    <a href="?cat={{ filtre_cat|urlencode }}&page={{ pagination.page + 1 }}" class="btn btn-sm" style="border-color:var(--border);color:var(--text-secondary);">Suivant →</a>
+    {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/tri.js"></script>
+<script src="/static/js/liste_tools.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+// ── TRI ───────────────────────────────────────────────────────────────────────
+const COL_NAMES_IDENT = ['Nom','Catégorie','Login','Mot de passe','URL','Expiration','Actions'];
+document.addEventListener('DOMContentLoaded', () => {
+    TriTable.init('table-identifiants', { skipCols: [3, 6] });
+    ListeTools.init('table-identifiants', { storageKey:'idents', exportName:'identifiants', skipExportCols:[0,3,6] });
+    updateSortStatusIdent();
+});
+function updateSortStatusIdent() {
+    const saved = sessionStorage.getItem('sort_table-identifiants');
+    const bar = document.getElementById('sort-status-ident');
+    if (!saved) { bar.style.display='none'; return; }
+    try {
+        const { col, dir } = JSON.parse(saved);
+        bar.style.display = 'flex';
+        document.getElementById('sort-col-ident').textContent = COL_NAMES_IDENT[col] || col;
+        document.getElementById('sort-dir-ident').textContent = dir === 'asc' ? '▲' : '▼';
+    } catch(e) { bar.style.display='none'; }
+}
+function resetTriIdent() { sessionStorage.removeItem('sort_table-identifiants'); location.reload(); }
+document.addEventListener('click', e => {
+    if (e.target.closest('#table-identifiants thead th')) setTimeout(updateSortStatusIdent, 50);
+});
+function filtrerIdents() {
+    const q = document.getElementById('search-ident').value.toLowerCase();
+    document.querySelectorAll('#table-identifiants tbody tr[data-nom]').forEach(row => {
+        const ok = !q || row.dataset.nom.toLowerCase().includes(q)
+                      || row.dataset.login.toLowerCase().includes(q)
+                      || row.dataset.cat.toLowerCase().includes(q)
+                      || (row.innerText||'').toLowerCase().includes(q);
+        row.style.display = ok ? '' : 'none';
+    });
+}
+
+// ── COPIE ROBUSTE ─────────────────────────────────────────────────────────────
+function copier(texte, btn) {
+    function ok() {
+        if (btn) {
+            const orig = btn.innerHTML;
+            btn.innerHTML = '✓';
+            btn.classList.add('copied');
+            setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 2000);
+        }
+        const t = document.getElementById('copy-toast');
+        t.classList.add('show');
+        clearTimeout(t._t);
+        t._t = setTimeout(() => t.classList.remove('show'), 2000);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(texte).then(ok).catch(() => fallback(texte, ok));
+    } else {
+        fallback(texte, ok);
+    }
+}
+function fallback(texte, cb) {
+    const el = document.getElementById('clipboard-helper');
+    el.value = texte;
+    el.removeAttribute('readonly');
+    el.focus(); el.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch(e) {}
+    el.setAttribute('readonly','');
+    if (ok && cb) cb();
+}
+function copierElement(id, btn) {
+    copier(document.getElementById(id).textContent.trim(), btn);
+}
+
+// ── MOT DE PASSE TABLE ────────────────────────────────────────────────────────
+const mdpCache = {};
+async function getMdp(id) {
+    if (mdpCache[id] !== undefined) return mdpCache[id];
+    const r = await fetch('/api/identifiant/' + id + '/mdp');
+    const d = await r.json();
+    mdpCache[id] = d.mdp || '';
+    return mdpCache[id];
+}
+async function afficherMdp(id, btn) {
+    const span = document.getElementById('pwd-' + id);
+    if (span.classList.contains('pwd-visible')) {
+        span.textContent = '••••••••';
+        span.classList.replace('pwd-visible','pwd-hidden');
+        btn.textContent = '👁 Afficher';
+    } else {
+        span.textContent = await getMdp(id) || '(vide)';
+        span.classList.replace('pwd-hidden','pwd-visible');
+        btn.textContent = '🙈 Masquer';
+    }
+}
+async function copierMdpBtn(id, btn) {
+    copier(await getMdp(id), btn);
+}
+
+// ── WIFI PARC : afficher / copier ─────────────────────────────────────────────
+function wpToggle(idx, pwd, btn) {
+    const span = document.getElementById('wp-span-' + idx);
+    const shown = span.classList.contains('pwd-visible');
+    span.textContent = shown ? '••••••••' : (pwd || '(vide)');
+    span.className   = shown ? 'pwd-hidden' : 'pwd-visible';
+    btn.textContent  = shown ? '👁 Afficher' : '🙈 Masquer';
+}
+function wpCopier(pwd, btn) { copier(pwd, btn); }
+
+// ── FENETRE PRESSE-PAPIER ─────────────────────────────────────────────────────
+let _win = null;
+function ouvrirFenetre(url) {
+    const W=440, H=440, left=Math.round((screen.availWidth-W)/2), top=40;
+    const opts = 'width='+W+',height='+H+',left='+left+',top='+top+',resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no,status=no';
+    if (_win && !_win.closed) _win.close();
+    _win = window.open(url, 'creds_'+Date.now(), opts);
+    if (_win) _win.focus();
+}
+
+// ── QR CODE WIFI ──────────────────────────────────────────────────────────────
+function _qrStr(ssid, pwd, sec) {
+    function e(s){ return String(s).replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/"/g,'\\"'); }
+    const t = (!sec || sec==='Ouvert') ? 'nopass' : sec;
+    const p = (!sec || sec==='Ouvert' || !pwd) ? '' : ';P:'+e(pwd);
+    return 'WIFI:T:'+t+';S:'+e(ssid)+p+';;';
+}
+function _montrerQR(ssid, sec, pwd) {
+    document.getElementById('qr-modal-ssid').textContent = ssid + ' (' + sec + ')';
+    const canvas = document.getElementById('qr-modal-canvas');
+    canvas.innerHTML = '';
+    document.getElementById('qr-modal').classList.add('open');
+    document.body.style.overflow = 'hidden';
+    if (!ssid) return;
+    try {
+        new QRCode(canvas, { text:_qrStr(ssid,pwd,sec), width:200, height:200,
+            colorDark:'#000', colorLight:'#fff', correctLevel:QRCode.CorrectLevel.M });
+    } catch(e) { canvas.textContent = 'Erreur QR'; }
+}
+function ouvrirQR(btn) {
+    _montrerQR(btn.dataset.ssid||'', btn.dataset.sec||'WPA2', btn.dataset.pwd||'');
+}
+async function ouvrirQRAsync(btn) {
+    const id = btn.dataset.pwdId;
+    const pwd = id ? (await getMdp(id)) : '';
+    _montrerQR(btn.dataset.ssid||'', btn.dataset.sec||'WPA2', pwd);
+}
+function fermerQR(e) {
+    if (e && e.target !== document.getElementById('qr-modal')) return;
+    document.getElementById('qr-modal').classList.remove('open');
+    document.body.style.overflow = '';
+}
+function telechargerQR() {
+    const cv = document.querySelector('#qr-modal-canvas canvas');
+    if (!cv) return;
+    const ssid = document.getElementById('qr-modal-ssid').textContent.split(' (')[0];
+    const a = document.createElement('a');
+    a.download = 'wifi_'+ssid.replace(/[^a-z0-9]/gi,'_')+'.png';
+    a.href = cv.toDataURL('image/png');
+    a.click();
+}
+document.addEventListener('keydown', e => { if (e.key==='Escape') fermerQR(); });
+</script>
+{% endblock %}

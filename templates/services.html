@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}Services — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.svc-card {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1.2rem 1.5rem; position: relative; overflow: hidden;
+    display: flex; align-items: center; gap: 1rem; transition: border-color .2s;
+}
+.svc-card:hover { border-color: var(--border-glow); }
+.svc-bar { position:absolute; left:0; top:0; bottom:0; width:4px; }
+.svc-icon {
+    width: 44px; height: 44px; border-radius: 4px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem;
+}
+.svc-info { flex: 1; }
+.svc-nom { font-family:'Rajdhani',sans-serif; font-size:1.1rem; font-weight:700; }
+.svc-meta { font-size:0.8rem; color:var(--text-secondary); margin-top:2px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Gestion des <span>Services</span></h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        — Départements et services de l'organisation
+    </p>
+</div>
+
+<div class="actions-row">
+    <p style="color:var(--text-secondary);font-size:.88rem;">
+        Les services permettent d'organiser les utilisateurs et d'appliquer des droits par groupe.
+    </p>
+    <a href="/service/nouveau" class="btn btn-success">+ Nouveau service</a>
+</div>
+
+{% if services %}
+<div style="display:flex;flex-direction:column;gap:0.8rem;">
+{% for svc in services %}
+<div class="svc-card">
+    <div class="svc-bar" style="background:{{ svc.couleur or '#6a8aaa' }};"></div>
+    <div class="svc-icon" style="background:{{ svc.couleur or '#6a8aaa' }}22;color:{{ svc.couleur or '#6a8aaa' }};">
+        🏢
+    </div>
+    <div class="svc-info">
+        <div class="svc-nom" style="color:{{ svc.couleur or '#d0e8ff' }}">{{ svc.nom }}</div>
+        <div class="svc-meta">
+            {% if svc.responsable %}Responsable : {{ svc.responsable }} · {% endif %}
+            <span style="color:{{ svc.couleur or '#6a8aaa' }}">{{ svc.nb_users }} utilisateur(s) actif(s)</span>
+            {% if svc.description %} · {{ svc.description }}{% endif %}
+        </div>
+    </div>
+    <div style="display:flex;gap:0.5rem;flex-shrink:0;">
+        <a href="/utilisateurs?service={{ svc.id }}" class="btn btn-primary btn-sm">👥 Voir</a>
+        <a href="/service/{{ svc.id }}/editer" class="btn btn-primary btn-sm">✏</a>
+        {% if svc.nb_users == 0 %}
+        <form method="POST" action="/service/{{ svc.id }}/supprimer"
+              onsubmit="return confirm('Supprimer le service « {{ svc.nom }} » ?')">
+            <button type="submit" class="btn btn-danger btn-sm">✕</button>
+        </form>
+        {% else %}
+        <button class="btn btn-danger btn-sm" disabled title="Déplacez les {{ svc.nb_users }} utilisateur(s) avant de supprimer"
+                style="opacity:.4;cursor:not-allowed;">✕</button>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:3rem;">
+    <p style="color:var(--text-secondary);margin-bottom:1.5rem;">
+        Aucun service créé.<br>
+        Les services permettent d'organiser vos utilisateurs (ex : Comptabilité, Direction, Informatique…)
+    </p>
+    <a href="/service/nouveau" class="btn btn-success">+ Créer le premier service</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connexion — ParcInfo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
+        body {
+            background:#080c12; color:#e2e8f0; font-family:'Exo 2',sans-serif;
+            min-height:100vh; display:flex; align-items:center; justify-content:center;
+            background-image: radial-gradient(ellipse at 20% 50%, rgba(0,201,255,.04) 0%, transparent 60%),
+                              radial-gradient(ellipse at 80% 20%, rgba(0,255,136,.03) 0%, transparent 50%);
+        }
+        .login-box {
+            background:#0f1825; border:1px solid #1e3a5f; border-radius:8px;
+            padding:2.5rem 2rem; width:360px; max-width:95vw;
+            box-shadow:0 20px 60px rgba(0,0,0,.6);
+        }
+        .login-logo {
+            text-align:center; margin-bottom:2rem;
+        }
+        .login-brand {
+            font-family:'Rajdhani',sans-serif; font-size:1.8rem; font-weight:700;
+            letter-spacing:4px; text-transform:uppercase;
+            background:linear-gradient(135deg,#00c9ff,#00ff88);
+            -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+        }
+        .login-sub { font-size:.72rem; color:#4a6a8a; letter-spacing:2px; margin-top:.2rem; }
+        .form-group { margin-bottom:1rem; }
+        label { display:block; font-size:.72rem; color:#4a8ab0; letter-spacing:1.5px;
+            text-transform:uppercase; margin-bottom:.35rem; }
+        input[type=text], input[type=password] {
+            width:100%; background:#0a0e14; border:1px solid #1e3a5f;
+            color:#e2e8f0; padding:.55rem .8rem; border-radius:4px; font-size:.88rem;
+            font-family:'Exo 2',sans-serif; outline:none; transition:border-color .2s;
+        }
+        input:focus { border-color:#00c9ff; }
+        .btn-login {
+            width:100%; padding:.65rem; background:linear-gradient(135deg,#00c9ff22,#00ff8811);
+            border:1px solid #00c9ff44; color:#00c9ff; border-radius:4px;
+            font-family:'Rajdhani',sans-serif; font-size:.88rem; font-weight:700;
+            letter-spacing:2px; text-transform:uppercase; cursor:pointer;
+            transition:all .2s; margin-top:.5rem;
+        }
+        .btn-login:hover { background:rgba(0,201,255,.15); border-color:#00c9ff; }
+        .error-msg {
+            background:rgba(255,51,85,.1); border:1px solid rgba(255,51,85,.3);
+            color:#ff3355; padding:.55rem .8rem; border-radius:4px; font-size:.82rem;
+            margin-bottom:1rem;
+        }
+        .login-footer { text-align:center; margin-top:1.5rem; font-size:.7rem; color:#2a4a6a; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <div class="login-logo">
+            <div class="login-brand">PARCINFO</div>
+            <div class="login-sub">Gestion de parc informatique</div>
+        </div>
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+        <form method="POST">
+            <input type="hidden" name="next" value="{{ next }}">
+            <div class="form-group">
+                <label>Identifiant</label>
+                <input type="text" name="login" autofocus autocomplete="username" required>
+            </div>
+            <div class="form-group">
+                <label>Mot de passe</label>
+                <input type="password" name="password" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="btn-login">→ Connexion</button>
+        </form>
+        <div class="login-footer">ParcInfo · Accès restreint</div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,836 @@
+{% extends "base.html" %}
+{% block title %}Baie de brassage — {{ client.nom }}{% endblock %}
+
+{% block extra_styles %}
+<style>
+/* ── LAYOUT ── */
+.baie-page { display:grid; grid-template-columns:1fr 340px; gap:1.5rem; align-items:start; }
+@media(max-width:1100px) { .baie-page { grid-template-columns:1fr; } }
+
+/* ── RACK ── */
+.rack-outer {
+    background:#0a0e14; border:3px solid #2a3a4a; border-radius:8px; overflow:visible;
+    box-shadow:0 8px 40px rgba(0,0,0,.7), inset 0 1px 0 rgba(255,255,255,.04);
+    user-select:none;
+}
+.rack-header {
+    background:linear-gradient(180deg,#1a2535 0%,#0f1825 100%);
+    padding:.55rem 1.2rem; text-align:center; border-bottom:2px solid #2a3a4a;
+    font-family:'Share Tech Mono',monospace; font-size:.7rem; letter-spacing:2px;
+    color:#4a6a8a; text-transform:uppercase; border-radius:5px 5px 0 0;
+}
+.rack-body { padding:8px 10px 8px 8px; display:flex; gap:6px; }
+.rack-numbers { display:flex; flex-direction:column; width:24px; flex-shrink:0; }
+.rack-num {
+    display:flex; align-items:center; justify-content:flex-end;
+    font-family:'Share Tech Mono',monospace; font-size:.58rem;
+    color:#2a4a6a; padding-right:4px; flex-shrink:0;
+}
+.rack-rows { flex:1; display:flex; flex-direction:column; gap:1px; }
+.rack-row { display:flex; gap:2px; flex-shrink:0; position:relative; }
+
+/* U height constant */
+.rack-cell {
+    flex:1; background:#0d1520; border:1px solid #1a2a3a; border-radius:2px;
+    cursor:pointer; display:flex; align-items:center; padding:0 6px; overflow:hidden;
+    font-family:'Share Tech Mono',monospace; font-size:.65rem; transition:all .12s;
+    position:relative; min-width:0; box-sizing:border-box;
+}
+.rack-cell.empty:hover  { border-color:#2a4a6a; background:#101820; }
+.rack-cell.drag-over    { border-color:rgba(0,201,255,.8)!important; background:rgba(0,201,255,.1)!important; }
+.rack-cell.selected     { border-color:var(--accent)!important; box-shadow:0 0 8px rgba(0,201,255,.3); }
+.rack-cell.highlighted  { border-color:#fbbf24!important; background:rgba(251,191,36,.1)!important; }
+.rack-cell.dragging     { opacity:.4; }
+
+/* Equipment type colors */
+.cell-srv   { background:rgba(124,58,237,.12)!important; border-color:rgba(124,58,237,.45)!important; }
+.cell-sw    { background:rgba(8,145,178,.12)!important;  border-color:rgba(8,145,178,.45)!important; }
+.cell-fw    { background:rgba(220,38,38,.12)!important;  border-color:rgba(220,38,38,.45)!important; }
+.cell-nas   { background:rgba(22,163,74,.12)!important;  border-color:rgba(22,163,74,.45)!important; }
+.cell-ups   { background:rgba(217,119,6,.12)!important;  border-color:rgba(217,119,6,.45)!important; }
+.cell-patch { background:rgba(71,85,105,.18)!important;  border-color:rgba(71,85,105,.55)!important; }
+.cell-pdu   { background:rgba(168,85,247,.12)!important; border-color:rgba(168,85,247,.45)!important; }
+.cell-ap    { background:rgba(37,99,235,.12)!important;  border-color:rgba(37,99,235,.45)!important; }
+
+.cell-led { width:6px; height:6px; border-radius:50%; flex-shrink:0; margin-right:5px; box-shadow:0 0 4px currentColor; }
+.led-on   { background:#22c55e; color:#22c55e; }
+.led-off  { background:#dc2626; color:#dc2626; }
+.led-none { background:#1e293b; color:#1e293b; }
+
+.cell-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    color:#d0e4f7; font-size:.72rem; font-weight:600; letter-spacing:.15px; }
+.cell-ip   { font-size:.6rem; color:#4a6a8a; flex-shrink:0; margin-left:4px; }
+.cell-del  {
+    background:none; border:none; color:#1e293b; cursor:pointer; font-size:.6rem;
+    padding:0 2px; flex-shrink:0; transition:color .12s; line-height:1;
+}
+.cell-del:hover { color:#ef4444; }
+
+.rack-footer {
+    background:#0d1520; padding:.4rem 1.2rem; border-top:2px solid #2a3a4a;
+    text-align:center; font-family:'Share Tech Mono',monospace;
+    font-size:.62rem; color:#2a4a6a; letter-spacing:1px; border-radius:0 0 5px 5px;
+}
+
+/* ── TOOLTIP ── */
+.rack-tooltip {
+    position:fixed; z-index:3000; background:#0f1825; border:1px solid #2a4a6a;
+    border-radius:5px; padding:.6rem .9rem; font-family:'Share Tech Mono',monospace;
+    font-size:.72rem; color:#94a3b8; pointer-events:none; max-width:260px;
+    box-shadow:0 4px 20px rgba(0,0,0,.7); display:none; line-height:1.5;
+}
+.rack-tooltip.show { display:block; }
+.tip-title { color:var(--accent); font-weight:700; margin-bottom:.3rem; }
+.tip-row { display:flex; gap:.5rem; }
+.tip-key  { color:#4a6a8a; min-width:60px; }
+.tip-val  { color:#cbd5e1; }
+
+/* ── PANEL DROITE ── */
+.cfg-panel {
+    background:var(--bg-card); border:1px solid var(--border); border-radius:4px;
+    padding:1.2rem; position:sticky; top:94px;
+}
+.cfg-tabs { display:flex; gap:0; margin-bottom:1rem; border:1px solid var(--border); border-radius:3px; overflow:hidden; }
+.cfg-tab {
+    flex:1; padding:.4rem; text-align:center; cursor:pointer;
+    font-family:'Rajdhani',sans-serif; font-size:.68rem; font-weight:700;
+    letter-spacing:1px; text-transform:uppercase;
+    background:var(--bg-secondary); color:var(--text-muted); transition:all .15s; border:none;
+}
+.cfg-tab.active { background:rgba(0,201,255,.1); color:var(--accent); }
+.cfg-pane { display:none; }
+.cfg-pane.active { display:block; }
+
+/* ── LÉGENDE ── */
+.legend-wrap { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.7rem; }
+.legend-item { display:flex; align-items:center; gap:4px; font-size:.68rem; color:var(--text-secondary); }
+.legend-swatch { width:10px; height:10px; border-radius:1px; border:1px solid; }
+
+/* ── LISTE ÉQUIP ── */
+.equip-row {
+    display:grid; grid-template-columns:28px 10px 1fr auto;
+    gap:.4rem; align-items:center; padding:.4rem .6rem;
+    border-bottom:1px solid rgba(30,58,95,.3); font-size:.78rem; cursor:pointer;
+}
+.equip-row:hover { background:rgba(0,201,255,.04); }
+.equip-pos { font-family:'Share Tech Mono',monospace; font-size:.58rem; color:var(--text-muted); text-align:right; }
+
+/* ── PHOTOS ── */
+.photos-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:.6rem; }
+.photo-thumb { position:relative; border:1px solid var(--border); border-radius:4px;
+    overflow:hidden; background:var(--bg-secondary); cursor:pointer; aspect-ratio:4/3; }
+.photo-thumb:hover { border-color:var(--accent); }
+.photo-thumb img { width:100%; height:100%; object-fit:cover; }
+.photo-thumb .photo-del {
+    position:absolute; top:3px; right:3px; background:rgba(0,0,0,.7);
+    border:1px solid rgba(255,51,85,.5); color:#ef4444; border-radius:2px;
+    font-size:.6rem; padding:1px 4px; cursor:pointer; opacity:0; transition:opacity .15s;
+}
+.photo-thumb:hover .photo-del { opacity:1; }
+.photo-label { position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.65);
+    padding:2px 5px; font-size:.62rem; color:#94a3b8; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; }
+.photo-add-btn {
+    border:2px dashed var(--border); border-radius:4px; aspect-ratio:4/3;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    cursor:pointer; color:var(--text-muted); font-size:.72rem; background:none; width:100%;
+    transition:all .15s;
+}
+.photo-add-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+/* ── LIGHTBOX ── */
+.lightbox { display:none; position:fixed; inset:0; background:rgba(0,0,0,.92);
+    z-index:2000; align-items:center; justify-content:center; flex-direction:column; }
+.lightbox.show { display:flex; }
+.lightbox img { max-width:92vw; max-height:88vh; border-radius:4px; object-fit:contain; }
+.lightbox-close { position:fixed; top:1rem; right:1.5rem; background:rgba(0,0,0,.8);
+    border:1px solid var(--border); color:var(--text-primary); padding:.4rem .9rem;
+    border-radius:3px; cursor:pointer; font-size:.85rem; z-index:10; }
+
+/* ── RECHERCHE ── */
+.search-rack { display:flex; gap:.4rem; margin-bottom:.7rem; }
+.search-rack input { flex:1; font-size:.8rem; padding:.3rem .6rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <div>
+        <h1>Baie de <span>Brassage</span></h1>
+        <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        · {{ parc.baie_marque or 'Baie' }}{% if parc.baie_nb_u %} · {{ parc.baie_nb_u }}U{% endif %}</p>
+    </div>
+    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.4rem;">
+        <button class="btn btn-primary btn-sm" onclick="exportRack()" title="Exporter en image PNG">📷 Exporter</button>
+        <a href="/parc" class="btn btn-primary btn-sm">✏ Config baie</a>
+    </div>
+</div>
+
+<div class="baie-page">
+    <!-- ── COLONNE GAUCHE ── -->
+    <div>
+        <!-- Barre de contrôles -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem;flex-wrap:wrap;gap:.5rem;">
+            <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;">
+                <!-- Sélecteur de baie -->
+                <div style="display:flex;align-items:center;gap:.4rem;">
+                    <span style="font-size:.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Baie</span>
+                    <select id="sel-baie" onchange="changerBaie(this.value)"
+                        style="font-family:'Share Tech Mono',monospace;font-size:.75rem;padding:.25rem .5rem;">
+                        <option value="Baie principale">Baie principale</option>
+                    </select>
+                    <button class="btn btn-primary btn-sm" onclick="ajouterBaie()" title="Nouvelle baie">+</button>
+                </div>
+                <span style="font-family:'Rajdhani',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);">
+                    &#9632; Vue de face — <span id="lbl-u">{{ nb_u }}</span>U
+                </span>
+            </div>
+            <div style="display:flex;gap:.4rem;flex-wrap:wrap;">
+                <button onclick="changerU(-1)" class="btn btn-primary btn-sm">− 1U</button>
+                <button onclick="changerU(1)"  class="btn btn-primary btn-sm">+ 1U</button>
+                <button onclick="toutVider()"  class="btn btn-danger btn-sm">✕ Vider</button>
+            </div>
+        </div>
+
+        <!-- Recherche -->
+        <div class="search-rack">
+            <input type="text" id="rack-search" placeholder="🔍 Rechercher un équipement..."
+                   oninput="rechercherEquip(this.value)">
+            <button class="btn btn-primary btn-sm" onclick="rechercherEquip('')">✕</button>
+        </div>
+
+        <!-- RACK -->
+        <div class="rack-outer" id="rack-outer">
+            <div class="rack-header" id="rack-hdr">{{ parc.baie_marque or 'RACK' }} — {{ nb_u }}U</div>
+            <div class="rack-body">
+                <div class="rack-numbers" id="rack-nums"></div>
+                <div class="rack-rows"   id="rack-rows"></div>
+            </div>
+            <div class="rack-footer" id="rack-footer">—</div>
+        </div>
+
+        <!-- Légende -->
+        <div class="legend-wrap">
+            {% for lbl,cls in [('Serveur','srv'),('Switch','sw'),('Pare-feu','fw'),('NAS','nas'),('UPS','ups'),('Patch','patch'),('PDU','pdu'),('WiFi','ap')] %}
+            <span class="legend-item">
+                <span class="legend-swatch cell-{{ cls }}"></span>{{ lbl }}
+            </span>
+            {% endfor %}
+            <span class="legend-item"><span class="cell-led led-on" style="display:inline-block;"></span> En ligne</span>
+            <span class="legend-item"><span class="cell-led led-off" style="display:inline-block;"></span> Hors ligne</span>
+        </div>
+
+        <!-- PHOTOS -->
+        <div style="margin-top:2rem;">
+            <div style="font-family:'Rajdhani',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:.8rem;">
+                &#9632; Photos de la baie — {{ photos|length }} photo(s)
+            </div>
+            <div class="photos-grid">
+                {% for p in photos %}
+                <div class="photo-thumb" onclick="ouvrirPhoto('/baie/photo/{{ p.id }}/apercu','{{ p.nom|e }}')">
+                    <img src="/baie/photo/{{ p.id }}/apercu" alt="{{ p.nom|e }}" loading="lazy">
+                    <span class="photo-label">{{ p.nom }}</span>
+                    <form method="POST" action="/baie/photo/{{ p.id }}/supprimer" style="display:inline;"
+                          onsubmit="return confirm('Supprimer cette photo ?')">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="photo-del" onclick="event.stopPropagation()">✕</button>
+                    </form>
+                </div>
+                {% endfor %}
+                <button class="photo-add-btn" onclick="document.getElementById('photo-input').click()">
+                    <span style="font-size:1.5rem;margin-bottom:.3rem;">📷</span>
+                    Ajouter une photo
+                </button>
+            </div>
+            <form method="POST" action="/baie/photo/upload" enctype="multipart/form-data" id="photo-form" style="display:none;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="file" id="photo-input" name="fichier" accept="image/*" onchange="soumettrePhoto(this)">
+                <input type="text" name="nom" id="photo-nom">
+            </form>
+        </div>
+    </div>
+
+    <!-- ── PANNEAU DROIT ── -->
+    <div class="cfg-panel">
+        <div class="cfg-tabs">
+            <button class="cfg-tab active" onclick="showTab('tab-add')">+ Placer</button>
+            <button class="cfg-tab" onclick="showTab('tab-list')">📋 Liste</button>
+        </div>
+
+        <!-- ONGLET PLACER -->
+        <div class="cfg-pane active" id="tab-add">
+            <div class="form-row cols-2" style="margin-bottom:.6rem;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Position (U)</label>
+                    <input type="number" id="cfg-pos" min="1" max="{{ nb_u }}" value="1"
+                           style="font-family:'Share Tech Mono',monospace;">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Hauteur (U)</label>
+                    <select id="cfg-hu">
+                        {% for i in range(1,9) %}<option value="{{ i }}"{% if i==1 %} selected{% endif %}>{{ i }}U</option>{% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row cols-2" style="margin-bottom:.6rem;">
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Colonne</label>
+                    <input type="number" id="cfg-col" min="0" max="4" value="0"
+                           style="font-family:'Share Tech Mono',monospace;" title="0 = pleine largeur, 1-4 = côte à côte">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Couleur</label>
+                    <input type="color" id="cfg-couleur" value="#1e3a5f">
+                </div>
+            </div>
+            <div class="form-group" style="margin-bottom:.6rem;">
+                <label>Type d'équipement</label>
+                <select id="cfg-type" onchange="couleurAuto()">
+                    <option value="">—</option>
+                    <option>Serveur</option><option>Switch</option>
+                    <option>Routeur/Pare-feu</option><option>NAS</option>
+                    <option>UPS</option><option>Patch Panel</option>
+                    <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:.6rem;">
+                <label>Associer à un appareil</label>
+                <select id="cfg-app" onchange="autoRemplir()">
+                    <option value="">— Aucun / saisie libre —</option>
+                    {% for a in appareils %}
+                    <option value="{{ a.id }}" data-nom="{{ a.nom_machine }}"
+                            data-type="{{ a.type_appareil }}" data-ip="{{ a.adresse_ip }}">
+                        {{ a.nom_machine }}{% if a.adresse_ip %} — {{ a.adresse_ip }}{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin-bottom:.6rem;">
+                <label>Nom personnalisé</label>
+                <input type="text" id="cfg-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
+            </div>
+            <div class="form-group" style="margin-bottom:.8rem;">
+                <label>Description / note</label>
+                <input type="text" id="cfg-desc" placeholder="Ex: Ports 1-24 bureau...">
+            </div>
+            <button onclick="placerEquip()" class="btn btn-success" style="width:100%;">✓ Placer l'équipement</button>
+        </div>
+
+        <!-- ONGLET LISTE -->
+        <div class="cfg-pane" id="tab-list">
+            <div id="equip-list-wrap"></div>
+        </div>
+    </div>
+</div>
+
+<!-- TOOLTIP -->
+<div class="rack-tooltip" id="rack-tooltip"></div>
+
+<!-- LIGHTBOX -->
+<div class="lightbox" id="lightbox" onclick="fermerLightbox()">
+    <button class="lightbox-close" onclick="fermerLightbox()">✕ Fermer</button>
+    <img id="lb-img" src="" alt="">
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// ── DONNÉES INITIALES ─────────────────────────────────────────────────────────
+const SLOTS_INIT = {{ slots_db | tojson }};
+const APPAREILS  = {{ appareils | tojson }};
+let nbU    = {{ nb_u }};
+let nbCols = 1;
+let slots  = {};  // key "pos-col" → slot
+let currentBaie = 'Baie principale';
+let baiesList   = ['Baie principale'];
+const MAX_COLS = 5;
+// U_H : calculé dynamiquement pour respecter le ratio 19" × 1,75" par U
+// (1 U = 1,75 pouce ; largeur rack = 19 pouces → ratio = 1,75/19 ≈ 0,0921)
+const U_RATIO = 1.75 / 19;
+let U_H = 44;   // valeur initiale, recalculée après rendu
+
+function calcUH(rerender) {
+    const rr = document.getElementById('rack-rows');
+    if (!rr) return;
+    const w = rr.getBoundingClientRect().width || rr.offsetWidth;
+    if (w < 60) return;
+    const newH = Math.max(22, Math.round(w * U_RATIO));
+    if (newH === U_H && !rerender) return;
+    U_H = newH;
+    renderRack();
+}
+
+const TYPE_CSS = {
+    'Serveur':'srv','Switch':'sw','Routeur/Pare-feu':'fw','NAS':'nas',
+    'UPS':'ups','Patch Panel':'patch','PDU':'pdu','Borne WiFi':'ap',
+};
+const TYPE_COLORS = {
+    'Serveur':'#3b1a8a','Switch':'#0a4a5a','Routeur/Pare-feu':'#5a0a0a','NAS':'#0a3a1a',
+    'UPS':'#5a3a00','Patch Panel':'#1a2535','PDU':'#3a0a5a','Borne WiFi':'#0a1a4a',
+};
+
+// ── INIT ──────────────────────────────────────────────────────────────────────
+async function init() {
+    await chargerBaie('Baie principale');
+    // Calcul des proportions après chargement initial
+    setTimeout(() => calcUH(true), 50);
+    // Recalcul si la fenêtre est redimensionnée
+    let _resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(_resizeTimer);
+        _resizeTimer = setTimeout(() => calcUH(false), 150);
+    });
+}
+
+async function chargerBaie(baieNom) {
+    currentBaie = baieNom;
+    const r = await fetch('/api/baie/slots?baie=' + encodeURIComponent(baieNom));
+    const data = await r.json();
+
+    // Mettre à jour la liste des baies
+    // Fusionner avec baiesList local (pour les nouvelles baies vides pas encore en DB)
+    const fromApi = data.baies || ['Baie principale'];
+    baiesList = [...new Set([...fromApi, ...baiesList])];
+    if (!baiesList.includes(baieNom)) baiesList.push(baieNom);
+
+    const sel = document.getElementById('sel-baie');
+    sel.innerHTML = baiesList.map(b =>
+        `<option value="${escH(b)}" ${b===baieNom?'selected':''}>${escH(b)}</option>`
+    ).join('');
+    sel.value = baieNom;
+
+    // Construire la map
+    slots = {};
+    nbCols = 1;
+    (data.slots || []).forEach(s => {
+        const k = key(s.position, s.col_index || 0);
+        slots[k] = s;
+        if ((s.col_index || 0) + 1 > nbCols) nbCols = (s.col_index || 0) + 1;
+    });
+
+    if (data.nb_u && data.nb_u !== nbU) {
+        nbU = data.nb_u;
+        document.getElementById('lbl-u').textContent = nbU;
+        document.getElementById('cfg-pos').max = nbU;
+    }
+    renderRack();
+    renderList();
+}
+
+function key(pos, col) { return `${pos}-${col}`; }
+function escH(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── RENDER RACK ───────────────────────────────────────────────────────────────
+function renderRack() {
+    document.getElementById('lbl-u').textContent = nbU;
+    document.getElementById('rack-hdr').textContent = `{{ parc.baie_marque or 'RACK' }} — ${nbU}U · ${currentBaie}`;
+
+    const nums = document.getElementById('rack-nums');
+    const rows = document.getElementById('rack-rows');
+    nums.innerHTML = ''; rows.innerHTML = '';
+
+    // Pre-pass : multi-U spans
+    const originSlot = {}, spannedBy = {};
+    for (let u = 1; u <= nbU; u++) {
+        for (let col = 0; col < MAX_COLS; col++) {
+            const s = slots[key(u, col)];
+            if (s) {
+                originSlot[key(u, col)] = s;
+                for (let du = 1; du < (s.hauteur_u || 1); du++) {
+                    spannedBy[key(u + du, col)] = s;
+                }
+            }
+        }
+    }
+
+    function colsActiveAtU(u) {
+        let max = 0;
+        for (let col = 0; col < MAX_COLS; col++) {
+            if (originSlot[key(u, col)] || spannedBy[key(u, col)]) max = col + 1;
+        }
+        return Math.max(1, max);
+    }
+
+    let totalOccupied = 0;
+
+    for (let u = 1; u <= nbU; u++) {
+        const nd = document.createElement('div');
+        nd.className = 'rack-num';
+        nd.style.height = U_H + 'px';
+        nd.textContent = u;
+        nums.appendChild(nd);
+
+        const activeCols = colsActiveAtU(u);
+        const row = document.createElement('div');
+        row.className = 'rack-row';
+        row.style.height = U_H + 'px';
+
+        if (activeCols === 1) {
+            const sk = key(u, 0);
+            if (spannedBy[sk]) {
+                // Spacer (visually hidden - slot rendered above with height)
+                const ph = document.createElement('div');
+                ph.style.cssText = `flex:1;height:${U_H}px;`;
+                row.appendChild(ph);
+            } else if (originSlot[sk]) {
+                totalOccupied++;
+                row.appendChild(makeOccupiedCell(originSlot[sk], u, 0));
+            } else {
+                row.appendChild(makeEmptyCell(u, 0, true));
+            }
+        } else {
+            for (let col = 0; col < activeCols; col++) {
+                const sk = key(u, col);
+                if (spannedBy[sk]) {
+                    const ph = document.createElement('div');
+                    ph.style.cssText = `flex:1;height:${U_H}px;`;
+                    row.appendChild(ph);
+                } else if (originSlot[sk]) {
+                    totalOccupied++;
+                    row.appendChild(makeOccupiedCell(originSlot[sk], u, col));
+                } else {
+                    row.appendChild(makeEmptyCell(u, col, false));
+                }
+            }
+        }
+        rows.appendChild(row);
+    }
+
+    const libre = nbU - totalOccupied;
+    document.getElementById('rack-footer').textContent =
+        `${totalOccupied} équipement(s) · ${libre} U libre(s)`;
+}
+
+// ── CELL BUILDERS ─────────────────────────────────────────────────────────────
+function makeOccupiedCell(s, u, col) {
+    const cell = document.createElement('div');
+    cell.className = 'rack-cell occupied';
+    cell.dataset.pos = u;
+    cell.dataset.col = col;
+    cell.dataset.id  = s.id;
+
+    const hu = s.hauteur_u || 1;
+    if (hu > 1) {
+        cell.style.height     = (hu * U_H + (hu - 1)) + 'px';
+        cell.style.alignSelf  = 'flex-start';
+        cell.style.position   = 'relative';
+        cell.style.zIndex     = '2';
+    } else {
+        cell.style.height = U_H + 'px';
+    }
+
+    const tcss = TYPE_CSS[s.type_equipement] || '';
+    if (tcss) cell.classList.add('cell-' + tcss);
+
+    const ledCls = s.appareil_id ? (s.en_ligne ? 'led-on' : 'led-off') : 'led-none';
+    const nom = escH(s.nom_machine || s.nom_custom || s.type_equipement || '—');
+    const ip  = s.adresse_ip || '';
+
+    cell.innerHTML = `
+        <span class="cell-led ${ledCls}"></span>
+        <span class="cell-name">${nom}</span>
+        ${ip ? `<span class="cell-ip">${escH(ip)}</span>` : ''}
+        <button class="cell-del" onclick="event.stopPropagation();delSlot(${s.id})" title="Retirer">✕</button>`;
+
+    // Click → pré-remplir formulaire
+    cell.addEventListener('click', () => selectSlot(s, cell));
+
+    // Tooltip au survol
+    cell.addEventListener('mouseenter', e => afficherTooltip(e, s));
+    cell.addEventListener('mousemove',  e => { const t = document.getElementById('rack-tooltip'); if(t.classList.contains('show')) positionnerTooltip(e); });
+    cell.addEventListener('mouseleave', () => masquerTooltip());
+
+    // Drag & drop
+    cell.draggable = true;
+    cell.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/plain', JSON.stringify({id: s.id, pos: u, col: col}));
+        cell.classList.add('dragging');
+        setTimeout(() => cell.classList.add('dragging'), 0);
+    });
+    cell.addEventListener('dragend', () => cell.classList.remove('dragging'));
+
+    return cell;
+}
+
+function makeEmptyCell(u, col, fullWidth) {
+    const cell = document.createElement('div');
+    cell.className = 'rack-cell empty';
+    cell.style.height = U_H + 'px';
+    cell.dataset.pos = u;
+    cell.dataset.col = col;
+    cell.innerHTML = fullWidth
+        ? `<span style="color:#1a2a3a;font-size:.52rem;user-select:none;">U${u}</span>`
+        : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">C${col}</span>`;
+
+    cell.addEventListener('click', () => {
+        document.getElementById('cfg-pos').value = u;
+        document.getElementById('cfg-col').value = col;
+        showTab('tab-add');
+    });
+    cell.addEventListener('mouseenter', () => cell.classList.add('drag-over'));
+    cell.addEventListener('mouseleave', () => cell.classList.remove('drag-over'));
+
+    // Drop target
+    cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('drag-over'); });
+    cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
+    cell.addEventListener('drop', async e => {
+        e.preventDefault();
+        cell.classList.remove('drag-over');
+        const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+        await deplacerSlot(data.id, u, col);
+    });
+
+    return cell;
+}
+
+// ── DRAG & DROP MOVE ──────────────────────────────────────────────────────────
+async function deplacerSlot(id, newPos, newCol) {
+    const r = await fetch(`/api/baie/slot/${id}/deplacer`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({position: newPos, col_index: newCol})
+    });
+    const slot = await r.json();
+    // Rebuild slots map
+    Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
+    const nk = key(newPos, newCol);
+    // Remove any existing at destination
+    Object.keys(slots).forEach(k => { if (k === nk) delete slots[k]; });
+    slots[nk] = slot;
+    nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1));
+    renderRack(); renderList();
+}
+
+// ── TOOLTIP ───────────────────────────────────────────────────────────────────
+function afficherTooltip(e, s) {
+    const t = document.getElementById('rack-tooltip');
+    const nom = s.nom_machine || s.nom_custom || s.type_equipement || '—';
+    const statut = s.appareil_id
+        ? (s.en_ligne ? '🟢 En ligne' : '🔴 Hors ligne')
+        : '⚪ Non pingable';
+    let html = `<div class="tip-title">${escH(nom)}</div>`;
+    if (s.type_equipement) html += `<div class="tip-row"><span class="tip-key">Type</span><span class="tip-val">${escH(s.type_equipement)}</span></div>`;
+    if (s.adresse_ip)     html += `<div class="tip-row"><span class="tip-key">IP</span><span class="tip-val">${escH(s.adresse_ip)}</span></div>`;
+    html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${statut}</span></div>`;
+    html += `<div class="tip-row"><span class="tip-key">Position</span><span class="tip-val">U${s.position} · C${s.col_index||0} · ${s.hauteur_u||1}U</span></div>`;
+    if (s.description)    html += `<div class="tip-row"><span class="tip-key">Note</span><span class="tip-val">${escH(s.description)}</span></div>`;
+    t.innerHTML = html;
+    t.classList.add('show');
+    positionnerTooltip(e);
+}
+function positionnerTooltip(e) {
+    const t = document.getElementById('rack-tooltip');
+    const x = e.clientX + 14, y = e.clientY + 14;
+    t.style.left = Math.min(x, window.innerWidth - 280) + 'px';
+    t.style.top  = Math.min(y, window.innerHeight - 160) + 'px';
+}
+function masquerTooltip() {
+    document.getElementById('rack-tooltip').classList.remove('show');
+}
+
+// ── RECHERCHE ─────────────────────────────────────────────────────────────────
+function rechercherEquip(q) {
+    document.getElementById('rack-search').value = q;
+    q = q.toLowerCase().trim();
+    document.querySelectorAll('.rack-cell.occupied').forEach(cell => {
+        cell.classList.remove('highlighted');
+    });
+    if (!q) return;
+    document.querySelectorAll('.rack-cell.occupied').forEach(cell => {
+        const id  = parseInt(cell.dataset.id);
+        const sk  = key(parseInt(cell.dataset.pos), parseInt(cell.dataset.col));
+        const s   = slots[sk] || Object.values(slots).find(x => x.id === id);
+        if (!s) return;
+        const txt = [s.nom_machine, s.nom_custom, s.type_equipement, s.adresse_ip, s.description].join(' ').toLowerCase();
+        if (txt.includes(q)) cell.classList.add('highlighted');
+    });
+}
+
+// ── LISTE ÉQUIPEMENTS ─────────────────────────────────────────────────────────
+function renderList() {
+    const wrap = document.getElementById('equip-list-wrap');
+    const sorted = Object.values(slots).sort((a,b) => a.position - b.position || (a.col_index||0) - (b.col_index||0));
+    if (!sorted.length) {
+        wrap.innerHTML = '<div style="color:var(--text-muted);font-size:.8rem;text-align:center;padding:1.5rem;">Aucun équipement</div>';
+        return;
+    }
+    wrap.innerHTML = sorted.map(s => {
+        const nom = escH(s.nom_machine || s.nom_custom || s.type_equipement || '?');
+        const led = s.appareil_id ? (s.en_ligne ? '#22c55e' : '#dc2626') : '#374151';
+        return `<div class="equip-row" onclick="surbrillanceEquip(${s.position},${s.col_index||0})">
+            <div class="equip-pos">U${s.position}${s.col_index?'·C'+s.col_index:''}</div>
+            <div style="width:8px;height:8px;border-radius:50%;background:${led};box-shadow:0 0 4px ${led};flex-shrink:0;"></div>
+            <div>
+                <strong style="font-size:.8rem;">${nom}</strong>
+                <div style="font-size:.68rem;color:var(--text-secondary);">
+                    ${escH(s.type_equipement||'')}${s.adresse_ip?' · '+escH(s.adresse_ip):''}${(s.hauteur_u||1)>1?' · '+(s.hauteur_u)+'U':''}
+                </div>
+            </div>
+            <button onclick="event.stopPropagation();delSlot(${s.id})" class="btn btn-danger btn-sm" style="padding:1px 5px;font-size:.6rem;">✕</button>
+        </div>`;
+    }).join('');
+}
+
+function surbrillanceEquip(pos, col) {
+    document.querySelectorAll('.rack-cell.highlighted').forEach(c => c.classList.remove('highlighted'));
+    const target = document.querySelector(`.rack-cell[data-pos="${pos}"][data-col="${col}"]`);
+    if (target) {
+        target.classList.add('highlighted');
+        target.scrollIntoView({behavior:'smooth', block:'center'});
+    }
+}
+
+// ── SELECTION ────────────────────────────────────────────────────────────────
+function selectSlot(s, cell) {
+    document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
+    cell.classList.add('selected');
+    document.getElementById('cfg-pos').value   = s.position;
+    document.getElementById('cfg-col').value   = s.col_index || 0;
+    document.getElementById('cfg-hu').value    = s.hauteur_u || 1;
+    document.getElementById('cfg-type').value  = s.type_equipement || '';
+    document.getElementById('cfg-nom').value   = s.nom_custom || s.nom_machine || '';
+    document.getElementById('cfg-desc').value  = s.description || '';
+    document.getElementById('cfg-couleur').value = s.couleur || '#1e3a5f';
+    if (s.appareil_id) document.getElementById('cfg-app').value = s.appareil_id;
+    showTab('tab-add');
+}
+
+// ── ACTIONS ──────────────────────────────────────────────────────────────────
+document.getElementById('cfg-app').addEventListener('change', autoRemplir);
+document.getElementById('cfg-type').addEventListener('change', couleurAuto);
+
+function autoRemplir() {
+    const sel = document.getElementById('cfg-app');
+    const opt = sel.options[sel.selectedIndex];
+    if (opt.value) {
+        document.getElementById('cfg-nom').value  = opt.dataset.nom || '';
+        document.getElementById('cfg-type').value = opt.dataset.type || '';
+        couleurAuto();
+    }
+}
+function couleurAuto() {
+    const t = document.getElementById('cfg-type').value;
+    document.getElementById('cfg-couleur').value = TYPE_COLORS[t] || '#1e3a5f';
+}
+
+async function placerEquip() {
+    const pos = parseInt(document.getElementById('cfg-pos').value) || 1;
+    const col = Math.min(4, Math.max(0, parseInt(document.getElementById('cfg-col').value) || 0));
+    const hu  = parseInt(document.getElementById('cfg-hu').value) || 1;
+    if (pos < 1 || pos > nbU) { alert(`Position entre 1 et ${nbU}`); return; }
+
+    const payload = {
+        position: pos, col_index: col, hauteur_u: hu, baie_nom: currentBaie,
+        type_equipement: document.getElementById('cfg-type').value,
+        nom_custom:  document.getElementById('cfg-nom').value.trim(),
+        description: document.getElementById('cfg-desc').value.trim(),
+        couleur:     document.getElementById('cfg-couleur').value,
+        appareil_id: document.getElementById('cfg-app').value ? parseInt(document.getElementById('cfg-app').value) : null
+    };
+
+    const r = await fetch('/api/baie/slot', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+    });
+    const s = await r.json();
+    slots[key(s.position, s.col_index||0)] = s;
+    if ((s.col_index||0) + 1 > nbCols) nbCols = (s.col_index||0) + 1;
+    renderRack(); renderList();
+}
+
+async function delSlot(id) {
+    if (!confirm('Retirer cet équipement de la baie ?')) return;
+    await fetch('/api/baie/slot/' + id, { method:'DELETE' });
+    Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
+    nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1), 1);
+    renderRack(); renderList();
+}
+
+async function toutVider() {
+    if (!confirm(`Vider toute la baie "${currentBaie}" ?`)) return;
+    for (const s of Object.values(slots))
+        await fetch('/api/baie/slot/' + s.id, { method:'DELETE' });
+    slots = {}; nbCols = 1;
+    renderRack(); renderList();
+}
+
+async function changerU(delta) {
+    const nv = Math.max(6, Math.min(48, nbU + delta));
+    if (nv === nbU) return;
+    nbU = nv;
+    await fetch('/api/baie/nb_u', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({nb_u: nbU})
+    });
+    document.getElementById('cfg-pos').max = nbU;
+    renderRack();
+}
+
+// ── PLUSIEURS BAIES ────────────────────────────────────────────────────────────
+function changerBaie(nom) {
+    chargerBaie(nom);
+}
+
+function ajouterBaie() {
+    const nom = prompt('Nom de la nouvelle baie :', 'Baie secondaire');
+    if (!nom || !nom.trim()) return;
+    if (baiesList.includes(nom.trim())) { alert('Cette baie existe déjà.'); return; }
+    baiesList.push(nom.trim());
+    const sel = document.getElementById('sel-baie');
+    const opt = document.createElement('option');
+    opt.value = nom.trim(); opt.textContent = nom.trim();
+    sel.appendChild(opt);
+    sel.value = nom.trim();
+    chargerBaie(nom.trim());
+}
+
+// ── EXPORT IMAGE ──────────────────────────────────────────────────────────────
+function exportRack() {
+    const rack = document.getElementById('rack-outer');
+    // Use html2canvas if available, otherwise fallback to print
+    if (typeof html2canvas !== 'undefined') {
+        html2canvas(rack, {backgroundColor: '#0a0e14', scale: 2}).then(canvas => {
+            const a = document.createElement('a');
+            a.download = `baie_${currentBaie.replace(/\s+/g,'_')}.png`;
+            a.href = canvas.toDataURL('image/png');
+            a.click();
+        });
+    } else {
+        // Fallback : ouvrir dans un nouvel onglet pour impression
+        window.print();
+    }
+}
+
+// ── TABS ─────────────────────────────────────────────────────────────────────
+function showTab(id) {
+    document.querySelectorAll('.cfg-tab').forEach((t, i) => {
+        t.classList.toggle('active', ['tab-add','tab-list'][i] === id);
+    });
+    document.querySelectorAll('.cfg-pane').forEach(p => p.classList.toggle('active', p.id === id));
+    if (id === 'tab-list') renderList();
+}
+
+// ── PHOTOS ───────────────────────────────────────────────────────────────────
+function soumettrePhoto(input) {
+    if (!input.files[0]) return;
+    document.getElementById('photo-nom').value = input.files[0].name.replace(/\.[^.]+$/,'');
+    document.getElementById('photo-form').submit();
+}
+function ouvrirPhoto(url, nom) {
+    document.getElementById('lb-img').src = url;
+    document.getElementById('lightbox').classList.add('show');
+    document.body.style.overflow = 'hidden';
+}
+function fermerLightbox() {
+    document.getElementById('lightbox').classList.remove('show');
+    document.getElementById('lb-img').src = '';
+    document.body.style.overflow = '';
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') fermerLightbox();
+});
+
+// ── START ────────────────────────────────────────────────────────────────────
+init();
+</script>
+<!-- html2canvas pour export PNG (chargé en différé) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
+{% endblock %}

@@ -1,0 +1,2873 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    {%- macro pagination_nav(p, extra_params='') %}
+    {%- if p and p.pages > 1 %}
+    <div style="display:flex;align-items:center;justify-content:center;gap:.5rem;padding:1rem;border-top:1px solid var(--border);flex-wrap:wrap;">
+        {% if p.page > 1 %}<a href="?page={{ p.page - 1 }}{{ extra_params }}" class="btn btn-sm" style="border-color:var(--border);color:var(--text-secondary);">← Préc.</a>{% endif %}
+        {% for n in range(1, p.pages + 1) %}
+            {%- if n == p.page %}<span style="padding:.3rem .7rem;background:var(--accent);color:#000;border-radius:3px;font-size:.82rem;font-weight:700;">{{ n }}</span>
+            {%- elif n == 1 or n == p.pages or (n >= p.page - 2 and n <= p.page + 2) %}<a href="?page={{ n }}{{ extra_params }}" style="padding:.3rem .7rem;border:1px solid var(--border);border-radius:3px;font-size:.82rem;color:var(--text-secondary);text-decoration:none;">{{ n }}</a>
+            {%- elif n == p.page - 3 or n == p.page + 3 %}<span style="color:var(--text-muted);">…</span>{%- endif %}
+        {%- endfor %}
+        {% if p.page < p.pages %}<a href="?page={{ p.page + 1 }}{{ extra_params }}" class="btn btn-sm" style="border-color:var(--border);color:var(--text-secondary);">Suiv. →</a>{% endif %}
+    </div>
+    {%- endif %}
+    {%- endmacro %}
+    <title>{% block title %}ParcInfo{% endblock %}{% if client is defined and client and client.nom %} — {{ client.nom }}{% endif %}</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230a0d12'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='%2300c9ff' font-family='monospace' font-weight='bold'>P</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0d12; --bg-secondary: #0f1520; --bg-card: #131c2b;
+            --border: #1e3a5f; --border-glow: #2e6cb0;
+            --accent: #00c9ff; --accent2: #0066ff;
+            --accent-green: #00ff88; --accent-orange: #ff8c00; --accent-red: #ff3355;
+            --text-primary: #d0e8ff; --text-secondary: #6a8aaa; --text-muted: #3a5570;
+            --grid-color: rgba(0,100,200,0.06);
+            --topbar-bg: rgba(8,11,16,0.98); --topbar-border: rgba(30,58,95,0.6);
+            --nav-bg: rgba(10,13,18,0.95);
+            --input-bg: #0f1520; --input-border: #1e3a5f;
+            --drawer-bg: #0d1520; --drawer-border: rgba(0,201,255,.2);
+        }
+        /* ── THÈME CLAIR ── */
+        body.theme-light {
+            --bg-primary: #f1f5f9; --bg-secondary: #e2e8f0; --bg-card: #ffffff;
+            --border: #cbd5e1; --border-glow: #64748b;
+            --text-primary: #0f172a; --text-secondary: #334155; --text-muted: #64748b;
+            --grid-color: rgba(100,150,200,0.04);
+            --topbar-bg: rgba(248,250,252,0.98); --topbar-border: rgba(203,213,225,0.9);
+            --nav-bg: rgba(255,255,255,0.98);
+            --input-bg: #ffffff; --input-border: #94a3b8;
+            --drawer-bg: #ffffff; --drawer-border: rgba(0,120,180,.2);
+        }
+        /* Ajustements spécifiques thème clair */
+        body.theme-light nav a { border-bottom-color: transparent; }
+        body.theme-light nav a:hover, body.theme-light nav a.active {
+            background: rgba(0,130,180,.07);
+        }
+        body.theme-light .nav-group-btn:hover,
+        body.theme-light .nav-group-btn.active { background: rgba(0,130,180,.07); }
+        body.theme-light .nav-dropdown { box-shadow: 0 4px 16px rgba(0,0,0,.12); }
+        body.theme-light .card { box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+        body.theme-light .card::before { opacity: .4; }
+        body.theme-light th { color: #1e293b; }
+        body.theme-light td { color: #334155; }
+        body.theme-light tr:hover td { background: rgba(0,130,180,.04) !important; }
+        body.theme-light .badge-blue   { background:rgba(0,120,200,.1); color:#0284c7; border-color:rgba(0,120,200,.25); }
+        body.theme-light .badge-green  { background:rgba(0,150,80,.1);  color:#16a34a; border-color:rgba(0,150,80,.25); }
+        body.theme-light .badge-red    { background:rgba(220,30,60,.1); color:#dc2626; border-color:rgba(220,30,60,.25); }
+        body.theme-light .badge-orange { background:rgba(220,100,0,.1); color:#ea580c; border-color:rgba(220,100,0,.25); }
+        body.theme-light .mono { color: #0f172a; }
+        body.theme-light .alert-info    { color: #0369a1; }
+        body.theme-light .alert-success { color: #15803d; }
+        body.theme-light .alert-error   { color: #b91c1c; }
+        body.theme-light input, body.theme-light select, body.theme-light textarea {
+            background: #ffffff; color: #0f172a;
+        }
+        body.theme-light .stat-card .stat-value { color: var(--accent); }
+
+        /* ── NIVEAUX DE CONTRASTE ── */
+        /* Contraste Élevé */
+        html.contrast-high {
+            --contrast-factor: 1.15;
+        }
+        html.contrast-high body {
+            --text-primary: #e0eeff;
+            --text-secondary: #7a9bc5;
+        }
+        html.contrast-high body.theme-light {
+            --text-primary: #051530;
+            --text-secondary: #2d5a8a;
+            --text-muted: #4a6fa8;
+        }
+
+        /* Contraste Maximum */
+        html.contrast-max {
+            --contrast-factor: 1.3;
+        }
+        html.contrast-max body {
+            --text-primary: #ffffff;
+            --text-secondary: #9ad0ff;
+            --text-muted: #7aa0c0;
+            filter: contrast(1.25);
+        }
+        html.contrast-max body.theme-light {
+            --text-primary: #000000;
+            --text-secondary: #1a4d80;
+            --text-muted: #3a6b9f;
+            filter: contrast(1.25);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Exo 2', sans-serif; background: var(--bg-primary);
+            color: var(--text-primary); min-height: 100vh;
+            background-image: linear-gradient(var(--grid-color) 1px, transparent 1px),
+                              linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        /* ── TOPBAR CLIENT ── */
+        .client-bar {
+            background: var(--topbar-bg); border-bottom: 1px solid var(--topbar-border);
+            padding: 0 1.5rem; display: flex; align-items: center; height: 42px; gap: 1rem;
+            position: sticky; top: 0; z-index: 200;
+        }
+        .client-bar-label {
+            font-family: 'Share Tech Mono', monospace; font-size: 0.65rem;
+            letter-spacing: 2px; color: var(--text-muted); text-transform: uppercase; white-space: nowrap;
+        }
+        .client-select-wrap { display: flex; align-items: center; gap: 0.6rem; }
+        .client-dot {
+            width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+            box-shadow: 0 0 6px currentColor;
+        }
+        #client-dropdown {
+            background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 3px;
+            color: var(--text-primary); padding: 0.3rem 0.7rem;
+            font-family: 'Exo 2', sans-serif; font-size: 0.85rem; font-weight: 600;
+            cursor: pointer; min-width: 200px; height: 28px;
+        }
+        #client-dropdown:focus { outline: none; border-color: var(--accent); }
+        .client-bar-actions { display: flex; align-items: center; gap: 0.6rem; margin-left: auto; }
+        .topbar-acces-badge {
+            font-family:'Share Tech Mono',monospace; font-size:.62rem;
+            padding:.15rem .55rem; border-radius:3px; white-space:nowrap; flex-shrink:0;
+        }
+        .topbar-acces-proprietaire { background:rgba(0,255,136,.08); border:1px solid rgba(0,255,136,.25); color:var(--accent-green); }
+        .topbar-acces-ecriture     { background:rgba(0,201,255,.08); border:1px solid rgba(0,201,255,.25); color:var(--accent); }
+        .topbar-acces-lecture      { background:rgba(255,140,0,.08);  border:1px solid rgba(255,140,0,.25);  color:var(--accent-orange); }
+        .topbar-acces-admin        { background:rgba(168,85,247,.08); border:1px solid rgba(168,85,247,.25); color:#a78bfa; }
+        .client-bar-link {
+            font-family: 'Share Tech Mono', monospace; font-size: 0.65rem;
+            color: var(--text-muted); text-decoration: none; letter-spacing: 1px; white-space: nowrap;
+            padding: 0.2rem 0.6rem; border: 1px solid var(--border); border-radius: 3px;
+            transition: all 0.15s;
+        }
+        .client-bar-link:hover { color: var(--accent); border-color: var(--accent); }
+
+        /* ── NAV ── */
+        nav {
+            background: var(--nav-bg); border-bottom: 1px solid var(--border);
+            padding: 0 1.5rem; display: flex; align-items: center;
+            position: sticky; top: 42px; z-index: 100; backdrop-filter: blur(12px); height: 50px;
+        }
+        .nav-brand {
+            font-family: 'Share Tech Mono', monospace; font-size: 1rem; color: var(--accent);
+            letter-spacing: 2px; margin-right: 1.5rem; text-decoration: none;
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .nav-brand::before {
+            content: ''; display: block; width: 7px; height: 7px;
+            background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent);
+            animation: blink 2s infinite;
+        }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+        nav a {
+            color: var(--text-secondary); text-decoration: none; padding: 0 0.9rem; height: 50px;
+            display: flex; align-items: center; font-size: 0.8rem; font-weight: 600;
+            letter-spacing: 1px; text-transform: uppercase; border-bottom: 2px solid transparent; transition: all 0.2s;
+        }
+        nav a:hover, nav a.active { color: var(--accent); border-bottom-color: var(--accent); background: rgba(0,201,255,0.04); }
+        .nav-spacer { flex: 1; }
+        .nav-client-badge {
+            font-family: 'Share Tech Mono', monospace; font-size: 0.7rem;
+            padding: 0.2rem 0.8rem; border-radius: 3px; border: 1px solid;
+        }
+        /* ── MENUS DÉROULANTS ── */
+        .nav-group { position: relative; display: flex; align-items: center; }
+        .nav-group-btn {
+            color: var(--text-secondary); text-decoration: none; padding: 0 0.85rem; height: 50px;
+            display: flex; align-items: center; gap: 0.3rem;
+            font-size: 0.8rem; font-weight: 600; letter-spacing: 1px; text-transform: uppercase;
+            border-bottom: 2px solid transparent; transition: all 0.2s;
+            background: none; border-top: none; border-left: none; border-right: none;
+            cursor: pointer; white-space: nowrap; font-family: 'Exo 2', sans-serif;
+        }
+        .nav-group-btn:hover, .nav-group-btn.active {
+            color: var(--accent); border-bottom-color: var(--accent);
+            background: rgba(0,201,255,0.04);
+        }
+        .nav-group-btn .arr { font-size: 0.5rem; opacity: .6; transition: transform .2s; }
+        .nav-group:hover .arr { transform: rotate(180deg); }
+        .nav-dropdown {
+            display: none; position: absolute; top: 100%; left: 0;
+            background: var(--bg-card); border: 1px solid var(--border);
+            border-top: 2px solid var(--accent); border-radius: 0 0 6px 6px;
+            min-width: 200px; z-index: 500;
+            box-shadow: 0 8px 32px rgba(0,0,0,.4);
+            overflow: hidden;
+        }
+        .nav-group:hover .nav-dropdown { display: block; }
+        .nav-dropdown a {
+            display: flex; align-items: center; gap: 0.6rem;
+            padding: 0.6rem 1rem; height: auto;
+            border-bottom: 1px solid var(--border); border-bottom-width: 1px;
+            font-size: 0.82rem; letter-spacing: 0.5px;
+            color: var(--text-secondary); text-decoration: none;
+            transition: all 0.15s; white-space: nowrap;
+        }
+        .nav-dropdown a:last-child { border-bottom: none; }
+        .nav-dropdown a:hover, .nav-dropdown a.active {
+            background: rgba(0,201,255,0.08); color: var(--accent);
+            border-bottom-color: var(--border);
+        }
+        .nav-dropdown a .nd-icon { width: 18px; text-align: center; flex-shrink: 0; }
+        .nav-sep { width: 1px; height: 20px; background: var(--border); margin: 0 0.3rem; }
+
+        /* ── BOUTON FLOTTANT ── */
+        .floating-save {
+            position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 900;
+            display: none; /* affiché via JS quand formulaire modifié */
+        }
+        .floating-save.visible { display: flex; }
+        .floating-save .btn {
+            box-shadow: 0 4px 20px rgba(0,255,136,.35);
+            animation: pulse-float 2s infinite;
+        }
+        @keyframes pulse-float {
+            0%,100% { box-shadow: 0 4px 20px rgba(0,255,136,.35); }
+            50%      { box-shadow: 0 4px 28px rgba(0,255,136,.6); }
+        }
+
+        /* ── INDICATEUR DE SYNC dans topbar ── */
+        #topbar-sync-wrap {
+            display: flex; align-items: center;
+        }
+        .topbar-sync-btn {
+            display: flex; align-items: center; gap: .3rem;
+            font-family: 'Share Tech Mono', monospace; font-size: .6rem; letter-spacing: .5px;
+            padding: .18rem .55rem; border-radius: 3px; white-space: nowrap;
+            background: none; cursor: pointer; border: 1px solid var(--border);
+            color: var(--text-muted); transition: all .2s; line-height: 1;
+        }
+        .topbar-sync-btn:hover  { border-color: var(--accent); color: var(--accent); }
+        .topbar-sync-btn.syncing{ border-color: rgba(0,201,255,.45); color: var(--accent); }
+        .topbar-sync-btn.ok     { border-color: rgba(0,255,136,.35); color: var(--accent-green); }
+        .topbar-sync-btn.error  { border-color: rgba(255,51,85,.35); color: var(--accent-red); }
+        .topbar-sync-icon { display: inline-block; }
+        .topbar-sync-btn.syncing .topbar-sync-icon { animation: spin .9s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── GEAR DISCRET dans topbar ── */
+        .topbar-gear {
+            background: none; border: none; cursor: pointer;
+            color: var(--text-muted); font-size: 0.95rem; padding: 0.2rem 0.4rem;
+            border-radius: 4px; line-height: 1; transition: color 0.2s, background 0.2s;
+            opacity: 0.55;
+        }
+        .topbar-gear:hover { color: var(--text-secondary); background: rgba(128,128,128,.12); opacity: 1; }
+        .topbar-gear:active { transform: rotate(30deg); }
+
+        /* ── LAYOUT ── */
+        main { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem 2rem; }
+
+        /* ══════════════════════════════════════════════════════════════
+           NAV VERTICAL (sidebar gauche)
+           ══════════════════════════════════════════════════════════════ */
+        body.nav-left nav {
+            position: fixed; left: 0; top: 0; bottom: 0;
+            width: 220px; height: 100vh;
+            flex-direction: column; align-items: stretch;
+            padding: 0; gap: 0; z-index: 200;
+            border-bottom: none; border-right: 1px solid var(--border);
+            overflow-y: auto; overflow-x: hidden;
+            top: 0 !important;  /* annule sticky */
+        }
+        body.nav-left .client-bar {
+            margin-left: 220px;
+            position: sticky; top: 0; z-index: 199;
+        }
+        body.nav-left main {
+            margin-left: 220px;
+        }
+        body.nav-left #cfg-drawer { /* le drawer reste à droite, inchangé */ }
+
+        /* Brand */
+        body.nav-left nav .nav-brand {
+            padding: .9rem 1.1rem; font-size: 1rem;
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0; letter-spacing: 3px;
+            display: flex; align-items: center; gap: .5rem;
+        }
+        /* Liens simples */
+        body.nav-left nav > a:not(.nav-brand) {
+            padding: .62rem 1.1rem; width: 100%; box-sizing: border-box;
+            display: flex; align-items: center; gap: .55rem;
+            font-size: .83rem; border-bottom: 1px solid var(--border);
+            height: auto;
+        }
+        body.nav-left nav > a:not(.nav-brand):hover,
+        body.nav-left nav > a:not(.nav-brand).active {
+            background: rgba(0,201,255,.07); color: var(--accent);
+        }
+        /* Séparateur */
+        body.nav-left .nav-sep { display: none; }
+        /* Spacer → pousse client badge en bas */
+        body.nav-left .nav-spacer { flex: 1; min-height: 1rem; }
+        /* Client badge */
+        body.nav-left .nav-client-badge {
+            display: block; padding: .7rem 1rem;
+            border-top: 1px solid var(--border); font-size: .72rem;
+            border-radius: 0; border-left: none; border-right: none; border-bottom: none;
+            margin: 0;
+        }
+
+        /* Groupes (Inventaire, Contrats, Accès) */
+        body.nav-left .nav-group {
+            display: block !important;   /* était flex → dropdown partait à droite */
+            position: static !important;
+            flex-shrink: 0;
+            border-bottom: 1px solid var(--border);
+        }
+        body.nav-left .nav-group-btn {
+            width: 100%; padding: .62rem 1.1rem;
+            font-size: .83rem; text-align: left;
+            display: flex !important; align-items: center; gap: .5rem;
+            height: auto; border-radius: 0;
+        }
+        body.nav-left .nav-group-btn .arr {
+            margin-left: auto; transition: transform .2s;
+        }
+        /* Dropdown vertical — s'insère dans le flux sous le bouton */
+        body.nav-left .nav-dropdown {
+            display: none !important;
+            position: static !important;
+            top: unset !important; left: unset !important;
+            z-index: unset !important;
+            box-shadow: none !important;
+            border: none !important; border-top: none !important;
+            border-radius: 0 !important;
+            background: rgba(0,0,0,.18);
+            min-width: unset !important; width: 100% !important;
+        }
+        /* Ouverture par clic (.open) uniquement */
+        body.nav-left .nav-group.open > .nav-dropdown {
+            display: block !important;
+        }
+        body.nav-left .nav-group.open .nav-group-btn .arr { transform: rotate(180deg); }
+        body.nav-left .nav-dropdown a {
+            padding: .5rem 1.1rem .5rem 2rem;
+            font-size: .8rem; border-bottom: 1px solid rgba(255,255,255,.04);
+        }
+        body.nav-left .nav-dropdown a:last-child { border-bottom: none; }
+
+        /* Light theme adjustments */
+        body.theme-light.nav-left nav { border-right-color: var(--border); }
+        body.theme-light.nav-left .nav-dropdown { background: rgba(0,0,0,.04); }
+        .page-header { margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+        .page-header h1 { font-family: 'Rajdhani', sans-serif; font-size: 1.9rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+        .page-header h1 span { color: var(--accent); }
+        .page-header p { color: var(--text-secondary); margin-top: 0.3rem; font-size: 0.88rem; }
+
+        /* ── FIL D'ARIANE ── */
+        .breadcrumb {
+            display: flex; align-items: center; gap: .35rem;
+            font-size: .72rem; color: var(--text-muted);
+            margin-bottom: 1rem;
+            font-family: 'Share Tech Mono', monospace; letter-spacing: .3px;
+        }
+        .breadcrumb a { color: var(--text-muted); text-decoration: none; transition: color .15s; }
+        .breadcrumb a:hover { color: var(--accent); }
+        .breadcrumb .sep { opacity: .4; }
+        .breadcrumb .current { color: var(--text-secondary); }
+
+        /* ── FLASH BANDEAU ── */
+        .flash-banner {
+            position: fixed; top: 92px; left: 50%; transform: translateX(-50%) translateY(-80px);
+            z-index: 1500; min-width: 320px; max-width: 600px; width: auto;
+            padding: .7rem 1.4rem; border-radius: 6px; border: 1px solid;
+            font-size: .88rem; font-weight: 600; text-align: center;
+            box-shadow: 0 4px 24px rgba(0,0,0,.5);
+            transition: transform .3s cubic-bezier(.34,1.56,.64,1), opacity .3s;
+            opacity: 0; pointer-events: none;
+            display: flex; align-items: center; gap: .7rem;
+        }
+        .flash-banner.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+        .flash-banner.success { background: rgba(0,255,136,.12); border-color: var(--accent-green); color: var(--accent-green); }
+        .flash-banner.error   { background: rgba(255,51,85,.12);  border-color: var(--accent-red);   color: var(--accent-red); }
+        .flash-banner.info    { background: rgba(0,201,255,.1);   border-color: var(--accent);        color: var(--accent); }
+
+        /* ── RACCOURCI ? AIDE ── */
+        .kbd-help-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7);
+            backdrop-filter: blur(4px); z-index: 4000;
+            align-items: center; justify-content: center;
+        }
+        .kbd-help-overlay.open { display: flex; }
+        .kbd-help-box {
+            background: var(--bg-card); border: 1px solid var(--border-glow);
+            border-radius: 8px; padding: 1.5rem 2rem; min-width: 340px;
+        }
+        .kbd-help-title { font-family: 'Rajdhani', sans-serif; font-size: 1rem; font-weight: 700;
+            letter-spacing: 2px; text-transform: uppercase; color: var(--accent); margin-bottom: 1rem; }
+        .kbd-row { display: flex; align-items: center; gap: 1rem; padding: .35rem 0;
+            border-bottom: 1px solid var(--border); font-size: .83rem; }
+        .kbd-row:last-child { border: none; }
+        .kbd { font-family: 'Share Tech Mono', monospace; background: var(--bg-secondary);
+            border: 1px solid var(--border); border-radius: 3px; padding: .15rem .45rem;
+            font-size: .75rem; color: var(--accent); flex-shrink: 0; }
+        .kbd-desc { color: var(--text-secondary); }
+
+        .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; padding: 1.5rem; position: relative; overflow: hidden; }
+        .card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,transparent,var(--border-glow),transparent); }
+        .card-title { font-family:'Rajdhani',sans-serif; font-size:.75rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--accent); margin-bottom:1.2rem; display:flex; align-items:center; gap:.5rem; }
+        .card-title::before { content:''; display:block; width:12px; height:2px; background:var(--accent); }
+
+        .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; }
+        .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:1.5rem; }
+        .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:1.5rem; }
+
+        .form-section { background:var(--bg-card); border:1px solid var(--border); border-radius:4px; padding:1.5rem; margin-bottom:1.5rem; }
+        .form-section-title { font-family:'Rajdhani',sans-serif; font-size:.7rem; font-weight:700; letter-spacing:3px; text-transform:uppercase; color:var(--accent); margin-bottom:1.2rem; padding-bottom:.6rem; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:.6rem; }
+        .form-row { display:grid; gap:1rem; margin-bottom:1rem; }
+        .form-row.cols-2 { grid-template-columns:1fr 1fr; }
+        .form-row.cols-3 { grid-template-columns:1fr 1fr 1fr; }
+        .form-row.cols-4 { grid-template-columns:1fr 1fr 1fr 1fr; }
+        .form-group { display:flex; flex-direction:column; gap:.4rem; }
+
+        label { font-size:.72rem; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-secondary); }
+        input, select, textarea {
+            background:var(--input-bg); border:1px solid var(--input-border); border-radius:3px;
+            color:var(--text-primary); padding:.55rem .8rem;
+            font-family:'Exo 2',sans-serif; font-size:.9rem; transition:border-color .2s, box-shadow .2s; width:100%;
+        }
+        input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(0,201,255,.1); }
+        input[type="date"] { color-scheme:dark; }
+        input[type="color"] { padding:.2rem; height:36px; cursor:pointer; }
+        textarea { resize:vertical; min-height:80px; }
+        select option { background:var(--bg-secondary); }
+
+        .form-section-subtitle {
+            font-size: 0.68rem; font-weight: 700; letter-spacing: 2px;
+            text-transform: uppercase; color: var(--text-muted);
+            margin-bottom: 0.6rem; padding-bottom: 0.3rem;
+            border-bottom: 1px dashed var(--border);
+        }
+        /* Password field with toggle */
+        .pwd-wrap { position: relative; }
+        .pwd-wrap input { padding-right: 2.4rem; }
+        .pwd-toggle {
+            position: absolute; right: 0.6rem; top: 50%; transform: translateY(-50%);
+            background: none; border: none; color: var(--text-muted); cursor: pointer;
+            font-size: 1rem; padding: 0; line-height: 1;
+        }
+        .pwd-toggle:hover { color: var(--accent); }
+
+        .btn { display:inline-flex; align-items:center; gap:.5rem; padding:.6rem 1.4rem; border:1px solid; border-radius:3px; font-family:'Rajdhani',sans-serif; font-size:.85rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; cursor:pointer; text-decoration:none; transition:all .2s; }
+        .btn-primary { background:rgba(0,201,255,.1); border-color:var(--accent); color:var(--accent); }
+        .btn-primary:hover { background:rgba(0,201,255,.2); box-shadow:0 0 16px rgba(0,201,255,.3); }
+        .btn-success { background:rgba(0,255,136,.08); border-color:var(--accent-green); color:var(--accent-green); }
+        .btn-success:hover { background:rgba(0,255,136,.18); }
+        .btn-danger { background:rgba(255,51,85,.08); border-color:var(--accent-red); color:var(--accent-red); }
+        .btn-danger:hover { background:rgba(255,51,85,.18); }
+        .btn-warning { background:rgba(255,140,0,.08); border-color:var(--accent-orange); color:var(--accent-orange); }
+        .btn-rdp     { background:rgba(192,132,252,.08); border-color:rgba(192,132,252,.5); color:#c084fc; }
+        .btn-rdp:hover { background:rgba(192,132,252,.18); box-shadow:0 0 12px rgba(192,132,252,.3); }
+        .btn-anydesk { background:rgba(239,68,68,.08); border-color:rgba(239,68,68,.5); color:#f87171; }
+        .btn-anydesk:hover { background:rgba(239,68,68,.18); box-shadow:0 0 12px rgba(239,68,68,.25); }
+        .btn-sm { padding:.3rem .8rem; font-size:.75rem; }
+
+        table { width:100%; border-collapse:collapse; }
+        th { background:var(--bg-secondary); padding:.7rem 1rem; text-align:left; font-size:.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text-secondary); border-bottom:1px solid var(--border); }
+        td { padding:.75rem 1rem; border-bottom:1px solid rgba(30,58,95,.4); font-size:.88rem; vertical-align:middle; }
+        tr:hover td { background:rgba(0,201,255,.03); }
+
+        .badge { display:inline-block; padding:.2rem .6rem; border-radius:2px; font-size:.65rem; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; }
+        .badge-green { background:rgba(0,255,136,.1); color:var(--accent-green); border:1px solid rgba(0,255,136,.3); }
+        .badge-red { background:rgba(255,51,85,.1); color:var(--accent-red); border:1px solid rgba(255,51,85,.3); }
+        .badge-orange { background:rgba(255,140,0,.1); color:var(--accent-orange); border:1px solid rgba(255,140,0,.3); }
+        .badge-blue { background:rgba(0,201,255,.1); color:var(--accent); border:1px solid rgba(0,201,255,.3); }
+        .badge-gray { background:rgba(100,130,160,.1); color:var(--text-secondary); border:1px solid var(--border); }
+        .badge-purple { background:rgba(150,80,255,.1); color:#c084fc; border:1px solid rgba(150,80,255,.3); }
+
+        .mono { font-family:'Share Tech Mono',monospace; font-size:.85rem; }
+        .alert { padding:.8rem 1.2rem; border-radius:3px; margin-bottom:1rem; font-size:.88rem; border-left:3px solid; }
+        .alert-success { background:rgba(0,255,136,.07); border-color:var(--accent-green); color:#80ffcc; }
+        .alert-error { background:rgba(255,51,85,.07); border-color:var(--accent-red); color:#ff8899; }
+        .alert-info { background:rgba(0,201,255,.07); border-color:var(--accent); color:var(--text-primary); }
+
+        .stat-card { background:var(--bg-card); border:1px solid var(--border); border-radius:4px; padding:1.2rem 1.5rem; position:relative; overflow:hidden; }
+        .stat-card .stat-value { font-family:'Share Tech Mono',monospace; font-size:2.4rem; color:var(--accent); line-height:1; margin-bottom:.4rem; }
+        .stat-card .stat-label { font-size:.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text-secondary); }
+
+        /* ── WATCHDOG TOPBAR ── */
+        .wd-topbar {
+            display:flex; align-items:center; gap:.45rem; margin-left:auto;
+            font-family:'Share Tech Mono',monospace; font-size:.65rem;
+            color:var(--text-muted); white-space:nowrap; overflow:hidden;
+        }
+        .wd-dot {
+            width:7px; height:7px; border-radius:50%; flex-shrink:0;
+            background:var(--text-muted); transition:background .3s, box-shadow .3s;
+        }
+        .wd-topbar.active .wd-dot { background:var(--accent-green); box-shadow:0 0 5px var(--accent-green); }
+        .wd-topbar.idle   .wd-dot { background:var(--text-muted); }
+        .wd-countdown { color:var(--accent); font-weight:700; }
+
+                .actions-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem; gap:1rem; flex-wrap:wrap; }
+
+        /* ── BOUTONS ACTIONS TABLEAUX ── */
+        .quick-actions { display:flex; gap:.35rem; flex-wrap:wrap; align-items:center; justify-content:flex-start; }
+        .qa-btn {
+            display:inline-flex; align-items:center; gap:4px;
+            padding:2px 8px; border-radius:3px; border:1px solid;
+            font-size:.68rem; font-weight:700; letter-spacing:.5px;
+            cursor:pointer; text-decoration:none; background:none;
+            transition:all .15s; white-space:nowrap; font-family:'Rajdhani',sans-serif;
+            line-height:1.6;
+        }
+        .qa-btn:hover { filter:brightness(1.2); background:rgba(128,128,128,.06); }
+        .qa-edit    { color:var(--accent);       border-color:rgba(0,201,255,.3); }
+        .qa-edit:hover  { background:rgba(0,201,255,.1)!important; }
+        .qa-danger  { color:var(--accent-red);   border-color:rgba(255,51,85,.35); }
+        .qa-danger:hover { background:rgba(255,51,85,.08)!important; }
+        .qa-green   { color:var(--accent-green); border-color:rgba(0,255,136,.35); }
+        .qa-green:hover  { background:rgba(0,255,136,.08)!important; }
+        .qa-purple  { color:#a78bfa;             border-color:rgba(167,139,250,.35); }
+        .qa-purple:hover { background:rgba(167,139,250,.08)!important; }
+        .qa-blue    { color:#60a5fa;             border-color:rgba(96,165,250,.4); }
+        .qa-blue:hover   { background:rgba(96,165,250,.08)!important; }
+        .qa-orange  { color:var(--accent-orange);border-color:rgba(255,140,0,.35); }
+        .qa-orange:hover { background:rgba(255,140,0,.08)!important; }
+
+        /* ── LISTE TOOLS ── */
+        .lt-toolbar {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: .4rem .8rem; background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border); gap: .5rem; flex-wrap: wrap;
+        }
+        .lt-left  { display:flex; align-items:center; gap:.5rem; }
+        .lt-right { display:flex; align-items:center; gap:.4rem; }
+        .lt-info  { color:var(--text-muted); font-family:'Share Tech Mono',monospace; font-size:.7rem; }
+        .lt-btn {
+            background: none; border: 1px solid var(--border); border-radius: 3px;
+            color: var(--text-secondary); font-size: .72rem; padding: .22rem .55rem;
+            cursor: pointer; transition: all .15s; white-space: nowrap;
+            font-family: 'Share Tech Mono', monospace;
+        }
+        .lt-btn:hover  { border-color:var(--accent); color:var(--accent); }
+        .lt-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(0,201,255,.08); }
+        .lt-group { display:flex; border:1px solid var(--border); border-radius:3px; overflow:hidden; }
+        .lt-group .lt-btn { border:none; border-right:1px solid var(--border); border-radius:0; }
+        .lt-group .lt-btn:last-child { border-right:none; }
+        /* Densité */
+        .density-compact td, .density-compact th { padding:.28rem .55rem !important; font-size:.78rem !important; }
+        .density-loose  td, .density-loose  th   { padding:.9rem 1.1rem !important; }
+
+        /* ── DOCUMENTS JOINTS ── */
+        /* Modale documents */
+        .docs-modal-overlay {
+            display:none; position:fixed; inset:0;
+            background:rgba(0,0,0,.75); backdrop-filter:blur(4px);
+            z-index:2500; align-items:center; justify-content:center;
+        }
+        .docs-modal-overlay.open { display:flex; }
+        .docs-modal-box {
+            background:var(--bg-card); border:1px solid var(--border-glow);
+            border-radius:8px; width:680px; max-width:95vw; max-height:88vh;
+            display:flex; flex-direction:column; overflow:hidden;
+            box-shadow:0 20px 60px rgba(0,0,0,.6);
+        }
+        .docs-modal-header {
+            padding:.9rem 1.2rem; border-bottom:1px solid var(--border);
+            display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+        }
+        .docs-modal-title { font-family:'Rajdhani',sans-serif; font-size:1rem; font-weight:700;
+            letter-spacing:1.5px; text-transform:uppercase; color:var(--accent); }
+        .docs-modal-sub { font-size:.75rem; color:var(--text-muted); margin-top:.1rem; }
+        .docs-modal-body { flex:1; overflow-y:auto; padding:1rem 1.2rem; }
+        .docs-modal-footer { padding:.7rem 1.2rem; border-top:1px solid var(--border);
+            display:flex; gap:.5rem; align-items:center; flex-shrink:0; flex-wrap:wrap; }
+        /* Upload zone */
+        .upload-zone {
+            border:2px dashed var(--border); border-radius:6px; padding:1.2rem;
+            text-align:center; color:var(--text-muted); font-size:.83rem;
+            transition:border-color .2s, background .2s; cursor:pointer; margin-bottom:1rem;
+        }
+        .upload-zone:hover, .upload-zone.drag { border-color:var(--accent); background:rgba(0,201,255,.05); color:var(--text-secondary); }
+        .upload-zone input[type=file] { display:none; }
+        .docs-list { display:flex; flex-direction:column; gap:0; }
+        .doc-row {
+            display:flex; align-items:center; gap:.8rem; padding:.55rem .7rem;
+            border-bottom:1px solid var(--border); transition:background .15s;
+        }
+        .doc-row:last-child { border-bottom:none; }
+        .doc-row:hover { background:rgba(0,201,255,.04); }
+        .doc-icon { font-size:1.2rem; flex-shrink:0; width:22px; text-align:center; }
+        .doc-info { flex:1; min-width:0; }
+        .doc-nom  { font-weight:600; font-size:.85rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .doc-meta { font-size:.72rem; color:var(--text-secondary); margin-top:.1rem; }
+        .doc-actions { display:flex; gap:.35rem; flex-shrink:0; }
+        .upload-panel summary::-webkit-details-marker { display:none; }
+        .upload-panel[open] summary { background:rgba(0,201,255,.1); border-color:var(--accent); color:var(--accent); }
+
+        /* ── FORM TOOLS ── */
+        .field-error { border-color:var(--accent-red) !important; box-shadow:0 0 0 2px rgba(255,51,85,.15) !important; }
+        .field-ok    { border-color:var(--accent-green) !important; }
+        .field-err-msg { font-size:.72rem; color:var(--accent-red); margin-top:.25rem; }
+        .req-star { color:var(--accent-red); font-size:.8rem; }
+        .draft-notice {
+            background:rgba(250,204,21,.1); border:1px solid rgba(250,204,21,.35);
+            border-radius:4px; padding:.5rem 1rem; margin-bottom:.8rem;
+            display:flex; align-items:center; justify-content:space-between;
+            font-size:.82rem; color:#fbbf24; transition:opacity .5s;
+        }
+        .draft-notice button { background:none; border:none; color:#fbbf24; cursor:pointer; font-size:.85rem; padding:0 .3rem; }
+        .draft-notice button:hover { color:#fff; }
+
+        @media(max-width:768px) {
+            .grid-2,.grid-3,.grid-4 { grid-template-columns:1fr; }
+            .form-row.cols-2,.form-row.cols-3,.form-row.cols-4 { grid-template-columns:1fr; }
+        }
+    </style>
+    {% block extra_styles %}{% endblock %}
+    <style>
+
+    </style>
+    <!-- CSS dynamique généré côté serveur avec les préférences personnelles de l'utilisateur -->
+    <style id="cfg-vars">{{ dynamic_css }}</style>
+</head>
+<body class="{{ 'theme-light' if cfg.get('mode') == 'light' else '' }}{{ ' nav-left' if cfg.get('nav_mode') == 'vertical' else '' }}">
+<script>
+// Apply theme mode and nav mode immediately to avoid flash on page load
+(function(){
+    var mode    = {{ cfg.get('mode', 'dark')|tojson }};
+    var navMode = {{ cfg.get('nav_mode', 'horizontal')|tojson }};
+    if (mode === 'light') document.body.classList.add('theme-light');
+    else document.body.classList.remove('theme-light');
+    if (navMode === 'vertical') document.body.classList.add('nav-left');
+    else document.body.classList.remove('nav-left');
+})();
+</script>
+
+<!-- TOPBAR CLIENT (liste déroulante) -->
+<div class="client-bar">
+    <span class="client-bar-label">Client :</span>
+    <div class="client-select-wrap">
+        {% set active_cl = clients | selectattr('id','eq', client_actif_id) | first | default(None) %}
+        <span class="client-dot" style="color:{{ active_cl.couleur if active_cl else '#00c9ff' }}; background:{{ active_cl.couleur if active_cl else '#00c9ff' }};"></span>
+        <select id="client-dropdown" onchange="changerClient(this.value)">
+            {% for cl in clients %}
+            <option value="{{ cl.id }}" {% if cl.id == client_actif_id %}selected{% endif %}>{{ cl.nom }}</option>
+            {% endfor %}
+        </select>
+        {% set acces_actif = active_cl.acces if active_cl and active_cl.acces is defined else '' %}
+        {% if acces_actif %}
+        <div class="topbar-acces-badge topbar-acces-{{ acces_actif }}" title="{% if acces_actif == 'proprietaire' %}Vous êtes propriétaire{% elif acces_actif == 'ecriture' %}Partagé — lecture/écriture{% elif acces_actif == 'admin' %}Accès administrateur{% else %}Partagé — lecture seule{% endif %}">
+            {% if acces_actif == 'proprietaire' %}🔑{% elif acces_actif == 'ecriture' %}✏ R/W{% elif acces_actif == 'admin' %}⚙{% else %}👁{% endif %}
+        </div>
+        {% endif %}
+    </div>
+    <div class="wd-topbar idle" id="wd-global-bar">
+        <span class="wd-dot"></span>
+        <span id="wd-global-text">…</span>
+        <span id="wd-global-countdown-wrap" style="display:none;">· prochain dans <span class="wd-countdown" id="wd-global-countdown"></span>s</span>
+        {% if request.endpoint == 'liste_appareils' %}
+        <button onclick="forcerPing()" class="btn btn-primary btn-sm"
+                style="padding:1px 5px;font-size:.62rem;" title="Forcer un cycle de ping">⟳</button>
+        {% endif %}
+    </div>
+    <div class="client-bar-actions">
+        {% if cfg.get('db_type') == 'sync' %}
+        <div id="topbar-sync-wrap" style="display:flex;align-items:center;gap:.35rem;">
+        {% else %}
+        <div id="topbar-sync-wrap" style="display:none;align-items:center;gap:.35rem;">
+        {% endif %}
+            <span style="font-family:'Share Tech Mono',monospace;font-size:.58rem;letter-spacing:1.5px;
+                         text-transform:uppercase;color:var(--text-muted);white-space:nowrap;">Synchro DB</span>
+            <button class="topbar-sync-btn" id="topbar-sync-btn"
+                    onclick="syncNow()" title="Base de données — mode synchronisation&#10;Cliquer pour synchroniser maintenant">
+                <span class="topbar-sync-icon" id="topbar-sync-icon">🔄</span>
+                <span id="topbar-sync-label">Sync…</span>
+            </button>
+        </div>
+        <a href="/client/nouveau" class="client-bar-link">+ Nouveau</a>
+        <a href="/clients" class="client-bar-link">Gérer →</a>
+        {% if session.get('auth_user_id') %}
+        <a href="/profil" style="display:flex;align-items:center;gap:.4rem;text-decoration:none;
+            border:1px solid var(--border);border-radius:3px;padding:.2rem .6rem;
+            font-size:.72rem;color:var(--text-muted);transition:all .15s;"
+           onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--text-secondary)'"
+           onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
+            👤 {{ session.get('auth_user_nom', 'Profil') }}
+        </a>
+        <a href="/logout" style="border:1px solid rgba(255,51,85,.3);border-radius:3px;padding:.2rem .5rem;
+            font-size:.7rem;color:var(--accent-red);text-decoration:none;" title="Déconnexion">⏏</a>
+        {% endif %}
+        <button class="topbar-gear" onclick="toggleConfig()" title="Paramètres">⚙</button>
+    </div>
+</div>
+
+<!-- NAV -->
+{% set ep = request.endpoint %}
+{% set inv_active = ep in ['liste_appareils','nouvel_appareil','editer_appareil','liste_peripheriques','nouveau_peripherique','editer_peripherique','parc_general','baie_brassage','page_scan','liste_plans','editer_plan'] %}
+{% set contrats_active = ep in ['liste_contrats','nouveau_contrat','editer_contrat','detail_contrat'] %}
+{% set secu_active = ep in ['liste_identifiants','nouvel_identifiant','editer_identifiant','liste_utilisateurs','nouvel_utilisateur','editer_utilisateur','droits_utilisateur'] %}
+<nav>
+    <a href="/" class="nav-brand">PARCINFO</a>
+    <a href="/" {% if ep == 'index' %}class="active"{% endif %} style="padding:0 .8rem;">
+        <span style="font-size:.9rem;">🏠</span>
+    </a>
+    <div class="nav-sep"></div>
+
+    <!-- INVENTAIRE -->
+    <div class="nav-group">
+        <button class="nav-group-btn {% if inv_active %}active{% endif %}">
+            🖥 Inventaire <span class="arr">▼</span>
+        </button>
+        <div class="nav-dropdown">
+            <a href="/appareils" {% if ep in ['liste_appareils','nouvel_appareil','editer_appareil'] %}class="active"{% endif %}>
+                <span class="nd-icon">🖥</span> Appareils
+            </a>
+            <a href="/peripheriques" {% if ep in ['liste_peripheriques','nouveau_peripherique','editer_peripherique'] %}class="active"{% endif %}>
+                <span class="nd-icon">🖱</span> Périphériques
+            </a>
+            <a href="/parc" {% if ep == 'parc_general' %}class="active"{% endif %}>
+                <span class="nd-icon">🏢</span> Parc général
+            </a>
+            <a href="/plans" {% if ep in ['liste_plans','editer_plan'] %}class="active"{% endif %}>
+                <span class="nd-icon">🗺</span> Plans
+            </a>
+            <a href="/baie" {% if ep == 'baie_brassage' %}class="active"{% endif %}>
+                <span class="nd-icon">🔌</span> Baie de brassage
+            </a>
+            <a href="/scan" {% if ep == 'page_scan' %}class="active"{% endif %}>
+                <span class="nd-icon">📡</span> Scan réseau
+            </a>
+        </div>
+    </div>
+
+    <!-- CONTRATS -->
+    <div class="nav-group">
+        <button class="nav-group-btn {% if contrats_active %}active{% endif %}">
+            📋 Contrats <span class="arr">▼</span>
+        </button>
+        <div class="nav-dropdown">
+            <a href="/contrats" {% if ep in ['liste_contrats','nouveau_contrat','editer_contrat','detail_contrat'] %}class="active"{% endif %}>
+                <span class="nd-icon">📋</span> Tous les contrats
+            </a>
+            <a href="/contrat/nouveau">
+                <span class="nd-icon">➕</span> Nouveau contrat
+            </a>
+        </div>
+    </div>
+
+    <!-- SÉCURITÉ / ACCÈS -->
+    <div class="nav-group">
+        <button class="nav-group-btn {% if secu_active %}active{% endif %}">
+            🔒 Accès <span class="arr">▼</span>
+        </button>
+        <div class="nav-dropdown">
+            <a href="/identifiants" {% if ep in ['liste_identifiants','nouvel_identifiant','editer_identifiant'] %}class="active"{% endif %}>
+                <span class="nd-icon">🔑</span> Identifiants
+            </a>
+            <a href="/utilisateurs" {% if ep in ['liste_utilisateurs','nouvel_utilisateur','editer_utilisateur','droits_utilisateur'] %}class="active"{% endif %}>
+                <span class="nd-icon">👥</span> Utilisateurs
+            </a>
+        </div>
+    </div>
+
+    <!-- JOURNAL -->
+    <a href="/historique" {% if ep == 'page_historique' %}class="active"{% endif %}>📋 Journal</a>
+
+    <!-- KNOWLEDGE BASE -->
+    <a href="/kb" {% if ep == 'page_kb' %}class="active"{% endif %}>📖 KB</a>
+
+    <!-- OUTILS (seul) -->
+    <a href="/outils" {% if ep == 'page_outils' %}class="active"{% endif %}>🔧 Outils</a>
+
+    {% if session.get('auth_user_role') == 'admin' %}
+    <!-- ADMIN -->
+    <a href="/admin/utilisateurs" {% if ep in ['admin_utilisateurs','admin_nouvel_utilisateur','admin_editer_utilisateur'] %}class="active"{% endif %}>👥 Admin</a>
+    {% endif %}
+
+    <div class="nav-spacer"></div>
+    {% if client is defined and client and client.nom %}
+    <span class="nav-client-badge" style="color:{{ client.couleur or '#00c9ff' }}; border-color:{{ client.couleur or '#00c9ff' }}33;">
+        &#9679; {{ client.nom }}
+    </span>
+    {% endif %}
+</nav>
+
+<!-- Flash banners (injectées par JS depuis data) -->
+<div class="flash-banner" id="flash-banner"></div>
+{% with messages = get_flashed_messages(with_categories=true) %}
+{% if messages %}
+<script>
+window._flashMessages = [
+    {% for cat, msg in messages %}
+    { cat: "{{ cat }}", msg: {{ msg|tojson }} }{% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+</script>
+{% endif %}
+{% endwith %}
+
+<!-- Aide raccourcis clavier -->
+<div class="kbd-help-overlay" id="kbd-help" onclick="this.classList.remove('open')">
+    <div class="kbd-help-box" onclick="event.stopPropagation()">
+        <div class="kbd-help-title">⌨ Raccourcis clavier</div>
+        <div class="kbd-row"><span class="kbd">N</span><span class="kbd-desc">Nouvel élément (sur une page liste)</span></div>
+        <div class="kbd-row"><span class="kbd">Échap</span><span class="kbd-desc">Retour à la liste / Fermer</span></div>
+        <div class="kbd-row"><span class="kbd">?</span><span class="kbd-desc">Afficher/masquer cette aide</span></div>
+        <div class="kbd-row"><span class="kbd">Ctrl+S</span><span class="kbd-desc">Sauvegarder (sur un formulaire)</span></div>
+        <div style="margin-top:.8rem;text-align:right;">
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('kbd-help').classList.remove('open')">Fermer</button>
+        </div>
+    </div>
+</div>
+
+<main>
+    <!-- Fil d'ariane -->
+    {% set ep = request.endpoint %}
+    {% set bc = [] %}
+    {% if ep in ['nouvel_appareil','editer_appareil'] %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Appareils', '/appareils')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouvel_appareil' else 'Modifier', None)) %}
+    {% elif ep in ['nouveau_peripherique','editer_peripherique'] %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Périphériques', '/peripheriques')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouveau_peripherique' else 'Modifier', None)) %}
+    {% elif ep in ['nouveau_contrat','editer_contrat'] %}
+        {% set _ = bc.append(('Contrats', '/contrats')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouveau_contrat' else 'Modifier', None)) %}
+    {% elif ep == 'detail_contrat' %}
+        {% set _ = bc.append(('Contrats', '/contrats')) %}
+        {% set _ = bc.append(('Détail', None)) %}
+    {% elif ep in ['nouvel_identifiant','editer_identifiant'] %}
+        {% set _ = bc.append(('Accès', None)) %}
+        {% set _ = bc.append(('Identifiants', '/identifiants')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouvel_identifiant' else 'Modifier', None)) %}
+    {% elif ep in ['nouvel_utilisateur','editer_utilisateur'] %}
+        {% set _ = bc.append(('Accès', None)) %}
+        {% set _ = bc.append(('Utilisateurs', '/utilisateurs')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouvel_utilisateur' else 'Modifier', None)) %}
+    {% elif ep == 'droits_utilisateur' %}
+        {% set _ = bc.append(('Accès', None)) %}
+        {% set _ = bc.append(('Utilisateurs', '/utilisateurs')) %}
+        {% set _ = bc.append(('Droits', None)) %}
+    {% elif ep == 'parc_general' %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Parc général', None)) %}
+    {% elif ep == 'baie_brassage' %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Baie de brassage', None)) %}
+    {% elif ep == 'page_scan' %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Scan réseau', None)) %}
+    {% endif %}
+    {% if bc %}
+    <div class="breadcrumb">
+        <a href="/">🏠</a>
+        {% for label, url in bc %}
+        <span class="sep">›</span>
+        {% if url %}<a href="{{ url }}">{{ label }}</a>
+        {% else %}<span class="current">{{ label }}</span>{% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+</main>
+
+
+<script>
+function changerClient(id) {
+    sessionStorage.setItem('parc_last_path', window.location.pathname);
+    window.location.href = '/client/' + id + '/selectionner?next=' + encodeURIComponent(window.location.pathname);
+}
+
+// ── PING BADGE TOPBAR ─────────────────────────────────────────────────────────
+(function() {
+    // ── WATCHDOG GLOBAL (toutes les pages) ─────────────────────────────────
+    var _wdCountdown = 0;
+    var _wdTimer = null;
+    var _wdCountTimer = null;
+
+    function _wdTick() {
+        var el = document.getElementById('wd-global-countdown');
+        var wrap = document.getElementById('wd-global-countdown-wrap');
+        if (!el || !wrap) return;
+        if (_wdCountdown > 0) {
+            _wdCountdown--;
+            el.textContent = _wdCountdown;
+            wrap.style.display = '';
+        } else {
+            wrap.style.display = 'none';
+        }
+    }
+
+    function refreshWdGlobal() {
+        fetch('/api/ping/summary')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var bar  = document.getElementById('wd-global-bar');
+                var txt  = document.getElementById('wd-global-text');
+                var wrap = document.getElementById('wd-global-countdown-wrap');
+                var el   = document.getElementById('wd-global-countdown');
+                if (!bar || !txt) return;
+
+                var total = d.total || 0;
+                var on    = d.en_ligne || 0;
+                var interval = d.interval || 60;
+
+                var cycleTs = '';
+                if (d.last_cycle) {
+                    try {
+                        var dt = new Date(d.last_cycle);
+                        cycleTs = ' · dernier : ' + dt.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+                    } catch(e) {}
+                }
+
+                bar.className = 'wd-topbar ' + (d.last_cycle ? 'active' : 'idle');
+                txt.textContent = total > 0
+                    ? on + '/' + total + ' en ligne' + cycleTs
+                    : 'Surveillance réseau' + cycleTs;
+
+                // Décompte
+                if (wrap && el && d.last_cycle) {
+                    _wdCountdown = interval;
+                    el.textContent = _wdCountdown;
+                    wrap.style.display = '';
+                    clearInterval(_wdCountTimer);
+                    _wdCountTimer = setInterval(_wdTick, 1000);
+                }
+            })
+            .catch(function() {});
+
+        clearTimeout(_wdTimer);
+        _wdTimer = setTimeout(refreshWdGlobal, 30000);
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        refreshWdGlobal();
+    });
+})();
+
+// ── BOUTON FLOTTANT SAUVEGARDER ───────────────────────────────────────────────
+(function() {
+    document.addEventListener('DOMContentLoaded', function() {
+        // Chercher un formulaire principal sur la page
+        var form = document.querySelector('main form');
+        if (!form) return;
+
+        // Créer le bouton flottant
+        var floatBtn = document.createElement('div');
+        floatBtn.className = 'floating-save';
+        var saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'btn btn-success';
+        saveBtn.textContent = '✓ Sauvegarder';
+        saveBtn.addEventListener('click', function() { form.requestSubmit(); });
+        floatBtn.appendChild(saveBtn);
+        document.body.appendChild(floatBtn);
+
+        var modified = false;
+        var scrollThreshold = 300;
+
+        form.addEventListener('input',  function() { modified = true; updateFloat(); });
+        form.addEventListener('change', function() { modified = true; updateFloat(); });
+        form.addEventListener('submit', function() { modified = false; floatBtn.classList.remove('visible'); });
+
+        function updateFloat() {
+            var scrolled = window.scrollY > scrollThreshold;
+            floatBtn.classList.toggle('visible', modified && scrolled);
+        }
+        window.addEventListener('scroll', updateFloat, { passive: true });
+    });
+})();
+
+function togglePwd(btn) {
+    const inp = btn.previousElementSibling;
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+    btn.textContent = inp.type === 'password' ? '👁' : '🙈';
+}
+
+// ── FLASH BANNER ─────────────────────────────────────────────────────────────
+(function() {
+    if (!window._flashMessages || !window._flashMessages.length) return;
+    const banner = document.getElementById('flash-banner');
+    if (!banner) return;
+    const icons = { success: '✓', danger: '✕', error: '✕', info: 'ℹ' };
+    const m = window._flashMessages[0];
+    const type = m.cat === 'success' ? 'success' : (m.cat === 'danger' ? 'error' : 'info');
+    banner.innerHTML = '<span>' + (icons[m.cat] || 'ℹ') + '</span><span>' + m.msg + '</span>';
+    banner.className = 'flash-banner ' + type;
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => { banner.classList.add('show'); });
+    });
+    setTimeout(() => {
+        banner.classList.remove('show');
+        setTimeout(() => { banner.innerHTML = ''; banner.className = 'flash-banner'; }, 400);
+    }, 3500);
+})();
+
+// ── RACCOURCIS CLAVIER GLOBAUX ────────────────────────────────────────────────
+document.addEventListener('keydown', function(e) {
+    // Ignorer si on tape dans un champ
+    const tag = document.activeElement ? document.activeElement.tagName : '';
+    const isInput = ['INPUT','TEXTAREA','SELECT'].includes(tag);
+
+    // ? = aide raccourcis
+    if (!isInput && e.key === '?') {
+        e.preventDefault();
+        document.getElementById('kbd-help').classList.toggle('open');
+        return;
+    }
+
+    // Ctrl+S = soumettre le formulaire actif
+    if (e.ctrlKey && e.key === 's') {
+        const form = document.querySelector('main form');
+        if (form) { e.preventDefault(); form.requestSubmit(); }
+        return;
+    }
+
+    // Échap = retour (si pas de modal ouverte)
+    if (!isInput && e.key === 'Escape') {
+        // Ne pas interférer si une modale est ouverte
+        const modal = document.querySelector('.modal-overlay.open, .qr-modal-overlay.open, .kbd-help-overlay.open');
+        if (modal) { modal.classList.remove('open'); return; }
+        // Retour à la liste selon la page
+        const backBtn = document.querySelector('a.btn-primary[href*="/appareils"], a.btn-primary[href*="/peripheriques"], a.btn-primary[href*="/contrats"], a.btn-primary[href*="/identifiants"], a.btn-primary[href*="/utilisateurs"]');
+        if (backBtn) { window.location.href = backBtn.href; }
+        return;
+    }
+
+    // N = Nouveau (sur pages liste uniquement)
+    if (!isInput && (e.key === 'n' || e.key === 'N')) {
+        const addBtn = document.querySelector('a.btn-success[href*="/nouveau"], a.btn-success[href*="/ajouter"]');
+        if (addBtn) { e.preventDefault(); window.location.href = addBtn.href; }
+        return;
+    }
+});
+
+// ── MÉMORISATION DE LA DERNIÈRE PAGE PAR SECTION ─────────────────────────────
+(function() {
+    const path = window.location.pathname;
+    // Sauvegarder la section visitée
+    if (path.startsWith('/appareils') || path.startsWith('/appareil')) sessionStorage.setItem('last_inventaire', path);
+    else if (path.startsWith('/peripheriques') || path.startsWith('/peripherique')) sessionStorage.setItem('last_inventaire', path);
+    else if (path.startsWith('/contrats') || path.startsWith('/contrat')) sessionStorage.setItem('last_contrats', path);
+    else if (path.startsWith('/identifiants') || path.startsWith('/identifiant')) sessionStorage.setItem('last_acces', path);
+    else if (path.startsWith('/utilisateurs') || path.startsWith('/utilisateur')) sessionStorage.setItem('last_acces', path);
+})();
+</script>
+{% block extra_scripts %}{% endblock %}
+<!-- ── MODALE DOCUMENTS ──────────────────────────────────────────────────── -->
+<div class="docs-modal-overlay" id="docs-modal" onclick="DocsModal.fermerSiOverlay(event)">
+    <div class="docs-modal-box">
+        <div class="docs-modal-header">
+            <div>
+                <div class="docs-modal-title" id="docs-modal-title">Documents joints</div>
+                <div class="docs-modal-sub" id="docs-modal-sub"></div>
+            </div>
+            <button onclick="DocsModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.25rem .6rem;cursor:pointer;">✕</button>
+        </div>
+        <div class="docs-modal-body" id="docs-modal-body">
+            <div style="text-align:center;padding:2rem;color:var(--text-muted);">Chargement…</div>
+        </div>
+        <div class="docs-modal-footer">
+            <button class="btn btn-success btn-sm" onclick="DocsModal.ouvrirUpload()">➕ Ajouter un fichier</button>
+            <a id="docs-modal-voir-fiche" href="#" class="btn btn-primary btn-sm" style="display:none;">✏ Voir la fiche →</a>
+            <div style="flex:1;"></div>
+            <button class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="DocsModal.fermer()">Fermer</button>
+        </div>
+    </div>
+</div>
+
+<!-- Upload form caché (soumission JS) -->
+<form id="docs-upload-form" method="POST" enctype="multipart/form-data" style="display:none;">
+    <input type="hidden" name="next" value="">
+    <input type="hidden" name="nom" id="docs-upload-nom">
+    <input type="hidden" name="type_doc" id="docs-upload-type">
+    <input type="file" name="fichier" id="docs-upload-file" onchange="DocsModal.soumettre()">
+</form>
+
+<script>
+const DocsModal = (() => {
+    let _appId = null, _appNom = '';
+
+    let _entite = 'appareil'; // 'appareil' ou 'peripherique'
+
+    function ouvrir(appId, appNom, entite) {
+        _appId = appId; _appNom = appNom;
+        _entite = entite || 'appareil';
+        document.getElementById('docs-modal-title').textContent = 'Documents — ' + appNom;
+        document.getElementById('docs-modal').classList.add('open');
+        document.body.style.overflow = 'hidden';
+        const lien = document.getElementById('docs-modal-voir-fiche');
+        const ficheUrl = _entite === 'peripherique'
+            ? '/peripherique/' + appId + '/editer#section-documents'
+            : '/appareil/' + appId + '/editer#section-documents';
+        lien.href = ficheUrl;
+        lien.style.display = '';
+        charger();
+    }
+
+    async function charger() {
+        const bodyEl = document.getElementById('docs-modal-body');
+        bodyEl.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted);">Chargement…</div>';
+        const apiUrl = _entite === 'peripherique'
+            ? '/api/peripherique/' + _appId + '/documents'
+            : '/api/appareil/' + _appId + '/documents';
+        const r = await fetch(apiUrl);
+        const docs = await r.json();
+        const nb = docs.length;
+        document.getElementById('docs-modal-sub').textContent =
+            nb + ' fichier' + (nb !== 1 ? 's' : '');
+        // Mettre à jour le badge dans la liste des appareils
+        const btnId = _entite === 'peripherique' ? 'docs-btn-per-' + _appId : 'docs-btn-' + _appId;
+        const btn = document.getElementById(btnId);
+        if (btn) {
+            let badge = btn.querySelector('.docs-badge');
+            if (nb > 0) {
+                if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'docs-badge';
+                    badge.style.cssText = 'background:rgba(96,165,250,.25);padding:0 4px;border-radius:8px;font-size:.7rem;';
+                    btn.appendChild(badge);
+                }
+                badge.textContent = nb;
+            } else if (badge) {
+                badge.remove();
+            }
+        }
+        if (!nb) {
+            bodyEl.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted);">Aucun document joint.<br><br>Cliquez sur <strong>➕ Ajouter un fichier</strong> pour commencer.</div>';
+            return;
+        }
+        bodyEl.innerHTML = docs.map(d => {
+            const ico = d.is_img ? '🖼' : d.is_pdf ? '📄' : '📎';
+            const prefix = _entite === 'peripherique' ? '/doc-peripherique' : '/document';
+            const preview = (d.is_img || d.is_pdf)
+                ? `<a href="${prefix}/${d.id}/apercu" target="_blank" class="btn btn-sm btn-primary">👁</a>` : '';
+            return `<div class="doc-row">
+                <div class="doc-icon">${ico}</div>
+                <div class="doc-info">
+                    <div class="doc-nom">${escH(d.nom || d.nom_fichier)}</div>
+                    <div class="doc-meta">${escH(d.taille_fmt)} · ${(d.date_upload||'').slice(0,10)}${d.type_doc ? ' · '+escH(d.type_doc) : ''}</div>
+                </div>
+                <div class="doc-actions">
+                    ${preview}
+                    <a href="${prefix}/${d.id}/telecharger" class="btn btn-sm btn-primary">⬇</a>
+                    <button class="btn btn-sm btn-danger" onclick="DocsModal.supprimer(${d.id})">✕</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function escH(s) {
+        return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function ouvrirUpload() {
+        // Préparer le formulaire
+        const form = document.getElementById('docs-upload-form');
+        form.action = _entite === 'peripherique'
+            ? '/peripherique/' + _appId + '/documents/upload'
+            : '/appareil/' + _appId + '/documents/upload';
+        document.querySelector('#docs-upload-form input[name=next]').value = window.location.pathname;
+        document.getElementById('docs-upload-nom').value = '';
+        // Attacher l'événement change (une seule fois)
+        const fileInput = document.getElementById('docs-upload-file');
+        fileInput.onchange = function() { soumettre(); };
+        // Déclencher le sélecteur de fichier
+        fileInput.click();
+    }
+
+    async function soumettre() {
+        const file = document.getElementById('docs-upload-file');
+        if (!file.files.length) return;
+        // Utiliser le nom du fichier si nom vide
+        const nomInput = document.getElementById('docs-upload-nom');
+        if (!nomInput.value.trim()) nomInput.value = file.files[0].name;
+        const form = document.getElementById('docs-upload-form');
+        const fd = new FormData(form);
+        const bodyEl = document.getElementById('docs-modal-body');
+        bodyEl.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted);">Envoi en cours…</div>';
+        await fetch(form.action, { method:'POST', body: fd });
+        file.value = '';
+        charger();
+    }
+
+    async function supprimer(docId) {
+        if (!confirm('Supprimer ce document définitivement ?')) return;
+        const fd = new FormData();
+        fd.append('next', window.location.pathname);
+        const delUrl = _entite === 'peripherique'
+            ? '/doc-peripherique/' + docId + '/supprimer'
+            : '/document/' + docId + '/supprimer';
+        await fetch(delUrl, { method:'POST', body: fd });
+        charger();
+    }
+
+    function fermer() {
+        document.getElementById('docs-modal').classList.remove('open');
+        document.body.style.overflow = '';
+    }
+    function fermerSiOverlay(e) {
+        if (e.target === document.getElementById('docs-modal')) fermer();
+    }
+
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && document.getElementById('docs-modal').classList.contains('open')) fermer();
+    });
+
+    return { ouvrir, fermer, fermerSiOverlay, ouvrirUpload, soumettre, supprimer };
+})();
+</script>
+
+<!-- ── CONFIG DRAWER ──────────────────────────────────────────────────────── -->
+<div id="cfg-overlay" onclick="toggleConfig()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(2px);z-index:1998;"></div>
+<div id="cfg-drawer" class="cfg-drawer-el" style="position:fixed;top:0;right:0;bottom:0;width:560px;max-width:98vw;z-index:1999;transform:translateX(100%);transition:transform .28s ease;overflow-y:auto;display:flex;flex-direction:column;">
+
+    <!-- HEADER -->
+    <div style="padding:1rem 1.4rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+        <div>
+            <div style="font-family:'Rajdhani',sans-serif;font-size:1.1rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);">⚙ Paramètres</div>
+            <div style="font-size:.72rem;color:var(--text-muted);margin-top:1px;">Configuration de ParcInfo</div>
+        </div>
+        <button onclick="toggleConfig()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.25rem .6rem;cursor:pointer;font-size:.85rem;">✕</button>
+    </div>
+
+    <!-- BODY (rempli par JS) -->
+    <div id="cfg-body" style="flex:1;padding:1.2rem 1.4rem;overflow-y:auto;"></div>
+
+    <!-- FOOTER -->
+    <div style="padding:.9rem 1.4rem;border-top:1px solid var(--border);display:flex;gap:.6rem;flex-shrink:0;">
+        <button onclick="sauvegarderConfig()" class="btn btn-success" style="flex:1;justify-content:center;">✓ Sauvegarder</button>
+        <button onclick="reinitialiserConfig()" class="btn btn-danger btn-sm" title="Réinitialiser aux valeurs par défaut">↺ Reset</button>
+        <button onclick="toggleConfig()" class="btn btn-primary btn-sm">✕ Fermer</button>
+    </div>
+</div>
+
+<script>
+// ── CONFIG DRAWER ─────────────────────────────────────────────────────────────
+
+let cfgOpen = false;
+let cfgData = {};
+
+const THEMES = {
+    'dark-blue':   { mode:'dark',  accent:'#00c9ff', green:'#00ff88', red:'#ff3355', orange:'#ff8c00', label:'🌙 Sombre — Bleu (défaut)' },
+    'dark-purple': { mode:'dark',  accent:'#a78bfa', green:'#34d399', red:'#f87171', orange:'#fbbf24', label:'🌙 Sombre — Violet' },
+    'dark-green':  { mode:'dark',  accent:'#4ade80', green:'#34d399', red:'#f87171', orange:'#fb923c', label:'🌙 Sombre — Vert' },
+    'dark-amber':  { mode:'dark',  accent:'#fbbf24', green:'#4ade80', red:'#f87171', orange:'#fb923c', label:'🌙 Sombre — Ambre' },
+    'dark-rose':   { mode:'dark',  accent:'#fb7185', green:'#34d399', red:'#f43f5e', orange:'#fb923c', label:'🌙 Sombre — Rose' },
+    'dark-cyan':   { mode:'dark',  accent:'#22d3ee', green:'#4ade80', red:'#fb7185', orange:'#fbbf24', label:'🌙 Sombre — Cyan' },
+    'light-blue':  { mode:'light', accent:'#0284c7', green:'#16a34a', red:'#dc2626', orange:'#ea580c', label:'☀ Clair — Bleu' },
+    'light-indigo':{ mode:'light', accent:'#4f46e5', green:'#16a34a', red:'#dc2626', orange:'#ea580c', label:'☀ Clair — Indigo' },
+    'light-teal':  { mode:'light', accent:'#0d9488', green:'#16a34a', red:'#dc2626', orange:'#ea580c', label:'☀ Clair — Teal' },
+    'light-purple':{ mode:'light', accent:'#7c3aed', green:'#16a34a', red:'#dc2626', orange:'#ea580c', label:'☀ Clair — Violet' },
+};
+
+function appliquerMode(mode) {
+    cfgData.mode = mode; // persist in memory so sauvegarderConfig picks it up
+    const body = document.body;
+    if (mode === 'light') {
+        body.classList.add('theme-light');
+    } else {
+        body.classList.remove('theme-light');
+    }
+}
+
+function applyNavMode(mode) {
+    cfgData.nav_mode = mode;
+    if (mode === 'vertical') {
+        document.body.classList.add('nav-left');
+        initNavVertical();
+    } else {
+        document.body.classList.remove('nav-left');
+    }
+}
+
+function appliquerContraste(level) {
+    cfgData.contrast_level = level; // persist in memory so sauvegarderConfig picks it up
+    const html = document.documentElement;
+    // Retirer toutes les classes de contraste
+    html.classList.remove('contrast-high', 'contrast-max');
+    // Ajouter la classe appropriée si elle n'est pas "normal"
+    if (level === 'high') {
+        html.classList.add('contrast-high');
+    } else if (level === 'max') {
+        html.classList.add('contrast-max');
+    }
+    // Mettre à jour les boutons actifs visuellement
+    document.querySelectorAll('button.cfg-contrast-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelectorAll('button.cfg-contrast-btn').forEach(btn => {
+        if (btn.textContent.trim() === 'Normale' && level === 'normal') btn.classList.add('active');
+        if (btn.textContent.trim() === 'Élevé' && level === 'high') btn.classList.add('active');
+        if (btn.textContent.trim() === 'Maximum' && level === 'max') btn.classList.add('active');
+    });
+}
+
+function initNavVertical() {
+    // Rend les groupes cliquables (toggle .open) au lieu de hover CSS
+    document.querySelectorAll('nav .nav-group').forEach(function(grp) {
+        const btn = grp.querySelector('.nav-group-btn');
+        if (!btn || btn.dataset.vnavInit) return;
+        btn.dataset.vnavInit = '1';
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // fermer les autres
+            document.querySelectorAll('nav .nav-group.open').forEach(function(o) {
+                if (o !== grp) o.classList.remove('open');
+            });
+            grp.classList.toggle('open');
+        });
+        // Ouvrir le groupe actif par défaut
+        if (btn.classList.contains('active')) grp.classList.add('open');
+    });
+}
+
+// Initialisation au chargement selon le mode courant
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.body.classList.contains('nav-left')) initNavVertical();
+});
+
+const PERIPH_LABELS = {
+    ecran:'Écran', clavier:'Clavier', souris:'Souris', webcam:'Webcam',
+    casque:'Casque/Micro', imprimante:'Imprimante', onduleur:'Onduleur/UPS',
+    stockage:'Stockage', dock:'Docking', tel:'Téléphone', usb:'USB/Hub',
+    reseau:'Réseau', badge:'Badge', autre:'Autre'
+};
+// Liste des types d'appareils (depuis config — inclut les types custom)
+const TYPE_LIST = {{ types_appareils_ctx | tojson }};
+// Générer TYPE_LABELS depuis TYPE_LIST (clé CSS → libellé)
+const TYPE_LABELS = {};
+(function(){
+    {% set _sk2 = [] %}
+    {% for t in types_appareils_ctx %}
+    {% set k = t|type_css %}
+    {% if k not in _sk2 %}{% set _ = _sk2.append(k) %}
+    TYPE_LABELS[{{ k|tojson }}] = {{ t|tojson }};
+    {% endif %}{% endfor %}
+})();
+const PORT_LABELS = {
+    ssh:'SSH (22)', http:'HTTP (80)', https:'HTTPS (443)', rdp:'RDP (3389)',
+    ftp:'FTP (21)', smb:'SMB (445)', print:'Print (631/9100)', telnet:'Telnet (23)', other:'Autre'
+};
+// Couleurs par défaut pour les types d'appareils (fallback si non configuré)
+const TYPE_DEFAULTS = {
+    pc:'#00c9ff', linux:'#4ade80', laptop:'#60a5fa', mac:'#e2e8f0',
+    serveur:'#c084fc', imprimante:'#f97316', switch:'#facc15',
+    routeur:'#ff3355', nas:'#4ade80', tel:'#34d399',
+    tablette:'#a78bfa', camera:'#fb923c', wifi:'#2dd4bf', autre:'#94a3b8'
+};
+// Labels courts par défaut pour les badges de types (≤3 chars)
+const TYPE_BADGE_DEFAULTS = {
+    pc:'PC', linux:'LNX', laptop:'LAP', mac:'MAC',
+    serveur:'SRV', imprimante:'IMP', switch:'SW', routeur:'RTR',
+    nas:'NAS', tel:'TEL', tablette:'TAB', camera:'CAM',
+    wifi:'WIF', autre:'AUT'
+};
+
+// Palette de couleurs prédéfinies (~30 couleurs)
+const COLOR_PALETTE = [
+    // Teintes froides (bleus, cyans, violets)
+    '#00c9ff', '#0284c7', '#0369a1', '#0d47a1',
+    '#5c6bc0', '#6366f1', '#7c3aed', '#a78bfa',
+    '#c084fc', '#d946ef', '#ec4899',
+    // Teintes chaudes (rouges, oranges, jaunes)
+    '#ff3355', '#dc2626', '#ef4444', '#f87171',
+    '#ff6b6b', '#ffa500', '#ff8c00', '#fb923c',
+    '#fbbf24', '#facc15', '#eab308', '#84cc16',
+    // Teintes vertes et neutres
+    '#00ff88', '#34d399', '#10b981', '#059669',
+    '#4ade80', '#22c55e', '#16a34a',
+    '#64748b', '#94a3b8', '#cbd5e1', '#e2e8f0',
+];
+
+// Fonction pour créer un sélecteur de couleur palette
+function colorPaletteSelector(configKey, currentColor) {
+    const selected = currentColor || COLOR_PALETTE[0];
+    return `<div class="color-palette-picker" style="display:grid;grid-template-columns:repeat(6,1fr);gap:.35rem;padding:.3rem;background:var(--bg-secondary);border-radius:3px;border:1px solid var(--border);">
+        ${COLOR_PALETTE.map(col => `
+            <button type="button" class="color-palette-btn ${col === selected ? 'selected' : ''}"
+                    data-cfg="${configKey}" data-color="${col}"
+                    onclick="selectColor(this, '${configKey}'); return false;"
+                    style="width:28px;height:28px;border:2px solid ${col === selected ? 'var(--accent)' : 'transparent'};background:${col};border-radius:3px;cursor:pointer;transition:all .15s;padding:0;font-size:0;"
+                    title="${col}"></button>
+        `).join('')}
+    </div>`;
+}
+
+function selectColor(btn, configKey) {
+    const color = btn.dataset.color;
+    // Mettre à jour le bouton sélectionné
+    btn.parentElement.querySelectorAll('button').forEach(b => {
+        b.style.borderColor = 'transparent';
+        b.classList.remove('selected');
+    });
+    btn.style.borderColor = 'var(--accent)';
+    btn.classList.add('selected');
+
+    // Créer ou mettre à jour un input hidden pour la sauvegarde
+    let input = btn.parentElement.parentElement.querySelector(`input[data-cfg="${configKey}"]`);
+    if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.dataset.cfg = configKey;
+        btn.parentElement.parentElement.appendChild(input);
+    }
+    input.value = color;
+
+    // Mettre à jour le badge de type si c'est une couleur de type
+    if (configKey.startsWith('type_color_')) {
+        const typeRow = btn.closest('[data-typerow]');
+        if (typeRow) {
+            const badge = typeRow.querySelector('.type-bdg-prev');
+            if (badge) {
+                badge.style.color = color;
+                badge.style.borderColor = color + '55';
+                badge.style.background = color + '15';
+            }
+        }
+    }
+
+    // Appliquer les variables si c'est une couleur globale ou de type
+    const obj = {};
+    obj[configKey] = color;
+    appliquerVariables(obj);
+
+    // Sauvegarder automatiquement
+    sauvegarderConfigAuto();
+}
+
+// Mapping statique type → clé CSS (réplique Python _TYPE_CSS_MAP)
+const _TYPE_CSS_MAP_JS = {
+    'PC':'pc','PC (Windows)':'pc','PC/Serveur (Linux)':'linux',
+    'Laptop':'laptop','MacBook':'mac','Serveur':'serveur',
+    'Imprimante':'imprimante','Imprimante multifonction':'imprimante',
+    'Switch':'switch','Switch/AP':'switch','Routeur/Pare-feu':'routeur',
+    'NAS':'nas','Telephone IP':'tel','Tablette':'tablette',
+    'Camera IP':'camera','Borne Wi-Fi':'wifi','Autre':'autre',
+};
+function _typeCssKey(label) {
+    if (_TYPE_CSS_MAP_JS[label]) return _TYPE_CSS_MAP_JS[label];
+    return label.toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,16) || 'autre';
+}
+
+// Liste de travail en mémoire (initialisée depuis TYPE_LIST à chaque rendreConfig)
+let _typesList = [];
+
+function _buildTypeRow(lbl) {
+    const k   = _typeCssKey(lbl);
+    const col = g('type_color_'+k) || TYPE_DEFAULTS[k] || '#94a3b8';
+    const bdg = g('type_badge_'+k) || TYPE_BADGE_DEFAULTS[k] || k.slice(0,3).toUpperCase();
+    const desc = g('type_desc_'+k) || '';
+    const safe = lbl.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return `<div class="types-cfg-row" data-typerow="${k}" data-label="${safe}" style="display:flex;align-items:center;gap:.45rem;padding:.28rem 0;border-bottom:1px solid rgba(255,255,255,.04);">
+        <input type="color" data-cfg="type_color_${k}" value="${col}" class="cfg-color" list="color-palette-list" style="flex-shrink:0;"
+               oninput="(function(el){const v=el.value,row=el.closest('[data-typerow]'),prev=row.querySelector('.type-bdg-prev');prev.style.color=v;prev.style.borderColor=v+'55';prev.style.background=v+'15';appliquerVariables({'type_color_${k}':v});sauvegarderConfigAuto();})(this)">
+        <span class="badge type-bdg-prev type-${k}" style="flex-shrink:0;min-width:2.4rem;text-align:center;font-size:.65rem;padding:.12rem .3rem;letter-spacing:1px;cursor:default;">${bdg}</span>
+        <input type="text" data-cfg="type_badge_${k}" value="${bdg}" maxlength="3" placeholder="ABC"
+               style="width:42px;text-align:center;text-transform:uppercase;font-family:'Share Tech Mono',monospace;font-size:.72rem;flex-shrink:0;padding:.2rem .3rem;"
+               class="cfg-input"
+               oninput="(function(el){const v=(el.value||'').toUpperCase();el.value=v;el.closest('[data-typerow]').querySelector('.type-bdg-prev').textContent=v||'…';})(this)">
+        <span style="font-size:.73rem;color:var(--text-secondary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${safe}">${safe}</span>
+        <input type="text" data-cfg="type_desc_${k}" value="${desc}" maxlength="32" placeholder="Description (optionnel)"
+               style="font-size:.72rem;flex:1;max-width:200px;padding:.2rem .3rem;"
+               class="cfg-input"
+               oninput="sauvegarderConfigAuto();" title="Description affichée en infobulle">
+        <button class="types-del-btn" onclick="_typeSupprimer(this)" title="Supprimer ce type">✕</button>
+    </div>`;
+}
+
+function _renderTypesGrid() {
+    const grid = document.getElementById('types-cfg-grid');
+    if (!grid) return;
+    if (!_typesList.length) {
+        grid.innerHTML = '<div style="color:var(--text-muted);font-size:.75rem;padding:.4rem 0;">Aucun type configuré.</div>';
+        return;
+    }
+    grid.innerHTML = _typesList.map(_buildTypeRow).join('');
+}
+
+async function _typeSupprimer(btn) {
+    const row   = btn.closest('[data-label]');
+    const label = row ? row.dataset.label.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"') : '';
+    if (!label) return;
+    if (!confirm(`Supprimer le type "${label}" ?`)) return;
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/listes/types_appareils/supprimer', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({valeur: label})
+        });
+        const d = await resp.json().catch(()=>({}));
+        if (d.ok) {
+            _typesList = _typesList.filter(t => t !== label);
+            // Mise à jour de TYPE_LIST et TYPE_LABELS en mémoire
+            const idx = TYPE_LIST.indexOf(label);
+            if (idx !== -1) TYPE_LIST.splice(idx, 1);
+            const k = _typeCssKey(label);
+            if (TYPE_LABELS[k] === label) delete TYPE_LABELS[k];
+            _renderTypesGrid();
+            showToast(`Type "${label}" supprimé`, 'info');
+        } else {
+            btn.disabled = false;
+            showToast(d.error || 'Erreur lors de la suppression', 'danger');
+        }
+    } catch(e) {
+        btn.disabled = false;
+        showToast('Erreur réseau', 'danger');
+    }
+}
+
+async function _typeAjouter() {
+    const input = document.getElementById('types-cfg-new');
+    if (!input) return;
+    const label = input.value.trim();
+    if (!label) { input.focus(); return; }
+    if (_typesList.includes(label)) { showToast('Ce type existe déjà', 'danger'); return; }
+    try {
+        const resp = await fetch('/api/listes/types_appareils/ajouter', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({valeur: label})
+        });
+        const d = await resp.json().catch(()=>({}));
+        if (d.ok) {
+            _typesList.push(label);
+            TYPE_LIST.push(label);
+            const k = _typeCssKey(label);
+            TYPE_LABELS[k] = label;
+            input.value = '';
+            _renderTypesGrid();
+            showToast(`Type "${label}" ajouté`, 'success');
+        } else {
+            showToast(d.error || 'Erreur lors de l\'ajout', 'danger');
+        }
+    } catch(e) {
+        showToast('Erreur réseau', 'danger');
+    }
+}
+
+// Ajouter un nouveau port à la liste des services
+async function _ajouterPort() {
+    const input = document.getElementById('new-port-input');
+    if (!input) return;
+    const port = parseInt(input.value.trim());
+    if (isNaN(port) || port < 1 || port > 65535) {
+        showToast('Port invalide (1-65535)', 'danger');
+        return;
+    }
+
+    // Récupérer la liste actuelle des ports
+    const scanPortsStr = g('scan_ports') || '21,22,23,25,53,80,110,135,139,143,443,445,631,3389,5900,8080,8443,9100';
+    const ports = scanPortsStr.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
+
+    if (ports.includes(port)) {
+        showToast(`Port ${port} déjà présent`, 'warning');
+        return;
+    }
+
+    // Ajouter le nouveau port
+    ports.push(port);
+    ports.sort((a,b) => a-b);
+    const newPortsStr = ports.join(',');
+
+    try {
+        const resp = await fetch('/api/config', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({scan_ports: newPortsStr})
+        });
+        const d = await resp.json().catch(()=>({}));
+        if (d.ok) {
+            cfgData.scan_ports = newPortsStr;
+            input.value = '';
+            rendreConfig();
+            showToast(`Port ${port} ajouté`, 'success');
+        } else {
+            showToast(d.error || 'Erreur lors de l\'ajout', 'danger');
+        }
+    } catch(e) {
+        showToast('Erreur réseau', 'danger');
+    }
+}
+
+// Supprimer un port de la liste des services
+async function _supprimerPort(port) {
+    if (!confirm(`Êtes-vous sûr de vouloir supprimer le port ${port} ?`)) {
+        return;
+    }
+
+    // Récupérer la liste actuelle des ports
+    const scanPortsStr = g('scan_ports') || '21,22,23,25,53,80,110,135,139,143,443,445,631,3389,5900,8080,8443,9100';
+    const ports = scanPortsStr.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
+
+    if (!ports.includes(port)) {
+        showToast(`Port ${port} non trouvé`, 'warning');
+        return;
+    }
+
+    // Supprimer le port
+    const newPorts = ports.filter(p => p !== port);
+    const newPortsStr = newPorts.join(',');
+
+    try {
+        const resp = await fetch('/api/config', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({scan_ports: newPortsStr})
+        });
+        const d = await resp.json().catch(()=>({}));
+        if (d.ok) {
+            cfgData.scan_ports = newPortsStr;
+            rendreConfig();
+            showToast(`Port ${port} supprimé`, 'success');
+        } else {
+            showToast(d.error || 'Erreur lors de la suppression', 'danger');
+        }
+    } catch(e) {
+        showToast('Erreur réseau', 'danger');
+    }
+}
+
+// Sauvegarde automatique avec debounce
+let autoSaveTimer = null;
+async function sauvegarderConfigAuto() {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(async () => {
+        const inputs = document.querySelectorAll('#cfg-body [data-cfg]');
+        const payload = {};
+        inputs.forEach(el => {
+            const key = el.dataset.cfg;
+            const value = el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value;
+            payload[key] = value;
+            // Mise à jour immédiate de cfgData pour la prévisualisation
+            cfgData[key] = value;
+        });
+        try {
+            await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+            appliquerVariables(payload);
+        } catch(e) { console.error('Erreur sauvegarde auto', e); }
+    }, 500);
+}
+
+function toggleConfig() {
+    cfgOpen = !cfgOpen;
+    const drawer = document.getElementById('cfg-drawer');
+    const overlay = document.getElementById('cfg-overlay');
+    drawer.style.transform = cfgOpen ? 'translateX(0)' : 'translateX(100%)';
+    overlay.style.display  = cfgOpen ? 'block' : 'none';
+    if (cfgOpen && !Object.keys(cfgData).length) chargerConfig();
+}
+
+async function chargerConfig() {
+    const resp = await fetch('/api/config');
+    if (resp.ok) { cfgData = await resp.json(); }
+    else { cfgData = {}; }
+    // Apply saved mode immediately
+    appliquerMode(cfgData.mode || 'dark');
+    // ✓ Applique le niveau de contraste
+    appliquerContraste(cfgData.contrast_level || 'normal');
+    // ✓ Reconstruit le CSS dynamique (couleurs, accents, etc.)
+    appliquerVariables(cfgData);
+    // ✓ Applique la configuration de navigation (horizontal/vertical)
+    applyNavMode(cfgData.nav_mode || 'horizontal');
+    rendreConfig();
+}
+
+async function sauvegarderConfig() {
+    // Collect all inputs inside drawer
+    const inputs = document.querySelectorAll('#cfg-body [data-cfg]');
+    const payload = {};
+    inputs.forEach(el => {
+        const key = el.dataset.cfg;
+        payload[key] = el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value;
+    });
+    // Always include current mode from cfgData (buttons update cfgData.mode directly)
+    payload.mode = cfgData.mode || 'dark';
+
+    // Désactiver le bouton pendant la sauvegarde
+    const saveBtn = document.querySelector('[onclick*="sauvegarderConfig"]');
+    const originalBtnText = saveBtn ? saveBtn.textContent : '';
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.style.opacity = '0.6';
+        saveBtn.innerHTML = '⏳ Sauvegarde...';
+    }
+
+    try {
+        const resp = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+
+        if (resp.ok) {
+            appliquerVariables(payload);
+            appliquerMode(payload.mode);
+            appliquerContraste(payload.contrast_level || 'normal');
+
+            // Afficher un message de succès avec animation
+            if (saveBtn) {
+                saveBtn.innerHTML = '✓ Sauvegardé!';
+                saveBtn.style.background = 'var(--accent-green, #00ff88)';
+                saveBtn.style.color = '#000';
+            }
+            showToast('✓ Configuration sauvegardée avec succès!', 'success');
+
+            // Fermer le panneau après 1.5 secondes
+            setTimeout(() => {
+                if (cfgOpen) toggleConfig();
+            }, 1500);
+        } else {
+            showToast('✗ Erreur lors de la sauvegarde', 'error');
+            if (saveBtn) {
+                saveBtn.innerHTML = '✗ Erreur!';
+                saveBtn.style.background = 'var(--accent-red, #ff3355)';
+            }
+            setTimeout(() => {
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.style.opacity = '1';
+                    saveBtn.innerHTML = originalBtnText;
+                    saveBtn.style.background = '';
+                    saveBtn.style.color = '';
+                }
+            }, 2000);
+        }
+    } catch (err) {
+        showToast('✗ Erreur de connexion', 'error');
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.style.opacity = '1';
+            saveBtn.innerHTML = originalBtnText;
+            saveBtn.style.background = '';
+            saveBtn.style.color = '';
+        }
+    }
+}
+
+async function reinitialiserConfig() {
+    if (!confirm('Réinitialiser tous les paramètres aux valeurs par défaut ?')) return;
+    await fetch('/api/config/reset', { method:'POST' });
+    cfgData = {};
+    await chargerConfig();
+    showToast('Configuration réinitialisée', 'info');
+}
+
+function appliquerVariables(patch) {
+    // Merge patch into cfgData for live preview
+    Object.assign(cfgData, patch);
+    if (patch.mode !== undefined) appliquerMode(patch.mode);
+    const c = cfgData;
+    const g = (k,d) => c[k] || d;
+
+    // Build full dynamic CSS
+    const accent = g('accent_color','#00c9ff');
+    const green  = g('accent_green','#00ff88');
+    const red    = g('accent_red','#ff3355');
+    const orange = g('accent_orange','#ff8c00');
+
+    const portRules = Object.entries({
+        ssh:g('port_color_ssh','#00ff88'), http:g('port_color_http','#00c9ff'),
+        https:g('port_color_https','#00c9ff'), rdp:g('port_color_rdp','#c084fc'),
+        ftp:g('port_color_ftp','#ff8c00'), smb:g('port_color_smb','#facc15'),
+        print:g('port_color_print','#fb923c'), telnet:g('port_color_telnet','#ff3355'),
+        other:g('port_color_other','#64748b')
+    }).map(([k,col])=>`.port-${k}{color:${col};border-color:${col}55}.port-${k}:hover{background:${col}18;box-shadow:0 0 8px ${col}44}`).join('');
+
+    const periphMap = {
+        ecran:g('periph_color_ecran','#22d3ee'), clavier:g('periph_color_clavier','#a78bfa'),
+        souris:g('periph_color_souris','#a78bfa'), webcam:g('periph_color_webcam','#fb923c'),
+        casque:g('periph_color_casque','#c084fc'), audio:g('periph_color_casque','#c084fc'),
+        imprimante:g('periph_color_imprimante','#f97316'), scanner:g('periph_color_imprimante','#f97316'),
+        onduleur:g('periph_color_onduleur','#facc15'), multiprise:g('periph_color_onduleur','#facc15'),
+        stockage:g('periph_color_stockage','#4ade80'), usb:g('periph_color_usb','#94a3b8'),
+        dock:g('periph_color_dock','#60a5fa'), reseau:g('periph_color_reseau','#2dd4bf'),
+        tel:g('periph_color_tel','#34d399'), badge:g('periph_color_badge','#f87171'),
+        autre:g('periph_color_autre','#94a3b8')
+    };
+    const periphRules = Object.entries(periphMap).map(([k,col])=>`.pi-${k}{color:${col};border-color:${col}66}.pi-${k}:hover{background:${col}18}`).join('');
+
+    // typeMap dynamique : couvre tous les types (standards + custom) via TYPE_LABELS
+    const typeMap = {};
+    Object.keys(TYPE_LABELS).forEach(k => {
+        typeMap[k] = g('type_color_'+k) || TYPE_DEFAULTS[k] || '#94a3b8';
+    });
+    const typeRules = Object.entries(typeMap).map(([k,col])=>`.type-${k}{color:${col};background:${col}15;border-color:${col}55}`).join('');
+
+    const style = document.getElementById('cfg-vars');
+    if (style) style.textContent = `:root{--accent:${accent};--accent-green:${green};--accent-red:${red};--accent-orange:${orange}}${portRules}${periphRules}${typeRules}`;
+}
+
+function appliquerTheme(themeKey) {
+    const t = THEMES[themeKey]; if (!t) return;
+    // Apply mode first
+    appliquerMode(t.mode || 'dark');
+    const modeInput = document.querySelector('[data-cfg="mode"]');
+    if (modeInput) modeInput.value = t.mode || 'dark';
+    // Apply colors
+    const accentEl = document.querySelector('[data-cfg="accent_color"]');
+    if (accentEl) accentEl.value = t.accent;
+    const greenEl = document.querySelector('[data-cfg="accent_green"]');
+    if (greenEl) greenEl.value = t.green;
+    const redEl = document.querySelector('[data-cfg="accent_red"]');
+    if (redEl) redEl.value = t.red;
+    const orangeEl = document.querySelector('[data-cfg="accent_orange"]');
+    if (orangeEl) orangeEl.value = t.orange;
+    appliquerVariables({ accent_color:t.accent, accent_green:t.green, accent_red:t.red, accent_orange:t.orange, mode:t.mode||'dark' });
+}
+
+function g(k) { return cfgData[k] || ''; }
+
+// ── CONSTANTES GLOBALES POUR LES PORTS ──
+const PORT_COLOR_DEFAULTS = {
+    ssh:'#00ff88', http:'#00c9ff', https:'#00c9ff', rdp:'#c084fc',
+    ftp:'#ff8c00', smb:'#facc15', print:'#fb923c', telnet:'#ff3355', other:'#64748b'
+};
+
+const PORT_ICONS = {
+    ssh:'⌨', http:'🌐', https:'🔒', rdp:'🖥',
+    ftp:'📁', smb:'🗂', print:'🖨', telnet:'⚠', other:'◈'
+};
+
+const PORT_ICON_OPTIONS = ['⌨', '🌐', '🔒', '🖥', '📁', '🗂', '🖨', '⚠', '◈', '🔌', '💾', '🔍', '📡', '🔑', '⚙', '✉', '🎯'];
+
+const PORT_TO_TYPE = {
+    21:'ftp', 22:'ssh', 23:'telnet', 25:'other', 53:'other',
+    80:'http', 110:'other', 135:'other', 139:'smb', 143:'other',
+    443:'https', 445:'smb', 631:'print', 3389:'rdp',
+    5900:'rdp', 8080:'http', 8443:'https', 9100:'print'
+};
+
+function rendreConfig() {
+    // helpers locaux pour les grilles de couleurs
+    function colorGrid2col(entries, cfgPrefix, defVal, labelFn, badgeFn) {
+        return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:.2rem .5rem;padding:.4rem 0;">
+            ${entries.map(([k,lbl])=>{
+                const col = g(cfgPrefix+k) || defVal[k] || '#94a3b8';
+                return `<div style="display:flex;align-items:center;gap:.4rem;padding:.2rem 0;border-bottom:1px solid rgba(255,255,255,.04);">
+                    <input type="color" data-cfg="${cfgPrefix}${k}" value="${col}" class="cfg-color" list="color-palette-list" style="flex-shrink:0;" oninput="appliquerVariables({${cfgPrefix}${k}:this.value})">
+                    ${badgeFn ? badgeFn(k,lbl,col) : `<span style="font-size:.69rem;color:${col};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${lbl}">${lbl}</span>`}
+                </div>`;
+            }).join('')}
+        </div>`;
+    }
+    function cfgCollapsible(id, icon, title, content, collapsed=true) {
+        return `<div class="cfg-collapsible${collapsed?' collapsed':''}" id="cfgcol-${id}">
+            <div class="cfg-collapsible-hdr" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>${icon} ${title}</span><span class="cfg-arr">▼</span>
+            </div>
+            <div class="cfg-collapsible-body">${content}</div>
+        </div>`;
+    }
+
+    // ── Noms des services (ports scannés) ──
+    // Récupérer les ports depuis scan_ports
+    const scanPortsStr = g('scan_ports') || '21,22,23,25,53,80,110,135,139,143,443,445,631,3389,5900,8080,8443,9100';
+    const scanPorts = scanPortsStr.split(',').map(p => {
+        const port = parseInt(p.trim());
+        return isNaN(port) ? null : port;
+    }).filter(p => p !== null).sort((a,b) => a-b);
+
+    const portNamesGrid = `<div style="display:flex;flex-direction:column;gap:.35rem;padding:.4rem 0;">
+        ${scanPorts.map((port, idx) => {
+            const serviceType = PORT_TO_TYPE[port] || 'other';
+            // Utiliser le numéro de port pour les clés (pas le serviceType) pour éviter les collisions
+            const colorKey = 'port_' + port + '_color';
+            const iconKey = 'port_' + port + '_icon';
+            const nameKey = 'port_' + port + '_name';
+            const descKey = 'port_' + port + '_description';
+            // Récupérer les valeurs: préférer les config spécifiques au port, puis fallback aux defaults par serviceType
+            const color = g(colorKey) || PORT_COLOR_DEFAULTS[serviceType] || '#64748b';
+            const icon = g(iconKey) || PORT_ICONS[serviceType] || '◈';
+            const name = g(nameKey) || PORT_LABELS[serviceType] || ('Port ' + port);
+            const desc = g(descKey) || '';
+            const portId = 'port-cfg-' + port + '-' + idx;
+            const rgb = {r: parseInt(color.slice(1,3),16), g: parseInt(color.slice(3,5),16), b: parseInt(color.slice(5,7),16)};
+
+            return `<div id="${portId}" style="display:grid;grid-template-columns:38px 48px 70px 1fr auto auto;gap:.25rem;align-items:center;padding:.3rem .4rem;background:rgba(0,0,0,.2);border-radius:4px;border:1px solid var(--input-border);">
+                <!-- 1. Couleur (input) -->
+                <input type="color" data-cfg="${colorKey}" value="${color}" class="cfg-color port-color-input" list="color-palette-list" style="width:38px;height:38px;cursor:pointer;border:none;border-radius:3px;"
+                    oninput="(function(){const col=this.value;const id='${portId}';const el=document.getElementById(id);if(el){const badge=el.querySelector('[data-badge]');if(badge){const rgb={r:parseInt(col.slice(1,3),16),g:parseInt(col.slice(3,5),16),b:parseInt(col.slice(5,7),16)};badge.style.backgroundColor='rgba('+rgb.r+','+rgb.g+','+rgb.b+',.25)';badge.style.borderColor=col;badge.style.color=col;}}appliquerVariables({${colorKey}:col});sauvegarderConfigAuto();}).call(this);" title="Couleur du port">
+
+                <!-- 2. Icône (select) -->
+                <select data-cfg="${iconKey}" class="cfg-input port-icon-select" style="width:48px;height:38px;padding:2px;font-size:.95rem;text-align:center;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);border-radius:3px;cursor:pointer;"
+                    onchange="appliquerVariables({${iconKey}:this.value}); sauvegarderConfigAuto();" title="Icône du service">
+                    ${PORT_ICON_OPTIONS.map(opt => `<option value="${opt}" ${opt===icon?'selected':''}>${opt}</option>`).join('')}
+                </select>
+
+                <!-- 3. Nom (input, max 8 chars) -->
+                <input type="text" data-cfg="${nameKey}" value="${name}" maxlength="8" placeholder="Nom" class="cfg-input"
+                    style="font-size:.8rem;padding:.25rem .4rem;height:34px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-primary);border-radius:3px;text-align:center;"
+                    oninput="sauvegarderConfigAuto();" title="Nom du service (8 car max)">
+
+                <!-- 4. Description (input) -->
+                <input type="text" data-cfg="${descKey}" value="${desc}" maxlength="48" placeholder="Description (optionnel)" class="cfg-input"
+                    style="font-size:.75rem;padding:.25rem .4rem;height:34px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text-muted);border-radius:3px;min-width:0;"
+                    oninput="sauvegarderConfigAuto();" title="Description pour l'infobulle">
+
+                <!-- 5. Badge aperçu (affiche le nom du service) -->
+                <span data-badge style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;background:rgba(${rgb.r},${rgb.g},${rgb.b},.15);color:${color};border:1px solid ${color}55;border-radius:3px;font-family:'Share Tech Mono',monospace;font-size:0.68rem;white-space:nowrap;"><span>${icon}</span><span>${name}</span></span>
+
+                <!-- 6. Bouton supprimer -->
+                <button class="ports-del-btn" onclick="_supprimerPort(${port})" title="Supprimer ce port">✕</button>
+            </div>`;
+        }).join('')}
+
+        <!-- Ajouter un nouveau port -->
+        <div style="display:flex;gap:.3rem;margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--border);">
+            <input type="number" id="new-port-input" min="1" max="65535" placeholder="Nouveau port (ex: 3306)" class="cfg-input" style="flex:1;font-size:.75rem;">
+            <button class="liste-add-btn" onclick="_ajouterPort()" style="font-size:.73rem;padding:.35rem .6rem;white-space:nowrap;">+ Ajouter</button>
+        </div>
+    </div>`;
+
+    // ── Périphériques ──
+    const periphDefs = {ecran:'#22d3ee',clavier:'#a78bfa',souris:'#a78bfa',webcam:'#fb923c',casque:'#c084fc',imprimante:'#f97316',onduleur:'#facc15',stockage:'#4ade80',dock:'#60a5fa',tel:'#34d399',usb:'#94a3b8',reseau:'#2dd4bf',badge:'#f87171',autre:'#94a3b8'};
+    const periphGrid = colorGrid2col(Object.entries(PERIPH_LABELS), 'periph_color_', periphDefs, null, (k,lbl,col)=>`<span style="font-size:.69rem;color:${col};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${lbl}">${lbl}</span>`);
+
+    // ── Types d'appareils : container dynamique (rempli par _renderTypesGrid) ──
+    _typesList = [...TYPE_LIST]; // réinitialise depuis la liste serveur
+    const typeGrid = `
+        <div id="types-cfg-grid" style="padding:.1rem 0;"></div>
+        <div style="display:flex;gap:.4rem;margin-top:.5rem;padding-top:.45rem;border-top:1px solid var(--border);">
+            <input type="text" id="types-cfg-new" placeholder="Nouveau type d'appareil…"
+                   class="cfg-input" style="flex:1;max-width:none;font-size:.78rem;"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();_typeAjouter();}">
+            <button class="liste-add-btn" onclick="_typeAjouter()" style="font-size:.73rem;">+ Ajouter</button>
+        </div>`;
+
+    document.getElementById('cfg-body').innerHTML = `
+
+<!-- Palette de couleurs commune -->
+<datalist id="color-palette-list">
+    ${COLOR_PALETTE.map(c => `<option value="${c}"></option>`).join('')}
+</datalist>
+
+<!-- ══ 1. ORGANISATION ══ -->
+<div class="cfg-section">
+    <div class="cfg-section-title">🏢 Informations société</div>
+    <div class="cfg-row">
+        <label class="cfg-label">Nom de l'organisation</label>
+        <input type="text" data-cfg="entreprise_nom" value="${g('entreprise_nom')||''}" placeholder="Mon entreprise…" class="cfg-input">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">URL logo (optionnel)</label>
+        <input type="url" data-cfg="entreprise_logo_url" value="${g('entreprise_logo_url')||''}" placeholder="https://…" class="cfg-input">
+    </div>
+</div>
+
+<!-- ══ 2. INTERFACE & NAVIGATION ══ -->
+<div class="cfg-section">
+    <div class="cfg-section-title">🖥 Interface & Navigation</div>
+    <div class="cfg-row">
+        <label class="cfg-label">Menu de navigation</label>
+        <select data-cfg="nav_mode" class="cfg-input" onchange="applyNavMode(this.value)">
+            <option value="horizontal" ${g('nav_mode')!=='vertical'?'selected':''}>☰ Horizontal (haut)</option>
+            <option value="vertical"   ${g('nav_mode')==='vertical'?'selected':''}>▐ Vertical (gauche)</option>
+        </select>
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Format de date</label>
+        <select data-cfg="date_format" class="cfg-input">
+            <option value="dd/mm/yyyy" ${g('date_format')==='dd/mm/yyyy'?'selected':''}>JJ/MM/AAAA</option>
+            <option value="mm/dd/yyyy" ${g('date_format')==='mm/dd/yyyy'?'selected':''}>MM/JJ/AAAA</option>
+            <option value="yyyy-mm-dd" ${g('date_format')==='yyyy-mm-dd'?'selected':''}>AAAA-MM-JJ</option>
+        </select>
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Lignes par page (tableaux)</label>
+        <input type="number" data-cfg="lignes_par_page" value="${g('lignes_par_page')||'50'}" min="10" max="500" step="10" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Afficher adresses MAC</label>
+        <input type="checkbox" data-cfg="afficher_mac" ${g('afficher_mac')==='0'?'':'checked'} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Afficher heure dernier ping</label>
+        <input type="checkbox" data-cfg="afficher_dernier_ping" ${g('afficher_dernier_ping')==='0'?'':'checked'} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Rétention journal (lignes max)</label>
+        <input type="number" data-cfg="historique_max_lignes" value="${g('historique_max_lignes')||'500'}" min="50" max="10000" step="50" class="cfg-input cfg-input-sm">
+    </div>
+</div>
+
+<!-- ══ 3. APPARENCE & COULEURS ══ -->
+<div class="cfg-section">
+    <div class="cfg-section-title">🎨 Apparence & Couleurs</div>
+
+    <!-- Mode clair / sombre -->
+    <div class="cfg-row">
+        <label class="cfg-label">Mode d'affichage</label>
+        <div style="display:flex;gap:.35rem;">
+            <button onclick="appliquerMode('dark');document.querySelector('[data-cfg=mode]').value='dark';"
+                class="cfg-mode-btn ${(g('mode')||'dark')==='dark'?'active':''}">🌙 Sombre</button>
+            <button onclick="appliquerMode('light');document.querySelector('[data-cfg=mode]').value='light';"
+                class="cfg-mode-btn ${(g('mode')||'dark')==='light'?'active':''}">☀ Clair</button>
+            <input type="hidden" data-cfg="mode" value="${g('mode')||'dark'}">
+        </div>
+    </div>
+
+    <!-- Niveau de contraste -->
+    <div class="cfg-row">
+        <label class="cfg-label">Niveau de contraste</label>
+        <div style="display:flex;gap:.35rem;flex-wrap:wrap;">
+            <button onclick="appliquerContraste('normal');document.querySelector('[data-cfg=contrast_level]').value='normal';"
+                class="cfg-contrast-btn ${(g('contrast_level')||'normal')==='normal'?'active':''}">Normale</button>
+            <button onclick="appliquerContraste('high');document.querySelector('[data-cfg=contrast_level]').value='high';"
+                class="cfg-contrast-btn ${(g('contrast_level')||'normal')==='high'?'active':''}">Élevé</button>
+            <button onclick="appliquerContraste('max');document.querySelector('[data-cfg=contrast_level]').value='max';"
+                class="cfg-contrast-btn ${(g('contrast_level')||'normal')==='max'?'active':''}">Maximum</button>
+            <input type="hidden" data-cfg="contrast_level" value="${g('contrast_level')||'normal'}">
+        </div>
+    </div>
+
+    <div class="cfg-row">
+        <label class="cfg-label">Thème prédéfini</label>
+        <select onchange="appliquerTheme(this.value)" class="cfg-input">
+            <optgroup label="🌙 Sombres">
+            ${Object.entries(THEMES).filter(([,t])=>t.mode==='dark').map(([k,t])=>`<option value="${k}">${t.label.replace('🌙 Sombre — ','')}</option>`).join('')}
+            </optgroup>
+            <optgroup label="☀ Clairs">
+            ${Object.entries(THEMES).filter(([,t])=>t.mode==='light').map(([k,t])=>`<option value="${k}">${t.label.replace('☀ Clair — ','')}</option>`).join('')}
+            </optgroup>
+        </select>
+    </div>
+
+    <!-- Couleurs globales -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.2rem .5rem;margin:.5rem 0 .3rem;">
+        <div class="cfg-color-item">
+            <input type="color" data-cfg="accent_color" value="${g('accent_color')||'#00c9ff'}" list="color-palette-list" oninput="appliquerVariables({accent_color:this.value})" class="cfg-color">
+            <span class="cfg-color-hint">Accent (liens)</span>
+        </div>
+        <div class="cfg-color-item">
+            <input type="color" data-cfg="accent_green" value="${g('accent_green')||'#00ff88'}" list="color-palette-list" oninput="appliquerVariables({accent_green:this.value})" class="cfg-color">
+            <span class="cfg-color-hint">Vert (succès)</span>
+        </div>
+        <div class="cfg-color-item">
+            <input type="color" data-cfg="accent_red" value="${g('accent_red')||'#ff3355'}" list="color-palette-list" oninput="appliquerVariables({accent_red:this.value})" class="cfg-color">
+            <span class="cfg-color-hint">Rouge (danger)</span>
+        </div>
+        <div class="cfg-color-item">
+            <input type="color" data-cfg="accent_orange" value="${g('accent_orange')||'#ff8c00'}" list="color-palette-list" oninput="appliquerVariables({accent_orange:this.value})" class="cfg-color">
+            <span class="cfg-color-hint">Orange (alerte)</span>
+        </div>
+    </div>
+
+
+    <!-- Sous-sections repliables -->
+    ${cfgCollapsible('portnames', '🌐', 'Noms des services (ports scannés)', portNamesGrid, true)}
+    ${cfgCollapsible('types',  '🖥', 'Couleurs des types d\'appareils',      typeGrid,  true)}
+    ${cfgCollapsible('perips', '🖱', 'Couleurs des badges périphériques',    periphGrid,true)}
+</div>
+
+<!-- ══ 4. RÉSEAU & SCAN ══ -->
+<div class="cfg-section">
+    <div class="cfg-section-title">📡 Réseau & Scan</div>
+    <div class="cfg-row">
+        <label class="cfg-label">Threads scan simultanés</label>
+        <input type="number" data-cfg="scan_workers" value="${g('scan_workers')||'50'}" min="5" max="200" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Intervalle ping (secondes)</label>
+        <input type="number" data-cfg="ping_interval" value="${g('ping_interval')||'60'}" min="15" max="3600" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Threads ping simultanés</label>
+        <input type="number" data-cfg="ping_workers" value="${g('ping_workers')||'30'}" min="5" max="150" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Timeout par ping (s)</label>
+        <input type="number" data-cfg="ping_timeout" value="${g('ping_timeout')||'1.0'}" min="0.3" max="5" step="0.1" class="cfg-input cfg-input-sm">
+    </div>
+</div>
+
+<!-- ══ 5. ALERTES ══ -->
+<div class="cfg-section">
+    <div class="cfg-section-title">⚠ Alertes</div>
+    <div class="cfg-row">
+        <label class="cfg-label">Alerte garantie (jours avant expiration)</label>
+        <input type="number" data-cfg="garantie_alerte_jours" value="${g('garantie_alerte_jours')||'90'}" min="0" max="365" class="cfg-input cfg-input-sm">
+    </div>
+</div>
+
+<!-- ══ 6. BASE DE DONNÉES ══ -->
+<div class="cfg-section">
+    <div class="cfg-section-title">🗄 Base de données</div>
+    <div class="cfg-row" style="flex-wrap:wrap;gap:.3rem;">
+        <label class="cfg-label">Mode</label>
+        <div style="display:flex;gap:.3rem;flex-wrap:wrap;">
+            <button id="btn-db-local" class="btn btn-sm" style="font-size:.73rem;${g('db_type')==='local'||!g('db_type')?'border-color:var(--accent);color:var(--accent);':''}"
+                    onclick="setDbType('local')">📁 Local</button>
+            <button id="btn-db-turso" class="btn btn-sm" style="font-size:.73rem;${g('db_type')==='turso'?'border-color:var(--accent);color:var(--accent);':''}"
+                    onclick="setDbType('turso')">☁ Turso</button>
+            <button id="btn-db-sync"  class="btn btn-sm" style="font-size:.73rem;${g('db_type')==='sync'?'border-color:var(--accent);color:var(--accent);':''}"
+                    onclick="setDbType('sync')">🔄 Sync (local + Turso)</button>
+        </div>
+        <input type="hidden" data-cfg="db_type" value="${g('db_type')||'local'}">
+    </div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:.2rem 0 .4rem;line-height:1.4;">
+        ${g('db_type')==='sync'
+            ? '🔄 Local (rapide) + synchronisation Turso pour partage multi-machines.'
+            : g('db_type')==='turso'
+                ? '☁ Toutes les requêtes passent par Turso (cloud).'
+                : '📁 Base de données locale uniquement.'}
+    </div>
+    <div id="turso-cfg-block" style="display:${g('db_type')==='turso'||g('db_type')==='sync'?'block':'none'}">
+        <div class="cfg-row">
+            <label class="cfg-label">URL Turso</label>
+            <input type="url" data-cfg="turso_url" value="${g('turso_url')}" placeholder="libsql://mydb-org.turso.io" class="cfg-input">
+        </div>
+        <div class="cfg-row">
+            <label class="cfg-label">Token d'auth</label>
+            <input type="password" data-cfg="turso_token" value="${g('turso_token')}" placeholder="eyJ…" class="cfg-input">
+        </div>
+        <div class="cfg-row">
+            <label class="cfg-label"></label>
+            <button class="btn btn-sm" onclick="testTursoConn()" style="font-size:.73rem;">🔌 Tester</button>
+            <span id="turso-test-msg" style="font-size:.72rem;margin-left:.5rem;"></span>
+        </div>
+    </div>
+    <div id="sync-cfg-block" style="display:${g('db_type')==='sync'?'block':'none'}">
+        <div class="cfg-row">
+            <label class="cfg-label">Intervalle de sync (s)</label>
+            <input type="number" data-cfg="db_sync_interval" value="${g('db_sync_interval')||'30'}" min="5" max="3600" class="cfg-input cfg-input-sm">
+        </div>
+        <div id="sync-status-block" style="margin:.4rem 0;padding:.5rem .7rem;background:var(--bg);border:1px solid var(--border);border-radius:4px;font-size:.72rem;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;">
+                <span id="sync-status-text" style="color:var(--text-secondary);">Chargement…</span>
+                <button class="btn btn-sm" onclick="syncNow()" id="btn-sync-now" style="font-size:.7rem;padding:.2rem .5rem;">↻ Sync maintenant</button>
+            </div>
+            <div id="sync-last-error" style="color:var(--accent-red);margin-top:.3rem;display:none;"></div>
+        </div>
+    </div>
+    <div class="cfg-row" style="margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--border);">
+        <label class="cfg-label">Transfert complet</label>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap;">
+            <button class="btn btn-sm" onclick="transferDb('local_to_turso')" style="font-size:.73rem;">📤 Local → Turso</button>
+            <button class="btn btn-sm" onclick="transferDb('turso_to_local')" style="font-size:.73rem;">📥 Turso → Local</button>
+        </div>
+    </div>
+    <div id="db-transfer-msg" style="font-size:.72rem;color:var(--text-secondary);padding:.2rem 0;"></div>
+</div>
+
+<!-- ══ 7. LISTES PERSONNALISABLES ══ -->
+<div class="cfg-section" id="cfg-listes-section">
+    <div class="cfg-section-title">📋 Listes personnalisables</div>
+    <div id="cfg-listes-body">
+        <div class="liste-loading">Chargement…</div>
+    </div>
+</div>
+
+    `;
+    // Rendre la grille des types et charger les autres listes
+    setTimeout(_renderTypesGrid, 10);
+    setTimeout(chargerListes, 80);
+}
+
+function showToast(msg, type) {
+    const t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:var(--bg-card);border:1px solid;border-radius:4px;padding:.6rem 1.2rem;font-size:.85rem;z-index:3000;pointer-events:none;transition:opacity .5s;';
+    t.style.borderColor = type === 'success' ? 'var(--accent-green)' : type === 'danger' ? 'var(--accent-red)' : 'var(--accent)';
+    t.style.color       = type === 'success' ? 'var(--accent-green)' : type === 'danger' ? 'var(--accent-red)' : 'var(--accent)';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 600); }, 2200);
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && cfgOpen) toggleConfig(); });
+
+// ── BASE DE DONNÉES ──────────────────────────────────────────────────────────
+
+function setDbType(type) {
+    const hidden = document.querySelector('[data-cfg="db_type"]');
+    if (hidden) hidden.value = type;
+    // Blocs conditionnels
+    const tursoBlock = document.getElementById('turso-cfg-block');
+    const syncBlock  = document.getElementById('sync-cfg-block');
+    if (tursoBlock) tursoBlock.style.display = (type === 'turso' || type === 'sync') ? 'block' : 'none';
+    if (syncBlock)  syncBlock.style.display  = type === 'sync' ? 'block' : 'none';
+    // Mise en surbrillance des boutons
+    ['local','turso','sync'].forEach(t => {
+        const btn = document.getElementById('btn-db-' + t);
+        if (!btn) return;
+        const active = (t === type);
+        btn.style.borderColor = active ? 'var(--accent)' : '';
+        btn.style.color       = active ? 'var(--accent)' : '';
+    });
+    // Badge topbar : afficher/masquer selon le mode
+    const wrap = document.getElementById('topbar-sync-wrap');
+    if (wrap) {
+        wrap.style.display = type === 'sync' ? 'flex' : 'none';
+        if (type === 'sync') { refreshSyncStatus(); _startTopbarPoll(); }
+        else                 { _stopTopbarPoll(); }
+    }
+}
+
+function testTursoConn() {
+    const url   = (document.querySelector('[data-cfg="turso_url"]')   || {}).value || '';
+    const token = (document.querySelector('[data-cfg="turso_token"]') || {}).value || '';
+    const msg   = document.getElementById('turso-test-msg');
+    if (msg) { msg.style.color = 'var(--text-secondary)'; msg.textContent = 'Test en cours…'; }
+    fetch('/api/db/test', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+        body: JSON.stringify({url, token})
+    }).then(r => r.json()).then(d => {
+        if (msg) {
+            msg.style.color = d.ok ? 'var(--accent-green)' : 'var(--accent-red)';
+            msg.textContent = (d.ok ? '✓ ' : '✗ ') + (d.message || (d.ok ? 'OK' : 'Erreur'));
+        }
+    }).catch(() => {
+        if (msg) { msg.style.color = 'var(--accent-red)'; msg.textContent = '✗ Erreur réseau'; }
+    });
+}
+
+function transferDb(direction) {
+    const lbl = direction === 'local_to_turso' ? 'Local \u2192 Turso' : 'Turso \u2192 Local';
+    if (!confirm('Transf\u00e9rer les donn\u00e9es\u00a0: ' + lbl + '\u00a0?\nLes donn\u00e9es existantes dans la cible seront remplac\u00e9es.')) return;
+    const el = document.getElementById('db-transfer-msg');
+    if (el) { el.style.color = 'var(--text-secondary)'; el.textContent = 'Transfert en cours\u2026'; }
+    fetch('/api/db/transfer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+        body: JSON.stringify({direction})
+    }).then(r => r.json()).then(d => {
+        if (el) {
+            el.style.color = d.ok ? 'var(--accent-green)' : 'var(--accent-red)';
+            el.textContent = d.ok ? ('\u2713 ' + d.summary) : ('\u2717 ' + (d.error || 'Erreur'));
+        }
+        if (d.ok) showToast('Transfert r\u00e9ussi\u00a0: ' + d.summary, 'success');
+    }).catch(() => {
+        if (el) { el.style.color = 'var(--accent-red)'; el.textContent = '\u2717 Erreur r\u00e9seau'; }
+    });
+}
+
+// ── SYNCHRONISATION ──────────────────────────────────────────────────────────
+
+// ── SYNCHRONISATION — badge topbar + panneau paramètres ──────────────────────
+
+let _syncPollTimer   = null;   // polling panneau paramètres
+let _topbarPollTimer = null;   // polling topbar (autonome)
+
+/* Formate un ISO datetime en "il y a Xs / Xm / Xh" */
+function _syncRelTime(iso) {
+    if (!iso) return '';
+    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (diff < 5)    return 'il y a quelques secondes';
+    if (diff < 60)   return 'il y a ' + diff + 's';
+    if (diff < 3600) return 'il y a ' + Math.floor(diff/60) + 'min';
+    return 'il y a ' + Math.floor(diff/3600) + 'h';
+}
+
+/* Met à jour le badge topbar depuis un état de sync */
+function _applyTopbarSync(d) {
+    const wrap  = document.getElementById('topbar-sync-wrap');
+    const btn   = document.getElementById('topbar-sync-btn');
+    const icon  = document.getElementById('topbar-sync-icon');
+    const label = document.getElementById('topbar-sync-label');
+    if (!wrap) return;
+    // Afficher seulement en mode sync
+    wrap.style.display = '';   // visible (Jinja l'a déjà géré au chargement)
+    if (!btn) return;
+
+    btn.classList.remove('syncing','ok','error');
+    if (d.running) {
+        btn.classList.add('syncing');
+        if (icon)  icon.textContent  = '\u21bb';
+        if (label) label.textContent = 'En cours\u2026';
+        btn.title = 'Synchronisation en cours\u2026';
+    } else if (d.last_error) {
+        btn.classList.add('error');
+        if (icon)  icon.textContent  = '\u26a0';
+        if (label) label.textContent = 'Erreur';
+        btn.title = 'Sync \u00e9chou\u00e9e\u00a0: ' + d.last_error + '\nCliquer pour r\u00e9essayer';
+    } else if (d.last_sync) {
+        btn.classList.add('ok');
+        if (icon)  icon.textContent  = '\u2713';
+        if (label) label.textContent = _syncRelTime(d.last_sync);
+        const total = Object.values(d.stats || {}).reduce((s,t) => s+(t.pushed||0)+(t.pulled||0), 0);
+        btn.title = 'Dernière sync : ' + d.last_sync.replace('T',' ')
+                  + (total ? '\n' + total + ' enregistrement(s) mis à jour' : '\nAucune modification')
+                  + '\nCliquer pour synchroniser maintenant';
+    } else {
+        if (icon)  icon.textContent  = '\ud83d\udd04';
+        if (label) label.textContent = 'Sync';
+        btn.title = 'Aucune sync effectu\u00e9e\nCliquer pour synchroniser maintenant';
+    }
+}
+
+/* Met à jour le panneau paramètres depuis un état de sync */
+function _applySyncPanel(d) {
+    const txt   = document.getElementById('sync-status-text');
+    const errEl = document.getElementById('sync-last-error');
+    if (!txt) return;
+    if (d.running) {
+        txt.style.color = 'var(--accent)';
+        txt.textContent = '\u21bb Synchronisation en cours\u2026';
+    } else if (d.last_sync) {
+        const total = Object.values(d.stats || {}).reduce((s,t) => s+(t.pushed||0)+(t.pulled||0), 0);
+        txt.style.color = d.last_error ? 'var(--accent-orange)' : 'var(--accent-green)';
+        txt.textContent = '\u2713 Dernière sync : ' + d.last_sync.replace('T',' ')
+                        + (total ? ' (' + total + ' mise(s) à jour)' : ' (aucune modification)');
+    } else {
+        txt.style.color = 'var(--text-secondary)';
+        txt.textContent = 'Aucune sync effectuée';
+    }
+    if (errEl) {
+        if (d.last_error) { errEl.style.display=''; errEl.textContent='\u26a0 '+d.last_error; }
+        else              { errEl.style.display='none'; }
+    }
+}
+
+/* Point central : applique l'état aux deux endroits */
+function _applySyncState(d) {
+    _applyTopbarSync(d);
+    _applySyncPanel(d);
+}
+
+function refreshSyncStatus() {
+    fetch('/api/db/sync').then(r=>r.json()).then(d=>_applySyncState(d)).catch(()=>{});
+}
+
+function syncNow() {
+    // Topbar
+    const tb = document.getElementById('topbar-sync-btn');
+    if (tb) { tb.classList.remove('ok','error'); tb.classList.add('syncing'); }
+    const tbIcon  = document.getElementById('topbar-sync-icon');
+    const tbLabel = document.getElementById('topbar-sync-label');
+    if (tbIcon)  tbIcon.textContent  = '\u21bb';
+    if (tbLabel) tbLabel.textContent = 'En cours\u2026';
+    // Panneau
+    const panBtn = document.getElementById('btn-sync-now');
+    if (panBtn) { panBtn.disabled=true; panBtn.textContent='\u21bb En cours\u2026'; }
+    const txt = document.getElementById('sync-status-text');
+    if (txt) { txt.style.color='var(--text-secondary)'; txt.textContent='Synchronisation en cours\u2026'; }
+
+    fetch('/api/db/sync', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-CSRFToken':'{{ csrf_token }}'},
+        body: JSON.stringify({})
+    }).then(r=>r.json()).then(d => {
+        _applySyncState(d);
+        if (d.ok) showToast('Synchronisation termin\u00e9e', 'success');
+        else      showToast('\u00c9chec sync\u00a0: '+(d.error||''), 'danger');
+    }).catch(()=>{
+        const t = document.getElementById('sync-status-text');
+        if (t) { t.style.color='var(--accent-red)'; t.textContent='\u2717 Erreur r\u00e9seau'; }
+        if (tb) { tb.classList.remove('syncing'); tb.classList.add('error'); }
+    }).finally(()=>{
+        if (panBtn) { panBtn.disabled=false; panBtn.textContent='\u21bb Sync maintenant'; }
+    });
+}
+
+/* Polling topbar autonome (toutes les 20s en mode sync) */
+function _startTopbarPoll() {
+    if (_topbarPollTimer) return;
+    refreshSyncStatus();
+    _topbarPollTimer = setInterval(refreshSyncStatus, 20000);
+}
+function _stopTopbarPoll() {
+    if (_topbarPollTimer) { clearInterval(_topbarPollTimer); _topbarPollTimer=null; }
+}
+
+/* Polling panneau (toutes les 15s quand ouvert) */
+function _startSyncPoll() {
+    _stopSyncPoll();
+    _syncPollTimer = setInterval(()=>{
+        const b = document.getElementById('sync-status-block');
+        if (b && b.offsetParent!==null) refreshSyncStatus();
+    }, 15000);
+}
+function _stopSyncPoll() { if (_syncPollTimer){clearInterval(_syncPollTimer);_syncPollTimer=null;} }
+
+document.addEventListener('DOMContentLoaded', () => {
+    const wrap = document.getElementById('topbar-sync-wrap');
+    if (wrap && wrap.style.display !== 'none') {
+        // Mode sync actif : démarrer le polling topbar
+        _startTopbarPoll();
+        // Mettre à jour le label relatif toutes les 30s (temps relatif)
+        setInterval(()=>{
+            fetch('/api/db/sync').then(r=>r.json()).then(d=>_applyTopbarSync(d)).catch(()=>{});
+        }, 30000);
+    }
+    // Polling panneau : actif seulement quand panneau ouvert + mode sync visible
+    setInterval(()=>{
+        const open      = typeof cfgOpen !== 'undefined' && cfgOpen;
+        const syncBlock = document.getElementById('sync-cfg-block');
+        const visible   = syncBlock && syncBlock.style.display !== 'none';
+        if (open && visible) { if (!_syncPollTimer) { refreshSyncStatus(); _startSyncPoll(); } }
+        else                 { _stopSyncPoll(); }
+    }, 2000);
+});
+
+// ── LISTES PERSONNALISABLES ──────────────────────────────────────────────────
+
+const LISTES_META = {
+    // types_appareils : géré directement dans la section Couleurs des types (panneau Apparence)
+    categories_peripheriques:{ label: '🖱 Catégories de périphériques',   icon: '🖱' },
+    types_contrats:          { label: '📋 Types de contrats',              icon: '📋' },
+    categories_identifiants: { label: '🔑 Catégories d\'identifiants',    icon: '🔑' },
+    services_utilisateurs:   { label: '👥 Services utilisateurs',          icon: '👥' },
+};
+
+async function chargerListes() {
+    const container = document.getElementById('cfg-listes-body');
+    if (!container) return;
+
+    // Build accordion sections for each liste
+    let html = '';
+    for (const [nom, meta] of Object.entries(LISTES_META)) {
+        html += `
+        <div class="liste-bloc" id="liste-bloc-${nom}">
+            <div class="liste-bloc-header" onclick="toggleListeBloc('${nom}')">
+                <span>${meta.label}</span>
+                <span class="liste-bloc-arrow" id="liste-arrow-${nom}">▶</span>
+            </div>
+            <div class="liste-bloc-body" id="liste-body-${nom}" style="display:none;">
+                <div class="liste-loading">Chargement…</div>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+async function toggleListeBloc(nom) {
+    const body  = document.getElementById('liste-body-' + nom);
+    const arrow = document.getElementById('liste-arrow-' + nom);
+    if (!body) return;
+
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        arrow.textContent = '▼';
+        // Load if not yet loaded
+        if (body.querySelector('.liste-loading')) {
+            await rafraichirListe(nom);
+        }
+    } else {
+        body.style.display = 'none';
+        arrow.textContent = '▶';
+    }
+}
+
+async function rafraichirListe(nom) {
+    const body = document.getElementById('liste-body-' + nom);
+    if (!body) return;
+
+    let valeurs = [];
+    let isServices = (nom === 'services_utilisateurs');
+
+    if (isServices) {
+        const r = await fetch('/api/services');
+        const d = await r.json();
+        valeurs = (d.services || []).map(s => ({ id: s.id, label: s.nom }));
+    } else {
+        const r = await fetch('/api/listes/' + nom);
+        const d = await r.json();
+        valeurs = (d.valeurs || []).map(v => ({ id: null, label: v }));
+    }
+
+    // Build the list HTML
+    const inputId = 'liste-input-' + nom;
+    let itemsHtml = valeurs.map(v => {
+        const safeNom = escAttr(nom);
+        const safeVal = isServices ? String(v.id) : escAttr(v.label);
+        return `<div class="liste-item">
+            <span class="liste-item-label">${escHtml(v.label)}</span>
+            <button class="liste-del-btn"
+                data-liste="${safeNom}"
+                data-valeur="${safeVal}"
+                data-isservice="${isServices ? '1' : '0'}"
+                onclick="supprimerValeurBtn(this)"
+                title="Supprimer">✕</button>
+        </div>`;
+    }).join('');
+
+    if (!itemsHtml) itemsHtml = '<div style="color:var(--text-muted);font-size:.75rem;padding:.3rem 0;">Aucune valeur</div>';
+
+    body.innerHTML = `
+        <div class="liste-items" id="liste-items-${nom}">${itemsHtml}</div>
+        <div class="liste-add-row">
+            <input type="text" id="${inputId}" placeholder="Nouvelle valeur…"
+                class="cfg-input" style="flex:1;max-width:none;"
+                onkeydown="if(event.key==='Enter'){event.preventDefault();ajouterValeur('${nom}');}">
+            <button class="liste-add-btn" onclick="ajouterValeur('${nom}')">+ Ajouter</button>
+        </div>
+        ${!isServices ? `<button class="liste-reset-btn" onclick="resetListe('${nom}')">↺ Rétablir défauts</button>` : ''}
+    `;
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escAttr(s) {
+    // Safe for HTML attribute values (both single and double quoted)
+    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function supprimerValeurBtn(btn) {
+    const nom       = btn.dataset.liste;
+    const valeur    = btn.dataset.valeur;
+    const isService = btn.dataset.isservice === '1';
+    const label     = btn.closest('.liste-item').querySelector('.liste-item-label').textContent;
+    supprimerValeur(nom, isService ? parseInt(valeur) : valeur, label);
+}
+
+async function ajouterValeur(nom) {
+    const inputId = 'liste-input-' + nom;
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const valeur = input.value.trim();
+    if (!valeur) { input.focus(); return; }
+
+    let resp;
+    if (nom === 'services_utilisateurs') {
+        resp = await fetch('/api/services/ajouter', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ nom: valeur })
+        });
+    } else {
+        resp = await fetch('/api/listes/' + nom + '/ajouter', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ valeur: valeur })
+        });
+    }
+
+    const d = await resp.json();
+    if (d.ok) {
+        input.value = '';
+        await rafraichirListe(nom);
+        showToast('Ajouté : ' + valeur, 'success');
+    } else {
+        showToast(d.error || 'Erreur', 'danger');
+    }
+}
+
+async function supprimerValeur(nom, valeur, label) {
+    if (!confirm('Supprimer "' + (label || valeur) + '" de cette liste ?')) return;
+
+    let resp;
+    if (nom === 'services_utilisateurs') {
+        resp = await fetch('/api/services/supprimer', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ id: valeur })
+        });
+    } else {
+        resp = await fetch('/api/listes/' + nom + '/supprimer', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ valeur: valeur })
+        });
+    }
+
+    const d = await resp.json();
+    if (d.ok) {
+        await rafraichirListe(nom);
+        showToast('Supprimé', 'info');
+    } else {
+        showToast(d.error || 'Erreur', 'danger');
+    }
+}
+
+async function resetListe(nom) {
+    if (!confirm('Rétablir la liste "' + LISTES_META[nom].label + '" aux valeurs par défaut ?')) return;
+    const resp = await fetch('/api/listes/' + nom + '/reset', { method: 'POST' });
+    const d = await resp.json();
+    if (d.ok) {
+        await rafraichirListe(nom);
+        showToast('Liste réinitialisée', 'info');
+    }
+}
+</script>
+
+<style>
+/* ── CONFIG DRAWER STYLES ── */
+.cfg-drawer-el {
+    background: #0d1520;
+    border-left: 1px solid rgba(0,201,255,.2);
+}
+body.theme-light .cfg-drawer-el {
+    background: #f8fafc;
+    border-left: 1px solid rgba(0,160,200,.25);
+    color: #1e293b;
+}
+body.theme-light .cfg-label { color: #475569; }
+body.theme-light .cfg-color-hint { color: #64748b; }
+.cfg-section { margin-bottom: 1.5rem; }
+.cfg-section-title {
+    font-family: 'Rajdhani', sans-serif; font-size: .7rem; font-weight: 700;
+    letter-spacing: 2px; text-transform: uppercase; color: var(--accent);
+    margin-bottom: .7rem; padding-bottom: .4rem;
+    border-bottom: 1px solid var(--border);
+}
+.cfg-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: .8rem; padding: .35rem 0;
+    border-bottom: 1px solid var(--border);
+    opacity: .85;
+}
+.cfg-row:last-child { border: none; }
+.cfg-label { font-size: .8rem; color: var(--text-secondary); flex-shrink: 0; max-width: 55%; }
+.cfg-input {
+    background: var(--input-bg); border: 1px solid var(--input-border);
+    border-radius: 3px; color: var(--text-primary); font-size: .82rem;
+    padding: .3rem .5rem; width: 100%; max-width: 200px;
+    transition: border-color .15s;
+}
+.cfg-input:focus { outline: none; border-color: var(--accent); }
+.cfg-input-sm { max-width: 90px; }
+.cfg-textarea { max-width: 100% !important; width: 100% !important; resize: vertical; font-family: 'Share Tech Mono', monospace; font-size: .75rem; }
+.cfg-color { width: 36px; height: 28px; border: 1px solid rgba(255,255,255,.15); border-radius: 3px; padding: 1px; background: none; cursor: pointer; flex-shrink: 0; }
+.cfg-color-hint { font-size: .72rem; color: var(--text-muted); }
+.cfg-check { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+/* ── MODE BUTTONS (clair/sombre) ── */
+.cfg-mode-btn {
+    padding: .28rem .65rem; border-radius: 3px; font-size: .75rem; cursor: pointer;
+    border: 1px solid var(--border); background: rgba(255,255,255,.04);
+    color: var(--text-muted); transition: all .15s; font-family: 'Exo 2', sans-serif;
+}
+.cfg-mode-btn.active { background: rgba(0,201,255,.15); color: var(--accent); border-color: var(--accent); }
+.cfg-mode-btn:hover:not(.active) { border-color: var(--text-muted); color: var(--text-secondary); }
+body.theme-light .cfg-mode-btn { background: rgba(0,0,0,.04); }
+body.theme-light .cfg-mode-btn.active { background: rgba(0,130,200,.12); }
+
+/* ── CONTRAST BUTTON (Level: normal/high/max) ── */
+.cfg-contrast-btn {
+    padding: .28rem .65rem; border-radius: 3px; font-size: .75rem; cursor: pointer;
+    border: 1px solid var(--border); background: rgba(255,255,255,.04);
+    color: var(--text-muted); transition: all .15s; font-family: 'Exo 2', sans-serif;
+}
+.cfg-contrast-btn.active { background: rgba(0,201,255,.15); color: var(--accent); border-color: var(--accent); }
+.cfg-contrast-btn:hover:not(.active) { border-color: var(--text-muted); color: var(--text-secondary); }
+body.theme-light .cfg-contrast-btn { background: rgba(0,0,0,.04); }
+body.theme-light .cfg-contrast-btn.active { background: rgba(0,130,200,.12); }
+
+/* ── COLOR ITEM (grille 2 col pour accent colors) ── */
+.cfg-color-item {
+    display: flex; align-items: center; gap: .4rem;
+    padding: .28rem 0; border-bottom: 1px solid rgba(255,255,255,.04);
+}
+
+/* ── SECTIONS REPLIABLES ── */
+.cfg-collapsible {
+    border: 1px solid var(--border); border-radius: 4px;
+    margin-bottom: .35rem; overflow: hidden;
+}
+.cfg-collapsible-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: .45rem .75rem; cursor: pointer; font-size: .76rem; font-weight: 600;
+    background: rgba(255,255,255,.025); transition: background .15s; user-select: none;
+    color: var(--text-secondary);
+}
+.cfg-collapsible-hdr:hover { background: rgba(0,201,255,.07); color: var(--accent); }
+body.theme-light .cfg-collapsible-hdr { background: rgba(0,0,0,.03); }
+body.theme-light .cfg-collapsible-hdr:hover { background: rgba(0,120,200,.07); color: var(--accent); }
+.cfg-arr { font-size: .55rem; color: var(--text-muted); transition: transform .2s; }
+.cfg-collapsible-body { padding: .2rem .6rem .5rem; border-top: 1px solid var(--border); }
+.cfg-collapsible.collapsed .cfg-collapsible-body { display: none; }
+.cfg-collapsible.collapsed .cfg-arr { transform: rotate(-90deg); }
+
+/* ── BOUTON SUPPRESSION TYPE DANS GRILLE COULEURS ── */
+.types-del-btn {
+    flex-shrink: 0; background: none; border: none;
+    color: transparent; cursor: pointer; font-size: .72rem;
+    padding: .15rem .35rem; border-radius: 3px; transition: all .15s; line-height: 1;
+}
+.types-cfg-row:hover .types-del-btn { color: var(--text-muted); }
+.types-del-btn:hover { color: var(--accent-red) !important; background: rgba(255,51,85,.12); }
+.types-del-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+.ports-del-btn {
+    flex-shrink: 0; background: none; border: none;
+    color: transparent; cursor: pointer; font-size: .72rem;
+    padding: .15rem .35rem; border-radius: 3px; transition: all .15s; line-height: 1;
+}
+#cfg-body > div:has(.portNamesGrid) :hover .ports-del-btn,
+[id*="port-cfg-"]:hover .ports-del-btn { color: var(--text-muted); }
+.ports-del-btn:hover { color: var(--accent-red) !important; background: rgba(255,51,85,.12); }
+.ports-del-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── LISTES PERSONNALISABLES ── */
+.liste-bloc { border: 1px solid var(--border); border-radius: 4px; margin-bottom: .5rem; overflow: hidden; }
+.liste-bloc-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: .5rem .8rem; cursor: pointer; font-size: .8rem; font-weight: 600;
+    background: rgba(255,255,255,.03); transition: background .15s;
+    user-select: none;
+}
+.liste-bloc-header:hover { background: rgba(0,201,255,.06); color: var(--accent); }
+body.theme-light .liste-bloc-header { background: rgba(0,0,0,.03); }
+body.theme-light .liste-bloc-header:hover { background: rgba(0,120,200,.07); }
+.liste-bloc-arrow { font-size: .65rem; color: var(--text-muted); }
+.liste-bloc-body { padding: .6rem .8rem; border-top: 1px solid var(--border); }
+.liste-items { display: flex; flex-direction: column; gap: 2px; margin-bottom: .6rem; max-height: 200px; overflow-y: auto; }
+.liste-item {
+    display: flex; align-items: center; gap: .4rem;
+    padding: .25rem .4rem; border-radius: 3px; font-size: .78rem;
+    background: rgba(255,255,255,.03); border: 1px solid transparent;
+    transition: all .1s;
+}
+.liste-item:hover { border-color: var(--border); }
+body.theme-light .liste-item { background: rgba(0,0,0,.03); }
+.liste-item-label { flex: 1; color: var(--text-secondary); }
+.liste-del-btn {
+    background: none; border: none; color: var(--text-muted); cursor: pointer;
+    font-size: .7rem; padding: 0 .2rem; line-height: 1; border-radius: 2px;
+    transition: all .15s; flex-shrink: 0;
+}
+.liste-del-btn:hover { color: var(--accent-red); background: rgba(255,51,85,.1); }
+.liste-add-row { display: flex; gap: .4rem; align-items: center; margin-bottom: .4rem; }
+.liste-add-btn {
+    background: rgba(0,201,255,.1); border: 1px solid rgba(0,201,255,.35);
+    color: var(--accent); border-radius: 3px; padding: .28rem .65rem;
+    font-size: .75rem; font-weight: 700; cursor: pointer; white-space: nowrap;
+    transition: all .15s; flex-shrink: 0;
+}
+.liste-add-btn:hover { background: rgba(0,201,255,.22); }
+.liste-reset-btn {
+    background: none; border: 1px solid var(--border); color: var(--text-muted);
+    border-radius: 3px; padding: .2rem .6rem; font-size: .68rem; cursor: pointer;
+    transition: all .15s; letter-spacing: .5px;
+}
+.liste-reset-btn:hover { border-color: var(--accent-orange); color: var(--accent-orange); }
+.liste-loading { color: var(--text-muted); font-size: .75rem; padding: .3rem 0; }
+</style>
+
+<script>
+/* ── CSRF : injection automatique dans les formulaires et les appels fetch ── */
+(function() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    if (!meta) return;
+    var token = meta.content;
+
+    // Ajouter le champ caché à tous les formulaires au moment de la soumission
+    document.addEventListener('submit', function(e) {
+        var form = e.target;
+        if (form.tagName !== 'FORM') return;
+        if (!form.querySelector('input[name="csrf_token"]')) {
+            var inp = document.createElement('input');
+            inp.type  = 'hidden';
+            inp.name  = 'csrf_token';
+            inp.value = token;
+            form.appendChild(inp);
+        }
+    }, true);
+
+    // Intercepter fetch() pour ajouter l'en-tête X-CSRF-Token sur les requêtes à effet de bord
+    var _fetch = window.fetch;
+    window.fetch = function(url, opts) {
+        opts = opts || {};
+        var method = (opts.method || 'GET').toUpperCase();
+        if (method !== 'GET' && method !== 'HEAD') {
+            if (opts.headers instanceof Headers) {
+                opts.headers.set('X-CSRF-Token', token);
+            } else {
+                opts.headers = Object.assign({}, opts.headers, { 'X-CSRF-Token': token });
+            }
+        }
+        return _fetch(url, opts);
+    };
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MODALE DE CONFIRMATION GLOBALE
+     Remplace window.confirm() pour toutes les suppressions / actions critiques
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div id="app-confirm-overlay" style="display:none;position:fixed;inset:0;z-index:9900;background:rgba(0,8,20,.75);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
+    <div id="app-confirm-box" style="background:var(--bg-card);border:1px solid var(--border-glow);border-radius:10px;padding:1.6rem 1.8rem;max-width:420px;width:92%;box-shadow:0 28px 90px rgba(0,0,0,.65);animation:fadeInScale .16s ease;">
+        <div style="display:flex;gap:.9rem;align-items:flex-start;margin-bottom:1.4rem;">
+            <span id="app-confirm-icon" style="font-size:1.8rem;line-height:1;flex-shrink:0;filter:drop-shadow(0 0 8px currentColor);">⚠️</span>
+            <div style="flex:1;min-width:0;">
+                <div id="app-confirm-title" style="font-weight:700;font-size:.95rem;color:var(--text-primary);margin-bottom:.4rem;letter-spacing:.02em;">Confirmation</div>
+                <div id="app-confirm-msg" style="color:var(--text-secondary);font-size:.85rem;line-height:1.55;"></div>
+            </div>
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:flex-end;">
+            <button onclick="appConfirmCancel()" class="btn btn-primary btn-sm" style="min-width:80px;">Annuler</button>
+            <button id="app-confirm-ok" class="btn btn-danger btn-sm" style="min-width:100px;">Confirmer</button>
+        </div>
+    </div>
+</div>
+
+<style>
+@keyframes fadeInScale {
+    from { opacity:0; transform:scale(.93) translateY(-6px); }
+    to   { opacity:1; transform:scale(1)   translateY(0); }
+}
+</style>
+
+<script>
+(function () {
+    var overlay = document.getElementById('app-confirm-overlay');
+    var msgEl   = document.getElementById('app-confirm-msg');
+    var titleEl = document.getElementById('app-confirm-title');
+    var iconEl  = document.getElementById('app-confirm-icon');
+    var okBtn   = document.getElementById('app-confirm-ok');
+    var _cb     = null;
+
+    /* ── API publique ── */
+    window.appConfirm = function (msg, callback, opts) {
+        opts = opts || {};
+        msgEl.textContent   = msg;
+        titleEl.textContent = opts.title   || 'Confirmation';
+        iconEl.textContent  = opts.icon    || '⚠️';
+        okBtn.textContent   = opts.ok      || 'Confirmer';
+        okBtn.className     = 'btn btn-sm ' + (opts.btnClass || 'btn-danger');
+        okBtn.style.minWidth = '100px';
+        _cb = callback;
+        overlay.style.display = 'flex';
+        setTimeout(function () { okBtn.focus(); }, 50);
+    };
+
+    window.appConfirmCancel = function () {
+        overlay.style.display = 'none';
+        _cb = null;
+    };
+
+    okBtn.addEventListener('click', function () {
+        var cb = _cb;
+        appConfirmCancel();
+        if (cb) cb();
+    });
+
+    /* Fermer sur clic fond ou Échap */
+    overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) appConfirmCancel();
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && overlay.style.display === 'flex') appConfirmCancel();
+    });
+
+    /* ── Interception des formulaires avec onsubmit="return confirm(...)" ──
+       Ce handler s'enregistre APRÈS le handler CSRF (qui injecte déjà le token),
+       donc form.submit() trouvera le token en place. */
+    document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (!form || form.tagName !== 'FORM') return;
+
+        /* Lire le message soit depuis data-confirm, soit depuis onsubmit */
+        var dataMsg  = form.getAttribute('data-confirm');
+        var attr     = form.getAttribute('onsubmit') || '';
+        var m        = attr.match(/confirm\(\s*['"`]([\s\S]*?)['"`]\s*\)/);
+        var msg      = dataMsg || (m && m[1]);
+        if (!msg) return;
+
+        e.preventDefault();
+        e.stopImmediatePropagation();
+
+        var isDel = /supprimer|retirer|effacer|réinitialis|reset|transfer/i.test(msg);
+        appConfirm(msg, function () {
+            form.submit(); /* form.submit() ne déclenche pas l'événement submit → pas de boucle */
+        }, {
+            title    : isDel ? 'Action irréversible' : 'Confirmation',
+            icon     : isDel ? '🗑️' : '⚠️',
+            ok       : isDel ? 'Supprimer' : 'Confirmer',
+            btnClass : isDel ? 'btn-danger' : 'btn-warning',
+        });
+    }, true /* capture, après CSRF */);
+
+})();
+</script>
+
+</body>
+</html>

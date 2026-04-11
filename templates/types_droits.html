@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Types de droits — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.type-row {
+    display: grid; grid-template-columns: 40px 1fr 160px 60px 100px;
+    gap: 0.8rem; align-items: center; padding: 0.6rem 1rem;
+    border-bottom: 1px solid rgba(30,58,95,.4);
+}
+.type-row:hover { background: rgba(0,201,255,.03); }
+.type-row.header {
+    background: var(--bg-secondary);
+    font-size: .7rem; font-weight: 700; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+}
+.cat-sep {
+    padding: .5rem 1rem; font-family:'Rajdhani',sans-serif;
+    font-size: .7rem; font-weight: 700; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--text-muted);
+    background: var(--bg-primary); border-bottom: 1px solid var(--border);
+}
+.inline-input {
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 3px; color: var(--text-primary); padding: .3rem .6rem;
+    font-family: 'Exo 2', sans-serif; font-size: .85rem; width: 100%;
+}
+.inline-input:focus { outline: none; border-color: var(--accent); }
+.icone-input { width: 50px; text-align: center; font-size: 1rem; }
+.add-row {
+    display: grid; grid-template-columns: 50px 1fr 160px 60px auto;
+    gap: .8rem; align-items: center; padding: 1rem;
+    background: rgba(0,255,136,.03); border-top: 1px dashed rgba(0,255,136,.2);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Types de <span>Droits</span></h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        — Référentiel des droits d'accès disponibles
+    </p>
+</div>
+
+<div class="actions-row">
+    <p style="color:var(--text-secondary);font-size:.88rem;max-width:600px;">
+        Définissez ici le catalogue de droits disponibles (dossiers réseau, logiciels, boîtes mail…).
+        Ces types seront proposés en sélection rapide lors de l'attribution des droits aux utilisateurs.
+    </p>
+    <a href="/utilisateurs" class="btn btn-primary btn-sm">← Retour aux utilisateurs</a>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden;" id="types-table">
+    <div class="type-row header">
+        <div>Icône</div><div>Nom / Description</div><div>Catégorie</div><div>Ordre</div><div>Action</div>
+    </div>
+
+    {% set ns = namespace(cur_cat='') %}
+    {% for t in types %}
+        {% if t.categorie != ns.cur_cat %}
+            {% set ns.cur_cat = t.categorie %}
+            <div class="cat-sep">▸ {{ t.categorie or 'Autre' }}</div>
+        {% endif %}
+        <div class="type-row" id="trow-{{ t.id }}">
+            <input class="inline-input icone-input" value="{{ t.icone }}" maxlength="4"
+                   onchange="majType({{ t.id }}, 'icone', this.value)">
+            <div>
+                <input class="inline-input" value="{{ t.nom }}"
+                       onchange="majType({{ t.id }}, 'nom', this.value)"
+                       placeholder="Nom du droit">
+                <input class="inline-input" value="{{ t.description }}"
+                       style="margin-top:3px;font-size:.78rem;color:var(--text-secondary);"
+                       onchange="majType({{ t.id }}, 'description', this.value)"
+                       placeholder="Description (optionnelle)">
+            </div>
+            <select class="inline-input" onchange="majType({{ t.id }}, 'categorie', this.value)">
+                {% for cat in categories_droits %}
+                <option value="{{ cat }}" {% if t.categorie == cat %}selected{% endif %}>{{ cat }}</option>
+                {% endfor %}
+            </select>
+            <input class="inline-input" type="number" value="{{ t.ordre }}" min="0" style="width:56px;"
+                   onchange="majType({{ t.id }}, 'ordre', this.value)">
+            <button onclick="supprimerType({{ t.id }})" class="btn btn-danger btn-sm">✕</button>
+        </div>
+    {% else %}
+        <div style="text-align:center;padding:2rem;color:var(--text-secondary);">
+            Aucun type de droit défini. Ajoutez-en via le formulaire ci-dessous.
+        </div>
+    {% endfor %}
+
+    <!-- LIGNE D'AJOUT -->
+    <div class="add-row">
+        <input class="inline-input icone-input" id="new-icone" value="🔑" maxlength="4">
+        <div>
+            <input class="inline-input" id="new-nom" placeholder="Nom du droit *">
+            <input class="inline-input" id="new-desc" placeholder="Description (optionnelle)"
+                   style="margin-top:3px;font-size:.78rem;">
+        </div>
+        <select class="inline-input" id="new-cat">
+            {% for cat in categories_droits %}
+            <option value="{{ cat }}">{{ cat }}</option>
+            {% endfor %}
+        </select>
+        <input class="inline-input" id="new-ordre" type="number" value="0" min="0" style="width:56px;">
+        <button onclick="ajouterType()" class="btn btn-success btn-sm">+ Ajouter</button>
+    </div>
+</div>
+
+<!-- Suggestions rapides -->
+<div class="card" style="margin-top:1.5rem;">
+    <div class="card-title">Suggestions d'ajout rapide</div>
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;">
+        {% set suggestions = [
+            ('📁','Dossier Comptabilité','Dossiers réseau'),('📁','Dossier RH','Dossiers réseau'),
+            ('📁','Dossier Direction','Dossiers réseau'),('📁','Dossier Partagé','Dossiers réseau'),
+            ('🧾','Sage 100','Logiciels'),('🧾','EBP Compta','Logiciels'),('🧾','Quadratus','Logiciels'),
+            ('📊','Excel avancé','Logiciels'),('🖨','Imprimante couleur','Logiciels'),
+            ('✉','Boîte mail contact@','Messagerie'),('✉','Boîte mail direction@','Messagerie'),
+            ('✉','Boîte mail compta@','Messagerie'),('✉','Liste de diffusion','Messagerie'),
+            ('🌐','Intranet','Applications web'),('🌐','CRM','Applications web'),('🌐','ERP','Applications web'),
+            ('🔑','Administration serveur','Administration'),('🔑','Accès VPN','Administration'),
+            ('🔑','Console de gestion','Administration'),
+        ] %}
+        {% for icone, nom, cat in suggestions %}
+        <button onclick="ajouterSuggestion('{{ icone }}','{{ nom }}','{{ cat }}')"
+                class="btn btn-primary btn-sm" style="font-size:.72rem;">
+            {{ icone }} {{ nom }}
+        </button>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function majType(id, champ, valeur) {
+    const row = document.getElementById('trow-' + id);
+    const inputs = row.querySelectorAll('input,select');
+    const data = {};
+    inputs.forEach((inp, i) => {
+        ['icone','nom','categorie','ordre'].forEach((f,j) => { if(i===j) data[f]=inp.value; });
+    });
+    data[champ] = valeur;
+    await fetch('/api/type-droit/' + id, {
+        method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    });
+}
+
+async function supprimerType(id) {
+    if (!confirm('Supprimer ce type de droit ? Les droits déjà attribués ne seront pas supprimés.')) return;
+    await fetch('/api/type-droit/' + id, { method: 'DELETE' });
+    document.getElementById('trow-' + id)?.remove();
+}
+
+async function ajouterType() {
+    const nom = document.getElementById('new-nom').value.trim();
+    if (!nom) { document.getElementById('new-nom').focus(); return; }
+    const data = {
+        icone: document.getElementById('new-icone').value,
+        nom: nom,
+        description: document.getElementById('new-desc').value.trim(),
+        categorie: document.getElementById('new-cat').value,
+        ordre: parseInt(document.getElementById('new-ordre').value) || 0
+    };
+    const r = await fetch('/api/type-droit', {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+    });
+    document.getElementById('new-nom').value = '';
+    document.getElementById('new-desc').value = '';
+    location.reload();
+}
+
+async function ajouterSuggestion(icone, nom, cat) {
+    await fetch('/api/type-droit', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ icone, nom, categorie: cat, ordre: 0, description: '' })
+    });
+    location.reload();
+}
+</script>
+{% endblock %}

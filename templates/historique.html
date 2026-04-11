@@ -1,0 +1,423 @@
+{% extends "base.html" %}
+{% block title %}Historique — {{ client.nom }}{% endblock %}
+
+{% block extra_styles %}
+<style>
+.hist-filters { display:flex; gap:.5rem; flex-wrap:wrap; margin-bottom:1rem; }
+.hist-chip {
+    padding:.25rem .8rem; border-radius:20px; border:1px solid var(--border);
+    font-size:.75rem; font-weight:600; text-decoration:none; color:var(--text-secondary);
+    transition:all .15s; cursor:pointer;
+}
+.hist-chip:hover { border-color:var(--accent); color:var(--accent); }
+.hist-chip.active { background:rgba(0,201,255,.1); border-color:var(--accent); color:var(--accent); }
+
+.hist-timeline { position:relative; padding-left:1.4rem; }
+.hist-timeline::before { content:''; position:absolute; left:.5rem; top:0; bottom:0; width:1px; background:var(--border); }
+
+.hist-entry {
+    position:relative; padding:.5rem 0 .5rem .8rem;
+    border-bottom:1px solid var(--border);
+    display:flex; align-items:flex-start; gap:.8rem;
+}
+.hist-entry:last-child { border:none; }
+.hist-entry.has-diff { cursor:default; }
+
+.hist-dot {
+    position:absolute; left:-.87rem; top:.75rem;
+    width:9px; height:9px; border-radius:50%; flex-shrink:0; border:2px solid var(--bg-card);
+}
+.hist-icon { font-size:1rem; flex-shrink:0; width:20px; text-align:center; }
+.hist-body { flex:1; min-width:0; }
+.hist-nom  { font-weight:600; font-size:.87rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hist-meta { font-size:.72rem; color:var(--text-secondary); margin-top:.1rem; display:flex; gap:.5rem; flex-wrap:wrap; align-items:center; }
+.hist-right { display:flex; align-items:center; gap:.5rem; flex-shrink:0; }
+.hist-time  { font-size:.68rem; color:var(--text-muted); white-space:nowrap; font-family:'Share Tech Mono',monospace; }
+
+/* Badges action */
+.badge-action-création    { background:rgba(0,255,136,.1);   color:var(--accent-green);  border-color:rgba(0,255,136,.3); }
+.badge-action-modification{ background:rgba(0,201,255,.1);   color:var(--accent);        border-color:rgba(0,201,255,.3); }
+.badge-action-suppression { background:rgba(255,51,85,.1);   color:var(--accent-red);    border-color:rgba(255,51,85,.3); }
+.badge-action-annulation  { background:rgba(250,204,21,.08); color:#facc15;              border-color:rgba(250,204,21,.3); }
+.badge-action-erreur      { background:rgba(255,51,85,.12);  color:#ff6680;              border-color:rgba(255,51,85,.4); }
+
+/* Tooltip erreur */
+.err-tip {
+    position:fixed; z-index:9999;
+    background:#0f1218; border:1px solid rgba(255,51,85,.4);
+    border-radius:8px; padding:.7rem .9rem;
+    font-size:.73rem; color:var(--text-primary);
+    box-shadow:0 10px 32px rgba(0,0,0,.65);
+    pointer-events:none; display:none;
+    min-width:280px; max-width:500px; max-height:320px;
+    overflow:hidden;
+}
+.err-tip.show { display:block; }
+.err-tip-title { color:#ff6680; font-weight:700; font-size:.7rem; letter-spacing:1px;
+    text-transform:uppercase; margin-bottom:.4rem; padding-bottom:.3rem;
+    border-bottom:1px solid rgba(255,51,85,.2); }
+.err-tip-msg { color:#fca5a5; font-family:'Share Tech Mono',monospace;
+    font-size:.72rem; word-break:break-word; margin-bottom:.4rem; }
+.err-tip-url { color:var(--text-muted); font-size:.65rem; margin-bottom:.4rem;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.err-tip-trace { color:#475569; font-family:'Share Tech Mono',monospace;
+    font-size:.62rem; white-space:pre-wrap; word-break:break-all;
+    max-height:120px; overflow:hidden; border-top:1px solid rgba(255,255,255,.05);
+    padding-top:.3rem; margin-top:.2rem; }
+
+/* Bouton annuler */
+.hist-revert-btn {
+    font-size:.62rem; padding:.12rem .45rem; line-height:1.4;
+    border:1px solid rgba(255,140,0,.4); color:var(--accent-orange);
+    background:rgba(255,140,0,.08); border-radius:4px;
+    cursor:pointer; white-space:nowrap; transition:all .15s;
+}
+.hist-revert-btn:hover { background:rgba(255,140,0,.2); border-color:rgba(255,140,0,.75); }
+
+/* Bouton supprimer entrée */
+.hist-del-btn {
+    font-size:.7rem; padding:.1rem .38rem; line-height:1.4;
+    border:1px solid rgba(255,51,85,.3); color:rgba(255,51,85,.55);
+    background:none; border-radius:4px;
+    cursor:pointer; white-space:nowrap; transition:all .15s;
+    opacity:0; flex-shrink:0;
+}
+.hist-entry:hover .hist-del-btn { opacity:1; }
+.hist-del-btn:hover { background:rgba(255,51,85,.12); border-color:rgba(255,51,85,.7); color:var(--accent-red); }
+
+/* Indicateur diff disponible */
+.diff-hint {
+    font-size:.6rem; color:var(--text-muted); cursor:default;
+    opacity:.55; user-select:none;
+}
+
+/* ── INFOBULLE DIFF AVANT/APRÈS ── */
+.hist-diff-tip {
+    position:fixed; z-index:9999;
+    background:var(--bg-card); border:1px solid var(--border-glow);
+    border-radius:8px; padding:.65rem .9rem;
+    font-size:.74rem; color:var(--text-primary);
+    box-shadow:0 10px 32px rgba(0,0,0,.55);
+    pointer-events:none; display:none;
+    min-width:270px; max-width:430px;
+}
+.diff-tip-header {
+    font-size:.6rem; letter-spacing:1.5px; text-transform:uppercase;
+    color:var(--text-muted); margin-bottom:.4rem; padding-bottom:.3rem;
+    border-bottom:1px solid rgba(255,255,255,.06);
+    display:grid; grid-template-columns:1fr 1fr 1fr; gap:.3rem;
+}
+.diff-table { width:100%; border-collapse:collapse; }
+.diff-td-field {
+    color:var(--text-muted); font-size:.66rem;
+    padding:.13rem .35rem .13rem 0; white-space:nowrap;
+}
+.diff-td-val {
+    font-family:'Share Tech Mono',monospace; font-size:.71rem;
+    padding:.13rem .35rem; max-width:150px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.diff-td-avant { color:var(--accent-red); }
+.diff-td-apres { color:var(--accent-green); }
+.diff-empty { color:var(--text-muted); font-style:italic; font-size:.7rem; opacity:.5; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <div>
+        <h1>Journal des <span>Modifications</span></h1>
+        <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        — {{ hist|length }} entrée{{ 's' if hist|length != 1 }}</p>
+    </div>
+    <button onclick="viderErreurs(this)" class="btn btn-sm"
+            style="border-color:rgba(255,51,85,.4);color:rgba(255,51,85,.7);background:rgba(255,51,85,.06);margin-top:.3rem;"
+            title="Supprimer toutes les entrées d'erreur système">
+        🗑 Vider les erreurs
+    </button>
+</div>
+
+<!-- Filtres -->
+<div class="hist-filters">
+    {% set entites = [('', 'Tout', '📋'), ('appareil', 'Appareils', '🖥'), ('peripherique', 'Périphériques', '🖱'),
+                      ('identifiant', 'Identifiants', '🔑'), ('contrat', 'Contrats', '📄'),
+                      ('utilisateur', 'Utilisateurs', '👥'), ('système', 'Erreurs', '⚠')] %}
+    {% for val, label, ico in entites %}
+    <a href="/historique{% if val %}?entite={{ val }}{% endif %}"
+       class="hist-chip {% if filtre == val %}active{% endif %}{% if val == 'système' %}" style="{% if filtre == val %}border-color:var(--accent-red);color:var(--accent-red);background:rgba(255,51,85,.08);{% else %}color:#ff6680;border-color:rgba(255,51,85,.25);{% endif %}{% endif %}">{{ ico }} {{ label }}</a>
+    {% endfor %}
+</div>
+
+<div class="card" style="padding:1rem 1.2rem;">
+{% if hist %}
+<div class="hist-timeline">
+{% set icons     = {'appareil':'🖥','peripherique':'🖱','identifiant':'🔑','contrat':'📄','utilisateur':'👥','système':'⚠'} %}
+{% set dot_colors= {'Création':'var(--accent-green)','Modification':'var(--accent)','Suppression':'var(--accent-red)','Annulation':'#facc15','Erreur':'#ff3355'} %}
+{% set links     = {'appareil':'/appareil/{}', 'peripherique':'/peripherique/{}', 'identifiant':'/identifiant/{}', 'contrat':'/contrat/{}', 'utilisateur':'/utilisateur/{}'} %}
+{% for h in hist %}
+{% set dot_col  = dot_colors.get(h.action, 'var(--text-muted)') %}
+{% set has_diff = h.action == 'Modification' and h.details and h.details[:1] == '{' %}
+{% set is_mod   = h.action == 'Modification' %}
+{% set is_err   = h.action == 'Erreur' %}
+<div class="hist-entry{% if has_diff %} has-diff{% endif %}"
+     {% if is_mod %}
+     data-diff="{{ h.details|e if has_diff else '' }}"
+     onmouseenter="showDiffTip(event, this)"
+     onmouseleave="hideDiffTip()"
+     {% elif is_err %}
+     data-err="{{ h.details|e }}"
+     onmouseenter="showErrTip(event, this)"
+     onmouseleave="hideErrTip()"
+     style="cursor:default;"
+     {% endif %}>
+    <div class="hist-dot" style="background:{{ dot_col }};"></div>
+    <span class="hist-icon">{{ icons.get(h.entite, '📋') }}</span>
+    <div class="hist-body">
+        <div class="hist-nom">
+            {% if h.action != 'Suppression' and links.get(h.entite) %}
+            <a href="{{ links[h.entite].format(h.entite_id) }}/editer" style="color:var(--text-primary);text-decoration:none;">{{ h.entite_nom }}</a>
+            {% else %}
+            {{ h.entite_nom }}
+            {% endif %}
+        </div>
+        <div class="hist-meta">
+            <span class="badge badge-action-{{ h.action|lower }}" style="font-size:.62rem;">{{ h.action }}</span>
+            <span>{{ h.entite|capitalize }}</span>
+            {% if h.action == 'Annulation' and h.details and h.details[:1] == '{' %}
+                {% set msg_data = h.details|tojson %}
+                <span style="color:var(--text-muted);font-style:italic;font-size:.68rem;">
+                    ↩ Restauration appliquée
+                </span>
+            {% elif h.action != 'Modification' and h.details %}
+                <span>{{ h.details }}</span>
+            {% endif %}
+            {% if has_diff %}
+            <span class="diff-hint" title="Survolez pour voir les différences">🔍 diff</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="hist-right">
+        {% if has_diff and can_write_flag %}
+        <form method="POST" action="/historique/{{ h.id }}/annuler"
+              data-nom="{{ h.entite_nom|e }}"
+              onsubmit="return confirm('Restaurer \u00ab ' + this.dataset.nom + ' \u00bb \u00e0 son \u00e9tat avant cette modification ?')"
+              style="margin:0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="hist-revert-btn" title="Annuler cette modification">↩ Annuler</button>
+        </form>
+        {% endif %}
+        <span class="hist-time">{{ h.date_action[:16].replace('T',' ') if h.date_action else '' }}</span>
+        <button class="hist-del-btn" onclick="supprimerEntree({{ h.id }}, this)" title="Supprimer cette entrée">✕</button>
+    </div>
+</div>
+{% endfor %}
+</div>
+{% else %}
+<div style="text-align:center;padding:3rem;color:var(--text-muted);">
+    Aucune entrée dans le journal.
+    <br><br>
+    <span style="font-size:.82rem;">Les modifications seront enregistrées automatiquement dès la prochaine action.</span>
+</div>
+{% endif %}
+</div>
+
+<!-- INFOBULLE ERREUR -->
+<div class="err-tip" id="err-tip">
+    <div class="err-tip-title">⚠ Erreur système</div>
+    <div class="err-tip-msg"  id="err-tip-msg"></div>
+    <div class="err-tip-url"  id="err-tip-url"></div>
+    <div class="err-tip-trace" id="err-tip-trace"></div>
+</div>
+
+<!-- INFOBULLE DIFF AVANT/APRÈS -->
+<div class="hist-diff-tip" id="diff-tip">
+    <div class="diff-tip-header">
+        <span>Champ</span>
+        <span style="color:var(--accent-red);">▼ Avant</span>
+        <span style="color:var(--accent-green);">▲ Après</span>
+    </div>
+    <div id="diff-tip-body"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const DIFF_LABELS = {
+    'nom_machine':'Nom machine','type_appareil':'Type','marque':'Marque','modele':'Modèle',
+    'numero_serie':'N° série','adresse_ip':'Adresse IP','adresse_mac':'Adresse MAC',
+    'nom_dns':'Nom DNS','utilisateur':'Utilisateur','service':'Service',
+    'localisation':'Localisation','date_achat':'Date achat',
+    'duree_garantie':'Garantie (mois)','date_fin_garantie':'Fin garantie',
+    'fournisseur':'Fournisseur','prix_achat':'Prix HT','numero_commande':'N° cmd',
+    'os':'OS','version_os':'Version OS','ram':'RAM','cpu':'CPU','stockage':'Stockage',
+    'carte_graphique':'GPU','statut':'Statut','notes':'Notes',
+    'user_login':'Login user','user_password':'MDP user',
+    'admin_login':'Login admin','admin_password':'MDP admin',
+    'anydesk_id':'AnyDesk ID','anydesk_password':'AnyDesk MDP',
+    'categorie':'Catégorie','description':'Description',
+    'appareil_id':'Appareil attaché','utilisateur_id':'Utilisateur attaché',
+    'nom':'Nom','login':'Login','mot_de_passe':'Mot de passe','url':'URL',
+    'date_expiration':'Expiration','wifi_ssid':'SSID Wi-Fi','wifi_securite':'Sécurité Wi-Fi',
+    'titre':'Titre','type_contrat':'Type contrat','contact_fournisseur':'Contact',
+    'email_fournisseur':'Email fourn.','telephone_fournisseur':'Tél. fourn.',
+    'numero_contrat':'N° contrat','date_debut':'Date début','date_fin':'Date fin',
+    'reconduction_auto':'Reconduction auto','preavis_jours':'Préavis (j)',
+    'montant_ht':'Montant HT','periodicite':'Périodicité',
+    'prenom':'Prénom','poste':'Poste','email':'Email','telephone':'Téléphone',
+    'login_windows':'Login Windows','login_mail':'Login mail',
+    'service_id':'Service',
+};
+
+function _esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function showDiffTip(e, el) {
+    const raw = el.dataset.diff || '';
+    const tip = document.getElementById('diff-tip');
+    const body = document.getElementById('diff-tip-body');
+
+    if (!raw) {
+        // Entrée ancienne sans données diff
+        body.innerHTML = '<span style="color:var(--text-muted);font-style:italic;font-size:.72rem;">' +
+            'Détail non disponible — modification enregistrée avant la mise à jour du journal.' +
+            '</span>';
+        tip.style.display = 'block';
+        posDiffTip(e);
+        return;
+    }
+
+    let diff;
+    try { diff = JSON.parse(raw); } catch { return; }
+    const avant = diff.avant || {}, apres = diff.apres || {};
+    const keys = Object.keys(avant);
+    if (!keys.length) return;
+
+    let rows = '';
+    keys.forEach(k => {
+        const lbl = DIFF_LABELS[k] || k;
+        const v1 = avant[k] !== undefined && avant[k] !== '' ? avant[k] : null;
+        const v2 = apres[k] !== undefined && apres[k] !== '' ? apres[k] : null;
+        const cell1 = v1 !== null
+            ? `<span title="${_esc(String(v1))}">${_esc(String(v1))}</span>`
+            : `<span class="diff-empty">vide</span>`;
+        const cell2 = v2 !== null
+            ? `<span title="${_esc(String(v2))}">${_esc(String(v2))}</span>`
+            : `<span class="diff-empty">vide</span>`;
+        rows += `<tr>
+            <td class="diff-td-field">${_esc(lbl)}</td>
+            <td class="diff-td-val diff-td-avant">${cell1}</td>
+            <td class="diff-td-val diff-td-apres">${cell2}</td>
+        </tr>`;
+    });
+
+    body.innerHTML = `<table class="diff-table"><tbody>${rows}</tbody></table>`;
+    tip.style.display = 'block';
+    posDiffTip(e);
+}
+
+function hideDiffTip() {
+    document.getElementById('diff-tip').style.display = 'none';
+}
+
+function posDiffTip(e) {
+    const tip = document.getElementById('diff-tip');
+    let x = e.clientX + 18, y = e.clientY + 8;
+    const tw = tip.offsetWidth || 430;
+    const th = tip.offsetHeight || 300;
+    if (x + tw > window.innerWidth)  x = e.clientX - tw - 8;
+    if (y + th > window.innerHeight) y = e.clientY - th - 8;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+}
+
+document.addEventListener('mousemove', e => {
+    const tip = document.getElementById('diff-tip');
+    if (tip && tip.style.display === 'block') posDiffTip(e);
+    const etip = document.getElementById('err-tip');
+    if (etip && etip.classList.contains('show')) posErrTip(e);
+});
+
+function showErrTip(e, el) {
+    const raw = el.dataset.err || '';
+    const tip = document.getElementById('err-tip');
+    let d = {};
+    try { d = JSON.parse(raw); } catch { d = {message: raw}; }
+    const msg   = document.getElementById('err-tip-msg');
+    const url   = document.getElementById('err-tip-url');
+    const trace = document.getElementById('err-tip-trace');
+    if (msg)   msg.textContent   = d.message || '(message indisponible)';
+    if (url)   { url.textContent = d.url || ''; url.style.display = d.url ? '' : 'none'; }
+    if (trace) { trace.textContent = d.trace || ''; trace.style.display = d.trace ? '' : 'none'; }
+    tip.classList.add('show');
+    posErrTip(e);
+}
+
+function hideErrTip() {
+    document.getElementById('err-tip').classList.remove('show');
+}
+
+function posErrTip(e) {
+    const tip = document.getElementById('err-tip');
+    let x = e.clientX + 18, y = e.clientY + 8;
+    const tw = tip.offsetWidth  || 480;
+    const th = tip.offsetHeight || 220;
+    if (x + tw > window.innerWidth)  x = e.clientX - tw - 8;
+    if (y + th > window.innerHeight) y = e.clientY - th - 8;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+}
+
+// ── SUPPRESSION D'ENTRÉES ────────────────────────────────────────────────────
+async function supprimerEntree(id, btn) {
+    const row = btn.closest('.hist-entry');
+    btn.disabled = true;
+    btn.textContent = '…';
+    try {
+        const r = await fetch(`/historique/${id}/supprimer`, {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' }
+        });
+        const d = await r.json();
+        if (d.ok) {
+            row.style.transition = 'opacity .25s, max-height .3s';
+            row.style.opacity = '0';
+            row.style.maxHeight = row.offsetHeight + 'px';
+            setTimeout(() => { row.style.maxHeight = '0'; row.style.padding = '0'; }, 10);
+            setTimeout(() => row.remove(), 340);
+        } else {
+            btn.disabled = false; btn.textContent = '✕';
+            alert(d.message || 'Erreur lors de la suppression');
+        }
+    } catch {
+        btn.disabled = false; btn.textContent = '✕';
+    }
+}
+
+async function viderErreurs(btn) {
+    if (!confirm('Supprimer toutes les entrées d\'erreur système du journal ?')) return;
+    btn.disabled = true;
+    try {
+        const r = await fetch('/historique/vider-erreurs', {
+            method: 'POST',
+            headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+        });
+        const d = await r.json();
+        if (d.ok) {
+            document.querySelectorAll('.hist-entry').forEach(row => {
+                const badge = row.querySelector('.badge-action-erreur');
+                if (badge) {
+                    row.style.transition = 'opacity .2s';
+                    row.style.opacity = '0';
+                    setTimeout(() => row.remove(), 220);
+                }
+            });
+            btn.textContent = `✓ ${d.nb} supprimée(s)`;
+            btn.style.color = 'var(--accent-green)';
+        }
+    } catch {
+        btn.disabled = false;
+    }
+}
+</script>
+{% endblock %}

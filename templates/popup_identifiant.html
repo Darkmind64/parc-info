@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ ident.nom }} — ParcInfo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0d1520; --bg2: #111c2b; --border: #1e3a5f;
+            --accent: #00c9ff; --green: #00ff88; --red: #ff3355;
+            --orange: #ff8c00; --text: #d0e8ff; --muted: #4a6a8a;
+        }
+        * { box-sizing:border-box; margin:0; padding:0; }
+        body {
+            font-family:'Exo 2',sans-serif; background:var(--bg); color:var(--text);
+            min-height:100vh; display:flex; flex-direction:column;
+        }
+        .topbar {
+            background:linear-gradient(135deg,#0a1020,#0f1a30);
+            border-bottom:2px solid var(--accent);
+            padding:.6rem 1rem; display:flex; align-items:center; gap:.7rem;
+            flex-shrink:0;
+        }
+        .topbar-name { flex:1; font-weight:700; font-size:.95rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .topbar-cat  { font-size:.6rem; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); padding:.15rem .45rem; border:1px solid var(--border); border-radius:3px; flex-shrink:0; }
+        .topbar-close { background:none; border:1px solid rgba(255,51,85,.4); color:var(--red); border-radius:4px; width:26px; height:26px; cursor:pointer; font-size:.85rem; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+        .topbar-close:hover { background:rgba(255,51,85,.15); }
+
+        .body { flex:1; padding:1rem; display:flex; flex-direction:column; gap:.8rem; }
+
+        .field { background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:.7rem .9rem; }
+        .field:focus-within { border-color:#2e6cb0; }
+        .flabel { font-size:.58rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--muted); margin-bottom:.35rem; }
+        .frow   { display:flex; align-items:center; gap:.55rem; }
+        .fval   { flex:1; font-family:'Share Tech Mono',monospace; font-size:.95rem; color:var(--text); word-break:break-all; min-width:0; }
+        .fval.masked  { letter-spacing:3px; color:var(--muted); font-size:.85rem; }
+        .fval.shown   { color:var(--green); }
+
+        .cbtn {
+            flex-shrink:0; background:rgba(0,201,255,.08); border:1px solid rgba(0,201,255,.4);
+            color:var(--accent); border-radius:4px; padding:.35rem .8rem;
+            font-size:.75rem; font-weight:700; cursor:pointer; transition:all .15s; white-space:nowrap;
+        }
+        .cbtn:hover { background:rgba(0,201,255,.18); box-shadow:0 0 10px rgba(0,201,255,.2); }
+        .cbtn.ok    { background:rgba(0,255,136,.12); border-color:var(--green); color:var(--green); }
+        .ebtn { background:none; border:1px solid var(--border); color:var(--muted); border-radius:4px; padding:.35rem .5rem; font-size:.85rem; cursor:pointer; transition:all .15s; flex-shrink:0; }
+        .ebtn:hover { border-color:var(--accent); color:var(--accent); }
+
+        .url-link { color:var(--accent); font-size:.85rem; word-break:break-all; text-decoration:none; flex:1; }
+        .url-link:hover { text-decoration:underline; }
+        .notes { font-size:.82rem; color:var(--muted); line-height:1.55; }
+
+        .footer {
+            padding:.55rem 1rem; border-top:1px solid var(--border);
+            display:flex; align-items:center; justify-content:space-between;
+            font-size:.65rem; color:var(--muted); flex-shrink:0;
+        }
+        .footer a { color:var(--muted); text-decoration:none; border:1px solid var(--border); padding:.2rem .55rem; border-radius:3px; transition:all .15s; }
+        .footer a:hover { color:var(--accent); border-color:var(--accent); }
+        .footer .shortcuts { letter-spacing:.3px; }
+
+        .toast {
+            position:fixed; top:.6rem; left:50%; transform:translateX(-50%) translateY(-70px);
+            background:rgba(0,255,136,.15); border:1px solid var(--green); color:var(--green);
+            padding:.4rem 1.1rem; border-radius:4px; font-size:.8rem; font-weight:700;
+            z-index:999; transition:transform .22s ease; pointer-events:none; white-space:nowrap;
+        }
+        .toast.show { transform:translateX(-50%) translateY(0); }
+
+        /* Textarea fantôme pour copie en HTTP */
+        #clip { position:fixed; left:-9999px; top:0; width:1px; height:1px; opacity:0; }
+    </style>
+</head>
+<body>
+
+<div class="topbar">
+    <span>🔑</span>
+    <span class="topbar-name">{{ ident.nom or '—' }}</span>
+    {% if ident.categorie %}<span class="topbar-cat">{{ ident.categorie }}</span>{% endif %}
+    <button class="topbar-close" onclick="window.close()">✕</button>
+</div>
+
+<div class="toast" id="toast">✓ Copié !</div>
+<textarea id="clip" tabindex="-1" aria-hidden="true"></textarea>
+
+<div class="body">
+
+    {% if ident.login %}
+    <div class="field">
+        <div class="flabel">Identifiant / Login</div>
+        <div class="frow">
+            <span class="fval" id="login-val">{{ ident.login }}</span>
+            <button class="cbtn" onclick="copier('login-val', this)">📋 Copier</button>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="field">
+        <div class="flabel">Mot de passe</div>
+        <div class="frow">
+            <span class="fval masked" id="pwd-val">••••••••••</span>
+            <button class="ebtn" id="eye" onclick="togglePwd()">👁</button>
+            <button class="cbtn" id="copy-pwd" onclick="copierMdp(this)">📋 Copier</button>
+        </div>
+        {% if ident.expire_depasse %}
+        <div style="margin-top:.4rem;font-size:.7rem;color:var(--red);">⚠ Mot de passe expiré le {{ ident.date_expiration_fmt }}</div>
+        {% elif ident.expire_bientot %}
+        <div style="margin-top:.4rem;font-size:.7rem;color:var(--orange);">⚠ Expire le {{ ident.date_expiration_fmt }}</div>
+        {% endif %}
+    </div>
+
+    {% if ident.url %}
+    <div class="field">
+        <div class="flabel">URL / Accès</div>
+        <div class="frow">
+            <a class="url-link" href="{{ ident.url }}" target="_blank">{{ ident.url }}</a>
+            <button class="cbtn" onclick="copierTexte('{{ ident.url|replace("'", "\\'") }}', this)">📋</button>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if ident.description or ident.notes %}
+    <div class="field">
+        <div class="flabel">Notes</div>
+        <div class="notes">
+            {% if ident.description %}<div>{{ ident.description }}</div>{% endif %}
+            {% if ident.notes %}<div style="margin-top:.3rem;opacity:.7;">{{ ident.notes }}</div>{% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+<div class="footer">
+    <span class="shortcuts">Ctrl+L : login &nbsp;·&nbsp; Ctrl+P : mot de passe &nbsp;·&nbsp; Ctrl+R : afficher/masquer &nbsp;·&nbsp; Échap : fermer</span>
+    <a href="/identifiant/{{ ident.id }}/editer" target="_blank">✏ Modifier</a>
+</div>
+
+<script>
+const IDENT_ID = {{ ident.id }};
+let mdp = null;
+let mdpShown = false;
+
+// ── Copie robuste HTTP + HTTPS ─────────────────────────────────────────────
+function copierValeur(texte, btn) {
+    function ok() {
+        if (btn) {
+            const orig = btn.innerHTML;
+            btn.innerHTML = '✓ Copié !';
+            btn.classList.add('ok');
+            setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('ok'); }, 2000);
+        }
+        const t = document.getElementById('toast');
+        t.classList.add('show');
+        clearTimeout(t._t);
+        t._t = setTimeout(() => t.classList.remove('show'), 1800);
+    }
+    // Essai API Clipboard (HTTPS / localhost)
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(texte).then(ok).catch(() => fallback(texte, ok));
+    } else {
+        fallback(texte, ok);
+    }
+}
+
+function fallback(texte, cb) {
+    const el = document.getElementById('clip');
+    el.value = texte;
+    el.style.left = '0';
+    el.removeAttribute('readonly');
+    el.focus();
+    el.select();
+    let success = false;
+    try { success = document.execCommand('copy'); } catch(e) {}
+    el.setAttribute('readonly', '');
+    el.style.left = '-9999px';
+    if (success && cb) cb();
+    else if (!success) alert('Copie impossible. Sélectionnez le texte manuellement.');
+}
+
+function copier(elemId, btn) {
+    const v = document.getElementById(elemId).textContent.trim();
+    copierValeur(v, btn);
+}
+
+function copierTexte(txt, btn) {
+    copierValeur(txt, btn);
+}
+
+// ── Mot de passe ───────────────────────────────────────────────────────────
+async function chargerMdp() {
+    if (mdp !== null) return mdp;
+    const r = await fetch('/api/identifiant/' + IDENT_ID + '/mdp');
+    const d = await r.json();
+    mdp = d.mdp || '';
+    return mdp;
+}
+
+function togglePwd() {
+    chargerMdp().then(m => {
+        mdpShown = !mdpShown;
+        const span = document.getElementById('pwd-val');
+        const eye  = document.getElementById('eye');
+        span.textContent  = mdpShown ? (m || '(vide)') : '••••••••••';
+        span.className    = 'fval ' + (mdpShown ? 'shown' : 'masked');
+        eye.textContent   = mdpShown ? '🙈' : '👁';
+    });
+}
+
+async function copierMdp(btn) {
+    const m = await chargerMdp();
+    copierValeur(m, btn);
+}
+
+// ── Raccourcis ─────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { window.close(); return; }
+    if (e.ctrlKey && e.key === 'l') { e.preventDefault(); const b = document.querySelector('[onclick*="login-val"]'); if(b) b.click(); }
+    if (e.ctrlKey && e.key === 'p') { e.preventDefault(); document.getElementById('copy-pwd').click(); }
+    if (e.ctrlKey && e.key === 'r') { e.preventDefault(); togglePwd(); }
+});
+
+// Précharger le mdp silencieusement dès l'ouverture
+chargerMdp();
+</script>
+</body>
+</html>

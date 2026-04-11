@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Plans — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.plans-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.2rem;
+    margin-top: 1.5rem;
+}
+.plan-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.25rem 1.5rem;
+    position: relative;
+    overflow: hidden;
+    transition: border-color .2s, box-shadow .2s;
+}
+.plan-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--border-glow), transparent);
+}
+.plan-card:hover {
+    border-color: var(--border-glow);
+    box-shadow: 0 4px 20px rgba(0,0,0,.3);
+}
+.plan-card-name {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--text-primary);
+    margin-bottom: .4rem;
+}
+.plan-card-desc {
+    font-size: .83rem;
+    color: var(--text-secondary);
+    margin-bottom: .9rem;
+    min-height: 1.2em;
+}
+.plan-card-meta {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: .65rem;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+    letter-spacing: .5px;
+}
+.plan-card-actions {
+    display: flex;
+    gap: .6rem;
+    flex-wrap: wrap;
+}
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-muted);
+}
+.empty-state p {
+    font-size: .9rem;
+    margin-top: .5rem;
+}
+
+/* Modal */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.65);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border-glow);
+    border-radius: 6px;
+    padding: 2rem;
+    width: 100%;
+    max-width: 460px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.6);
+}
+.modal-title {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 1.5rem;
+    padding-bottom: .7rem;
+    border-bottom: 1px solid var(--border);
+}
+.modal-actions {
+    display: flex;
+    gap: .8rem;
+    justify-content: flex-end;
+    margin-top: 1.5rem;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:1rem;">
+    <div>
+        <h1>Plans <span>de sol</span></h1>
+        <p>Éditeur de plans d'étage pour {{ client.nom if client else 'ce client' }}</p>
+    </div>
+    <button class="btn btn-success" onclick="document.getElementById('modal-nouveau').classList.add('open')">
+        + Nouveau plan
+    </button>
+</div>
+
+{% if plans %}
+<div class="plans-grid">
+    {% for plan in plans %}
+    <div class="plan-card">
+        <div class="plan-card-name">{{ plan.nom }}</div>
+        <div class="plan-card-desc">{{ plan.description or '–' }}</div>
+        <div class="plan-card-meta">
+            Modifié&nbsp;: {{ plan.date_maj[:16].replace('T',' ') if plan.date_maj else '–' }}
+        </div>
+        <div class="plan-card-actions">
+            <a href="{{ url_for('editer_plan', id=plan.id) }}" class="btn btn-primary btn-sm">
+                ✏ Éditer
+            </a>
+            <form method="post" action="{{ url_for('supprimer_plan', id=plan.id) }}"
+                  style="display:inline;"
+                  onsubmit="return confirm('Supprimer le plan « {{ plan.nom }} » ? Cette action est irréversible.')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="btn btn-danger btn-sm">Supprimer</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="form-section">
+    <div class="empty-state">
+        <div style="font-size:2.5rem; margin-bottom:.8rem; opacity:.4;">🗺</div>
+        <strong>Aucun plan enregistré</strong>
+        <p>Créez votre premier plan de sol pour commencer à positionner les équipements.</p>
+        <button class="btn btn-success" style="margin-top:1.2rem;"
+                onclick="document.getElementById('modal-nouveau').classList.add('open')">
+            + Nouveau plan
+        </button>
+    </div>
+</div>
+{% endif %}
+
+<!-- Modal nouveau plan -->
+<div class="modal-overlay" id="modal-nouveau"
+     onclick="if(event.target===this) this.classList.remove('open')">
+    <div class="modal-box">
+        <div class="modal-title">Nouveau plan</div>
+        <form method="post" action="{{ url_for('nouveau_plan') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="form-group">
+                <label class="form-label">Nom <span style="color:var(--accent-red)">*</span></label>
+                <input type="text" name="nom" class="form-input" required
+                       placeholder="Ex: Rez-de-chaussée" autocomplete="off">
+            </div>
+            <div class="form-group" style="margin-top:1rem;">
+                <label class="form-label">Description <span style="color:var(--text-muted);font-size:.8rem;">(optionnel)</span></label>
+                <textarea name="description" class="form-input" rows="3"
+                          placeholder="Description du plan…" style="resize:vertical;"></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-sm"
+                        style="border-color:var(--border);color:var(--text-secondary);"
+                        onclick="document.getElementById('modal-nouveau').classList.remove('open')">
+                    Annuler
+                </button>
+                <button type="submit" class="btn btn-success btn-sm">Créer</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        document.getElementById('modal-nouveau').classList.remove('open');
+    }
+});
+</script>
+{% endblock %}

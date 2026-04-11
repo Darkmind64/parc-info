@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}{{ action }} contrat — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.check-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:.4rem; }
+.check-item {
+    display:flex; align-items:center; gap:.6rem; padding:.45rem .7rem;
+    border:1px solid var(--border); border-radius:3px; cursor:pointer;
+    transition:all .12s; font-size:.82rem;
+}
+.check-item:hover { border-color:var(--accent); background:rgba(0,201,255,.04); }
+.check-item input[type="checkbox"] { accent-color:var(--accent); width:15px; height:15px; flex-shrink:0; }
+.check-item.checked { border-color:rgba(0,201,255,.5); background:rgba(0,201,255,.07); }
+.sect-label { font-family:'Rajdhani',sans-serif; font-size:.7rem; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:var(--text-muted); margin-bottom:.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ action }} un <span>Contrat</span></h1>
+    <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span></p>
+</div>
+
+<form method="POST" id="form-contrat">
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Identification du contrat</div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Titre / Intitulé *</label>
+                <input type="text" name="titre" value="{{ contrat.titre if contrat else '' }}"
+                       placeholder="Ex: Maintenance Dell PowerEdge, Licence Microsoft 365..." required>
+            </div>
+            <div class="form-group">
+                <label>Type de contrat</label>
+                <select name="type_contrat">
+                    {% for t in types_contrats %}
+                    <option value="{{ t }}" {% if contrat and contrat.type_contrat == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Fournisseur / Prestataire</label>
+                <input type="text" name="fournisseur" value="{{ contrat.fournisseur if contrat else '' }}"
+                       placeholder="Ex: Dell, Microsoft, Orange...">
+            </div>
+            <div class="form-group">
+                <label>Contact fournisseur</label>
+                <input type="text" name="contact_fournisseur" value="{{ contrat.contact_fournisseur if contrat else '' }}"
+                       placeholder="Nom du contact">
+            </div>
+            <div class="form-group">
+                <label>Numéro de contrat</label>
+                <input type="text" name="numero_contrat" value="{{ contrat.numero_contrat if contrat else '' }}"
+                       placeholder="Référence fournisseur" class="mono">
+            </div>
+        </div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Email fournisseur</label>
+                <input type="email" name="email_fournisseur" value="{{ contrat.email_fournisseur if contrat else '' }}"
+                       placeholder="support@fournisseur.com">
+            </div>
+            <div class="form-group">
+                <label>Téléphone fournisseur</label>
+                <input type="text" name="telephone_fournisseur" value="{{ contrat.telephone_fournisseur if contrat else '' }}"
+                       placeholder="Ex: 01 00 00 00 00">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Dates &amp; Financier</div>
+        <div class="form-row cols-4">
+            <div class="form-group">
+                <label>Date de début</label>
+                <input type="date" name="date_debut" value="{{ contrat.date_debut if contrat and contrat.date_debut else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Date de fin</label>
+                <input type="date" name="date_fin" value="{{ contrat.date_fin if contrat and contrat.date_fin else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Préavis résiliation (jours)</label>
+                <input type="number" name="preavis_jours" min="0"
+                       value="{{ contrat.preavis_jours if contrat else '30' }}" placeholder="30">
+            </div>
+            <div class="form-group" style="justify-content:flex-end;padding-top:1.5rem;">
+                <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;text-transform:none;letter-spacing:0;font-size:.88rem;">
+                    <input type="checkbox" name="reconduction_auto" value="1"
+                           {% if contrat and contrat.reconduction_auto %}checked{% endif %}
+                           style="accent-color:var(--accent);width:16px;height:16px;">
+                    Reconduction automatique
+                </label>
+            </div>
+        </div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Montant HT (€)</label>
+                <input type="number" step="0.01" name="montant_ht"
+                       value="{{ contrat.montant_ht if contrat and contrat.montant_ht else '' }}"
+                       placeholder="0.00">
+            </div>
+            <div class="form-group">
+                <label>Périodicité</label>
+                <select name="periodicite">
+                    {% for p in periodicites %}
+                    <option value="{{ p }}" {% if contrat and contrat.periodicite == p %}selected{% endif %}>{{ p|capitalize }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Statut</label>
+                <select name="statut">
+                    <option value="actif"   {% if not contrat or contrat.statut == 'actif' %}selected{% endif %}>✅ Actif</option>
+                    <option value="expire"  {% if contrat and contrat.statut == 'expire' %}selected{% endif %}>❌ Expiré</option>
+                    <option value="resilie" {% if contrat and contrat.statut == 'resilie' %}selected{% endif %}>🚫 Résilié</option>
+                    <option value="suspendu"{% if contrat and contrat.statut == 'suspendu' %}selected{% endif %}>⏸ Suspendu</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Appareils couverts</div>
+        {% if appareils %}
+        <div class="check-grid" id="app-grid">
+            {% for a in appareils %}
+            <label class="check-item {% if a.id in appareils_lies %}checked{% endif %}" onclick="toggleCheck(this)">
+                <input type="checkbox" name="appareils_lies" value="{{ a.id }}"
+                       {% if a.id in appareils_lies %}checked{% endif %}>
+                <span>🖥 <strong>{{ a.nom_machine }}</strong>
+                    <span style="color:var(--text-muted);font-size:.75rem;">{{ a.type_appareil }}</span>
+                    {% if a.adresse_ip %}<span class="mono" style="font-size:.72rem;"> · {{ a.adresse_ip }}</span>{% endif %}
+                </span>
+            </label>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:.85rem;">Aucun appareil enregistré.</p>
+        {% endif %}
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Périphériques couverts</div>
+        {% if peripheriques %}
+        <div class="check-grid" id="per-grid">
+            {% for p in peripheriques %}
+            <label class="check-item {% if p.id in peripheriques_lies %}checked{% endif %}" onclick="toggleCheck(this)">
+                <input type="checkbox" name="peripheriques_lies" value="{{ p.id }}"
+                       {% if p.id in peripheriques_lies %}checked{% endif %}>
+                <span>🖱 <strong>{{ p.marque }} {{ p.modele }}</strong>
+                    <span style="color:var(--text-muted);font-size:.75rem;">{{ p.categorie }}</span>
+                </span>
+            </label>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p style="color:var(--text-muted);font-size:.85rem;">Aucun périphérique enregistré.</p>
+        {% endif %}
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Description &amp; Notes</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Description</label>
+                <textarea name="description" rows="3"
+                          placeholder="Périmètre couvert, conditions particulières...">{{ contrat.description if contrat else '' }}</textarea>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Notes internes</label>
+                <textarea name="notes" rows="2"
+                          placeholder="Notes privées, historique, relances...">{{ contrat.notes if contrat else '' }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+        <button type="submit" class="btn btn-success">&#10003; {{ action }} le contrat</button>
+        <a href="/contrats" class="btn btn-primary">← Retour</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function toggleCheck(label) {
+    setTimeout(() => {
+        const cb = label.querySelector('input[type="checkbox"]');
+        label.classList.toggle('checked', cb.checked);
+    }, 0);
+}
+</script>
+<script src="/static/js/form_tools.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    FormTools.init('form-contrat', { draftKey: 'draft_ctr' });
+});
+</script>
+{% endblock %}

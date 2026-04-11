@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Contrats & Abonnements — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.stat-chips { display:flex; gap:.6rem; flex-wrap:wrap; margin-bottom:1.2rem; }
+.sc { display:flex; align-items:center; gap:.5rem; padding:.35rem .9rem; border-radius:20px; border:1px solid; font-size:.78rem; font-weight:600; text-decoration:none; cursor:pointer; transition:all .15s; background:none; }
+.sc-all    { color:var(--accent);        border-color:rgba(0,201,255,.35); }
+.sc-all.on { background:rgba(0,201,255,.1); }
+.sc-act    { color:var(--accent-green);  border-color:rgba(0,255,136,.35); }
+.sc-act.on { background:rgba(0,255,136,.08); }
+.sc-exp    { color:var(--accent-red);    border-color:rgba(255,51,85,.35); }
+.sc-exp.on { background:rgba(255,51,85,.08); }
+.sc-res    { color:var(--text-muted);    border-color:var(--border); }
+.sc-res.on { background:rgba(100,130,160,.08); }
+.sc-n { font-family:'Share Tech Mono',monospace; font-size:.85rem; font-weight:700; }
+
+.alert-row { background:rgba(255,140,0,.07); border:1px solid rgba(255,140,0,.3); border-radius:4px; padding:.8rem 1.2rem; margin-bottom:1.2rem; }
+.alert-row.expired { background:rgba(255,51,85,.07); border-color:rgba(255,51,85,.3); }
+
+.ctr-card {
+    background:var(--bg-card); border:1px solid var(--border); border-radius:4px;
+    padding:1.1rem 1.4rem; display:flex; align-items:flex-start; gap:1rem;
+    transition:border-color .15s; position:relative; overflow:hidden;
+}
+.ctr-card:hover { border-color:var(--border-glow); }
+.ctr-card::before { content:''; position:absolute; top:0; left:0; bottom:0; width:3px; }
+.ctr-actif::before   { background:var(--accent-green); }
+.ctr-expire::before  { background:var(--accent-red); }
+.ctr-bientot::before { background:var(--accent-orange); }
+.ctr-resilie::before { background:var(--text-muted); }
+.ctr-icon { width:44px; height:44px; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:1.4rem; flex-shrink:0; }
+.ctr-badges { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.4rem; }
+.days-chip {
+    display:inline-block; padding:.1rem .5rem; border-radius:10px; font-size:.65rem; font-weight:700; letter-spacing:.5px;
+}
+.filter-row { display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
+.filter-row select, .filter-row input { width:auto; padding:.35rem .7rem; font-size:.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Contrats & <span>Abonnements</span></h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        — {{ stats.total }} contrat(s) enregistré(s)
+    </p>
+</div>
+
+<!-- ALERTES -->
+{% for ct in alertes %}
+<div class="alert-row {% if ct.expire_depasse %}expired{% endif %}">
+    {% if ct.expire_depasse %}
+    🚨 <strong>{{ ct.titre }}</strong> — expiré depuis {{ ct.jours_restants|abs }} jour(s)
+    ({{ ct.date_fin_fmt }}) · {{ ct.fournisseur }}
+    {% else %}
+    ⚠ <strong>{{ ct.titre }}</strong> — expire dans <strong>{{ ct.jours_restants }} jour(s)</strong>
+    ({{ ct.date_fin_fmt }}) · {{ ct.fournisseur }}
+    {% if ct.reconduction_auto %} · <em>Reconduction automatique</em>{% endif %}
+    {% endif %}
+    <a href="/contrat/{{ ct.id }}" style="margin-left:.8rem;color:var(--accent);">Voir →</a>
+</div>
+{% endfor %}
+
+<!-- FILTRE APPAREIL ACTIF -->
+{% if filtre_app_id %}
+<div style="display:flex;align-items:center;gap:.7rem;padding:.55rem 1rem;margin-bottom:.8rem;background:rgba(0,201,255,.06);border:1px solid rgba(0,201,255,.25);border-radius:4px;font-size:.84rem;">
+    <span style="color:var(--accent);">🖥</span>
+    <span>Contrats liés à l'appareil <strong style="color:var(--accent);">{{ filtre_app_nom }}</strong></span>
+    <a href="/contrats" style="margin-left:auto;font-size:.75rem;color:var(--text-muted);text-decoration:none;border:1px solid var(--border);padding:.15rem .5rem;border-radius:3px;">✕ Afficher tous les contrats</a>
+</div>
+{% endif %}
+
+<!-- STAT CHIPS -->
+<div class="stat-chips">
+    <a href="/contrats{% if filtre_app_id %}?appareil={{ filtre_app_id }}{% endif %}" class="sc sc-all {% if not filtre_stat %}on{% endif %}">Tous <span class="sc-n">{{ stats.total if not filtre_app_id else contrats|length }}</span></a>
+    <a href="/contrats?statut=actif{% if filtre_app_id %}&appareil={{ filtre_app_id }}{% endif %}"   class="sc sc-act {% if filtre_stat=='actif' %}on{% endif %}">✅ Actifs <span class="sc-n">{{ stats.actif }}</span></a>
+    <a href="/contrats?statut=expire{% if filtre_app_id %}&appareil={{ filtre_app_id }}{% endif %}"  class="sc sc-exp {% if filtre_stat=='expire' %}on{% endif %}">❌ Expirés <span class="sc-n">{{ stats.expire }}</span></a>
+    <a href="/contrats?statut=resilie{% if filtre_app_id %}&appareil={{ filtre_app_id }}{% endif %}" class="sc sc-res {% if filtre_stat=='resilie' %}on{% endif %}">🚫 Résiliés <span class="sc-n">{{ stats.resilie }}</span></a>
+</div>
+
+<!-- FILTRES -->
+<div class="actions-row">
+    <div class="filter-row">
+        <input type="text" id="search-ctr" placeholder="🔍 Rechercher..." oninput="filtrerC()" style="width:200px;">
+        <select id="filtre-type" onchange="appliquerFiltre()">
+            <option value="">Tous les types</option>
+            {% for t in types_utilises %}
+            <option value="{{ t }}" {% if filtre_type == t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <a href="/contrat/nouveau" class="btn btn-success">+ Nouveau contrat</a>
+</div>
+
+<!-- LISTE -->
+{% if contrats %}
+<div id="ctr-list" style="display:flex;flex-direction:column;gap:.7rem;">
+{% for ct in contrats %}
+{% set card_cls = 'ctr-expire' if ct.expire_depasse else ('ctr-bientot' if ct.expire_bientot else ('ctr-resilie' if ct.statut == 'resilie' else 'ctr-actif')) %}
+<div class="ctr-card {{ card_cls }}"
+     data-search="{{ ct.titre }} {{ ct.fournisseur }} {{ ct.type_contrat }} {{ ct.numero_contrat }}">
+    <div class="ctr-icon" style="background:rgba(0,201,255,.08);color:var(--accent);">
+        {% if ct.type_contrat in ['Abonnement logiciel (SaaS)','Licence logicielle','Abonnement cloud'] %}☁
+        {% elif ct.type_contrat in ['Contrat operateur (telecom)','Contrat internet / fibre'] %}📡
+        {% elif ct.type_contrat in ['Maintenance materiel','Support & assistance','Infogérance'] %}🔧
+        {% elif ct.type_contrat in ['Abonnement securite / antivirus'] %}🛡
+        {% elif ct.type_contrat in ['Contrat de leasing','Location'] %}🏷
+        {% elif ct.type_contrat in ['Garantie etendue'] %}🔒
+        {% else %}📋{% endif %}
+    </div>
+    <div style="flex:1;min-width:0;">
+        <div style="display:flex;align-items:baseline;gap:.8rem;flex-wrap:wrap;">
+            <a href="/contrat/{{ ct.id }}" style="font-weight:700;font-size:.95rem;color:var(--text-primary);text-decoration:none;">
+                {{ ct.titre }}
+            </a>
+            <span class="badge badge-blue" style="font-size:.58rem;">{{ ct.type_contrat }}</span>
+            {% if ct.reconduction_auto %}<span class="badge badge-orange" style="font-size:.58rem;">↺ Auto</span>{% endif %}
+        </div>
+        <div style="font-size:.82rem;color:var(--text-secondary);margin-top:.2rem;">
+            {{ ct.fournisseur or '—' }}
+            {% if ct.numero_contrat %} · N° {{ ct.numero_contrat }}{% endif %}
+        </div>
+        <div class="ctr-badges">
+            {% if ct.date_debut_fmt %}<span style="font-size:.75rem;color:var(--text-muted);">📅 {{ ct.date_debut_fmt }}</span>{% endif %}
+            {% if ct.date_fin_fmt %}
+                {% if ct.expire_depasse %}
+                <span class="days-chip" style="background:rgba(255,51,85,.15);color:var(--accent-red);">
+                    ❌ Expiré {{ ct.jours_restants|abs }}j
+                </span>
+                {% elif ct.expire_bientot %}
+                <span class="days-chip" style="background:rgba(255,140,0,.15);color:var(--accent-orange);">
+                    ⚠ {{ ct.jours_restants }}j restants
+                </span>
+                {% else %}
+                <span class="days-chip" style="background:rgba(0,255,136,.08);color:var(--accent-green);">
+                    ✅ {{ ct.jours_restants }}j restants
+                </span>
+                {% endif %}
+            {% endif %}
+            {% if ct.montant_ht %}<span style="font-size:.75rem;color:var(--text-secondary);">💶 {{ "%.0f"|format(ct.montant_ht) }} € HT / {{ ct.periodicite }}</span>{% endif %}
+            {% if ct.nb_appareils %}<span class="badge badge-blue" style="font-size:.6rem;">🖥 {{ ct.nb_appareils }} appareil(s)</span>{% endif %}
+            {% if ct.nb_peripheriques %}<span class="badge badge-blue" style="font-size:.6rem;">🖱 {{ ct.nb_peripheriques }} périph.</span>{% endif %}
+            {% if ct.nb_docs %}<span class="badge badge-gray" style="font-size:.6rem;">📎 {{ ct.nb_docs }} doc(s)</span>{% endif %}
+        </div>
+    </div>
+    <div style="display:flex;gap:.4rem;flex-shrink:0;align-items:flex-start;">
+        <a href="/contrat/{{ ct.id }}" class="btn btn-primary btn-sm">Voir</a>
+        <a href="/contrat/{{ ct.id }}/editer" class="btn btn-primary btn-sm">✏</a>
+        <form method="POST" action="/contrat/{{ ct.id }}/supprimer"
+              onsubmit="return confirm('Supprimer ce contrat ?')" style="margin:0;">
+            <button type="submit" class="btn btn-danger btn-sm">✕</button>
+        </form>
+    </div>
+</div>
+{% endfor %}
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:3rem;">
+    <p style="color:var(--text-secondary);margin-bottom:1.5rem;">Aucun contrat enregistré.</p>
+    <a href="/contrat/nouveau" class="btn btn-success">+ Créer le premier contrat</a>
+</div>
+{% endif %}
+{{ pagination_nav(pagination, '&type=' ~ (filtre_type|urlencode) ~ '&statut=' ~ (filtre_stat|urlencode) ~ '&appareil=' ~ (filtre_app_id|urlencode)) }}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function filtrerC() {
+    const q = document.getElementById('search-ctr').value.toLowerCase();
+    document.querySelectorAll('#ctr-list .ctr-card').forEach(c => {
+        c.style.display = !q || c.dataset.search.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+function appliquerFiltre() {
+    const t = document.getElementById('filtre-type').value;
+    const cur = new URLSearchParams(window.location.search);
+    const p = [];
+    if (t) p.push('type=' + encodeURIComponent(t));
+    if (cur.get('statut'))   p.push('statut='   + cur.get('statut'));
+    if (cur.get('appareil')) p.push('appareil=' + cur.get('appareil'));
+    window.location.href = '/contrats?' + p.join('&');
+}
+</script>
+{% endblock %}

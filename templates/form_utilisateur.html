@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ action }} utilisateur — ParcInfo{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ action }} un <span>Utilisateur</span></h1>
+    <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span></p>
+</div>
+
+<form method="POST" id="form-user" style="max-width:860px;">
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Identité</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Prénom</label>
+                <input type="text" name="prenom" value="{{ utilisateur.prenom if utilisateur else '' }}" placeholder="Prénom" required>
+            </div>
+            <div class="form-group">
+                <label>Nom *</label>
+                <input type="text" name="nom" value="{{ utilisateur.nom if utilisateur else '' }}" placeholder="Nom de famille" required>
+            </div>
+            <div class="form-group">
+                <label>Statut</label>
+                <select name="statut">
+                    <option value="actif" {% if not utilisateur or utilisateur.statut == 'actif' %}selected{% endif %}>Actif</option>
+                    <option value="suspendu" {% if utilisateur and utilisateur.statut == 'suspendu' %}selected{% endif %}>Suspendu</option>
+                    <option value="inactif" {% if utilisateur and utilisateur.statut == 'inactif' %}selected{% endif %}>Inactif</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Poste / Fonction</label>
+                <input type="text" name="poste" value="{{ utilisateur.poste if utilisateur else '' }}" placeholder="Ex: Comptable, Directeur...">
+            </div>
+            <div class="form-group">
+                <label>Service</label>
+                <select name="service_id">
+                    <option value="">— Aucun service —</option>
+                    {% for svc in services %}
+                    <option value="{{ svc.id }}" {% if utilisateur and utilisateur.service_id == svc.id %}selected{% endif %}>
+                        {{ svc.nom }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Contact</div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Email professionnel</label>
+                <input type="email" name="email" value="{{ utilisateur.email if utilisateur else '' }}" placeholder="prenom.nom@client.fr">
+            </div>
+            <div class="form-group">
+                <label>Téléphone</label>
+                <input type="text" name="telephone" value="{{ utilisateur.telephone if utilisateur else '' }}" placeholder="Ex: 04 00 00 00 00">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Identifiants système</div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Login Windows / Active Directory</label>
+                <input type="text" name="login_windows" value="{{ utilisateur.login_windows if utilisateur else '' }}"
+                       placeholder="Ex: j.dupont ou DOMAINE\jdupont" autocomplete="off" class="mono">
+            </div>
+            <div class="form-group">
+                <label>Adresse mail / Login messagerie</label>
+                <input type="text" name="login_mail" value="{{ utilisateur.login_mail if utilisateur else '' }}"
+                       placeholder="Ex: jean.dupont@client.fr" autocomplete="off" class="mono">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Notes</div>
+        <div class="form-group">
+            <textarea name="notes" rows="3" placeholder="Observations, particularités...">{{ utilisateur.notes if utilisateur else '' }}</textarea>
+        </div>
+    </div>
+
+    <div style="display:flex;gap:1rem;">
+        <button type="submit" class="btn btn-success">&#10003; {{ action }} l'utilisateur</button>
+        <a href="/utilisateurs" class="btn btn-primary">← Retour</a>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/form_tools.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    FormTools.init('form-user', { draftKey: 'draft_usr' });
+});
+</script>
+{% endblock %}

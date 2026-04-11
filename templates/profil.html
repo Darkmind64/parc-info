@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Mon profil — ParcInfo{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Mon <span>Profil</span></h1>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;max-width:900px;">
+    <!-- Infos personnelles -->
+    <div>
+        <form method="POST" enctype="multipart/form-data">
+            <div class="form-section">
+                <div class="form-section-title">&#9632; Identité</div>
+                <div class="form-row cols-2">
+                    <div class="form-group"><label>Prénom</label>
+                        <input type="text" name="prenom" value="{{ u.prenom or '' }}"></div>
+                    <div class="form-group"><label>Nom</label>
+                        <input type="text" name="nom" value="{{ u.nom or '' }}" required></div>
+                </div>
+                <div class="form-group"><label>Email</label>
+                    <input type="email" name="email" value="{{ u.email or '' }}"></div>
+                <div class="form-group">
+                    <label>Logo / Avatar</label>
+                    {% if u.logo_fichier %}
+                    <div style="margin-bottom:.5rem;">
+                        <img src="/user/logo/{{ u.logo_fichier }}" style="height:60px;border-radius:4px;border:1px solid var(--border);">
+                    </div>
+                    {% endif %}
+                    <input type="file" name="logo" accept="image/*">
+                </div>
+            </div>
+            <div class="form-section">
+                <div class="form-section-title">&#9632; Changer le mot de passe</div>
+                <div class="form-group"><label>Nouveau mot de passe</label>
+                    <input type="password" name="password" placeholder="Laisser vide pour ne pas changer"></div>
+                <div class="form-group"><label>Confirmer</label>
+                    <input type="password" name="password2"></div>
+            </div>
+            <button type="submit" class="btn btn-success">✓ Enregistrer</button>
+            <a href="/" class="btn btn-primary">← Retour</a>
+        </form>
+    </div>
+    <!-- Infos compte -->
+    <div>
+        <div class="card" style="padding:1.2rem;">
+            <div class="form-section-title">&#9632; Informations du compte</div>
+            <div style="font-size:.83rem;display:flex;flex-direction:column;gap:.6rem;margin-top:.5rem;">
+                <div><span style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:1px;">Login :</span>
+                    <strong style="font-family:'Share Tech Mono',monospace;margin-left:.5rem;">{{ u.login }}</strong></div>
+                <div><span style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:1px;">Rôle :</span>
+                    <span class="badge {% if u.role == 'admin' %}badge-orange{% else %}badge-green{% endif %}" style="margin-left:.5rem;">{{ u.role }}</span></div>
+                <div><span style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:1px;">Compte créé :</span>
+                    <span style="margin-left:.5rem;">{{ u.date_creation[:10] if u.date_creation else '—' }}</span></div>
+            </div>
+            {% if u.role == 'admin' %}
+            <div style="margin-top:1.2rem;padding-top:1rem;border-top:1px solid var(--border);">
+                <a href="/admin/utilisateurs" class="btn btn-primary btn-sm">⚙ Gérer les utilisateurs</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
