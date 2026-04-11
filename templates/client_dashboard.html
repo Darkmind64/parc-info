@@ -129,6 +129,17 @@
 {% endblock %}
 
 {% block content %}
+<!-- BREADCRUMB (conditional on cfg.show_breadcrumb) -->
+{% if cfg.get('show_breadcrumb') == '1' %}
+<div style="margin-bottom:1rem;font-size:.75rem;color:var(--text-secondary);">
+    <a href="/" style="color:var(--accent);text-decoration:none;">Accueil</a>
+    <span> / </span>
+    <a href="/" style="color:var(--accent);text-decoration:none;">Clients</a>
+    <span> / </span>
+    <span style="color:var(--text-primary);">{{ client.nom }}</span>
+</div>
+{% endif %}
+
 <!-- PAGE HEADER -->
 <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;">
     <div>
@@ -141,7 +152,14 @@
             {% endif %}
         </p>
     </div>
-    <a href="/parc" class="btn btn-primary btn-sm" style="flex-shrink:0;margin-top:.4rem;">✏ Modifier le parc</a>
+    <div style="display:flex;gap:.5rem;flex-shrink:0;margin-top:.4rem;">
+        <!-- Back Button (conditional on cfg.show_back_button) -->
+        {% if cfg.get('show_back_button') == '1' %}
+        <a href="/" class="btn btn-secondary btn-sm" title="Retourner à la vue d'ensemble">← Vue d'ensemble</a>
+        {% endif %}
+        <!-- Existing button -->
+        <a href="/parc" class="btn btn-primary btn-sm">✏ Modifier le parc</a>
+    </div>
 </div>
 
 <!-- ══ ALERTES ══════════════════════════════════════════════════════════════ -->

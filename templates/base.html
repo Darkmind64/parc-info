@@ -1988,6 +1988,14 @@ function rendreConfig() {
         <label class="cfg-label">Rétention journal (lignes max)</label>
         <input type="number" data-cfg="historique_max_lignes" value="${g('historique_max_lignes')||'500'}" min="50" max="10000" step="50" class="cfg-input cfg-input-sm">
     </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Afficher le fil d'Ariane</label>
+        <input type="checkbox" data-cfg="show_breadcrumb" ${g('show_breadcrumb')==='0'?'':'checked'} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Afficher le bouton "Retour"</label>
+        <input type="checkbox" data-cfg="show_back_button" ${g('show_back_button')==='0'?'':'checked'} class="cfg-check">
+    </div>
 </div>
 
 <!-- ══ 3. APPARENCE & COULEURS ══ -->

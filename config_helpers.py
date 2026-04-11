@@ -205,6 +205,9 @@ CFG_DEFAULTS = {
     'turso_url': '',
     'turso_token': '',
     'db_sync_interval': '30',
+    # ── Navigation preferences ────────────────────────────────────────────────────
+    'show_breadcrumb': '1',       # Show breadcrumb navigation (personal preference)
+    'show_back_button': '1',      # Show "Back to overview" button (personal preference)
 }
 
 # Cache avec limite de taille (LRU-like) pour éviter memory leak
