@@ -85,7 +85,11 @@ def get_client_access(client_id) -> str | None:
     conn = get_db()
     try:
         role_row = conn.execute('SELECT role FROM auth_users WHERE id=?', (uid,)).fetchone()
-        role = role_row[0] if role_row else 'user'
+        if not role_row:
+            logger.warning(f'User {uid} has no role defined in auth_users, using default: user')
+            role = 'user'
+        else:
+            role = role_row[0]
         if role == 'admin':
             return 'proprietaire'
         own = conn.execute(
@@ -126,8 +130,15 @@ def get_client_id():
     uid = session.get('auth_user_id')
     conn = get_db()
     try:
-        role = (conn.execute('SELECT role FROM auth_users WHERE id=?', (uid,)).fetchone()
-                or ['user'])[0] if uid else 'user'
+        if uid:
+            role_row = conn.execute('SELECT role FROM auth_users WHERE id=?', (uid,)).fetchone()
+            if not role_row:
+                logger.warning(f'User {uid} has no role defined, using default: user')
+                role = 'user'
+            else:
+                role = role_row[0]
+        else:
+            role = 'user'
         cid = session.get('client_id')
         if cid:
             if role == 'admin':
@@ -211,8 +222,8 @@ def log_history(conn, client_id, entite, entite_id, entite_nom, action, details=
                 '''DELETE FROM historique WHERE client_id=? AND id NOT IN (
                    SELECT id FROM historique WHERE client_id=? ORDER BY id DESC LIMIT ?)''',
                 (client_id, client_id, max_l))
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f'Erreur nettoyage historique pour client {client_id}: {e}', exc_info=True)
 
 
 def log_error(conn, client_id, url, exc, trace=''):

@@ -207,8 +207,19 @@ CFG_DEFAULTS = {
     'db_sync_interval': '30',
 }
 
-_cfg_cache: dict = {}
+# Cache avec limite de taille (LRU-like) pour éviter memory leak
+from collections import OrderedDict
+_cfg_cache: OrderedDict = OrderedDict()
 _cfg_lock = threading.Lock()
+_CFG_CACHE_MAX_SIZE = 500  # Maximum d'entrées en cache
+
+def _cfg_cache_set_unlocked(key: str, value) -> None:
+    """Ajoute une clé au cache avec éviction FIFO si dépassement de taille.
+    MUST be called within a _cfg_lock context to avoid deadlock."""
+    if len(_cfg_cache) >= _CFG_CACHE_MAX_SIZE:
+        # Supprimer la clé la plus ancienne (FIFO)
+        _cfg_cache.popitem(last=False)
+    _cfg_cache[key] = value
 
 
 def get_liste(nom: str) -> list:
@@ -271,7 +282,7 @@ def cfg_get(cle: str, default=None, auth_user_id=None):
         val = default if default is not None else CFG_DEFAULTS.get(cle, '')
 
     with _cfg_lock:
-        _cfg_cache[cache_key] = val
+        _cfg_cache_set_unlocked(cache_key, val)
     return val
 
 
@@ -309,7 +320,7 @@ def cfg_set(cle: str, valeur, auth_user_id=None):
     _execute_with_retry(_do_set)
     cache_key = f"{cle}#{auth_user_id}" if auth_user_id else cle
     with _cfg_lock:
-        _cfg_cache[cache_key] = str(valeur)
+        _cfg_cache_set_unlocked(cache_key, str(valeur))
 
 
 def cfg_set_batch(config_dict: dict, auth_user_id=None) -> None:
@@ -365,7 +376,7 @@ def cfg_set_batch(config_dict: dict, auth_user_id=None) -> None:
     with _cfg_lock:
         for cle, valeur in config_dict.items():
             cache_key = f"{cle}#{auth_user_id}" if auth_user_id and cle in PERSONAL_CONFIG_KEYS else cle
-            _cfg_cache[cache_key] = str(valeur)
+            _cfg_cache_set_unlocked(cache_key, str(valeur))
 
 
 def cfg_all(auth_user_id=None) -> dict:

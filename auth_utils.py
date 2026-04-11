@@ -103,7 +103,11 @@ def check_rate_limit(ip: str) -> bool:
     now = time.time()
     with _LOGIN_LOCK:
         attempts = [t for t in _login_attempts.get(ip, []) if now - t < _LOGIN_WINDOW]
-        _login_attempts[ip] = attempts
+        if attempts:
+            _login_attempts[ip] = attempts
+        else:
+            # Nettoyer les clés vides (IPs sans tentatives récentes)
+            _login_attempts.pop(ip, None)
         return len(attempts) < _LOGIN_MAX
 
 
