@@ -3,13 +3,14 @@
 
 {% block extra_styles %}
 <style>
-/* ── GRILLE 12-COLONNES AVEC TAILLES WIDGETS ── */
+/* ── GRILLE 12-COLONNES AVEC TAILLES ET HAUTEURS WIDGETS ── */
 .widgets-grid {
     display: grid;
     grid-template-columns: repeat(12, 1fr);
     gap: 1.2rem;
     margin-bottom: 1.2rem;
-    align-items: stretch;  /* Égaliser les hauteurs des widgets sur une ligne */
+    align-items: start;  /* Ne pas étirer - garder les hauteurs définies */
+    auto-rows: max-content;  /* Rangée = hauteur du plus haut widget */
 }
 
 /* Tailles widget (desktop) */
@@ -21,16 +22,59 @@
 .widget-small > .card,
 .widget-medium > .card,
 .widget-large > .card,
-.widget-small > div:not(.s-head),
-.widget-medium > div:not(.s-head),
-.widget-large > div:not(.s-head) {
+.widget-small > div:not(.s-head):not(.alert-strip),
+.widget-medium > div:not(.s-head):not(.alert-strip),
+.widget-large > div:not(.s-head):not(.alert-strip) {
     flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
-/* Hauteurs widget (Phase 10) */
-.widget-h-compact { min-height: 180px; max-height: 240px; }  /* Compact */
-.widget-h-normal  { min-height: 280px; max-height: 380px; }  /* Normal */
-.widget-h-tall    { min-height: 400px; max-height: 600px; }  /* Tall */
+/* ═══════════════════════════════════════════════════════════════════ */
+/* HAUTEURS WIDGET (Phase 10) - Hauteurs FIXES avec contenu adaptable */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+/* Compact: 200px */
+.widget-h-compact {
+    height: 200px;
+    overflow: hidden;
+}
+
+.widget-h-compact .card {
+    height: 100%;
+    overflow-y: auto;
+}
+
+/* Normal: 340px (hauteur équilibrée par défaut) */
+.widget-h-normal {
+    height: 340px;
+    overflow: hidden;
+}
+
+.widget-h-normal .card {
+    height: 100%;
+    overflow-y: auto;
+}
+
+/* Tall: 480px */
+.widget-h-tall {
+    height: 480px;
+    overflow: hidden;
+}
+
+.widget-h-tall .card {
+    height: 100%;
+    overflow-y: auto;
+}
+
+/* S'assurer que les listes et conteneurs internes remplissent l'espace */
+.net-list,
+.timeline,
+.donut-wrap,
+.flux-item,
+[class*="list"] {
+    flex: 1;
+}
 
 /* Breakpoint tablet (≤1200px): small collapse to 50% */
 @media(max-width: 1200px) {
