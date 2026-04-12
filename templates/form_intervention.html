@@ -199,18 +199,10 @@
             </div>
         </div>
 
-        <div class="form-row cols-2">
+        <div class="form-row cols-1">
             <div class="form-group">
-                <label>Coût HT (optionnel)</label>
+                <label>Coût HT en EUR (optionnel)</label>
                 <input type="number" name="cout_ht" value="{{ intervention.cout_ht or '' }}" min="0" step="0.01" style="width: 100%;">
-            </div>
-            <div class="form-group">
-                <label>Devise</label>
-                <select name="devise" style="width: 100%;">
-                    <option value="EUR" {% if not intervention or intervention.devise == 'EUR' %}selected{% endif %}>EUR €</option>
-                    <option value="USD" {% if intervention and intervention.devise == 'USD' %}selected{% endif %}>USD $</option>
-                    <option value="CHF" {% if intervention and intervention.devise == 'CHF' %}selected{% endif %}>CHF ₣</option>
-                </select>
             </div>
         </div>
     </div>

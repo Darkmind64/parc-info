@@ -94,6 +94,10 @@ LISTE_DEFAULTS = {
         'CrowdStrike Falcon', 'SentinelOne Singularity',
         'Webroot Business Endpoint Protection', 'F-Secure Elements', 'Autre',
     ],
+    'types_interventions': [
+        'Maintenance préventive', 'Maintenance corrective', 'Dépannage',
+        'Installation', 'Upgrade', 'Support', 'Audit', 'Formation', 'Autre'
+    ],
 }
 
 # ─── VALEURS PAR DÉFAUT DE LA CONFIG ─────────────────────────────────────────
@@ -209,8 +213,6 @@ CFG_DEFAULTS = {
     'show_breadcrumb': '1',       # Show breadcrumb navigation (personal preference)
     'show_back_button': '1',      # Show "Back to overview" button (personal preference)
     'confirm_client_switch': '1', # Show confirmation modal before switching clients (personal preference)
-    # ── Interventions ────────────────────────────────────────────────────────
-    'types_interventions': '["maintenance préventive", "maintenance corrective", "dépannage", "installation", "upgrade", "support", "autre"]',
 }
 
 # Cache avec limite de taille (LRU-like) pour éviter memory leak

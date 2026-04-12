@@ -4687,7 +4687,7 @@ def nouveau_intervention():
              f.get('description', ''), f.get('notes', ''),
              f.get('date_intervention', ''), f.get('heure_debut', ''), f.get('heure_fin', ''),
              duree_minutes, f.get('technicien_nom', ''), f.get('technicien_email', ''),
-             f.get('statut', 'completee'), contrat_id, cout_ht, f.get('devise', 'EUR'),
+             f.get('statut', 'completee'), contrat_id, cout_ht, 'EUR',
              now, now, user['id']))
 
         intv_id = cur.lastrowid
@@ -4830,7 +4830,7 @@ def editer_intervention(id):
              f.get('description', ''), f.get('notes', ''),
              f.get('date_intervention', ''), f.get('heure_debut', ''), f.get('heure_fin', ''),
              duree_minutes, f.get('technicien_nom', ''), f.get('technicien_email', ''),
-             f.get('statut', 'completee'), contrat_id, cout_ht, f.get('devise', 'EUR'),
+             f.get('statut', 'completee'), contrat_id, cout_ht, 'EUR',
              now, id, cid))
 
         # Reset liaisons
