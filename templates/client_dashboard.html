@@ -8,10 +8,21 @@
 .cols-6      { grid-template-columns: repeat(6,1fr); }
 .cols-3      { grid-template-columns: repeat(3,1fr); }
 .cols-2      { grid-template-columns: 1fr 1fr; }
+.cols-1      { grid-template-columns: 1fr; }
 .cols-1-2    { grid-template-columns: 1fr 2fr; }
 .cols-2-1    { grid-template-columns: 2fr 1fr; }
-@media(max-width:1200px){ .cols-6{grid-template-columns:repeat(3,1fr);} .cols-3{grid-template-columns:1fr 1fr;} }
-@media(max-width:800px) { .cols-6,.cols-3,.cols-2,.cols-1-2,.cols-2-1{grid-template-columns:1fr;} }
+
+/* Auto-compact pour widgets avec peu de contenu */
+.card { min-height: auto; display:flex; flex-direction:column; }
+
+@media(max-width:1200px){
+    .cols-6{grid-template-columns:repeat(3,1fr);}
+    .cols-3{grid-template-columns:repeat(2,1fr);}
+    .cols-2{grid-template-columns:1fr;}
+}
+@media(max-width:800px) {
+    .cols-6,.cols-3,.cols-2,.cols-1-2,.cols-2-1{grid-template-columns:1fr;}
+}
 
 /* ── KPI ── */
 .kpi {
