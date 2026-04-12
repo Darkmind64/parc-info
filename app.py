@@ -1928,7 +1928,7 @@ def single_client_dashboard(cid):
             'critical-alerts': 'large',
             'kpi': 'large',
             'av-status': 'medium',
-            'network-status': 'large',
+            'network-status': 'medium',  # Changed from 'large' to match device-types for visual cohesion
             'device-types': 'medium',
             'peripherals': 'medium',
             'device-age': 'small',

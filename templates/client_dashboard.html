@@ -9,12 +9,23 @@
     grid-template-columns: repeat(12, 1fr);
     gap: 1.2rem;
     margin-bottom: 1.2rem;
+    align-items: stretch;  /* Égaliser les hauteurs des widgets sur une ligne */
 }
 
 /* Tailles widget (desktop) */
-.widget-small   { grid-column: span 4; }   /* 33% */
-.widget-medium  { grid-column: span 6; }   /* 50% */
-.widget-large   { grid-column: span 12; }  /* 100% */
+.widget-small   { grid-column: span 4; display: flex; flex-direction: column; }   /* 33% */
+.widget-medium  { grid-column: span 6; display: flex; flex-direction: column; }   /* 50% */
+.widget-large   { grid-column: span 12; display: flex; flex-direction: column; }  /* 100% */
+
+/* Faire grandir le contenu des widgets pour remplir la hauteur disponible */
+.widget-small > .card,
+.widget-medium > .card,
+.widget-large > .card,
+.widget-small > div:not(.s-head),
+.widget-medium > div:not(.s-head),
+.widget-large > div:not(.s-head) {
+    flex: 1;
+}
 
 /* Breakpoint tablet (≤1200px): small collapse to 50% */
 @media(max-width: 1200px) {
