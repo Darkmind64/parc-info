@@ -1882,6 +1882,135 @@ async function reinitialiserConfig() {
     showToast('Configuration réinitialisée', 'info');
 }
 
+// ─── DASHBOARD WIDGET CONFIGURATION ──────────────────────────────────────────────────
+const DASHBOARD_WIDGETS = [
+    { id: 'critical-alerts', name: '⚠️ Alertes critiques', desc: 'Problèmes urgents du parc' },
+    { id: 'kpi', name: '📊 KPI', desc: '6 indicateurs clés de performance' },
+    { id: 'av-status', name: '🛡️ AV/RMM/EDR', desc: 'État des licences de sécurité' },
+    { id: 'network-status', name: '🌐 État réseau', desc: 'Appareils en ligne/hors ligne' },
+    { id: 'device-types', name: '🖥️ Types d\'appareils', desc: 'Distribution par type d\'appareil' },
+    { id: 'peripherals', name: '🖱️ Périphériques', desc: 'Distribution par catégorie' },
+    { id: 'device-age', name: '📅 Âge du parc', desc: 'Vieillissement des appareils' },
+    { id: 'contracts-timeline', name: '📅 Échéances contrats', desc: 'Renouvellements à venir' },
+    { id: 'recent-activity', name: '📝 Activité récente', desc: 'Historique des modifications' },
+    { id: 'interventions', name: '🔧 Interventions', desc: 'Actions de maintenance' },
+    { id: 'business-software', name: '💼 Logiciels métier', desc: 'Logiciels installés' },
+    { id: 'network-info', name: '🔗 Info réseau', desc: 'Configuration réseau et ISP' },
+];
+
+function initDashboardWidgetConfig() {
+    const container = document.getElementById('dashboard-widgets-config');
+    if (!container) return;
+
+    const enabledStr = g('dashboard_widgets_enabled') || 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info';
+    const orderStr = g('dashboard_widgets_order') || 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info';
+
+    const enabled = new Set(enabledStr.split(',').map(s => s.trim()).filter(s => s));
+    const order = orderStr.split(',').map(s => s.trim()).filter(s => s);
+
+    let html = '';
+    order.forEach(widgetId => {
+        const widget = DASHBOARD_WIDGETS.find(w => w.id === widgetId);
+        if (!widget) return;
+
+        const isEnabled = enabled.has(widgetId);
+        html += `
+            <div class="widget-config-item" draggable="true" data-widget="${widgetId}" style="display:flex;align-items:center;gap:.5rem;padding:.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);cursor:grab;transition:all .15s;">
+                <span class="drag-handle" style="cursor:grab;color:var(--text-muted);font-size:.8rem;user-select:none;">⋮⋮</span>
+                <input type="checkbox" class="widget-checkbox" ${isEnabled ? 'checked' : ''} data-widget="${widgetId}"
+                       onchange="toggleWidget('${widgetId}', this.checked)" style="cursor:pointer;">
+                <div style="flex:1;font-size:.8rem;">
+                    <div style="font-weight:600;color:var(--text-primary);">${widget.name}</div>
+                    <div style="color:var(--text-secondary);font-size:.75rem;">${widget.desc}</div>
+                </div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+    setupWidgetDragDrop(container);
+}
+
+function toggleWidget(widgetId, checked) {
+    const enabledStr = g('dashboard_widgets_enabled') || '';
+    const enabled = new Set(enabledStr.split(',').map(s => s.trim()).filter(s => s));
+
+    if (checked) {
+        enabled.add(widgetId);
+    } else {
+        enabled.delete(widgetId);
+    }
+
+    saveWidgetConfig({ enabled: Array.from(enabled).join(',') });
+}
+
+function setupWidgetDragDrop(container) {
+    let draggedElement = null;
+    const items = container.querySelectorAll('.widget-config-item');
+
+    items.forEach(item => {
+        item.addEventListener('dragstart', (e) => {
+            draggedElement = item;
+            item.style.opacity = '0.5';
+            item.style.background = 'rgba(0, 201, 255, 0.1)';
+        });
+
+        item.addEventListener('dragend', (e) => {
+            item.style.opacity = '1';
+            item.style.background = '';
+            draggedElement = null;
+        });
+
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (draggedElement && draggedElement !== item) {
+                const rect = item.getBoundingClientRect();
+                const midpoint = rect.top + rect.height / 2;
+                if (e.clientY < midpoint) {
+                    item.parentNode.insertBefore(draggedElement, item);
+                } else {
+                    item.parentNode.insertBefore(draggedElement, item.nextSibling);
+                }
+            }
+        });
+    });
+
+    container.addEventListener('dragend', () => {
+        const order = Array.from(container.querySelectorAll('.widget-config-item'))
+            .map(el => el.dataset.widget)
+            .join(',');
+        saveWidgetConfig({ order: order });
+    });
+}
+
+function saveWidgetConfig(changes) {
+    const enabledStr = g('dashboard_widgets_enabled') || '';
+    const orderStr = g('dashboard_widgets_order') || '';
+
+    const config = {
+        'dashboard_widgets_enabled': changes.enabled || enabledStr,
+        'dashboard_widgets_order': changes.order || orderStr,
+    };
+
+    fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+    })
+    .then(r => r.json())
+    .then(d => {
+        if (d.ok) {
+            showToast('✓ Widgets sauvegardés', 'success');
+        } else {
+            showToast('✗ Erreur lors de la sauvegarde', 'error');
+        }
+    })
+    .catch(err => {
+        console.error('Failed to save widget config:', err);
+        showToast('✗ Erreur de connexion', 'error');
+    });
+}
+
 function appliquerVariables(patch) {
     // Merge patch into cfgData for live preview
     Object.assign(cfgData, patch);
@@ -2129,6 +2258,17 @@ function rendreConfig() {
     <div class="cfg-row">
         <label class="cfg-label">Demander confirmation avant de changer de client</label>
         <input type="checkbox" data-cfg="confirm_client_switch" ${g('confirm_client_switch')==='0'?'':'checked'} class="cfg-check">
+    </div>
+</div>
+
+<!-- ══ 2B. WIDGETS TABLEAU DE BORD ══ -->
+<div class="cfg-section">
+    <div class="cfg-section-title">📊 Widgets Tableau de Bord</div>
+    <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:1rem;">
+        💡 Réorganisez vos widgets en les glissant-déposant. Décochez pour masquer.
+    </div>
+    <div id="dashboard-widgets-config" style="display:flex;flex-direction:column;gap:.5rem;max-height:400px;overflow-y:auto;">
+        <!-- Widget list generated by JavaScript -->
     </div>
 </div>
 

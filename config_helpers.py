@@ -22,6 +22,8 @@ PERSONAL_CONFIG_KEYS = {
     'nav_mode',          # Menu horizontal/vertical
     'theme',             # Thème prédéfini
     'contrast_level',    # Niveau de contraste (normal/high/max)
+    'dashboard_widgets_enabled',   # Widgets activés sur le dashboard
+    'dashboard_widgets_order',     # Ordre des widgets sur le dashboard
 }
 
 
@@ -213,6 +215,9 @@ CFG_DEFAULTS = {
     'show_breadcrumb': '1',       # Show breadcrumb navigation (personal preference)
     'show_back_button': '1',      # Show "Back to overview" button (personal preference)
     'confirm_client_switch': '1', # Show confirmation modal before switching clients (personal preference)
+    # ── Dashboard Widget Preferences ───────────────────────────────────────────────
+    'dashboard_widgets_enabled': 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info',
+    'dashboard_widgets_order': 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info',
 }
 
 # Cache avec limite de taille (LRU-like) pour éviter memory leak

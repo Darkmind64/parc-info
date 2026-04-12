@@ -1583,12 +1583,292 @@ def _compute_alerts_for_client(conn, cid, today):
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════════════
+# PHASE 8: WIDGET DATA COMPUTATION HELPERS
+# These functions compute data for individual dashboard widgets
+# ═══════════════════════════════════════════════════════════════════════════════════════
+
+def _compute_critical_alerts(conn, cid, today):
+    """
+    Consolidates all critical issues for the client:
+    - Expired warranties
+    - Expired contracts
+    - Offline devices
+    - Expiring licenses (AV/RMM/EDR)
+    Returns list sorted by urgency.
+    """
+    alerts = []
+
+    # Expired/expiring warranties
+    for row in conn.execute(
+        "SELECT id, nom_machine, date_fin_garantie FROM appareils "
+        "WHERE client_id=? AND date_fin_garantie!='' AND date_fin_garantie<=?",
+        (cid, (today + timedelta(days=30)).isoformat())).fetchall():
+        a = row_to_dict(row)
+        try:
+            df = date.fromisoformat(a['date_fin_garantie'])
+            if df < today:
+                alerts.append({'type': 'warranty_expired', 'device': a['nom_machine'], 'date': a['date_fin_garantie'], 'severity': 'critical'})
+            else:
+                alerts.append({'type': 'warranty_expiring', 'device': a['nom_machine'], 'date': a['date_fin_garantie'], 'severity': 'warning'})
+        except: pass
+
+    # Expired/expiring contracts
+    for row in conn.execute(
+        "SELECT id, description, date_fin FROM contrats "
+        "WHERE client_id=? AND statut='actif' AND date_fin!='' AND date_fin<=?",
+        (cid, (today + timedelta(days=30)).isoformat())).fetchall():
+        c = row_to_dict(row)
+        try:
+            df = date.fromisoformat(c['date_fin'])
+            if df < today:
+                alerts.append({'type': 'contract_expired', 'contract': c['description'], 'date': c['date_fin'], 'severity': 'critical'})
+            else:
+                alerts.append({'type': 'contract_expiring', 'contract': c['description'], 'date': c['date_fin'], 'severity': 'warning'})
+        except: pass
+
+    # Offline devices (no recent ping)
+    for row in conn.execute(
+        "SELECT id, nom_machine FROM appareils WHERE client_id=? AND online=0",
+        (cid,)).fetchall():
+        a = row_to_dict(row)
+        alerts.append({'type': 'device_offline', 'device': a['nom_machine'], 'severity': 'warning'})
+
+    # Expiring AV/RMM/EDR licenses
+    for row in conn.execute(
+        "SELECT nom_machine, av_date_fin FROM appareils "
+        "WHERE client_id=? AND av_date_fin!='' AND av_date_fin<=?",
+        (cid, (today + timedelta(days=30)).isoformat())).fetchall():
+        a = row_to_dict(row)
+        try:
+            df = date.fromisoformat(a['av_date_fin'])
+            severity = 'critical' if df < today else 'warning'
+            alerts.append({'type': 'av_expiring', 'device': a['nom_machine'], 'date': a['av_date_fin'], 'severity': severity})
+        except: pass
+
+    # Sort by severity (critical first) then by date
+    severity_order = {'critical': 0, 'warning': 1}
+    alerts.sort(key=lambda x: (severity_order.get(x.get('severity'), 2), x.get('date', '')))
+
+    return {'alerts': alerts, 'count': len(alerts)}
+
+
+def _compute_kpi_cards(stats, alerts, today):
+    """Returns data for the 6 main KPI cards."""
+    return {
+        'nb_app_total': stats['nb_app_total'],
+        'nb_en_ligne': stats['nb_en_ligne'],
+        'taux_dispo': stats['taux_dispo'],
+        'nb_garantie': stats['nb_garantie'],
+        'nb_contrats': stats['nb_contrats'],
+        'montant_annuel': stats['montant_annuel'],
+        'nb_alertes': len(alerts['contrats_alertes']) + len(alerts['garanties_alertes']) + len(alerts['av_urgents']),
+    }
+
+
+def _compute_av_status(conn, cid):
+    """
+    Returns AV/RMM/EDR license health status across all devices.
+    Counts by status: active, expiring soon (30 days), expired.
+    """
+    today = date.today()
+    seuil_futur = (today + timedelta(days=30)).isoformat()
+    today_iso = today.isoformat()
+
+    devices = conn.execute(
+        "SELECT nom_machine, av_marque, av_date_fin, rmm_marque, rmm_date_fin, edr_marque, edr_date_fin FROM appareils WHERE client_id=?",
+        (cid,)).fetchall()
+
+    av_status = {'active': 0, 'expiring': 0, 'expired': 0}
+    rmm_status = {'active': 0, 'expiring': 0, 'expired': 0}
+    edr_status = {'active': 0, 'expiring': 0, 'expired': 0}
+
+    for row in devices:
+        d = row_to_dict(row)
+
+        # AV
+        if d.get('av_date_fin'):
+            if d['av_date_fin'] < today_iso:
+                av_status['expired'] += 1
+            elif d['av_date_fin'] <= seuil_futur:
+                av_status['expiring'] += 1
+            else:
+                av_status['active'] += 1
+
+        # RMM
+        if d.get('rmm_date_fin'):
+            if d['rmm_date_fin'] < today_iso:
+                rmm_status['expired'] += 1
+            elif d['rmm_date_fin'] <= seuil_futur:
+                rmm_status['expiring'] += 1
+            else:
+                rmm_status['active'] += 1
+
+        # EDR
+        if d.get('edr_date_fin'):
+            if d['edr_date_fin'] < today_iso:
+                edr_status['expired'] += 1
+            elif d['edr_date_fin'] <= seuil_futur:
+                edr_status['expiring'] += 1
+            else:
+                edr_status['active'] += 1
+
+    return {
+        'av': av_status,
+        'rmm': rmm_status,
+        'edr': edr_status,
+    }
+
+
+def _compute_network_status(stats):
+    """Returns device online/offline status summary."""
+    return {
+        'nb_en_ligne': stats['nb_en_ligne'],
+        'nb_hors_ligne': stats['nb_hors_ligne'],
+        'taux_dispo': stats['taux_dispo'],
+        'devices': stats['appareils'][:10],  # Top 10 devices
+    }
+
+
+def _compute_device_types(stats):
+    """Returns device type distribution."""
+    return {
+        'repartition': stats['repartition'],
+        'types_chart': stats['types_chart'],
+    }
+
+
+def _compute_peripherals_distribution(stats):
+    """Returns peripheral category distribution."""
+    return {
+        'periph_chart': stats['periph_chart'],
+        'periph_stats': stats['periph_stats'],
+    }
+
+
+def _compute_device_age(conn, cid, today):
+    """
+    Groups devices by acquisition date into age buckets:
+    - 0-1 year
+    - 1-3 years
+    - 3-5 years
+    - 5+ years
+    """
+    devices = conn.execute(
+        "SELECT nom_machine, date_acquisition FROM appareils WHERE client_id=? AND date_acquisition!=''",
+        (cid,)).fetchall()
+
+    age_groups = {
+        '0-1_year': [],
+        '1-3_years': [],
+        '3-5_years': [],
+        '5plus_years': [],
+        'unknown': []
+    }
+
+    for row in devices:
+        d = row_to_dict(row)
+        if not d.get('date_acquisition'):
+            age_groups['unknown'].append(d)
+            continue
+
+        try:
+            acq_date = date.fromisoformat(d['date_acquisition'])
+            age_days = (today - acq_date).days
+            age_years = age_days / 365.25
+
+            if age_years < 1:
+                age_groups['0-1_year'].append(d)
+            elif age_years < 3:
+                age_groups['1-3_years'].append(d)
+            elif age_years < 5:
+                age_groups['3-5_years'].append(d)
+            else:
+                age_groups['5plus_years'].append(d)
+        except:
+            age_groups['unknown'].append(d)
+
+    return {
+        'age_groups': age_groups,
+        '0-1_year_count': len(age_groups['0-1_year']),
+        '1-3_years_count': len(age_groups['1-3_years']),
+        '3-5_years_count': len(age_groups['3-5_years']),
+        '5plus_years_count': len(age_groups['5plus_years']),
+    }
+
+
+def _compute_contracts_timeline(conn, cid, today):
+    """Returns upcoming contract renewals/expirations timeline."""
+    contracts = []
+    for row in conn.execute(
+        "SELECT id, description, date_fin, montant FROM contrats "
+        "WHERE client_id=? AND statut='actif' AND date_fin!='' "
+        "ORDER BY date_fin LIMIT 10",
+        (cid,)).fetchall():
+        c = row_to_dict(row)
+        try:
+            df = date.fromisoformat(c['date_fin'])
+            days_left = (df - today).days
+            c['jours_restants'] = days_left
+            c['date_fin_fmt'] = df.strftime('%d/%m/%Y')
+            c['urgence'] = 'expired' if days_left < 0 else ('urgent' if days_left < 30 else 'ok')
+            contracts.append(c)
+        except: pass
+
+    return {
+        'contracts': contracts,
+        'total_count': len(contracts),
+    }
+
+
+def _compute_recent_activity(stats):
+    """Returns recent activity/modifications."""
+    return {
+        'recents': stats['recents'],
+        'hist_recent': stats['hist_recent'],
+    }
+
+
+def _compute_interventions_summary(recent_interventions):
+    """Returns recent interventions summary."""
+    return {
+        'interventions': recent_interventions,
+        'count': len(recent_interventions),
+    }
+
+
+def _compute_business_software(logiciels, stats):
+    """Returns business software deployments."""
+    return {
+        'logiciels': logiciels,
+        'count': len(logiciels),
+        'appareils_count': stats['nb_app_total'],
+    }
+
+
+def _compute_network_info(parc):
+    """Returns network configuration information."""
+    return {
+        'nom_site': parc.get('nom_site', 'N/A'),
+        'type_connexion': parc.get('type_connexion', 'N/A'),
+        'debit_montant': parc.get('debit_montant', 'N/A'),
+        'debit_descendant': parc.get('debit_descendant', 'N/A'),
+        'fournisseur_internet': parc.get('fournisseur_internet', 'N/A'),
+        'ip_publique': parc.get('ip_publique', 'N/A'),
+        'plage_ip_locale': parc.get('plage_ip_locale', 'N/A'),
+        'domaine': parc.get('domaine', 'N/A'),
+        'serveur_dns': parc.get('serveur_dns', 'N/A'),
+        'passerelle': parc.get('passerelle', 'N/A'),
+    }
+
+
 def single_client_dashboard(cid):
     """
     Affiche le dashboard pour un seul client (vue classique).
     """
     conn = get_db()
     today = date.today()
+    user = get_auth_user()
 
     try:
         # Fetch parc and client info
@@ -1611,6 +1891,36 @@ def single_client_dashboard(cid):
 
         # Calcul valeur parc
         valeur_parc = sum(a.get('prix_achat') or 0 for a in stats['appareils'])
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 8.4: Fetch and parse user's widget preferences
+        # ═══════════════════════════════════════════════════════════════════
+        user_id = user['id'] if user else None
+        default_enabled = 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info'
+        default_order = 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info'
+
+        enabled_widgets_str = cfg_get('dashboard_widgets_enabled', default_enabled, user_id)
+        widget_order_str = cfg_get('dashboard_widgets_order', default_order, user_id)
+
+        enabled_widgets = [w.strip() for w in enabled_widgets_str.split(',') if w.strip()]
+        widget_order = [w.strip() for w in widget_order_str.split(',') if w.strip()]
+
+        # Build complete widget_data dict with all widget calculations
+        # (even disabled widgets may be re-enabled later without reload)
+        widget_data = {
+            'critical_alerts': _compute_critical_alerts(conn, cid, today),
+            'kpi': _compute_kpi_cards(stats, alerts, today),
+            'av_status': _compute_av_status(conn, cid),
+            'network_status': _compute_network_status(stats),
+            'device_types': _compute_device_types(stats),
+            'peripherals': _compute_peripherals_distribution(stats),
+            'device_age': _compute_device_age(conn, cid, today),
+            'contracts_timeline': _compute_contracts_timeline(conn, cid, today),
+            'recent_activity': _compute_recent_activity(stats),
+            'interventions': _compute_interventions_summary(recent_interventions),
+            'business_software': _compute_business_software(logiciels, stats),
+            'network_info': _compute_network_info(parc),
+        }
 
         # Combine all data for template
         template_data = {
@@ -1646,6 +1956,10 @@ def single_client_dashboard(cid):
             'nb_hors_service': stats['nb_hors_service'],
             'clients': get_clients(),
             'client_actif_id': cid,
+            # Widget preferences (Phase 8.4)
+            'enabled_widgets': enabled_widgets,
+            'widget_order': widget_order,
+            'widget_data': widget_data,
         }
 
         return render_template('client_dashboard.html', **template_data)
