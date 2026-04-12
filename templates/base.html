@@ -1991,23 +1991,21 @@ function initDashboardWidgetConfig() {
                     </button>
                 </div>
                 <!-- Height buttons (Phase 10) - Compact -->
-                <div style="display:flex;gap:.15rem;flex-shrink:0;border-left:1px solid var(--border);padding-left:.3rem;">
-                    <button type="button" class="height-btn height-btn-C ${currentHeight === 'compact' ? 'active' : ''}"
-                            onclick="setHeightWidget('${widgetId}', 'compact')"
-                            title="Compact" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:${currentHeight === 'compact' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentHeight === 'compact' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">
-                        C
-                    </button>
-                    <button type="button" class="height-btn height-btn-N ${currentHeight === 'normal' ? 'active' : ''}"
-                            onclick="setHeightWidget('${widgetId}', 'normal')"
-                            title="Normal" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:${currentHeight === 'normal' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentHeight === 'normal' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">
-                        N
-                    </button>
-                    <button type="button" class="height-btn height-btn-T ${currentHeight === 'tall' ? 'active' : ''}"
-                            onclick="setHeightWidget('${widgetId}', 'tall')"
-                            title="Haut" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:${currentHeight === 'tall' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentHeight === 'tall' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">
-                        T
-                    </button>
-                </div>
+                <!-- EXCEPTION: KPI widget doesn't support height resizing -->
+                ${widgetId !== 'kpi' ?
+                    '<div style="display:flex;gap:.15rem;flex-shrink:0;border-left:1px solid var(--border);padding-left:.3rem;">' +
+                    '<button type="button" class="height-btn height-btn-C ' + (currentHeight === 'compact' ? 'active' : '') + '"' +
+                    'onclick="setHeightWidget(\'' + widgetId + '\', \'compact\')"' +
+                    'title="Compact" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:' + (currentHeight === 'compact' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'compact' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">C</button>' +
+                    '<button type="button" class="height-btn height-btn-N ' + (currentHeight === 'normal' ? 'active' : '') + '"' +
+                    'onclick="setHeightWidget(\'' + widgetId + '\', \'normal\')"' +
+                    'title="Normal" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:' + (currentHeight === 'normal' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'normal' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">N</button>' +
+                    '<button type="button" class="height-btn height-btn-T ' + (currentHeight === 'tall' ? 'active' : '') + '"' +
+                    'onclick="setHeightWidget(\'' + widgetId + '\', \'tall\')"' +
+                    'title="Haut" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:' + (currentHeight === 'tall' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'tall' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">T</button>' +
+                    '</div>'
+                    : '<span style="font-size:.65rem;color:var(--text-muted);font-style:italic;padding-left:.3rem;">Hauteur fixe</span>'
+                }
             </div>
         `;
     });
@@ -2112,13 +2110,16 @@ function applyWidgetChangesToDashboard() {
             dashWidget.classList.add(`widget-${newSize}`);
 
             // Mettre à jour la classe de hauteur (Phase 10)
-            const oldHeightClass = Array.from(dashWidget.classList).find(c => c.match(/^widget-h-(compact|normal|tall)$/));
-            if (oldHeightClass) {
-                dashWidget.classList.remove(oldHeightClass);
-            }
+            // EXCEPTION: KPI widget uses natural height, not resizable
+            if (widgetId !== 'kpi') {
+                const oldHeightClass = Array.from(dashWidget.classList).find(c => c.match(/^widget-h-(compact|normal|tall)$/));
+                if (oldHeightClass) {
+                    dashWidget.classList.remove(oldHeightClass);
+                }
 
-            const newHeight = currentWidgetHeights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'normal';
-            dashWidget.classList.add(`widget-h-${newHeight}`);
+                const newHeight = currentWidgetHeights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'normal';
+                dashWidget.classList.add(`widget-h-${newHeight}`);
+            }
         }
     });
 }

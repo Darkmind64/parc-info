@@ -19,12 +19,13 @@
 .widget-large   { grid-column: span 12; display: flex; flex-direction: column; }  /* 100% */
 
 /* Faire grandir le contenu des widgets pour remplir la hauteur disponible */
+/* IMPORTANT: Exclude .dash-row (KPI grid) and .alert-strip containers */
 .widget-small > .card,
 .widget-medium > .card,
 .widget-large > .card,
-.widget-small > div:not(.s-head):not(.alert-strip),
-.widget-medium > div:not(.s-head):not(.alert-strip),
-.widget-large > div:not(.s-head):not(.alert-strip) {
+.widget-small > div:not(.s-head):not(.alert-strip):not(.dash-row),
+.widget-medium > div:not(.s-head):not(.alert-strip):not(.dash-row),
+.widget-large > div:not(.s-head):not(.alert-strip):not(.dash-row) {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -74,6 +75,47 @@
 .flux-item,
 [class*="list"] {
     flex: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* CONTENT REORGANIZATION - Hide/show elements based on height (Phase 10) */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+/* COMPACT MODE (200px) - Show only essential content */
+.widget-h-compact .kpi-sub,
+.widget-h-compact .kpi-bar,
+.widget-h-compact .tl-meta,
+.widget-h-compact .flux-meta,
+.widget-h-compact .leg-pct,
+.widget-h-compact .as-sub {
+    display: none;
+}
+
+.widget-h-compact .net-list {
+    max-height: 80px;  /* Show only 2-3 devices */
+}
+
+.widget-h-compact .timeline,
+.widget-h-compact .donut-legend {
+    max-height: 90px;
+}
+
+.widget-h-compact .flux-item {
+    padding: .25rem 0;
+    font-size: .75rem;
+}
+
+/* TALL MODE (480px) - Show all content with expanded lists */
+.widget-h-tall .net-list {
+    max-height: 250px;  /* Show 8-10 devices */
+}
+
+.widget-h-tall .timeline {
+    max-height: 300px;
+}
+
+.widget-h-tall .donut-legend {
+    max-height: 250px;
 }
 
 /* Breakpoint tablet (≤1200px): small collapse to 50% */
@@ -270,7 +312,8 @@
     {% for widget_id in widget_order %}
         {% if widget_id in enabled_widgets %}
         <!-- Widget wrapper with size & height classes (Phase 9-10) - data-widget-id for real-time updates -->
-        <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }} widget-h-{{ widget_heights.get(widget_id, 'normal') if widget_heights else 'normal' }}" data-widget-id="{{ widget_id }}">
+        <!-- KPI widget: no height resizing, use natural height -->
+        <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }}{% if widget_id != 'kpi' %} widget-h-{{ widget_heights.get(widget_id, 'normal') if widget_heights else 'normal' }}{% endif %}" data-widget-id="{{ widget_id }}">
 
             <!-- ══ WIDGET: CRITICAL ALERTS ════════════════════════════════════════ -->
             {% if widget_id == 'critical-alerts' %}
