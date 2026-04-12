@@ -85,7 +85,7 @@
             {% if intervention.contrat_id %}
             <div style="padding: .6rem 0; border-bottom: 1px solid var(--border);">
                 <div style="color: var(--text-secondary); font-size: .85rem; margin-bottom: .4rem;">Contrat associé</div>
-                <span class="badge badge-blue" style="display: inline-block; padding: .4rem .6rem;">📋 {{ intervention.contrat_titre or 'Contrat #' ~ intervention.contrat_id }}</span>
+                <a href="/contrat/{{ intervention.contrat_id }}" class="badge badge-blue" style="display: inline-block; padding: .4rem .6rem; text-decoration: none; cursor: pointer; transition: all .15s;">📋 {{ intervention.contrat_titre or 'Contrat #' ~ intervention.contrat_id }}</a>
             </div>
             {% endif %}
 
@@ -120,11 +120,11 @@
             {% if appareils_lies %}
             <div style="display: flex; flex-wrap: wrap; gap: .6rem;">
             {% for a in appareils_lies %}
-                <span class="badge badge-blue" style="display: inline-flex; flex-direction: column; padding: .5rem .7rem; font-size: .75rem;">
+                <a href="/appareil/{{ a.id }}/editer" class="badge badge-blue" style="display: inline-flex; flex-direction: column; padding: .5rem .7rem; font-size: .75rem; text-decoration: none; cursor: pointer; transition: all .15s;">
                     <strong>{{ a.nom_machine }}</strong>
                     <span style="font-size: .7rem; opacity: .8;">{{ a.type_appareil }}</span>
                     {% if a.adresse_ip %}<span style="font-family: monospace; font-size: .7rem; opacity: .8;">{{ a.adresse_ip }}</span>{% endif %}
-                </span>
+                </a>
             {% endfor %}
             </div>
             {% else %}
@@ -138,10 +138,10 @@
             {% if peripheriques_lies %}
             <div style="display: flex; flex-wrap: wrap; gap: .6rem;">
             {% for p in peripheriques_lies %}
-                <span class="badge badge-secondary" style="display: inline-flex; flex-direction: column; padding: .5rem .7rem; font-size: .75rem;">
+                <a href="/peripherique/{{ p.id }}/editer" class="badge badge-blue" style="display: inline-flex; flex-direction: column; padding: .5rem .7rem; font-size: .75rem; text-decoration: none; cursor: pointer; transition: all .15s;">
                     <strong>{{ p.marque }} {{ p.modele }}</strong>
                     <span style="font-size: .7rem; opacity: .8;">{{ p.categorie }}</span>
-                </span>
+                </a>
             {% endfor %}
             </div>
             {% else %}
