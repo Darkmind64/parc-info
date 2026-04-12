@@ -1138,6 +1138,20 @@ def api_config_save():
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"Invalid dashboard_widgets_size JSON: {str(e)}")
                     return jsonify({'error': 'Invalid JSON in dashboard_widgets_size'}), 400
+            # Special validation for dashboard_widgets_height (Phase 10)
+            elif k == 'dashboard_widgets_height':
+                # Ensure it's valid JSON before saving
+                try:
+                    heights = json.loads(str(v))
+                    # Validate all heights are valid
+                    for widget_id, height in heights.items():
+                        if height not in ('compact', 'normal', 'tall'):
+                            logger.warning(f"Invalid widget height: {widget_id}={height}")
+                            return jsonify({'error': 'Invalid widget height value'}), 400
+                    valid_config[k] = json.dumps(heights)  # Re-serialize to ensure valid JSON
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.warning(f"Invalid dashboard_widgets_height JSON: {str(e)}")
+                    return jsonify({'error': 'Invalid JSON in dashboard_widgets_height'}), 400
             else:
                 valid_config[k] = str(v)
 
@@ -1953,6 +1967,39 @@ def single_client_dashboard(cid):
                 # Use user's size if specified, otherwise use default
                 widget_sizes[widget_id] = widget_sizes_json.get(widget_id, WIDGET_DEFAULT_SIZES[widget_id])
 
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 10: Parse widget heights from user preferences (NEW)
+        # ═══════════════════════════════════════════════════════════════════
+        # Default widget heights per widget_id
+        WIDGET_DEFAULT_HEIGHTS = {
+            'critical-alerts': 'normal',
+            'kpi': 'normal',
+            'av-status': 'normal',
+            'network-status': 'compact',  # Réduit suite à la diminution
+            'device-types': 'normal',
+            'peripherals': 'normal',
+            'device-age': 'normal',
+            'contracts-timeline': 'normal',
+            'recent-activity': 'normal',
+            'interventions': 'compact',
+            'business-software': 'compact',
+            'network-info': 'compact',
+        }
+
+        # Parse user's widget height preferences (JSON)
+        widget_heights_str = cfg_get('dashboard_widgets_height', '{}', user_id)
+        try:
+            widget_heights_json = json.loads(widget_heights_str)
+        except (json.JSONDecodeError, ValueError):
+            widget_heights_json = {}
+
+        # Build final heights dict with defaults
+        widget_heights = {}
+        for widget_id in enabled_widgets + widget_order:
+            if widget_id in WIDGET_DEFAULT_HEIGHTS:
+                # Use user's height if specified, otherwise use default
+                widget_heights[widget_id] = widget_heights_json.get(widget_id, WIDGET_DEFAULT_HEIGHTS[widget_id])
+
         # Build complete widget_data dict with all widget calculations
         # (even disabled widgets may be re-enabled later without reload)
         try:
@@ -2028,6 +2075,8 @@ def single_client_dashboard(cid):
             'widget_data': widget_data,
             # Widget sizes (Phase 9)
             'widget_sizes': widget_sizes,
+            # Widget heights (Phase 10)
+            'widget_heights': widget_heights,
         }
 
         return render_template('client_dashboard.html', **template_data)

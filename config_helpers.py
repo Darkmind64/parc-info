@@ -25,6 +25,7 @@ PERSONAL_CONFIG_KEYS = {
     'dashboard_widgets_enabled',   # Widgets activés sur le dashboard
     'dashboard_widgets_order',     # Ordre des widgets sur le dashboard
     'dashboard_widgets_size',      # Tailles des widgets (JSON: {"widget-id": "size-class"})
+    'dashboard_widgets_height',    # Hauteurs des widgets (JSON: {"widget-id": "height-class"})
 }
 
 
@@ -220,6 +221,7 @@ CFG_DEFAULTS = {
     'dashboard_widgets_enabled': 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info',
     'dashboard_widgets_order': 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info',
     'dashboard_widgets_size': '{}',  # JSON: {"widget-id": "size-class"} — empty defaults to widget-specific sizes
+    'dashboard_widgets_height': '{}',  # JSON: {"widget-id": "height-class"} — empty defaults to widget-specific heights
 }
 
 # Cache avec limite de taille (LRU-like) pour éviter memory leak

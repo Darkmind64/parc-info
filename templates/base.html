@@ -1898,7 +1898,23 @@ const WIDGET_DEFAULT_SIZES = {
     'network-info': 'medium',
 };
 
-let currentWidgetSizes = {};  // Track current sizes during config session
+const WIDGET_DEFAULT_HEIGHTS = {
+    'critical-alerts': 'normal',
+    'kpi': 'normal',
+    'av-status': 'normal',
+    'network-status': 'compact',
+    'device-types': 'normal',
+    'peripherals': 'normal',
+    'device-age': 'normal',
+    'contracts-timeline': 'normal',
+    'recent-activity': 'normal',
+    'interventions': 'compact',
+    'business-software': 'compact',
+    'network-info': 'compact',
+};
+
+let currentWidgetSizes = {};     // Track current sizes during config session
+let currentWidgetHeights = {};   // Track current heights during config session
 
 const DASHBOARD_WIDGETS = [
     { id: 'critical-alerts', name: '⚠️ Alertes critiques', desc: 'Problèmes urgents du parc' },
@@ -1930,6 +1946,14 @@ function initDashboardWidgetConfig() {
         currentWidgetSizes = {};
     }
 
+    // Parse widget heights from cfgData (Phase 10)
+    let heightStr = g('dashboard_widgets_height') || '{}';
+    try {
+        currentWidgetHeights = JSON.parse(heightStr);
+    } catch (e) {
+        currentWidgetHeights = {};
+    }
+
     const enabled = new Set(enabledStr.split(',').map(s => s.trim()).filter(s => s));
     const order = orderStr.split(',').map(s => s.trim()).filter(s => s);
 
@@ -1940,6 +1964,7 @@ function initDashboardWidgetConfig() {
 
         const isEnabled = enabled.has(widgetId);
         const currentSize = currentWidgetSizes[widgetId] || WIDGET_DEFAULT_SIZES[widgetId] || 'large';
+        const currentHeight = currentWidgetHeights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'normal';
 
         html += `
             <div class="widget-config-item" draggable="true" data-widget="${widgetId}" style="display:flex;align-items:center;gap:.3rem;padding:.25rem .4rem;border:1px solid var(--border);border-radius:3px;background:var(--bg-secondary);cursor:grab;transition:all .15s;">
@@ -1963,6 +1988,24 @@ function initDashboardWidgetConfig() {
                             onclick="setSizeWidget('${widgetId}', 'large')"
                             title="Grand (100%)" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:${currentSize === 'large' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentSize === 'large' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">
                         L
+                    </button>
+                </div>
+                <!-- Height buttons (Phase 10) - Compact -->
+                <div style="display:flex;gap:.15rem;flex-shrink:0;border-left:1px solid var(--border);padding-left:.3rem;">
+                    <button type="button" class="height-btn height-btn-C ${currentHeight === 'compact' ? 'active' : ''}"
+                            onclick="setHeightWidget('${widgetId}', 'compact')"
+                            title="Compact" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:${currentHeight === 'compact' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentHeight === 'compact' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">
+                        C
+                    </button>
+                    <button type="button" class="height-btn height-btn-N ${currentHeight === 'normal' ? 'active' : ''}"
+                            onclick="setHeightWidget('${widgetId}', 'normal')"
+                            title="Normal" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:${currentHeight === 'normal' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentHeight === 'normal' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">
+                        N
+                    </button>
+                    <button type="button" class="height-btn height-btn-T ${currentHeight === 'tall' ? 'active' : ''}"
+                            onclick="setHeightWidget('${widgetId}', 'tall')"
+                            title="Haut" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:${currentHeight === 'tall' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentHeight === 'tall' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">
+                        T
                     </button>
                 </div>
             </div>
@@ -2059,14 +2102,23 @@ function applyWidgetChangesToDashboard() {
         if (isEnabled) {
             // Mettre à jour la classe de taille
             // D'abord, retirer les anciennes classes widget-*
-            const oldClass = Array.from(dashWidget.classList).find(c => c.match(/^widget-(small|medium|large)$/));
-            if (oldClass) {
-                dashWidget.classList.remove(oldClass);
+            const oldSizeClass = Array.from(dashWidget.classList).find(c => c.match(/^widget-(small|medium|large)$/));
+            if (oldSizeClass) {
+                dashWidget.classList.remove(oldSizeClass);
             }
 
             // Ajouter la nouvelle classe
             const newSize = currentWidgetSizes[widgetId] || WIDGET_DEFAULT_SIZES[widgetId] || 'large';
             dashWidget.classList.add(`widget-${newSize}`);
+
+            // Mettre à jour la classe de hauteur (Phase 10)
+            const oldHeightClass = Array.from(dashWidget.classList).find(c => c.match(/^widget-h-(compact|normal|tall)$/));
+            if (oldHeightClass) {
+                dashWidget.classList.remove(oldHeightClass);
+            }
+
+            const newHeight = currentWidgetHeights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'normal';
+            dashWidget.classList.add(`widget-h-${newHeight}`);
         }
     });
 }
@@ -2098,6 +2150,33 @@ function setSizeWidget(widgetId, size) {
     saveWidgetConfig({ sizes: currentWidgetSizes });
 }
 
+function setHeightWidget(widgetId, height) {
+    // Validate height is valid
+    if (!['compact', 'normal', 'tall'].includes(height)) return;
+
+    // Update in-memory heights
+    currentWidgetHeights[widgetId] = height;
+
+    // Update button styles
+    const container = document.getElementById('dashboard-widgets-config');
+    const item = container?.querySelector(`[data-widget="${widgetId}"]`);
+    if (item) {
+        const buttons = item.querySelectorAll('.height-btn');
+        buttons.forEach(btn => {
+            const isActive = btn.textContent.trim() === height.charAt(0).toUpperCase();
+            btn.style.background = isActive ? 'var(--accent)' : 'var(--bg-secondary)';
+            btn.style.color = isActive ? 'var(--bg-primary)' : 'var(--text-primary)';
+            btn.classList.toggle('active', isActive);
+        });
+    }
+
+    // Apply changes immediately to dashboard (Phase 10 - Live Preview)
+    applyWidgetChangesToDashboard();
+
+    // Save to database
+    saveWidgetConfig({ heights: currentWidgetHeights });
+}
+
 function saveWidgetConfig(changes) {
     const enabledStr = g('dashboard_widgets_enabled') || '';
     const orderStr = g('dashboard_widgets_order') || '';
@@ -2106,6 +2185,7 @@ function saveWidgetConfig(changes) {
         'dashboard_widgets_enabled': changes.enabled || enabledStr,
         'dashboard_widgets_order': changes.order || orderStr,
         'dashboard_widgets_size': JSON.stringify(changes.sizes || currentWidgetSizes || {}),
+        'dashboard_widgets_height': JSON.stringify(changes.heights || currentWidgetHeights || {}),
     };
 
     fetch('/api/config', {

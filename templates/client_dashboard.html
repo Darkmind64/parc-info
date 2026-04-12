@@ -27,6 +27,11 @@
     flex: 1;
 }
 
+/* Hauteurs widget (Phase 10) */
+.widget-h-compact { min-height: 180px; max-height: 240px; }  /* Compact */
+.widget-h-normal  { min-height: 280px; max-height: 380px; }  /* Normal */
+.widget-h-tall    { min-height: 400px; max-height: 600px; }  /* Tall */
+
 /* Breakpoint tablet (≤1200px): small collapse to 50% */
 @media(max-width: 1200px) {
     .widget-small { grid-column: span 6; }
@@ -220,8 +225,8 @@
 <div class="widgets-grid">
     {% for widget_id in widget_order %}
         {% if widget_id in enabled_widgets %}
-        <!-- Widget wrapper with size class (Phase 9) - data-widget-id for real-time updates -->
-        <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }}" data-widget-id="{{ widget_id }}">
+        <!-- Widget wrapper with size & height classes (Phase 9-10) - data-widget-id for real-time updates -->
+        <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }} widget-h-{{ widget_heights.get(widget_id, 'normal') if widget_heights else 'normal' }}" data-widget-id="{{ widget_id }}">
 
             <!-- ══ WIDGET: CRITICAL ALERTS ════════════════════════════════════════ -->
             {% if widget_id == 'critical-alerts' %}
