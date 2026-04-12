@@ -776,6 +776,21 @@
         </div>
     </div>
 
+    <!-- INTERVENTIONS / MAINTENANCE -->
+    <div class="nav-group">
+        <button class="nav-group-btn {% if ep in ['liste_interventions','nouveau_intervention','detail_intervention','editer_intervention'] %}active{% endif %}">
+            🔧 Interventions <span class="arr">▼</span>
+        </button>
+        <div class="nav-dropdown">
+            <a href="/interventions" {% if ep in ['liste_interventions','detail_intervention','editer_intervention'] %}class="active"{% endif %}>
+                <span class="nd-icon">🔧</span> Toutes les interventions
+            </a>
+            <a href="/intervention/nouveau">
+                <span class="nd-icon">➕</span> Nouvelle intervention
+            </a>
+        </div>
+    </div>
+
     <!-- SÉCURITÉ / ACCÈS -->
     <div class="nav-group">
         <button class="nav-group-btn {% if secu_active %}active{% endif %}">
