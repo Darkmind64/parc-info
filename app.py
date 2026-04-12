@@ -1629,7 +1629,7 @@ def _compute_critical_alerts(conn, cid, today):
 
     # Offline devices (no recent ping)
     for row in conn.execute(
-        "SELECT id, nom_machine FROM appareils WHERE client_id=? AND online=0",
+        "SELECT id, nom_machine FROM appareils WHERE client_id=? AND en_ligne=0",
         (cid,)).fetchall():
         a = row_to_dict(row)
         alerts.append({'type': 'device_offline', 'device': a['nom_machine'], 'severity': 'warning'})
@@ -1907,20 +1907,38 @@ def single_client_dashboard(cid):
 
         # Build complete widget_data dict with all widget calculations
         # (even disabled widgets may be re-enabled later without reload)
-        widget_data = {
-            'critical_alerts': _compute_critical_alerts(conn, cid, today),
-            'kpi': _compute_kpi_cards(stats, alerts, today),
-            'av_status': _compute_av_status(conn, cid),
-            'network_status': _compute_network_status(stats),
-            'device_types': _compute_device_types(stats),
-            'peripherals': _compute_peripherals_distribution(stats),
-            'device_age': _compute_device_age(conn, cid, today),
-            'contracts_timeline': _compute_contracts_timeline(conn, cid, today),
-            'recent_activity': _compute_recent_activity(stats),
-            'interventions': _compute_interventions_summary(recent_interventions),
-            'business_software': _compute_business_software(logiciels, stats),
-            'network_info': _compute_network_info(parc),
-        }
+        try:
+            widget_data = {
+                'critical_alerts': _compute_critical_alerts(conn, cid, today),
+                'kpi': _compute_kpi_cards(stats, alerts, today),
+                'av_status': _compute_av_status(conn, cid),
+                'network_status': _compute_network_status(stats),
+                'device_types': _compute_device_types(stats),
+                'peripherals': _compute_peripherals_distribution(stats),
+                'device_age': _compute_device_age(conn, cid, today),
+                'contracts_timeline': _compute_contracts_timeline(conn, cid, today),
+                'recent_activity': _compute_recent_activity(stats),
+                'interventions': _compute_interventions_summary(recent_interventions),
+                'business_software': _compute_business_software(logiciels, stats),
+                'network_info': _compute_network_info(parc),
+            }
+        except Exception as e:
+            logger.exception("Error computing widget data for client %d: %s", cid, str(e))
+            # Fallback: empty widget data
+            widget_data = {
+                'critical_alerts': {},
+                'kpi': {},
+                'av_status': {},
+                'network_status': {},
+                'device_types': {},
+                'peripherals': {},
+                'device_age': {},
+                'contracts_timeline': {},
+                'recent_activity': {},
+                'interventions': {},
+                'business_software': {},
+                'network_info': {},
+            }
 
         # Combine all data for template
         template_data = {
