@@ -140,7 +140,7 @@
 <!-- Filtres -->
 <div class="hist-filters">
     {% set entites = [('', 'Tout', '📋'), ('appareil', 'Appareils', '🖥'), ('peripherique', 'Périphériques', '🖱'),
-                      ('identifiant', 'Identifiants', '🔑'), ('contrat', 'Contrats', '📄'),
+                      ('intervention', 'Interventions', '🔧'), ('identifiant', 'Identifiants', '🔑'), ('contrat', 'Contrats', '📄'),
                       ('utilisateur', 'Utilisateurs', '👥'), ('système', 'Erreurs', '⚠')] %}
     {% for val, label, ico in entites %}
     <a href="/historique{% if val %}?entite={{ val }}{% endif %}"
@@ -151,9 +151,9 @@
 <div class="card" style="padding:1rem 1.2rem;">
 {% if hist %}
 <div class="hist-timeline">
-{% set icons     = {'appareil':'🖥','peripherique':'🖱','identifiant':'🔑','contrat':'📄','utilisateur':'👥','système':'⚠'} %}
+{% set icons     = {'appareil':'🖥','peripherique':'🖱','intervention':'🔧','identifiant':'🔑','contrat':'📄','utilisateur':'👥','système':'⚠'} %}
 {% set dot_colors= {'Création':'var(--accent-green)','Modification':'var(--accent)','Suppression':'var(--accent-red)','Annulation':'#facc15','Erreur':'#ff3355'} %}
-{% set links     = {'appareil':'/appareil/{}', 'peripherique':'/peripherique/{}', 'identifiant':'/identifiant/{}', 'contrat':'/contrat/{}', 'utilisateur':'/utilisateur/{}'} %}
+{% set links     = {'appareil':'/appareil/{}', 'peripherique':'/peripherique/{}', 'intervention':'/intervention/{}', 'identifiant':'/identifiant/{}', 'contrat':'/contrat/{}', 'utilisateur':'/utilisateur/{}'} %}
 {% for h in hist %}
 {% set dot_col  = dot_colors.get(h.action, 'var(--text-muted)') %}
 {% set has_diff = h.action == 'Modification' and h.details and h.details[:1] == '{' %}
@@ -266,6 +266,12 @@ const DIFF_LABELS = {
     'prenom':'Prénom','poste':'Poste','email':'Email','telephone':'Téléphone',
     'login_windows':'Login Windows','login_mail':'Login mail',
     'service_id':'Service',
+    // Interventions
+    'type_intervention':'Type intervention','date_intervention':'Date intervention',
+    'heure_debut':'Heure début','heure_fin':'Heure fin',
+    'duree_minutes':'Durée (minutes)','technicien_nom':'Technicien',
+    'technicien_email':'Email technicien','contrat_id':'Contrat lié','cout_ht':'Coût HT',
+    'devise':'Devise','fichier':'Fichier','type_doc':'Type document',
 };
 
 function _esc(s) {
