@@ -166,7 +166,7 @@
 .net-bar-on  { background:var(--accent-green); border-radius:3px 0 0 3px; transition:width 1s ease; }
 .net-bar-off { background:var(--accent-red);   transition:width 1s ease; }
 .net-legend  { display:flex; justify-content:space-between; font-size:.7rem; color:var(--text-secondary); margin-top:.25rem; }
-.net-list    { display:flex; flex-direction:column; gap:.25rem; max-height:200px; overflow-y:auto; }
+.net-list    { display:flex; flex-direction:column; gap:.25rem; max-height:140px; overflow-y:auto; }
 .net-row     { display:flex; align-items:center; gap:.5rem; font-size:.78rem; padding:.2rem 0; }
 .net-led     { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
 .led-on  { background:var(--accent-green); box-shadow:0 0 5px var(--accent-green); }
@@ -359,15 +359,15 @@
                             {% set en_ligne_list = appareils|selectattr('en_ligne')|list %}
                             {% if en_ligne_list %}
                             <div style="font-size:.62rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent-green);margin:.4rem 0 .2rem;">En ligne</div>
-                            {% for a in en_ligne_list[:6] %}
+                            {% for a in en_ligne_list[:4] %}
                             <div class="net-row">
                                 <span class="net-led led-on"></span>
                                 <span class="net-name">{{ a.nom_machine }}</span>
                                 <span class="net-ip">{{ a.adresse_ip }}</span>
                             </div>
                             {% endfor %}
-                            {% if en_ligne_list|length > 6 %}
-                            <div style="font-size:.7rem;color:var(--text-muted);padding:.3rem 0;">+ {{ en_ligne_list|length - 6 }} autre(s)</div>
+                            {% if en_ligne_list|length > 4 %}
+                            <div style="font-size:.7rem;color:var(--text-muted);padding:.3rem 0;">+ {{ en_ligne_list|length - 4 }} autre(s)</div>
                             {% endif %}
                             {% endif %}
                         </div>
