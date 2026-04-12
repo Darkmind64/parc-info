@@ -208,6 +208,7 @@ CFG_DEFAULTS = {
     # ── Navigation preferences ────────────────────────────────────────────────────
     'show_breadcrumb': '1',       # Show breadcrumb navigation (personal preference)
     'show_back_button': '1',      # Show "Back to overview" button (personal preference)
+    'confirm_client_switch': '1', # Show confirmation modal before switching clients (personal preference)
 }
 
 # Cache avec limite de taille (LRU-like) pour éviter memory leak

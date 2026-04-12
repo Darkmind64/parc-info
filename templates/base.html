@@ -607,6 +607,24 @@
         .upload-panel summary::-webkit-details-marker { display:none; }
         .upload-panel[open] summary { background:rgba(0,201,255,.1); border-color:var(--accent); color:var(--accent); }
 
+        /* ── GENERIC MODAL OVERLAY ── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(4px);
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+        .modal-overlay.open {
+            display: flex;
+        }
+
         /* ── FORM TOOLS ── */
         .field-error { border-color:var(--accent-red) !important; box-shadow:0 0 0 2px rgba(255,51,85,.15) !important; }
         .field-ok    { border-color:var(--accent-green) !important; }
@@ -652,7 +670,7 @@
     <div class="client-select-wrap">
         {% set active_cl = clients | selectattr('id','eq', client_actif_id) | first | default(None) %}
         <span class="client-dot" style="color:{{ active_cl.couleur if active_cl else '#00c9ff' }}; background:{{ active_cl.couleur if active_cl else '#00c9ff' }};"></span>
-        <select id="client-dropdown" onchange="changerClientAvecConfirmation(this)">
+        <select id="client-dropdown" onchange="changerClientAvecConfirmation(this)" data-current-value="{{ client_actif_id or '' }}">
             {% for cl in clients %}
             <option value="{{ cl.id }}" {% if cl.id == client_actif_id %}selected{% endif %}>{{ cl.nom }}</option>
             {% endfor %}
@@ -879,32 +897,79 @@ window._flashMessages = [
 
 
 <script>
+// ── CLIENT SWITCH CONFIRMATION (with modal) ───────────────────────────────────
+let _pendingClientSwitchId = null;
+let _currentClientDropdownValue = null;
+
 function changerClientAvecConfirmation(selectElement) {
     /**
-     * Demande confirmation avant de basculer vers un autre client.
+     * Demande confirmation (via modal ou natif) avant de basculer vers un autre client.
      * Restaure la valeur précédente si l'utilisateur annule.
      */
     const id = selectElement.value;
     const clientName = selectElement.options[selectElement.selectedIndex].text;
 
-    const confirmed = confirm('Basculer vers le client "' + clientName + '" ?');
+    // Stocker la valeur actuelle pour pouvoir la restaurer si l'utilisateur annule
+    _currentClientDropdownValue = selectElement.value;
 
-    if (confirmed) {
-        // Navigation approuvée
+    // Vérifier si la confirmation est activée dans les préférences
+    const confirmEnabled = g('confirm_client_switch') !== '0';  // true par défaut
+
+    if (!confirmEnabled) {
+        // Si désactivée, changer immédiatement sans confirmation
         changerClient(id);
-    } else {
-        // Restaurer la sélection précédente
-        const prevOption = selectElement.querySelector('option[selected]');
-        if (prevOption) {
-            selectElement.value = prevOption.value;
-        }
+        return;
     }
+
+    // Afficher la modale personnalisée
+    _pendingClientSwitchId = id;
+    document.getElementById('client-switch-name').textContent = clientName;
+    document.getElementById('client-switch-modal').classList.add('open');
+}
+
+function confirmClientSwitch() {
+    /**
+     * Confirme le changement de client après affichage de la modale.
+     */
+    if (_pendingClientSwitchId !== null) {
+        document.getElementById('client-switch-modal').classList.remove('open');
+        changerClient(_pendingClientSwitchId);
+        _pendingClientSwitchId = null;
+    }
+}
+
+function cancelClientSwitch() {
+    /**
+     * Annule le changement de client et restaure la sélection précédente dans le dropdown.
+     */
+    document.getElementById('client-switch-modal').classList.remove('open');
+
+    // Restaurer la sélection précédente dans le dropdown
+    const selectElement = document.querySelector('select[name="client_id"], #client-dropdown');
+    if (selectElement && _currentClientDropdownValue !== null) {
+        selectElement.value = _currentClientDropdownValue;
+    }
+
+    _pendingClientSwitchId = null;
 }
 
 function changerClient(id) {
     sessionStorage.setItem('parc_last_path', window.location.pathname);
     window.location.href = '/client/' + id + '/selectionner?next=' + encodeURIComponent(window.location.pathname);
 }
+
+// ── SETUP: Attacher les événements des boutons de la modale au chargement du DOM ──
+document.addEventListener('DOMContentLoaded', function() {
+    const confirmBtn = document.getElementById('client-switch-confirm');
+    const cancelBtn = document.getElementById('client-switch-cancel');
+
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', confirmClientSwitch);
+    }
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', cancelClientSwitch);
+    }
+});
 
 // ── PING BADGE TOPBAR ─────────────────────────────────────────────────────────
 (function() {
@@ -1245,6 +1310,34 @@ const DocsModal = (() => {
     return { ouvrir, fermer, fermerSiOverlay, ouvrirUpload, soumettre, supprimer };
 })();
 </script>
+
+<!-- ── CLIENT SWITCH CONFIRMATION MODAL ────────────────────────────────── -->
+<div id="client-switch-modal" class="modal-overlay">
+    <div style="
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-glow);
+        border-radius: 8px;
+        padding: 2rem;
+        max-width: 400px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        text-align: center;
+    ">
+        <h3 style="margin: 0 0 1rem 0; color: var(--text-primary);">
+            Changer de client
+        </h3>
+        <p style="margin: 0 0 1.5rem 0; color: var(--text-secondary); font-size: 0.95rem;">
+            Basculer vers le client <strong id="client-switch-name"></strong> ?
+        </p>
+        <div style="display: flex; gap: 0.75rem; justify-content: center;">
+            <button id="client-switch-cancel" type="button" class="btn btn-secondary btn-sm">
+                Annuler
+            </button>
+            <button id="client-switch-confirm" type="button" class="btn btn-primary btn-sm">
+                Confirmer
+            </button>
+        </div>
+    </div>
+</div>
 
 <!-- ── CONFIG DRAWER ──────────────────────────────────────────────────────── -->
 <div id="cfg-overlay" onclick="toggleConfig()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);backdrop-filter:blur(2px);z-index:1998;"></div>
@@ -2017,6 +2110,10 @@ function rendreConfig() {
     <div class="cfg-row">
         <label class="cfg-label">Afficher le bouton "Retour"</label>
         <input type="checkbox" data-cfg="show_back_button" ${g('show_back_button')==='0'?'':'checked'} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Demander confirmation avant de changer de client</label>
+        <input type="checkbox" data-cfg="confirm_client_switch" ${g('confirm_client_switch')==='0'?'':'checked'} class="cfg-check">
     </div>
 </div>
 
