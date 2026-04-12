@@ -4,6 +4,20 @@
 
 {% block content %}
 <style>
+/* Stat chips (consistent with contrats.html) */
+.stat-chips { display:flex; gap:.6rem; flex-wrap:wrap; margin-bottom:1.2rem; }
+.sc { display:flex; align-items:center; gap:.5rem; padding:.35rem .9rem; border-radius:20px; border:1px solid; font-size:.78rem; font-weight:600; text-decoration:none; cursor:pointer; transition:all .15s; background:none; }
+.sc-all    { color:var(--accent);        border-color:rgba(0,201,255,.35); }
+.sc-all.on { background:rgba(0,201,255,.1); }
+.sc-plan   { color:var(--accent);        border-color:rgba(0,201,255,.35); }
+.sc-plan.on { background:rgba(0,201,255,.1); }
+.sc-cours  { color:var(--accent-orange); border-color:rgba(255,140,0,.35); }
+.sc-cours.on { background:rgba(255,140,0,.08); }
+.sc-compl  { color:var(--accent-green);  border-color:rgba(0,255,136,.35); }
+.sc-compl.on { background:rgba(0,255,136,.08); }
+.sc-n { font-family:'Share Tech Mono',monospace; font-size:.85rem; font-weight:700; }
+
+/* Cards */
 .intv-card {
     display: flex;
     align-items: center;
@@ -47,19 +61,11 @@
 
 <!-- STAT CHIPS -->
 {% if stats %}
-<div style="display: flex; gap: .5rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
-    <a href="?statut=" class="btn btn-sm" style="border-color: {{ 'var(--accent)' if not filtre_stat else 'var(--border)' }}; background: {{ 'rgba(0,201,255,.1)' if not filtre_stat else 'transparent' }};">
-        Toutes <span style="font-family: monospace; margin-left: .4rem;">{{ stats.total }}</span>
-    </a>
-    <a href="?statut=planifiee" class="btn btn-sm" style="border-color: {{ 'var(--accent)' if filtre_stat=='planifiee' else 'var(--border)' }}; background: {{ 'rgba(0,201,255,.1)' if filtre_stat=='planifiee' else 'transparent' }};">
-        Planifiées <span style="font-family: monospace; margin-left: .4rem;">{{ stats.planifiee or 0 }}</span>
-    </a>
-    <a href="?statut=en_cours" class="btn btn-sm" style="border-color: {{ 'var(--accent)' if filtre_stat=='en_cours' else 'var(--border)' }}; background: {{ 'rgba(0,201,255,.1)' if filtre_stat=='en_cours' else 'transparent' }};">
-        En cours <span style="font-family: monospace; margin-left: .4rem;">{{ stats.en_cours or 0 }}</span>
-    </a>
-    <a href="?statut=completee" class="btn btn-sm" style="border-color: {{ 'var(--accent)' if filtre_stat=='completee' else 'var(--border)' }}; background: {{ 'rgba(0,201,255,.1)' if filtre_stat=='completee' else 'transparent' }};">
-        Complétées <span style="font-family: monospace; margin-left: .4rem;">{{ stats.completee or 0 }}</span>
-    </a>
+<div class="stat-chips">
+    <a href="?" class="sc sc-all {% if not filtre_stat %}on{% endif %}">Toutes <span class="sc-n">{{ stats.total }}</span></a>
+    <a href="?statut=planifiee" class="sc sc-plan {% if filtre_stat=='planifiee' %}on{% endif %}">📅 Planifiées <span class="sc-n">{{ stats.planifiee }}</span></a>
+    <a href="?statut=en_cours" class="sc sc-cours {% if filtre_stat=='en_cours' %}on{% endif %}">⚙️ En cours <span class="sc-n">{{ stats.en_cours }}</span></a>
+    <a href="?statut=completee" class="sc sc-compl {% if filtre_stat=='completee' %}on{% endif %}">✅ Complétées <span class="sc-n">{{ stats.completee }}</span></a>
 </div>
 {% endif %}
 
