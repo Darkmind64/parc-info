@@ -1899,18 +1899,27 @@ const WIDGET_DEFAULT_SIZES = {
 };
 
 const WIDGET_DEFAULT_HEIGHTS = {
-    'critical-alerts': 'normal',
-    'kpi': 'normal',
-    'av-status': 'normal',
-    'network-status': 'compact',
-    'device-types': 'normal',
-    'peripherals': 'normal',
-    'device-age': 'normal',
-    'contracts-timeline': 'normal',
-    'recent-activity': 'normal',
-    'interventions': 'compact',
-    'business-software': 'compact',
-    'network-info': 'compact',
+    'critical-alerts': 'm',  // Medium
+    'kpi': 'm',
+    'av-status': 'm',
+    'network-status': 's',   // Small
+    'device-types': 'm',
+    'peripherals': 'm',
+    'device-age': 'm',
+    'contracts-timeline': 'm',
+    'recent-activity': 'm',
+    'interventions': 's',
+    'business-software': 's',
+    'network-info': 's',
+};
+
+// Niveaux de hauteur disponibles avec descriptions
+const HEIGHT_LEVELS = {
+    'xs': { name: 'XS', title: 'Extra Petit (160px)' },
+    's': { name: 'S', title: 'Petit (220px)' },
+    'm': { name: 'M', title: 'Moyen (280px)' },
+    'l': { name: 'L', title: 'Grand (360px)' },
+    'xl': { name: 'XL', title: 'Extra Grand (480px)' },
 };
 
 let currentWidgetSizes = {};     // Track current sizes during config session
@@ -1990,19 +1999,25 @@ function initDashboardWidgetConfig() {
                         L
                     </button>
                 </div>
-                <!-- Height buttons (Phase 10) - Compact -->
+                <!-- Height buttons (5 LEVELS: XS, S, M, L, XL) -->
                 <!-- EXCEPTION: KPI widget doesn't support height resizing -->
                 ${widgetId !== 'kpi' ?
-                    '<div style="display:flex;gap:.15rem;flex-shrink:0;border-left:1px solid var(--border);padding-left:.3rem;">' +
-                    '<button type="button" class="height-btn height-btn-C ' + (currentHeight === 'compact' ? 'active' : '') + '"' +
-                    'onclick="setHeightWidget(\'' + widgetId + '\', \'compact\')"' +
-                    'title="Compact" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:' + (currentHeight === 'compact' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'compact' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">C</button>' +
-                    '<button type="button" class="height-btn height-btn-N ' + (currentHeight === 'normal' ? 'active' : '') + '"' +
-                    'onclick="setHeightWidget(\'' + widgetId + '\', \'normal\')"' +
-                    'title="Normal" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:' + (currentHeight === 'normal' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'normal' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">N</button>' +
-                    '<button type="button" class="height-btn height-btn-T ' + (currentHeight === 'tall' ? 'active' : '') + '"' +
-                    'onclick="setHeightWidget(\'' + widgetId + '\', \'tall\')"' +
-                    'title="Haut" style="padding:.12rem .25rem;font-size:.6rem;font-weight:600;border:1px solid var(--border);background:' + (currentHeight === 'tall' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'tall' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">T</button>' +
+                    '<div style="display:flex;gap:.1rem;flex-shrink:0;border-left:1px solid var(--border);padding-left:.2rem;">' +
+                    '<button type="button" class="height-btn ' + (currentHeight === 'xs' ? 'active' : '') + '"' +
+                    'onclick="setHeightWidget(\'' + widgetId + '\', \'xs\')"' +
+                    'title="' + HEIGHT_LEVELS.xs.title + '" style="padding:.1rem .2rem;font-size:.55rem;font-weight:700;border:1px solid var(--border);background:' + (currentHeight === 'xs' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'xs' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">XS</button>' +
+                    '<button type="button" class="height-btn ' + (currentHeight === 's' ? 'active' : '') + '"' +
+                    'onclick="setHeightWidget(\'' + widgetId + '\', \'s\')"' +
+                    'title="' + HEIGHT_LEVELS.s.title + '" style="padding:.1rem .2rem;font-size:.55rem;font-weight:700;border:1px solid var(--border);background:' + (currentHeight === 's' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 's' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">S</button>' +
+                    '<button type="button" class="height-btn ' + (currentHeight === 'm' ? 'active' : '') + '"' +
+                    'onclick="setHeightWidget(\'' + widgetId + '\', \'m\')"' +
+                    'title="' + HEIGHT_LEVELS.m.title + '" style="padding:.1rem .2rem;font-size:.55rem;font-weight:700;border:1px solid var(--border);background:' + (currentHeight === 'm' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'm' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">M</button>' +
+                    '<button type="button" class="height-btn ' + (currentHeight === 'l' ? 'active' : '') + '"' +
+                    'onclick="setHeightWidget(\'' + widgetId + '\', \'l\')"' +
+                    'title="' + HEIGHT_LEVELS.l.title + '" style="padding:.1rem .2rem;font-size:.55rem;font-weight:700;border:1px solid var(--border);background:' + (currentHeight === 'l' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'l' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">L</button>' +
+                    '<button type="button" class="height-btn ' + (currentHeight === 'xl' ? 'active' : '') + '"' +
+                    'onclick="setHeightWidget(\'' + widgetId + '\', \'xl\')"' +
+                    'title="' + HEIGHT_LEVELS.xl.title + '" style="padding:.1rem .2rem;font-size:.55rem;font-weight:700;border:1px solid var(--border);background:' + (currentHeight === 'xl' ? 'var(--accent)' : 'var(--bg-secondary)') + ';color:' + (currentHeight === 'xl' ? 'var(--bg-primary)' : 'var(--text-primary)') + ';border-radius:2px;cursor:pointer;transition:all .15s;line-height:1;">XL</button>' +
                     '</div>'
                     : '<span style="font-size:.65rem;color:var(--text-muted);font-style:italic;padding-left:.3rem;">Hauteur fixe</span>'
                 }
@@ -2117,7 +2132,7 @@ function applyWidgetChangesToDashboard() {
                     dashWidget.classList.remove(oldHeightClass);
                 }
 
-                const newHeight = currentWidgetHeights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'normal';
+                const newHeight = currentWidgetHeights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'm';
                 dashWidget.classList.add(`widget-h-${newHeight}`);
             }
         }
@@ -2152,8 +2167,8 @@ function setSizeWidget(widgetId, size) {
 }
 
 function setHeightWidget(widgetId, height) {
-    // Validate height is valid
-    if (!['compact', 'normal', 'tall'].includes(height)) return;
+    // Validate height is valid (5 levels: xs, s, m, l, xl)
+    if (!['xs', 's', 'm', 'l', 'xl'].includes(height)) return;
 
     // Update in-memory heights
     currentWidgetHeights[widgetId] = height;
@@ -2164,7 +2179,8 @@ function setHeightWidget(widgetId, height) {
     if (item) {
         const buttons = item.querySelectorAll('.height-btn');
         buttons.forEach(btn => {
-            const isActive = btn.textContent.trim() === height.charAt(0).toUpperCase();
+            const btnHeight = btn.textContent.trim().toLowerCase();
+            const isActive = btnHeight === height.toLowerCase();
             btn.style.background = isActive ? 'var(--accent)' : 'var(--bg-secondary)';
             btn.style.color = isActive ? 'var(--bg-primary)' : 'var(--text-primary)';
             btn.classList.toggle('active', isActive);

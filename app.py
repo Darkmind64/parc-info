@@ -1138,16 +1138,25 @@ def api_config_save():
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"Invalid dashboard_widgets_size JSON: {str(e)}")
                     return jsonify({'error': 'Invalid JSON in dashboard_widgets_size'}), 400
-            # Special validation for dashboard_widgets_height (Phase 10)
+            # Special validation for dashboard_widgets_height (5 levels: xs, s, m, l, xl)
             elif k == 'dashboard_widgets_height':
                 # Ensure it's valid JSON before saving
                 try:
                     heights = json.loads(str(v))
+                    # Valid height levels (5 levels for more precision)
+                    valid_heights = {'xs', 's', 'm', 'l', 'xl', 'compact', 'normal', 'tall'}  # Include legacy names
+                    # Map legacy names to new ones for backwards compatibility
+                    legacy_map = {'compact': 's', 'normal': 'm', 'tall': 'l'}
+
                     # Validate all heights are valid
                     for widget_id, height in heights.items():
-                        if height not in ('compact', 'normal', 'tall'):
+                        if height not in valid_heights:
                             logger.warning(f"Invalid widget height: {widget_id}={height}")
                             return jsonify({'error': 'Invalid widget height value'}), 400
+                        # Convert legacy names to new ones
+                        if height in legacy_map:
+                            heights[widget_id] = legacy_map[height]
+
                     valid_config[k] = json.dumps(heights)  # Re-serialize to ensure valid JSON
                 except (json.JSONDecodeError, ValueError) as e:
                     logger.warning(f"Invalid dashboard_widgets_height JSON: {str(e)}")

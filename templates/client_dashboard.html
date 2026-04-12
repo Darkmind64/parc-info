@@ -9,8 +9,8 @@
     grid-template-columns: repeat(12, 1fr);
     gap: 1rem;
     margin-bottom: 1.2rem;
-    align-items: stretch;  /* Étirer tous les widgets pour aligner les hauteurs */
-    auto-rows: 1fr;  /* Rangées égales */
+    align-items: start;
+    auto-rows: max-content;  /* Laisser les hauteurs fixes des widgets primer */
 }
 
 /* Tailles widget (desktop) */
@@ -32,41 +32,71 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
-/* HAUTEURS WIDGET (Phase 10) - Hauteurs FIXES avec contenu adaptable */
+/* HAUTEURS WIDGET (5 NIVEAUX) - Hauteurs FIXES avec contenu adaptable */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-/* Compact: 200px */
-.widget-h-compact {
-    height: 200px;
+/* XS: Extra Small - 160px */
+.widget-h-xs {
+    height: 160px;
     overflow: hidden;
 }
 
-.widget-h-compact .card {
+.widget-h-xs .card {
     height: 100%;
     overflow-y: auto;
 }
 
-/* Normal: 340px (hauteur équilibrée par défaut) */
-.widget-h-normal {
-    height: 340px;
+/* S: Small - 220px */
+.widget-h-s {
+    height: 220px;
     overflow: hidden;
 }
 
-.widget-h-normal .card {
+.widget-h-s .card {
     height: 100%;
     overflow-y: auto;
 }
 
-/* Tall: 480px */
-.widget-h-tall {
+/* M: Medium/Normal - 280px (hauteur équilibrée par défaut) */
+.widget-h-m {
+    height: 280px;
+    overflow: hidden;
+}
+
+.widget-h-m .card {
+    height: 100%;
+    overflow-y: auto;
+}
+
+/* L: Large - 360px */
+.widget-h-l {
+    height: 360px;
+    overflow: hidden;
+}
+
+.widget-h-l .card {
+    height: 100%;
+    overflow-y: auto;
+}
+
+/* XL: Extra Large - 480px */
+.widget-h-xl {
     height: 480px;
     overflow: hidden;
 }
 
-.widget-h-tall .card {
+.widget-h-xl .card {
     height: 100%;
     overflow-y: auto;
 }
+
+/* Legacy compat: map old names to new ones */
+.widget-h-compact { height: 220px; }
+.widget-h-compact .card { height: 100%; overflow-y: auto; }
+.widget-h-normal { height: 280px; }
+.widget-h-normal .card { height: 100%; overflow-y: auto; }
+.widget-h-tall { height: 360px; }
+.widget-h-tall .card { height: 100%; overflow-y: auto; }
 
 /* S'assurer que les listes et conteneurs internes remplissent l'espace */
 .net-list,
@@ -78,44 +108,127 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
-/* CONTENT REORGANIZATION - Hide/show elements based on height (Phase 10) */
+/* CONTENT REORGANIZATION - Hide/show elements based on height (5 LEVELS) */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-/* COMPACT MODE (200px) - Show only essential content */
-.widget-h-compact .kpi-sub,
+/* XS (160px) - Minimal: Only values, no descriptions */
+.widget-h-xs .kpi-sub,
+.widget-h-xs .kpi-bar,
+.widget-h-xs .tl-meta,
+.widget-h-xs .flux-meta,
+.widget-h-xs .leg-pct,
+.widget-h-xs .leg-name,
+.widget-h-xs .as-sub,
+.widget-h-xs .flux-time {
+    display: none;
+}
+
+.widget-h-xs .net-list {
+    max-height: 60px;  /* 1-2 devices */
+}
+
+.widget-h-xs .timeline,
+.widget-h-xs .donut-legend {
+    max-height: 70px;
+}
+
+.widget-h-xs .flux-item {
+    padding: .2rem 0;
+    font-size: .7rem;
+}
+
+/* S (220px) - Small: Essential content only */
+.widget-h-s .kpi-bar,
+.widget-h-s .tl-meta,
+.widget-h-s .leg-pct,
+.widget-h-s .as-sub {
+    display: none;
+}
+
+.widget-h-s .net-list {
+    max-height: 100px;  /* 3-4 devices */
+}
+
+.widget-h-s .timeline,
+.widget-h-s .donut-legend {
+    max-height: 110px;
+}
+
+.widget-h-s .flux-item {
+    padding: .25rem 0;
+    font-size: .75rem;
+}
+
+/* M (280px) - Medium/Normal: Standard view (default) */
+.widget-h-m .net-list {
+    max-height: 150px;  /* 5-6 devices */
+}
+
+.widget-h-m .timeline {
+    max-height: 160px;
+}
+
+.widget-h-m .donut-legend {
+    max-height: 140px;
+}
+
+/* L (360px) - Large: Show more content */
+.widget-h-l .net-list {
+    max-height: 220px;  /* 7-8 devices */
+}
+
+.widget-h-l .timeline {
+    max-height: 240px;
+}
+
+.widget-h-l .donut-legend {
+    max-height: 220px;
+}
+
+/* XL (480px) - Extra Large: Show all content with expanded lists */
+.widget-h-xl .net-list {
+    max-height: 320px;  /* 10-12 devices */
+}
+
+.widget-h-xl .timeline {
+    max-height: 340px;
+}
+
+.widget-h-xl .donut-legend {
+    max-height: 320px;
+}
+
+/* Legacy compat for C/N/T: map to S/M/L */
 .widget-h-compact .kpi-bar,
 .widget-h-compact .tl-meta,
-.widget-h-compact .flux-meta,
 .widget-h-compact .leg-pct,
 .widget-h-compact .as-sub {
     display: none;
 }
 
 .widget-h-compact .net-list {
-    max-height: 80px;  /* Show only 2-3 devices */
+    max-height: 100px;
 }
 
 .widget-h-compact .timeline,
 .widget-h-compact .donut-legend {
-    max-height: 90px;
+    max-height: 110px;
 }
 
-.widget-h-compact .flux-item {
-    padding: .25rem 0;
-    font-size: .75rem;
+.widget-h-normal .net-list {
+    max-height: 150px;
 }
 
-/* TALL MODE (480px) - Show all content with expanded lists */
+.widget-h-normal .timeline {
+    max-height: 160px;
+}
+
 .widget-h-tall .net-list {
-    max-height: 250px;  /* Show 8-10 devices */
+    max-height: 220px;
 }
 
 .widget-h-tall .timeline {
-    max-height: 300px;
-}
-
-.widget-h-tall .donut-legend {
-    max-height: 250px;
+    max-height: 240px;
 }
 
 /* Breakpoint tablet (≤1200px): small collapse to 50% */
