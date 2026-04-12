@@ -111,9 +111,21 @@
 /* CONTENT REORGANIZATION - Hide/show elements based on height (5 LEVELS) */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-/* XS (160px) - Minimal: Only values, no descriptions */
+/* XS (160px) - Minimal: Only essential values */
+.widget-h-xs .card {
+    padding: 0.7rem;
+}
+
+.widget-h-xs .s-head {
+    margin: 0 0 0.5rem 0;
+    padding-bottom: 0.4rem;
+    font-size: 0.65rem;
+}
+
 .widget-h-xs .kpi-sub,
 .widget-h-xs .kpi-bar,
+.widget-h-xs .kpi-lbl,
+.widget-h-xs .kpi-icon,
 .widget-h-xs .tl-meta,
 .widget-h-xs .flux-meta,
 .widget-h-xs .leg-pct,
@@ -123,8 +135,22 @@
     display: none;
 }
 
+.widget-h-xs .kpi {
+    padding: 0.6rem 0.8rem;
+}
+
+.widget-h-xs .kpi-val {
+    font-size: 1.5rem;
+}
+
+.widget-h-xs .leg-row {
+    padding: 0.15rem 0;
+    font-size: 0.7rem;
+}
+
 .widget-h-xs .net-list {
-    max-height: 60px;  /* 1-2 devices */
+    max-height: 60px;
+    gap: 0.2rem;
 }
 
 .widget-h-xs .timeline,
@@ -133,11 +159,25 @@
 }
 
 .widget-h-xs .flux-item {
-    padding: .2rem 0;
-    font-size: .7rem;
+    padding: 0.2rem 0;
+    font-size: 0.7rem;
 }
 
-/* S (220px) - Small: Essential content only */
+.widget-h-xs .tl-item {
+    padding: 0.3rem 0 0.3rem 0.6rem;
+}
+
+/* S (220px) - Small: Compact view */
+.widget-h-s .card {
+    padding: 0.8rem;
+}
+
+.widget-h-s .s-head {
+    margin: 0 0 0.6rem 0;
+    padding-bottom: 0.5rem;
+    font-size: 0.7rem;
+}
+
 .widget-h-s .kpi-bar,
 .widget-h-s .tl-meta,
 .widget-h-s .leg-pct,
@@ -145,8 +185,32 @@
     display: none;
 }
 
+.widget-h-s .kpi {
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 0.3rem;
+}
+
+.widget-h-s .kpi-val {
+    font-size: 1.8rem;
+}
+
+.widget-h-s .kpi-lbl {
+    font-size: 0.6rem;
+    margin-top: 0.2rem;
+}
+
+.widget-h-s .leg-row {
+    padding: 0.2rem 0;
+    font-size: 0.75rem;
+}
+
 .widget-h-s .net-list {
-    max-height: 100px;  /* 3-4 devices */
+    max-height: 100px;
+    gap: 0.25rem;
+}
+
+.widget-h-s .net-row {
+    padding: 0.25rem 0;
 }
 
 .widget-h-s .timeline,
@@ -154,14 +218,46 @@
     max-height: 110px;
 }
 
+.widget-h-s .tl-item {
+    padding: 0.35rem 0 0.35rem 0.6rem;
+}
+
 .widget-h-s .flux-item {
-    padding: .25rem 0;
-    font-size: .75rem;
+    padding: 0.25rem 0;
+    font-size: 0.75rem;
 }
 
 /* M (280px) - Medium/Normal: Standard view (default) */
+.widget-h-m .card {
+    padding: 1rem;
+}
+
+.widget-h-m .s-head {
+    margin: 0 0 0.8rem 0;
+    padding-bottom: 0.6rem;
+    font-size: 0.75rem;
+}
+
+.widget-h-m .kpi {
+    padding: 0.8rem 1rem;
+}
+
+.widget-h-m .kpi-val {
+    font-size: 2rem;
+}
+
+.widget-h-m .leg-row {
+    padding: 0.3rem 0;
+    font-size: 0.78rem;
+}
+
 .widget-h-m .net-list {
-    max-height: 150px;  /* 5-6 devices */
+    max-height: 150px;
+    gap: 0.3rem;
+}
+
+.widget-h-m .net-row {
+    padding: 0.3rem 0;
 }
 
 .widget-h-m .timeline {
@@ -172,9 +268,42 @@
     max-height: 140px;
 }
 
-/* L (360px) - Large: Show more content */
+.widget-h-m .flux-item {
+    padding: 0.3rem 0;
+}
+
+/* L (360px) - Large: Expanded view */
+.widget-h-l .card {
+    padding: 1.1rem;
+}
+
+.widget-h-l .s-head {
+    margin: 0 0 0.9rem 0;
+    padding-bottom: 0.7rem;
+    font-size: 0.78rem;
+}
+
+.widget-h-l .kpi {
+    padding: 0.9rem 1.1rem;
+    margin-bottom: 0.4rem;
+}
+
+.widget-h-l .kpi-val {
+    font-size: 2.1rem;
+}
+
+.widget-h-l .leg-row {
+    padding: 0.35rem 0;
+    font-size: 0.8rem;
+}
+
 .widget-h-l .net-list {
-    max-height: 220px;  /* 7-8 devices */
+    max-height: 220px;
+    gap: 0.35rem;
+}
+
+.widget-h-l .net-row {
+    padding: 0.35rem 0;
 }
 
 .widget-h-l .timeline {
@@ -185,9 +314,46 @@
     max-height: 220px;
 }
 
-/* XL (480px) - Extra Large: Show all content with expanded lists */
+.widget-h-l .tl-item {
+    padding: 0.45rem 0 0.45rem 0.7rem;
+}
+
+.widget-h-l .flux-item {
+    padding: 0.35rem 0;
+}
+
+/* XL (480px) - Extra Large: Full content */
+.widget-h-xl .card {
+    padding: 1.2rem;
+}
+
+.widget-h-xl .s-head {
+    margin: 0 0 1rem 0;
+    padding-bottom: 0.8rem;
+    font-size: 0.8rem;
+}
+
+.widget-h-xl .kpi {
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.5rem;
+}
+
+.widget-h-xl .kpi-val {
+    font-size: 2.2rem;
+}
+
+.widget-h-xl .leg-row {
+    padding: 0.4rem 0;
+    font-size: 0.82rem;
+}
+
 .widget-h-xl .net-list {
-    max-height: 320px;  /* 10-12 devices */
+    max-height: 320px;
+    gap: 0.4rem;
+}
+
+.widget-h-xl .net-row {
+    padding: 0.4rem 0;
 }
 
 .widget-h-xl .timeline {
@@ -196,6 +362,14 @@
 
 .widget-h-xl .donut-legend {
     max-height: 320px;
+}
+
+.widget-h-xl .tl-item {
+    padding: 0.5rem 0 0.5rem 0.7rem;
+}
+
+.widget-h-xl .flux-item {
+    padding: 0.4rem 0;
 }
 
 /* Legacy compat for C/N/T: map to S/M/L */
@@ -246,13 +420,45 @@
 }
 
 /* Ancienne grille (compatible) */
-.dash-row    { display:grid; gap:1.2rem; margin-bottom:1.2rem; }
+.dash-row {
+    display: grid;
+    gap: 1rem;
+    margin-bottom: 0;
+    align-items: stretch;
+}
+
 .cols-6      { grid-template-columns: repeat(6,1fr); }
 .cols-3      { grid-template-columns: repeat(3,1fr); }
 .cols-2      { grid-template-columns: 1fr 1fr; }
 .cols-1      { grid-template-columns: 1fr; }
 .cols-1-2    { grid-template-columns: 1fr 2fr; }
 .cols-2-1    { grid-template-columns: 2fr 1fr; }
+
+/* Adaptive KPI grid for different heights */
+.widget-h-xs .dash-row.cols-6 {
+    grid-template-columns: repeat(3, 1fr);  /* 3 cards per row */
+    gap: 0.6rem;
+}
+
+.widget-h-s .dash-row.cols-6 {
+    grid-template-columns: repeat(3, 1fr);  /* 3 cards per row */
+    gap: 0.8rem;
+}
+
+.widget-h-m .dash-row.cols-6 {
+    grid-template-columns: repeat(6, 1fr);  /* Full 6 cards */
+    gap: 1rem;
+}
+
+.widget-h-l .dash-row.cols-6 {
+    grid-template-columns: repeat(6, 1fr);  /* Full 6 cards */
+    gap: 1rem;
+}
+
+.widget-h-xl .dash-row.cols-6 {
+    grid-template-columns: repeat(6, 1fr);  /* Full 6 cards */
+    gap: 1.1rem;
+}
 
 /* Auto-compact pour widgets avec peu de contenu */
 .card {
@@ -303,6 +509,36 @@
     font-size: 0.85rem;
     color: var(--text-secondary);
     line-height: 1.5;
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* CUSTOM SCROLLBARS - Pro & Elegant */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+/* Webkit (Chrome, Safari, Edge) */
+.card::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+.card::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.card::-webkit-scrollbar-thumb {
+    background: var(--border-glow);
+    border-radius: 3px;
+    transition: background 0.2s;
+}
+
+.card::-webkit-scrollbar-thumb:hover {
+    background: var(--accent);
+}
+
+/* Firefox */
+.card {
+    scrollbar-color: var(--border-glow) transparent;
+    scrollbar-width: thin;
 }
 
 /* ── KPI ── */
@@ -388,12 +624,34 @@
     align-items: center;
     gap: 1.2rem;
     flex: 1;
+    overflow: hidden;
 }
 
 .donut-wrap svg {
     flex-shrink: 0;
     width: 140px;
     height: 140px;
+}
+
+/* Resize donut for compact heights */
+.widget-h-xs .donut-wrap svg {
+    width: 100px;
+    height: 100px;
+}
+
+.widget-h-s .donut-wrap svg {
+    width: 120px;
+    height: 120px;
+}
+
+.widget-h-l .donut-wrap svg {
+    width: 160px;
+    height: 160px;
+}
+
+.widget-h-xl .donut-wrap svg {
+    width: 180px;
+    height: 180px;
 }
 
 .donut-legend {
@@ -657,9 +915,8 @@
 
 .net-row:hover {
     background-color: rgba(0,201,255,0.05);
-    padding-left: 0.3rem;
-    margin-left: -0.3rem;
     border-radius: 3px;
+    transition: background-color 0.15s;
 }
 
 .net-led {
