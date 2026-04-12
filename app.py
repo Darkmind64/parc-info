@@ -1755,7 +1755,7 @@ def _compute_device_age(conn, cid, today):
     - 5+ years
     """
     devices = conn.execute(
-        "SELECT nom_machine, date_acquisition FROM appareils WHERE client_id=? AND date_acquisition!=''",
+        "SELECT nom_machine, date_achat FROM appareils WHERE client_id=? AND date_achat!='' AND date_achat IS NOT NULL",
         (cid,)).fetchall()
 
     age_groups = {
@@ -1768,12 +1768,12 @@ def _compute_device_age(conn, cid, today):
 
     for row in devices:
         d = row_to_dict(row)
-        if not d.get('date_acquisition'):
+        if not d.get('date_achat'):
             age_groups['unknown'].append(d)
             continue
 
         try:
-            acq_date = date.fromisoformat(d['date_acquisition'])
+            acq_date = date.fromisoformat(d['date_achat'])
             age_days = (today - acq_date).days
             age_years = age_days / 365.25
 
@@ -1801,7 +1801,7 @@ def _compute_contracts_timeline(conn, cid, today):
     """Returns upcoming contract renewals/expirations timeline."""
     contracts = []
     for row in conn.execute(
-        "SELECT id, description, date_fin, montant FROM contrats "
+        "SELECT id, titre, date_fin, montant_ht FROM contrats "
         "WHERE client_id=? AND statut='actif' AND date_fin!='' "
         "ORDER BY date_fin LIMIT 10",
         (cid,)).fetchall():
