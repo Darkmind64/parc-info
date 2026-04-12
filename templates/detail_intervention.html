@@ -84,8 +84,8 @@
 
             {% if intervention.contrat_id %}
             <div style="padding: .6rem 0; border-bottom: 1px solid var(--border);">
-                <div style="color: var(--text-secondary); font-size: .85rem; margin-bottom: .2rem;">Contrat associé</div>
-                <a href="/contrat/{{ intervention.contrat_id }}">📋 {{ intervention.contrat_titre or 'Contrat #' ~ intervention.contrat_id }}</a>
+                <div style="color: var(--text-secondary); font-size: .85rem; margin-bottom: .4rem;">Contrat associé</div>
+                <span class="badge badge-blue" style="display: inline-block; padding: .4rem .6rem;">📋 {{ intervention.contrat_titre or 'Contrat #' ~ intervention.contrat_id }}</span>
             </div>
             {% endif %}
 
@@ -118,15 +118,15 @@
         <div class="card">
             <div class="card-title">🖥 Appareils intervenus ({{ appareils_lies|length }})</div>
             {% if appareils_lies %}
+            <div style="display: flex; flex-wrap: wrap; gap: .6rem;">
             {% for a in appareils_lies %}
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--border);">
-                <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: .9rem;">{{ a.nom_machine }}</strong>
-                    <div style="font-size: .8rem; color: var(--text-secondary);">{{ a.type_appareil }}</div>
-                </div>
-                <a href="/appareil/{{ a.id }}" class="mono" style="font-size: .8rem; color: var(--accent);">{{ a.adresse_ip }}</a>
-            </div>
+                <span class="badge badge-blue" style="display: inline-flex; flex-direction: column; padding: .5rem .7rem; font-size: .75rem;">
+                    <strong>{{ a.nom_machine }}</strong>
+                    <span style="font-size: .7rem; opacity: .8;">{{ a.type_appareil }}</span>
+                    {% if a.adresse_ip %}<span style="font-family: monospace; font-size: .7rem; opacity: .8;">{{ a.adresse_ip }}</span>{% endif %}
+                </span>
             {% endfor %}
+            </div>
             {% else %}
             <p style="color: var(--text-muted); font-size: .85rem; margin: 0;">Aucun appareil assigné</p>
             {% endif %}
@@ -136,15 +136,14 @@
         <div class="card">
             <div class="card-title">🖱 Périphériques intervenus ({{ peripheriques_lies|length }})</div>
             {% if peripheriques_lies %}
+            <div style="display: flex; flex-wrap: wrap; gap: .6rem;">
             {% for p in peripheriques_lies %}
-            <div style="display: flex; justify-content: space-between; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--border);">
-                <div style="flex: 1; min-width: 0;">
-                    <strong style="font-size: .9rem;">{{ p.marque }} {{ p.modele }}</strong>
-                    <div style="font-size: .8rem; color: var(--text-secondary);">{{ p.categorie }}</div>
-                </div>
-                <a href="/peripherique/{{ p.id }}" style="font-size: .8rem; color: var(--accent);">→</a>
-            </div>
+                <span class="badge badge-secondary" style="display: inline-flex; flex-direction: column; padding: .5rem .7rem; font-size: .75rem;">
+                    <strong>{{ p.marque }} {{ p.modele }}</strong>
+                    <span style="font-size: .7rem; opacity: .8;">{{ p.categorie }}</span>
+                </span>
             {% endfor %}
+            </div>
             {% else %}
             <p style="color: var(--text-muted); font-size: .85rem; margin: 0;">Aucun périphérique assigné</p>
             {% endif %}
@@ -169,8 +168,8 @@
                         <div style="font-size: .75rem; color: var(--text-secondary);">{{ d.type_doc or 'Document' }} · {{ d.taille_fmt }} · {{ d.date_upload[:10] }}</div>
                     </div>
                     <div style="display: flex; gap: .2rem; flex-shrink: 0;">
-                        <a href="/intervention/document/{{ d.id }}/apercu" class="btn btn-xs" title="Aperçu">👁</a>
-                        <a href="/intervention/document/{{ d.id }}/telecharger" class="btn btn-xs" title="Télécharger">⬇</a>
+                        <a href="/intervention/document/{{ d.id }}/apercu" target="_blank" class="btn btn-xs" title="Aperçu">👁</a>
+                        <a href="/intervention/document/{{ d.id }}/telecharger" target="_blank" class="btn btn-xs" title="Télécharger">⬇</a>
                         <button class="btn btn-xs" onclick="supprimerDoc({{ d.id }}, '{{ d.nom }}')" title="Supprimer">✕</button>
                     </div>
                 </div>
