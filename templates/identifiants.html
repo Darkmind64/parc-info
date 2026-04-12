@@ -14,6 +14,14 @@
 .copy-btn:hover { border-color:var(--accent); color:var(--accent); }
 .copy-btn.copied { border-color:var(--accent-green); color:var(--accent-green); }
 .pwd-btns { display:flex; gap:4px; flex-wrap:wrap; }
+/* Stat chips (consistent with other modules) */
+.stat-chips { display:flex; gap:.6rem; flex-wrap:wrap; margin-bottom:1.2rem; }
+.sc { display:flex; align-items:center; gap:.5rem; padding:.35rem .9rem; border-radius:20px; border:1px solid; font-size:.78rem; font-weight:600; text-decoration:none; cursor:pointer; transition:all .15s; background:none; }
+.sc-all    { color:var(--accent);        border-color:rgba(0,201,255,.35); }
+.sc-all.on { background:rgba(0,201,255,.1); }
+.sc-cat    { color:var(--accent);        border-color:rgba(0,201,255,.35); }
+.sc-cat.on { background:rgba(0,201,255,.1); }
+.sc-n { font-family:'Share Tech Mono',monospace; font-size:.85rem; font-weight:700; }
 .cat-filter { display:flex; gap:0.4rem; flex-wrap:wrap; margin-bottom:1.5rem; }
 .cat-chip { padding:0.25rem 0.8rem; border-radius:20px; border:1px solid var(--border); font-size:0.75rem; font-weight:600; text-decoration:none; color:var(--text-secondary); transition:all 0.15s; }
 .cat-chip:hover { border-color:var(--accent); color:var(--accent); }
@@ -46,17 +54,20 @@ th[data-col]:hover { color:var(--accent) !important; background:rgba(0,201,255,.
     <p><span style="color:{{ client.couleur or '#00c9ff' }}; font-weight:700;">{{ client.nom }}</span> — {{ pagination.total }} identifiant(s){% if pagination.pages > 1 %} <span style="color:var(--text-muted);font-size:.8rem;">— page {{ pagination.page }}/{{ pagination.pages }}</span>{% endif %}</p>
 </div>
 
-<div class="actions-row">
-    <div style="display:flex;flex-direction:column;gap:0.6rem;">
-        <div class="cat-filter">
-            <a href="/identifiants" class="cat-chip {% if not filtre_cat %}active{% endif %}">Tous</a>
-            {% for cat in cats_utilisees %}
-            <a href="/identifiants?cat={{ cat|urlencode }}" class="cat-chip {% if filtre_cat == cat %}active{% endif %}">{{ cat }}</a>
-            {% endfor %}
-        </div>
-        <input type="text" id="search-ident" placeholder="🔍 Rechercher..." oninput="filtrerIdents()"
-               style="width:260px;padding:0.4rem 0.8rem;font-size:0.85rem;">
+<div style="margin-bottom:1.5rem;">
+    {% if stats %}
+    <div class="stat-chips">
+        <a href="/identifiants" class="sc sc-all {% if not filtre_cat %}on{% endif %}">Tous <span class="sc-n">{{ stats.total }}</span></a>
+        {% for cat in cats_utilisees %}
+        <a href="/identifiants?cat={{ cat|urlencode }}" class="sc sc-cat {% if filtre_cat == cat %}on{% endif %}">{{ cat }} <span class="sc-n">{{ stats.get(cat, 0) }}</span></a>
+        {% endfor %}
     </div>
+    {% endif %}
+</div>
+
+<div class="actions-row">
+    <input type="text" id="search-ident" placeholder="🔍 Rechercher..." oninput="filtrerIdents()"
+           style="width:260px;padding:0.4rem 0.8rem;font-size:0.85rem;">
     <a href="/identifiant/nouveau" class="btn btn-success">+ Ajouter</a>
 </div>
 

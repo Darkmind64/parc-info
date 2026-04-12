@@ -2692,6 +2692,15 @@ def liste_identifiants():
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
     cats = [r[0] for r in conn.execute(
         'SELECT DISTINCT categorie FROM identifiants WHERE client_id=? ORDER BY categorie', (cid,)).fetchall()]
+
+    # Générer les statistiques par catégorie
+    stats = {'total': 0}
+    total_result = conn.execute('SELECT COUNT(*) FROM identifiants WHERE client_id=?', (cid,)).fetchone()
+    stats['total'] = total_result[0] if total_result else 0
+    for cat in cats:
+        count_result = conn.execute('SELECT COUNT(*) FROM identifiants WHERE client_id=? AND categorie=?', (cid, cat)).fetchone()
+        stats[cat] = count_result[0] if count_result else 0
+
     conn.close()
     for i in ids_:
         if i.get('date_expiration'):
@@ -2736,7 +2745,7 @@ def liste_identifiants():
     return render_template('identifiants.html', identifiants=ids_, wifi_parc=wifi_parc, client=client,
                            clients=get_clients(), client_actif_id=cid,
                            categories=get_liste('categories_identifiants'), cats_utilisees=cats,
-                           filtre_cat=filtre_cat, pagination=pagination)
+                           filtre_cat=filtre_cat, pagination=pagination, stats=stats)
 
 @app.route('/identifiant/nouveau', methods=['GET','POST'])
 def nouvel_identifiant():
