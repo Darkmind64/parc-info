@@ -1124,7 +1124,22 @@ def api_config_save():
                 or k.startswith('type_badge_')
                 or k.startswith('type_desc_')  # Nouveau: descriptions de types
                 or k == 'mode'):
-            valid_config[k] = str(v)
+            # Special validation for dashboard_widgets_size (Phase 9)
+            if k == 'dashboard_widgets_size':
+                # Ensure it's valid JSON before saving
+                try:
+                    sizes = json.loads(str(v))
+                    # Validate all sizes are valid
+                    for widget_id, size in sizes.items():
+                        if size not in ('small', 'medium', 'large'):
+                            logger.warning(f"Invalid widget size: {widget_id}={size}")
+                            return jsonify({'error': 'Invalid widget size value'}), 400
+                    valid_config[k] = json.dumps(sizes)  # Re-serialize to ensure valid JSON
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.warning(f"Invalid dashboard_widgets_size JSON: {str(e)}")
+                    return jsonify({'error': 'Invalid JSON in dashboard_widgets_size'}), 400
+            else:
+                valid_config[k] = str(v)
 
     # ✓ Sauvegarder tout en UNE SEULE transaction (beaucoup plus rapide)
     # Les clés personnelles iront dans user_preferences, les autres dans config
@@ -1905,6 +1920,39 @@ def single_client_dashboard(cid):
         enabled_widgets = [w.strip() for w in enabled_widgets_str.split(',') if w.strip()]
         widget_order = [w.strip() for w in widget_order_str.split(',') if w.strip()]
 
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 9: Parse widget sizes from user preferences (Phase 9)
+        # ═══════════════════════════════════════════════════════════════════
+        # Default widget sizes per widget_id
+        WIDGET_DEFAULT_SIZES = {
+            'critical-alerts': 'large',
+            'kpi': 'large',
+            'av-status': 'medium',
+            'network-status': 'large',
+            'device-types': 'medium',
+            'peripherals': 'medium',
+            'device-age': 'small',
+            'contracts-timeline': 'large',
+            'recent-activity': 'large',
+            'interventions': 'small',
+            'business-software': 'medium',
+            'network-info': 'medium',
+        }
+
+        # Parse user's widget size preferences (JSON)
+        widget_sizes_str = cfg_get('dashboard_widgets_size', '{}', user_id)
+        try:
+            widget_sizes_json = json.loads(widget_sizes_str)
+        except (json.JSONDecodeError, ValueError):
+            widget_sizes_json = {}
+
+        # Build final sizes dict with defaults
+        widget_sizes = {}
+        for widget_id in enabled_widgets + widget_order:
+            if widget_id in WIDGET_DEFAULT_SIZES:
+                # Use user's size if specified, otherwise use default
+                widget_sizes[widget_id] = widget_sizes_json.get(widget_id, WIDGET_DEFAULT_SIZES[widget_id])
+
         # Build complete widget_data dict with all widget calculations
         # (even disabled widgets may be re-enabled later without reload)
         try:
@@ -1978,6 +2026,8 @@ def single_client_dashboard(cid):
             'enabled_widgets': enabled_widgets,
             'widget_order': widget_order,
             'widget_data': widget_data,
+            # Widget sizes (Phase 9)
+            'widget_sizes': widget_sizes,
         }
 
         return render_template('client_dashboard.html', **template_data)

@@ -48,7 +48,8 @@
       "Bash(wc -l \"/e/Claude Code/parc_info\"/*.py)",
       "Bash(ls -la \"/e/Claude Code/parc_info/\"*.md)",
       "Bash(python -c \"from app import app; print\\('App imports successfully'\\)\")",
-      "Bash(python -c \"from app import app; print\\('OK'\\)\")"
+      "Bash(python -c \"from app import app; print\\('OK'\\)\")",
+      "Bash(python)"
     ]
   }
 }

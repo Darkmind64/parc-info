@@ -1883,6 +1883,23 @@ async function reinitialiserConfig() {
 }
 
 // ─── DASHBOARD WIDGET CONFIGURATION ──────────────────────────────────────────────────
+const WIDGET_DEFAULT_SIZES = {
+    'critical-alerts': 'large',
+    'kpi': 'large',
+    'av-status': 'medium',
+    'network-status': 'large',
+    'device-types': 'medium',
+    'peripherals': 'medium',
+    'device-age': 'small',
+    'contracts-timeline': 'large',
+    'recent-activity': 'large',
+    'interventions': 'small',
+    'business-software': 'medium',
+    'network-info': 'medium',
+};
+
+let currentWidgetSizes = {};  // Track current sizes during config session
+
 const DASHBOARD_WIDGETS = [
     { id: 'critical-alerts', name: '⚠️ Alertes critiques', desc: 'Problèmes urgents du parc' },
     { id: 'kpi', name: '📊 KPI', desc: '6 indicateurs clés de performance' },
@@ -1905,6 +1922,14 @@ function initDashboardWidgetConfig() {
     const enabledStr = g('dashboard_widgets_enabled') || 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info';
     const orderStr = g('dashboard_widgets_order') || 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info';
 
+    // Parse widget sizes from cfgData (Phase 9)
+    let sizeStr = g('dashboard_widgets_size') || '{}';
+    try {
+        currentWidgetSizes = JSON.parse(sizeStr);
+    } catch (e) {
+        currentWidgetSizes = {};
+    }
+
     const enabled = new Set(enabledStr.split(',').map(s => s.trim()).filter(s => s));
     const order = orderStr.split(',').map(s => s.trim()).filter(s => s);
 
@@ -1914,6 +1939,8 @@ function initDashboardWidgetConfig() {
         if (!widget) return;
 
         const isEnabled = enabled.has(widgetId);
+        const currentSize = currentWidgetSizes[widgetId] || WIDGET_DEFAULT_SIZES[widgetId] || 'large';
+
         html += `
             <div class="widget-config-item" draggable="true" data-widget="${widgetId}" style="display:flex;align-items:center;gap:.5rem;padding:.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-secondary);cursor:grab;transition:all .15s;">
                 <span class="drag-handle" style="cursor:grab;color:var(--text-muted);font-size:.8rem;user-select:none;">⋮⋮</span>
@@ -1922,6 +1949,24 @@ function initDashboardWidgetConfig() {
                 <div style="flex:1;font-size:.8rem;">
                     <div style="font-weight:600;color:var(--text-primary);">${widget.name}</div>
                     <div style="color:var(--text-secondary);font-size:.75rem;">${widget.desc}</div>
+                </div>
+                <!-- Size buttons (Phase 9) -->
+                <div style="display:flex;gap:.3rem;margin-left:.5rem;flex-shrink:0;">
+                    <button type="button" class="size-btn size-btn-S ${currentSize === 'small' ? 'active' : ''}"
+                            onclick="setSizeWidget('${widgetId}', 'small')"
+                            title="Petit (33%)" style="padding:.25rem .4rem;font-size:.65rem;border:1px solid var(--border);background:${currentSize === 'small' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentSize === 'small' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:3px;cursor:pointer;transition:all .15s;">
+                        S
+                    </button>
+                    <button type="button" class="size-btn size-btn-M ${currentSize === 'medium' ? 'active' : ''}"
+                            onclick="setSizeWidget('${widgetId}', 'medium')"
+                            title="Moyen (50%)" style="padding:.25rem .4rem;font-size:.65rem;border:1px solid var(--border);background:${currentSize === 'medium' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentSize === 'medium' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:3px;cursor:pointer;transition:all .15s;">
+                        M
+                    </button>
+                    <button type="button" class="size-btn size-btn-L ${currentSize === 'large' ? 'active' : ''}"
+                            onclick="setSizeWidget('${widgetId}', 'large')"
+                            title="Grand (100%)" style="padding:.25rem .4rem;font-size:.65rem;border:1px solid var(--border);background:${currentSize === 'large' ? 'var(--accent)' : 'var(--bg-secondary)'};color:${currentSize === 'large' ? 'var(--bg-primary)' : 'var(--text-primary)'};border-radius:3px;cursor:pointer;transition:all .15s;">
+                        L
+                    </button>
                 </div>
             </div>
         `;
@@ -1983,6 +2028,30 @@ function setupWidgetDragDrop(container) {
     });
 }
 
+function setSizeWidget(widgetId, size) {
+    // Validate size is valid
+    if (!['small', 'medium', 'large'].includes(size)) return;
+
+    // Update in-memory sizes
+    currentWidgetSizes[widgetId] = size;
+
+    // Update button styles
+    const container = document.getElementById('dashboard-widgets-config');
+    const item = container?.querySelector(`[data-widget="${widgetId}"]`);
+    if (item) {
+        const buttons = item.querySelectorAll('.size-btn');
+        buttons.forEach(btn => {
+            const isActive = btn.textContent.trim() === size.charAt(0).toUpperCase();
+            btn.style.background = isActive ? 'var(--accent)' : 'var(--bg-secondary)';
+            btn.style.color = isActive ? 'var(--bg-primary)' : 'var(--text-primary)';
+            btn.classList.toggle('active', isActive);
+        });
+    }
+
+    // Save immediately
+    saveWidgetConfig({ sizes: currentWidgetSizes });
+}
+
 function saveWidgetConfig(changes) {
     const enabledStr = g('dashboard_widgets_enabled') || '';
     const orderStr = g('dashboard_widgets_order') || '';
@@ -1990,6 +2059,7 @@ function saveWidgetConfig(changes) {
     const config = {
         'dashboard_widgets_enabled': changes.enabled || enabledStr,
         'dashboard_widgets_order': changes.order || orderStr,
+        'dashboard_widgets_size': JSON.stringify(changes.sizes || currentWidgetSizes || {}),
     };
 
     fetch('/api/config', {

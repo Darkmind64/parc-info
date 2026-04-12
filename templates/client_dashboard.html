@@ -3,7 +3,34 @@
 
 {% block extra_styles %}
 <style>
-/* ── GRILLE ── */
+/* ── GRILLE 12-COLONNES AVEC TAILLES WIDGETS ── */
+.widgets-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 1.2rem;
+    margin-bottom: 1.2rem;
+}
+
+/* Tailles widget (desktop) */
+.widget-small   { grid-column: span 4; }   /* 33% */
+.widget-medium  { grid-column: span 6; }   /* 50% */
+.widget-large   { grid-column: span 12; }  /* 100% */
+
+/* Breakpoint tablet (≤1200px): small collapse to 50% */
+@media(max-width: 1200px) {
+    .widget-small { grid-column: span 6; }
+}
+
+/* Breakpoint mobile (≤800px): all 100% */
+@media(max-width: 800px) {
+    .widget-small,
+    .widget-medium,
+    .widget-large {
+        grid-column: span 12;
+    }
+}
+
+/* Ancienne grille (compatible) */
 .dash-row    { display:grid; gap:1.2rem; margin-bottom:1.2rem; }
 .cols-6      { grid-template-columns: repeat(6,1fr); }
 .cols-3      { grid-template-columns: repeat(3,1fr); }
@@ -179,8 +206,11 @@
      ═══════════════════════════════════════════════════════════════════════════════════ -->
 
 {% if widget_order and enabled_widgets %}
+<div class="widgets-grid">
     {% for widget_id in widget_order %}
         {% if widget_id in enabled_widgets %}
+        <!-- Widget wrapper with size class (Phase 9) -->
+        <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }}">
 
             <!-- ══ WIDGET: CRITICAL ALERTS ════════════════════════════════════════ -->
             {% if widget_id == 'critical-alerts' %}
@@ -570,8 +600,10 @@
 
             {% endif %}
 
+        </div> <!-- Close widget-size wrapper (Phase 9) -->
         {% endif %}
     {% endfor %}
+</div> <!-- Close widgets-grid (Phase 9) -->
 {% else %}
     <!-- Fallback: No widget preferences configured (shouldn't happen, but safety net) -->
     <div style="padding:1.5rem;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;text-align:center;color:var(--text-muted);">
