@@ -2893,6 +2893,13 @@ def upload_document(id):
         (appareil_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload)
         VALUES (?,?,?,?,?,?,?,?)''',
         (id, cid, nom, desc, type_doc, unique, taille, now))
+
+    # Log document upload
+    app_title = conn.execute('SELECT nom_machine FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone()
+    app_name = app_title[0] if app_title else f'Appareil #{id}'
+    log_history(conn, cid, 'appareil', id, app_name, 'Ajout de document',
+                _diff_json({}, {'nom': nom, 'fichier': unique, 'type_doc': type_doc}))
+
     conn.commit(); conn.close()
     flash(f'Document « {nom} » uploadé avec succès', 'success')
     next_url = request.form.get('next') or url_for('editer_appareil', id=id)
@@ -2920,6 +2927,13 @@ def supprimer_document(id):
     appareil_id = doc.get('appareil_id', 0)
     if doc:
         conn.execute('DELETE FROM documents_appareils WHERE id=?', (id,))
+
+        # Log document deletion
+        app_title = conn.execute('SELECT nom_machine FROM appareils WHERE id=? AND client_id=?', (appareil_id, cid)).fetchone()
+        app_name = app_title[0] if app_title else f'Appareil #{appareil_id}'
+        log_history(conn, cid, 'appareil', appareil_id, app_name, 'Suppression de document',
+                    _diff_json({'nom': doc.get('nom', ''), 'fichier': doc.get('nom_fichier', '')}, {}))
+
         conn.commit()
         try:
             os.remove(os.path.join(UPLOAD_FOLDER, doc['nom_fichier']))
@@ -3016,6 +3030,13 @@ def upload_doc_peripherique(id):
         (peripherique_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload)
         VALUES (?,?,?,?,?,?,?,?)''',
         (id, cid, nom, desc, type_doc, unique, taille, datetime.now().isoformat()))
+
+    # Log document upload
+    per_title = conn.execute('SELECT CONCAT(marque, \' \', modele) FROM peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone()
+    per_name = per_title[0] if per_title else f'Périphérique #{id}'
+    log_history(conn, cid, 'peripherique', id, per_name, 'Ajout de document',
+                _diff_json({}, {'nom': nom, 'fichier': unique, 'type_doc': type_doc}))
+
     conn.commit(); conn.close()
     flash(f'Document « {nom} » uploadé', 'success')
     return redirect(url_for('editer_peripherique', id=id))
@@ -3052,6 +3073,13 @@ def supprimer_doc_peripherique(id):
     periph_id = doc.get('peripherique_id', 0)
     if doc:
         conn.execute('DELETE FROM documents_peripheriques WHERE id=?', (id,))
+
+        # Log document deletion
+        per_title = conn.execute('SELECT CONCAT(marque, \' \', modele) FROM peripheriques WHERE id=? AND client_id=?', (periph_id, cid)).fetchone()
+        per_name = per_title[0] if per_title else f'Périphérique #{periph_id}'
+        log_history(conn, cid, 'peripherique', periph_id, per_name, 'Suppression de document',
+                    _diff_json({'nom': doc.get('nom', ''), 'fichier': doc.get('nom_fichier', '')}, {}))
+
         conn.commit()
         try: os.remove(os.path.join(UPLOAD_FOLDER, doc['nom_fichier']))
         except: pass
@@ -4485,6 +4513,13 @@ def upload_doc_contrat(id):
     conn = get_db()
     conn.execute('INSERT INTO documents_contrats (contrat_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload) VALUES (?,?,?,?,?,?,?,?)',
                  (id, cid, nom, request.form.get('description',''), request.form.get('type_doc',''), unique, os.path.getsize(save_path), now))
+
+    # Log document upload
+    ctr_title = conn.execute('SELECT titre FROM contrats WHERE id=? AND client_id=?', (id, cid)).fetchone()
+    ctr_name = ctr_title[0] if ctr_title else f'Contrat #{id}'
+    log_history(conn, cid, 'contrat', id, ctr_name, 'Ajout de document',
+                _diff_json({}, {'nom': nom, 'fichier': unique, 'type_doc': request.form.get('type_doc','')}))
+
     conn.commit(); conn.close()
     flash(f'Document ajouté', 'success')
     return redirect(url_for('detail_contrat', id=id))
@@ -4500,6 +4535,13 @@ def supprimer_doc_contrat(id):
     ctr_id = doc.get('contrat_id', 0)
     if doc:
         conn.execute('DELETE FROM documents_contrats WHERE id=?', (id,))
+
+        # Log document deletion
+        ctr_title = conn.execute('SELECT titre FROM contrats WHERE id=? AND client_id=?', (ctr_id, cid)).fetchone()
+        ctr_name = ctr_title[0] if ctr_title else f'Contrat #{ctr_id}'
+        log_history(conn, cid, 'contrat', ctr_id, ctr_name, 'Suppression de document',
+                    _diff_json({'nom': doc.get('nom', ''), 'fichier': doc.get('nom_fichier', '')}, {}))
+
         conn.commit()
         try: os.remove(os.path.join(UPLOAD_FOLDER, doc['nom_fichier']))
         except: pass
@@ -4803,6 +4845,9 @@ def editer_intervention(id):
         user = get_auth_user()
         now = datetime.now().isoformat()
 
+        # Fetch old values for comparison
+        _old = row_to_dict(conn.execute('SELECT * FROM interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+
         contrat_id = None
         try:
             contrat_id = int(f.get('contrat_id')) if f.get('contrat_id') else None
@@ -4851,7 +4896,11 @@ def editer_intervention(id):
             except:
                 pass
 
-        log_history(conn, cid, 'intervention', id, f.get('titre', '') or f'Intervention #{id}', 'Modification')
+        # Record change details
+        _cols_i = _ENTITE_COLS['intervention']
+        _details_i = _diff_json({k: str(_old.get(k,'') or '') for k in _cols_i},
+                                 {k: str(f.get(k,'') or '') for k in _cols_i})
+        log_history(conn, cid, 'intervention', id, f.get('titre', '') or f'Intervention #{id}', 'Modification', _details_i)
         conn.commit()
         conn.close()
         flash('Intervention mise à jour', 'success')
@@ -4915,6 +4964,13 @@ def upload_doc_intervention(id):
         'INSERT INTO documents_interventions (intervention_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload) VALUES (?,?,?,?,?,?,?,?)',
         (id, cid, nom, request.form.get('description', ''), request.form.get('type_doc', ''),
          unique, os.path.getsize(save_path), now))
+
+    # Log document upload
+    user = get_auth_user()
+    intv_title = conn.execute('SELECT titre FROM interventions WHERE id=? AND client_id=?', (id, cid)).fetchone()
+    intv_name = intv_title[0] if intv_title else f'Intervention #{id}'
+    log_history(conn, cid, 'intervention', id, intv_name, 'Ajout de document',
+                _diff_json({}, {'nom': nom, 'fichier': unique, 'type_doc': request.form.get('type_doc', '')}))
     conn.commit()
     conn.close()
 
@@ -4936,6 +4992,13 @@ def supprimer_doc_intervention(id):
 
     if doc:
         conn.execute('DELETE FROM documents_interventions WHERE id=?', (id,))
+
+        # Log document deletion
+        intv_title = conn.execute('SELECT titre FROM interventions WHERE id=? AND client_id=?', (intv_id, cid)).fetchone()
+        intv_name = intv_title[0] if intv_title else f'Intervention #{intv_id}'
+        log_history(conn, cid, 'intervention', intv_id, intv_name, 'Suppression de document',
+                    _diff_json({'nom': doc.get('nom', ''), 'fichier': doc.get('nom_fichier', '')}, {}))
+
         conn.commit()
         try:
             os.remove(os.path.join(UPLOAD_FOLDER, doc['nom_fichier']))
