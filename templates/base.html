@@ -2039,22 +2039,24 @@ function applyWidgetChangesToDashboard() {
     const grid = document.querySelector('.widgets-grid');
     if (!grid) return; // Pas sur le dashboard
 
-    // Obtenir tous les items de config dans leur ordre
-    const configItems = Array.from(document.querySelectorAll('.widget-config-item'));
+    // Obtenir tous les widgets du dashboard par leur data-widget-id
+    const dashboardWidgets = grid.querySelectorAll('[data-widget-id]');
 
-    // Obtenir les enfants directs du grid (tous les widgets)
-    const gridChildren = Array.from(grid.children);
+    // Mettre à jour chaque widget selon sa configuration
+    dashboardWidgets.forEach(dashWidget => {
+        const widgetId = dashWidget.dataset.widgetId;
 
-    // Parcourir les items de config et mettre à jour chaque widget en conséquence
-    let visibleWidgetIndex = 0;
-    configItems.forEach(item => {
-        const widgetId = item.dataset.widget;
-        const checkbox = item.querySelector('input[type="checkbox"]');
+        // Trouver l'item de config correspondant
+        const configItem = document.querySelector(`.widget-config-item[data-widget="${widgetId}"]`);
+        if (!configItem) return;
+
+        const checkbox = configItem.querySelector('input[type="checkbox"]');
         const isEnabled = checkbox ? checkbox.checked : false;
 
-        if (isEnabled && visibleWidgetIndex < gridChildren.length) {
-            const dashWidget = gridChildren[visibleWidgetIndex];
+        // Mettre à jour la visibilité
+        dashWidget.style.display = isEnabled ? '' : 'none';
 
+        if (isEnabled) {
             // Mettre à jour la classe de taille
             // D'abord, retirer les anciennes classes widget-*
             const oldClass = Array.from(dashWidget.classList).find(c => c.match(/^widget-(small|medium|large)$/));
@@ -2065,8 +2067,6 @@ function applyWidgetChangesToDashboard() {
             // Ajouter la nouvelle classe
             const newSize = currentWidgetSizes[widgetId] || WIDGET_DEFAULT_SIZES[widgetId] || 'large';
             dashWidget.classList.add(`widget-${newSize}`);
-
-            visibleWidgetIndex++;
         }
     });
 }

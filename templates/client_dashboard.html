@@ -209,8 +209,8 @@
 <div class="widgets-grid">
     {% for widget_id in widget_order %}
         {% if widget_id in enabled_widgets %}
-        <!-- Widget wrapper with size class (Phase 9) -->
-        <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }}">
+        <!-- Widget wrapper with size class (Phase 9) - data-widget-id for real-time updates -->
+        <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }}" data-widget-id="{{ widget_id }}">
 
             <!-- ══ WIDGET: CRITICAL ALERTS ════════════════════════════════════════ -->
             {% if widget_id == 'critical-alerts' %}
