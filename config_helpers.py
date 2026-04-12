@@ -209,6 +209,8 @@ CFG_DEFAULTS = {
     'show_breadcrumb': '1',       # Show breadcrumb navigation (personal preference)
     'show_back_button': '1',      # Show "Back to overview" button (personal preference)
     'confirm_client_switch': '1', # Show confirmation modal before switching clients (personal preference)
+    # ── Interventions ────────────────────────────────────────────────────────
+    'types_interventions': '["maintenance préventive", "maintenance corrective", "dépannage", "installation", "upgrade", "support", "autre"]',
 }
 
 # Cache avec limite de taille (LRU-like) pour éviter memory leak

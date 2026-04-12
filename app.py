@@ -50,7 +50,7 @@ from config_helpers import (LISTE_DEFAULTS, CFG_DEFAULTS,
 from client_helpers import (paginate, get_client_access, can_write,
                              get_client_with_acces, get_client_id, get_clients,
                              log_history, log_error, garantie_active, human_size,
-                             fmt_appareils, fmt_garantie_periph, fmt_contrat)
+                             fmt_appareils, fmt_garantie_periph, fmt_contrat, fmt_intervention)
 
 # ─── HELPER: Retry pour requêtes DB verrouillées ─────────────────────────────
 def retry_db_query(query_func, max_retries=5):
@@ -841,6 +841,63 @@ def init_db():
             conn.commit()
     except Exception:
         pass
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # TABLE INTERVENTIONS
+    # ════════════════════════════════════════════════════════════════════════════
+    c.execute('''CREATE TABLE IF NOT EXISTS interventions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        titre TEXT DEFAULT '',
+        type_intervention TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        date_intervention TEXT NOT NULL,
+        heure_debut TEXT DEFAULT '',
+        heure_fin TEXT DEFAULT '',
+        duree_minutes INTEGER DEFAULT 0,
+        technicien_nom TEXT DEFAULT '',
+        technicien_email TEXT DEFAULT '',
+        statut TEXT DEFAULT 'completee',
+        contrat_id INTEGER DEFAULT NULL,
+        cout_ht REAL DEFAULT 0,
+        devise TEXT DEFAULT 'EUR',
+        date_creation TEXT DEFAULT '',
+        date_maj TEXT DEFAULT '',
+        auth_user_id INTEGER,
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+        FOREIGN KEY(contrat_id) REFERENCES contrats(id) ON DELETE SET NULL,
+        FOREIGN KEY(auth_user_id) REFERENCES auth_users(id) ON DELETE SET NULL)''')
+
+    # TABLE PIVOT: INTERVENTIONS <-> APPAREILS
+    c.execute('''CREATE TABLE IF NOT EXISTS interventions_appareils (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        intervention_id INTEGER NOT NULL,
+        appareil_id INTEGER NOT NULL,
+        FOREIGN KEY(intervention_id) REFERENCES interventions(id) ON DELETE CASCADE,
+        FOREIGN KEY(appareil_id) REFERENCES appareils(id) ON DELETE CASCADE)''')
+
+    # TABLE PIVOT: INTERVENTIONS <-> PERIPHERIQUES
+    c.execute('''CREATE TABLE IF NOT EXISTS interventions_peripheriques (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        intervention_id INTEGER NOT NULL,
+        peripherique_id INTEGER NOT NULL,
+        FOREIGN KEY(intervention_id) REFERENCES interventions(id) ON DELETE CASCADE,
+        FOREIGN KEY(peripherique_id) REFERENCES peripheriques(id) ON DELETE CASCADE)''')
+
+    # TABLE DOCUMENTS INTERVENTIONS
+    c.execute('''CREATE TABLE IF NOT EXISTS documents_interventions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        intervention_id INTEGER NOT NULL,
+        client_id INTEGER NOT NULL,
+        nom TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        type_doc TEXT DEFAULT '',
+        nom_fichier TEXT DEFAULT '',
+        taille INTEGER DEFAULT 0,
+        date_upload TEXT DEFAULT '',
+        FOREIGN KEY(intervention_id) REFERENCES interventions(id) ON DELETE CASCADE,
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
 
     # Migration : colonnes antivirus / EDR / RMM sur appareils
     for _col, _def in [('av_marque', "TEXT DEFAULT ''"), ('av_nom', "TEXT DEFAULT ''"),
@@ -4477,6 +4534,420 @@ def _extract_contrat(cid, f):
 
 
 
+# --- INTERVENTIONS ----------------------------------------------------------
+
+@app.route('/interventions')
+@login_required
+def liste_interventions():
+    cid = get_client_id()
+    if not cid: return redirect(url_for('nouveau_client'))
+    page = request.args.get('page', 1, type=int)
+    q = request.args.get('q', '')
+    filtre_type = request.args.get('type', '')
+    filtre_statut = request.args.get('statut', '')
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+
+    # Build query
+    query = 'SELECT * FROM interventions WHERE client_id=? AND statut != ?'
+    params = [cid, 'archivee']
+
+    if q:
+        query += ' AND titre LIKE ?'
+        params.append(f'%{q}%')
+    if filtre_type:
+        query += ' AND type_intervention=?'
+        params.append(filtre_type)
+    if filtre_statut:
+        query += ' AND statut=?'
+        params.append(filtre_statut)
+
+    query += ' ORDER BY date_intervention DESC'
+
+    rows, pagination = paginate(query, tuple(params), page)
+    interventions = [fmt_intervention(row_to_dict(r)) for r in rows]
+
+    # Stats
+    stats = {
+        'total': conn.execute(
+            'SELECT COUNT(*) FROM interventions WHERE client_id=? AND statut != ?', (cid, 'archivee')).fetchone()[0],
+        'planifiee': conn.execute(
+            "SELECT COUNT(*) FROM interventions WHERE client_id=? AND statut='planifiee'", (cid,)).fetchone()[0],
+        'en_cours': conn.execute(
+            "SELECT COUNT(*) FROM interventions WHERE client_id=? AND statut='en_cours'", (cid,)).fetchone()[0],
+        'completee': conn.execute(
+            "SELECT COUNT(*) FROM interventions WHERE client_id=? AND statut='completee'", (cid,)).fetchone()[0],
+    }
+
+    filtre_stat = ''
+    if filtre_statut:
+        filtre_stat = filtre_statut
+
+    types_interventions = get_liste('types_interventions')
+    conn.close()
+
+    return render_template('interventions.html', interventions=interventions, client=client,
+                          clients=get_clients(), client_actif_id=cid,
+                          pagination=pagination, stats=stats,
+                          filtre_type=filtre_type, filtre_statut=filtre_statut, filtre_stat=filtre_stat,
+                          types_interventions=types_interventions)
+
+@app.route('/intervention/nouveau', methods=['GET', 'POST'])
+@login_required
+def nouveau_intervention():
+    if not can_write():
+        flash('Accès en lecture seule — modification non autorisée', 'danger')
+        return redirect(url_for('liste_interventions'))
+
+    cid = get_client_id()
+    if not cid: return redirect(url_for('nouveau_client'))
+
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    appareils = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine, type_appareil, adresse_ip FROM appareils WHERE client_id=? ORDER BY nom_machine',
+        (cid,)).fetchall()]
+    peripheriques = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, categorie, marque, modele FROM peripheriques WHERE client_id=? ORDER BY categorie, marque',
+        (cid,)).fetchall()]
+    contrats = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, titre FROM contrats WHERE client_id=? ORDER BY titre', (cid,)).fetchall()]
+    types_interventions = get_liste('types_interventions')
+
+    if request.method == 'POST':
+        errs = validate_form([
+            ('titre', 'str', True),
+            ('type_intervention', 'str', True),
+            ('date_intervention', 'date', True),
+            ('description', 'str', True),
+        ], request.form)
+
+        if errs:
+            for e in errs: flash(e, 'danger')
+            return redirect(request.url)
+
+        f = request.form
+        user = get_auth_user()
+        now = datetime.now().isoformat()
+
+        conn = get_db()
+        cur = conn.cursor()
+
+        contrat_id = None
+        try:
+            contrat_id = int(f.get('contrat_id')) if f.get('contrat_id') else None
+        except:
+            pass
+
+        cout_ht = None
+        try:
+            cout_ht = float(f.get('cout_ht')) if f.get('cout_ht') else None
+        except:
+            pass
+
+        duree_minutes = 0
+        try:
+            duree_minutes = int(f.get('duree_minutes')) if f.get('duree_minutes') else 0
+        except:
+            pass
+
+        cur.execute("""INSERT INTO interventions
+            (client_id, titre, type_intervention, description, notes,
+             date_intervention, heure_debut, heure_fin, duree_minutes,
+             technicien_nom, technicien_email, statut, contrat_id, cout_ht, devise,
+             date_creation, date_maj, auth_user_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (cid, f.get('titre', ''), f.get('type_intervention', ''),
+             f.get('description', ''), f.get('notes', ''),
+             f.get('date_intervention', ''), f.get('heure_debut', ''), f.get('heure_fin', ''),
+             duree_minutes, f.get('technicien_nom', ''), f.get('technicien_email', ''),
+             f.get('statut', 'completee'), contrat_id, cout_ht, f.get('devise', 'EUR'),
+             now, now, user['id']))
+
+        intv_id = cur.lastrowid
+
+        # Link appareils
+        for app_id in request.form.getlist('appareils_lies'):
+            try:
+                conn.execute('INSERT INTO interventions_appareils (intervention_id, appareil_id) VALUES (?,?)',
+                           (intv_id, int(app_id)))
+            except:
+                pass
+
+        # Link peripheriques
+        for per_id in request.form.getlist('peripheriques_lies'):
+            try:
+                conn.execute('INSERT INTO interventions_peripheriques (intervention_id, peripherique_id) VALUES (?,?)',
+                           (intv_id, int(per_id)))
+            except:
+                pass
+
+        log_history(conn, cid, 'intervention', intv_id, f.get('titre', '') or f'Intervention #{intv_id}', 'Création')
+        conn.commit()
+        conn.close()
+        flash('Intervention créée', 'success')
+        return redirect(url_for('detail_intervention', id=intv_id))
+
+    conn.close()
+    return render_template('form_intervention.html', intervention=None,
+                          appareils=appareils, appareils_lies=[],
+                          peripheriques=peripheriques, peripheriques_lies=[],
+                          contrats=contrats, types_interventions=types_interventions,
+                          client=client, clients=get_clients(), client_actif_id=cid)
+
+@app.route('/intervention/<int:id>')
+@login_required
+def detail_intervention(id):
+    cid = get_client_id()
+    conn = get_db()
+
+    intv = fmt_intervention(row_to_dict(
+        conn.execute('SELECT * FROM interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {}))
+
+    if not intv:
+        conn.close()
+        return 'Intervention non trouvée', 404
+
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+
+    appareils_lies = [row_to_dict(r) for r in conn.execute(
+        'SELECT a.* FROM appareils a JOIN interventions_appareils ia ON a.id=ia.appareil_id WHERE ia.intervention_id=?',
+        (id,)).fetchall()]
+
+    peripheriques_lies = [row_to_dict(r) for r in conn.execute(
+        'SELECT p.* FROM peripheriques p JOIN interventions_peripheriques ip ON p.id=ip.peripherique_id WHERE ip.intervention_id=?',
+        (id,)).fetchall()]
+
+    docs = [row_to_dict(r) for r in conn.execute(
+        'SELECT * FROM documents_interventions WHERE intervention_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
+    for d in docs:
+        d['taille_fmt'] = human_size(d.get('taille', 0))
+
+    # Get contrat title if exists
+    if intv.get('contrat_id'):
+        contrat = conn.execute('SELECT titre FROM contrats WHERE id=?', (intv['contrat_id'],)).fetchone()
+        if contrat:
+            intv['contrat_titre'] = contrat[0]
+
+    conn.close()
+    return render_template('detail_intervention.html', intervention=intv,
+                          appareils_lies=appareils_lies, peripheriques_lies=peripheriques_lies,
+                          docs=docs, client=client, clients=get_clients(), client_actif_id=cid)
+
+@app.route('/intervention/<int:id>/editer', methods=['GET', 'POST'])
+@login_required
+def editer_intervention(id):
+    if not can_write():
+        flash('Accès en lecture seule — modification non autorisée', 'danger')
+        return redirect(url_for('liste_interventions'))
+
+    cid = get_client_id()
+    conn = get_db()
+
+    intv = fmt_intervention(row_to_dict(
+        conn.execute('SELECT * FROM interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {}))
+
+    if not intv:
+        conn.close()
+        return 'Intervention non trouvée', 404
+
+    appareils = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine, type_appareil, adresse_ip FROM appareils WHERE client_id=? ORDER BY nom_machine',
+        (cid,)).fetchall()]
+    peripheriques = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, categorie, marque, modele FROM peripheriques WHERE client_id=? ORDER BY categorie, marque',
+        (cid,)).fetchall()]
+    contrats = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, titre FROM contrats WHERE client_id=? ORDER BY titre', (cid,)).fetchall()]
+    types_interventions = get_liste('types_interventions')
+
+    if request.method == 'POST':
+        errs = validate_form([
+            ('titre', 'str', True),
+            ('type_intervention', 'str', True),
+            ('date_intervention', 'date', True),
+            ('description', 'str', True),
+        ], request.form)
+
+        if errs:
+            for e in errs: flash(e, 'danger')
+            return redirect(request.url)
+
+        f = request.form
+        user = get_auth_user()
+        now = datetime.now().isoformat()
+
+        contrat_id = None
+        try:
+            contrat_id = int(f.get('contrat_id')) if f.get('contrat_id') else None
+        except:
+            pass
+
+        cout_ht = None
+        try:
+            cout_ht = float(f.get('cout_ht')) if f.get('cout_ht') else None
+        except:
+            pass
+
+        duree_minutes = 0
+        try:
+            duree_minutes = int(f.get('duree_minutes')) if f.get('duree_minutes') else 0
+        except:
+            pass
+
+        conn.execute("""UPDATE interventions SET
+            titre=?, type_intervention=?, description=?, notes=?,
+            date_intervention=?, heure_debut=?, heure_fin=?, duree_minutes=?,
+            technicien_nom=?, technicien_email=?, statut=?, contrat_id=?, cout_ht=?, devise=?,
+            date_maj=? WHERE id=? AND client_id=?""",
+            (f.get('titre', ''), f.get('type_intervention', ''),
+             f.get('description', ''), f.get('notes', ''),
+             f.get('date_intervention', ''), f.get('heure_debut', ''), f.get('heure_fin', ''),
+             duree_minutes, f.get('technicien_nom', ''), f.get('technicien_email', ''),
+             f.get('statut', 'completee'), contrat_id, cout_ht, f.get('devise', 'EUR'),
+             now, id, cid))
+
+        # Reset liaisons
+        conn.execute('DELETE FROM interventions_appareils WHERE intervention_id=?', (id,))
+        conn.execute('DELETE FROM interventions_peripheriques WHERE intervention_id=?', (id,))
+
+        for app_id in request.form.getlist('appareils_lies'):
+            try:
+                conn.execute('INSERT INTO interventions_appareils (intervention_id, appareil_id) VALUES (?,?)',
+                           (id, int(app_id)))
+            except:
+                pass
+
+        for per_id in request.form.getlist('peripheriques_lies'):
+            try:
+                conn.execute('INSERT INTO interventions_peripheriques (intervention_id, peripherique_id) VALUES (?,?)',
+                           (id, int(per_id)))
+            except:
+                pass
+
+        log_history(conn, cid, 'intervention', id, f.get('titre', '') or f'Intervention #{id}', 'Modification')
+        conn.commit()
+        conn.close()
+        flash('Intervention mise à jour', 'success')
+        return redirect(url_for('detail_intervention', id=id))
+
+    appareils_lies = [r[0] for r in conn.execute(
+        'SELECT appareil_id FROM interventions_appareils WHERE intervention_id=?', (id,)).fetchall()]
+    peripheriques_lies = [r[0] for r in conn.execute(
+        'SELECT peripherique_id FROM interventions_peripheriques WHERE intervention_id=?', (id,)).fetchall()]
+
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    conn.close()
+
+    return render_template('form_intervention.html', intervention=intv,
+                          appareils=appareils, appareils_lies=appareils_lies,
+                          peripheriques=peripheriques, peripheriques_lies=peripheriques_lies,
+                          contrats=contrats, types_interventions=types_interventions,
+                          client=client, clients=get_clients(), client_actif_id=cid)
+
+@app.route('/intervention/<int:id>/supprimer', methods=['POST'])
+@login_required
+def supprimer_intervention(id):
+    if not can_write():
+        flash('Accès en lecture seule — modification non autorisée', 'danger')
+        return redirect(url_for('liste_interventions'))
+
+    cid = get_client_id()
+    conn = get_db()
+
+    # Soft delete: set status to archivee
+    conn.execute('UPDATE interventions SET statut=? WHERE id=? AND client_id=?',
+                ('archivee', id, cid))
+    log_history(conn, cid, 'intervention', id, f'Intervention #{id}', 'Archivage')
+    conn.commit()
+    conn.close()
+
+    flash('Intervention archivée', 'info')
+    return redirect(url_for('liste_interventions'))
+
+@app.route('/intervention/<int:id>/document/upload', methods=['POST'])
+@login_required
+def upload_doc_intervention(id):
+    cid = get_client_id()
+    if 'fichier' not in request.files:
+        return redirect(url_for('detail_intervention', id=id))
+
+    f = request.files['fichier']
+    if not f.filename or not allowed_file(f.filename):
+        flash('Type non autorisé', 'danger')
+        return redirect(url_for('detail_intervention', id=id))
+
+    unique = f"intv{id}_{int(time.time())}_{secure_filename(f.filename)}"
+    save_path = os.path.join(UPLOAD_FOLDER, unique)
+    f.save(save_path)
+
+    nom = request.form.get('nom', '') or f.filename
+    now = datetime.now().isoformat()
+
+    conn = get_db()
+    conn.execute(
+        'INSERT INTO documents_interventions (intervention_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload) VALUES (?,?,?,?,?,?,?,?)',
+        (id, cid, nom, request.form.get('description', ''), request.form.get('type_doc', ''),
+         unique, os.path.getsize(save_path), now))
+    conn.commit()
+    conn.close()
+
+    flash('Document ajouté', 'success')
+    return redirect(url_for('detail_intervention', id=id))
+
+@app.route('/intervention/document/<int:id>/supprimer', methods=['POST'])
+@login_required
+def supprimer_doc_intervention(id):
+    if not can_write():
+        flash('Accès en lecture seule — modification non autorisée', 'danger')
+        return redirect(url_for('liste_interventions'))
+
+    cid = get_client_id()
+    conn = get_db()
+    doc = row_to_dict(conn.execute(
+        'SELECT * FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    intv_id = doc.get('intervention_id', 0)
+
+    if doc:
+        conn.execute('DELETE FROM documents_interventions WHERE id=?', (id,))
+        conn.commit()
+        try:
+            os.remove(os.path.join(UPLOAD_FOLDER, doc['nom_fichier']))
+        except:
+            pass
+
+    conn.close()
+    return redirect(url_for('detail_intervention', id=intv_id))
+
+@app.route('/intervention/document/<int:id>/apercu')
+@login_required
+def apercu_doc_intervention(id):
+    cid = get_client_id()
+    conn = get_db()
+    doc = row_to_dict(conn.execute(
+        'SELECT * FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    conn.close()
+
+    if not doc:
+        return 'Not found', 404
+
+    return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+
+@app.route('/intervention/document/<int:id>/telecharger')
+@login_required
+def telecharger_doc_intervention(id):
+    cid = get_client_id()
+    conn = get_db()
+    doc = row_to_dict(conn.execute(
+        'SELECT * FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    conn.close()
+
+    if not doc:
+        return 'Not found', 404
+
+    return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
+
+
 @app.route('/identifiant/<int:id>/popup')
 def popup_identifiant(id):
     cid = get_client_id()
@@ -5003,11 +5474,15 @@ _ENTITE_COLS = {
         'preavis_jours','montant_ht','periodicite','description','notes','statut'],
     'utilisateur': ['prenom','nom','poste','email','telephone','login_windows','login_mail',
         'statut','notes','service_id'],
+    'intervention': ['titre','type_intervention','description','notes','date_intervention',
+        'heure_debut','heure_fin','duree_minutes','technicien_nom','technicien_email',
+        'statut','contrat_id','cout_ht','devise'],
 }
 
 _ENTITE_TABLE = {
     'appareil':'appareils','peripherique':'peripheriques',
     'identifiant':'identifiants','contrat':'contrats','utilisateur':'utilisateurs',
+    'intervention':'interventions',
 }
 
 

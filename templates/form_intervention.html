@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block title %}{% if intervention %}Modifier intervention{% else %}Nouvelle intervention{% endif %}{% endblock %}
+
+{% block content %}
+<style>
+.check-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: .4rem;
+}
+.check-item {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .45rem .7rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all .12s;
+}
+.check-item:hover {
+    border-color: rgba(0, 201, 255, .5);
+    background: rgba(0, 201, 255, .05);
+}
+.check-item input[type="checkbox"] {
+    cursor: pointer;
+}
+.check-item.checked {
+    border-color: rgba(0, 201, 255, .5);
+    background: rgba(0, 201, 255, .07);
+}
+.check-item input[type="checkbox"]:checked {
+    accent-color: var(--accent);
+}
+</style>
+
+<!-- HEADER -->
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem;">
+    <div>
+        <h1>{% if intervention %}Modifier intervention{% else %}Nouvelle intervention{% endif %}</h1>
+    </div>
+    {% if intervention %}
+    <a href="/intervention/{{ intervention.id }}" class="btn btn-secondary btn-sm">Annuler</a>
+    {% else %}
+    <a href="/interventions" class="btn btn-secondary btn-sm">Annuler</a>
+    {% endif %}
+</div>
+
+<form method="POST" id="form-intervention">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <!-- SECTION 1: INFORMATIONS INTERVENTION -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Informations de l'intervention</div>
+
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Titre <span class="req-star">*</span></label>
+                <input type="text" name="titre" value="{{ intervention.titre or '' }}" required style="width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Type d'intervention <span class="req-star">*</span></label>
+                <select name="type_intervention" required style="width: 100%;">
+                    <option value="">-- Sélectionner --</option>
+                    {% for t in types_interventions %}
+                    <option value="{{ t }}" {% if intervention and intervention.type_intervention == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Date de l'intervention <span class="req-star">*</span></label>
+                <input type="date" name="date_intervention" value="{{ intervention.date_intervention or '' }}" required style="width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Statut</label>
+                <select name="statut" style="width: 100%;">
+                    <option value="completee" {% if not intervention or intervention.statut == 'completee' %}selected{% endif %}>✓ Complétée</option>
+                    <option value="planifiee" {% if intervention and intervention.statut == 'planifiee' %}selected{% endif %}>🔵 Planifiée</option>
+                    <option value="en_cours" {% if intervention and intervention.statut == 'en_cours' %}selected{% endif %}>🔴 En cours</option>
+                    <option value="reportee" {% if intervention and intervention.statut == 'reportee' %}selected{% endif %}>🟠 Reportée</option>
+                    <option value="archivee" {% if intervention and intervention.statut == 'archivee' %}selected{% endif %}>⚫ Archivée</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Heure de début</label>
+                <input type="time" name="heure_debut" value="{{ intervention.heure_debut or '' }}" style="width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Heure de fin</label>
+                <input type="time" name="heure_fin" value="{{ intervention.heure_fin or '' }}" style="width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Durée (minutes)</label>
+                <input type="number" name="duree_minutes" value="{{ intervention.duree_minutes or '' }}" min="0" style="width: 100%;">
+            </div>
+        </div>
+
+        <div class="form-row cols-1">
+            <div class="form-group">
+                <label>Description <span class="req-star">*</span></label>
+                <textarea name="description" required style="width: 100%; min-height: 100px;">{{ intervention.description or '' }}</textarea>
+            </div>
+        </div>
+
+        <div class="form-row cols-1">
+            <div class="form-group">
+                <label>Notes (supplémentaires)</label>
+                <textarea name="notes" style="width: 100%; min-height: 80px;">{{ intervention.notes or '' }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- SECTION 2: TECHNICIEN -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Technicien responsable</div>
+
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Nom du technicien</label>
+                <input type="text" name="technicien_nom" value="{{ intervention.technicien_nom or '' }}" style="width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Email du technicien</label>
+                <input type="email" name="technicien_email" value="{{ intervention.technicien_email or '' }}" style="width: 100%;">
+            </div>
+        </div>
+    </div>
+
+    <!-- SECTION 3: LIAISONS APPAREILS/PERIPHERIQUES -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Appareils et périphériques intervenus</div>
+
+        <!-- APPAREILS -->
+        <div style="margin-bottom: 1.5rem;">
+            <div style="font-weight: 600; font-size: .9rem; margin-bottom: .6rem; color: var(--text-primary);">🖥 Appareils couverts</div>
+            {% if appareils %}
+            <div class="check-grid" id="app-grid">
+                {% for a in appareils %}
+                <label class="check-item {% if a.id in appareils_lies %}checked{% endif %}" onclick="toggleCheck(this)">
+                    <input type="checkbox" name="appareils_lies" value="{{ a.id }}"
+                           {% if a.id in appareils_lies %}checked{% endif %} onchange="updateLabel(this)">
+                    <span>
+                        <strong style="font-size: .85rem;">{{ a.nom_machine }}</strong><br>
+                        <span style="color: var(--text-muted); font-size: .75rem;">{{ a.type_appareil }}</span>
+                        {% if a.adresse_ip %}<span class="mono" style="font-size: .75rem;"> · {{ a.adresse_ip }}</span>{% endif %}
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p style="color: var(--text-muted); font-size: .85rem;">Aucun appareil enregistré.</p>
+            {% endif %}
+        </div>
+
+        <!-- PERIPHERIQUES -->
+        <div>
+            <div style="font-weight: 600; font-size: .9rem; margin-bottom: .6rem; color: var(--text-primary);">🖱 Périphériques couverts</div>
+            {% if peripheriques %}
+            <div class="check-grid" id="per-grid">
+                {% for p in peripheriques %}
+                <label class="check-item {% if p.id in peripheriques_lies %}checked{% endif %}" onclick="toggleCheck(this)">
+                    <input type="checkbox" name="peripheriques_lies" value="{{ p.id }}"
+                           {% if p.id in peripheriques_lies %}checked{% endif %} onchange="updateLabel(this)">
+                    <span>
+                        <strong style="font-size: .85rem;">{{ p.marque }} {{ p.modele }}</strong><br>
+                        <span style="color: var(--text-muted); font-size: .75rem;">{{ p.categorie }}</span>
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p style="color: var(--text-muted); font-size: .85rem;">Aucun périphérique enregistré.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- SECTION 4: CONTRAT & TARIFICATION -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Contrat & Facturation</div>
+
+        <div class="form-row cols-1">
+            <div class="form-group">
+                <label>Contrat associé (optionnel)</label>
+                <select name="contrat_id" style="width: 100%;">
+                    <option value="">-- Aucun --</option>
+                    {% for c in contrats %}
+                    <option value="{{ c.id }}" {% if intervention and intervention.contrat_id == c.id %}selected{% endif %}>
+                        📋 {{ c.titre }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Coût HT (optionnel)</label>
+                <input type="number" name="cout_ht" value="{{ intervention.cout_ht or '' }}" min="0" step="0.01" style="width: 100%;">
+            </div>
+            <div class="form-group">
+                <label>Devise</label>
+                <select name="devise" style="width: 100%;">
+                    <option value="EUR" {% if not intervention or intervention.devise == 'EUR' %}selected{% endif %}>EUR €</option>
+                    <option value="USD" {% if intervention and intervention.devise == 'USD' %}selected{% endif %}>USD $</option>
+                    <option value="CHF" {% if intervention and intervention.devise == 'CHF' %}selected{% endif %}>CHF ₣</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- BOUTONS -->
+    <div style="display: flex; gap: .5rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+        <button type="submit" class="btn btn-primary">💾 {% if intervention %}Mettre à jour{% else %}Créer{% endif %}</button>
+        {% if intervention %}
+        <a href="/intervention/{{ intervention.id }}" class="btn btn-secondary">Annuler</a>
+        {% else %}
+        <a href="/interventions" class="btn btn-secondary">Annuler</a>
+        {% endif %}
+    </div>
+</form>
+
+<script>
+function toggleCheck(label) {
+    const cb = label.querySelector('input[type="checkbox"]');
+    setTimeout(() => {
+        label.classList.toggle('checked', cb.checked);
+    }, 0);
+}
+
+function updateLabel(cb) {
+    const label = cb.closest('.check-item');
+    if (label) {
+        label.classList.toggle('checked', cb.checked);
+    }
+}
+
+// Initialize checked labels
+document.querySelectorAll('.check-item input[type="checkbox"]:checked').forEach(cb => {
+    cb.closest('.check-item').classList.add('checked');
+});
+</script>
+{% endblock %}

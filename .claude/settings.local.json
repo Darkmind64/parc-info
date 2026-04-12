@@ -46,7 +46,9 @@
       "Bash(pkill -9 python)",
       "Bash(curl -s -m 2 http://localhost:5000/)",
       "Bash(wc -l \"/e/Claude Code/parc_info\"/*.py)",
-      "Bash(ls -la \"/e/Claude Code/parc_info/\"*.md)"
+      "Bash(ls -la \"/e/Claude Code/parc_info/\"*.md)",
+      "Bash(python -c \"from app import app; print\\('App imports successfully'\\)\")",
+      "Bash(python -c \"from app import app; print\\('OK'\\)\")"
     ]
   }
 }

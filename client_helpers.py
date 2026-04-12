@@ -339,3 +339,63 @@ def fmt_contrat(c_: dict) -> dict:
     else:
         c_['date_debut_fmt'] = ''
     return c_
+
+def fmt_intervention(i_: dict) -> dict:
+    """Formate une intervention pour l'affichage."""
+    # Dates formatées
+    if i_.get('date_intervention'):
+        try:
+            di = date.fromisoformat(i_['date_intervention'])
+            i_['date_intervention_fmt'] = di.strftime('%d/%m/%Y')
+            i_['date_intervention_jj'] = di.strftime('%d')
+            i_['date_intervention_mm'] = di.strftime('%b').upper()
+        except (ValueError, TypeError):
+            i_['date_intervention_fmt'] = i_['date_intervention']
+            i_['date_intervention_jj'] = ''
+            i_['date_intervention_mm'] = ''
+    else:
+        i_['date_intervention_fmt'] = ''
+        i_['date_intervention_jj'] = ''
+        i_['date_intervention_mm'] = ''
+
+    # Couleur et emoji par statut
+    i_['statut_color'] = {
+        'planifiee': '#2196F3',      # 🔵 blue
+        'en_cours': '#FF5722',       # 🔴 red
+        'completee': '#4CAF50',      # 🟢 green
+        'reportee': '#FF9800',       # 🟠 orange
+        'archivee': '#9E9E9E'        # ⚫ grey
+    }.get(i_.get('statut', 'completee'), '#757575')
+
+    i_['statut_emoji'] = {
+        'planifiee': '🔵',
+        'en_cours': '🔴',
+        'completee': '🟢',
+        'reportee': '🟠',
+        'archivee': '⚫'
+    }.get(i_.get('statut', 'completee'), '❓')
+
+    # Durée lisible
+    if i_.get('duree_minutes'):
+        try:
+            m = int(i_['duree_minutes'])
+            h = m // 60
+            m = m % 60
+            if h > 0:
+                i_['duree_fmt'] = f"{h}h{m}min"
+            else:
+                i_['duree_fmt'] = f"{m}min"
+        except (ValueError, TypeError):
+            i_['duree_fmt'] = ''
+    else:
+        i_['duree_fmt'] = ''
+
+    # Horaire lisible
+    if i_.get('heure_debut') and i_.get('heure_fin'):
+        i_['horaire'] = f"{i_['heure_debut']} - {i_['heure_fin']}"
+    elif i_.get('heure_debut'):
+        i_['horaire'] = f"À partir de {i_['heure_debut']}"
+    else:
+        i_['horaire'] = 'Horaire non précisé'
+
+    return i_

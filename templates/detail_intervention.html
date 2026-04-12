@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+
+{% block title %}Intervention — {{ intervention.titre }}{% endblock %}
+
+{% block content %}
+<!-- HEADER -->
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap;">
+    <div style="flex: 1;">
+        <h1 style="margin: 0;">{{ intervention.statut_emoji }} {{ intervention.titre }}</h1>
+        <p style="margin: .3rem 0 0; color: var(--text-secondary); font-size: .9rem;">
+            <strong class="badge badge-secondary">{{ intervention.type_intervention }}</strong>
+        </p>
+    </div>
+    <div style="display: flex; gap: .3rem; flex-shrink: 0;">
+        <a href="/intervention/{{ intervention.id }}/editer" class="btn btn-secondary btn-sm">✏ Modifier</a>
+        <a href="/interventions" class="btn btn-sm" style="border-color: var(--border);">← Retour</a>
+    </div>
+</div>
+
+<!-- STATUT BARRE -->
+<div style="display: flex; align-items: center; gap: 1.5rem; padding: 1rem; background: rgba(0,201,255,.05); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 2rem;">
+    <div style="text-align: center;">
+        <div style="font-size: 2rem; font-weight: 700; font-family: 'Rajdhani', monospace; color: {{ intervention.statut_color }};">
+            {{ intervention.statut_emoji }}
+        </div>
+        <div style="font-size: .75rem; color: var(--text-secondary); margin-top: .2rem; text-transform: capitalize;">
+            {{ intervention.statut }}
+        </div>
+    </div>
+    <div style="flex: 1;">
+        <div style="font-size: .85rem;">
+            <div><strong>{{ intervention.date_intervention_fmt }}</strong></div>
+            {% if intervention.horaire %}<div style="color: var(--text-secondary);">{{ intervention.horaire }}</div>{% endif %}
+            {% if intervention.duree_fmt %}<div style="color: var(--text-secondary);">Durée: {{ intervention.duree_fmt }}</div>{% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- CONTENU 2-COLONNES -->
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+    <!-- COLONNE GAUCHE: DETAILS -->
+    <div>
+        <div class="card">
+            <div class="card-title">📋 Détails de l'intervention</div>
+
+            <div style="display: flex; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid var(--border); font-size: .9rem;">
+                <span style="color: var(--text-secondary);">Type</span>
+                <strong>{{ intervention.type_intervention }}</strong>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid var(--border); font-size: .9rem;">
+                <span style="color: var(--text-secondary);">Statut</span>
+                <strong style="text-transform: capitalize;">{{ intervention.statut }}</strong>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid var(--border); font-size: .9rem;">
+                <span style="color: var(--text-secondary);">Date</span>
+                <strong>{{ intervention.date_intervention_fmt }}</strong>
+            </div>
+
+            {% if intervention.heure_debut or intervention.heure_fin %}
+            <div style="display: flex; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid var(--border); font-size: .9rem;">
+                <span style="color: var(--text-secondary);">Horaire</span>
+                <strong>{{ intervention.horaire }}</strong>
+            </div>
+            {% endif %}
+
+            {% if intervention.duree_minutes %}
+            <div style="display: flex; justify-content: space-between; padding: .6rem 0; border-bottom: 1px solid var(--border); font-size: .9rem;">
+                <span style="color: var(--text-secondary);">Durée</span>
+                <strong>{{ intervention.duree_fmt }}</strong>
+            </div>
+            {% endif %}
+
+            {% if intervention.technicien_nom %}
+            <div style="padding: .6rem 0; border-bottom: 1px solid var(--border);">
+                <div style="color: var(--text-secondary); font-size: .85rem; margin-bottom: .2rem;">Technicien</div>
+                <strong>{{ intervention.technicien_nom }}</strong>
+                {% if intervention.technicien_email %}
+                <div style="font-size: .85rem; color: var(--text-secondary);">{{ intervention.technicien_email }}</div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if intervention.contrat_id %}
+            <div style="padding: .6rem 0; border-bottom: 1px solid var(--border);">
+                <div style="color: var(--text-secondary); font-size: .85rem; margin-bottom: .2rem;">Contrat associé</div>
+                <a href="/contrat/{{ intervention.contrat_id }}">📋 {{ intervention.contrat_titre or 'Contrat #' ~ intervention.contrat_id }}</a>
+            </div>
+            {% endif %}
+
+            {% if intervention.cout_ht %}
+            <div style="padding: .6rem 0; border-bottom: 1px solid var(--border); font-size: .9rem;">
+                <span style="color: var(--text-secondary);">Coût</span>
+                <strong style="float: right;">{{ intervention.cout_ht }} {{ intervention.devise }}</strong>
+            </div>
+            {% endif %}
+
+            {% if intervention.description %}
+            <div style="padding: .8rem 0; margin-top: .4rem;">
+                <div style="font-size: .85rem; color: var(--text-secondary); margin-bottom: .3rem;">Description</div>
+                <p style="margin: 0; font-size: .9rem; line-height: 1.5; white-space: pre-wrap;">{{ intervention.description }}</p>
+            </div>
+            {% endif %}
+
+            {% if intervention.notes %}
+            <div style="padding: .8rem 0; margin-top: .4rem; border-top: 1px solid var(--border);">
+                <div style="font-size: .85rem; color: var(--text-secondary); margin-bottom: .3rem;">Notes</div>
+                <p style="margin: 0; font-size: .9rem; line-height: 1.5; white-space: pre-wrap;">{{ intervention.notes }}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- COLONNE DROITE: LIAISONS & DOCUMENTS -->
+    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+        <!-- APPAREILS -->
+        <div class="card">
+            <div class="card-title">🖥 Appareils intervenus ({{ appareils_lies|length }})</div>
+            {% if appareils_lies %}
+            {% for a in appareils_lies %}
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--border);">
+                <div style="flex: 1; min-width: 0;">
+                    <strong style="font-size: .9rem;">{{ a.nom_machine }}</strong>
+                    <div style="font-size: .8rem; color: var(--text-secondary);">{{ a.type_appareil }}</div>
+                </div>
+                <a href="/appareil/{{ a.id }}" class="mono" style="font-size: .8rem; color: var(--accent);">{{ a.adresse_ip }}</a>
+            </div>
+            {% endfor %}
+            {% else %}
+            <p style="color: var(--text-muted); font-size: .85rem; margin: 0;">Aucun appareil assigné</p>
+            {% endif %}
+        </div>
+
+        <!-- PERIPHERIQUES -->
+        <div class="card">
+            <div class="card-title">🖱 Périphériques intervenus ({{ peripheriques_lies|length }})</div>
+            {% if peripheriques_lies %}
+            {% for p in peripheriques_lies %}
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: .5rem 0; border-bottom: 1px solid var(--border);">
+                <div style="flex: 1; min-width: 0;">
+                    <strong style="font-size: .9rem;">{{ p.marque }} {{ p.modele }}</strong>
+                    <div style="font-size: .8rem; color: var(--text-secondary);">{{ p.categorie }}</div>
+                </div>
+                <a href="/peripherique/{{ p.id }}" style="font-size: .8rem; color: var(--accent);">→</a>
+            </div>
+            {% endfor %}
+            {% else %}
+            <p style="color: var(--text-muted); font-size: .85rem; margin: 0;">Aucun périphérique assigné</p>
+            {% endif %}
+        </div>
+
+        <!-- DOCUMENTS -->
+        <div class="card">
+            <div class="card-title">📎 Documents ({{ docs|length }})</div>
+            {% if docs %}
+            <div style="display: flex; flex-direction: column; gap: .3rem;">
+                {% for d in docs %}
+                <div style="display: flex; align-items: center; gap: .5rem; padding: .4rem; border: 1px solid var(--border); border-radius: 3px;">
+                    <div style="font-size: 1rem; flex-shrink: 0;">
+                        {% if d.nom_fichier.endswith('.pdf') %}📄
+                        {% elif d.nom_fichier.endswith(('.jpg', '.jpeg', '.png', '.gif')) %}🖼
+                        {% elif d.nom_fichier.endswith(('.doc', '.docx')) %}📝
+                        {% elif d.nom_fichier.endswith(('.xls', '.xlsx')) %}📊
+                        {% else %}📎{% endif %}
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="font-weight: 600; font-size: .85rem; word-break: break-word;">{{ d.nom }}</div>
+                        <div style="font-size: .75rem; color: var(--text-secondary);">{{ d.type_doc or 'Document' }} · {{ d.taille_fmt }} · {{ d.date_upload[:10] }}</div>
+                    </div>
+                    <div style="display: flex; gap: .2rem; flex-shrink: 0;">
+                        <a href="/intervention/document/{{ d.id }}/apercu" class="btn btn-xs" title="Aperçu">👁</a>
+                        <a href="/intervention/document/{{ d.id }}/telecharger" class="btn btn-xs" title="Télécharger">⬇</a>
+                        <button class="btn btn-xs" onclick="supprimerDoc({{ d.id }}, '{{ d.nom }}')" title="Supprimer">✕</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p style="color: var(--text-muted); font-size: .85rem; margin: 0;">Aucun document.</p>
+            {% endif %}
+
+            <!-- UPLOAD ZONE -->
+            <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border);">
+                <div id="drop-zone" style="border: 2px dashed var(--border); border-radius: 4px; padding: 1rem; text-align: center; color: var(--text-secondary); cursor: pointer; transition: all .15s;"
+                     ondragover="this.style.borderColor='var(--accent)'; this.style.background='rgba(0,201,255,.05)'"
+                     ondragleave="this.style.borderColor='var(--border)'; this.style.background='transparent'"
+                     ondrop="uploadDoc(event)">
+                    Glisser-déposer ou <strong style="color: var(--accent);">cliquer</strong> pour ajouter un document
+                </div>
+                <form id="doc-upload-form" action="/intervention/{{ intervention.id }}/document/upload" method="POST" enctype="multipart/form-data" style="display: none;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="file" id="doc-file" name="fichier" onchange="soumettrDoc()">
+                </form>
+                <script>
+                document.getElementById('drop-zone').addEventListener('click', () => document.getElementById('doc-file').click());
+                function uploadDoc(e) {
+                    e.preventDefault();
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        document.getElementById('doc-file').files = files;
+                        soumettrDoc();
+                    }
+                }
+                function soumettrDoc() {
+                    if (document.getElementById('doc-file').files.length > 0) {
+                        const fd = new FormData(document.getElementById('doc-upload-form'));
+                        fetch(document.getElementById('doc-upload-form').action, { method: 'POST', body: fd })
+                            .then(() => location.reload());
+                    }
+                }
+                </script>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- RESPONSIVE: COLLAPSE GRID -->
+<style>
+@media(max-width: 900px) {
+    div[style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+}
+</style>
+
+<script>
+function supprimerDoc(id, nom) {
+    if (confirm('Supprimer le document "' + nom + '" ?')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/intervention/document/' + id + '/supprimer';
+        form.innerHTML = '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">';
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+</script>
+{% endblock %}

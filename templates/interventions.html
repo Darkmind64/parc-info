@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}Interventions — {{ client.nom }}{% endblock %}
+
+{% block content %}
+<style>
+.intv-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-card);
+    transition: all .15s;
+    cursor: pointer;
+}
+.intv-card:hover { border-color: var(--accent); background: rgba(0,201,255,.02); }
+.intv-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    flex-shrink: 0;
+    border-left: 4px solid transparent;
+}
+.intv-date {
+    font-weight: 700;
+    font-size: 1.2rem;
+    font-family: 'Rajdhani', monospace;
+}
+.intv-badges { display: flex; gap: .4rem; flex-wrap: wrap; font-size: .75rem; }
+.intv-actions { display: flex; gap: .3rem; margin-left: auto; flex-shrink: 0; }
+</style>
+
+<!-- HEADER -->
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <h1>Interventions</h1>
+        <p style="color: var(--text-secondary); font-size: .95rem;">{{ client.nom }}</p>
+    </div>
+    <a href="/intervention/nouveau" class="btn btn-primary btn-sm">➕ Nouvelle</a>
+</div>
+
+<!-- STAT CHIPS -->
+{% if stats %}
+<div style="display: flex; gap: .5rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+    <a href="?statut=" class="btn btn-sm" style="border-color: {{ 'var(--accent)' if not filtre_stat else 'var(--border)' }}; background: {{ 'rgba(0,201,255,.1)' if not filtre_stat else 'transparent' }};">
+        Toutes <span style="font-family: monospace; margin-left: .4rem;">{{ stats.total }}</span>
+    </a>
+    <a href="?statut=planifiee" class="btn btn-sm" style="border-color: {{ 'var(--accent)' if filtre_stat=='planifiee' else 'var(--border)' }}; background: {{ 'rgba(0,201,255,.1)' if filtre_stat=='planifiee' else 'transparent' }};">
+        Planifiées <span style="font-family: monospace; margin-left: .4rem;">{{ stats.planifiee or 0 }}</span>
+    </a>
+    <a href="?statut=en_cours" class="btn btn-sm" style="border-color: {{ 'var(--accent)' if filtre_stat=='en_cours' else 'var(--border)' }}; background: {{ 'rgba(0,201,255,.1)' if filtre_stat=='en_cours' else 'transparent' }};">
+        En cours <span style="font-family: monospace; margin-left: .4rem;">{{ stats.en_cours or 0 }}</span>
+    </a>
+    <a href="?statut=completee" class="btn btn-sm" style="border-color: {{ 'var(--accent)' if filtre_stat=='completee' else 'var(--border)' }}; background: {{ 'rgba(0,201,255,.1)' if filtre_stat=='completee' else 'transparent' }};">
+        Complétées <span style="font-family: monospace; margin-left: .4rem;">{{ stats.completee or 0 }}</span>
+    </a>
+</div>
+{% endif %}
+
+<!-- FILTERS -->
+<div style="display: grid; gap: .5rem; margin-bottom: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-items: start;">
+    <input type="text" id="search" placeholder="Rechercher..." style="grid-column: auto;" oninput="filtrerIntv()">
+    <select id="filtre-type" onchange="filtrerIntv()">
+        <option value="">-- Type --</option>
+        {% for t in types_interventions %}
+        <option value="{{ t }}" {% if filtre_type == t %}selected{% endif %}>{{ t }}</option>
+        {% endfor %}
+    </select>
+    <select id="filtre-statut" onchange="filtrerIntv()">
+        <option value="">-- Statut --</option>
+        <option value="planifiee" {% if filtre_statut == 'planifiee' %}selected{% endif %}>Planifiée</option>
+        <option value="en_cours" {% if filtre_statut == 'en_cours' %}selected{% endif %}>En cours</option>
+        <option value="completee" {% if filtre_statut == 'completee' %}selected{% endif %}>Complétée</option>
+        <option value="reportee" {% if filtre_statut == 'reportee' %}selected{% endif %}>Reportée</option>
+        <option value="archivee" {% if filtre_statut == 'archivee' %}selected{% endif %}>Archivée</option>
+    </select>
+</div>
+
+<!-- LISTE INTERVENTIONS -->
+{% if interventions %}
+<div style="display: flex; flex-direction: column; gap: .7rem;">
+    {% for intv in interventions %}
+    <div class="intv-card">
+        <div class="intv-icon" style="background: {{ intv.statut_color }}20; border-left-color: {{ intv.statut_color }};">{{ intv.statut_emoji }}</div>
+        <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: baseline; gap: .5rem; flex-wrap: wrap;">
+                <strong style="font-size: 1rem;">{{ intv.titre }}</strong>
+                <span class="badge badge-secondary">{{ intv.type_intervention }}</span>
+            </div>
+            <div style="font-size: .85rem; color: var(--text-secondary); margin-top: .2rem;">
+                {% if intv.date_intervention_fmt %}
+                    <strong>{{ intv.date_intervention_fmt }}</strong>
+                    {% if intv.horaire %} · {{ intv.horaire }}{% endif %}
+                {% endif %}
+            </div>
+            <div class="intv-badges" style="margin-top: .4rem;">
+                {% if intv.technicien_nom %}<span class="badge">👤 {{ intv.technicien_nom }}</span>{% endif %}
+                {% if intv.contrat_id %}<span class="badge badge-blue">📋 Contrat</span>{% endif %}
+                {% if intv.duree_fmt %}<span class="badge">⏱ {{ intv.duree_fmt }}</span>{% endif %}
+            </div>
+        </div>
+        <div class="intv-actions">
+            <a href="/intervention/{{ intv.id }}" class="btn btn-primary btn-xs">Voir</a>
+            <a href="/intervention/{{ intv.id }}/editer" class="btn btn-secondary btn-xs">✏</a>
+            <button class="btn btn-danger btn-xs" onclick="confirmerSuppression({{ intv.id }}, '{{ intv.titre }}')">✕</button>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- PAGINATION -->
+{{ pagination_nav(pagination, '&type=' ~ (filtre_type|urlencode) ~ '&statut=' ~ (filtre_statut|urlencode)) }}
+
+{% else %}
+<div style="text-align: center; padding: 2rem; color: var(--text-muted);">
+    <div style="font-size: 2rem; margin-bottom: .5rem;">📭</div>
+    <p>Aucune intervention enregistrée.</p>
+    <a href="/intervention/nouveau" class="btn btn-primary btn-sm" style="margin-top: 1rem;">Créer une intervention</a>
+</div>
+{% endif %}
+
+<script>
+function filtrerIntv() {
+    const search = document.getElementById('search').value;
+    const type = document.getElementById('filtre-type').value;
+    const statut = document.getElementById('filtre-statut').value;
+    let url = '/interventions';
+    const params = [];
+    if (search) params.push('q=' + encodeURIComponent(search));
+    if (type) params.push('type=' + encodeURIComponent(type));
+    if (statut) params.push('statut=' + encodeURIComponent(statut));
+    if (params.length) url += '?' + params.join('&');
+    window.location.href = url;
+}
+
+function confirmerSuppression(id, titre) {
+    if (confirm('Archiver l\'intervention "' + titre + '" ?')) {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/intervention/' + id + '/supprimer';
+        form.innerHTML = '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">';
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+</script>
+{% endblock %}
