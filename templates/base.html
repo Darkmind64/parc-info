@@ -984,9 +984,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (cancelBtn) {
         cancelBtn.addEventListener('click', cancelClientSwitch);
     }
-
-    // Initialize dashboard widget configuration UI
-    initDashboardWidgetConfig();
 });
 
 // ── PING BADGE TOPBAR ─────────────────────────────────────────────────────────
@@ -2446,6 +2443,8 @@ function rendreConfig() {
     // Rendre la grille des types et charger les autres listes
     setTimeout(_renderTypesGrid, 10);
     setTimeout(chargerListes, 80);
+    // Initialize dashboard widget configuration UI
+    setTimeout(initDashboardWidgetConfig, 50);
 }
 
 function showToast(msg, type) {
