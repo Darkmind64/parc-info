@@ -473,6 +473,26 @@
         {% endif %}
     </div>
 
+    <!-- INTERVENTIONS RÉCENTES -->
+    {% if recent_interventions %}
+    <div class="card">
+        <div class="s-head">🔧 Interventions récentes <a href="/interventions">Voir tout →</a></div>
+        {% for intv in recent_interventions[:3] %}
+        <div style="display: flex; align-items: center; gap: 0.8rem; padding: 0.7rem 0; border-bottom: 1px solid var(--border);">
+            <div style="font-size: 1.2rem;">{{ intv.statut_emoji }}</div>
+            <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 600; font-size: 0.9rem; color: var(--text-primary);">
+                    <a href="/intervention/{{ intv.id }}" style="color: var(--accent); text-decoration: none;">{{ intv.titre }}</a>
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-secondary);">
+                    {{ intv.date_intervention_fmt }} — <strong>{{ intv.type_intervention }}</strong>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
 </div>
 
 <!-- ══ LIGNE 4 : LOGICIELS + RÉSEAU ════════════════════════════════════════ -->

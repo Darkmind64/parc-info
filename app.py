@@ -1601,6 +1601,11 @@ def single_client_dashboard(cid):
         # Get alerts
         alerts = _compute_alerts_for_client(conn, cid, today)
 
+        # Recent interventions
+        recent_interventions = [fmt_intervention(row_to_dict(r)) for r in conn.execute(
+            "SELECT * FROM interventions WHERE client_id=? AND statut != ? ORDER BY date_intervention DESC LIMIT 5",
+            (cid, 'archivee')).fetchall()]
+
         # Logiciels & antivirus (depuis parc_general)
         logiciels = [l.strip() for l in (parc.get('logiciels_metier') or '').splitlines() if l.strip()]
 
@@ -1633,6 +1638,7 @@ def single_client_dashboard(cid):
             'recents': stats['recents'],
             'derniers_periph': stats['derniers_periph'],
             'derniers_contrats': stats['derniers_contrats'],
+            'recent_interventions': recent_interventions,
             'logiciels': logiciels,
             'av_urgents': alerts['av_urgents'],
             'hist_recent': stats['hist_recent'],
@@ -2847,10 +2853,17 @@ def documents_appareil(id):
     a = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     docs = [row_to_dict(r) for r in conn.execute(
         'SELECT * FROM documents_appareils WHERE appareil_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
+
+    # Fetch related interventions
+    interventions = [fmt_intervention(row_to_dict(r)) for r in conn.execute(
+        'SELECT i.* FROM interventions i JOIN interventions_appareils ia ON i.id=ia.intervention_id '
+        'WHERE ia.appareil_id=? AND i.statut != ? ORDER BY i.date_intervention DESC LIMIT 10',
+        (id, 'archivee')).fetchall()]
+
     conn.close()
     for d in docs:
         d['taille_fmt'] = human_size(d.get('taille', 0))
-    return render_template('documents_appareil.html', appareil=a, documents=docs,
+    return render_template('documents_appareil.html', appareil=a, documents=docs, interventions=interventions,
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/appareil/<int:id>/documents/upload', methods=['POST'])
@@ -4181,12 +4194,19 @@ def editer_peripherique(id):
     # Appareils déjà liés à ce périphérique
     linked_app_ids = [r[0] for r in conn.execute(
         "SELECT appareil_id FROM peripheriques_appareils WHERE peripherique_id=?", (id,)).fetchall()]
+
+    # Fetch related interventions
+    interventions = [fmt_intervention(row_to_dict(r)) for r in conn.execute(
+        'SELECT i.* FROM interventions i JOIN interventions_peripheriques ip ON i.id=ip.intervention_id '
+        'WHERE ip.peripherique_id=? AND i.statut != ? ORDER BY i.date_intervention DESC LIMIT 10',
+        (id, 'archivee')).fetchall()]
+
     conn.close()
     return render_template('form_peripherique.html', peripherique=p, documents=docs_per, action='Modifier',
                            appareils=appareils, utilisateurs=utilisateurs,
                            client=client, clients=get_clients(), client_actif_id=cid,
                            categories=get_liste('categories_peripheriques'), pre_appareil_id='',
-                           linked_app_ids=linked_app_ids)
+                           linked_app_ids=linked_app_ids, interventions=interventions)
 
 @app.route('/peripherique/<int:id>/supprimer', methods=['POST'])
 def supprimer_peripherique(id):
@@ -4367,9 +4387,15 @@ def detail_contrat(id):
     docs = [row_to_dict(r) for r in conn.execute(
         'SELECT * FROM documents_contrats WHERE contrat_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
     for d in docs: d['taille_fmt'] = human_size(d.get('taille', 0))
+
+    # Fetch related interventions
+    interventions = [fmt_intervention(row_to_dict(r)) for r in conn.execute(
+        'SELECT * FROM interventions WHERE contrat_id=? AND statut != ? ORDER BY date_intervention DESC LIMIT 10',
+        (id, 'archivee')).fetchall()]
+
     conn.close()
     return render_template('detail_contrat.html', contrat=ct, appareils_lies=appareils_lies,
-                           periph_lies=periph_lies, docs=docs,
+                           periph_lies=periph_lies, docs=docs, interventions=interventions,
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/contrat/<int:id>/editer', methods=['GET','POST'])

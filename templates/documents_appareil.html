@@ -244,4 +244,26 @@ function fermerApercu() {
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') fermerApercu(); });
 </script>
+
+<!-- INTERVENTIONS RELATED -->
+{% if interventions %}
+<div style="margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--border);">
+    <h3 style="margin-bottom: 1rem;">Interventions liées</h3>
+    <div style="display: grid; gap: 0.7rem;">
+    {% for intv in interventions %}
+        <div style="display: flex; align-items: center; gap: 1rem; padding: 1rem; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px;">
+            <div style="font-size: 1.5rem;">{{ intv.statut_emoji }}</div>
+            <div style="flex: 1; min-width: 0;">
+                <div style="font-weight: 600; font-size: 0.95rem;">{{ intv.titre }}</div>
+                <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                    {{ intv.date_intervention_fmt }} — <strong>{{ intv.type_intervention }}</strong>
+                </div>
+            </div>
+            <a href="/intervention/{{ intv.id }}" class="btn btn-primary btn-sm">Voir</a>
+        </div>
+    {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 {% endblock %}
