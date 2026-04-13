@@ -3,100 +3,115 @@
 
 {% block extra_styles %}
 <style>
-/* ── GRILLE 12-COLONNES AVEC TAILLES ET HAUTEURS WIDGETS ── */
+/* ═══════════════════════════════════════════════════════════════════ */
+/* GRILLE RESPONSIVE 12-COLONNES AVEC ALIGNEMENT UNIFIÉ */
+/* ═══════════════════════════════════════════════════════════════════ */
+
 .widgets-grid {
     display: grid;
     grid-template-columns: repeat(12, 1fr);
     gap: 1rem;
     margin-bottom: 1.2rem;
-    align-items: start;
-    auto-rows: max-content;  /* Laisser les hauteurs fixes des widgets primer */
+    align-items: stretch;  /* Étirer widgets pour hauteurs égales sur même ligne */
+    align-content: start;  /* Grouper lignes en haut sans espace vide */
+    auto-rows: auto;       /* Hauteurs déterminées par widget-h-* classes */
 }
 
-/* Tailles widget (desktop) */
-.widget-small   { grid-column: span 4; display: flex; flex-direction: column; }   /* 33% */
-.widget-medium  { grid-column: span 6; display: flex; flex-direction: column; }   /* 50% */
-.widget-large   { grid-column: span 12; display: flex; flex-direction: column; }  /* 100% */
+/* Tailles widget (desktop) - 12, 6, 4 colonnes */
+.widget-small {
+    grid-column: span 4;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;  /* Fix: Éviter débordement contenu */
+}
 
-/* Faire grandir le contenu des widgets pour remplir la hauteur disponible */
-/* IMPORTANT: Exclude .dash-row (KPI grid) and .alert-strip containers */
+.widget-medium {
+    grid-column: span 6;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.widget-large {
+    grid-column: span 12;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+/* Contenu widget remplit la hauteur disponible */
 .widget-small > .card,
 .widget-medium > .card,
-.widget-large > .card,
-.widget-small > div:not(.s-head):not(.alert-strip):not(.dash-row),
-.widget-medium > div:not(.s-head):not(.alert-strip):not(.dash-row),
-.widget-large > div:not(.s-head):not(.alert-strip):not(.dash-row) {
+.widget-large > .card {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* Breakpoints responsifs */
+@media(max-width: 1200px) {
+    .widget-small { grid-column: span 6; }
+}
+
+@media(max-width: 800px) {
+    .widget-small,
+    .widget-medium,
+    .widget-large {
+        grid-column: span 12;
+    }
+}
+
+@media(max-width: 600px) {
+    .widgets-grid {
+        gap: 0.8rem;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════════════ */
+/* HAUTEURS WIDGET (5 NIVEAUX) - CSS Variables + Contenu Adaptatif */
+/* ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+    --widget-h-xs: 160px;
+    --widget-h-s: 220px;
+    --widget-h-m: 280px;
+    --widget-h-l: 360px;
+    --widget-h-xl: 480px;
+
+    /* Padding/gap scales per height level */
+    --scale-xs: 0.7;
+    --scale-s: 1;
+    --scale-m: 1.4;
+    --scale-l: 1.8;
+    --scale-xl: 2.2;
+}
+
+/* Base: Tous les widgets avec hauteur fixe */
+[class*="widget-h-"] {
+    overflow: hidden;
     display: flex;
     flex-direction: column;
 }
 
-/* ═══════════════════════════════════════════════════════════════════ */
-/* HAUTEURS WIDGET (5 NIVEAUX) - Hauteurs FIXES avec contenu adaptable */
-/* ═══════════════════════════════════════════════════════════════════ */
-
-/* XS: Extra Small - 160px */
-.widget-h-xs {
-    height: 160px;
-    overflow: hidden;
-}
-
-.widget-h-xs .card {
+[class*="widget-h-"] .card {
     height: 100%;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 
-/* S: Small - 220px */
-.widget-h-s {
-    height: 220px;
-    overflow: hidden;
-}
+/* Heights: XS, S, M, L, XL */
+.widget-h-xs { height: var(--widget-h-xs); --content-scale: var(--scale-xs); }
+.widget-h-s  { height: var(--widget-h-s);  --content-scale: var(--scale-s); }
+.widget-h-m  { height: var(--widget-h-m);  --content-scale: var(--scale-m); }
+.widget-h-l  { height: var(--widget-h-l);  --content-scale: var(--scale-l); }
+.widget-h-xl { height: var(--widget-h-xl); --content-scale: var(--scale-xl); }
 
-.widget-h-s .card {
-    height: 100%;
-    overflow-y: auto;
-}
-
-/* M: Medium/Normal - 280px (hauteur équilibrée par défaut) */
-.widget-h-m {
-    height: 280px;
-    overflow: hidden;
-}
-
-.widget-h-m .card {
-    height: 100%;
-    overflow-y: auto;
-}
-
-/* L: Large - 360px */
-.widget-h-l {
-    height: 360px;
-    overflow: hidden;
-}
-
-.widget-h-l .card {
-    height: 100%;
-    overflow-y: auto;
-}
-
-/* XL: Extra Large - 480px */
-.widget-h-xl {
-    height: 480px;
-    overflow: hidden;
-}
-
-.widget-h-xl .card {
-    height: 100%;
-    overflow-y: auto;
-}
-
-/* Legacy compat: map old names to new ones */
-.widget-h-compact { height: 220px; }
-.widget-h-compact .card { height: 100%; overflow-y: auto; }
-.widget-h-normal { height: 280px; }
-.widget-h-normal .card { height: 100%; overflow-y: auto; }
-.widget-h-tall { height: 360px; }
-.widget-h-tall .card { height: 100%; overflow-y: auto; }
+/* Legacy compat: compact->s, normal->m, tall->l */
+.widget-h-compact { height: var(--widget-h-s); --content-scale: var(--scale-s); }
+.widget-h-normal  { height: var(--widget-h-m); --content-scale: var(--scale-m); }
+.widget-h-tall    { height: var(--widget-h-l); --content-scale: var(--scale-l); }
 
 /* S'assurer que les listes et conteneurs internes remplissent l'espace */
 .net-list,
@@ -108,24 +123,58 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════ */
-/* CONTENT REORGANIZATION - Hide/show elements based on height (5 LEVELS) */
+/* CONTENT ADAPTATION - Dynamique via CSS Variables */
 /* ═══════════════════════════════════════════════════════════════════ */
 
-/* XS (160px) - Minimal: Only essential values */
-.widget-h-xs .card {
-    padding: 0.7rem;
+/* Base padding scalable */
+[class*="widget-h-"] .card {
+    padding: calc(0.7rem * var(--content-scale));
 }
 
-.widget-h-xs .s-head {
-    margin: 0 0 0.5rem 0;
-    padding-bottom: 0.4rem;
-    font-size: 0.65rem;
+[class*="widget-h-"] .s-head {
+    margin: 0 0 calc(0.7rem * var(--content-scale)) 0;
+    padding-bottom: calc(0.5rem * var(--content-scale));
+    font-size: calc(0.65rem + 0.15rem * (var(--content-scale) - 0.7));
 }
 
+[class*="widget-h-"] .kpi {
+    padding: calc(0.7rem * var(--content-scale)) calc(0.9rem * var(--content-scale));
+    margin-bottom: calc(0.3rem * var(--content-scale));
+}
+
+[class*="widget-h-"] .kpi-val {
+    font-size: calc(1.5rem + 0.7rem * (var(--content-scale) - 0.7));
+}
+
+[class*="widget-h-"] .kpi-lbl {
+    font-size: calc(0.6rem + 0.1rem * (var(--content-scale) - 0.7));
+    margin-top: calc(0.2rem * var(--content-scale));
+}
+
+[class*="widget-h-"] .leg-row,
+[class*="widget-h-"] .net-row,
+[class*="widget-h-"] .tl-item,
+[class*="widget-h-"] .flux-item {
+    padding: calc(0.25rem * var(--content-scale)) 0;
+    font-size: calc(0.75rem + 0.08rem * (var(--content-scale) - 0.7));
+}
+
+[class*="widget-h-"] .tl-item {
+    padding: calc(0.3rem * var(--content-scale)) 0 calc(0.3rem * var(--content-scale)) calc(0.6rem * var(--content-scale));
+}
+
+[class*="widget-h-"] .net-list,
+[class*="widget-h-"] .timeline,
+[class*="widget-h-"] .donut-legend {
+    gap: calc(0.25rem * var(--content-scale));
+    max-height: calc(60px + 260px * (var(--content-scale) - 0.7) / 1.5);
+}
+
+/* Hide/show elements based on height level */
 .widget-h-xs .kpi-sub,
 .widget-h-xs .kpi-bar,
-.widget-h-xs .kpi-lbl,
 .widget-h-xs .kpi-icon,
+.widget-h-xs .kpi-lbl,
 .widget-h-xs .tl-meta,
 .widget-h-xs .flux-meta,
 .widget-h-xs .leg-pct,
@@ -135,49 +184,6 @@
     display: none;
 }
 
-.widget-h-xs .kpi {
-    padding: 0.6rem 0.8rem;
-}
-
-.widget-h-xs .kpi-val {
-    font-size: 1.5rem;
-}
-
-.widget-h-xs .leg-row {
-    padding: 0.15rem 0;
-    font-size: 0.7rem;
-}
-
-.widget-h-xs .net-list {
-    max-height: 60px;
-    gap: 0.2rem;
-}
-
-.widget-h-xs .timeline,
-.widget-h-xs .donut-legend {
-    max-height: 70px;
-}
-
-.widget-h-xs .flux-item {
-    padding: 0.2rem 0;
-    font-size: 0.7rem;
-}
-
-.widget-h-xs .tl-item {
-    padding: 0.3rem 0 0.3rem 0.6rem;
-}
-
-/* S (220px) - Small: Compact view */
-.widget-h-s .card {
-    padding: 0.8rem;
-}
-
-.widget-h-s .s-head {
-    margin: 0 0 0.6rem 0;
-    padding-bottom: 0.5rem;
-    font-size: 0.7rem;
-}
-
 .widget-h-s .kpi-bar,
 .widget-h-s .tl-meta,
 .widget-h-s .leg-pct,
@@ -185,224 +191,11 @@
     display: none;
 }
 
-.widget-h-s .kpi {
-    padding: 0.7rem 0.9rem;
-    margin-bottom: 0.3rem;
-}
-
-.widget-h-s .kpi-val {
-    font-size: 1.8rem;
-}
-
-.widget-h-s .kpi-lbl {
-    font-size: 0.6rem;
-    margin-top: 0.2rem;
-}
-
-.widget-h-s .leg-row {
-    padding: 0.2rem 0;
-    font-size: 0.75rem;
-}
-
-.widget-h-s .net-list {
-    max-height: 100px;
-    gap: 0.25rem;
-}
-
-.widget-h-s .net-row {
-    padding: 0.25rem 0;
-}
-
-.widget-h-s .timeline,
-.widget-h-s .donut-legend {
-    max-height: 110px;
-}
-
-.widget-h-s .tl-item {
-    padding: 0.35rem 0 0.35rem 0.6rem;
-}
-
-.widget-h-s .flux-item {
-    padding: 0.25rem 0;
-    font-size: 0.75rem;
-}
-
-/* M (280px) - Medium/Normal: Standard view (default) */
-.widget-h-m .card {
-    padding: 1rem;
-}
-
-.widget-h-m .s-head {
-    margin: 0 0 0.8rem 0;
-    padding-bottom: 0.6rem;
-    font-size: 0.75rem;
-}
-
-.widget-h-m .kpi {
-    padding: 0.8rem 1rem;
-}
-
-.widget-h-m .kpi-val {
-    font-size: 2rem;
-}
-
-.widget-h-m .leg-row {
-    padding: 0.3rem 0;
-    font-size: 0.78rem;
-}
-
-.widget-h-m .net-list {
-    max-height: 150px;
-    gap: 0.3rem;
-}
-
-.widget-h-m .net-row {
-    padding: 0.3rem 0;
-}
-
-.widget-h-m .timeline {
-    max-height: 160px;
-}
-
-.widget-h-m .donut-legend {
-    max-height: 140px;
-}
-
-.widget-h-m .flux-item {
-    padding: 0.3rem 0;
-}
-
-/* L (360px) - Large: Expanded view */
-.widget-h-l .card {
-    padding: 1.1rem;
-}
-
-.widget-h-l .s-head {
-    margin: 0 0 0.9rem 0;
-    padding-bottom: 0.7rem;
-    font-size: 0.78rem;
-}
-
-.widget-h-l .kpi {
-    padding: 0.9rem 1.1rem;
-    margin-bottom: 0.4rem;
-}
-
-.widget-h-l .kpi-val {
-    font-size: 2.1rem;
-}
-
-.widget-h-l .leg-row {
-    padding: 0.35rem 0;
-    font-size: 0.8rem;
-}
-
-.widget-h-l .net-list {
-    max-height: 220px;
-    gap: 0.35rem;
-}
-
-.widget-h-l .net-row {
-    padding: 0.35rem 0;
-}
-
-.widget-h-l .timeline {
-    max-height: 240px;
-}
-
-.widget-h-l .donut-legend {
-    max-height: 220px;
-}
-
-.widget-h-l .tl-item {
-    padding: 0.45rem 0 0.45rem 0.7rem;
-}
-
-.widget-h-l .flux-item {
-    padding: 0.35rem 0;
-}
-
-/* XL (480px) - Extra Large: Full content */
-.widget-h-xl .card {
-    padding: 1.2rem;
-}
-
-.widget-h-xl .s-head {
-    margin: 0 0 1rem 0;
-    padding-bottom: 0.8rem;
-    font-size: 0.8rem;
-}
-
-.widget-h-xl .kpi {
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.5rem;
-}
-
-.widget-h-xl .kpi-val {
-    font-size: 2.2rem;
-}
-
-.widget-h-xl .leg-row {
-    padding: 0.4rem 0;
-    font-size: 0.82rem;
-}
-
-.widget-h-xl .net-list {
-    max-height: 320px;
-    gap: 0.4rem;
-}
-
-.widget-h-xl .net-row {
-    padding: 0.4rem 0;
-}
-
-.widget-h-xl .timeline {
-    max-height: 340px;
-}
-
-.widget-h-xl .donut-legend {
-    max-height: 320px;
-}
-
-.widget-h-xl .tl-item {
-    padding: 0.5rem 0 0.5rem 0.7rem;
-}
-
-.widget-h-xl .flux-item {
-    padding: 0.4rem 0;
-}
-
-/* Legacy compat for C/N/T: map to S/M/L */
 .widget-h-compact .kpi-bar,
 .widget-h-compact .tl-meta,
 .widget-h-compact .leg-pct,
 .widget-h-compact .as-sub {
     display: none;
-}
-
-.widget-h-compact .net-list {
-    max-height: 100px;
-}
-
-.widget-h-compact .timeline,
-.widget-h-compact .donut-legend {
-    max-height: 110px;
-}
-
-.widget-h-normal .net-list {
-    max-height: 150px;
-}
-
-.widget-h-normal .timeline {
-    max-height: 160px;
-}
-
-.widget-h-tall .net-list {
-    max-height: 220px;
-}
-
-.widget-h-tall .timeline {
-    max-height: 240px;
 }
 
 /* Breakpoint tablet (≤1200px): small collapse to 50% */
@@ -434,30 +227,10 @@
 .cols-1-2    { grid-template-columns: 1fr 2fr; }
 .cols-2-1    { grid-template-columns: 2fr 1fr; }
 
-/* Adaptive KPI grid for different heights */
-.widget-h-xs .dash-row.cols-6 {
-    grid-template-columns: repeat(3, 1fr);  /* 3 cards per row */
-    gap: 0.6rem;
-}
-
-.widget-h-s .dash-row.cols-6 {
-    grid-template-columns: repeat(3, 1fr);  /* 3 cards per row */
-    gap: 0.8rem;
-}
-
-.widget-h-m .dash-row.cols-6 {
-    grid-template-columns: repeat(6, 1fr);  /* Full 6 cards */
-    gap: 1rem;
-}
-
-.widget-h-l .dash-row.cols-6 {
-    grid-template-columns: repeat(6, 1fr);  /* Full 6 cards */
-    gap: 1rem;
-}
-
-.widget-h-xl .dash-row.cols-6 {
-    grid-template-columns: repeat(6, 1fr);  /* Full 6 cards */
-    gap: 1.1rem;
+/* Adaptive KPI grid: 3 cols (compact), 6 cols (normal/large) */
+.widget-h-xs .cols-6,
+.widget-h-s .cols-6 {
+    grid-template-columns: repeat(3, 1fr);
 }
 
 /* Auto-compact pour widgets avec peu de contenu */
