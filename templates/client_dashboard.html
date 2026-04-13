@@ -12,7 +12,7 @@
     grid-template-columns: repeat(12, 1fr);
     gap: 1rem;
     margin-bottom: 1.2rem;
-    align-items: stretch;  /* Étirer widgets pour hauteurs égales sur même ligne */
+    align-items: start;    /* Aligner widgets en haut sans les étirer */
     align-content: start;  /* Grouper lignes en haut sans espace vide */
     auto-rows: auto;       /* Hauteurs déterminées par widget-h-* classes */
 }
@@ -801,7 +801,7 @@
 
             <!-- ══ WIDGET: KPI ════════════════════════════════════════════════════ -->
             {% elif widget_id == 'kpi' %}
-                <div class="dash-row cols-6" style="margin-bottom:1.5rem;">
+                <div class="dash-row cols-6" style="display:grid;gap:1rem;auto-rows:auto;margin-bottom:0;">
                     <div class="kpi {% if taux_dispo >= 80 %}green{% elif taux_dispo >= 50 %}orange{% else %}red{% endif %}">
                         <div class="kpi-top">
                             <div>
@@ -1241,5 +1241,12 @@ async function ignorerGarantie(id, btn) {
         btn.disabled = false;
     }
 }
+
+// ── PRÉ-CHARGER LA CONFIGURATION AU DÉMARRAGE ─────────────────────────────────
+// Cela s'assure que cfgData est rempli avant que l'utilisateur n'interact avec les widgets
+chargerConfig().catch(err => {
+    console.error('Failed to load config on page startup:', err);
+    // Si le chargement échoue, cfgData reste {}, ce qui est un fallback acceptable
+});
 </script>
 {% endblock %}

@@ -288,11 +288,15 @@ def cfg_get(cle: str, default=None, auth_user_id=None):
                 val = row[0]
 
         # Fallback vers config globale
-        if val is None:
+        # CRITICAL: Treat empty strings as missing for widget config keys to prevent broken dashboards
+        if val is None or (cle.startswith('dashboard_widgets') and not val):
             row = conn.execute('SELECT valeur FROM config WHERE cle=?', (cle,)).fetchone()
             val = row[0] if row else None
 
         conn.close()
+        # If still empty after fallback, use default
+        if cle.startswith('dashboard_widgets') and not val:
+            val = None
         val = val if val is not None else (default if default is not None else CFG_DEFAULTS.get(cle, ''))
     except Exception:
         logger.exception('Erreur cfg_get(%s, user=%s)', cle, auth_user_id)

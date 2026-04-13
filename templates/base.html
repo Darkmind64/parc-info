@@ -2039,11 +2039,16 @@ function toggleWidget(widgetId, checked) {
         enabled.delete(widgetId);
     }
 
+    const newEnabledStr = Array.from(enabled).join(',');
+
+    // IMPORTANT: Mettre à jour cfgData immédiatement (avant applyWidgetChangesToDashboard)
+    cfgData['dashboard_widgets_enabled'] = newEnabledStr;
+
     // Apply changes immediately to dashboard (Phase 9 - Live Preview)
     applyWidgetChangesToDashboard();
 
-    // Save to database
-    saveWidgetConfig({ enabled: Array.from(enabled).join(',') });
+    // Save to database (asynchrone)
+    saveWidgetConfig({ enabled: newEnabledStr });
 }
 
 function setupWidgetDragDrop(container) {
@@ -2082,10 +2087,13 @@ function setupWidgetDragDrop(container) {
             .map(el => el.dataset.widget)
             .join(',');
 
+        // IMPORTANT: Mettre à jour cfgData immédiatement (avant applyWidgetChangesToDashboard)
+        cfgData['dashboard_widgets_order'] = order;
+
         // Apply changes immediately to dashboard (Phase 9 - Live Preview)
         applyWidgetChangesToDashboard();
 
-        // Save to database
+        // Save to database (asynchrone)
         saveWidgetConfig({ order: order });
     });
 }
@@ -2095,19 +2103,33 @@ function applyWidgetChangesToDashboard() {
     const grid = document.querySelector('.widgets-grid');
     if (!grid) return; // Pas sur le dashboard
 
+    // CRITIQUE: Lire depuis cfgData qui est la source de vérité, pas depuis les variables temporaires
+    const enabledStr = g('dashboard_widgets_enabled') || '';
+    const enabledWidgets = new Set(enabledStr.split(',').map(s => s.trim()).filter(s => s));
+
+    // Lire les tailles et hauteurs depuis cfgData (stockées en JSON)
+    let sizes = {};
+    let heights = {};
+    try {
+        const sizesStr = g('dashboard_widgets_size') || '{}';
+        sizes = JSON.parse(sizesStr);
+    } catch (e) {
+        console.warn('Failed to parse widget sizes:', e);
+    }
+    try {
+        const heightsStr = g('dashboard_widgets_height') || '{}';
+        heights = JSON.parse(heightsStr);
+    } catch (e) {
+        console.warn('Failed to parse widget heights:', e);
+    }
+
     // Obtenir tous les widgets du dashboard par leur data-widget-id
     const dashboardWidgets = grid.querySelectorAll('[data-widget-id]');
 
     // Mettre à jour chaque widget selon sa configuration
     dashboardWidgets.forEach(dashWidget => {
         const widgetId = dashWidget.dataset.widgetId;
-
-        // Trouver l'item de config correspondant
-        const configItem = document.querySelector(`.widget-config-item[data-widget="${widgetId}"]`);
-        if (!configItem) return;
-
-        const checkbox = configItem.querySelector('input[type="checkbox"]');
-        const isEnabled = checkbox ? checkbox.checked : false;
+        const isEnabled = enabledWidgets.has(widgetId);
 
         // Mettre à jour la visibilité
         dashWidget.style.display = isEnabled ? '' : 'none';
@@ -2121,18 +2143,18 @@ function applyWidgetChangesToDashboard() {
             }
 
             // Ajouter la nouvelle classe
-            const newSize = currentWidgetSizes[widgetId] || WIDGET_DEFAULT_SIZES[widgetId] || 'large';
+            const newSize = sizes[widgetId] || WIDGET_DEFAULT_SIZES[widgetId] || 'large';
             dashWidget.classList.add(`widget-${newSize}`);
 
             // Mettre à jour la classe de hauteur (Phase 10)
             // EXCEPTION: KPI widget uses natural height, not resizable
             if (widgetId !== 'kpi') {
-                const oldHeightClass = Array.from(dashWidget.classList).find(c => c.match(/^widget-h-(compact|normal|tall)$/));
+                const oldHeightClass = Array.from(dashWidget.classList).find(c => c.match(/^widget-h-(xs|s|m|l|xl|compact|normal|tall)$/));
                 if (oldHeightClass) {
                     dashWidget.classList.remove(oldHeightClass);
                 }
 
-                const newHeight = currentWidgetHeights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'm';
+                const newHeight = heights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'm';
                 dashWidget.classList.add(`widget-h-${newHeight}`);
             }
         }
@@ -2143,8 +2165,12 @@ function setSizeWidget(widgetId, size) {
     // Validate size is valid
     if (!['small', 'medium', 'large'].includes(size)) return;
 
-    // Update in-memory sizes
+    // Update in-memory sizes FIRST
     currentWidgetSizes[widgetId] = size;
+
+    // IMPORTANT: Mettre à jour cfgData immédiatement (avant applyWidgetChangesToDashboard)
+    // Cela assure que applyWidgetChangesToDashboard() lira la bonne valeur depuis cfgData
+    cfgData['dashboard_widgets_size'] = JSON.stringify(currentWidgetSizes);
 
     // Update button styles
     const container = document.getElementById('dashboard-widgets-config');
@@ -2162,7 +2188,7 @@ function setSizeWidget(widgetId, size) {
     // Apply changes immediately to dashboard (Phase 9 - Live Preview)
     applyWidgetChangesToDashboard();
 
-    // Save to database
+    // Save to database (asynchrone)
     saveWidgetConfig({ sizes: currentWidgetSizes });
 }
 
@@ -2170,8 +2196,12 @@ function setHeightWidget(widgetId, height) {
     // Validate height is valid (5 levels: xs, s, m, l, xl)
     if (!['xs', 's', 'm', 'l', 'xl'].includes(height)) return;
 
-    // Update in-memory heights
+    // Update in-memory heights FIRST
     currentWidgetHeights[widgetId] = height;
+
+    // IMPORTANT: Mettre à jour cfgData immédiatement (avant applyWidgetChangesToDashboard)
+    // Cela assure que applyWidgetChangesToDashboard() lira la bonne valeur depuis cfgData
+    cfgData['dashboard_widgets_height'] = JSON.stringify(currentWidgetHeights);
 
     // Update button styles
     const container = document.getElementById('dashboard-widgets-config');
@@ -2190,7 +2220,7 @@ function setHeightWidget(widgetId, height) {
     // Apply changes immediately to dashboard (Phase 10 - Live Preview)
     applyWidgetChangesToDashboard();
 
-    // Save to database
+    // Save to database (asynchrone)
     saveWidgetConfig({ heights: currentWidgetHeights });
 }
 
@@ -2198,11 +2228,25 @@ function saveWidgetConfig(changes) {
     const enabledStr = g('dashboard_widgets_enabled') || '';
     const orderStr = g('dashboard_widgets_order') || '';
 
+    // Lire les valeurs actuelles de cfgData (pas depuis currentWidgetSizes/currentWidgetHeights qui peuvent être vides)
+    let currentSizes = {};
+    let currentHeights = {};
+    try {
+        currentSizes = JSON.parse(g('dashboard_widgets_size') || '{}');
+    } catch (e) {}
+    try {
+        currentHeights = JSON.parse(g('dashboard_widgets_height') || '{}');
+    } catch (e) {}
+
+    // Fusionner avec les changements fournis
+    const finalSizes = Object.assign({}, currentSizes, changes.sizes || {});
+    const finalHeights = Object.assign({}, currentHeights, changes.heights || {});
+
     const config = {
         'dashboard_widgets_enabled': changes.enabled || enabledStr,
         'dashboard_widgets_order': changes.order || orderStr,
-        'dashboard_widgets_size': JSON.stringify(changes.sizes || currentWidgetSizes || {}),
-        'dashboard_widgets_height': JSON.stringify(changes.heights || currentWidgetHeights || {}),
+        'dashboard_widgets_size': JSON.stringify(finalSizes),
+        'dashboard_widgets_height': JSON.stringify(finalHeights),
     };
 
     fetch('/api/config', {
@@ -2213,6 +2257,23 @@ function saveWidgetConfig(changes) {
     .then(r => r.json())
     .then(d => {
         if (d.ok) {
+            // CRITIQUE: Mettre à jour cfgData après sauvegarde réussie
+            // Ceci évite la désynchronisation entre le client et le serveur
+            if (changes.enabled !== undefined) {
+                cfgData['dashboard_widgets_enabled'] = changes.enabled;
+            }
+            if (changes.order !== undefined) {
+                cfgData['dashboard_widgets_order'] = changes.order;
+            }
+            if (changes.sizes !== undefined) {
+                cfgData['dashboard_widgets_size'] = JSON.stringify(changes.sizes);
+                currentWidgetSizes = changes.sizes;
+            }
+            if (changes.heights !== undefined) {
+                cfgData['dashboard_widgets_height'] = JSON.stringify(changes.heights);
+                currentWidgetHeights = changes.heights;
+            }
+
             showToast('✓ Widgets sauvegardés', 'success');
         } else {
             showToast('✗ Erreur lors de la sauvegarde', 'error');

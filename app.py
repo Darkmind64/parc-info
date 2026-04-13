@@ -1940,6 +1940,13 @@ def single_client_dashboard(cid):
         enabled_widgets_str = cfg_get('dashboard_widgets_enabled', default_enabled, user_id)
         widget_order_str = cfg_get('dashboard_widgets_order', default_order, user_id)
 
+        # CRITICAL: Handle empty strings by using defaults
+        # This prevents widgets from disappearing if saved as empty
+        if not enabled_widgets_str or not enabled_widgets_str.strip():
+            enabled_widgets_str = default_enabled
+        if not widget_order_str or not widget_order_str.strip():
+            widget_order_str = default_order
+
         enabled_widgets = [w.strip() for w in enabled_widgets_str.split(',') if w.strip()]
         widget_order = [w.strip() for w in widget_order_str.split(',') if w.strip()]
 
@@ -1979,20 +1986,21 @@ def single_client_dashboard(cid):
         # ═══════════════════════════════════════════════════════════════════
         # PHASE 10: Parse widget heights from user preferences (NEW)
         # ═══════════════════════════════════════════════════════════════════
-        # Default widget heights per widget_id
+        # Default widget heights per widget_id (5 LEVEL SYSTEM: xs, s, m, l, xl)
+        # Tous les widgets utilisent 'm' (280px) pour une présentation cohérente et harmonieuse
         WIDGET_DEFAULT_HEIGHTS = {
-            'critical-alerts': 'normal',
-            'kpi': 'normal',
-            'av-status': 'normal',
-            'network-status': 'compact',  # Réduit suite à la diminution
-            'device-types': 'normal',
-            'peripherals': 'normal',
-            'device-age': 'normal',
-            'contracts-timeline': 'normal',
-            'recent-activity': 'normal',
-            'interventions': 'compact',
-            'business-software': 'compact',
-            'network-info': 'compact',
+            'critical-alerts': 'm',      # Medium (280px)
+            'kpi': 'm',
+            'av-status': 'm',
+            'network-status': 'm',       # Changed from 'compact' to 'm' for consistency
+            'device-types': 'm',
+            'peripherals': 'm',
+            'device-age': 'm',
+            'contracts-timeline': 'm',
+            'recent-activity': 'm',
+            'interventions': 'm',        # Changed from 'compact' to 'm' for consistency
+            'business-software': 'm',    # Changed from 'compact' to 'm' for consistency
+            'network-info': 'm',         # Changed from 'compact' to 'm' for consistency
         }
 
         # Parse user's widget height preferences (JSON)

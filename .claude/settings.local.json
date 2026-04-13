@@ -50,7 +50,11 @@
       "Bash(python -c \"from app import app; print\\('App imports successfully'\\)\")",
       "Bash(python -c \"from app import app; print\\('OK'\\)\")",
       "Bash(python)",
-      "Bash(curl -s http://localhost:5000/)"
+      "Bash(curl -s http://localhost:5000/)",
+      "Bash(python -m py_compile templates/client_dashboard.html)",
+      "Bash(curl -s -L http://localhost:5000 -H \"Accept: text/html\")",
+      "Read(//e/Claude Code/parc_info/**)",
+      "Bash(curl -s http://localhost:5000/client/3/dashboard)"
     ]
   }
 }
