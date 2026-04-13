@@ -1081,6 +1081,10 @@
                         </div>
                         {% endfor %}
                     </div>
+                {% else %}
+                <div class="card" style="flex:1;display:flex;flex-direction:column;margin-bottom:0;overflow:hidden;align-items:center;justify-content:center;">
+                    <div style="color:var(--text-muted);font-size:.85rem;text-align:center;">Aucune intervention</div>
+                </div>
                 {% endif %}
 
             <!-- ══ WIDGET: BUSINESS SOFTWARE ═══════════════════════════════════════ -->
@@ -1094,6 +1098,10 @@
                             {% endfor %}
                         </div>
                     </div>
+                {% else %}
+                <div class="card" style="flex:1;display:flex;flex-direction:column;margin-bottom:0;overflow:hidden;align-items:center;justify-content:center;">
+                    <div style="color:var(--text-muted);font-size:.85rem;text-align:center;">Aucun logiciel configuré</div>
+                </div>
                 {% endif %}
 
             <!-- ══ WIDGET: NETWORK INFO ═══════════════════════════════════════════ -->
@@ -1112,6 +1120,10 @@
                             {% endfor %}
                         </div>
                     </div>
+                {% else %}
+                <div class="card" style="flex:1;display:flex;flex-direction:column;margin-bottom:0;overflow:hidden;align-items:center;justify-content:center;">
+                    <div style="color:var(--text-muted);font-size:.85rem;text-align:center;">Aucune information réseau</div>
+                </div>
                 {% endif %}
 
             <!-- ══ WIDGET: AV STATUS (New) ════════════════════════════════════════ -->

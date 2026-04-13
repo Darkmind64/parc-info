@@ -2104,7 +2104,9 @@ function applyWidgetChangesToDashboard() {
     if (!grid) return; // Pas sur le dashboard
 
     // CRITIQUE: Lire depuis cfgData qui est la source de vérité, pas depuis les variables temporaires
-    const enabledStr = g('dashboard_widgets_enabled') || '';
+    // Utiliser les valeurs par défaut si cfgData est vide
+    const DEFAULT_ENABLED = 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info';
+    const enabledStr = g('dashboard_widgets_enabled') || DEFAULT_ENABLED;
     const enabledWidgets = new Set(enabledStr.split(',').map(s => s.trim()).filter(s => s));
 
     // Lire les tailles et hauteurs depuis cfgData (stockées en JSON)
