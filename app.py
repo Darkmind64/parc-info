@@ -1950,6 +1950,12 @@ def single_client_dashboard(cid):
         enabled_widgets = [w.strip() for w in enabled_widgets_str.split(',') if w.strip()]
         widget_order = [w.strip() for w in widget_order_str.split(',') if w.strip()]
 
+        # CRITICAL: Ensure all widgets are in widget_order (for new widgets added later)
+        # If a widget is enabled but not in order, add it to the end
+        for widget_id in enabled_widgets:
+            if widget_id not in widget_order:
+                widget_order.append(widget_id)
+
         # ═══════════════════════════════════════════════════════════════════
         # PHASE 9: Parse widget sizes from user preferences (Phase 9)
         # ═══════════════════════════════════════════════════════════════════
