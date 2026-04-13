@@ -1950,9 +1950,16 @@ def single_client_dashboard(cid):
         enabled_widgets = [w.strip() for w in enabled_widgets_str.split(',') if w.strip()]
         widget_order = [w.strip() for w in widget_order_str.split(',') if w.strip()]
 
-        # CRITICAL: Ensure all widgets are in widget_order (for new widgets added later)
-        # If a widget is enabled but not in order, add it to the end
-        for widget_id in enabled_widgets:
+        # CRITICAL: Ensure all widgets from default list are included (for new widgets added later)
+        # If a widget is in the default list but not in the saved config, add it
+        default_enabled_list = [w.strip() for w in default_enabled.split(',') if w.strip()]
+        default_order_list = [w.strip() for w in default_order.split(',') if w.strip()]
+
+        for widget_id in default_enabled_list:
+            if widget_id not in enabled_widgets:
+                enabled_widgets.append(widget_id)
+
+        for widget_id in default_order_list:
             if widget_id not in widget_order:
                 widget_order.append(widget_id)
 
