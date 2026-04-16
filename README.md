@@ -1,8 +1,13 @@
 # ParcInfo — Gestion de Parc Informatique 🖥️
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/downloads/)
+[![Flask 3.0+](https://img.shields.io/badge/Flask-3.0%2B-green)](https://flask.palletsprojects.com/)
+
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Dernière mise à jour** : 2026-04-07
+**Version** : 1.0.0  
+**Dernière mise à jour** : 2026-04-13
 
 ---
 
@@ -246,22 +251,36 @@ Modifiables via admin → Configuration.
 ## 🔐 Sécurité
 
 ### Authentification
-- **Hashing** : PBKDF2-SHA256 (via werkzeug)
-- **Sessions** : 8h timeout, HttpOnly, SameSite=Lax
-- **Rate-limiting** : 10 tentatives / 5 min par IP
+- **Hashing** : PBKDF2-SHA256 (via werkzeug) — timing-safe
+- **Sessions** : 8h timeout, HttpOnly, SameSite=Lax CSRF protection
+- **Rate-limiting** : 10 tentatives / 5 min par IP (brute-force mitigation)
+- **Validation** : Form validation avec typed rules (str, ip, email, date, mac)
 
 ### Accès Données
-- **Multi-client** : isolation stricte par `client_id`
-- **ACL** : proprietaire | ecriture | lecture
-- **Audit** : historique complet (user, action, timestamp, delta)
+- **Multi-client** : isolation stricte par `client_id` — appliquée avant chaque query
+- **ACL** : trois niveaux (proprietaire | ecriture | lecture)
+  - Proprietaire : tous les accès
+  - Ecriture : lecture + création/modification
+  - Lecture : consultation uniquement
+- **Audit Trail** : historique complet (user, action, timestamp, delta details)
 
 ### Protection Attaques
-- **CSRF** : tokens stateless `secrets.token_hex(32)`
-- **SQL Injection** : requêtes paramétrées (?)
-- **XSS** : Jinja2 auto-escape
-- **HTTPS** : à configurer reverse proxy (nginx/apache)
+- **CSRF** : tokens stateless `secrets.token_hex(32)` sur chaque form POST/PUT/DELETE
+- **SQL Injection** : requêtes **paramétrées** (? placeholders) — jamais f-strings
+- **XSS** : Jinja2 auto-escape de contenu, `url_for()` pour URLs
+- **Upload Security** : stockage hors webroot, validation extension + MIME
+- **HTTPS** : à configurer reverse proxy (nginx/apache) en production
 
-**Recommandations Prod** : voir [claude.md](claude.md#-sécurité--conventions-critique)
+### Checklist Sécurité Avant Production
+- [ ] SECRET_KEY unique et sécurisé (30+ caractères)
+- [ ] Uploads whitelistés par extension ET MIME type
+- [ ] Rate-limiting renforcé (Redis-backed recommandé)
+- [ ] Logs centralisés (masquer PII : pas de pwd, tokens, emails)
+- [ ] Backup quotidien de la BD
+- [ ] HTTPS + HSTS headers activés
+- [ ] Admin panel IP-whitelisté
+
+**Recommandations Prod** : voir [claude.md § Sécurité](claude.md#-sécurité--conventions-critique)
 
 ---
 
