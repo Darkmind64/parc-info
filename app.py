@@ -8641,10 +8641,12 @@ if __name__ == '__main__':
     print("  URL : http://localhost:5000")
     print("="*50)
 
-    import webbrowser
-    def _open_browser():
-        import time; time.sleep(1.5)
-        webbrowser.open('http://localhost:5000')
-    threading.Thread(target=_open_browser, daemon=True).start()
+    if not os.environ.get('RUNNING_IN_DOCKER'):
+        import webbrowser
+        def _open_browser():
+            import time; time.sleep(1.5)
+            webbrowser.open('http://localhost:5000')
+        threading.Thread(target=_open_browser, daemon=True).start()
 
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    debug = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(debug=debug, host='0.0.0.0', port=5000)

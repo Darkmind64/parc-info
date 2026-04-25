@@ -1,23 +1,20 @@
-version: '3'
+version: '3.8'
 
 services:
   parcinfo:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: darkmind64/parcinfo:latest
     container_name: parcinfo-app
     restart: unless-stopped
     ports:
       - "5010:5000"
     environment:
-      - FLASK_ENV=production
+      - FLASK_DEBUG=0
       - PYTHONUNBUFFERED=1
+      - RUNNING_IN_DOCKER=1
       - TZ=Europe/Paris
     volumes:
-      - parcinfo-db:/app
-      - parcinfo-uploads:/app/uploads
-      - parcinfo-backups:/data/backups
-      - parcinfo-config:/data/config
+      - parcinfo-data:/data
+      - parcinfo-app:/app
     logging:
       driver: json-file
       options:
@@ -25,11 +22,5 @@ services:
         max-file: "3"
 
 volumes:
-  parcinfo-db:
-    driver: local
-  parcinfo-uploads:
-    driver: local
-  parcinfo-backups:
-    driver: local
-  parcinfo-config:
-    driver: local
+  parcinfo-data:
+  parcinfo-app:
