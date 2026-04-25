@@ -2848,7 +2848,7 @@ def editer_appareil(id):
         return redirect(url_for('liste_appareils'))
     a = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=?', (id,)).fetchone() or {})
     docs = [row_to_dict(r) for r in conn.execute(
-        'SELECT * FROM documents_appareils WHERE appareil_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
+        'SELECT id, appareil_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload, sync_status FROM documents_appareils WHERE appareil_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
     for d in docs:
         d['taille_fmt'] = human_size(d.get('taille', 0))
     contrats = [row_to_dict(r) for r in conn.execute(
@@ -3578,7 +3578,7 @@ def documents_appareil(id):
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
     a = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     docs = [row_to_dict(r) for r in conn.execute(
-        'SELECT * FROM documents_appareils WHERE appareil_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
+        'SELECT id, appareil_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload, sync_status FROM documents_appareils WHERE appareil_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
 
     # Fetch related interventions
     interventions = [fmt_intervention(row_to_dict(r)) for r in conn.execute(
@@ -3636,7 +3636,7 @@ def upload_document(id):
 def telecharger_document(id):
     cid = get_client_id()
     conn = get_db()
-    doc = row_to_dict(conn.execute('SELECT * FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    doc = row_to_dict(conn.execute('SELECT id, appareil_id, client_id, nom, nom_fichier, contenu_blob FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc:
         flash('Document introuvable', 'danger')
@@ -3660,7 +3660,7 @@ def supprimer_document(id):
         return redirect(url_for('liste_appareils'))
     cid = get_client_id()
     conn = get_db()
-    doc = row_to_dict(conn.execute('SELECT * FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    doc = row_to_dict(conn.execute('SELECT id, appareil_id, client_id, nom, nom_fichier, contenu_blob FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     appareil_id = doc.get('appareil_id', 0)
     if doc:
         conn.execute('DELETE FROM documents_appareils WHERE id=?', (id,))
@@ -3685,7 +3685,7 @@ def supprimer_document(id):
 def apercu_document(id):
     cid = get_client_id()
     conn = get_db()
-    doc = row_to_dict(conn.execute('SELECT * FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    doc = row_to_dict(conn.execute('SELECT id, appareil_id, client_id, nom, nom_fichier, contenu_blob FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc:
         return 'Not found', 404
@@ -3726,7 +3726,7 @@ def api_docs_appareil(id):
     cid = get_client_id()
     conn = get_db()
     docs = [row_to_dict(r) for r in conn.execute(
-        'SELECT * FROM documents_appareils WHERE appareil_id=? AND client_id=? ORDER BY date_upload DESC',
+        'SELECT id, appareil_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload, sync_status FROM documents_appareils WHERE appareil_id=? AND client_id=? ORDER BY date_upload DESC',
         (id, cid)).fetchall()]
     conn.close()
     for d in docs:
@@ -3741,7 +3741,7 @@ def api_docs_peripherique(id):
     cid = get_client_id()
     conn = get_db()
     docs = [row_to_dict(r) for r in conn.execute(
-        'SELECT * FROM documents_peripheriques WHERE peripherique_id=? AND client_id=? ORDER BY date_upload DESC',
+        'SELECT id, peripherique_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload, sync_status FROM documents_peripheriques WHERE peripherique_id=? AND client_id=? ORDER BY date_upload DESC',
         (id, cid)).fetchall()]
     conn.close()
     for d in docs:
@@ -3794,7 +3794,7 @@ def telecharger_doc_peripherique(id):
     cid = get_client_id()
     conn = get_db()
     doc = row_to_dict(conn.execute(
-        'SELECT * FROM documents_peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        'SELECT id, peripherique_id, client_id, nom, nom_fichier, contenu_blob FROM documents_peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc: return 'Not found', 404
 
@@ -3814,7 +3814,7 @@ def apercu_doc_peripherique(id):
     cid = get_client_id()
     conn = get_db()
     doc = row_to_dict(conn.execute(
-        'SELECT * FROM documents_peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        'SELECT id, peripherique_id, client_id, nom, nom_fichier, contenu_blob FROM documents_peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc: return 'Not found', 404
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
@@ -3827,7 +3827,7 @@ def supprimer_doc_peripherique(id):
     cid = get_client_id()
     conn = get_db()
     doc = row_to_dict(conn.execute(
-        'SELECT * FROM documents_peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        'SELECT id, peripherique_id, client_id, nom, nom_fichier, contenu_blob FROM documents_peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     periph_id = doc.get('peripherique_id', 0)
     if doc:
         conn.execute('DELETE FROM documents_peripheriques WHERE id=?', (id,))
@@ -4974,7 +4974,7 @@ def editer_peripherique(id):
     p = fmt_garantie_periph(row_to_dict(
         conn.execute('SELECT * FROM peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {}))
     docs_per = [row_to_dict(r) for r in conn.execute(
-        'SELECT * FROM documents_peripheriques WHERE peripherique_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
+        'SELECT id, peripherique_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload, sync_status FROM documents_peripheriques WHERE peripherique_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
     for d in docs_per:
         d['taille_fmt'] = human_size(d.get('taille', 0))
     # Appareils déjà liés à ce périphérique
@@ -5171,7 +5171,7 @@ def detail_contrat(id):
     periph_lies = [row_to_dict(r) for r in conn.execute(
         'SELECT p.* FROM peripheriques p JOIN contrats_peripheriques cp ON p.id=cp.peripherique_id WHERE cp.contrat_id=?', (id,)).fetchall()]
     docs = [row_to_dict(r) for r in conn.execute(
-        'SELECT * FROM documents_contrats WHERE contrat_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
+        'SELECT id, contrat_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload, sync_status FROM documents_contrats WHERE contrat_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
     for d in docs: d['taille_fmt'] = human_size(d.get('taille', 0))
 
     # Fetch related interventions
@@ -5291,7 +5291,7 @@ def supprimer_doc_contrat(id):
         return redirect(url_for('liste_contrats'))
     cid = get_client_id()
     conn = get_db()
-    doc = row_to_dict(conn.execute('SELECT * FROM documents_contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    doc = row_to_dict(conn.execute('SELECT id, contrat_id, client_id, nom, nom_fichier, contenu_blob FROM documents_contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     ctr_id = doc.get('contrat_id', 0)
     if doc:
         conn.execute('DELETE FROM documents_contrats WHERE id=?', (id,))
@@ -5312,7 +5312,7 @@ def supprimer_doc_contrat(id):
 def apercu_doc_contrat(id):
     cid = get_client_id()
     conn = get_db()
-    doc = row_to_dict(conn.execute('SELECT * FROM documents_contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    doc = row_to_dict(conn.execute('SELECT id, contrat_id, client_id, nom, nom_fichier, contenu_blob FROM documents_contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc: return 'Not found', 404
 
@@ -5330,7 +5330,7 @@ def apercu_doc_contrat(id):
 def telecharger_doc_contrat(id):
     cid = get_client_id()
     conn = get_db()
-    doc = row_to_dict(conn.execute('SELECT * FROM documents_contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    doc = row_to_dict(conn.execute('SELECT id, contrat_id, client_id, nom, nom_fichier, contenu_blob FROM documents_contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc: return 'Not found', 404
 
@@ -5828,7 +5828,7 @@ def detail_intervention(id):
         (id,)).fetchall()]
 
     docs = [row_to_dict(r) for r in conn.execute(
-        'SELECT * FROM documents_interventions WHERE intervention_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
+        'SELECT id, intervention_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload FROM documents_interventions WHERE intervention_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
     for d in docs:
         d['taille_fmt'] = human_size(d.get('taille', 0))
 
@@ -6028,7 +6028,7 @@ def supprimer_doc_intervention(id):
     cid = get_client_id()
     conn = get_db()
     doc = row_to_dict(conn.execute(
-        'SELECT * FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        'SELECT id, intervention_id, client_id, nom, nom_fichier FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     intv_id = doc.get('intervention_id', 0)
 
     if doc:
@@ -6055,7 +6055,7 @@ def apercu_doc_intervention(id):
     cid = get_client_id()
     conn = get_db()
     doc = row_to_dict(conn.execute(
-        'SELECT * FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        'SELECT id, intervention_id, client_id, nom, nom_fichier FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
 
     if not doc:
@@ -6069,7 +6069,7 @@ def telecharger_doc_intervention(id):
     cid = get_client_id()
     conn = get_db()
     doc = row_to_dict(conn.execute(
-        'SELECT * FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        'SELECT id, intervention_id, client_id, nom, nom_fichier FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
 
     if not doc:
