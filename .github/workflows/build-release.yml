@@ -1,0 +1,89 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            asset_name: ParcInfo-Windows.exe
+          - os: macos-latest
+            asset_name: ParcInfo-macOS.zip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Dépendances
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller pillow pystray
+
+      - name: Build PyInstaller
+        run: pyinstaller parcinfo.spec
+
+      - name: Zip .app (macOS)
+        if: runner.os == 'macOS'
+        run: cd dist && zip -r ParcInfo-macOS.zip ParcInfo.app
+
+      - name: Upload artefact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/ParcInfo.exe
+
+      - name: Upload artefact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: dist/ParcInfo-macOS.zip
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Télécharger artefacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Créer la release GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ParcInfo ${{ github.ref_name }}
+          body: |
+            ## ParcInfo ${{ github.ref_name }}
+
+            ### Téléchargements
+            | Plateforme | Fichier |
+            |-----------|---------|
+            | Windows   | `ParcInfo-Windows.exe` |
+            | macOS     | `ParcInfo-macOS.zip` → dézipper → `ParcInfo.app` |
+
+            ### Installation macOS
+            Si macOS bloque l'application (non signée) :
+            ```bash
+            xattr -cr ParcInfo.app
+            ```
+          files: |
+            artifacts/ParcInfo-Windows.exe/ParcInfo-Windows.exe
+            artifacts/ParcInfo-macOS.zip/ParcInfo-macOS.zip
