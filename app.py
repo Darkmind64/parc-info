@@ -8648,8 +8648,10 @@ if __name__ == '__main__':
     start_sync_thread(interval=60)
     print("="*50)
     print("  ParcInfo Multi-Clients")
-    print(f"  OS : {platform.system()} | DB : {DB_PATH}")
-    print("  URL : http://localhost:5000")
+    print(f"  OS      : {platform.system()}")
+    print(f"  DB      : {DB_PATH}")
+    print(f"  Uploads : {UPLOAD_FOLDER}")
+    print("  URL     : http://localhost:5000")
     print("="*50)
 
     if not os.environ.get('RUNNING_IN_DOCKER'):
