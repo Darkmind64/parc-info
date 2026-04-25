@@ -8640,4 +8640,11 @@ if __name__ == '__main__':
     print(f"  OS : {platform.system()} | DB : {DB_PATH}")
     print("  URL : http://localhost:5000")
     print("="*50)
+
+    import webbrowser
+    def _open_browser():
+        import time; time.sleep(1.5)
+        webbrowser.open('http://localhost:5000')
+    threading.Thread(target=_open_browser, daemon=True).start()
+
     app.run(debug=True, host='0.0.0.0', port=5000)
