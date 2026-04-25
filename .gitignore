@@ -1,0 +1,46 @@
+# Base de données & données persistantes
+parc_info.db
+parc_info.db-shm
+parc_info.db-wal
+secret.key
+uploads/
+
+# Environnement Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.env
+.venv/
+
+# Build PyInstaller
+dist/
+build/
+*.spec.bak
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.claude/
+
+# Python packaging
+*.egg-info/
+dist/
+build/
+.coverage
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker local overrides
+docker-compose.override.yml

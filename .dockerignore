@@ -1,0 +1,42 @@
+# Données persistantes (montées via volume)
+parc_info.db
+parc_info.db-shm
+parc_info.db-wal
+secret.key
+uploads/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+venv/
+.venv/
+env/
+
+# Build PyInstaller
+dist/
+build/
+*.spec.bak
+
+# Git
+.git/
+.gitignore
+
+# Logs & rapports
+*.log
+AUDIT_*.md
+*_REPORT.md
+*_FIX.md
+*_SUMMARY.md
+test_*.log
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Docker lui-même
+docker-compose.override.yml
+.env
