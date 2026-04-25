@@ -3602,14 +3602,21 @@ def upload_document(id):
     if not f.filename or not allowed_file(f.filename):
         flash('Type de fichier non autorisé', 'danger')
         return redirect(url_for('documents_appareil', id=id))
-    # Secure filename with appareil prefix
-    ext = f.filename.rsplit('.', 1)[1].lower()
     safe = secure_filename(f.filename)
-    # Unique filename: appareil_id + timestamp + name
+    if not safe:
+        flash('Nom de fichier invalide', 'danger')
+        return redirect(url_for('documents_appareil', id=id))
     unique = f"app{id}_{int(time.time())}_{safe}"
     save_path = os.path.join(UPLOAD_FOLDER, unique)
-    f.save(save_path)
-    taille = os.path.getsize(save_path)
+    logger.info(f"Upload document appareil #{id}: saving to {save_path}")
+    try:
+        f.save(save_path)
+        taille = os.path.getsize(save_path)
+        logger.info(f"Upload document appareil #{id}: saved {taille} bytes")
+    except Exception as e:
+        logger.exception(f"Upload document appareil #{id}: save FAILED → {save_path}")
+        flash(f'Erreur lors de la sauvegarde du fichier : {e}', 'danger')
+        return redirect(url_for('documents_appareil', id=id))
 
     nom = request.form.get('nom', '') or f.filename
     desc = request.form.get('description', '')
@@ -3768,10 +3775,20 @@ def upload_doc_peripherique(id):
         flash('Type de fichier non autorisé', 'danger')
         return redirect(url_for('editer_peripherique', id=id))
     safe = secure_filename(f.filename)
+    if not safe:
+        flash('Nom de fichier invalide', 'danger')
+        return redirect(url_for('editer_peripherique', id=id))
     unique = f"per{id}_{int(time.time())}_{safe}"
     save_path = os.path.join(UPLOAD_FOLDER, unique)
-    f.save(save_path)
-    taille = os.path.getsize(save_path)
+    logger.info(f"Upload document périphérique #{id}: saving to {save_path}")
+    try:
+        f.save(save_path)
+        taille = os.path.getsize(save_path)
+        logger.info(f"Upload document périphérique #{id}: saved {taille} bytes")
+    except Exception as e:
+        logger.exception(f"Upload document périphérique #{id}: save FAILED → {save_path}")
+        flash(f'Erreur lors de la sauvegarde du fichier : {e}', 'danger')
+        return redirect(url_for('editer_peripherique', id=id))
 
     nom = request.form.get('nom', '') or f.filename
     desc = request.form.get('description', '')
@@ -5273,10 +5290,21 @@ def upload_doc_contrat(id):
     if not f.filename or not allowed_file(f.filename):
         flash('Type non autorisé', 'danger')
         return redirect(url_for('detail_contrat', id=id))
-    unique = f"ctr{id}_{int(time.time())}_{secure_filename(f.filename)}"
+    safe = secure_filename(f.filename)
+    if not safe:
+        flash('Nom de fichier invalide', 'danger')
+        return redirect(url_for('detail_contrat', id=id))
+    unique = f"ctr{id}_{int(time.time())}_{safe}"
     save_path = os.path.join(UPLOAD_FOLDER, unique)
-    f.save(save_path)
-    taille = os.path.getsize(save_path)
+    logger.info(f"Upload document contrat #{id}: saving to {save_path}")
+    try:
+        f.save(save_path)
+        taille = os.path.getsize(save_path)
+        logger.info(f"Upload document contrat #{id}: saved {taille} bytes")
+    except Exception as e:
+        logger.exception(f"Upload document contrat #{id}: save FAILED → {save_path}")
+        flash(f'Erreur lors de la sauvegarde du fichier : {e}', 'danger')
+        return redirect(url_for('detail_contrat', id=id))
 
     nom = request.form.get('nom','') or f.filename
     now = datetime.now().isoformat()
