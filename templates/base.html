@@ -2123,7 +2123,7 @@ function initDashboardWidgetConfig() {
 
         const isEnabled = enabled.has(widgetId);
         const currentSize = currentWidgetSizes[widgetId] || WIDGET_DEFAULT_SIZES[widgetId] || 'large';
-        const currentHeight = currentWidgetHeights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'normal';
+        const currentHeight = currentWidgetHeights[widgetId] || WIDGET_DEFAULT_HEIGHTS[widgetId] || 'm';
 
         html += `
             <div class="widget-config-item" draggable="true" data-widget="${widgetId}" style="display:flex;align-items:center;gap:.3rem;padding:.25rem .4rem;border:1px solid var(--border);border-radius:3px;background:var(--bg-secondary);cursor:grab;transition:all .15s;">
@@ -2283,8 +2283,9 @@ function applyWidgetChangesToDashboard() {
         const widgetId = dashWidget.dataset.widgetId;
         const isEnabled = enabledWidgets.has(widgetId);
 
-        // Mettre à jour la visibilité
-        dashWidget.style.display = isEnabled ? '' : 'none';
+        // Mettre à jour la visibilité (respecter data-auto-hide pour les widgets sans contenu)
+        const autoHide = dashWidget.dataset.autoHide === '1';
+        dashWidget.style.display = isEnabled && !autoHide ? '' : 'none';
 
         if (isEnabled) {
             // Mettre à jour la classe de taille

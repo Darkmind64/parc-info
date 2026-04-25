@@ -14,7 +14,7 @@
     margin-bottom: 1.2rem;
     align-items: start;    /* Aligner widgets en haut sans les étirer */
     align-content: start;  /* Grouper lignes en haut sans espace vide */
-    auto-rows: auto;       /* Hauteurs déterminées par widget-h-* classes */
+    grid-auto-rows: auto;  /* Hauteurs déterminées par widget-h-* classes */
 }
 
 /* Tailles widget (desktop) - 12, 6, 4 colonnes */
@@ -167,7 +167,6 @@
 [class*="widget-h-"] .timeline,
 [class*="widget-h-"] .donut-legend {
     gap: calc(0.25rem * var(--content-scale));
-    max-height: calc(60px + 260px * (var(--content-scale) - 0.7) / 1.5);
 }
 
 /* Hide/show elements based on height level */
@@ -777,7 +776,8 @@
         {% if widget_id in enabled_widgets %}
         <!-- Widget wrapper with size & height classes (Phase 9-10) - data-widget-id for real-time updates -->
         <!-- KPI widget: no height resizing, use natural height -->
-        <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }}{% if widget_id != 'kpi' %} widget-h-{{ widget_heights.get(widget_id, 'm') if widget_heights else 'm' }}{% endif %}" data-widget-id="{{ widget_id }}" style="display:flex;flex-direction:column;">
+        {% set _hide = widget_id == 'critical-alerts' and not (widget_data and widget_data.critical_alerts and widget_data.critical_alerts.alerts) %}
+        <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }}{% if widget_id != 'kpi' %} widget-h-{{ widget_heights.get(widget_id, 'm') if widget_heights else 'm' }}{% endif %}" data-widget-id="{{ widget_id }}"{% if _hide %} data-auto-hide="1"{% endif %} style="display:{{ 'none' if _hide else 'flex' }};flex-direction:column;">
 
             <!-- ══ WIDGET: CRITICAL ALERTS ════════════════════════════════════════ -->
             {% if widget_id == 'critical-alerts' %}
@@ -801,7 +801,7 @@
 
             <!-- ══ WIDGET: KPI ════════════════════════════════════════════════════ -->
             {% elif widget_id == 'kpi' %}
-                <div class="dash-row cols-6" style="display:grid;gap:1rem;auto-rows:auto;margin-bottom:0;">
+                <div class="dash-row cols-6" style="display:grid;gap:1rem;grid-auto-rows:auto;margin-bottom:0;">
                     <div class="kpi {% if taux_dispo >= 80 %}green{% elif taux_dispo >= 50 %}orange{% else %}red{% endif %}">
                         <div class="kpi-top">
                             <div>
@@ -974,7 +974,7 @@
                             <svg width="90" height="90" viewBox="0 0 90 90" id="donut-periph" style="flex-shrink:0;">
                                 <circle cx="45" cy="45" r="32" fill="none" stroke="var(--bg-secondary)" stroke-width="14"/>
                             </svg>
-                            <div class="donut-legend" style="max-height:170px;overflow-y:auto;">
+                            <div class="donut-legend">
                                 {% set pcolors = ['#22d3ee','#a78bfa','#fb923c','#c084fc','#f97316','#facc15','#4ade80','#94a3b8','#60a5fa','#2dd4bf','#34d399','#f87171'] %}
                                 {% for cat, nb in periph_chart[:8] %}
                                 {% set col = pcolors[loop.index0 % pcolors|length] %}
@@ -1025,7 +1025,6 @@
                         <div style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:.85rem;">Aucune échéance dans les 6 prochains mois</div>
                         {% endif %}
                     </div>
-                </div>
 
             <!-- ══ WIDGET: RECENT ACTIVITY ────════════────════════════────────────── -->
             {% elif widget_id == 'recent-activity' %}
