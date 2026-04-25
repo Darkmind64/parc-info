@@ -1,7 +1,7 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, make_response
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, make_response, send_file
 from werkzeug.utils import secure_filename
 from datetime import datetime, date, timedelta
-import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time
+import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time, io
 
 # ─── LOGGING ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -51,6 +51,7 @@ from client_helpers import (paginate, get_client_access, can_write,
                              get_client_with_acces, get_client_id, get_clients,
                              log_history, log_error, garantie_active, human_size,
                              fmt_appareils, fmt_garantie_periph, fmt_contrat, fmt_intervention)
+from uploads_sync import start_sync_thread
 
 # ─── HELPER: Retry pour requêtes DB verrouillées ─────────────────────────────
 def retry_db_query(query_func, max_retries=5):
@@ -721,6 +722,9 @@ def init_db():
         nom_fichier TEXT DEFAULT '',
         taille INTEGER DEFAULT 0,
         date_upload TEXT DEFAULT '',
+        contenu_blob BLOB,
+        sync_status TEXT DEFAULT 'local',
+        date_sync TEXT DEFAULT '',
         FOREIGN KEY(contrat_id) REFERENCES contrats(id) ON DELETE CASCADE,
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
 
@@ -735,6 +739,9 @@ def init_db():
         nom_fichier TEXT DEFAULT '',
         taille INTEGER DEFAULT 0,
         date_upload TEXT DEFAULT '',
+        contenu_blob BLOB,
+        sync_status TEXT DEFAULT 'local',
+        date_sync TEXT DEFAULT '',
         FOREIGN KEY(appareil_id) REFERENCES appareils(id) ON DELETE CASCADE,
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
 
@@ -817,6 +824,9 @@ def init_db():
         nom_fichier TEXT DEFAULT '',
         taille INTEGER DEFAULT 0,
         date_upload TEXT DEFAULT '',
+        contenu_blob BLOB,
+        sync_status TEXT DEFAULT 'local',
+        date_sync TEXT DEFAULT '',
         FOREIGN KEY(peripherique_id) REFERENCES peripheriques(id) ON DELETE CASCADE,
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
 
@@ -1042,6 +1052,21 @@ def init_db():
                 INSERT OR REPLACE INTO _sync_deletions (tbl, record_id, deleted_at)
                 VALUES ('{_t}', OLD.id, datetime('now'));
             END""")
+
+    # Migration : ajouter colonnes BLOB + sync si n'existent pas
+    for table in ['documents_appareils', 'documents_contrats', 'documents_peripheriques']:
+        try:
+            c.execute(f'ALTER TABLE {table} ADD COLUMN contenu_blob BLOB')
+        except sqlite3.OperationalError:
+            pass  # Colonne existe déjà
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN sync_status TEXT DEFAULT 'local'")
+        except sqlite3.OperationalError:
+            pass  # Colonne existe déjà
+        try:
+            c.execute(f"ALTER TABLE {table} ADD COLUMN date_sync TEXT DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # Colonne existe déjà
 
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
@@ -3354,15 +3379,20 @@ def upload_document(id):
     save_path = os.path.join(UPLOAD_FOLDER, unique)
     f.save(save_path)
     taille = os.path.getsize(save_path)
+
+    # Lire le fichier en BLOB pour synchronisation Turso
+    with open(save_path, 'rb') as fp:
+        blob_data = fp.read()
+
     nom = request.form.get('nom', '') or f.filename
     desc = request.form.get('description', '')
     type_doc = request.form.get('type_doc', '')
     now = datetime.now().isoformat()
     conn = get_db()
     conn.execute('''INSERT INTO documents_appareils
-        (appareil_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload)
-        VALUES (?,?,?,?,?,?,?,?)''',
-        (id, cid, nom, desc, type_doc, unique, taille, now))
+        (appareil_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload,contenu_blob,sync_status,date_sync)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+        (id, cid, nom, desc, type_doc, unique, taille, now, blob_data, 'local', ''))
 
     # Log document upload
     app_title = conn.execute('SELECT nom_machine FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone()
@@ -3384,6 +3414,16 @@ def telecharger_document(id):
     if not doc:
         flash('Document introuvable', 'danger')
         return redirect(url_for('liste_appareils'))
+
+    # Préférer servir depuis BLOB si disponible (synced)
+    if doc.get('contenu_blob'):
+        return send_file(
+            io.BytesIO(doc['contenu_blob']),
+            as_attachment=True,
+            download_name=doc['nom']
+        )
+
+    # Fallback: servir depuis fichier local
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
 
 @app.route('/document/<int:id>/supprimer', methods=['POST'])
@@ -3422,6 +3462,15 @@ def apercu_document(id):
     conn.close()
     if not doc:
         return 'Not found', 404
+
+    # Préférer servir depuis BLOB si disponible (synced)
+    if doc.get('contenu_blob'):
+        return send_file(
+            io.BytesIO(doc['contenu_blob']),
+            as_attachment=False
+        )
+
+    # Fallback: servir depuis fichier local
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
 
 
@@ -3492,14 +3541,20 @@ def upload_doc_peripherique(id):
     save_path = os.path.join(UPLOAD_FOLDER, unique)
     f.save(save_path)
     taille = os.path.getsize(save_path)
+
+    # Lire le fichier en BLOB pour synchronisation Turso
+    with open(save_path, 'rb') as fp:
+        blob_data = fp.read()
+
     nom = request.form.get('nom', '') or f.filename
     desc = request.form.get('description', '')
     type_doc = request.form.get('type_doc', '')
+    now = datetime.now().isoformat()
     conn = get_db()
     conn.execute('''INSERT INTO documents_peripheriques
-        (peripherique_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload)
-        VALUES (?,?,?,?,?,?,?,?)''',
-        (id, cid, nom, desc, type_doc, unique, taille, datetime.now().isoformat()))
+        (peripherique_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload,contenu_blob,sync_status,date_sync)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+        (id, cid, nom, desc, type_doc, unique, taille, now, blob_data, 'local', ''))
 
     # Log document upload
     per_title = conn.execute('SELECT CONCAT(marque, \' \', modele) FROM peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone()
@@ -3519,6 +3574,16 @@ def telecharger_doc_peripherique(id):
         'SELECT * FROM documents_peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc: return 'Not found', 404
+
+    # Préférer servir depuis BLOB si disponible (synced)
+    if doc.get('contenu_blob'):
+        return send_file(
+            io.BytesIO(doc['contenu_blob']),
+            as_attachment=True,
+            download_name=doc['nom']
+        )
+
+    # Fallback: servir depuis fichier local
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
 
 @app.route('/doc-peripherique/<int:id>/apercu')
@@ -4978,11 +5043,17 @@ def upload_doc_contrat(id):
     unique = f"ctr{id}_{int(time.time())}_{secure_filename(f.filename)}"
     save_path = os.path.join(UPLOAD_FOLDER, unique)
     f.save(save_path)
+    taille = os.path.getsize(save_path)
+
+    # Lire le fichier en BLOB pour synchronisation Turso
+    with open(save_path, 'rb') as fp:
+        blob_data = fp.read()
+
     nom = request.form.get('nom','') or f.filename
     now = datetime.now().isoformat()
     conn = get_db()
-    conn.execute('INSERT INTO documents_contrats (contrat_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload) VALUES (?,?,?,?,?,?,?,?)',
-                 (id, cid, nom, request.form.get('description',''), request.form.get('type_doc',''), unique, os.path.getsize(save_path), now))
+    conn.execute('INSERT INTO documents_contrats (contrat_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload,contenu_blob,sync_status,date_sync) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                 (id, cid, nom, request.form.get('description',''), request.form.get('type_doc',''), unique, taille, now, blob_data, 'local', ''))
 
     # Log document upload
     ctr_title = conn.execute('SELECT titre FROM contrats WHERE id=? AND client_id=?', (id, cid)).fetchone()
@@ -5025,6 +5096,15 @@ def apercu_doc_contrat(id):
     doc = row_to_dict(conn.execute('SELECT * FROM documents_contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc: return 'Not found', 404
+
+    # Préférer servir depuis BLOB si disponible (synced)
+    if doc.get('contenu_blob'):
+        return send_file(
+            io.BytesIO(doc['contenu_blob']),
+            as_attachment=False
+        )
+
+    # Fallback: servir depuis fichier local
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
 
 @app.route('/contrat/document/<int:id>/telecharger')
@@ -5034,6 +5114,16 @@ def telecharger_doc_contrat(id):
     doc = row_to_dict(conn.execute('SELECT * FROM documents_contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc: return 'Not found', 404
+
+    # Préférer servir depuis BLOB si disponible (synced)
+    if doc.get('contenu_blob'):
+        return send_file(
+            io.BytesIO(doc['contenu_blob']),
+            as_attachment=True,
+            download_name=doc['nom']
+        )
+
+    # Fallback: servir depuis fichier local
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
 
 @app.route('/api/contrats/appareil/<int:app_id>')
@@ -7161,6 +7251,8 @@ if __name__ == '__main__':
     init_db()
     # Précharger la base OUI en arrière-plan pour ne pas bloquer le démarrage
     threading.Thread(target=_oui_load_full, daemon=True).start()
+    # Lancer la synchronisation des uploads (local ↔ Turso)
+    start_sync_thread(interval=60)
     print("="*50)
     print("  ParcInfo Multi-Clients")
     print(f"  OS : {platform.system()} | DB : {DB_PATH}")
