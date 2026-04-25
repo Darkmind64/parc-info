@@ -22,7 +22,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger('parcinfo')
 
-# ── Support PyInstaller (exécutable portable) ────────────────────────────────
+# ── Support PyInstaller (exécutable portable) + Docker ───────────────────────
 import sys as _sys
 if getattr(_sys, 'frozen', False):
     # Mode exécutable : les ressources sont dans _MEIPASS
@@ -31,6 +31,12 @@ if getattr(_sys, 'frozen', False):
 else:
     _resource_base = os.path.dirname(os.path.abspath(__file__))
     _data_base     = os.path.dirname(os.path.abspath(__file__))
+
+# DATA_DIR permet de séparer données persistantes du code (Docker, NAS)
+_data_dir_env = os.environ.get('DATA_DIR', '').strip()
+if _data_dir_env:
+    _data_base = _data_dir_env
+    os.makedirs(_data_base, exist_ok=True)
 
 app = Flask(
     __name__,

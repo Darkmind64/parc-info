@@ -6,7 +6,8 @@ LABEL description="ParcInfo - Gestion de parc informatique multi-clients"
 ENV PYTHONUNBUFFERED=1 \
     FLASK_APP=app.py \
     FLASK_DEBUG=0 \
-    RUNNING_IN_DOCKER=1
+    RUNNING_IN_DOCKER=1 \
+    DATA_DIR=/data
 
 WORKDIR /app
 

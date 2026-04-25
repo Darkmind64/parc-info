@@ -11,16 +11,15 @@ services:
       - FLASK_DEBUG=0
       - PYTHONUNBUFFERED=1
       - RUNNING_IN_DOCKER=1
+      - DATA_DIR=/data
       - TZ=Europe/Paris
     volumes:
-      - parcinfo-data:/data
-      - parcinfo-app:/app
+      # Bind mount vers un dossier NAS accessible — modifie le chemin gauche selon ton NAS
+      # Synology : /volume1/docker/parcinfo
+      # Linux    : /opt/parcinfo/data
+      - /volume1/docker/parcinfo:/data
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  parcinfo-data:
-  parcinfo-app:
