@@ -1,0 +1,436 @@
+{% extends "base.html" %}
+{% block title %}Historique Maintenances — ParcInfo{% endblock %}
+{% block extra_styles %}
+<style>
+/* Page Layout */
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 2px solid var(--accent);
+}
+
+.page-header h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.page-header h1 span {
+    color: var(--accent);
+    background: linear-gradient(135deg, var(--accent), #00f0ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Stats Grid - Enhanced */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 2rem;
+    margin-bottom: 3rem;
+}
+
+.stat-card {
+    background: linear-gradient(135deg, var(--bg-secondary), var(--bg-primary));
+    padding: 2rem;
+    border-radius: 12px;
+    border: 1px solid var(--accent);
+    box-shadow: 0 8px 32px rgba(0, 201, 255, 0.1);
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent), #00f0ff);
+}
+
+.stat-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 48px rgba(0, 201, 255, 0.2);
+    border-color: #00f0ff;
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-weight: 600;
+    margin-bottom: 0.8rem;
+}
+
+.stat-value {
+    font-size: 3rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent), #00f0ff);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0;
+    letter-spacing: -0.02em;
+}
+
+/* Charts Section */
+.charts-section {
+    margin-top: 3rem;
+}
+
+.section-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.section-title::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+}
+
+.charts-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+    gap: 2rem;
+    margin-bottom: 3rem;
+}
+
+.chart-container {
+    position: relative;
+    background: linear-gradient(135deg, var(--bg-secondary), var(--bg-primary));
+    padding: 2rem;
+    border-radius: 12px;
+    border: 1px solid rgba(0, 201, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s ease;
+}
+
+.chart-container:hover {
+    border-color: var(--accent);
+    box-shadow: 0 12px 48px rgba(0, 201, 255, 0.15);
+}
+
+.chart-container h3 {
+    color: var(--text-primary);
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin: 0 0 1.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.chart-container h3::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    background: var(--accent);
+    border-radius: 50%;
+}
+
+.chart-wrapper {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#typesChart,
+#statusChart,
+#monthsChart {
+    max-height: 300px;
+}
+
+/* Full-width chart container */
+.chart-container-full {
+    position: relative;
+    background: linear-gradient(135deg, var(--bg-secondary), var(--bg-primary));
+    padding: 2rem;
+    border-radius: 12px;
+    border: 1px solid rgba(0, 201, 255, 0.2);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    height: 400px;
+    transition: all 0.3s ease;
+    margin-bottom: 2rem;
+}
+
+.chart-container-full:hover {
+    border-color: var(--accent);
+    box-shadow: 0 12px 48px rgba(0, 201, 255, 0.15);
+}
+
+.chart-container-full h3 {
+    color: var(--text-primary);
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin: 0 0 1.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.chart-container-full h3::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    background: var(--accent);
+    border-radius: 50%;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+
+    .charts-row {
+        grid-template-columns: 1fr;
+    }
+
+    .page-header {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: flex-start;
+    }
+
+    .page-header h1 {
+        font-size: 1.8rem;
+    }
+
+    .stat-value {
+        font-size: 2.5rem;
+    }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>📊 Historique <span>Maintenances</span></h1>
+        <p style="color: var(--text-secondary); margin: 0.5rem 0 0 0; font-size: 0.95rem;">Vue d'ensemble et statistiques des opérations</p>
+    </div>
+    <a href="/maintenances" class="btn btn-secondary">← Liste des maintenances</a>
+</div>
+
+<!-- Statistiques clés -->
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">📦 Total Opérations</div>
+        <div class="stat-value">{{ total }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">✅ Réalisées</div>
+        <div class="stat-value" style="color: #00ff88;">{{ realisees }}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">📈 Taux Réalisation</div>
+        <div class="stat-value" style="color: #00c9ff;">{{ taux_realisation }}%</div>
+    </div>
+</div>
+
+<!-- Section Graphiques -->
+<div class="charts-section">
+    <div class="section-title">Distribution & Statuts</div>
+
+    <!-- Graphiques côte à côte -->
+    <div class="charts-row">
+        <div class="chart-container">
+            <h3>Maintenances par Type</h3>
+            <div class="chart-wrapper">
+                <canvas id="typesChart"></canvas>
+            </div>
+        </div>
+        <div class="chart-container">
+            <h3>Statut des Maintenances</h3>
+            <div class="chart-wrapper">
+                <canvas id="statusChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Graphique historique -->
+    <div class="section-title">Évolution Mensuelle</div>
+    <div class="chart-container-full">
+        <h3>Maintenances par Mois (12 derniers mois)</h3>
+        <canvas id="monthsChart" style="max-height: 280px;"></canvas>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const colors = {
+    primary: '#00c9ff',
+    success: '#00ff88',
+    warning: '#ffaa00',
+    danger: '#ff6b6b',
+    secondary: '#888'
+};
+
+// Configuration commune des plugins
+const commonPlugins = {
+    legend: {
+        position: 'bottom',
+        labels: {
+            color: '#ffffff',
+            font: { size: 13, weight: 'bold' },
+            padding: 20,
+            usePointStyle: true,
+            boxWidth: 12,
+            boxHeight: 12,
+            pointStyle: 'circle'
+        }
+    },
+    tooltip: {
+        backgroundColor: 'rgba(0, 0, 0, 0.9)',
+        titleColor: '#ffffff',
+        bodyColor: '#ffffff',
+        borderColor: 'var(--accent)',
+        borderWidth: 2,
+        padding: 15,
+        titleFont: { size: 14, weight: 'bold' },
+        bodyFont: { size: 12 },
+        cornerRadius: 6,
+        displayColors: true,
+        boxPadding: 8
+    }
+};
+
+// Graphique par type
+const typeCtx = document.getElementById('typesChart').getContext('2d');
+new Chart(typeCtx, {
+    type: 'doughnut',
+    data: {
+        labels: {{ types_labels | safe }},
+        datasets: [{
+            data: {{ types_data | safe }},
+            backgroundColor: [
+                colors.primary, colors.success, colors.warning,
+                colors.danger, colors.secondary, '#ff8c00'
+            ],
+            borderColor: 'var(--bg-primary)',
+            borderWidth: 3,
+            hoverBorderColor: '#ffffff',
+            hoverBorderWidth: 3,
+            hoverOffset: 8
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: commonPlugins
+    }
+});
+
+// Graphique par statut
+const statusCtx = document.getElementById('statusChart').getContext('2d');
+new Chart(statusCtx, {
+    type: 'pie',
+    data: {
+        labels: {{ status_labels | safe }},
+        datasets: [{
+            data: {{ status_data | safe }},
+            backgroundColor: [
+                colors.warning,    // Programmée
+                colors.success,    // Réalisée
+                colors.warning,    // Reportée
+                colors.secondary   // Annulée
+            ],
+            borderColor: 'var(--bg-primary)',
+            borderWidth: 3,
+            hoverBorderColor: '#ffffff',
+            hoverBorderWidth: 3,
+            hoverOffset: 8
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: commonPlugins
+    }
+});
+
+// Graphique par mois
+const monthCtx = document.getElementById('monthsChart').getContext('2d');
+new Chart(monthCtx, {
+    type: 'bar',
+    data: {
+        labels: {{ months_labels | safe }},
+        datasets: [{
+            label: 'Maintenances',
+            data: {{ months_data | safe }},
+            backgroundColor: 'rgba(0, 201, 255, 0.7)',
+            borderColor: colors.primary,
+            borderWidth: 2,
+            borderRadius: 6,
+            borderSkipped: false,
+            hoverBackgroundColor: 'rgba(0, 240, 255, 0.9)',
+            hoverBorderColor: '#ffffff',
+            hoverBorderWidth: 2,
+            barPercentage: 0.7,
+            categoryPercentage: 0.8
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: 'x',
+        scales: {
+            x: {
+                ticks: {
+                    color: '#ffffff',
+                    font: { size: 12, weight: 'bold' }
+                },
+                grid: {
+                    color: 'rgba(100, 100, 100, 0.1)',
+                    drawBorder: false
+                }
+            },
+            y: {
+                ticks: {
+                    color: '#ffffff',
+                    font: { size: 12, weight: 'bold' },
+                    stepSize: 1
+                },
+                grid: {
+                    color: 'rgba(100, 100, 100, 0.2)',
+                    drawBorder: false
+                },
+                beginAtZero: true
+            }
+        },
+        plugins: {
+            ...commonPlugins,
+            filler: { propagate: true }
+        }
+    }
+});
+</script>
+{% endblock %}

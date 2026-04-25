@@ -102,6 +102,13 @@ LISTE_DEFAULTS = {
         'Maintenance préventive', 'Maintenance corrective', 'Dépannage',
         'Installation', 'Upgrade', 'Support', 'Audit', 'Formation', 'Autre'
     ],
+    'types_maintenance': [
+        'Préventive', 'Corrective', 'Évolutive', 'Diagnostic', 'Installation',
+        'Migration', 'Sécurité', 'Autre'
+    ],
+    'statuts_maintenance': [
+        'Programmée', 'Réalisée', 'Reportée', 'Annulée'
+    ],
 }
 
 # ─── VALEURS PAR DÉFAUT DE LA CONFIG ─────────────────────────────────────────

@@ -54,7 +54,18 @@
       "Bash(python -m py_compile templates/client_dashboard.html)",
       "Bash(curl -s -L http://localhost:5000 -H \"Accept: text/html\")",
       "Read(//e/Claude Code/parc_info/**)",
-      "Bash(curl -s http://localhost:5000/client/3/dashboard)"
+      "Bash(curl -s http://localhost:5000/client/3/dashboard)",
+      "Bash(python -m py_compile app.py client_helpers.py config_helpers.py)",
+      "Bash(pip install *)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(python -m pip install weasyprint --quiet)",
+      "PowerShell(python -m pip install weasyprint -q)",
+      "PowerShell(python -m pip install reportlab -q)",
+      "Bash(curl -s http://localhost:5000/maintenances/historique)",
+      "Bash(python3 -c \"with open\\(r'E:\\\\Claude Code\\\\parc_info - docker\\\\.claude\\\\worktrees\\\\adoring-fermat-24a2c4\\\\app.py'\\) as f: print\\(len\\(f.readlines\\(\\)\\)\\)\")",
+      "Bash(python3 -m py_compile \"E:\\\\Claude Code\\\\parc_info - docker\\\\.claude\\\\worktrees\\\\adoring-fermat-24a2c4\\\\app.py\")",
+      "Bash(python -m py_compile \"E:\\\\Claude Code\\\\parc_info - docker\\\\.claude\\\\worktrees\\\\adoring-fermat-24a2c4\\\\app.py\")",
+      "Bash(sqlite3 parc_info.db \".tables\")"
     ]
   }
 }

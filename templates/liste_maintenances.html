@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% block title %}Maintenances — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.filter-bar { display:flex; gap:0.8rem; flex-wrap:wrap; align-items:center; }
+.filter-bar input, .filter-bar select { width:auto; padding:0.45rem 0.8rem; font-size:0.85rem; }
+
+.maint-info-btn {
+    cursor:pointer; user-select:none; padding:0 6px; color:var(--accent);
+    font-weight:bold; position:relative; display:inline-block; font-size:0.9rem;
+}
+.maint-info-tooltip {
+    display:none; position:absolute; z-index:1000; bottom:125%; left:50%; transform:translateX(-50%);
+    background:var(--bg-card); color:var(--text-primary); text-align:left;
+    padding:0.75rem; border-radius:4px; border:1px solid var(--border-glow);
+    box-shadow:0 4px 12px rgba(0,0,0,.3); width:280px; font-size:0.75rem;
+    font-weight:normal; white-space:normal; line-height:1.4;
+}
+.maint-info-tooltip::after {
+    content:''; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+    border:6px solid transparent; border-top-color:var(--bg-card);
+}
+.maint-info-btn:hover .maint-info-tooltip { display:block; }
+.maint-info-field { margin-bottom:0.5rem; }
+.maint-info-label { color:var(--text-secondary); font-weight:600; font-size:0.7rem; text-transform:uppercase; }
+.maint-info-value { color:var(--text-primary); word-break:break-word; }
+
+.multisel-wrap { position: relative; display: inline-block; }
+.multisel-btn {
+    padding: 0.45rem 0.8rem; font-size: 0.85rem; cursor: pointer;
+    background: var(--bg-input, #1a2332); border: 1px solid var(--border);
+    color: var(--text-secondary); border-radius: 4px;
+    white-space: nowrap; transition: border-color .15s, color .15s;
+    font-family: inherit;
+}
+.multisel-btn:hover { border-color: var(--accent); }
+.multisel-btn.ms-active { border-color: var(--accent); color: var(--accent); }
+.ms-count {
+    display: inline-block; background: var(--accent); color: #000;
+    border-radius: 10px; padding: 0 5px; font-size: 0.7rem;
+    font-weight: 700; margin: 0 2px; vertical-align: middle;
+}
+.multisel-dropdown {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 1100;
+    background: var(--bg-card); border: 1px solid var(--border-glow);
+    border-radius: 6px; padding: 0.35rem;
+    min-width: 200px; max-height: 260px; overflow-y: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5);
+    display: none;
+}
+.multisel-dropdown.open { display: block; }
+.multisel-item {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.28rem 0.5rem; border-radius: 3px; cursor: pointer;
+    font-size: 0.82rem; color: var(--text-primary);
+    transition: background .1s;
+    user-select: none;
+}
+.multisel-item:hover { background: rgba(0,201,255,.08); }
+.multisel-item input[type=checkbox] {
+    width: auto; margin: 0; cursor: pointer; accent-color: var(--accent);
+    flex-shrink: 0;
+}
+.multisel-divider { height: 1px; background: var(--border); margin: 0.3rem 0.2rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>⚙️ <span>Maintenances</span></h1>
+    <a href="/maintenance/nouveau" class="btn btn-success">+ Nouvelle maintenance</a>
+</div>
+
+<div style="margin:1.5rem 0;">
+    <form method="GET">
+        <div class="filter-bar">
+
+            <!-- Dropdown clients multi-select -->
+            <div class="multisel-wrap" id="wrap-clients">
+                <button type="button" class="multisel-btn" id="btn-clients"
+                        onclick="toggleMS('clients')">Clients ▾</button>
+                <div class="multisel-dropdown" id="dd-clients">
+                    <label class="multisel-item">
+                        <input type="checkbox" class="ms-clients" value="all"
+                               {% if 'all' in request.args.getlist('clients_selection') %}checked{% endif %}
+                               onchange="onMSSelectAll('clients', this, 'Clients')">
+                        <em style="color:var(--text-muted);">★ Tous mes clients</em>
+                    </label>
+                    <div class="multisel-divider"></div>
+                    {% for c in clients %}
+                    <label class="multisel-item">
+                        <input type="checkbox" class="ms-clients" value="{{ c.id }}"
+                               {% if c.id|string in request.args.getlist('clients_selection') %}checked{% endif %}
+                               onchange="onMSChange('clients', 'Clients')">
+                        {{ c.nom }}
+                    </label>
+                    {% endfor %}
+                    <div class="multisel-divider"></div>
+                    <button type="button" class="multisel-item"
+                            style="width:100%; justify-content:center; background:rgba(0,201,255,.1); border:none;"
+                            onclick="document.getElementById('dd-clients').classList.remove('open'); applyFilters()">✓ Appliquer</button>
+                </div>
+            </div>
+
+            <!-- Type -->
+            <select name="type_maintenance" id="filtre-type">
+                <option value="">Tous les types</option>
+                {% for t in types_maintenance %}
+                <option value="{{ t }}" {% if filtre_type == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+            </select>
+
+            <!-- Statut -->
+            <select name="statut" id="filtre-statut">
+                <option value="">Tous les statuts</option>
+                <option value="programmee" {% if filtre_statut == 'programmee' %}selected{% endif %}>Programmée</option>
+                <option value="realisee" {% if filtre_statut == 'realisee' %}selected{% endif %}>Réalisée</option>
+                <option value="reportee" {% if filtre_statut == 'reportee' %}selected{% endif %}>Reportée</option>
+                <option value="annulee" {% if filtre_statut == 'annulee' %}selected{% endif %}>Annulée</option>
+            </select>
+
+            <!-- Dates -->
+            <input type="date" name="date_debut" value="{{ filtre_date_debut }}" title="Date début">
+            <input type="date" name="date_fin" value="{{ filtre_date_fin }}" title="Date fin">
+
+            <button type="button" class="btn btn-primary" onclick="applyFilters()">Filtrer</button>
+            <a href="/maintenances" class="btn btn-secondary">✕ Réinitialiser</a>
+            <a href="/maintenances/export.csv?{{ request.query_string.decode() }}" class="btn btn-secondary" style="margin-left:auto;">📥 Export CSV</a>
+        </div>
+    </form>
+</div>
+
+<!-- Tableau -->
+<div style="overflow-x:auto;">
+    {% if maintenances %}
+    <table class="liste-table">
+        <thead>
+            <tr>
+                <th><a href="#" onclick="sortBy('date_planifiee'); return false;" style="text-decoration:none; color:inherit; cursor:pointer;">
+                    Date planifiée {% if sort_by == 'date_planifiee' %}{{ '▲' if sort_order == 'asc' else '▼' }}{% endif %}
+                </a></th>
+                <th>Appareil / Périphérique</th>
+                <th><a href="#" onclick="sortBy('type_maintenance'); return false;" style="text-decoration:none; color:inherit; cursor:pointer;">
+                    Type {% if sort_by == 'type_maintenance' %}{{ '▲' if sort_order == 'asc' else '▼' }}{% endif %}
+                </a></th>
+                <th><a href="#" onclick="sortBy('responsable'); return false;" style="text-decoration:none; color:inherit; cursor:pointer;">
+                    Responsable {% if sort_by == 'responsable' %}{{ '▲' if sort_order == 'asc' else '▼' }}{% endif %}
+                </a></th>
+                <th><a href="#" onclick="sortBy('statut'); return false;" style="text-decoration:none; color:inherit; cursor:pointer;">
+                    Statut {% if sort_by == 'statut' %}{{ '▲' if sort_order == 'asc' else '▼' }}{% endif %}
+                </a></th>
+                <th><a href="#" onclick="sortBy('date_realisee'); return false;" style="text-decoration:none; color:inherit; cursor:pointer;">
+                    Date réalisée {% if sort_by == 'date_realisee' %}{{ '▲' if sort_order == 'asc' else '▼' }}{% endif %}
+                </a></th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for m in maintenances %}
+            <tr>
+                <td><strong>{{ m.date_planifiee_fmt }}</strong></td>
+                <td>
+                    <div style="display:flex; flex-direction:column; gap:0.25rem;">
+                        {% if m.appareil_id %}
+                            <span style="color:var(--accent);font-weight:600; font-size:0.9rem;">{{ m.appareil_nom }}</span>
+                            <span style="color:var(--text-secondary); font-size:0.75rem;">Appareil</span>
+                        {% elif m.peripherique_id %}
+                            <span style="color:var(--accent-orange);font-weight:600; font-size:0.9rem;">{{ m.peripherique_marque }} {{ m.peripherique_modele }}</span>
+                            <span style="color:var(--text-secondary); font-size:0.75rem;">{{ m.peripherique_categorie }}</span>
+                        {% else %}
+                            <span style="color:var(--text-secondary);">—</span>
+                        {% endif %}
+                    </div>
+                </td>
+                <td>{{ m.type_label }}</td>
+                <td>{{ m.responsable or '—' }}</td>
+                <td>
+                    <span style="display:inline-block; padding:2px 8px; border-radius:3px; font-size:.78rem; font-weight:700;
+                        background:{% if m.statut == 'programmee' %}rgba(255,140,0,.2){% elif m.statut == 'realisee' %}rgba(0,255,136,.15){% elif m.statut == 'reportee' %}rgba(255,170,0,.2){% else %}rgba(136,136,136,.2){% endif %};
+                        color:{% if m.statut == 'programmee' %}#ff8c00{% elif m.statut == 'realisee' %}#00ff88{% elif m.statut == 'reportee' %}#ffaa00{% else %}#888{% endif %};">
+                        {{ m.statut_label }}
+                    </span>
+                </td>
+                <td>{{ m.date_realisee_fmt or '—' }}</td>
+                <td style="white-space:nowrap;">
+                    <span class="maint-info-btn" title="Détails">ⓘ
+                        <div class="maint-info-tooltip">
+                            {% if m.description %}
+                            <div class="maint-info-field">
+                                <div class="maint-info-label">Description</div>
+                                <div class="maint-info-value">{{ m.description }}</div>
+                            </div>
+                            {% endif %}
+                            {% if m.contrat_type or m.contrat_fournisseur %}
+                            <div class="maint-info-field">
+                                <div class="maint-info-label">Contrat</div>
+                                <div class="maint-info-value">{{ m.contrat_type }} - {{ m.contrat_fournisseur }}</div>
+                            </div>
+                            {% endif %}
+                            {% if m.heure_debut or m.heure_fin %}
+                            <div class="maint-info-field">
+                                <div class="maint-info-label">Horaires</div>
+                                <div class="maint-info-value">{{ m.heure_debut if m.heure_debut else '—' }} à {{ m.heure_fin if m.heure_fin else '—' }}</div>
+                            </div>
+                            {% endif %}
+                            {% if m.recurrence %}
+                            <div class="maint-info-field">
+                                <div class="maint-info-label">Récurrence</div>
+                                <div class="maint-info-value">{{ m.recurrence }}</div>
+                            </div>
+                            {% endif %}
+                            {% if m.notes %}
+                            <div class="maint-info-field">
+                                <div class="maint-info-label">Notes</div>
+                                <div class="maint-info-value">{{ m.notes }}</div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </span>
+                    {% if m.statut == 'programmee' %}
+                    <button onclick="confirmerMaintenance({{ m.id }})" class="btn btn-small btn-success" title="Marquer comme réalisée">✓</button>
+                    {% endif %}
+                    <a href="/maintenance/{{ m.id }}/editer" class="btn btn-small btn-primary" title="Éditer">✎</a>
+                    <form method="POST" action="/maintenance/{{ m.id }}/supprimer" style="display:inline;"
+                          onsubmit="return confirm('Annuler cette maintenance ?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="btn btn-small btn-danger" title="Annuler">✕</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if pagination and pagination.pages > 1 %}
+    <div style="margin-top:1.5rem;text-align:center;display:flex;gap:.5rem;justify-content:center;align-items:center;">
+        {% if pagination.page > 1 %}
+        <a href="?page=1" class="btn btn-secondary">⬅ Première</a>
+        <a href="?page={{ pagination.page - 1 }}" class="btn btn-secondary">← Précédent</a>
+        {% endif %}
+        <span style="color:var(--text-secondary);">Page {{ pagination.page }} / {{ pagination.pages }}</span>
+        {% if pagination.page < pagination.pages %}
+        <a href="?page={{ pagination.page + 1 }}" class="btn btn-secondary">Suivant →</a>
+        <a href="?page={{ pagination.pages }}" class="btn btn-secondary">Dernière ⮕</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <div style="text-align:center;padding:3rem;color:var(--text-secondary);">
+        <p>Aucune maintenance trouvée</p>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function sortBy(column) {
+    const params = new URLSearchParams(window.location.search);
+    const currentSort = params.get('sort_by');
+    const currentOrder = params.get('sort_order') || 'desc';
+
+    // Si on clique sur la même colonne, inverser l'ordre
+    if (currentSort === column) {
+        params.set('sort_order', currentOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+        params.set('sort_by', column);
+        params.set('sort_order', 'desc');
+    }
+
+    // Réinitialiser la pagination à la première page
+    params.set('page', '1');
+
+    window.location.search = params.toString();
+}
+
+function toggleMS(id) {
+    const dd = document.getElementById('dd-' + id);
+    const isOpen = dd.classList.contains('open');
+    document.querySelectorAll('.multisel-dropdown.open').forEach(d => d.classList.remove('open'));
+    if (!isOpen) dd.classList.add('open');
+}
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.multisel-wrap')) {
+        document.querySelectorAll('.multisel-dropdown.open').forEach(d => d.classList.remove('open'));
+    }
+});
+
+function getMSValues(id) {
+    return Array.from(
+        document.querySelectorAll(`#dd-${id} input.ms-${id}:checked:not([value="all"])`)
+    ).map(c => c.value);
+}
+function onMSSelectAll(id, checkbox, label) {
+    document.querySelectorAll(`#dd-${id} input.ms-${id}:not([value="all"])`).forEach(c => c.checked = checkbox.checked);
+    updateMSBtn(id, label);
+}
+function onMSChange(id, label) {
+    updateMSBtn(id, label);
+}
+function updateMSBtn(id, label) {
+    const vals = getMSValues(id);
+    const btn = document.getElementById('btn-' + id);
+    if (vals.length === 0) {
+        btn.innerHTML = label + ' ▾';
+        btn.classList.remove('ms-active');
+    } else {
+        btn.innerHTML = label + ' <span class="ms-count">' + vals.length + '</span> ▾';
+        btn.classList.add('ms-active');
+    }
+}
+
+function applyFilters() {
+    const form = document.querySelector('form');
+    document.querySelectorAll('input[name="clients_selection"]').forEach(el => el.remove());
+    getMSValues('clients').forEach(val => {
+        const inp = document.createElement('input');
+        inp.type = 'hidden'; inp.name = 'clients_selection'; inp.value = val;
+        form.appendChild(inp);
+    });
+    form.submit();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateMSBtn('clients', 'Clients');
+});
+
+function confirmerMaintenance(id) {
+    if (!confirm('Marquer cette maintenance comme réalisée ?')) return;
+    fetch(`/maintenance/${id}/confirmer`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': '{{ csrf_token }}', 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => { if (data.ok) location.reload(); else alert('Erreur : ' + (data.error || '')); })
+    .catch(e => alert('Erreur réseau : ' + e));
+}
+</script>
+{% endblock %}
