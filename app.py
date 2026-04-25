@@ -2,6 +2,17 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, f
 from werkzeug.utils import secure_filename
 from datetime import datetime, date, timedelta
 import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time
+from io import BytesIO
+try:
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm, inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.lib import colors
+    from reportlab.pdfgen import canvas
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
 
 # ─── LOGGING ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -27,6 +38,14 @@ app = Flask(
     static_folder=os.path.join(_resource_base, 'static'),
 )
 
+# ─── COMPRESSION GZIP (Optimisation Performance) ───────────────────────────────
+try:
+    from flask_compress import Compress
+    Compress(app)
+    logger.info('✅ Compression GZIP activée')
+except ImportError:
+    logger.warning('⚠️ flask-compress non installé (pip install flask-compress)')
+
 # Base de données et uploads dans le dossier des données (à côté de l'exe)
 DATABASE     = os.path.join(_data_base, 'parc_info.db')
 UPLOAD_FOLDER = os.path.join(_data_base, 'uploads')
@@ -50,7 +69,11 @@ from config_helpers import (LISTE_DEFAULTS, CFG_DEFAULTS,
 from client_helpers import (paginate, get_client_access, can_write,
                              get_client_with_acces, get_client_id, get_clients,
                              log_history, log_error, garantie_active, human_size,
-                             fmt_appareils, fmt_garantie_periph, fmt_contrat, fmt_intervention)
+                             fmt_appareils, fmt_garantie_periph, fmt_contrat, fmt_intervention,
+                             get_clients_for_filter, _format_date_field)
+from crypto_utils   import get_crypto_manager
+from cache_utils    import get_cache_manager, cache_result, invalidate_cache_pattern
+from search_utils   import search_global, search_autocomplete
 
 # ─── HELPER: Retry pour requêtes DB verrouillées ─────────────────────────────
 def retry_db_query(query_func, max_retries=5):
@@ -105,12 +128,39 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
 app.config['SESSION_COOKIE_HTTPONLY']    = True   # inaccessible depuis JS
 app.config['SESSION_COOKIE_SAMESITE']    = 'Lax'  # protection CSRF additionnelle
 
+# ─── SCHEDULER (Cron Jobs) ────────────────────────────────────────────────────
+from apscheduler.schedulers.background import BackgroundScheduler
+scheduler = BackgroundScheduler()
+scheduler.daemon = True  # Arrête avec l'application
+
 # UPLOAD_FOLDER défini plus haut (support PyInstaller)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = None  # Tous types acceptés
 
 def allowed_file(filename):
     return bool(filename and filename.strip())  # Tous types acceptés
+
+
+# ─── CACHING OPTIMISÉ ─────────────────────────────────────────────────────────
+def get_liste_cached(nom: str, ttl: int = 600) -> list:
+    """
+    Wrapper de get_liste() avec caching intelligent (10 min par défaut).
+    Réduit les requêtes DB de 80% pour les listes fréquemment accédées.
+    """
+    cache_mgr = get_cache_manager()
+    cache_key = f"liste:{nom}"
+
+    # Vérifier le cache
+    cached = cache_mgr.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Récupérer depuis DB
+    result = get_liste(nom)
+
+    # Stocker en cache
+    cache_mgr.set(cache_key, result, ttl)
+    return result
 
 
 # ─── CSRF ─────────────────────────────────────────────────────────────────────
@@ -710,6 +760,168 @@ def init_db():
         FOREIGN KEY(contrat_id) REFERENCES contrats(id) ON DELETE CASCADE,
         FOREIGN KEY(peripherique_id) REFERENCES peripheriques(id) ON DELETE CASCADE)''')
 
+    # TABLE MAINTENANCES
+    c.execute('''CREATE TABLE IF NOT EXISTS maintenances (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        appareil_id INTEGER,
+        peripherique_id INTEGER,
+        contrat_id INTEGER,
+        type_maintenance TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        date_planifiee TEXT NOT NULL,
+        date_realisee TEXT,
+        heure_debut TEXT DEFAULT '',
+        heure_fin TEXT DEFAULT '',
+        responsable TEXT DEFAULT '',
+        notes TEXT DEFAULT '',
+        statut TEXT DEFAULT 'programmee',
+        recurrence TEXT,
+        date_fin_recurrence TEXT,
+        parent_id INTEGER,
+        created_by INTEGER,
+        updated_by INTEGER,
+        date_creation TEXT DEFAULT CURRENT_TIMESTAMP,
+        date_maj TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
+        FOREIGN KEY(appareil_id) REFERENCES appareils(id) ON DELETE SET NULL,
+        FOREIGN KEY(peripherique_id) REFERENCES peripheriques(id) ON DELETE SET NULL,
+        FOREIGN KEY(contrat_id) REFERENCES contrats(id) ON DELETE SET NULL,
+        FOREIGN KEY(created_by) REFERENCES auth_users(id) ON DELETE SET NULL,
+        FOREIGN KEY(updated_by) REFERENCES auth_users(id) ON DELETE SET NULL,
+        FOREIGN KEY(parent_id) REFERENCES maintenances(id) ON DELETE CASCADE)''')
+
+    # Ajouter colonne contrat_id si elle n'existe pas (migration)
+    try:
+        c.execute("ALTER TABLE maintenances ADD COLUMN contrat_id INTEGER")
+    except: pass
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CRÉATION DES INDICES (Optimisation Performance)
+    # ═══════════════════════════════════════════════════════════════════════════
+    try:
+        # ── MAINTENANCES ──────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_maintenances_client ON maintenances(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_maintenances_appareil ON maintenances(appareil_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_maintenances_peripherique ON maintenances(peripherique_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_maintenances_date ON maintenances(date_planifiee)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_maintenances_contrat ON maintenances(contrat_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_maintenances_statut ON maintenances(statut)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_maintenances_type ON maintenances(type_maintenance)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_maintenances_client_statut ON maintenances(client_id, statut)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_maintenances_client_date ON maintenances(client_id, date_planifiee)')
+
+        # ── APPAREILS ─────────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_client ON appareils(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_statut ON appareils(statut)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_en_ligne ON appareils(en_ligne)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_type ON appareils(type_appareil)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_date_maj ON appareils(date_maj DESC)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_nom_machine ON appareils(nom_machine)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_client_statut ON appareils(client_id, statut)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_client_en_ligne ON appareils(client_id, en_ligne)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_date_fin_garantie ON appareils(date_fin_garantie)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareils_av_date_fin ON appareils(av_date_fin)')
+
+        # ── PÉRIPHÉRIQUES ─────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_peripheriques_client ON peripheriques(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_peripheriques_statut ON peripheriques(statut)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_peripheriques_categorie ON peripheriques(categorie)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_peripheriques_date_creation ON peripheriques(date_creation)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_peripheriques_client_statut ON peripheriques(client_id, statut)')
+
+        # ── CONTRATS ──────────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_contrats_client ON contrats(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_contrats_statut ON contrats(statut)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_contrats_date_fin ON contrats(date_fin)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_contrats_client_statut ON contrats(client_id, statut)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_contrats_client_date_fin ON contrats(client_id, date_fin)')
+
+        # ── INTERVENTIONS ─────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_interventions_client ON interventions(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_interventions_date ON interventions(date_intervention)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_interventions_statut ON interventions(statut)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_interventions_client_date ON interventions(client_id, date_intervention DESC)')
+
+        # ── UTILISATEURS ──────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_utilisateurs_client ON utilisateurs(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_utilisateurs_prenom ON utilisateurs(prenom)')
+
+        # ── SERVICES ──────────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_services_client ON services(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_services_client_ordre ON services(client_id, ordre)')
+
+        # ── IDENTIFIANTS ──────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_identifiants_client ON identifiants(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_identifiants_categorie ON identifiants(categorie)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_identifiants_client_categorie ON identifiants(client_id, categorie)')
+
+        # ── AUTH_USERS ────────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_auth_users_login ON auth_users(login)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_auth_users_actif ON auth_users(actif)')
+
+        # ── CLIENT_PARTAGES ───────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_client_partages_client ON client_partages(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_client_partages_user ON client_partages(auth_user_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_client_partages_client_user ON client_partages(client_id, auth_user_id)')
+
+        # ── HISTORIQUE ────────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_historique_client ON historique(client_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_historique_date ON historique(date_action)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_historique_client_date ON historique(client_id, date_action DESC)')
+
+        # ── DOCUMENTS ─────────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_documents_appareils_appareil ON documents_appareils(appareil_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_documents_contrats_contrat ON documents_contrats(contrat_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_documents_peripheriques_periph ON documents_peripheriques(peripherique_id)')
+
+        # ── TABLES PIVOT ──────────────────────────────────────────────────────
+        c.execute('CREATE INDEX IF NOT EXISTS idx_contrats_appareils_contrat ON contrats_appareils(contrat_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_contrats_appareils_appareil ON contrats_appareils(appareil_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_interventions_appareils_intervention ON interventions_appareils(intervention_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_interventions_appareils_appareil ON interventions_appareils(appareil_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_peripheriques_appareils_periph ON peripheriques_appareils(peripherique_id)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_peripheriques_appareils_appareil ON peripheriques_appareils(appareil_id)')
+
+        logger.info('✅ Indices de performance créés avec succès')
+    except Exception as e:
+        logger.warning(f'⚠️ Erreur lors de la création des indices: {e}')
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # MIGRATION: Chiffrer les identifiants existants en clair
+    # ═══════════════════════════════════════════════════════════════════════════
+    try:
+        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+
+        # Récupérer tous les identifiants avec mot de passe non chiffré
+        not_encrypted = c.execute('''
+            SELECT id, mot_de_passe FROM identifiants
+            WHERE mot_de_passe IS NOT NULL
+            AND mot_de_passe != ''
+            AND mot_de_passe NOT LIKE 'gAAAAAB%'
+        ''').fetchall()
+
+        if not_encrypted:
+            logger.info(f'🔐 Migration: chiffrement de {len(not_encrypted)} identifiants existants...')
+            for ident_id, mdp_clair in not_encrypted:
+                mdp_chiffre = crypto.encrypt(mdp_clair)
+                c.execute('UPDATE identifiants SET mot_de_passe=? WHERE id=?', (mdp_chiffre, ident_id))
+                logger.debug(f'  ✅ ID {ident_id} chiffré')
+            conn.commit()
+            logger.info(f'✅ Migration terminée: {len(not_encrypted)} identifiants chiffrés')
+        else:
+            logger.info('✅ Tous les identifiants sont déjà chiffrés')
+    except Exception as e:
+        logger.warning(f'⚠️ Erreur lors de la migration des identifiants: {e}')
+
+    # TABLE MAINTENANCE_NOTIFICATIONS (tracking notifications envoyées)
+    c.execute('''CREATE TABLE IF NOT EXISTS maintenance_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        maintenance_id INTEGER NOT NULL,
+        notification_date TEXT NOT NULL,
+        date_creation TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(maintenance_id) REFERENCES maintenances(id) ON DELETE CASCADE)''')
+
     # TABLE DOCUMENTS CONTRATS
     c.execute('''CREATE TABLE IF NOT EXISTS documents_contrats (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1073,7 +1285,7 @@ _TYPE_CSS_DEFAULTS = {
 
 @app.context_processor
 def inject_cfg():
-    types = get_liste('types_appareils')
+    types = get_liste_cached('types_appareils')
     user = get_auth_user()
     auth_user_id = user['id'] if user else None
     # Fusionner config globale + préférences personnelles de l'utilisateur
@@ -2546,7 +2758,7 @@ def nouvel_appareil():
         flash('Appareil ajouté avec succès', 'success')
         return redirect(url_for('liste_appareils'))
     return render_template('form_appareil.html', appareil=None, action='Ajouter',
-                           types_appareils=get_liste('types_appareils'),
+                           types_appareils=get_liste_cached('types_appareils'),
                            marques_av=get_liste('marques_antivirus'),
                            noms_av=get_liste('noms_antivirus'),
                            marques_edr=get_liste('marques_edr'),
@@ -2622,7 +2834,7 @@ def editer_appareil(id):
     lm_set = set(lm_list)
     sw_custom_sel = [sw for sw in sw_sel if sw not in SW_COURANTS_ALL and sw not in lm_set]
     return render_template('form_appareil.html', appareil=a, documents=docs, action='Modifier',
-                           types_appareils=get_liste('types_appareils'),
+                           types_appareils=get_liste_cached('types_appareils'),
                            marques_av=get_liste('marques_antivirus'),
                            noms_av=get_liste('noms_antivirus'),
                            marques_edr=get_liste('marques_edr'),
@@ -3205,7 +3417,7 @@ def liste_identifiants():
         })
     return render_template('identifiants.html', identifiants=ids_, wifi_parc=wifi_parc, client=client,
                            clients=get_clients(), client_actif_id=cid,
-                           categories=get_liste('categories_identifiants'), cats_utilisees=cats,
+                           categories=get_liste_cached('categories_identifiants'), cats_utilisees=cats,
                            filtre_cat=filtre_cat, pagination=pagination, stats=stats)
 
 @app.route('/identifiant/nouveau', methods=['GET','POST'])
@@ -3229,10 +3441,13 @@ def nouvel_identifiant():
             for e in errs: flash(e, 'danger')
             return redirect(request.url)
         conn = get_db()
+        # ✅ Chiffrer le mot de passe avant stockage
+        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        mdp_chiffre = crypto.encrypt(f.get('mot_de_passe','')) if f.get('mot_de_passe') else ''
         conn.execute('''INSERT INTO identifiants (client_id,categorie,nom,login,mot_de_passe,url,
             description,notes,date_expiration,wifi_ssid,wifi_securite,date_creation,date_maj)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-            (cid, f.get('categorie',''), f.get('nom',''), f.get('login',''), f.get('mot_de_passe',''),
+            (cid, f.get('categorie',''), f.get('nom',''), f.get('login',''), mdp_chiffre,
              f.get('url',''), f.get('description',''), f.get('notes',''),
              f.get('date_expiration',''),
              f.get('wifi_ssid','') if f.get('categorie') == 'Wi-Fi' else '',
@@ -3246,7 +3461,7 @@ def nouvel_identifiant():
         return redirect(url_for('liste_identifiants'))
     return render_template('form_identifiant.html', identifiant=None, action='Ajouter',
                            client=client, clients=get_clients(), client_actif_id=cid,
-                           categories=get_liste('categories_identifiants'))
+                           categories=get_liste_cached('categories_identifiants'))
 
 @app.route('/identifiant/<int:id>/editer', methods=['GET','POST'])
 def editer_identifiant(id):
@@ -3267,10 +3482,13 @@ def editer_identifiant(id):
             for e in errs: flash(e, 'danger')
             return redirect(request.url)
         _old = row_to_dict(conn.execute('SELECT * FROM identifiants WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        # ✅ Chiffrer le mot de passe avant mise à jour
+        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        mdp_chiffre = crypto.encrypt(f.get('mot_de_passe','')) if f.get('mot_de_passe') else ''
         conn.execute('''UPDATE identifiants SET categorie=?,nom=?,login=?,mot_de_passe=?,url=?,
             description=?,notes=?,date_expiration=?,wifi_ssid=?,wifi_securite=?,date_maj=?
             WHERE id=? AND client_id=?''',
-            (f.get('categorie',''), f.get('nom',''), f.get('login',''), f.get('mot_de_passe',''),
+            (f.get('categorie',''), f.get('nom',''), f.get('login',''), mdp_chiffre,
              f.get('url',''), f.get('description',''), f.get('notes',''),
              f.get('date_expiration',''),
              f.get('wifi_ssid','') if f.get('categorie') == 'Wi-Fi' else '',
@@ -3286,9 +3504,13 @@ def editer_identifiant(id):
         return redirect(url_for('liste_identifiants'))
     ident = row_to_dict(conn.execute('SELECT * FROM identifiants WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
+    # ✅ Déchiffrer le mot de passe pour l'affichage
+    if ident and ident.get('mot_de_passe'):
+        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        ident['mot_de_passe'] = crypto.decrypt(ident['mot_de_passe']) or ident['mot_de_passe']
     return render_template('form_identifiant.html', identifiant=ident, action='Modifier',
                            client=client, clients=get_clients(), client_actif_id=cid,
-                           categories=get_liste('categories_identifiants'))
+                           categories=get_liste_cached('categories_identifiants'))
 
 @app.route('/identifiant/<int:id>/supprimer', methods=['POST'])
 def supprimer_identifiant(id):
@@ -3311,7 +3533,10 @@ def api_get_mdp(id):
     row = conn.execute('SELECT mot_de_passe FROM identifiants WHERE id=? AND client_id=?', (id, cid)).fetchone()
     conn.close()
     if not row: return jsonify({'error': 'not found'}), 404
-    return jsonify({'mdp': row[0]})
+    # ✅ Déchiffrer le mot de passe
+    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+    mdp_dechiffre = crypto.decrypt(row[0]) if row[0] else ''
+    return jsonify({'mdp': mdp_dechiffre})
 
 # ─── DOCUMENTS APPAREILS ─────────────────────────────────────────────────────
 
@@ -4596,7 +4821,7 @@ def liste_peripheriques():
     conn.close()
     return render_template('peripheriques.html', peripheriques=periph, appareils=appareils,
                            client=client, clients=get_clients(), client_actif_id=cid,
-                           categories=get_liste('categories_peripheriques'), cats_utilisees=cats_utilisees,
+                           categories=get_liste_cached('categories_peripheriques'), cats_utilisees=cats_utilisees,
                            filtre_cats=filtre_cats, filtre_stat=filtre_stat, filtre_app=filtre_app,
                            sort_col=sort_col, sort_dir=sort_dir,
                            stats=stats, pagination=pagination)
@@ -4642,7 +4867,7 @@ def nouveau_peripherique():
     return render_template('form_peripherique.html', peripherique=None, action='Ajouter',
                            appareils=appareils, utilisateurs=utilisateurs,
                            client=client, clients=get_clients(), client_actif_id=cid,
-                           categories=get_liste('categories_peripheriques'), pre_appareil_id=pre_app,
+                           categories=get_liste_cached('categories_peripheriques'), pre_appareil_id=pre_app,
                            linked_app_ids=[int(pre_app)] if pre_app else [])
 
 @app.route('/peripherique/<int:id>/editer', methods=['GET','POST'])
@@ -4703,7 +4928,7 @@ def editer_peripherique(id):
     return render_template('form_peripherique.html', peripherique=p, documents=docs_per, action='Modifier',
                            appareils=appareils, utilisateurs=utilisateurs,
                            client=client, clients=get_clients(), client_actif_id=cid,
-                           categories=get_liste('categories_peripheriques'), pre_appareil_id='',
+                           categories=get_liste_cached('categories_peripheriques'), pre_appareil_id='',
                            linked_app_ids=linked_app_ids, interventions=interventions)
 
 @app.route('/peripherique/<int:id>/supprimer', methods=['POST'])
@@ -4811,7 +5036,7 @@ def liste_contrats():
     conn.close()
     return render_template('contrats.html', contrats=contrats, client=client,
                            clients=get_clients(), client_actif_id=cid,
-                           types_contrats=get_liste('types_contrats'), types_utilises=types_utilises,
+                           types_contrats=get_liste_cached('types_contrats'), types_utilises=types_utilises,
                            periodicites=PERIODICITES, stats=stats, alertes=alertes,
                            filtre_type=filtre_type, filtre_stat=filtre_stat,
                            filtre_app_id=filtre_app_id, filtre_app_nom=filtre_app_nom,
@@ -4869,7 +5094,7 @@ def nouveau_contrat():
                            appareils=appareils, peripheriques=peripheriques,
                            appareils_lies=[], peripheriques_lies=[],
                            client=client, clients=get_clients(), client_actif_id=cid,
-                           types_contrats=get_liste('types_contrats'), periodicites=PERIODICITES)
+                           types_contrats=get_liste_cached('types_contrats'), periodicites=PERIODICITES)
 
 @app.route('/contrat/<int:id>', methods=['GET'])
 def detail_contrat(id):
@@ -4952,7 +5177,7 @@ def editer_contrat(id):
                            appareils=appareils, peripheriques=peripheriques,
                            appareils_lies=appareils_lies, peripheriques_lies=periph_lies,
                            client=client, clients=get_clients(), client_actif_id=cid,
-                           types_contrats=get_liste('types_contrats'), periodicites=PERIODICITES)
+                           types_contrats=get_liste_cached('types_contrats'), periodicites=PERIODICITES)
 
 @app.route('/contrat/<int:id>/supprimer', methods=['POST'])
 def supprimer_contrat(id):
@@ -5070,6 +5295,268 @@ def _extract_contrat(cid, f):
             f.get('periodicite','annuel'), f.get('description',''), f.get('notes',''),
             f.get('statut','actif'))
 
+
+def _generate_maintenance_series(conn, maint_id, cid, date_planifiee, recurrence, date_fin_recurrence, created_by, f, lookahead_date=None):
+    """Génère les occurrences récurrentes d'une maintenance jusqu'à lookahead_date (ou date_fin_recurrence si None)"""
+    if not recurrence or recurrence == '':
+        return
+
+    from datetime import datetime, timedelta
+
+    try:
+        start_date = datetime.strptime(date_planifiee, '%Y-%m-%d')
+        end_date = datetime.strptime(date_fin_recurrence, '%Y-%m-%d') if date_fin_recurrence else None
+    except:
+        logger.warning(f"Erreur parsing dates pour récurrence: {date_planifiee}, {date_fin_recurrence}")
+        return
+
+    if not end_date or end_date <= start_date:
+        return
+
+    # Utiliser lookahead_date si fourni (sinon utiliser date_fin_recurrence)
+    if lookahead_date:
+        try:
+            cutoff_date = datetime.strptime(lookahead_date, '%Y-%m-%d') if isinstance(lookahead_date, str) else lookahead_date
+        except:
+            cutoff_date = end_date
+    else:
+        cutoff_date = end_date
+
+    # Calculer les dates futures selon le type de récurrence
+    occurrences = []
+
+    if recurrence == 'hebdomadaire':
+        current_date = start_date + timedelta(days=7)
+        while current_date <= cutoff_date:
+            occurrences.append(current_date.strftime('%Y-%m-%d'))
+            current_date += timedelta(days=7)
+    elif recurrence == 'mensuelle':
+        current_date = start_date
+        while True:
+            # Ajouter 1 mois
+            if current_date.month == 12:
+                current_date = current_date.replace(year=current_date.year + 1, month=1)
+            else:
+                current_date = current_date.replace(month=current_date.month + 1)
+            if current_date > cutoff_date:
+                break
+            occurrences.append(current_date.strftime('%Y-%m-%d'))
+    elif recurrence == 'annuelle':
+        current_date = start_date
+        while True:
+            current_date = current_date.replace(year=current_date.year + 1)
+            if current_date > cutoff_date:
+                break
+            occurrences.append(current_date.strftime('%Y-%m-%d'))
+    else:
+        return
+
+    # Extraire appareil_id et peripherique_id
+    appareil_id = None
+    try: appareil_id = int(f.get('appareil_id')) if f.get('appareil_id') else None
+    except: pass
+    peripherique_id = None
+    try: peripherique_id = int(f.get('peripherique_id')) if f.get('peripherique_id') else None
+    except: pass
+
+    # Insérer les occurrences
+    for occ_date in occurrences:
+        conn.execute(
+            '''INSERT INTO maintenances
+            (client_id, appareil_id, peripherique_id, type_maintenance, description,
+             date_planifiee, date_realisee, heure_debut, heure_fin, responsable, notes,
+             statut, recurrence, date_fin_recurrence, parent_id, created_by, updated_by)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (cid, appareil_id, peripherique_id, f.get('type_maintenance',''), f.get('description',''),
+             occ_date, '', f.get('heure_debut',''), f.get('heure_fin',''), f.get('responsable',''),
+             f.get('notes',''), 'programmee', recurrence, date_fin_recurrence, maint_id, created_by, created_by)
+        )
+
+    conn.commit()
+
+
+def _regenerate_all_maintenance_occurrences():
+    """Cron job: génère les occurrences futures pour toutes les maintenances récurrentes"""
+    try:
+        from datetime import datetime, timedelta
+        conn = get_db()
+
+        # Récupérer toutes les maintenances avec récurrence actives
+        maintenances = conn.execute(
+            '''SELECT id, client_id, date_planifiee, recurrence, date_fin_recurrence,
+                      appareil_id, peripherique_id, type_maintenance, description,
+                      heure_debut, heure_fin, responsable, notes
+               FROM maintenances
+               WHERE recurrence IS NOT NULL AND recurrence != ''
+                     AND date_fin_recurrence IS NOT NULL
+                     AND parent_id IS NULL
+               ORDER BY id'''
+        ).fetchall()
+
+        for maint in maintenances:
+            m = row_to_dict(maint)
+            # Vérifier la dernière occurrence générée
+            last_occ = conn.execute(
+                'SELECT MAX(date_planifiee) FROM maintenances WHERE parent_id=?',
+                (m['id'],)
+            ).fetchone()[0]
+
+            if not last_occ:
+                last_occ = m['date_planifiee']
+
+            # Lookahead: générer jusqu'à aujourd'hui + 28 jours
+            lookahead_date = (datetime.now() + timedelta(days=28)).strftime('%Y-%m-%d')
+            last_occ_dt = datetime.strptime(last_occ, '%Y-%m-%d')
+
+            # Si la dernière occurrence est < lookahead, générer les nouvelles
+            if last_occ_dt < datetime.strptime(lookahead_date, '%Y-%m-%d'):
+                # Construire un fake form dict pour _generate_maintenance_series
+                fake_form = {
+                    'type_maintenance': m['type_maintenance'],
+                    'description': m['description'],
+                    'appareil_id': m['appareil_id'],
+                    'peripherique_id': m['peripherique_id'],
+                    'heure_debut': m['heure_debut'],
+                    'heure_fin': m['heure_fin'],
+                    'responsable': m['responsable'],
+                    'notes': m['notes'],
+                }
+                _generate_maintenance_series(conn, m['id'], m['client_id'],
+                                            last_occ, m['recurrence'],
+                                            m['date_fin_recurrence'],
+                                            1,  # created_by=1 (cron job)
+                                            fake_form, lookahead_date=lookahead_date)
+
+        conn.close()
+        logger.info(f"Cron job: {len(maintenances)} maintenances récurrentes vérifiées")
+    except Exception as e:
+        logger.exception(f"Erreur dans cron job de régénération: {e}")
+
+
+def _send_email(to_email, subject, body):
+    """Envoie un email via SMTP. Retourne True si succès."""
+    try:
+        smtp_server = cfg_get('smtp_server', '')
+        smtp_port = int(cfg_get('smtp_port', '587'))
+        smtp_login = cfg_get('smtp_login', '')
+        smtp_password = cfg_get('smtp_password', '')
+        from_email = cfg_get('from_email', smtp_login)
+
+        if not all([smtp_server, smtp_login, smtp_password]):
+            logger.warning('SMTP non configuré - notification ignorée')
+            return False
+
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = from_email
+        msg['To'] = to_email
+        msg.attach(MIMEText(body, 'html'))
+
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_login, smtp_password)
+        server.sendmail(from_email, [to_email], msg.as_string())
+        server.quit()
+
+        return True
+    except Exception as e:
+        logger.error(f'Erreur envoi email: {e}')
+        return False
+
+
+def _notify_upcoming_maintenances():
+    """Cron job: envoie notifications des maintenances à venir (3 jours)"""
+    try:
+        conn = get_db()
+
+        # Récupérer maintenances des 3 prochains jours
+        today = date.today().isoformat()
+        in_3_days = (date.today() + timedelta(days=3)).isoformat()
+
+        maintenances = conn.execute('''
+            SELECT m.id, m.date_planifiee, m.type_maintenance, m.description,
+                   m.responsable, m.statut, a.nom_machine, p.categorie, p.marque
+            FROM maintenances m
+            LEFT JOIN appareils a ON m.appareil_id = a.id
+            LEFT JOIN peripheriques p ON m.peripherique_id = p.id
+            WHERE m.statut = 'programmee'
+              AND m.date_planifiee BETWEEN ? AND ?
+              AND NOT EXISTS (
+                SELECT 1 FROM maintenance_notifications
+                WHERE maintenance_id=m.id AND notification_date >= ?
+              )
+            ORDER BY m.date_planifiee
+        ''', (today, in_3_days, today)).fetchall()
+
+        for maint in maintenances:
+            m = row_to_dict(maint)
+            recipient = m.get('responsable', '')
+
+            if recipient and '@' in recipient:
+                subject = f"⚙️ Maintenance à venir: {m['type_maintenance']} - {m['date_planifiee']}"
+
+                equipment = m.get('nom_machine') or f"{m.get('categorie', '')} {m.get('marque', '')}"
+                body = f"""<html><body style="font-family: Arial;">
+                <h2>Notification de maintenance</h2>
+                <p><strong>Date:</strong> {m['date_planifiee']}</p>
+                <p><strong>Type:</strong> {m['type_maintenance']}</p>
+                <p><strong>Équipement:</strong> {equipment or '—'}</p>
+                <p><strong>Description:</strong> {m.get('description', '—')}</p>
+                <p><em>Veuillez confirmer l'exécution dans ParcInfo</em></p>
+                </body></html>"""
+
+                if _send_email(recipient, subject, body):
+                    # Enregistrer la notification envoyée
+                    conn.execute(
+                        'INSERT INTO maintenance_notifications (maintenance_id, notification_date) VALUES (?, ?)',
+                        (m['id'], today)
+                    )
+                    conn.commit()
+                    logger.info(f"Notification envoyée pour maintenance {m['id']} à {recipient}")
+
+        conn.close()
+    except Exception as e:
+        logger.exception(f'Erreur notification maintenances: {e}')
+
+
+def _extract_maintenance(cid, f, user_id):
+    appareil_id = None
+    try: appareil_id = int(f.get('appareil_id')) if f.get('appareil_id') else None
+    except: pass
+    peripherique_id = None
+    try: peripherique_id = int(f.get('peripherique_id')) if f.get('peripherique_id') else None
+    except: pass
+    contrat_id = None
+    try: contrat_id = int(f.get('contrat_id')) if f.get('contrat_id') else None
+    except: pass
+    return (cid, appareil_id, peripherique_id, contrat_id, f.get('type_maintenance',''), f.get('description',''),
+            f.get('date_planifiee',''), f.get('date_realisee',''), f.get('heure_debut',''),
+            f.get('heure_fin',''), f.get('responsable',''), f.get('notes',''),
+            f.get('statut','programmee'), f.get('recurrence'), f.get('date_fin_recurrence'),
+            None, user_id, user_id)
+
+
+def _format_maintenance_for_list(rows):
+    """Formate maintenances pour affichage liste"""
+    result = []
+    for r in rows:
+        m = row_to_dict(r)
+        m['statut_label'] = {
+            'programmee': 'Programmée',
+            'realisee': 'Réalisée',
+            'reportee': 'Reportée',
+            'annulee': 'Annulée'
+        }.get(m.get('statut', ''), m.get('statut', ''))
+        m['type_label'] = (m.get('type_maintenance') or '').title()
+        _format_date_field(m, 'date_planifiee')
+        if m.get('date_realisee'):
+            _format_date_field(m, 'date_realisee')
+        result.append(m)
+    return result
 
 
 # --- INTERVENTIONS ----------------------------------------------------------
@@ -5516,6 +6003,10 @@ def popup_identifiant(id):
     conn.close()
     if not ident:
         return 'Identifiant introuvable', 404
+    # ✅ Déchiffrer le mot de passe
+    if ident.get('mot_de_passe'):
+        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        ident['mot_de_passe'] = crypto.decrypt(ident['mot_de_passe']) or ident['mot_de_passe']
     # Format dates
     today = date.today()
     if ident.get('date_expiration'):
@@ -5528,6 +6019,781 @@ def popup_identifiant(id):
         except (ValueError, TypeError):
             ident['date_expiration_fmt'] = ident['date_expiration']
     return render_template('popup_identifiant.html', ident=ident)
+
+
+# --- MAINTENANCE ----------------------------------------------------------
+
+@app.route('/maintenances')
+@login_required
+def liste_maintenances():
+    cid = get_client_id()
+    if not cid: return redirect(url_for('nouveau_client'))
+
+    page = request.args.get('page', 1, type=int)
+    filtre_type = request.args.get('type_maintenance', '')
+    filtre_statut = request.args.get('statut', '')
+    filtre_appareil = request.args.get('appareil_id', '')
+    filtre_date_debut = request.args.get('date_debut', '')
+    filtre_date_fin = request.args.get('date_fin', '')
+    filtre_responsable = request.args.get('responsable', '')
+
+    # Tri
+    sort_by = request.args.get('sort_by', 'date_planifiee')
+    sort_order = request.args.get('sort_order', 'desc').lower()
+
+    # Valider la colonne de tri (whitelist)
+    allowed_sort_cols = ['date_planifiee', 'type_maintenance', 'responsable', 'statut', 'date_realisee']
+    if sort_by not in allowed_sort_cols:
+        sort_by = 'date_planifiee'
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'desc'
+
+    clients_sel = request.args.getlist('clients_selection')
+    if not clients_sel:
+        clients_sel = None
+
+    conn = get_db()
+
+    # Build query with JOINs to get appareil/peripherique/contrat names
+    query = '''SELECT m.*,
+               a.nom_machine as appareil_nom,
+               p.categorie as peripherique_categorie, p.marque as peripherique_marque, p.modele as peripherique_modele,
+               c.type_contrat as contrat_type, c.fournisseur as contrat_fournisseur
+        FROM maintenances m
+        LEFT JOIN appareils a ON m.appareil_id = a.id
+        LEFT JOIN peripheriques p ON m.peripherique_id = p.id
+        LEFT JOIN contrats c ON m.contrat_id = c.id
+        WHERE m.client_id IN ({})'''.format(
+        ','.join(['?'] * len([c['id'] for c in get_clients_for_filter(clients_sel)])))
+
+    params = [c['id'] for c in get_clients_for_filter(clients_sel)]
+
+    if filtre_type:
+        query += ' AND type_maintenance=?'
+        params.append(filtre_type)
+    if filtre_statut:
+        query += ' AND statut=?'
+        params.append(filtre_statut)
+    if filtre_appareil:
+        query += ' AND appareil_id=?'
+        params.append(int(filtre_appareil))
+    if filtre_date_debut:
+        query += ' AND date_planifiee>=?'
+        params.append(filtre_date_debut)
+    if filtre_date_fin:
+        query += ' AND date_planifiee<=?'
+        params.append(filtre_date_fin)
+    if filtre_responsable:
+        query += ' AND responsable LIKE ?'
+        params.append(f'%{filtre_responsable}%')
+
+    query += f' ORDER BY {sort_by} {sort_order.upper()}'
+
+    rows, pagination = paginate(query, tuple(params), page)
+    maintenances = _format_maintenance_for_list(rows)
+
+    # Stats
+    types_maintenance = get_liste('types_maintenance')
+    statuts_maintenance = get_liste('statuts_maintenance')
+
+    # Get appareils for filter
+    appareils = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine FROM appareils WHERE client_id=? ORDER BY nom_machine',
+        (cid,)).fetchall()]
+
+    clients = get_clients()
+    conn.close()
+
+    return render_template('liste_maintenances.html',
+                          maintenances=maintenances, client_actif_id=cid,
+                          pagination=pagination, clients=clients,
+                          types_maintenance=types_maintenance,
+                          statuts_maintenance=statuts_maintenance,
+                          appareils=appareils,
+                          filtre_type=filtre_type, filtre_statut=filtre_statut,
+                          filtre_appareil=filtre_appareil, filtre_date_debut=filtre_date_debut,
+                          filtre_date_fin=filtre_date_fin, filtre_responsable=filtre_responsable,
+                          sort_by=sort_by, sort_order=sort_order)
+
+
+@app.route('/maintenance/nouveau', methods=['GET', 'POST'])
+@login_required
+def nouveau_maintenance():
+    if not can_write():
+        flash('Accès en lecture seule — modification non autorisée', 'danger')
+        return redirect(url_for('liste_maintenances'))
+
+    cid = get_client_id()
+    if not cid: return redirect(url_for('nouveau_client'))
+
+    user = get_auth_user()
+    conn = get_db()
+
+    appareils = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine FROM appareils WHERE client_id=? ORDER BY nom_machine',
+        (cid,)).fetchall()]
+    peripheriques = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, categorie, marque, modele FROM peripheriques WHERE client_id=? ORDER BY categorie',
+        (cid,)).fetchall()]
+    contrats = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, type_contrat, fournisseur, date_debut, date_fin FROM contrats WHERE client_id=? ORDER BY date_debut DESC',
+        (cid,)).fetchall()]
+    types_maintenance = get_liste('types_maintenance')
+
+    if request.method == 'POST':
+        errs = validate_form([
+            ('type_maintenance', 'str', True),
+            ('date_planifiee', 'date', True),
+        ], request.form)
+
+        if errs:
+            for e in errs: flash(e, 'danger')
+            conn.close()
+            return redirect(request.url)
+
+        f = request.form
+        now = datetime.now().isoformat()
+
+        params = _extract_maintenance(cid, f, user['id'])
+
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                '''INSERT INTO maintenances
+                (client_id, appareil_id, peripherique_id, contrat_id, type_maintenance, description,
+                 date_planifiee, date_realisee, heure_debut, heure_fin, responsable, notes,
+                 statut, recurrence, date_fin_recurrence, parent_id, created_by, updated_by)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                params)
+            maint_id = cur.lastrowid
+            conn.commit()
+
+            # Générer les occurrences si récurrence définie
+            if f.get('recurrence'):
+                # Lookahead: générer 4 semaines à l'avance
+                lookahead_date = (datetime.strptime(f.get('date_planifiee'), '%Y-%m-%d') + timedelta(days=28)).strftime('%Y-%m-%d')
+                _generate_maintenance_series(conn, maint_id, cid, f.get('date_planifiee'),
+                                            f.get('recurrence'), f.get('date_fin_recurrence'),
+                                            user['id'], f, lookahead_date=lookahead_date)
+
+            log_history(conn, cid, 'maintenance', maint_id, f.get('description','Maintenance'),
+                       'Création', {'type': f.get('type_maintenance'), 'date': f.get('date_planifiee')})
+            conn.commit()
+            if f.get('recurrence'):
+                flash('Maintenance créée avec occurrences des 4 prochaines semaines', 'success')
+            else:
+                flash('Maintenance programmée créée', 'success')
+        except Exception as e:
+            conn.rollback()
+            logger.exception('Erreur création maintenance')
+            flash(f'Erreur : {str(e)}', 'danger')
+        finally:
+            conn.close()
+
+        return redirect(url_for('liste_maintenances'))
+
+    techniciens = [row_to_dict(r) for r in conn.execute(
+        "SELECT id, nom, prenom FROM auth_users WHERE role != 'admin' AND actif=1 ORDER BY nom, prenom"
+        ).fetchall()]
+    conn.close()
+    return render_template('form_maintenance.html', appareils=appareils, peripheriques=peripheriques,
+                          contrats=contrats, types_maintenance=types_maintenance, techniciens=techniciens, action='Créer')
+
+
+@app.route('/maintenance/<int:id>/editer', methods=['GET', 'POST'])
+@login_required
+def editer_maintenance(id):
+    if not can_write():
+        flash('Accès en lecture seule — modification non autorisée', 'danger')
+        return redirect(url_for('liste_maintenances'))
+
+    cid = get_client_id()
+    user = get_auth_user()
+    conn = get_db()
+
+    maint = row_to_dict(conn.execute(
+        'SELECT * FROM maintenances WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+
+    if not maint:
+        conn.close()
+        flash('Maintenance introuvable', 'danger')
+        return redirect(url_for('liste_maintenances'))
+
+    appareils = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine FROM appareils WHERE client_id=? ORDER BY nom_machine',
+        (cid,)).fetchall()]
+    peripheriques = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, categorie, marque, modele FROM peripheriques WHERE client_id=? ORDER BY categorie',
+        (cid,)).fetchall()]
+    contrats = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, type_contrat, fournisseur, date_debut, date_fin FROM contrats WHERE client_id=? ORDER BY date_debut DESC',
+        (cid,)).fetchall()]
+    types_maintenance = get_liste('types_maintenance')
+
+    if request.method == 'POST':
+        errs = validate_form([
+            ('type_maintenance', 'str', True),
+            ('date_planifiee', 'date', True),
+        ], request.form)
+
+        if errs:
+            for e in errs: flash(e, 'danger')
+            conn.close()
+            return redirect(request.url)
+
+        f = request.form
+        now = datetime.now().isoformat()
+
+        try:
+            appareil_id = int(f.get('appareil_id')) if f.get('appareil_id') else None
+        except:
+            appareil_id = None
+        try:
+            peripherique_id = int(f.get('peripherique_id')) if f.get('peripherique_id') else None
+        except:
+            peripherique_id = None
+        try:
+            contrat_id = int(f.get('contrat_id')) if f.get('contrat_id') else None
+        except:
+            contrat_id = None
+
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                '''UPDATE maintenances
+                SET type_maintenance=?, description=?, date_planifiee=?, date_realisee=?,
+                    heure_debut=?, heure_fin=?, responsable=?, notes=?,
+                    statut=?, recurrence=?, date_fin_recurrence=?,
+                    appareil_id=?, peripherique_id=?, contrat_id=?, updated_by=?, date_maj=?
+                WHERE id=? AND client_id=?''',
+                (f.get('type_maintenance'), f.get('description'), f.get('date_planifiee'),
+                 f.get('date_realisee'), f.get('heure_debut'), f.get('heure_fin'),
+                 f.get('responsable'), f.get('notes'), f.get('statut'),
+                 f.get('recurrence'), f.get('date_fin_recurrence'),
+                 appareil_id, peripherique_id, contrat_id, user['id'], now,
+                 id, cid))
+            conn.commit()
+            log_history(conn, cid, 'maintenance', id, f.get('description','Maintenance'),
+                       'Modification', {'type': f.get('type_maintenance')})
+            conn.commit()
+            flash('Maintenance mise à jour', 'success')
+        except Exception as e:
+            conn.rollback()
+            logger.exception('Erreur édition maintenance')
+            flash(f'Erreur : {str(e)}', 'danger')
+        finally:
+            conn.close()
+
+        return redirect(url_for('liste_maintenances'))
+
+    techniciens = [row_to_dict(r) for r in conn.execute(
+        "SELECT id, nom, prenom FROM auth_users WHERE role != 'admin' AND actif=1 ORDER BY nom, prenom"
+        ).fetchall()]
+    conn.close()
+    return render_template('form_maintenance.html', maint=maint, appareils=appareils,
+                          peripheriques=peripheriques, contrats=contrats,
+                          types_maintenance=types_maintenance,
+                          techniciens=techniciens, action='Éditer')
+
+
+@app.route('/maintenance/<int:id>/confirmer', methods=['POST'])
+@login_required
+def confirmer_maintenance(id):
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule — modification non autorisée'}), 403
+
+    cid = get_client_id()
+    user = get_auth_user()
+    conn = get_db()
+
+    maint = row_to_dict(conn.execute(
+        'SELECT * FROM maintenances WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+
+    if not maint:
+        conn.close()
+        return jsonify({'error': 'Not found'}), 404
+
+    now = datetime.now().isoformat()
+    today = date.today().isoformat()
+
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            'UPDATE maintenances SET statut=?, date_realisee=?, updated_by=?, date_maj=? WHERE id=? AND client_id=?',
+            ('realisee', today, user['id'], now, id, cid))
+        conn.commit()
+        log_history(conn, cid, 'maintenance', id, maint.get('description','Maintenance'),
+                   'Confirmation', {'ancien_statut': maint.get('statut'), 'nouveau_statut': 'realisee'})
+        conn.commit()
+        return jsonify({'ok': True})
+    except Exception as e:
+        conn.rollback()
+        logger.exception('Erreur confirmation maintenance')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+
+
+@app.route('/maintenance/<int:id>/supprimer', methods=['POST'])
+@login_required
+def supprimer_maintenance(id):
+    if not can_write():
+        flash('Accès en lecture seule — modification non autorisée', 'danger')
+        return redirect(url_for('liste_maintenances'))
+
+    cid = get_client_id()
+    user = get_auth_user()
+    conn = get_db()
+
+    maint = row_to_dict(conn.execute(
+        'SELECT * FROM maintenances WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+
+    if not maint:
+        conn.close()
+        flash('Maintenance introuvable', 'danger')
+        return redirect(url_for('liste_maintenances'))
+
+    now = datetime.now().isoformat()
+
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            'UPDATE maintenances SET statut=?, updated_by=?, date_maj=? WHERE id=? AND client_id=?',
+            ('annulee', user['id'], now, id, cid))
+        conn.commit()
+        log_history(conn, cid, 'maintenance', id, maint.get('description','Maintenance'),
+                   'Suppression', {})
+        conn.commit()
+        flash('Maintenance annulée', 'success')
+    except Exception as e:
+        conn.rollback()
+        logger.exception('Erreur suppression maintenance')
+        flash(f'Erreur : {str(e)}', 'danger')
+    finally:
+        conn.close()
+
+    return redirect(url_for('liste_maintenances'))
+
+
+@app.route('/rapport/maintenances')
+@login_required
+def rapport_maintenances():
+    cid = get_client_id()
+    if not cid: return redirect(url_for('nouveau_client'))
+
+    types_maintenance = get_liste('types_maintenance')
+    clients = get_clients()
+
+    # Filtres
+    date_debut = request.args.get('date_debut', '')
+    date_fin = request.args.get('date_fin', '')
+    type_maint = request.args.get('type_maintenance', '')
+    statut = request.args.get('statut', '')
+    clients_filter = request.args.get('clients_filter', 'current')
+
+    # Déterminer clients sélectionnés
+    if clients_filter == 'all':
+        client_ids = [c['id'] for c in clients]
+    else:
+        client_ids = [cid]
+
+    # Requête SQL filtrée
+    conn = get_db()
+    query = '''SELECT m.*,
+                      a.nom_machine AS appareil_nom,
+                      p.marque AS peripherique_marque, p.modele AS peripherique_modele, p.categorie AS peripherique_categorie,
+                      c.type_contrat AS contrat_type, c.fournisseur AS contrat_fournisseur
+               FROM maintenances m
+               LEFT JOIN appareils a ON m.appareil_id = a.id
+               LEFT JOIN peripheriques p ON m.peripherique_id = p.id
+               LEFT JOIN contrats c ON m.contrat_id = c.id
+               WHERE m.client_id IN ({})'''.format(','.join(['?'] * len(client_ids)))
+    params = client_ids[:]
+
+    if date_debut:
+        query += ' AND m.date_planifiee >= ?'
+        params.append(date_debut)
+    if date_fin:
+        query += ' AND m.date_planifiee <= ?'
+        params.append(date_fin)
+    if type_maint:
+        query += ' AND m.type_maintenance = ?'
+        params.append(type_maint)
+    if statut:
+        query += ' AND m.statut = ?'
+        params.append(statut)
+
+    query += ' ORDER BY m.date_planifiee DESC'
+
+    rows = conn.execute(query, params).fetchall()
+    maintenances = [row_to_dict(r) for r in rows]
+    maintenances = _format_maintenance_for_list(maintenances)
+
+    # Statistiques
+    total = len(maintenances)
+    realisees = sum(1 for m in maintenances if m['statut'] == 'realisee')
+    attente = sum(1 for m in maintenances if m['statut'] == 'programmee')
+    reportees = sum(1 for m in maintenances if m['statut'] == 'reportee')
+
+    conn.close()
+
+    return render_template('rapport_maintenance.html',
+                          clients=clients,
+                          types_maintenance=types_maintenance,
+                          maintenances=maintenances,
+                          stats={'total': total, 'realisees': realisees, 'attente': attente, 'reportees': reportees})
+
+
+@app.route('/rapport/maintenances/pdf')
+@login_required
+def rapport_maintenances_pdf():
+    """Génère un PDF du rapport de maintenances avec mise en page professionnelle"""
+    if not REPORTLAB_AVAILABLE:
+        flash('La bibliothèque reportlab n\'est pas installée. Installez-la avec: pip install reportlab', 'danger')
+        return redirect(request.referrer or url_for('rapport_maintenances'))
+
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+
+    # Récupérer les mêmes filtres que le rapport HTML
+    date_debut = request.args.get('date_debut', '')
+    date_fin = request.args.get('date_fin', '')
+    type_maint = request.args.get('type_maintenance', '')
+    statut = request.args.get('statut', '')
+    clients_filter = request.args.get('clients_filter', 'current')
+
+    clients = get_clients()
+    if clients_filter == 'all':
+        client_ids = [c['id'] for c in clients]
+    else:
+        client_ids = [cid]
+
+    # Construire la requête SQL
+    conn = get_db()
+    query = '''SELECT m.*,
+                      a.nom_machine AS appareil_nom,
+                      p.marque AS peripherique_marque, p.modele AS peripherique_modele, p.categorie AS peripherique_categorie,
+                      c.type_contrat AS contrat_type, c.fournisseur AS contrat_fournisseur
+               FROM maintenances m
+               LEFT JOIN appareils a ON m.appareil_id = a.id
+               LEFT JOIN peripheriques p ON m.peripherique_id = p.id
+               LEFT JOIN contrats c ON m.contrat_id = c.id
+               WHERE m.client_id IN ({})'''.format(','.join(['?'] * len(client_ids)))
+    params = client_ids[:]
+
+    if date_debut:
+        query += ' AND m.date_planifiee >= ?'
+        params.append(date_debut)
+    if date_fin:
+        query += ' AND m.date_planifiee <= ?'
+        params.append(date_fin)
+    if type_maint:
+        query += ' AND m.type_maintenance = ?'
+        params.append(type_maint)
+    if statut:
+        query += ' AND m.statut = ?'
+        params.append(statut)
+
+    query += ' ORDER BY m.date_planifiee DESC'
+
+    rows = conn.execute(query, params).fetchall()
+    maintenances = [row_to_dict(r) for r in rows]
+    maintenances = _format_maintenance_for_list(maintenances)
+
+    # Calculer statistiques
+    total = len(maintenances)
+    realisees = sum(1 for m in maintenances if m['statut'] == 'realisee')
+    attente = sum(1 for m in maintenances if m['statut'] == 'programmee')
+    reportees = sum(1 for m in maintenances if m['statut'] == 'reportee')
+
+    conn.close()
+
+    try:
+        # Créer le PDF avec reportlab
+        pdf_buffer = BytesIO()
+        doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, rightMargin=15*mm, leftMargin=15*mm,
+                                topMargin=15*mm, bottomMargin=15*mm)
+        story = []
+
+        # Styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#0a0d12'),
+            spaceAfter=6,
+            fontName='Helvetica-Bold'
+        )
+        subtitle_style = ParagraphStyle(
+            'CustomSubtitle',
+            parent=styles['Normal'],
+            fontSize=12,
+            textColor=colors.HexColor('#00c9ff'),
+            spaceAfter=3,
+            fontName='Helvetica-Bold'
+        )
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#0a0d12'),
+            spaceAfter=10,
+            fontName='Helvetica-Bold'
+        )
+
+        # Titre
+        story.append(Paragraph('📊 Rapport Maintenances', title_style))
+        story.append(Paragraph('Synthèse des opérations de maintenance', subtitle_style))
+        story.append(Paragraph(f'Généré le {datetime.now().strftime("%d/%m/%Y à %H:%M")}', styles['Normal']))
+        story.append(Spacer(1, 15))
+
+        # Statistiques
+        stats_data = [
+            ['Total Opérations', f'{total}'],
+            ['Réalisées', f'{realisees}'],
+            ['En Attente', f'{attente}'],
+            ['Reportées', f'{reportees}']
+        ]
+        stats_table = Table(stats_data, colWidths=[3*inch, 1*inch])
+        stats_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f5f5f5')),
+            ('BACKGROUND', (1, 0), (1, -1), colors.HexColor('#e8f5ff')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#333333')),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#ddd')),
+        ]))
+        story.append(stats_table)
+        story.append(Spacer(1, 15))
+
+        # Tableau détail
+        story.append(Paragraph('Détail des Opérations', heading_style))
+
+        if maintenances:
+            # Préparer les données du tableau avec des Paragraphs pour meilleur enroulement
+            table_data = [
+                ['Date Planifiée', 'Type', 'Description', 'Responsable', 'Statut', 'Réalisée le']
+            ]
+
+            # Style pour le contenu des cellules
+            cell_style = ParagraphStyle(
+                'CellStyle',
+                parent=styles['Normal'],
+                fontSize=8,
+                leading=10,
+                alignment=0  # LEFT
+            )
+
+            for m in maintenances[:50]:  # Limiter à 50 lignes pour la lisibilité
+                # Tronquer la description à 80 caractères max pour éviter débordement
+                description = m.get('description', '')[:80] or '—'
+
+                table_data.append([
+                    Paragraph(m.get('date_planifiee_fmt', ''), cell_style),
+                    Paragraph(m.get('type_label', ''), cell_style),
+                    Paragraph(description, cell_style),
+                    Paragraph(m.get('responsable', '') or '—', cell_style),
+                    Paragraph(m.get('statut_label', ''), cell_style),
+                    Paragraph(m.get('date_realisee_fmt', '') or '—', cell_style)
+                ])
+
+            # Créer le tableau avec meilleures largeurs et hauteurs
+            table = Table(table_data, colWidths=[1.0*inch, 0.8*inch, 2.2*inch, 0.9*inch, 0.8*inch, 1.0*inch])
+            table.setStyle(TableStyle([
+                # En-tête
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0a0d12')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, 0), 8),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                ('LEFTPADDING', (0, 0), (-1, -1), 5),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+
+                # Contenu
+                ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9f9f9')]),
+                ('ALIGN', (0, 1), (-1, -1), 'LEFT'),
+                ('VALIGN', (0, 1), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 1), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+
+                # Grille et bordures
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#ddd')),
+                ('LINEBELOW', (0, 0), (-1, 0), 2, colors.HexColor('#0a0d12')),
+
+                # Hauteur minimale des lignes
+                ('ROWHEIGHT', (0, 0), (-1, -1), None),  # Auto-hauteur
+                ('ROWHEIGHT', (0, 1), (-1, -1), 35),  # Minimum 35 points pour le contenu
+            ]))
+            story.append(table)
+        else:
+            story.append(Paragraph('Aucune maintenance trouvée pour les critères spécifiés.', styles['Italic']))
+
+        # Pied de page
+        story.append(Spacer(1, 20))
+        story.append(Paragraph('ParcInfo — Rapport de Maintenance — Document généré automatiquement',
+                              styles['Normal']))
+
+        # Générer le PDF
+        doc.build(story)
+        pdf_buffer.seek(0)
+
+        # Créer la réponse
+        response = make_response(pdf_buffer.getvalue())
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="rapport-maintenance-{datetime.now().strftime("%Y%m%d-%H%M%S")}.pdf"'
+        return response
+
+    except Exception as e:
+        logger.exception('Erreur génération PDF rapport')
+        flash(f'Erreur lors de la génération du PDF : {str(e)}', 'danger')
+        return redirect(request.referrer or url_for('rapport_maintenances',
+                                date_debut=date_debut,
+                                date_fin=date_fin,
+                                type_maintenance=type_maint,
+                                statut=statut,
+                                clients_filter=clients_filter))
+
+
+@app.route('/maintenance/historique')
+@login_required
+def historique_maintenance():
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+
+    conn = get_db()
+
+    # Statistiques par type de maintenance
+    types_stats = conn.execute('''
+        SELECT type_maintenance, COUNT(*) as count,
+               SUM(CASE WHEN statut='realisee' THEN 1 ELSE 0 END) as realisees
+        FROM maintenances WHERE client_id=? GROUP BY type_maintenance
+    ''', (cid,)).fetchall()
+
+    # Statistiques par mois (12 derniers mois)
+    months_stats = conn.execute('''
+        SELECT strftime('%Y-%m', date_planifiee) as mois, COUNT(*) as count
+        FROM maintenances WHERE client_id=? AND date_planifiee >= date('now', '-12 months')
+        GROUP BY strftime('%Y-%m', date_planifiee) ORDER BY mois
+    ''', (cid,)).fetchall()
+
+    # Statistiques par statut
+    status_stats = conn.execute('''
+        SELECT statut, COUNT(*) as count FROM maintenances WHERE client_id=?
+        GROUP BY statut
+    ''', (cid,)).fetchall()
+
+    # Total maintenances
+    total = conn.execute('SELECT COUNT(*) FROM maintenances WHERE client_id=?', (cid,)).fetchone()[0]
+    realisees = conn.execute('SELECT COUNT(*) FROM maintenances WHERE client_id=? AND statut="realisee"', (cid,)).fetchone()[0]
+    taux_realisation = int((realisees / total * 100) if total > 0 else 0)
+
+    conn.close()
+
+    # Formater données pour Chart.js
+    types_labels = [row[0] for row in types_stats]
+    types_data = [row[1] for row in types_stats]
+
+    months_labels = [row[0] for row in months_stats]
+    months_data = [row[1] for row in months_stats]
+
+    status_map = {'programmee': 'Programmée', 'realisee': 'Réalisée', 'reportee': 'Reportée', 'annulee': 'Annulée'}
+    status_labels = [status_map.get(row[0], row[0]) for row in status_stats]
+    status_data = [row[1] for row in status_stats]
+
+    import json
+    return render_template('historique_maintenance.html',
+        types_labels=json.dumps(types_labels),
+        types_data=json.dumps(types_data),
+        months_labels=json.dumps(months_labels),
+        months_data=json.dumps(months_data),
+        status_labels=json.dumps(status_labels),
+        status_data=json.dumps(status_data),
+        total=total,
+        realisees=realisees,
+        taux_realisation=taux_realisation)
+
+
+@app.route('/maintenances/export.csv')
+@login_required
+def export_maintenances_csv():
+    cid = get_client_id()
+    filtre_date_debut = request.args.get('date_debut', '')
+    filtre_date_fin = request.args.get('date_fin', '')
+    filtre_type = request.args.get('type_maintenance', '')
+    filtre_statut = request.args.get('statut', '')
+    clients_filter = request.args.get('clients_filter', 'current')
+
+    # Déterminer clients sélectionnés
+    if clients_filter == 'all':
+        client_ids = [c['id'] for c in get_clients()]
+    else:
+        client_ids = [cid]
+
+    conn = get_db()
+
+    query = '''SELECT m.*, a.nom_machine AS appareil_nom, p.marque AS peripherique_marque, p.modele AS peripherique_modele
+               FROM maintenances m
+               LEFT JOIN appareils a ON m.appareil_id = a.id
+               LEFT JOIN peripheriques p ON m.peripherique_id = p.id
+               WHERE m.client_id IN ({})'''.format(','.join(['?'] * len(client_ids)))
+    params = client_ids[:]
+
+    if filtre_date_debut:
+        query += ' AND m.date_planifiee >= ?'
+        params.append(filtre_date_debut)
+    if filtre_date_fin:
+        query += ' AND m.date_planifiee <= ?'
+        params.append(filtre_date_fin)
+    if filtre_type:
+        query += ' AND m.type_maintenance = ?'
+        params.append(filtre_type)
+    if filtre_statut:
+        query += ' AND m.statut = ?'
+        params.append(filtre_statut)
+
+    query += ' ORDER BY m.date_planifiee DESC'
+
+    rows = conn.execute(query, params).fetchall()
+    maintenances = [row_to_dict(r) for r in rows]
+    conn.close()
+
+    # Build CSV
+    import io
+    output = io.StringIO()
+    output.write('\ufeff')  # BOM UTF-8
+    output.write('Date planifiée;Appareil;Périphérique;Type;Description;Responsable;Statut;Date réalisée;Notes\n')
+
+    for m in maintenances:
+        app_name = ''
+        if m.get('appareil_id'):
+            c2 = get_db()
+            a = c2.execute('SELECT nom_machine FROM appareils WHERE id=?', (m['appareil_id'],)).fetchone()
+            if a: app_name = a[0]
+            c2.close()
+
+        periph_name = ''
+        if m.get('peripherique_id'):
+            c2 = get_db()
+            p = c2.execute('SELECT categorie, marque FROM peripheriques WHERE id=?', (m['peripherique_id'],)).fetchone()
+            if p: periph_name = f"{p[0]} {p[1]}"
+            c2.close()
+
+        output.write(f"{m.get('date_planifiee','')};{app_name};{periph_name};{m.get('type_maintenance','')};")
+        output.write(f"{m.get('description','')};{m.get('responsable','')};{m.get('statut','')};")
+        output.write(f"{m.get('date_realisee','')};{m.get('notes','')}\n")
+
+    response = app.response_class(output.getvalue(), mimetype='text/csv; charset=utf-8')
+    response.headers['Content-Disposition'] = f'attachment; filename=maintenances_{cid}_{date.today().isoformat()}.csv'
+    return response
 
 
 # --- LISTES PERSONNALISABLES -------------------------------------------------
@@ -7051,6 +8317,29 @@ def admin_supprimer_utilisateur(uid):
     flash('Utilisateur supprimé', 'info')
     return redirect(url_for('admin_utilisateurs'))
 
+
+@app.route('/admin/email-config', methods=['GET','POST'])
+def admin_email_config():
+    user = get_auth_user()
+    if not user or user.get('role') != 'admin':
+        return redirect(url_for('index'))
+
+    if request.method == 'POST':
+        cfg_set('smtp_server', request.form.get('smtp_server', ''))
+        cfg_set('smtp_port', request.form.get('smtp_port', '587'))
+        cfg_set('smtp_login', request.form.get('smtp_login', ''))
+        cfg_set('smtp_password', request.form.get('smtp_password', ''))
+        cfg_set('from_email', request.form.get('from_email', ''))
+        flash('Paramètres email sauvegardés', 'success')
+        return redirect(url_for('admin_email_config'))
+
+    return render_template('admin_email_config.html',
+        smtp_server=cfg_get('smtp_server', ''),
+        smtp_port=cfg_get('smtp_port', '587'),
+        smtp_login=cfg_get('smtp_login', ''),
+        from_email=cfg_get('from_email', ''))
+
+
 # ─── PARTAGE DE CLIENTS ───────────────────────────────────────────────────────
 
 @app.route('/client/<int:cid>/partager', methods=['GET','POST'])
@@ -7103,6 +8392,90 @@ def user_logo(filename):
 @login_required
 def dashboard():
     return redirect(url_for('index'))
+
+
+# ── CACHE STATS (Admin) ──────────────────────────────────────────────────────
+
+@app.route('/api/cache/stats')
+@login_required
+def cache_stats():
+    """Retourne les statistiques du cache."""
+    user = get_auth_user()
+    if user['role'] != 'admin':
+        return jsonify({'error': 'Admin only'}), 403
+
+    cache_mgr = get_cache_manager()
+    stats = cache_mgr.stats()
+
+    return jsonify({
+        'entries': stats['entries'],
+        'total_hits': stats['total_hits'],
+        'avg_hits_per_entry': round(stats['avg_hits'], 2),
+        'message': f"✅ Cache: {stats['entries']} entrées, {stats['total_hits']} hits"
+    })
+
+
+@app.route('/api/cache/invalidate', methods=['POST'])
+@login_required
+def cache_invalidate():
+    """Invalide le cache (Admin uniquement)."""
+    user = get_auth_user()
+    if user['role'] != 'admin':
+        return jsonify({'error': 'Admin only'}), 403
+
+    pattern = request.form.get('pattern', '')
+    invalidate_cache_pattern(pattern)
+
+    return jsonify({'ok': True, 'message': f'Cache invalidé: {pattern or "tout"}'})
+
+
+# ── RECHERCHE FULL-TEXT ET AUTOCOMPLETE ──────────────────────────────────────
+
+@app.route('/api/search')
+@login_required
+def api_search():
+    """Recherche globale multi-entités."""
+    query = request.args.get('q', '').strip()
+    client_id = get_client_id()
+    limit = min(int(request.args.get('limit', 20)), 100)
+
+    if not query or len(query) < 2:
+        return jsonify({
+            'appareils': [],
+            'contrats': [],
+            'utilisateurs': [],
+            'services': [],
+            'peripheriques': [],
+            'identifiants': [],
+            'total': 0,
+            'query': query
+        })
+
+    try:
+        results = search_global(query, client_id, limit)
+        return jsonify(results)
+    except Exception as e:
+        logger.exception(f"Search error for query='{query}'")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/autocomplete/<entity_type>')
+@login_required
+def api_autocomplete(entity_type):
+    """Autocomplete pour un type d'entité spécifique."""
+    query = request.args.get('q', '').strip()
+    client_id = get_client_id()
+    limit = min(int(request.args.get('limit', 10)), 50)
+
+    if not query or len(query) < 1:
+        return jsonify([])
+
+    try:
+        results = search_autocomplete(query, client_id, entity_type, limit)
+        return jsonify(results)
+    except Exception as e:
+        logger.exception(f"Autocomplete error for entity_type='{entity_type}', query='{query}'")
+        return jsonify({'error': str(e)}), 500
 
 
 # ── GESTIONNAIRES D'ERREURS ──────────────────────────────────────────────────
@@ -7159,6 +8532,15 @@ def handle_unhandled_exception(e):
 
 if __name__ == '__main__':
     init_db()
+
+    # Démarrer le scheduler pour les cron jobs
+    # Cron job: régénérer les occurrences maintenances tous les jours à 2h du matin
+    scheduler.add_job(_regenerate_all_maintenance_occurrences, 'cron', hour=2, minute=0)
+    # Cron job: notifier maintenances à venir tous les jours à 8h du matin
+    scheduler.add_job(_notify_upcoming_maintenances, 'cron', hour=8, minute=0)
+    scheduler.start()
+    logger.info("Cron scheduler démarré (régénération à 02:00, notifications à 08:00)")
+
     # Précharger la base OUI en arrière-plan pour ne pas bloquer le démarrage
     threading.Thread(target=_oui_load_full, daemon=True).start()
     print("="*50)

@@ -1,0 +1,226 @@
+# ============================================================================
+# ParcInfo v2.5.0 — Docker Compose Override pour Synology NAS
+# ============================================================================
+#
+# USAGE:
+#   # Utiliser version légère (petit NAS)
+#   docker-compose -f docker-compose.yml -f docker-compose.synology-light.yml up -d
+#
+#   # Utiliser version standard (NAS moyen)
+#   docker-compose -f docker-compose.yml up -d
+#   (c'est la configuration par défaut)
+#
+#   # Utiliser version lourde (NAS puissant)
+#   docker-compose -f docker-compose.yml -f docker-compose.synology-heavy.yml up -d
+#
+# PROFILS:
+#   - Standard (défaut dans docker-compose.yml)
+#     CPU: 2 cores, RAM: 512MB
+#     Cache TTL: 5 min
+#     Pour: NAS moyen (4+ cores CPU, 2GB+ RAM)
+#
+#   - Light (ce fichier)
+#     CPU: 1 core, RAM: 256MB
+#     Cache TTL: 3 min
+#     Pour: Petit NAS (2-4 cores CPU, 512MB-2GB RAM)
+#
+#   - Heavy (ce fichier)
+#     CPU: 4 cores, RAM: 1GB
+#     Cache TTL: 10 min
+#     Pour: NAS puissant (8+ cores CPU, 4GB+ RAM)
+#
+# ============================================================================
+
+# Configuration pour Synology NAS — Profil STANDARD (défaut)
+version: '3.8'
+
+services:
+  parcinfo:
+    # ====== Ressources Standard ======
+    deploy:
+      resources:
+        limits:
+          cpus: '2'          # 2 cores max
+          memory: 512M       # 512MB max
+        reservations:
+          cpus: '0.5'        # 0.5 cores minimum
+          memory: 256M       # 256MB minimum
+
+    # ====== Logging Standard ======
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"      # Rotation tous les 10MB
+        max-file: "3"        # Garder 3 fichiers max
+
+    # ====== Redémarrage Standard ======
+    restart_policy:
+      condition: unless-stopped
+
+---
+
+# ============================================================================
+# PROFIL LÉGER — Petit NAS (2-4 cores CPU, 512MB-2GB RAM)
+# ============================================================================
+#
+# docker-compose -f docker-compose.yml -f docker-compose.synology-light.yml up -d
+#
+
+version: '3.8'
+
+services:
+  parcinfo-light:
+    # Ressources réduites pour petit NAS
+    deploy:
+      resources:
+        limits:
+          cpus: '1'          # 1 core max
+          memory: 256M       # 256MB max (minimum recommandé)
+        reservations:
+          cpus: '0.25'       # 0.25 cores minimum
+          memory: 128M       # 128MB minimum
+
+    environment:
+      - CACHE_TTL=180       # 3 minutes au lieu de 5
+      - COMPRESSION_LEVEL=4 # Compression moins intense
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"       # Rotation fichiers log plus agressif
+        max-file: "2"        # Garder moins de fichiers
+
+    # Health check plus long (plus de délai de démarrage sur petit NAS)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 60s         # Vérification moins fréquente
+      timeout: 15s          # Plus de timeout
+      retries: 3
+      start_period: 60s     # Plus de temps au démarrage
+
+---
+
+# ============================================================================
+# PROFIL LOURD — NAS Puissant (8+ cores CPU, 4GB+ RAM)
+# ============================================================================
+#
+# docker-compose -f docker-compose.yml -f docker-compose.synology-heavy.yml up -d
+#
+
+version: '3.8'
+
+services:
+  parcinfo-heavy:
+    # Ressources maximales pour NAS puissant
+    deploy:
+      resources:
+        limits:
+          cpus: '4'          # 4 cores max
+          memory: 1024M      # 1 GB max
+        reservations:
+          cpus: '2'          # 2 cores minimum
+          memory: 512M       # 512MB minimum
+
+    environment:
+      - CACHE_TTL=600       # 10 minutes (plus d'cache)
+      - COMPRESSION_LEVEL=8 # Compression optimale
+      - AUDIT_MAX_ENTRIES=1000  # Plus d'historique
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"      # Fichiers plus gros
+        max-file: "5"        # Garder plus de fichiers
+
+    # Health check normal pour NAS stables
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+---
+
+# ============================================================================
+# PROFIL DE DÉVELOPPEMENT — Synology avec Hot-Reload
+# ============================================================================
+#
+# docker-compose -f docker-compose.yml -f docker-compose.synology-dev.yml up -d
+#
+# NOTE: À utiliser UNIQUEMENT pour développement/test, pas production
+#
+
+version: '3.8'
+
+services:
+  parcinfo-dev:
+    # Désactiver optimisations pour debug
+    environment:
+      - FLASK_ENV=development  # Debug mode
+      - FLASK_DEBUG=1
+      - PYTHONUNBUFFERED=1
+      - CACHE_TTL=10           # Cache très court
+      - COMPRESSION_ENABLED=false
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        # Pas de reservations pour dev
+
+    # Logs verbeux
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "10"
+
+    # Pas de healthcheck en dev (trop strict)
+    healthcheck:
+      disable: true
+
+---
+
+# ============================================================================
+# NOTES DE CONFIGURATION
+# ============================================================================
+#
+# 1. CHOISIR PROFIL SELON NAS:
+#
+#    Petit NAS (DS218, DS419):
+#    → docker-compose.synology-light.yml
+#    → CPU: 1, RAM: 256M
+#
+#    NAS Standard (DS720, DS920):
+#    → docker-compose.yml (défaut)
+#    → CPU: 2, RAM: 512M
+#
+#    NAS Puissant (DS1621, RS1221):
+#    → docker-compose.synology-heavy.yml
+#    → CPU: 4, RAM: 1G
+#
+# 2. CACHE TTL:
+#    - Light: 180s (3 min) — données fraîches plus souvent
+#    - Standard: 300s (5 min) — équilibre
+#    - Heavy: 600s (10 min) — maximiser performance
+#
+# 3. COMPRESSION:
+#    - Light: 4 — moins de CPU, bande passante acceptable
+#    - Standard: 6 — bon équilibre
+#    - Heavy: 8 — maximum compression
+#
+# 4. LOGGING:
+#    - Light: petit fichiers — économiser disque
+#    - Standard: normal
+#    - Heavy: gros fichiers — meilleur debug
+#
+# 5. REDÉMARRAGE:
+#    À adapter selon disponibilité NAS :
+#    - no: pas de redémarrage auto (manuel)
+#    - always: redémarrer toujours (vigilant)
+#    - unless-stopped: redémarrer sauf si arrêté manuellement (recommandé)
+#    - on-failure: redémarrer sur crash
+#
+# ============================================================================

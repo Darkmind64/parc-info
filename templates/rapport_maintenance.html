@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Rapport Maintenances — ParcInfo{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>📊 Rapport <span>Maintenances</span></h1>
+</div>
+
+<!-- Filtres -->
+<div style="margin:1.5rem 0;padding:1.5rem;background:var(--bg-secondary);border-radius:.5rem;">
+    <form method="GET" id="rapportForm" style="display:grid;gap:1rem;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:1rem;">
+            <div class="form-group">
+                <label>Date début</label>
+                <input type="date" name="date_debut" value="{{ request.args.get('date_debut', '') }}">
+            </div>
+            <div class="form-group">
+                <label>Date fin</label>
+                <input type="date" name="date_fin" value="{{ request.args.get('date_fin', '') }}">
+            </div>
+            <div class="form-group">
+                <label>Type de maintenance</label>
+                <select name="type_maintenance">
+                    <option value="">-- Tous --</option>
+                    {% for t in types_maintenance %}
+                    <option value="{{ t }}" {% if request.args.get('type_maintenance') == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Statut</label>
+                <select name="statut">
+                    <option value="">-- Tous --</option>
+                    <option value="programmee" {% if request.args.get('statut') == 'programmee' %}selected{% endif %}>Programmée</option>
+                    <option value="realisee" {% if request.args.get('statut') == 'realisee' %}selected{% endif %}>Réalisée</option>
+                    <option value="reportee" {% if request.args.get('statut') == 'reportee' %}selected{% endif %}>Reportée</option>
+                    <option value="annulee" {% if request.args.get('statut') == 'annulee' %}selected{% endif %}>Annulée</option>
+                </select>
+            </div>
+        </div>
+
+        <div>
+            <label style="font-weight:600;margin-bottom:.5rem;display:block;">Clients</label>
+            <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+                    <input type="radio" name="clients_filter" value="current"
+                        {% if not request.args.get('clients_filter') or request.args.get('clients_filter') == 'current' %}checked{% endif %}>
+                    <span>Client actif uniquement</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:.5rem;cursor:pointer;">
+                    <input type="radio" name="clients_filter" value="all"
+                        {% if request.args.get('clients_filter') == 'all' %}checked{% endif %}>
+                    <span>Tous mes clients</span>
+                </label>
+            </div>
+        </div>
+
+        <div style="display:flex;gap:1rem;margin-top:1rem;">
+            <button type="submit" class="btn btn-primary">🔍 Générer rapport</button>
+            <a href="/maintenances" class="btn btn-secondary">← Liste des maintenances</a>
+        </div>
+    </form>
+</div>
+
+<!-- Résumé/Statistiques -->
+{% if maintenances %}
+<div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:1rem;margin:2rem 0;">
+    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid #00ff88;border-radius:.3rem;">
+        <div style="font-size:.85rem;color:var(--text-secondary);">Total opérations</div>
+        <div style="font-size:2rem;font-weight:700;color:#00ff88;">{{ stats.total }}</div>
+    </div>
+    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid #00c9ff;border-radius:.3rem;">
+        <div style="font-size:.85rem;color:var(--text-secondary);">Réalisées</div>
+        <div style="font-size:2rem;font-weight:700;color:#00c9ff;">{{ stats.realisees }}</div>
+    </div>
+    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid #ff8c00;border-radius:.3rem;">
+        <div style="font-size:.85rem;color:var(--text-secondary);">En attente</div>
+        <div style="font-size:2rem;font-weight:700;color:#ff8c00;">{{ stats.attente }}</div>
+    </div>
+    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid #ffaa00;border-radius:.3rem;">
+        <div style="font-size:.85rem;color:var(--text-secondary);">Reportées</div>
+        <div style="font-size:2rem;font-weight:700;color:#ffaa00;">{{ stats.reportees }}</div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Boutons export/impression -->
+<div style="text-align:right;margin:1.5rem 0;display:flex;gap:1rem;justify-content:flex-end;flex-wrap:wrap;">
+    {% if maintenances %}
+    <a href="/rapport/maintenances/pdf?date_debut={{ request.args.get('date_debut', '') }}&date_fin={{ request.args.get('date_fin', '') }}&type_maintenance={{ request.args.get('type_maintenance', '') }}&statut={{ request.args.get('statut', '') }}&clients_filter={{ request.args.get('clients_filter', 'current') }}"
+       class="btn btn-primary" style="background:linear-gradient(135deg, #00c9ff, #0066ff);">📄 Télécharger PDF</a>
+    <button onclick="window.print()" class="btn btn-secondary">🖨️ Imprimer</button>
+    <a href="/maintenances/export.csv?date_debut={{ request.args.get('date_debut', '') }}&date_fin={{ request.args.get('date_fin', '') }}&type_maintenance={{ request.args.get('type_maintenance', '') }}&statut={{ request.args.get('statut', '') }}&clients_filter={{ request.args.get('clients_filter', 'current') }}"
+       class="btn btn-secondary">📥 Export CSV</a>
+    {% endif %}
+</div>
+
+<!-- Tableau aperçu (en mode rapport) -->
+{% if maintenances %}
+<div style="background:var(--bg-secondary);padding:1.5rem;border-radius:.5rem;margin:2rem 0;">
+    <h3 style="margin-top:0;">Détail des opérations de maintenance</h3>
+    <div style="overflow-x:auto;">
+        <table class="liste-table">
+            <thead>
+                <tr>
+                    <th>Date planifiée</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Responsable</th>
+                    <th>Statut</th>
+                    <th>Réalisée le</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in maintenances %}
+                <tr>
+                    <td><strong>{{ m.date_planifiee_fmt }}</strong></td>
+                    <td>{{ m.type_label }}</td>
+                    <td>{{ m.description or '—' }}</td>
+                    <td>{{ m.responsable or '—' }}</td>
+                    <td>
+                        <span style="display:inline-block; padding:2px 8px; border-radius:3px; font-size:.78rem; font-weight:700;
+                            background:{% if m.statut == 'programmee' %}rgba(255,140,0,.2){% elif m.statut == 'realisee' %}rgba(0,255,136,.15){% elif m.statut == 'reportee' %}rgba(255,170,0,.2){% else %}rgba(136,136,136,.2){% endif %};
+                            color:{% if m.statut == 'programmee' %}#ff8c00{% elif m.statut == 'realisee' %}#00ff88{% elif m.statut == 'reportee' %}#ffaa00{% else %}#888{% endif %};">
+                            {{ m.statut_label }}
+                        </span>
+                    </td>
+                    <td>{{ m.date_realisee_fmt or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div style="text-align:center;padding:3rem;color:var(--text-secondary);">
+    <p>Sélectionnez des filtres et cliquez sur "Générer rapport" pour voir les statistiques et les détails</p>
+</div>
+{% endif %}
+
+<script>
+function exporterPDF() {
+    // Implémentation client-side jsPDF (optionnel)
+    // Pour l'MVP, on utilise juste print
+    window.print();
+}
+</script>
+
+<style media="print">
+    .page-header, form, div[style*="text-align:right"], button, a.btn {
+        display: none !important;
+    }
+</style>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Configuration Email — ParcInfo Admin{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>📧 Configuration <span>Email (SMTP)</span></h1>
+</div>
+
+<form method="POST" style="max-width:600px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Paramètres Serveur SMTP</div>
+
+        <div class="form-group">
+            <label>Serveur SMTP *</label>
+            <input type="text" name="smtp_server" value="{{ smtp_server }}" required
+                   placeholder="ex: smtp.gmail.com">
+            <small>Adresse du serveur mail (ex: smtp.gmail.com, smtp.office365.com)</small>
+        </div>
+
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Port *</label>
+                <input type="number" name="smtp_port" value="{{ smtp_port }}" required
+                       placeholder="587">
+                <small>Généralement 587 (TLS) ou 465 (SSL)</small>
+            </div>
+            <div class="form-group">
+                <label>Email/Login *</label>
+                <input type="email" name="smtp_login" value="{{ smtp_login }}" required
+                       placeholder="votre@email.com">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Mot de passe *</label>
+            <input type="password" name="smtp_password" placeholder="Mot de passe SMTP">
+            <small>Laissez vide pour ne pas modifier</small>
+        </div>
+
+        <div class="form-group">
+            <label>Email d'envoi</label>
+            <input type="email" name="from_email" value="{{ from_email }}"
+                   placeholder="notification@parcinfo.local">
+            <small>Email qui apparaîtra comme expéditeur (par défaut = email/login)</small>
+        </div>
+    </div>
+
+    <div style="background:rgba(0,201,255,.1);padding:1rem;border-radius:4px;margin:1.5rem 0;">
+        <p><strong>ℹ️ Conseil:</strong> Utilisez un compte de service ou une adresse générique pour l'envoi de notifications.</p>
+        <p style="font-size:0.9rem;color:var(--text-secondary);">Les notifications sont envoyées automatiquement chaque jour à 8h pour les maintenances planifiées dans les 3 prochains jours.</p>
+    </div>
+
+    <div style="display:flex;gap:1rem;">
+        <button type="submit" class="btn btn-success">💾 Sauvegarder</button>
+        <a href="/admin/utilisateurs" class="btn btn-primary">← Retour</a>
+    </div>
+</form>
+{% endblock %}

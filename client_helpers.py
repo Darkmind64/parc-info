@@ -3,6 +3,7 @@ client_helpers.py — Accès clients, pagination, audit, formatage.
 """
 import logging
 from datetime import datetime, date, timedelta
+from typing import Optional
 from flask import session
 
 logger = logging.getLogger('parcinfo')
@@ -77,7 +78,7 @@ def paginate(query: str, params: tuple, page: int, per_page: int = None):
 
 # ─── ACCÈS CLIENTS ────────────────────────────────────────────────────────────
 
-def get_client_access(client_id) -> str | None:
+def get_client_access(client_id) -> Optional[str]:
     from database import get_db
     uid = session.get('auth_user_id')
     if not uid:
@@ -202,6 +203,30 @@ def get_clients() -> list:
         return result
     finally:
         conn.close()
+
+
+def get_clients_for_filter(clients_selection=None) -> list:
+    """
+    Récupère clients accessibles pour filtrage multi-client.
+    - Si clients_selection=None : client_id session
+    - Si clients_selection=['all'] : tous les clients accessibles
+    - Sinon : clients_selection[] IDs (intersection avec accessibles)
+    """
+    all_accessible = get_clients()
+
+    if not clients_selection:
+        active_id = get_client_id()
+        return [c for c in all_accessible if c['id'] == active_id]
+
+    if clients_selection == ['all']:
+        return all_accessible
+
+    try:
+        selected_ids = [int(cid) for cid in clients_selection]
+    except (ValueError, TypeError):
+        return [c for c in all_accessible if c['id'] == get_client_id()]
+
+    return [c for c in all_accessible if c['id'] in selected_ids]
 
 
 # ─── AUDIT ────────────────────────────────────────────────────────────────────

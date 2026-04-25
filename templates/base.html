@@ -21,6 +21,8 @@
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230a0d12'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='%2300c9ff' font-family='monospace' font-weight='bold'>P</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- TomSelect: Autocomplete & Select Enhancement -->
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.bootstrap5.min.css" rel="stylesheet">
     <style>
         :root {
             --bg-primary: #0a0d12; --bg-secondary: #0f1520; --bg-card: #131c2b;
@@ -729,6 +731,22 @@
 {% set secu_active = ep in ['liste_identifiants','nouvel_identifiant','editer_identifiant','liste_utilisateurs','nouvel_utilisateur','editer_utilisateur','droits_utilisateur'] %}
 <nav>
     <a href="/" class="nav-brand">PARCINFO</a>
+
+    <!-- SEARCH BAR -->
+    <div style="display:flex;align-items:center;margin-left:1rem;margin-right:1rem;flex:0 0 auto;">
+        <input type="text" id="global-search-input" placeholder="Rechercher..."
+            style="width:180px;padding:.4rem .6rem;background:var(--input-bg);border:1px solid var(--input-border);
+                   border-radius:3px;color:var(--text-primary);font-size:.75rem;font-family:'Share Tech Mono',monospace;
+                   transition:all .2s;box-sizing:border-box;"
+            onkeyup="handleGlobalSearch(event)"
+            onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 8px rgba(0,201,255,.3)'"
+            onblur="this.style.borderColor='var(--input-border)';this.style.boxShadow='none'">
+        <div id="search-results" style="position:absolute;top:50px;left:0;right:0;background:var(--bg-card);border:1px solid var(--border);
+                                        border-radius:3px;max-height:400px;overflow-y:auto;display:none;z-index:1000;
+                                        min-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.3);">
+        </div>
+    </div>
+
     <a href="/" {% if ep == 'index' %}class="active"{% endif %}>
         <span style="font-size:.9rem;">🏠</span> DASHBOARD
     </a>
@@ -791,6 +809,27 @@
         </div>
     </div>
 
+    <!-- MAINTENANCE -->
+    <div class="nav-group">
+        <button class="nav-group-btn {% if ep in ['liste_maintenances','nouveau_maintenance','editer_maintenance','rapport_maintenances','historique_maintenance'] %}active{% endif %}">
+            ⚙️ Maintenance <span class="arr">▼</span>
+        </button>
+        <div class="nav-dropdown">
+            <a href="/maintenances" {% if ep in ['liste_maintenances','editer_maintenance'] %}class="active"{% endif %}>
+                <span class="nd-icon">⚙️</span> Toutes les maintenances
+            </a>
+            <a href="/maintenance/nouveau">
+                <span class="nd-icon">➕</span> Nouvelle maintenance
+            </a>
+            <a href="/rapport/maintenances" {% if ep == 'rapport_maintenances' %}class="active"{% endif %}>
+                <span class="nd-icon">📊</span> Rapport
+            </a>
+            <a href="/maintenance/historique" {% if ep == 'historique_maintenance' %}class="active"{% endif %}>
+                <span class="nd-icon">📈</span> Historique
+            </a>
+        </div>
+    </div>
+
     <!-- SÉCURITÉ / ACCÈS -->
     <div class="nav-group">
         <button class="nav-group-btn {% if secu_active %}active{% endif %}">
@@ -817,7 +856,19 @@
 
     {% if session.get('auth_user_role') == 'admin' %}
     <!-- ADMIN -->
-    <a href="/admin/utilisateurs" {% if ep in ['admin_utilisateurs','admin_nouvel_utilisateur','admin_editer_utilisateur'] %}class="active"{% endif %}>👥 Admin</a>
+    <div class="nav-group">
+        <button class="nav-group-btn {% if ep in ['admin_utilisateurs','admin_nouvel_utilisateur','admin_editer_utilisateur','admin_email_config'] %}active{% endif %}">
+            👥 Admin <span class="arr">▼</span>
+        </button>
+        <div class="nav-dropdown">
+            <a href="/admin/utilisateurs" {% if ep in ['admin_utilisateurs','admin_nouvel_utilisateur','admin_editer_utilisateur'] %}class="active"{% endif %}>
+                <span class="nd-icon">👥</span> Utilisateurs
+            </a>
+            <a href="/admin/email-config" {% if ep == 'admin_email_config' %}class="active"{% endif %}>
+                <span class="nd-icon">📧</span> Configuration Email
+            </a>
+        </div>
+    </div>
     {% endif %}
 
     <div class="nav-spacer"></div>
@@ -1110,6 +1161,105 @@ function togglePwd(btn) {
         setTimeout(() => { banner.innerHTML = ''; banner.className = 'flash-banner'; }, 400);
     }, 3500);
 })();
+
+// ── RECHERCHE GLOBALE ──────────────────────────────────────────────────────────
+let _searchTimeout = null;
+function handleGlobalSearch(event) {
+    const query = event.target.value.trim();
+    const resultsDiv = document.getElementById('search-results');
+
+    if (!query || query.length < 2) {
+        resultsDiv.style.display = 'none';
+        return;
+    }
+
+    clearTimeout(_searchTimeout);
+    _searchTimeout = setTimeout(() => {
+        fetch(`/api/search?q=${encodeURIComponent(query)}&limit=8`)
+            .then(r => r.json())
+            .then(data => {
+                if (!data.total) {
+                    resultsDiv.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-muted);">Aucun résultat</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+
+                let html = '<div style="padding:0;">';
+
+                // Appareils
+                if (data.appareils && data.appareils.length) {
+                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;">🖥 Appareils (' + data.appareils.length + ')</div>';
+                    for (let item of data.appareils) {
+                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
+                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
+                    }
+                }
+
+                // Périphériques
+                if (data.peripheriques && data.peripheriques.length) {
+                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">🖱 Périphériques (' + data.peripheriques.length + ')</div>';
+                    for (let item of data.peripheriques) {
+                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
+                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
+                    }
+                }
+
+                // Contrats
+                if (data.contrats && data.contrats.length) {
+                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">📋 Contrats (' + data.contrats.length + ')</div>';
+                    for (let item of data.contrats) {
+                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
+                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
+                    }
+                }
+
+                // Services
+                if (data.services && data.services.length) {
+                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">🔧 Services (' + data.services.length + ')</div>';
+                    for (let item of data.services) {
+                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
+                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
+                    }
+                }
+
+                // Utilisateurs
+                if (data.utilisateurs && data.utilisateurs.length) {
+                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">👤 Utilisateurs (' + data.utilisateurs.length + ')</div>';
+                    for (let item of data.utilisateurs) {
+                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
+                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
+                    }
+                }
+
+                // Identifiants
+                if (data.identifiants && data.identifiants.length) {
+                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">🔐 Identifiants (' + data.identifiants.length + ')</div>';
+                    for (let item of data.identifiants) {
+                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
+                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
+                    }
+                }
+
+                html += '</div>';
+                resultsDiv.innerHTML = html;
+                resultsDiv.style.display = 'block';
+            })
+            .catch(err => {
+                console.error('Search error:', err);
+                resultsDiv.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--accent-red);">Erreur de recherche</div>';
+                resultsDiv.style.display = 'block';
+            });
+    }, 300);
+}
+
+// Fermer les résultats au clic ailleurs
+document.addEventListener('click', function(e) {
+    const searchInput = document.getElementById('global-search-input');
+    const searchResults = document.getElementById('search-results');
+    if (searchResults && !searchResults.contains(e.target) && !searchInput.contains(e.target)) {
+        searchResults.style.display = 'none';
+    }
+});
 
 // ── RACCOURCIS CLAVIER GLOBAUX ────────────────────────────────────────────────
 document.addEventListener('keydown', function(e) {
@@ -3428,6 +3578,50 @@ body.theme-light .liste-item { background: rgba(0,0,0,.03); }
     }, true /* capture, après CSRF */);
 
 })();
+</script>
+
+<!-- TomSelect Library for Autocomplete -->
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+<script>
+// Initialize TomSelect on autocomplete selects
+document.addEventListener('DOMContentLoaded', function() {
+    // Configuration pour autocomplete dynamique
+    const autocompleteConfig = {
+        'appareil_id': 'appareil',
+        'peripherique_id': 'peripherique',
+        'contrat_id': 'contrat',
+        'utilisateur_id': 'utilisateur',
+        'service_id': 'service',
+        'responsable': 'utilisateur'
+    };
+
+    Object.entries(autocompleteConfig).forEach(([selectId, entityType]) => {
+        const selectEl = document.getElementById(selectId) || document.querySelector(`select[name="${selectId}"]`);
+        if (!selectEl) return;
+
+        // Initialiser TomSelect avec autocomplete
+        new TomSelect(selectEl, {
+            create: false,
+            placeholder: 'Rechercher...',
+            searchField: 'text',
+            valueField: 'value',
+            labelField: 'text',
+            maxOptions: 10,
+            load: function(query, callback) {
+                if (!query.length) return callback();
+                fetch(`/api/autocomplete/${entityType}?q=${encodeURIComponent(query)}&limit=10`)
+                    .then(res => res.json())
+                    .then(data => {
+                        callback(data || []);
+                    })
+                    .catch(() => callback([]));
+            },
+            onOptionAdd: function(value, option) {
+                // Remplir le champ caché après sélection
+            }
+        });
+    });
+});
 </script>
 
 </body>

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}{{ action }} maintenance — ParcInfo{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>{{ action }} une <span>Maintenance</span></h1>
+</div>
+
+<form method="POST" style="max-width:800px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Type & Description</div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Type de maintenance *</label>
+                <select name="type_maintenance" required>
+                    <option value="">-- Sélectionner --</option>
+                    {% for t in types_maintenance %}
+                    <option value="{{ t }}" {% if maint and maint.type_maintenance == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Technicien</label>
+                <select name="responsable">
+                    <option value="">-- Sélectionner --</option>
+                    {% for t in techniciens %}
+                    {% set nom_complet = (t.prenom + ' ' + t.nom).strip() %}
+                    <option value="{{ nom_complet }}"
+                        {% if maint and maint.responsable == nom_complet %}selected{% endif %}>
+                        {{ nom_complet }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Description</label>
+                <textarea name="description" rows="3" placeholder="Détails de la maintenance...">{{ maint.description if maint else '' }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Équipements & Contrat</div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Appareil</label>
+                <select id="appareil_id" name="appareil_id">
+                    <option value="">-- Aucun --</option>
+                    {% for a in appareils %}
+                    <option value="{{ a.id }}" {% if maint and maint.appareil_id == a.id %}selected{% endif %}>
+                        {{ a.nom_machine }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Périphérique</label>
+                <select id="peripherique_id" name="peripherique_id">
+                    <option value="">-- Aucun --</option>
+                    {% for p in peripheriques %}
+                    <option value="{{ p.id }}" {% if maint and maint.peripherique_id == p.id %}selected{% endif %}>
+                        {{ p.categorie }} - {{ p.marque }} {{ p.modele }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Contrat (couverture support)</label>
+                <select id="contrat_id" name="contrat_id">
+                    <option value="">-- Aucun --</option>
+                    {% for c in contrats %}
+                    <option value="{{ c.id }}" {% if maint and maint.contrat_id == c.id %}selected{% endif %}>
+                        {{ c.type_contrat }} - {{ c.fournisseur }} ({{ c.date_debut[:10] }} à {{ c.date_fin[:10] }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Planification</div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label>Date planifiée *</label>
+                <input type="date" name="date_planifiee" value="{{ maint.date_planifiee if maint else '' }}" required>
+            </div>
+            <div class="form-group">
+                <label>Heure début</label>
+                <input type="time" name="heure_debut" value="{{ maint.heure_debut if maint else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Heure fin</label>
+                <input type="time" name="heure_fin" value="{{ maint.heure_fin if maint else '' }}">
+            </div>
+        </div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Récurrence</label>
+                <select name="recurrence">
+                    <option value="">Aucune (ponctuelle)</option>
+                    <option value="hebdomadaire" {% if maint and maint.recurrence == 'hebdomadaire' %}selected{% endif %}>Hebdomadaire</option>
+                    <option value="mensuelle" {% if maint and maint.recurrence == 'mensuelle' %}selected{% endif %}>Mensuelle</option>
+                    <option value="annuelle" {% if maint and maint.recurrence == 'annuelle' %}selected{% endif %}>Annuelle</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Fin récurrence</label>
+                <input type="date" name="date_fin_recurrence" value="{{ maint.date_fin_recurrence if maint else '' }}">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Exécution & Statut</div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label>Date réalisée</label>
+                <input type="date" name="date_realisee" value="{{ maint.date_realisee if maint else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Statut</label>
+                <select name="statut">
+                    <option value="programmee" {% if not maint or maint.statut == 'programmee' %}selected{% endif %}>Programmée</option>
+                    <option value="realisee" {% if maint and maint.statut == 'realisee' %}selected{% endif %}>Réalisée</option>
+                    <option value="reportee" {% if maint and maint.statut == 'reportee' %}selected{% endif %}>Reportée</option>
+                    <option value="annulee" {% if maint and maint.statut == 'annulee' %}selected{% endif %}>Annulée</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Notes complémentaires</label>
+                <textarea name="notes" rows="2" placeholder="Observations...">{{ maint.notes if maint else '' }}</textarea>
+            </div>
+        </div>
+    </div>
+
+    <div style="display:flex;gap:1rem;">
+        <button type="submit" class="btn btn-success">&#10003; {{ action }} la maintenance</button>
+        <a href="/maintenances" class="btn btn-primary">← Retour</a>
+    </div>
+</form>
+{% endblock %}

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: white;
+        }
+        .container {
+            max-width: 210mm;
+            margin: 0 auto;
+            padding: 20mm;
+        }
+        .header {
+            border-bottom: 3px solid #00c9ff;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+        .header h1 {
+            color: #0a0d12;
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+        .header .subtitle {
+            color: #00c9ff;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .header .date {
+            color: #666;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        .filters {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 25px;
+            font-size: 12px;
+        }
+        .filters h3 {
+            margin-bottom: 10px;
+            color: #0a0d12;
+            font-size: 13px;
+        }
+        .filter-group {
+            display: inline-block;
+            margin-right: 25px;
+            margin-bottom: 8px;
+        }
+        .filter-label {
+            font-weight: 600;
+            color: #333;
+        }
+        .filter-value {
+            color: #666;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: #f9f9f9;
+            border-left: 4px solid #00c9ff;
+            padding: 15px;
+            border-radius: 3px;
+            text-align: center;
+        }
+        .stat-label {
+            font-size: 11px;
+            color: #666;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .stat-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #00c9ff;
+        }
+        .section-title {
+            color: #0a0d12;
+            font-size: 16px;
+            font-weight: 700;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #00c9ff;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            font-size: 11px;
+        }
+        table th {
+            background: #0a0d12;
+            color: white;
+            padding: 10px;
+            text-align: left;
+            font-weight: 600;
+            border: 1px solid #ddd;
+        }
+        table td {
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            vertical-align: top;
+        }
+        table tbody tr:nth-child(odd) {
+            background: #f9f9f9;
+        }
+        table tbody tr:hover {
+            background: #f0f0f0;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+            text-align: center;
+        }
+        .status-programmee {
+            background: rgba(255, 140, 0, 0.15);
+            color: #ff8c00;
+        }
+        .status-realisee {
+            background: rgba(0, 255, 136, 0.15);
+            color: #00ff88;
+        }
+        .status-reportee {
+            background: rgba(255, 170, 0, 0.15);
+            color: #ffaa00;
+        }
+        .status-annulee {
+            background: rgba(136, 136, 136, 0.15);
+            color: #888;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            font-size: 10px;
+            color: #999;
+            text-align: center;
+        }
+        .no-data {
+            padding: 20px;
+            text-align: center;
+            color: #999;
+            font-style: italic;
+        }
+        @page {
+            size: A4;
+            margin: 15mm;
+        }
+        @media print {
+            body {
+                margin: 0;
+                padding: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- En-tête -->
+        <div class="header">
+            <h1>📊 Rapport Maintenances</h1>
+            <div class="subtitle">Synthèse des opérations de maintenance</div>
+            <div class="date">Généré le {{ today_formatted }}</div>
+        </div>
+
+        <!-- Filtres appliqués -->
+        {% if filters_applied %}
+        <div class="filters">
+            <h3>Filtres appliqués :</h3>
+            {% if filters.date_debut or filters.date_fin %}
+                <div class="filter-group">
+                    <span class="filter-label">Période :</span>
+                    <span class="filter-value">
+                        {% if filters.date_debut %}{{ filters.date_debut }}{% else %}—{% endif %}
+                        à
+                        {% if filters.date_fin %}{{ filters.date_fin }}{% else %}—{% endif %}
+                    </span>
+                </div>
+            {% endif %}
+            {% if filters.type_maintenance %}
+                <div class="filter-group">
+                    <span class="filter-label">Type :</span>
+                    <span class="filter-value">{{ filters.type_maintenance }}</span>
+                </div>
+            {% endif %}
+            {% if filters.statut %}
+                <div class="filter-group">
+                    <span class="filter-label">Statut :</span>
+                    <span class="filter-value">{{ filters.statut }}</span>
+                </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <!-- Statistiques -->
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Total Opérations</div>
+                <div class="stat-value">{{ stats.total }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Réalisées</div>
+                <div class="stat-value">{{ stats.realisees }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">En Attente</div>
+                <div class="stat-value">{{ stats.attente }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Reportées</div>
+                <div class="stat-value">{{ stats.reportees }}</div>
+            </div>
+        </div>
+
+        <!-- Tableau détail -->
+        <h2 class="section-title">Détail des Opérations</h2>
+        {% if maintenances %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Date Planifiée</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Responsable</th>
+                    <th>Statut</th>
+                    <th>Réalisée le</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in maintenances %}
+                <tr>
+                    <td><strong>{{ m.date_planifiee_fmt }}</strong></td>
+                    <td>{{ m.type_label }}</td>
+                    <td>{{ m.description or '—' }}</td>
+                    <td>{{ m.responsable or '—' }}</td>
+                    <td>
+                        <span class="status-badge status-{{ m.statut }}">
+                            {{ m.statut_label }}
+                        </span>
+                    </td>
+                    <td>{{ m.date_realisee_fmt or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="no-data">
+            Aucune maintenance trouvée pour les critères spécifiés.
+        </div>
+        {% endif %}
+
+        <!-- Pied de page -->
+        <div class="footer">
+            <p>ParcInfo — Rapport de Maintenance — Document généré automatiquement</p>
+        </div>
+    </div>
+</body>
+</html>
