@@ -12,7 +12,7 @@ jobs:
         include:
           - os: windows-latest
             asset_name: ParcInfo-Windows.exe
-          - os: macos-latest
+          - os: macos-13
             asset_name: ParcInfo-macOS.zip
 
     runs-on: ${{ matrix.os }}
@@ -34,6 +34,8 @@ jobs:
 
       - name: Build PyInstaller
         run: pyinstaller parcinfo.spec
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "11.0"
 
       - name: Zip .app (macOS)
         if: runner.os == 'macOS'
