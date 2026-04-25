@@ -3611,10 +3611,6 @@ def upload_document(id):
     f.save(save_path)
     taille = os.path.getsize(save_path)
 
-    # Lire le fichier en BLOB pour synchronisation Turso
-    with open(save_path, 'rb') as fp:
-        blob_data = fp.read()
-
     nom = request.form.get('nom', '') or f.filename
     desc = request.form.get('description', '')
     type_doc = request.form.get('type_doc', '')
@@ -3623,7 +3619,7 @@ def upload_document(id):
     conn.execute('''INSERT INTO documents_appareils
         (appareil_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload,contenu_blob,sync_status,date_sync)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
-        (id, cid, nom, desc, type_doc, unique, taille, now, blob_data, 'local', ''))
+        (id, cid, nom, desc, type_doc, unique, taille, now, None, 'local', ''))
 
     # Log document upload
     app_title = conn.execute('SELECT nom_machine FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone()
@@ -3773,10 +3769,6 @@ def upload_doc_peripherique(id):
     f.save(save_path)
     taille = os.path.getsize(save_path)
 
-    # Lire le fichier en BLOB pour synchronisation Turso
-    with open(save_path, 'rb') as fp:
-        blob_data = fp.read()
-
     nom = request.form.get('nom', '') or f.filename
     desc = request.form.get('description', '')
     type_doc = request.form.get('type_doc', '')
@@ -3785,7 +3777,7 @@ def upload_doc_peripherique(id):
     conn.execute('''INSERT INTO documents_peripheriques
         (peripherique_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload,contenu_blob,sync_status,date_sync)
         VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
-        (id, cid, nom, desc, type_doc, unique, taille, now, blob_data, 'local', ''))
+        (id, cid, nom, desc, type_doc, unique, taille, now, None, 'local', ''))
 
     # Log document upload
     per_title = conn.execute('SELECT CONCAT(marque, \' \', modele) FROM peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone()
@@ -5276,15 +5268,11 @@ def upload_doc_contrat(id):
     f.save(save_path)
     taille = os.path.getsize(save_path)
 
-    # Lire le fichier en BLOB pour synchronisation Turso
-    with open(save_path, 'rb') as fp:
-        blob_data = fp.read()
-
     nom = request.form.get('nom','') or f.filename
     now = datetime.now().isoformat()
     conn = get_db()
     conn.execute('INSERT INTO documents_contrats (contrat_id,client_id,nom,description,type_doc,nom_fichier,taille,date_upload,contenu_blob,sync_status,date_sync) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
-                 (id, cid, nom, request.form.get('description',''), request.form.get('type_doc',''), unique, taille, now, blob_data, 'local', ''))
+                 (id, cid, nom, request.form.get('description',''), request.form.get('type_doc',''), unique, taille, now, None, 'local', ''))
 
     # Log document upload
     ctr_title = conn.execute('SELECT titre FROM contrats WHERE id=? AND client_id=?', (id, cid)).fetchone()

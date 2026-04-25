@@ -126,6 +126,7 @@
         </div>
         <form method="POST" action="/appareil/{{ appareil.id }}/documents/upload"
               enctype="multipart/form-data" id="upload-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="form-section" style="margin-bottom:1rem;">
                 <div class="form-group" style="margin-bottom:.8rem;">
                     <label>Fichier *</label>
