@@ -76,7 +76,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         # Développement / tests
-        'tkinter', 'unittest', 'doctest', 'pdb', 'distutils',
+        'tkinter', 'unittest', 'doctest', 'pdb',
         'lib2to3', 'setuptools', 'pip', 'wheel',
 
         # Réseau / FTP obsolètes
