@@ -3694,11 +3694,15 @@ def apercu_document(id):
     if doc.get('contenu_blob'):
         return send_file(
             io.BytesIO(doc['contenu_blob']),
-            as_attachment=False
+            as_attachment=False,
+            download_name=doc.get('nom_fichier', 'document')
         )
 
     # Fallback: servir depuis fichier local
-    return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+    try:
+        return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+    except Exception:
+        return f"Fichier introuvable : {doc.get('nom_fichier', '?')}", 404
 
 
 # ─── API APPAREIL : IGNORER ALERTE GARANTIE ──────────────────────────────────
@@ -3817,7 +3821,13 @@ def apercu_doc_peripherique(id):
         'SELECT id, peripherique_id, client_id, nom, nom_fichier, contenu_blob FROM documents_peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not doc: return 'Not found', 404
-    return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+    if doc.get('contenu_blob'):
+        return send_file(io.BytesIO(doc['contenu_blob']), as_attachment=False,
+                         download_name=doc.get('nom_fichier', 'document'))
+    try:
+        return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+    except Exception:
+        return f"Fichier introuvable : {doc.get('nom_fichier', '?')}", 404
 
 @app.route('/doc-peripherique/<int:id>/supprimer', methods=['POST'])
 def supprimer_doc_peripherique(id):
@@ -5320,11 +5330,15 @@ def apercu_doc_contrat(id):
     if doc.get('contenu_blob'):
         return send_file(
             io.BytesIO(doc['contenu_blob']),
-            as_attachment=False
+            as_attachment=False,
+            download_name=doc.get('nom_fichier', 'document')
         )
 
     # Fallback: servir depuis fichier local
-    return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+    try:
+        return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+    except Exception:
+        return f"Fichier introuvable : {doc.get('nom_fichier', '?')}", 404
 
 @app.route('/contrat/document/<int:id>/telecharger')
 def telecharger_doc_contrat(id):
@@ -6061,7 +6075,10 @@ def apercu_doc_intervention(id):
     if not doc:
         return 'Not found', 404
 
-    return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+    try:
+        return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+    except Exception:
+        return f"Fichier introuvable : {doc.get('nom_fichier', '?')}", 404
 
 @app.route('/intervention/document/<int:id>/telecharger')
 @login_required
