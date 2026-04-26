@@ -59,7 +59,7 @@ jobs:
 
           for pkg in $PKGS; do
             if pip3.11 download \
-                --platform macosx_11_0_universal2 \
+                --platform macosx_10_9_universal2 \
                 --python-version 311 --implementation cp --abi cp311 \
                 --only-binary :all: --dest /tmp/u2wheels "$pkg" 2>/dev/null; then
               echo "✓ wheel universal2 téléchargé : $pkg"
