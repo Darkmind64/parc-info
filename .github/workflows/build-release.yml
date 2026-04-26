@@ -45,17 +45,44 @@ jobs:
           pip3.11 install -r requirements.txt pyinstaller pillow pystray || \
           pip install -r requirements.txt pyinstaller pillow pystray
 
-      - name: Recompiler extensions C en fat binary (universal2 uniquement)
+      - name: Remplacer extensions C par wheels universal2
         if: runner.os == 'macOS' && matrix.target_arch == 'universal2'
         env:
           ARCHFLAGS: "-arch arm64 -arch x86_64"
           MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: |
-          # Recompiler depuis les sources tous les paquets avec des extensions C
-          # issus de requirements.txt + pillow + pystray
-          pip3.11 install --force-reinstall --no-binary \
-            markupsafe,cffi,cryptography,Pillow,reportlab,greenlet,SQLAlchemy \
-            markupsafe cffi cryptography Pillow reportlab greenlet SQLAlchemy
+          # Pour chaque paquet avec extensions C : télécharger le wheel universal2 si dispo,
+          # sinon compiler depuis les sources avec ARCHFLAGS (fat binary).
+          mkdir -p /tmp/u2wheels
+          PKGS="markupsafe cffi cryptography Pillow reportlab greenlet SQLAlchemy"
+          SOURCE_PKGS=""
+
+          for pkg in $PKGS; do
+            if pip3.11 download \
+                --platform macosx_11_0_universal2 \
+                --python-version 311 --implementation cp --abi cp311 \
+                --only-binary :all: --dest /tmp/u2wheels "$pkg" 2>/dev/null; then
+              echo "✓ wheel universal2 téléchargé : $pkg"
+            else
+              echo "→ compilation source (pas de wheel universal2) : $pkg"
+              SOURCE_PKGS="$SOURCE_PKGS $pkg"
+            fi
+          done
+
+          # Installer les wheels universal2 téléchargés
+          WHL_COUNT=$(ls /tmp/u2wheels/*.whl 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$WHL_COUNT" -gt "0" ]; then
+            echo "Installation de $WHL_COUNT wheels universal2…"
+            pip3.11 install --force-reinstall --no-deps /tmp/u2wheels/*.whl
+          fi
+
+          # Compiler depuis les sources les paquets sans wheel universal2
+          if [ -n "$SOURCE_PKGS" ]; then
+            SOURCE_PKGS=$(echo "$SOURCE_PKGS" | xargs)
+            echo "Compilation source avec ARCHFLAGS : $SOURCE_PKGS"
+            NO_BIN=$(echo "$SOURCE_PKGS" | tr ' ' ',')
+            pip3.11 install --force-reinstall --no-binary "$NO_BIN" $SOURCE_PKGS
+          fi
 
       - name: Build PyInstaller
         run: pyinstaller parcinfo.spec
