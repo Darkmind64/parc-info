@@ -81,6 +81,7 @@ from uploads_sync import start_sync_thread
 from crypto_utils   import get_crypto_manager
 from cache_utils    import get_cache_manager, cache_result, invalidate_cache_pattern
 from search_utils   import search_global, search_autocomplete
+from app_update_routes import register_update_routes
 
 # ─── HELPER: Retry pour requêtes DB verrouillées ─────────────────────────────
 def retry_db_query(query_func, max_retries=5):
@@ -1338,6 +1339,9 @@ def inject_cfg():
         'type_badge_defaults': _TYPE_BADGE_DEFAULTS,
         'type_badges': type_badges,
     }
+
+# ─── REGISTER UPDATE NOTIFICATION ROUTES ──────────────────────────────────────
+register_update_routes(app)
 
 @app.route('/api/config', methods=['GET'])
 def api_config_get():

@@ -1,0 +1,18 @@
+{
+  "version": "2.5.0",
+  "release_date": "2026-04-26T17:45:33.937307",
+  "github_repo": "darkmind64/parc_info",
+  "downloads": {
+    "windows_app": "https://github.com/darkmind64/parc_info/releases/download/v2.5.0/ParcInfo.exe",
+    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.5.0/installer.exe"
+  },
+  "checksums": {
+    "windows_app_sha256": "a98e4cfc7c73f1d816c8e6afc4a223628c9564eadaf3983990fd403131d511d7",
+    "windows_installer_sha256": "fdba169fffda72419148050f50caf6a01495034e1a96bd4face84f7b07ec9dbf"
+  },
+  "file_sizes": {
+    "windows_app_bytes": 39793903,
+    "windows_installer_bytes": 14194442
+  },
+  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.5.0"
+}
