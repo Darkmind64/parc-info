@@ -116,7 +116,8 @@ def _t_enc(v):
     if isinstance(v, float):
         return {"type": "float", "value": v}
     if isinstance(v, bytes):
-        return {"type": "blob", "value": base64.b64encode(v).decode()}
+        # L'API Turso libSQL utilise "base64" (pas "value") pour les BLOBs
+        return {"type": "blob", "base64": base64.b64encode(v).decode()}
     return {"type": "text", "value": str(v)}
 
 
@@ -125,15 +126,19 @@ def _t_dec(v):
     if v is None:
         return None
     t = v.get("type", "text")
+    if t == "null":
+        return None
+    if t == "blob":
+        # Turso retourne {"type": "blob", "base64": "..."} — clé "base64" pas "value"
+        b64 = v.get("base64") or v.get("value")
+        return base64.b64decode(b64) if b64 else None
     val = v.get("value")
-    if t == "null" or val is None:
+    if val is None:
         return None
     if t == "integer":
         return int(val)
     if t == "float":
         return float(val)
-    if t == "blob":
-        return base64.b64decode(val)
     return val  # text
 
 

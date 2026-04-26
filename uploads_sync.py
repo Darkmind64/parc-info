@@ -23,6 +23,7 @@ Lancé en thread background au démarrage de app.py.
 import logging
 import time
 import os
+import urllib.error
 from datetime import datetime
 
 logger = logging.getLogger('parcinfo')
@@ -96,8 +97,14 @@ def _push_documents_to_turso(table_name: str, upload_folder: str) -> None:
                     f"push {table_name} id={doc_id}: {nom_fichier} "
                     f"({len(blob):,} octets) → Turso"
                 )
+            except urllib.error.HTTPError as e:
+                body = e.read().decode('utf-8', errors='replace')
+                logger.warning(
+                    f"push {table_name} id={doc_id} ({nom_fichier}, {len(blob):,}B): "
+                    f"HTTP {e.code} — {body[:300]}"
+                )
             except Exception as e:
-                logger.warning(f"push {table_name} id={doc_id}: ERREUR : {e}")
+                logger.warning(f"push {table_name} id={doc_id} ({nom_fichier}): ERREUR : {e}")
 
         if count:
             logger.info(f"uploads_sync push: {count} fichier(s) envoyé(s) vers Turso ({table_name})")
