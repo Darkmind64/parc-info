@@ -13,7 +13,9 @@ jobs:
           - os: windows-latest
             asset_name: ParcInfo-Windows.exe
           - os: macos-13
-            asset_name: ParcInfo-macOS.zip
+            asset_name: ParcInfo-macOS-Intel.zip
+          - os: macos-latest
+            asset_name: ParcInfo-macOS-ARM.zip
 
     runs-on: ${{ matrix.os }}
 
@@ -39,7 +41,7 @@ jobs:
 
       - name: Zip .app (macOS)
         if: runner.os == 'macOS'
-        run: cd dist && zip -r ParcInfo-macOS.zip ParcInfo.app
+        run: cd dist && zip -r ${{ matrix.asset_name }} ParcInfo.app
 
       - name: Upload artefact (Windows)
         if: runner.os == 'Windows'
@@ -53,7 +55,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: dist/ParcInfo-macOS.zip
+          path: dist/${{ matrix.asset_name }}
 
   docker:
     runs-on: ubuntu-latest
@@ -107,7 +109,8 @@ jobs:
             | Plateforme | Fichier |
             |-----------|---------|
             | Windows   | `ParcInfo-Windows.exe` |
-            | macOS     | `ParcInfo-macOS.zip` → dézipper → `ParcInfo.app` |
+            | macOS Intel (13+) | `ParcInfo-macOS-Intel.zip` → dézipper → `ParcInfo.app` |
+            | macOS ARM (Apple Silicon) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
             | Docker    | `docker pull darkmind64/parcinfo:${{ github.ref_name }}` |
 
             ### Docker
@@ -125,4 +128,5 @@ jobs:
             ```
           files: |
             artifacts/ParcInfo-Windows.exe/ParcInfo-Windows.exe
-            artifacts/ParcInfo-macOS.zip/ParcInfo-macOS.zip
+            artifacts/ParcInfo-macOS-Intel.zip/ParcInfo-macOS-Intel.zip
+            artifacts/ParcInfo-macOS-ARM.zip/ParcInfo-macOS-ARM.zip
