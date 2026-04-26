@@ -45,6 +45,15 @@ jobs:
           pip3.11 install -r requirements.txt pyinstaller pillow pystray || \
           pip install -r requirements.txt pyinstaller pillow pystray
 
+      - name: Recompiler extensions C en fat binary (universal2 uniquement)
+        if: runner.os == 'macOS' && matrix.target_arch == 'universal2'
+        env:
+          ARCHFLAGS: "-arch arm64 -arch x86_64"
+        run: |
+          # Forcer la recompilation depuis les sources pour obtenir des fat binaries
+          pip3.11 install --force-reinstall --no-binary markupsafe markupsafe
+          pip3.11 install --force-reinstall --no-binary Pillow Pillow
+
       - name: Build PyInstaller
         run: pyinstaller parcinfo.spec
         env:
