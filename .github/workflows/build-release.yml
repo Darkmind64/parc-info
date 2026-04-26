@@ -55,10 +55,10 @@ jobs:
           # --platform force pip à télécharger les wheels macosx universal2 (fat binary)
           pip3.11 install \
             --platform macosx_14_0_universal2 \
-            --python-version 311 --implementation cp --abi cp311 \
+            --python-version 3.11 \
             --only-binary :all: \
             --target /tmp/u2 \
-            -r requirements.txt pillow pystray
+            -r requirements.txt Pillow pystray
 
       - name: Build PyInstaller
         run: pyinstaller parcinfo.spec
