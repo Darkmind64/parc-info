@@ -2,7 +2,7 @@
 ParcInfo — launcher.py
 Point d'entrée PyInstaller : port libre, navigateur auto, pas de console.
 """
-import sys, os, threading, time, socket, webbrowser, logging
+import sys, os, threading, time, socket, webbrowser, logging, platform
 
 # ── Résolution des chemins ────────────────────────────────────────────────────
 def res(relative=''):
@@ -25,7 +25,13 @@ def free_port():
         return s.getsockname()[1]
 
 # ── Systray optionnel ─────────────────────────────────────────────────────────
-def run_systray(url):
+def run_systray(url, logger):
+    """Essaie de créer la barre système. Échoue silencieusement si indisponible."""
+    # Systray non supporté sur macOS (problèmes de compatibilité AppKit)
+    if platform.system() == 'Darwin':
+        logger.info("Systray disabled on macOS (AppKit compatibility)")
+        return
+
     try:
         from pystray import Icon, MenuItem, Menu
         from PIL import Image, ImageDraw
@@ -38,8 +44,8 @@ def run_systray(url):
             MenuItem('Ouvrir ParcInfo', lambda i, it: webbrowser.open(url), default=True),
             MenuItem('Quitter',         lambda i, it: (i.stop(), os._exit(0))),
         )).run()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Systray unavailable: {e}")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
@@ -87,8 +93,8 @@ def main():
         webbrowser.open(url)
     threading.Thread(target=open_browser, daemon=True).start()
 
-    # Systray (optionnel)
-    threading.Thread(target=run_systray, args=(url,), daemon=True).start()
+    # Systray (optionnel — désactivé sur macOS)
+    threading.Thread(target=run_systray, args=(url, logger), daemon=True).start()
 
     # Auto-update au démarrage (bloquant, très rapide si pas d'update)
     logger.info("Checking for updates...")

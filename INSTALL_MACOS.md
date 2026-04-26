@@ -155,6 +155,13 @@ open /Applications/ParcInfo.app
 # Cmd+Space → type "ParcInfo" → Return
 ```
 
+### Note: System Tray on macOS
+
+The system tray icon is **disabled on macOS** due to compatibility issues with certain macOS versions. The application works perfectly without it — all functionality is available through the web interface. You can still:
+- Pin the app to your Dock for easy access
+- Use Cmd+Space to launch via Spotlight
+- Add the app to your Favorites in Finder
+
 ### Add to Dock
 
 1. Open Applications folder

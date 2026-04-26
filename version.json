@@ -1,18 +1,18 @@
 {
   "version": "2.5.0",
-  "release_date": "2026-04-26T17:59:56.926160",
+  "release_date": "2026-04-26T19:11:00.000000",
   "github_repo": "darkmind64/parc_info",
   "downloads": {
     "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.5.0/installer.exe"
   },
   "notes": {
-    "windows_installer": "Standalone installer - contains both ParcInfo.exe and installer logic. No separate files needed."
+    "windows_installer": "Standalone installer - contains both ParcInfo.exe and installer logic. No separate files needed. Fixed: System tray disabled on macOS to prevent crashes on macOS 12.x."
   },
   "checksums": {
-    "windows_installer_sha256": "39FC7C282A78A33B72B1423252A4F385F3F3E9253EE680ECA5B4DA2966049A30"
+    "windows_installer_sha256": "D447D64C394A3B31FFA983098936F0382DC1B8B9683EF09910E2A0FB89B57BCF"
   },
   "file_sizes": {
-    "windows_installer_bytes": 53575300
+    "windows_installer_bytes": 53546563
   },
   "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.5.0"
 }

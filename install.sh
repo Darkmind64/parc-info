@@ -303,6 +303,9 @@ main() {
     echo "  • Updates: Available from within the app (auto-update)"
     echo "  • Uninstall: Drag $APP_NAME.app to Trash"
     echo ""
+    print_warning "Note: System tray icon is disabled on macOS"
+    echo "        (use Dock shortcuts for full functionality)"
+    echo ""
 }
 
 # Run main
