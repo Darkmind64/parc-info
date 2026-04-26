@@ -12,10 +12,8 @@ jobs:
         include:
           - os: windows-latest
             asset_name: ParcInfo-Windows.exe
-            target_arch: ''
           - os: macos-latest
-            asset_name: ParcInfo-macOS.zip
-            target_arch: 'universal2'
+            asset_name: ParcInfo-macOS-ARM.zip
 
     runs-on: ${{ matrix.os }}
     continue-on-error: true
@@ -25,48 +23,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Python 3.11 (Windows / macOS ARM-only)
-        if: runner.os != 'macOS' || matrix.target_arch == ''
+      - name: Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Python 3.11 universal2 (macOS universal2 via python.org pkg)
-        if: runner.os == 'macOS' && matrix.target_arch == 'universal2'
-        run: |
-          curl -fsSL -o /tmp/python311.pkg \
-            https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg
-          sudo installer -pkg /tmp/python311.pkg -target /
-          echo "/Library/Frameworks/Python.framework/Versions/3.11/bin" >> $GITHUB_PATH
-
-      - name: Dépendances (Windows)
-        if: runner.os == 'Windows'
+      - name: Dépendances
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt pyinstaller pillow pystray
-
-      - name: Dépendances (macOS universal2)
-        if: runner.os == 'macOS' && matrix.target_arch == 'universal2'
-        run: |
-          pip3.11 install --upgrade pip
-          # PyInstaller installé normalement (pas besoin d'être universal2)
-          pip3.11 install pyinstaller
-          # Dépendances de l'app installées en wheels universal2 dans /tmp/u2
-          # --platform force pip à télécharger les wheels macosx universal2 (fat binary)
-          pip3.11 install \
-            --platform macosx_14_0_universal2 \
-            --python-version 3.11 \
-            --only-binary :all: \
-            --target /tmp/u2 \
-            -r requirements.txt Pillow pystray
 
       - name: Build PyInstaller
         run: pyinstaller parcinfo.spec
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
-          TARGET_ARCH: ${{ matrix.target_arch }}
-          # macOS universal2 : forcer PyInstaller à utiliser les packages universal2
-          PYTHONPATH: ${{ matrix.target_arch == 'universal2' && '/tmp/u2' || '' }}
 
       - name: Zip .app (macOS)
         if: runner.os == 'macOS'
@@ -143,7 +113,7 @@ jobs:
             | Plateforme | Fichier |
             |-----------|---------|
             | Windows   | `ParcInfo-Windows.exe` |
-            | macOS (Intel + Apple Silicon) | `ParcInfo-macOS.zip` → dézipper → `ParcInfo.app` |
+            | macOS (Apple Silicon) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
             | Docker    | `docker pull darkmind64/parcinfo:${{ github.ref_name }}` |
 
             ### Docker
@@ -161,4 +131,4 @@ jobs:
             ```
           files: |
             artifacts/ParcInfo-Windows.exe/ParcInfo-Windows.exe
-            artifacts/ParcInfo-macOS.zip/ParcInfo-macOS.zip
+            artifacts/ParcInfo-macOS-ARM.zip/ParcInfo-macOS-ARM.zip
