@@ -12,8 +12,10 @@ jobs:
         include:
           - os: windows-latest
             asset_name: ParcInfo-Windows.exe
+            pyinstaller_extra: ''
           - os: macos-latest
-            asset_name: ParcInfo-macOS-ARM.zip
+            asset_name: ParcInfo-macOS.zip
+            pyinstaller_extra: '--target-arch universal2'
 
     runs-on: ${{ matrix.os }}
     continue-on-error: true
@@ -35,7 +37,7 @@ jobs:
           pip install pyinstaller pillow pystray
 
       - name: Build PyInstaller
-        run: pyinstaller parcinfo.spec
+        run: pyinstaller ${{ matrix.pyinstaller_extra }} parcinfo.spec
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
 
@@ -114,7 +116,7 @@ jobs:
             | Plateforme | Fichier |
             |-----------|---------|
             | Windows   | `ParcInfo-Windows.exe` |
-            | macOS (Apple Silicon) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
+            | macOS (Intel + Apple Silicon) | `ParcInfo-macOS.zip` → dézipper → `ParcInfo.app` |
             | Docker    | `docker pull darkmind64/parcinfo:${{ github.ref_name }}` |
 
             ### Docker
@@ -132,4 +134,4 @@ jobs:
             ```
           files: |
             artifacts/ParcInfo-Windows.exe/ParcInfo-Windows.exe
-            artifacts/ParcInfo-macOS-ARM.zip/ParcInfo-macOS-ARM.zip
+            artifacts/ParcInfo-macOS.zip/ParcInfo-macOS.zip
