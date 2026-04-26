@@ -54,7 +54,7 @@ jobs:
           # Dépendances de l'app installées en wheels universal2 dans /tmp/u2
           # --platform force pip à télécharger les wheels macosx universal2 (fat binary)
           pip3.11 install \
-            --platform macosx_10_9_universal2 \
+            --platform macosx_14_0_universal2 \
             --python-version 311 --implementation cp --abi cp311 \
             --only-binary :all: \
             --target /tmp/u2 \
