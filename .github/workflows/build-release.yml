@@ -47,21 +47,26 @@ jobs:
 
       - name: Dépendances (macOS universal2)
         if: runner.os == 'macOS' && matrix.target_arch == 'universal2'
-        env:
-          # Fait croire à pip qu'il tourne sur macosx universal2 →
-          # il sélectionne les wheels universal2 (fat binary arm64+x86_64)
-          _PYTHON_HOST_PLATFORM: "macosx-11.0-universal2"
-          ARCHFLAGS: "-arch arm64 -arch x86_64"
-          MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: |
           pip3.11 install --upgrade pip
-          pip3.11 install -r requirements.txt pyinstaller pillow pystray
+          # PyInstaller installé normalement (pas besoin d'être universal2)
+          pip3.11 install pyinstaller
+          # Dépendances de l'app installées en wheels universal2 dans /tmp/u2
+          # --platform force pip à télécharger les wheels macosx universal2 (fat binary)
+          pip3.11 install \
+            --platform macosx_10_9_universal2 \
+            --python-version 311 --implementation cp --abi cp311 \
+            --only-binary :all: \
+            --target /tmp/u2 \
+            -r requirements.txt pillow pystray
 
       - name: Build PyInstaller
         run: pyinstaller parcinfo.spec
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
           TARGET_ARCH: ${{ matrix.target_arch }}
+          # macOS universal2 : forcer PyInstaller à utiliser les packages universal2
+          PYTHONPATH: ${{ matrix.target_arch == 'universal2' && '/tmp/u2' || '' }}
 
       - name: Zip .app (macOS)
         if: runner.os == 'macOS'
