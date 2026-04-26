@@ -51,48 +51,11 @@ jobs:
           ARCHFLAGS: "-arch arm64 -arch x86_64"
           MACOSX_DEPLOYMENT_TARGET: "11.0"
         run: |
-          # Détecter tous les .so ARM64-only et recompiler leurs paquets depuis les sources
-          python3.11 - << 'PYEOF'
-          import subprocess, glob, os
-
-          site = subprocess.check_output(
-              ['python3.11', '-c', 'import site; print(site.getsitepackages()[0])'],
-              text=True
-          ).strip()
-
-          # Dictionnaire: préfixe dossier → nom pip
-          PKG_MAP = {
-              'markupsafe': 'markupsafe',
-              '_cffi_backend': 'cffi',
-              'cffi': 'cffi',
-              'cryptography': 'cryptography',
-              'pil': 'Pillow',
-              'reportlab': 'reportlab',
-              'greenlet': 'greenlet',
-          }
-
-          thin = set()
-          for f in glob.glob(f'{site}/**/*.so', recursive=True):
-              r = subprocess.run(['lipo', '-info', f], capture_output=True, text=True)
-              if r.returncode == 0 and 'Non-fat' in r.stdout:
-                  name = os.path.basename(f).split('.')[0].split('-')[0].lower()
-                  rel  = os.path.relpath(f, site).split('/')[0].split('-')[0].lower()
-                  for key in (name, rel):
-                      if key in PKG_MAP:
-                          thin.add(PKG_MAP[key])
-                          break
-                  else:
-                      thin.add(rel)  # fallback: essayer le nom du dossier
-
-          if thin:
-              pkgs = sorted(thin)
-              print(f'Paquets ARM64-only à recompiler : {pkgs}')
-              cmd = ['pip3.11', 'install', '--force-reinstall',
-                     '--no-binary', ','.join(pkgs)] + pkgs
-              subprocess.run(cmd, check=True, env=os.environ.copy())
-          else:
-              print('Aucun .so ARM64-only détecté.')
-          PYEOF
+          # Recompiler depuis les sources tous les paquets avec des extensions C
+          # issus de requirements.txt + pillow + pystray
+          pip3.11 install --force-reinstall --no-binary \
+            markupsafe,cffi,cryptography,Pillow,reportlab,greenlet,SQLAlchemy \
+            markupsafe cffi cryptography Pillow reportlab greenlet SQLAlchemy
 
       - name: Build PyInstaller
         run: pyinstaller parcinfo.spec
