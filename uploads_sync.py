@@ -159,8 +159,73 @@ def _pull_documents_from_turso(table_name: str, upload_folder: str) -> None:
         logger.exception(f"_pull_documents_from_turso({table_name}) a échoué")
 
 
+def _cleanup_orphaned_files(upload_folder: str) -> None:
+    """
+    Supprime les fichiers physiques dont le record DB a été supprimé.
+
+    Collecte tous les nom_fichier référencés dans la DB locale (source de
+    vérité sur cette machine), puis supprime du disque tout fichier du
+    dossier uploads qui n'est plus référencé.
+
+    Sécurité : ne touche qu'aux fichiers dont le nom commence par un préfixe
+    connu de l'app (app, per, ctr, intv, baie) pour ne pas effacer des
+    fichiers déposés manuellement.
+    """
+    # Préfixes générés par les routes upload de l'app
+    APP_PREFIXES = ('app', 'per', 'ctr', 'intv', 'baie')
+
+    try:
+        if not os.path.isdir(upload_folder):
+            return
+
+        from database import get_db
+        conn = get_db()
+
+        # Collecter tous les noms de fichiers encore référencés dans la DB
+        referenced: set = set()
+        tables = [
+            'documents_appareils',
+            'documents_contrats',
+            'documents_peripheriques',
+        ]
+        for tbl in tables:
+            try:
+                rows = conn.execute(
+                    f'SELECT nom_fichier FROM {tbl} WHERE nom_fichier IS NOT NULL'
+                ).fetchall()
+                for r in rows:
+                    if r['nom_fichier']:
+                        referenced.add(r['nom_fichier'])
+            except Exception:
+                pass
+        conn.close()
+
+        count = 0
+        for fname in os.listdir(upload_folder):
+            # Ne toucher qu'aux fichiers uploadés par l'app
+            if not fname.startswith(APP_PREFIXES):
+                continue
+            if fname in referenced:
+                continue
+            fpath = os.path.join(upload_folder, fname)
+            if not os.path.isfile(fpath):
+                continue
+            try:
+                os.remove(fpath)
+                count += 1
+                logger.debug(f"cleanup: supprimé fichier orphelin : {fname}")
+            except Exception as e:
+                logger.warning(f"cleanup: impossible de supprimer {fname} : {e}")
+
+        if count:
+            logger.info(f"uploads_sync cleanup: {count} fichier(s) orphelin(s) supprimé(s)")
+
+    except Exception:
+        logger.exception("_cleanup_orphaned_files a échoué")
+
+
 def sync_uploads() -> None:
-    """Cycle complet push + pull pour toutes les tables documents."""
+    """Cycle complet push + pull + cleanup pour toutes les tables documents."""
     from database import UPLOAD_FOLDER
 
     tables = [
@@ -172,6 +237,9 @@ def sync_uploads() -> None:
     for table in tables:
         _push_documents_to_turso(table, UPLOAD_FOLDER)
         _pull_documents_from_turso(table, UPLOAD_FOLDER)
+
+    # Supprimer les fichiers physiques dont le record a été supprimé
+    _cleanup_orphaned_files(UPLOAD_FOLDER)
 
 
 def start_sync_thread(interval: int = 60) -> None:
