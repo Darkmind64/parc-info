@@ -46,6 +46,9 @@ def main():
     port = free_port()
     url  = f'http://127.0.0.1:{port}'
 
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+    logger = logging.getLogger('parcinfo')
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
     # Préparer les chemins de données AVANT d'importer app
