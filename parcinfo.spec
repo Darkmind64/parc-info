@@ -110,7 +110,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,                               # Compression UPX (si dispo)
+    upx=False,                              # Désactiver UPX (réduit faux positifs antivirus)
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,                          # ← IMPORTANT : pas de console Windows
@@ -119,8 +119,8 @@ exe = EXE(
     target_arch=_target_arch,
     codesign_identity=None,
     entitlements_file=None,
-    # Optionnel : icône Windows
-    # icon='static/icon.ico',               # Décommenter si icon.ico (256×256) présent
+    manifest='app.manifest',                # Manifest de confiance Windows
+    icon='static/icon.ico',                 # Icône de l'application
 )
 
 # ── Bundle macOS .app ─────────────────────────────────────────────────────────

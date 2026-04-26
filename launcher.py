@@ -46,6 +46,9 @@ def main():
     port = free_port()
     url  = f'http://127.0.0.1:{port}'
 
+    # Configure logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+    logger = logging.getLogger('parcinfo')
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
     # Préparer les chemins de données AVANT d'importer app
@@ -86,6 +89,24 @@ def main():
 
     # Systray (optionnel)
     threading.Thread(target=run_systray, args=(url,), daemon=True).start()
+
+    # Auto-update au démarrage (bloquant, très rapide si pas d'update)
+    logger.info("Checking for updates...")
+    try:
+        from update_checker import UpdateChecker
+        checker = UpdateChecker(config_dir=data())
+
+        # Check and install if update available
+        if checker.check_and_install_updates(force=True, silent=True):
+            # Update was installed, app will be restarted by installer
+            logger.info("Update installed, restarting...")
+            time.sleep(2)  # Give installer time to close our process
+            sys.exit(0)
+        else:
+            logger.info("No update needed")
+    except Exception as e:
+        logger.warning(f"Update check failed (non-critical): {e}")
+        # Continue anyway, update failure shouldn't block app startup
 
     # Démarrer Flask
     flask_app.app.run(host='127.0.0.1', port=port,
