@@ -12,10 +12,10 @@ jobs:
         include:
           - os: windows-latest
             asset_name: ParcInfo-Windows.exe
-            pyinstaller_extra: ''
+            target_arch: ''
           - os: macos-latest
             asset_name: ParcInfo-macOS.zip
-            pyinstaller_extra: '--target-arch universal2'
+            target_arch: 'universal2'
 
     runs-on: ${{ matrix.os }}
     continue-on-error: true
@@ -37,9 +37,10 @@ jobs:
           pip install pyinstaller pillow pystray
 
       - name: Build PyInstaller
-        run: pyinstaller ${{ matrix.pyinstaller_extra }} parcinfo.spec
+        run: pyinstaller parcinfo.spec
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
+          TARGET_ARCH: ${{ matrix.target_arch }}
 
       - name: Zip .app (macOS)
         if: runner.os == 'macOS'

@@ -20,6 +20,10 @@ import sys, os
 
 block_cipher = None
 
+# Permet de surcharger l'architecture cible via variable d'environnement.
+# Ex. : TARGET_ARCH=universal2 pyinstaller parcinfo.spec
+_target_arch = os.environ.get('TARGET_ARCH') or None
+
 # ── Ressources à embarquer (pas la BD) ────────────────────────────────────────
 
 datas = [
@@ -112,7 +116,7 @@ exe = EXE(
     console=False,                          # ← IMPORTANT : pas de console Windows
     disable_windowed_traceback=False,       # Logs en fichier
     argv_emulation=False,                   # macOS : ne pas émuler argv
-    target_arch=None,
+    target_arch=_target_arch,
     codesign_identity=None,
     entitlements_file=None,
     # Optionnel : icône Windows
