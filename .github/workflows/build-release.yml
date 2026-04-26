@@ -43,12 +43,17 @@ jobs:
         if: runner.os == 'macOS'
         run: cd dist && zip -r ${{ matrix.asset_name }} ParcInfo.app
 
+      - name: Rename exe (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Rename-Item dist\ParcInfo.exe ParcInfo-Windows.exe
+
       - name: Upload artefact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: dist/ParcInfo.exe
+          path: dist/ParcInfo-Windows.exe
 
       - name: Upload artefact (macOS)
         if: runner.os == 'macOS'
