@@ -9,7 +9,7 @@
     "windows_installer": "Standalone installer - contains both ParcInfo.exe and installer logic. No separate files needed."
   },
   "checksums": {
-    "windows_installer_sha256": "840E0B38E27DE57CC9C462077909007F761170ACFA24CFE9CBD0F2C0892227FE"
+    "windows_installer_sha256": "39FC7C282A78A33B72B1423252A4F385F3F3E9253EE680ECA5B4DA2966049A30"
   },
   "file_sizes": {
     "windows_installer_bytes": 53575300
