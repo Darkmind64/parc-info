@@ -131,7 +131,11 @@ def _t_dec(v):
     if t == "blob":
         # Turso retourne {"type": "blob", "base64": "..."} — clé "base64" pas "value"
         b64 = v.get("base64") or v.get("value")
-        return base64.b64decode(b64) if b64 else None
+        if not b64:
+            return None
+        # Turso omet parfois le padding '=' → compléter avant décodage
+        b64 += '=' * ((-len(b64)) % 4)
+        return base64.b64decode(b64)
     val = v.get("value")
     if val is None:
         return None
