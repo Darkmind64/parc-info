@@ -25,16 +25,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Python 3.11
+      - name: Python 3.11 (Windows / macOS ARM-only)
+        if: runner.os != 'macOS' || matrix.target_arch == ''
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
+      - name: Python 3.11 universal2 (macOS universal2 via python.org pkg)
+        if: runner.os == 'macOS' && matrix.target_arch == 'universal2'
+        run: |
+          curl -fsSL -o /tmp/python311.pkg \
+            https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg
+          sudo installer -pkg /tmp/python311.pkg -target /
+          echo "/Library/Frameworks/Python.framework/Versions/3.11/bin" >> $GITHUB_PATH
+
       - name: Dépendances
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller pillow pystray
+          pip3.11 install --upgrade pip || pip install --upgrade pip
+          pip3.11 install -r requirements.txt pyinstaller pillow pystray || \
+          pip install -r requirements.txt pyinstaller pillow pystray
 
       - name: Build PyInstaller
         run: pyinstaller parcinfo.spec
