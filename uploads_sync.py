@@ -1,10 +1,17 @@
 """
-uploads_sync.py — Synchronisation des fichiers uploads entre SQLite local et Turso.
+uploads_sync.py — Synchronisation des fichiers uploads entre machines via Turso.
 
-Gère:
-- Push: fichiers locaux → Turso (lecture disque en arrière-plan, non bloquant)
-- Pull: récupération depuis Turso si fichier manquant localement
-- Nettoyage automatique des fichiers supprimés
+Architecture :
+  - Les deux machines (PC et NAS) utilisent Turso comme DB principale.
+  - Un upload crée un record dans Turso avec contenu_blob=NULL.
+  - Push  : cette machine lit son fichier local et envoie le BLOB vers Turso.
+  - Pull  : cette machine télécharge depuis Turso les BLOBs des fichiers absents localement.
+
+Pourquoi "push interroge Turso" (et non la SQLite locale) :
+  Quand db_type='turso', get_db() retourne TursoConnection → l'INSERT de
+  l'upload va dans Turso. La SQLite locale est vide/inutilisée. L'ancienne
+  version interrogeait get_local_db() (SQLite locale vide) → ne trouvait
+  jamais rien → BLOB jamais envoyé → fichier absent sur les autres machines.
 
 Lancé en thread background au démarrage de app.py.
 """
@@ -12,126 +19,104 @@ Lancé en thread background au démarrage de app.py.
 import logging
 import time
 import os
-import sqlite3
 from datetime import datetime
 
 logger = logging.getLogger('parcinfo')
 
-def get_db():
-    from database import get_db as _get_db
-    return _get_db()
-
-def get_local_db():
-    from database import get_local_db as _get_local_db
-    return _get_local_db()
 
 def get_turso_db():
-    """Récupère la connexion Turso (ou None si non configurée)."""
+    """Retourne la connexion Turso, ou None si non configurée / hors-ligne."""
     try:
         from config_helpers import cfg_get
-        db_type = cfg_get('db_type', 'local')
-        if db_type == 'turso':
-            from database import TursoConnection
-            url = cfg_get('turso_url', '').strip()
-            token = cfg_get('turso_token', '').strip()
-            if url and token:
-                return TursoConnection(url, token)
+        if cfg_get('db_type', 'local') != 'turso':
+            return None
+        from database import TursoConnection
+        url   = cfg_get('turso_url',   '').strip()
+        token = cfg_get('turso_token', '').strip()
+        if url and token:
+            return TursoConnection(url, token)
     except Exception as e:
-        logger.warning(f"Cannot create Turso connection for uploads_sync: {e}")
+        logger.warning(f"uploads_sync: impossible d'ouvrir Turso : {e}")
     return None
 
 
-def _push_documents_to_turso(table_name: str, upload_folder: str):
+def _push_documents_to_turso(table_name: str, upload_folder: str) -> None:
     """
-    Push local → Turso : envoie les fichiers non-synced (sync_status='local').
+    Push local → Turso : pour chaque record Turso avec contenu_blob=NULL,
+    si le fichier physique existe sur CETTE machine → lit et envoie le BLOB.
 
-    Lit le contenu depuis le disque (non-bloquant pour l'upload HTTP).
-    Ne pousse que si le fichier physique existe localement.
+    Logique :
+      1. Interroge Turso (pas la SQLite locale) pour contenu_blob IS NULL.
+      2. Pour chaque record, vérifie si le fichier existe dans upload_folder.
+      3. Si oui : lit → UPDATE Turso avec le BLOB → marque sync_status='synced'.
+      4. Si non : ignoré (le fichier est sur une autre machine qui le poussera).
     """
     try:
-        local_db = get_local_db()
         turso_db = get_turso_db()
-
         if not turso_db:
-            local_db.close()
             return
 
-        # Récupérer les documents non-syncs — avec ou sans BLOB (le BLOB sera lu depuis le disque)
-        unsync = local_db.execute(f'''
+        to_push = turso_db.execute(f'''
             SELECT id, nom_fichier FROM {table_name}
-            WHERE sync_status='local'
+            WHERE contenu_blob IS NULL
+              AND nom_fichier IS NOT NULL
+              AND nom_fichier != ''
         ''').fetchall()
 
-        if not unsync:
-            local_db.close()
+        if not to_push:
             turso_db.close()
             return
 
-        now = datetime.now().isoformat()
+        now   = datetime.now().isoformat()
         count = 0
 
-        for row in unsync:
-            doc_id = row['id']
+        for row in to_push:
+            doc_id      = row['id']
             nom_fichier = row['nom_fichier']
+            local_path  = os.path.join(upload_folder, nom_fichier)
 
-            if not nom_fichier:
-                continue
-
-            local_path = os.path.join(upload_folder, nom_fichier)
             if not os.path.exists(local_path):
-                logger.warning(f"Fichier manquant pour sync: {local_path}")
+                # Ce fichier n'est pas sur cette machine — une autre le poussera
                 continue
 
             try:
                 with open(local_path, 'rb') as f:
                     blob = f.read()
 
-                # Upsert dans Turso avec le contenu
                 turso_db.execute(f'''
                     UPDATE {table_name}
                     SET contenu_blob=?, sync_status='synced', date_sync=?
                     WHERE id=?
                 ''', (blob, now, doc_id))
 
-                # Marquer comme synced localement
-                local_db.execute(f'''
-                    UPDATE {table_name}
-                    SET sync_status='synced', date_sync=?
-                    WHERE id=?
-                ''', (now, doc_id))
-
                 count += 1
+                logger.debug(f"push: {nom_fichier} → Turso ({table_name} id={doc_id}, {len(blob)} octets)")
+
             except Exception as e:
-                logger.warning(f"Error syncing {table_name} id={doc_id}: {e}")
+                logger.warning(f"push: erreur {table_name} id={doc_id} : {e}")
 
-        turso_db.commit()
-        local_db.commit()
+        if count:
+            turso_db.commit()
+            logger.info(f"push: {count} fichier(s) envoyé(s) vers Turso ({table_name})")
+        else:
+            turso_db.rollback()   # rien à écrire, on nettoie quand même
 
-        if count > 0:
-            logger.info(f"Pushed {count} documents to Turso ({table_name})")
-
-        local_db.close()
         turso_db.close()
 
     except Exception as e:
-        logger.exception(f"Error in _push_documents_to_turso({table_name})")
+        logger.exception(f"_push_documents_to_turso({table_name}) a échoué")
 
 
-def _pull_documents_from_turso(table_name: str, upload_folder: str):
+def _pull_documents_from_turso(table_name: str, upload_folder: str) -> None:
     """
-    Pull Turso → local : récupère les fichiers depuis Turso si manquants localement.
-
-    Utile pour synchroniser une nouvelle machine qui reçoit les documents d'une autre.
+    Pull Turso → local : télécharge les fichiers présents dans Turso (BLOB non NULL)
+    mais absents physiquement sur CETTE machine.
     """
     try:
-        local_db = get_local_db()
         turso_db = get_turso_db()
-
         if not turso_db:
-            local_db.close()
             return
 
-        # Récupérer TOUS les documents de Turso qui ont un BLOB
         remote_docs = turso_db.execute(f'''
             SELECT id, nom_fichier, contenu_blob FROM {table_name}
             WHERE contenu_blob IS NOT NULL
@@ -140,54 +125,45 @@ def _pull_documents_from_turso(table_name: str, upload_folder: str):
         count = 0
 
         for row in remote_docs:
-            doc_id = row['id']
             nom_fichier = row['nom_fichier']
-            blob = row['contenu_blob']
+            blob        = row['contenu_blob']
 
             if not nom_fichier or not blob:
                 continue
 
             local_path = os.path.join(upload_folder, nom_fichier)
+            if os.path.exists(local_path):
+                continue   # déjà présent localement
 
-            if not os.path.exists(local_path):
-                try:
-                    os.makedirs(upload_folder, exist_ok=True)
-                    with open(local_path, 'wb') as f:
-                        f.write(blob)
-                    # Marquer comme synced localement si ce n'est pas déjà le cas
-                    local_db.execute(f'''
-                        UPDATE {table_name}
-                        SET sync_status='synced', date_sync=?
-                        WHERE id=? AND sync_status != 'synced'
-                    ''', (datetime.now().isoformat(), doc_id))
-                    count += 1
-                except Exception as e:
-                    logger.warning(f"Error writing {local_path}: {e}")
+            try:
+                os.makedirs(upload_folder, exist_ok=True)
+                with open(local_path, 'wb') as f:
+                    f.write(blob)
+                count += 1
+                logger.debug(f"pull: {nom_fichier} ← Turso ({len(blob)} octets)")
+            except Exception as e:
+                logger.warning(f"pull: erreur écriture {local_path} : {e}")
 
-        if count > 0:
-            local_db.commit()
-            logger.info(f"Pulled {count} documents from Turso to uploads/ ({table_name})")
+        if count:
+            logger.info(f"pull: {count} fichier(s) récupéré(s) depuis Turso ({table_name})")
 
-        local_db.close()
         turso_db.close()
 
     except Exception as e:
-        logger.exception(f"Error in _pull_documents_from_turso({table_name})")
+        logger.exception(f"_pull_documents_from_turso({table_name}) a échoué")
 
 
-def sync_uploads():
+def sync_uploads() -> None:
     """
-    Synchronisation complète des uploads (local ↔ Turso).
-
-    1. Push local → Turso (lit le fichier depuis le disque, non-bloquant)
-    2. Pull Turso → local (fichiers manquants écrits sur disque)
+    Cycle complet push + pull pour toutes les tables documents.
+    Appelé périodiquement par start_sync_thread().
     """
     from database import UPLOAD_FOLDER
 
     tables = [
         'documents_appareils',
         'documents_contrats',
-        'documents_peripheriques'
+        'documents_peripheriques',
     ]
 
     for table in tables:
@@ -195,20 +171,20 @@ def sync_uploads():
         _pull_documents_from_turso(table, UPLOAD_FOLDER)
 
 
-def start_sync_thread(interval: int = 60):
-    """Lance un thread background pour la synchronisation périodique."""
+def start_sync_thread(interval: int = 60) -> None:
+    """Lance un thread daemon qui appelle sync_uploads() toutes les `interval` secondes."""
     import threading
 
-    def sync_loop():
-        logger.info(f"Starting uploads sync thread (interval={interval}s)")
+    def _loop():
+        logger.info(f"uploads_sync: thread démarré (intervalle={interval}s)")
         while True:
             try:
                 time.sleep(interval)
                 sync_uploads()
-            except Exception as e:
-                logger.exception("Error in sync_loop")
+            except Exception:
+                logger.exception("uploads_sync: erreur dans la boucle principale")
                 time.sleep(5)
 
-    thread = threading.Thread(target=sync_loop, daemon=True)
-    thread.start()
-    logger.info("Uploads sync thread started")
+    t = threading.Thread(target=_loop, daemon=True, name='uploads-sync')
+    t.start()
+    logger.info("uploads_sync: thread lancé")
