@@ -3,16 +3,16 @@
   "release_date": "2026-04-26T17:59:56.926160",
   "github_repo": "darkmind64/parc_info",
   "downloads": {
-    "windows_app": "https://github.com/darkmind64/parc_info/releases/download/v2.5.0/ParcInfo.exe",
     "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.5.0/installer.exe"
   },
+  "notes": {
+    "windows_installer": "Standalone installer - contains both ParcInfo.exe and installer logic. No separate files needed."
+  },
   "checksums": {
-    "windows_app_sha256": "06debe8a48b071514842ecd07fcb46b0d7db2123d26f767ab3b33b3818ea2ccc",
-    "windows_installer_sha256": "cad9dc9a404913b98bb8f3157ffd2ad73cd8e40939ada8cdc704c12aead05af0"
+    "windows_installer_sha256": "840E0B38E27DE57CC9C462077909007F761170ACFA24CFE9CBD0F2C0892227FE"
   },
   "file_sizes": {
-    "windows_app_bytes": 39795120,
-    "windows_installer_bytes": 14193002
+    "windows_installer_bytes": 53575300
   },
   "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.5.0"
 }

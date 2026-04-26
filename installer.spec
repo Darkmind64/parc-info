@@ -19,7 +19,7 @@ a = Analysis(
     ['installer.py'],
     pathex=['.'],
     binaries=[],
-    datas=[],
+    datas=[('dist/ParcInfo.exe', '.')],  # Embed ParcInfo.exe inside installer
     hiddenimports=[
         'tkinter',
         'tkinter.ttk',

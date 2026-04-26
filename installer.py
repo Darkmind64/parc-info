@@ -70,7 +70,15 @@ class Installer:
         if source_exe:
             return Path(source_exe)
 
-        # Look for compiled binaries in common locations
+        # Strategy 1: Check if bundled inside installer (PyInstaller embedded)
+        if getattr(sys, 'frozen', False):
+            # Running as PyInstaller exe
+            bundle_exe = Path(sys._MEIPASS) / f"{APP_NAME}.exe"
+            if bundle_exe.exists():
+                logger.info(f"Found bundled executable: {bundle_exe}")
+                return bundle_exe
+
+        # Strategy 2: Look for compiled binaries in common locations (dev mode)
         candidates = [
             Path("dist") / f"{APP_NAME}.exe",
             Path("dist") / APP_NAME,

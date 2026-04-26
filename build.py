@@ -49,15 +49,24 @@ def build_app():
 
 
 def build_installer():
-    """Build installer with PyInstaller."""
+    """Build standalone installer with embedded ParcInfo.exe."""
     logger.info("\n" + "="*60)
-    logger.info("Building ParcInfo Installer")
+    logger.info("Building ParcInfo Standalone Installer")
     logger.info("="*60)
+
+    # Verify ParcInfo.exe exists (must build app first)
+    app_exe = Path("dist") / "ParcInfo.exe"
+    if not app_exe.exists():
+        logger.error(f"❌ ParcInfo.exe not found. Build application first with: python build.py --app-only")
+        return False
+
+    logger.info(f"✓ Found embedded app: {app_exe}")
 
     if not run_cmd(["pyinstaller", "installer.spec"]):
         return False
 
-    logger.info("✓ Installer built: dist/installer.exe")
+    logger.info("✓ Standalone installer built: dist/installer.exe")
+    logger.info("  → Single executable contains both installer + ParcInfo.exe")
     return True
 
 
@@ -125,10 +134,15 @@ def main():
     logger.info("\n" + "="*60)
     if success:
         logger.info("✅ Build completed successfully!")
-        logger.info("\nDeployment instructions:")
-        logger.info("1. Run installer: dist/installer.exe")
-        logger.info("2. Installer copies app and creates shortcuts")
-        logger.info("3. App auto-updates itself when new version available")
+        logger.info("\n📦 STANDALONE INSTALLER READY")
+        logger.info("   File: dist/installer.exe")
+        logger.info("   Contains: ParcInfo.exe + Installer")
+        logger.info("   Size: Single executable (no separate files needed)")
+        logger.info("\nUser instructions:")
+        logger.info("1. Download dist/installer.exe")
+        logger.info("2. Run installer.exe")
+        logger.info("3. Installer auto-extracts ParcInfo and installs")
+        logger.info("4. App auto-updates when new version available")
         logger.info("="*60)
         return 0
     else:
