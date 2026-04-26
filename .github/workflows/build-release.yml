@@ -12,8 +12,6 @@ jobs:
         include:
           - os: windows-latest
             asset_name: ParcInfo-Windows.exe
-          - os: macos-13
-            asset_name: ParcInfo-macOS-Intel.zip
           - os: macos-latest
             asset_name: ParcInfo-macOS-ARM.zip
 
@@ -111,8 +109,7 @@ jobs:
             | Plateforme | Fichier |
             |-----------|---------|
             | Windows   | `ParcInfo-Windows.exe` |
-            | macOS Intel (13+) | `ParcInfo-macOS-Intel.zip` → dézipper → `ParcInfo.app` |
-            | macOS ARM (Apple Silicon) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
+            | macOS (Apple Silicon) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
             | Docker    | `docker pull darkmind64/parcinfo:${{ github.ref_name }}` |
 
             ### Docker
@@ -130,5 +127,4 @@ jobs:
             ```
           files: |
             artifacts/ParcInfo-Windows.exe/ParcInfo-Windows.exe
-            artifacts/ParcInfo-macOS-Intel.zip/ParcInfo-macOS-Intel.zip
             artifacts/ParcInfo-macOS-ARM.zip/ParcInfo-macOS-ARM.zip
