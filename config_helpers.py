@@ -26,6 +26,8 @@ PERSONAL_CONFIG_KEYS = {
     'dashboard_widgets_order',     # Ordre des widgets sur le dashboard
     'dashboard_widgets_size',      # Tailles des widgets (JSON: {"widget-id": "size-class"})
     'dashboard_widgets_height',    # Hauteurs des widgets (JSON: {"widget-id": "height-class"})
+    'user_dashboard_view_mode',    # Mode de vue du dashboard utilisateur ('grid' ou 'table')
+    'user_dashboard_detail_level', # Niveau de détails des cartes ('minimal', 'standard', 'detailed', 'complet')
 }
 
 

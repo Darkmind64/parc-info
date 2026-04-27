@@ -124,6 +124,68 @@
     .clients-grid { grid-template-columns:1fr; }
 }
 
+/* ── VIEW MODE CONTROLS ── */
+.dashboard-controls {
+    display:flex; align-items:center; justify-content:space-between;
+    gap:1.5rem; margin-bottom:1.5rem; flex-wrap:wrap;
+}
+.view-switcher, .detail-switcher {
+    display:flex; align-items:center; gap:.5rem;
+}
+.btn-view {
+    background:var(--bg-secondary); border:1px solid var(--border);
+    color:var(--text-secondary); padding:.4rem .6rem; border-radius:4px;
+    cursor:pointer; font-size:.9rem; transition:all .15s;
+}
+.btn-view:hover { border-color:var(--border-glow); color:var(--text-primary); }
+.btn-view.active {
+    background:var(--accent); color:var(--bg-card); border-color:var(--accent);
+}
+.detail-select {
+    background:var(--bg-secondary); border:1px solid var(--border);
+    color:var(--text-primary); padding:.4rem .6rem; border-radius:4px;
+    cursor:pointer; font-size:.9rem;
+}
+
+/* ── VIEW MODE VARIANTS ── */
+/* Table view layout */
+.clients-grid.view-table {
+    grid-template-columns:1fr;
+    gap:.8rem;
+}
+.clients-grid.view-table .client-card {
+    flex-direction:row; align-items:center; padding:1rem 1.2rem;
+    gap:1.2rem;
+}
+.clients-grid.view-table .client-card-header {
+    flex:0 0 280px; min-width:0;
+}
+.clients-grid.view-table .client-stats-grid {
+    flex:1; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));
+    gap:.5rem; min-width:0;
+}
+.clients-grid.view-table .client-action {
+    flex:0 0 auto;
+}
+
+/* ── DETAIL LEVEL VARIANTS ── */
+.detail-item { display:none; }
+.clients-grid.detail-detailed .detail-item.detailed { display:flex; flex-direction:column; gap:.3rem; font-size:.82rem; }
+.clients-grid.detail-complet .detail-item.detailed { display:flex; flex-direction:column; gap:.3rem; font-size:.82rem; }
+.clients-grid.detail-complet .detail-item.complet { display:block; font-size:.78rem; }
+
+.detail-item.detailed span,
+.detail-item.complet span {
+    display:flex; align-items:center; gap:.4rem; color:var(--text-secondary);
+}
+.detail-item.detailed span strong,
+.detail-item.complet span strong {
+    color:var(--text-primary); font-weight:600;
+}
+
+/* Minimal view: hide stats grid */
+.clients-grid.detail-minimal .client-stats-grid { display:none; }
+
 /* ── NO ALERTS STATE ── */
 .no-content-state {
     text-align:center; padding:2rem; color:var(--text-secondary);
@@ -138,6 +200,23 @@
     <div>
         <h1>Votre Infrastructure Informatique</h1>
         <p>Vue complète de tous vos clients et parcs informatiques</p>
+    </div>
+</div>
+
+<!-- VIEW MODE CONTROLS -->
+<div class="dashboard-controls">
+    <div class="view-switcher">
+        <button class="btn-view" data-mode="grid" title="Vue grille">▦ Grille</button>
+        <button class="btn-view" data-mode="table" title="Vue tableau">☰ Tableau</button>
+    </div>
+    <div class="detail-switcher">
+        <label for="detail-level-select" style="font-size:.85rem; color:var(--text-secondary);">Détails:</label>
+        <select id="detail-level-select" class="detail-select">
+            <option value="minimal">Minimal</option>
+            <option value="standard" selected>Standard</option>
+            <option value="detailed">Détaillé</option>
+            <option value="complet">Complet</option>
+        </select>
     </div>
 </div>
 
@@ -260,7 +339,7 @@
     <div class="s-head">Tous les Clients Accessibles</div>
 </div>
 
-<div class="clients-grid">
+<div class="clients-grid view-{{ user_dashboard_view_mode }} detail-{{ user_dashboard_detail_level }}">
 {% for cd in clients_data %}
     {% set client = cd.client %}
     {% set stats = cd.stats %}
@@ -319,6 +398,27 @@
                     <span class="client-stat-label">Périphériques</span>
                     <span class="client-stat-number">{{ stats.nb_periph }}</span>
                 </div>
+            </div>
+        </div>
+
+        <!-- Detailed level: Additional KPIs -->
+        <div class="detail-item detailed">
+            <span>📊 <strong>{{ stats.taux_dispo|int }}%</strong> disponibilité</span>
+            <span>👥 <strong>{{ stats.nb_users }}</strong> utilisateurs</span>
+            <span>💰 <strong>{{ (stats.montant_annuel|int)|round(0)|int }}</strong> € annuels</span>
+        </div>
+
+        <!-- Complet level: Alert breakdown and recent activity -->
+        <div class="detail-item complet">
+            <div style="margin-top:.5rem; padding:.5rem; background:var(--bg-secondary); border-radius:3px; font-size:.75rem;">
+                <div style="margin-bottom:.3rem; font-weight:600; color:var(--text-primary);">🔴 Alertes actives:</div>
+                {% if alerts.contrats_alertes or alerts.garanties_alertes or alerts.av_urgents %}
+                    {% if alerts.contrats_alertes %}<div>📋 {{ alerts.contrats_alertes|length }} contrat{{ 's' if alerts.contrats_alertes|length != 1 }} expirant</div>{% endif %}
+                    {% if alerts.garanties_alertes %}<div>🔒 {{ alerts.garanties_alertes|length }} garantie{{ 's' if alerts.garanties_alertes|length != 1 }} expirant</div>{% endif %}
+                    {% if alerts.av_urgents %}<div>🛡 {{ alerts.av_urgents|length }} antivirus expirant</div>{% endif %}
+                {% else %}
+                <div style="color:var(--accent-green);">✓ Aucune alerte</div>
+                {% endif %}
             </div>
         </div>
 

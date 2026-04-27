@@ -2453,6 +2453,11 @@ def user_dashboard():
         if active_client_id:
             active_client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (active_client_id,)).fetchone() or {})
 
+        # Récupérer les préférences de vue du dashboard utilisateur
+        user_id = user['id'] if user else None
+        user_view_mode = cfg_get('user_dashboard_view_mode', 'grid', user_id)
+        user_detail_level = cfg_get('user_dashboard_detail_level', 'standard', user_id)
+
         return render_template('user_dashboard.html',
                              user=user,
                              clients_data=clients_data,
@@ -2464,7 +2469,9 @@ def user_dashboard():
                              total_alerts_count=total_alerts_count,
                              clients=clients,
                              client=active_client,  # Pass active client from session to topbar
-                             client_actif_id=active_client_id)  # Pass active client ID to dropdown
+                             client_actif_id=active_client_id,  # Pass active client ID to dropdown
+                             user_dashboard_view_mode=user_view_mode,
+                             user_dashboard_detail_level=user_detail_level)
     finally:
         conn.close()
 

@@ -1047,6 +1047,63 @@ function changerClient(id) {
     window.location.href = '/client/' + id + '/selectionner?next=' + encodeURIComponent(window.location.pathname);
 }
 
+// ── USER DASHBOARD VIEW PREFERENCES ───────────────────────────────────────────────
+function setupDashboardViewControls() {
+    const clientsGrid = document.querySelector('.clients-grid');
+    if (!clientsGrid) return; // Not on user_dashboard
+
+    // Load current preferences from template
+    const currentViewMode = clientsGrid.classList.contains('view-table') ? 'table' : 'grid';
+    const currentDetailLevel = Array.from(clientsGrid.classList).find(c => c.startsWith('detail-'))?.replace('detail-', '') || 'standard';
+
+    // Setup view mode buttons
+    document.querySelectorAll('.btn-view').forEach(btn => {
+        if (btn.dataset.mode === currentViewMode) {
+            btn.classList.add('active');
+        }
+        btn.addEventListener('click', function() {
+            saveViewPreference('user_dashboard_view_mode', this.dataset.mode);
+        });
+    });
+
+    // Setup detail level select
+    const detailSelect = document.getElementById('detail-level-select');
+    if (detailSelect) {
+        detailSelect.value = currentDetailLevel;
+        detailSelect.addEventListener('change', function(e) {
+            saveViewPreference('user_dashboard_detail_level', e.target.value);
+        });
+    }
+}
+
+function saveViewPreference(key, value) {
+    // Show loading state
+    const clientsGrid = document.querySelector('.clients-grid');
+    if (clientsGrid) {
+        clientsGrid.style.opacity = '0.6';
+    }
+
+    fetch('/api/config', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': document.querySelector('input[name="csrf_token"]')?.value || '{{ csrf_token }}'
+        },
+        body: JSON.stringify({[key]: value})
+    })
+    .then(response => response.json())
+    .then(() => {
+        // Reload page to apply changes
+        location.reload();
+    })
+    .catch(err => {
+        console.error('Failed to save preference:', err);
+        if (clientsGrid) {
+            clientsGrid.style.opacity = '1';
+        }
+    });
+}
+
 // ── SETUP: Attacher les événements des boutons de la modale au chargement du DOM ──
 document.addEventListener('DOMContentLoaded', function() {
     const confirmBtn = document.getElementById('client-switch-confirm');
@@ -1058,6 +1115,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (cancelBtn) {
         cancelBtn.addEventListener('click', cancelClientSwitch);
     }
+
+    // Setup dashboard view controls if on user_dashboard
+    setupDashboardViewControls();
 });
 
 // ── PING BADGE TOPBAR ─────────────────────────────────────────────────────────
