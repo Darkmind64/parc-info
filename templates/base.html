@@ -2117,7 +2117,17 @@ function initDashboardWidgetConfig() {
     }
 
     const enabled = new Set(enabledStr.split(',').map(s => s.trim()).filter(s => s));
-    const order = orderStr.split(',').map(s => s.trim()).filter(s => s);
+    let order = orderStr.split(',').map(s => s.trim()).filter(s => s);
+
+    // CRITICAL FIX: Ajouter les widgets manquants de la liste par défaut
+    // Cela s'assure que même si orderStr est incomplet (comme pour s.mireaud avec 9/12 widgets),
+    // TOUS les widgets sont toujours disponibles dans la configuration
+    const DEFAULT_ORDER = DEFAULT_WIDGETS.split(',').map(s => s.trim());
+    for (const widgetId of DEFAULT_ORDER) {
+        if (!order.includes(widgetId)) {
+            order.push(widgetId);
+        }
+    }
 
     let html = '';
     order.forEach(widgetId => {
