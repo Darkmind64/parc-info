@@ -1124,9 +1124,12 @@ function saveViewPreference(key, value) {
         return response.json();
     })
     .then(data => {
-        console.log('[DEBUG] Success, reloading page');
-        // Reload page to apply changes
-        location.reload();
+        console.log('[DEBUG] Fetch successful, data:', data);
+        console.log('[DEBUG] Reloading page in 500ms...');
+        setTimeout(() => {
+            console.log('[DEBUG] NOW reloading');
+            location.reload();
+        }, 500);
     })
     .catch(err => {
         console.error('[DEBUG] Error:', err);
