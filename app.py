@@ -2446,6 +2446,13 @@ def user_dashboard():
         total_peripherals = sum(s['stats']['nb_periph'] for s in clients_data)
         total_alerts_count = len(all_alerts)
 
+        # Récupérer le client actif de la session (si existe)
+        # pour afficher le bon nom dans la topbar du dashboard utilisateur
+        active_client_id = session.get('client_id')
+        active_client = None
+        if active_client_id:
+            active_client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (active_client_id,)).fetchone() or {})
+
         return render_template('user_dashboard.html',
                              user=user,
                              clients_data=clients_data,
@@ -2456,8 +2463,8 @@ def user_dashboard():
                              total_peripherals=total_peripherals,
                              total_alerts_count=total_alerts_count,
                              clients=clients,
-                             client=None,  # Clear client context (no specific client on user dashboard)
-                             client_actif_id=None)  # No active client on user dashboard
+                             client=active_client,  # Pass active client from session to topbar
+                             client_actif_id=active_client_id)  # Pass active client ID to dropdown
     finally:
         conn.close()
 
