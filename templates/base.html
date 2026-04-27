@@ -996,6 +996,26 @@ function changerClientAvecConfirmation(selectElement) {
     document.getElementById('client-switch-modal').classList.add('open');
 }
 
+function changerClientFromCard(id, clientName) {
+    /**
+     * Version pour les cartes client du user_dashboard.
+     * Demande confirmation avant de basculer vers le client.
+     */
+    // Vérifier si la confirmation est activée dans les préférences
+    const confirmEnabled = g('confirm_client_switch') !== '0';  // true par défaut
+
+    if (!confirmEnabled) {
+        // Si désactivée, changer immédiatement sans confirmation
+        changerClient(id);
+        return;
+    }
+
+    // Afficher la modale personnalisée
+    _pendingClientSwitchId = id;
+    document.getElementById('client-switch-name').textContent = clientName;
+    document.getElementById('client-switch-modal').classList.add('open');
+}
+
 function confirmClientSwitch() {
     /**
      * Confirme le changement de client après affichage de la modale.
@@ -2117,7 +2137,12 @@ function initDashboardWidgetConfig() {
     }
 
     const enabled = new Set(enabledStr.split(',').map(s => s.trim()).filter(s => s));
-    const order = orderStr.split(',').map(s => s.trim()).filter(s => s);
+    let order = orderStr.split(',').map(s => s.trim()).filter(s => s);
+
+    // Si order est incomplet (ex: ancienne config), ajouter les widgets manquants à la fin
+    for (const w of DASHBOARD_WIDGETS) {
+        if (!order.includes(w.id)) order.push(w.id);
+    }
 
     let html = '';
     order.forEach(widgetId => {

@@ -271,7 +271,7 @@
         <div class="client-card-header">
             <div>
                 <div class="client-card-title">
-                    <a href="/client/{{ client.id }}/dashboard">{{ client.nom }}</a>
+                    <a href="#" onclick="changerClientFromCard({{ client.id }}, '{{ client.nom }}'); return false;">{{ client.nom }}</a>
                 </div>
                 {% if client.couleur %}
                 <div style="display:inline-block;width:6px;height:6px;border-radius:50%;background:{{ client.couleur }};margin-top:.3rem;"></div>
@@ -322,7 +322,7 @@
             </div>
         </div>
 
-        <a href="/client/{{ client.id }}/dashboard" class="client-action">
+        <a href="#" onclick="changerClientFromCard({{ client.id }}, '{{ client.nom }}'); return false;" class="client-action">
             Voir Dashboard →
         </a>
     </div>
