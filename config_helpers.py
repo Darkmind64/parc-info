@@ -231,6 +231,9 @@ CFG_DEFAULTS = {
     'dashboard_widgets_order': 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info',
     'dashboard_widgets_size': '{}',  # JSON: {"widget-id": "size-class"} — empty defaults to widget-specific sizes
     'dashboard_widgets_height': '{}',  # JSON: {"widget-id": "height-class"} — empty defaults to widget-specific heights
+    # ── User Dashboard View Preferences ────────────────────────────────────────────
+    'user_dashboard_view_mode': 'grid',  # 'grid' or 'table'
+    'user_dashboard_detail_level': 'standard',  # 'minimal', 'standard', 'detailed', 'complet'
 }
 
 # Cache avec limite de taille (LRU-like) pour éviter memory leak
