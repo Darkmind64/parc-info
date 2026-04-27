@@ -1050,33 +1050,49 @@ function changerClient(id) {
 // ── USER DASHBOARD VIEW PREFERENCES ───────────────────────────────────────────────
 function setupDashboardViewControls() {
     const clientsGrid = document.querySelector('.clients-grid');
-    if (!clientsGrid) return; // Not on user_dashboard
+    if (!clientsGrid) {
+        console.log('[DEBUG] Not on user_dashboard - .clients-grid not found');
+        return;
+    }
+
+    console.log('[DEBUG] setupDashboardViewControls called');
+    console.log('[DEBUG] clientsGrid classes:', clientsGrid.className);
 
     // Load current preferences from template
     const currentViewMode = clientsGrid.classList.contains('view-table') ? 'table' : 'grid';
     const currentDetailLevel = Array.from(clientsGrid.classList).find(c => c.startsWith('detail-'))?.replace('detail-', '') || 'standard';
 
+    console.log('[DEBUG] Current view mode:', currentViewMode);
+    console.log('[DEBUG] Current detail level:', currentDetailLevel);
+
     // Setup view mode buttons
-    document.querySelectorAll('.btn-view').forEach(btn => {
+    const viewButtons = document.querySelectorAll('.btn-view');
+    console.log('[DEBUG] Found', viewButtons.length, 'view buttons');
+    viewButtons.forEach(btn => {
         if (btn.dataset.mode === currentViewMode) {
             btn.classList.add('active');
         }
         btn.addEventListener('click', function() {
+            console.log('[DEBUG] View button clicked:', this.dataset.mode);
             saveViewPreference('user_dashboard_view_mode', this.dataset.mode);
         });
     });
 
     // Setup detail level select
     const detailSelect = document.getElementById('detail-level-select');
+    console.log('[DEBUG] Detail select found:', !!detailSelect);
     if (detailSelect) {
         detailSelect.value = currentDetailLevel;
         detailSelect.addEventListener('change', function(e) {
+            console.log('[DEBUG] Detail level changed:', e.target.value);
             saveViewPreference('user_dashboard_detail_level', e.target.value);
         });
     }
 }
 
 function saveViewPreference(key, value) {
+    console.log('[DEBUG] saveViewPreference called with:', key, '=', value);
+
     // Show loading state
     const clientsGrid = document.querySelector('.clients-grid');
     if (clientsGrid) {
@@ -1085,10 +1101,13 @@ function saveViewPreference(key, value) {
 
     // Get CSRF token from input or global function
     let csrfToken = document.querySelector('input[name="csrf_token"]')?.value;
+    console.log('[DEBUG] CSRF token from input:', !!csrfToken);
     if (!csrfToken && typeof g === 'function') {
         csrfToken = g('csrf_token');
+        console.log('[DEBUG] CSRF token from g():', !!csrfToken);
     }
 
+    console.log('[DEBUG] Making fetch request to /api/config');
     fetch('/api/config', {
         method: 'POST',
         headers: {
@@ -1098,17 +1117,19 @@ function saveViewPreference(key, value) {
         body: JSON.stringify({[key]: value})
     })
     .then(response => {
+        console.log('[DEBUG] Response status:', response.status);
         if (!response.ok) {
             throw new Error('API response error: ' + response.status);
         }
         return response.json();
     })
-    .then(() => {
+    .then(data => {
+        console.log('[DEBUG] Success, reloading page');
         // Reload page to apply changes
         location.reload();
     })
     .catch(err => {
-        console.error('Failed to save preference:', err);
+        console.error('[DEBUG] Error:', err);
         if (clientsGrid) {
             clientsGrid.style.opacity = '1';
         }
