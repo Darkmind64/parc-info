@@ -2456,6 +2456,7 @@ def user_dashboard():
                              total_peripherals=total_peripherals,
                              total_alerts_count=total_alerts_count,
                              clients=clients,
+                             client=None,  # Clear client context (no specific client on user dashboard)
                              client_actif_id=None)  # No active client on user dashboard
     finally:
         conn.close()
