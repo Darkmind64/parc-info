@@ -195,6 +195,9 @@
 {% endblock %}
 
 {% block content %}
+<!-- Store CSRF token for JavaScript access -->
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
 <!-- PAGE HEADER -->
 <div class="page-header">
     <div>

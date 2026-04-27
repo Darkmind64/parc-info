@@ -1083,15 +1083,26 @@ function saveViewPreference(key, value) {
         clientsGrid.style.opacity = '0.6';
     }
 
+    // Get CSRF token from input or global function
+    let csrfToken = document.querySelector('input[name="csrf_token"]')?.value;
+    if (!csrfToken && typeof g === 'function') {
+        csrfToken = g('csrf_token');
+    }
+
     fetch('/api/config', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': document.querySelector('input[name="csrf_token"]')?.value || '{{ csrf_token }}'
+            'X-CSRF-Token': csrfToken || ''
         },
         body: JSON.stringify({[key]: value})
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('API response error: ' + response.status);
+        }
+        return response.json();
+    })
     .then(() => {
         // Reload page to apply changes
         location.reload();
@@ -1101,6 +1112,7 @@ function saveViewPreference(key, value) {
         if (clientsGrid) {
             clientsGrid.style.opacity = '1';
         }
+        alert('Erreur lors de la sauvegarde: ' + err.message);
     });
 }
 
