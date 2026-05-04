@@ -1492,6 +1492,7 @@ def api_db_sync():
     if not can_write():
         return jsonify({'ok': False, 'error': 'Accès en lecture seule'})
     ok, stats, error = sync_once()
+    _log_sync_errors(error)
     state = get_sync_state()
     state['ok']    = ok
     state['error'] = error
@@ -1503,6 +1504,31 @@ def api_db_sync():
 _sync_thread: threading.Thread | None = None
 _sync_stop   = threading.Event()
 
+_last_sync_error_logged: str | None = None
+
+def _log_sync_errors(error_msg: str | None):
+    """Enregistre une erreur de sync dans le journal (client_id=0 = entrée système).
+    Réinitialise la déduplication si la sync réussit (error_msg is None).
+    """
+    global _last_sync_error_logged
+    if not error_msg:
+        _last_sync_error_logged = None
+        return
+    if error_msg == _last_sync_error_logged:
+        return
+    _last_sync_error_logged = error_msg
+    try:
+        import json as _j
+        from database import get_local_db
+        from client_helpers import log_history as _lh
+        conn = get_local_db()
+        details = _j.dumps({'message': error_msg[:800]}, ensure_ascii=False)
+        _lh(conn, 0, 'système', 0, 'Synchronisation Turso', 'Erreur', details)
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
 
 def _bg_sync_loop():
     """Boucle de synchronisation bidirectionnelle en arrière-plan."""
@@ -1510,7 +1536,8 @@ def _bg_sync_loop():
     while not _sync_stop.is_set():
         try:
             if cfg_get('db_type') == 'sync':
-                sync_once()
+                ok, stats, error = sync_once()
+                _log_sync_errors(error)
             else:
                 break   # Mode sync désactivé : on arrête le thread
         except Exception:
@@ -7536,7 +7563,7 @@ def supprimer_entree_historique(hist_id):
     if not cid:
         return jsonify({'ok': False, 'message': 'Aucun client actif'}), 400
     conn = get_db()
-    row = conn.execute('SELECT id FROM historique WHERE id=? AND client_id=?', (hist_id, cid)).fetchone()
+    row = conn.execute('SELECT id FROM historique WHERE id=? AND (client_id=? OR client_id=0)', (hist_id, cid)).fetchone()
     if not row:
         conn.close()
         return jsonify({'ok': False, 'message': 'Entrée introuvable'}), 404
@@ -7560,10 +7587,10 @@ def vider_erreurs_historique():
     conn = get_db()
     # Récupérer les IDs avant suppression pour les enregistrer dans _sync_deletions
     ids = [r[0] for r in conn.execute(
-        "SELECT id FROM historique WHERE client_id=? AND action='Erreur'", (cid,)).fetchall()]
+        "SELECT id FROM historique WHERE (client_id=? OR client_id=0) AND action='Erreur'", (cid,)).fetchall()]
     if ids:
         conn.execute(
-            "DELETE FROM historique WHERE client_id=? AND action='Erreur'", (cid,))
+            "DELETE FROM historique WHERE (client_id=? OR client_id=0) AND action='Erreur'", (cid,))
         # Enregistrer chaque suppression pour la sync Turso
         conn.executemany(
             "INSERT OR REPLACE INTO _sync_deletions (tbl, record_id, deleted_at) VALUES ('historique', ?, datetime('now'))",
@@ -7584,11 +7611,11 @@ def page_historique():
     limit  = int(request.args.get('limit', 200))
     if filtre:
         rows = conn.execute(
-            "SELECT * FROM historique WHERE client_id=? AND entite=? ORDER BY date_action DESC LIMIT ?",
+            "SELECT * FROM historique WHERE (client_id=? OR client_id=0) AND entite=? ORDER BY date_action DESC LIMIT ?",
             (cid, filtre, limit)).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM historique WHERE client_id=? ORDER BY date_action DESC LIMIT ?",
+            "SELECT * FROM historique WHERE (client_id=? OR client_id=0) ORDER BY date_action DESC LIMIT ?",
             (cid, limit)).fetchall()
     hist = [row_to_dict(r) for r in rows]
     conn.close()
