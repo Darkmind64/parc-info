@@ -262,13 +262,21 @@ class TursoConnection:
         return _TCursor(cols, rows, last_id, rows_aff)
 
     def pipeline_exec(self, statements: list):
-        """Exécute plusieurs requêtes en batch. statements = liste de (sql, params)."""
-        reqs = [{
+        """Exécute plusieurs requêtes en batch. statements = liste de (sql, params).
+
+        PRAGMA foreign_keys = OFF est inclus en tête du batch : chaque appel HTTP
+        Turso ouvre une connexion indépendante, donc le PRAGMA doit être dans le même
+        pipeline pour éviter les erreurs FK sur les tables pivot (contrats_appareils, etc.)
+        dont les enregistrements orphelins existent en local (SQLite FK désactivées).
+        """
+        _fk_off = {"type": "execute", "stmt": {"sql": "PRAGMA foreign_keys = OFF", "args": []}}
+        reqs = [_fk_off] + [{
             "type": "execute",
             "stmt": {"sql": s, "args": [_t_enc(p) for p in (par or [])]}
         } for s, par in statements]
         results = self._pipeline(reqs)
-        return [self._parse_result(r) for r in results]
+        # Ignorer le résultat du PRAGMA (premier élément)
+        return [self._parse_result(r) for r in results[1:]]
 
     def cursor(self):
         """Retourne self pour compatibilité avec le pattern conn.cursor().execute()."""
