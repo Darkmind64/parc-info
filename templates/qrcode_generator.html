@@ -1,0 +1,1572 @@
+{% extends "base.html" %}
+
+{% block title %}Étiquettes QR — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+  .qr-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem;
+  }
+
+  /* Sections de paramétrage - cohérent avec le système de thème */
+  .qr-section {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    color: var(--text-primary);
+  }
+
+  .qr-section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: 0.5px;
+  }
+
+  .asset-selection {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .radio-group {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .radio-group label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    margin: 0;
+    font-size: 13px;
+  }
+
+  /* Asset dropdown - utilise thème */
+  .asset-dropdown {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--text-primary);
+    background-color: var(--input-bg);
+  }
+
+  .field-group {
+    margin-bottom: 10px;
+  }
+
+  .field-group-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .checkbox-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    padding: 6px 0;
+  }
+
+  .checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: var(--bg-secondary);
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    transition: all 0.2s;
+  }
+
+  .checkbox-item:hover {
+    border-color: var(--accent);
+    background: rgba(0, 201, 255, 0.05);
+  }
+
+  .checkbox-item input {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+  }
+
+  .checkbox-item label {
+    cursor: pointer;
+    margin: 0;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-primary);
+    flex: 1;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .form-row.full {
+    grid-template-columns: 1fr;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .form-group label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .form-group input[type="text"],
+  .form-group textarea,
+  .form-group input[type="file"] {
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 12px;
+    font-family: inherit;
+    background: var(--input-bg);
+    color: var(--text-primary);
+  }
+
+  .form-group textarea {
+    resize: vertical;
+    min-height: 50px;
+  }
+
+  .logo-preview {
+    margin-top: 6px;
+    width: 50px;
+    height: 50px;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    display: none;
+    background: var(--bg-secondary);
+  }
+
+  .logo-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  /* Position Grid - Proportional to AVERY J8159 (63.5×33.9mm ratio = 1.875:1) */
+  .position-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 12px;
+    background: white;
+    padding: 12px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  .position-box {
+    aspect-ratio: 1.875 / 1;
+    min-height: 160px;
+    border: 2px solid var(--border);
+    background: white;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .position-box.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), inset 0 0 0 1px var(--accent);
+  }
+
+  .position-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: 3px;
+    background: var(--bg-secondary);
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .position-preview-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: white;
+  }
+
+  .position-click-overlay {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0);
+    cursor: pointer;
+    z-index: 1;
+  }
+
+  .position-box:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .position-preview-image {
+    max-width: 95%;
+    max-height: 85%;
+    object-fit: contain;
+  }
+
+  .position-copy-count {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: var(--accent);
+    color: white;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px 5px;
+    border-radius: 3px;
+    z-index: 2;
+  }
+
+  .preview-section h3 {
+    margin-top: 0;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .label-preview {
+    display: inline-block;
+    /* 63.5×33.9mm at 300 DPI = ~750×400px, scaled down */
+    width: 300px;
+    height: 160px;
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    text-align: left;
+    font-size: 11px;
+    color: var(--text-primary);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  /* Buttons */
+  .btn-group {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .btn-generate {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.5px;
+  }
+
+  .btn-generate:hover:not(:disabled) {
+    background: #0099cc;
+    box-shadow: 0 2px 8px rgba(0, 201, 255, 0.3);
+  }
+
+  .btn-generate:disabled {
+    background: var(--text-muted);
+    cursor: not-allowed;
+  }
+
+  .btn-reset {
+    background: var(--border);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 10px 20px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-reset:hover {
+    background: rgba(30, 58, 95, 0.8);
+    border-color: var(--accent);
+  }
+
+  body.theme-light .btn-reset {
+    background: #e2e8f0;
+    border-color: #cbd5e1;
+  }
+
+  body.theme-light .btn-reset:hover {
+    background: #cbd5e1;
+    border-color: #0284c7;
+  }
+
+  /* Error/Success messages */
+  .alert {
+    padding: 10px 12px;
+    border-radius: 3px;
+    margin-bottom: 12px;
+    display: none;
+  }
+
+  .alert.error {
+    background: rgba(255, 51, 85, 0.08);
+    border: 1px solid rgba(255, 51, 85, 0.3);
+    color: var(--accent-red);
+  }
+
+  .alert.success {
+    background: rgba(0, 255, 136, 0.08);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    color: var(--accent-green);
+  }
+
+  .alert.show {
+    display: block;
+  }
+
+  /* Security Warning */
+  .security-warning {
+    background: rgba(255, 140, 0, 0.08);
+    border: 1px solid rgba(255, 140, 0, 0.3);
+    border-radius: 3px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    color: var(--accent-orange);
+    font-size: 12px;
+    border-left: 3px solid var(--accent-orange);
+  }
+
+  .security-warning strong {
+    display: block;
+    font-weight: 700;
+  }
+
+  /* Template Management Styles */
+  #customTemplateInput {
+    animation: slideDown 0.3s ease-out;
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .template-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 8px;
+    background: var(--bg-secondary);
+  }
+
+  .template-item {
+    padding: 6px 8px;
+    margin-bottom: 4px;
+    background: var(--bg-card);
+    border-radius: 3px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+
+  .template-item button {
+    padding: 3px 6px;
+    margin-left: 5px;
+    font-size: 11px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .template-item button:hover {
+    background: rgba(0, 201, 255, 0.8);
+  }
+
+  .template-item button.delete {
+    background: var(--accent-red);
+  }
+
+  .template-item button.delete:hover {
+    background: rgba(255, 51, 85, 0.8);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="qr-container">
+  <div class="page-header">
+    <h1>📋 Générer Étiquettes QR</h1>
+    <p>Créez des étiquettes imprimables avec codes QR pour vos appareils et périphériques</p>
+  </div>
+
+  <div class="security-warning">
+    <strong>⚠️ Sécurité</strong>
+    Les identifiants et mots de passe sont inclus en clair dans le code QR. Assurez-vous que les étiquettes imprimées sont sécurisées physiquement.
+  </div>
+
+  <div id="alertBox" class="alert"></div>
+
+  <form id="qrcodeForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <!-- Asset Selection -->
+    <div class="qr-section">
+      <div class="qr-section-title">1. Sélection de l'Actif</div>
+
+      <div class="asset-selection">
+        <div>
+          <div class="radio-group">
+            <label>
+              <input type="radio" name="asset_type" value="appareil" checked>
+              <span>Appareil</span>
+            </label>
+            <label>
+              <input type="radio" name="asset_type" value="peripherique">
+              <span>Périphérique</span>
+            </label>
+          </div>
+        </div>
+        <div>
+          <select id="assetDropdown" class="asset-dropdown" name="asset_id" required>
+            <option value="">-- Sélectionner un appareil --</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Field Selection -->
+    <div class="qr-section">
+      <div class="qr-section-title">2. Champs à Inclure dans le QR</div>
+
+      <!-- Basic Fields -->
+      <div class="field-group">
+        <div class="field-group-title">Informations de base</div>
+        <div class="checkbox-grid">
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="nom" id="field_nom" checked>
+            <label for="field_nom">Nom</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="adresse_ip" id="field_ip" checked>
+            <label for="field_ip">Adresse IP</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="adresse_mac" id="field_mac">
+            <label for="field_mac">Adresse MAC</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="nom_dns" id="field_dns">
+            <label for="field_dns">Nom DNS</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Credentials -->
+      <div class="field-group">
+        <div class="field-group-title">Identifiants</div>
+        <div class="checkbox-grid">
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="user_login" id="field_user_login">
+            <label for="field_user_login">Login utilisateur</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="user_password" id="field_user_pwd">
+            <label for="field_user_pwd">Mot de passe utilisateur</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="admin_login" id="field_admin_login">
+            <label for="field_admin_login">Login admin</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="admin_password" id="field_admin_pwd">
+            <label for="field_admin_pwd">Mot de passe admin</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Network Fields -->
+      <div class="field-group">
+        <div class="field-group-title">Réseau</div>
+        <div class="checkbox-grid">
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="ports_ouverts" id="field_ports">
+            <label for="field_ports">Ports ouverts</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="type" id="field_type">
+            <label for="field_type">Type appareil</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="marque" id="field_marque">
+            <label for="field_marque">Marque</label>
+          </div>
+          <div class="checkbox-item">
+            <input type="checkbox" name="fields" value="modele" id="field_modele">
+            <label for="field_modele">Modèle</label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Label Customization -->
+    <div class="qr-section">
+      <div class="qr-section-title">3. Personnalisation de l'Étiquette</div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="logoFile">Logo (PNG, JPG, max 5 MB)</label>
+          <input type="file" id="logoFile" name="logo" accept="image/png,image/jpeg">
+          <div id="logoPreview" class="logo-preview">
+            <img id="logoImg" src="" alt="Logo">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="customText">Texte personnalisé (max 200 caractères)</label>
+          <textarea id="customText" name="custom_text" placeholder="ex: Informatique - À scanner avec soin"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Label Presentation Template -->
+    <div class="qr-section">
+      <div class="qr-section-title">4. Modèle de Présentation</div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="templateSelect">Sélectionner un modèle:</label>
+          <select id="templateSelect" class="asset-dropdown">
+            <option value="default">Par défaut (Standard)</option>
+            <option value="compact">Compact</option>
+            <option value="qr-focused">QR Code en avant</option>
+            <option value="logo-focused">Logo en avant</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <button type="button" id="btnSaveTemplate" class="btn-reset" style="flex: 1;">💾 Enregistrer Modèle</button>
+        <button type="button" id="btnLoadTemplate" class="btn-reset" style="flex: 1;">📂 Mes Modèles</button>
+      </div>
+
+      <!-- QR Code Settings -->
+      <div style="padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 10px;">
+        <div style="font-weight: bold; margin-bottom: 8px; color: var(--text-primary); font-size: 12px;">📊 Paramètres QR Code</div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+          <div class="form-group">
+            <label>Taille QR:</label>
+            <select id="qrSize" class="asset-dropdown">
+              <option value="small">Petit (30%)</option>
+              <option value="medium" selected>Normal (45%)</option>
+              <option value="large">Grand (60%)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Position QR:</label>
+            <select id="qrPosition" class="asset-dropdown">
+              <option value="left">Gauche</option>
+              <option value="center" selected>Centre</option>
+              <option value="right">Droite</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Bordure QR:</label>
+            <input type="number" id="qrBorder" min="0" max="4" value="1" style="padding: 6px 8px; border: 1px solid var(--border); border-radius: 3px; font-size: 12px; background: var(--input-bg); color: var(--text-primary);">
+          </div>
+          <div class="form-group">
+            <label>Couleur QR:</label>
+            <input type="color" id="qrColor" value="#000000" style="padding: 3px; cursor: pointer;">
+          </div>
+          <div class="form-group">
+            <label>Fond QR:</label>
+            <input type="color" id="qrBgColor" value="#ffffff" style="padding: 3px; cursor: pointer;">
+          </div>
+        </div>
+      </div>
+
+      <!-- Logo Settings -->
+      <div style="padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; margin-bottom: 10px;">
+        <div style="font-weight: bold; margin-bottom: 8px; color: var(--text-primary); font-size: 12px;">🎨 Paramètres Logo</div>
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;">
+          <div class="form-group">
+            <label>Taille Logo (mm):</label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input type="range" id="logoSize" min="0" max="30" value="8" style="flex: 1;">
+              <span id="logoSizeValue" style="width: 30px; font-size: 12px;">8mm</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Position Logo:</label>
+            <select id="logoPosition" class="asset-dropdown">
+              <option value="auto" selected>Automatique</option>
+              <option value="left">Gauche</option>
+              <option value="right">Droite</option>
+              <option value="top">Haut</option>
+              <option value="bottom">Bas</option>
+              <option value="center">Centre</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Opacité Logo (%):</label>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input type="range" id="logoOpacity" min="0" max="100" value="100" style="flex: 1;">
+              <span id="logoOpacityValue" style="width: 30px; font-size: 12px;">100%</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Bordure Logo:</label>
+            <input type="checkbox" id="logoBorder" style="width: 18px; height: 18px; cursor: pointer; margin-top: 4px;">
+          </div>
+          <div id="logoBorderColorDiv" style="display: none;" class="form-group">
+            <label>Couleur Bordure:</label>
+            <input type="color" id="logoBorderColor" value="#000000" style="padding: 3px; cursor: pointer;">
+          </div>
+          <div id="logoBorderWidthDiv" style="display: none;" class="form-group">
+            <label>Épaisseur (px):</label>
+            <input type="number" id="logoBorderWidth" min="1" max="5" value="2" style="padding: 6px 8px; border: 1px solid var(--border); border-radius: 3px; font-size: 12px; background: var(--input-bg); color: var(--text-primary);">
+          </div>
+        </div>
+      </div>
+
+      <!-- Text Settings - Advanced Controls -->
+      <div style="padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px;">
+        <div style="font-weight: bold; margin-bottom: 12px; color: var(--text-primary); font-size: 12px;">✏️ Paramètres Texte Avancés</div>
+
+        <!-- Header Section -->
+        <div style="padding: 10px 12px; background: var(--bg-secondary); border-left: 4px solid var(--accent); margin-bottom: 12px; border-radius: 3px;">
+          <div style="font-weight: bold; margin-bottom: 8px; color: var(--accent); font-size: 12px;">📝 En-tête (Header)</div>
+          <input type="text" id="customHeader" placeholder="Texte avant le nom" style="width: 100%; padding: 6px 8px; font-size: 12px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--input-bg); color: var(--text-primary);">
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+            <div class="form-group">
+              <label style="font-size: 10px;">Taille (pt):</label>
+              <input type="number" id="headerSize" min="8" max="24" value="12" style="padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; background: var(--input-bg); color: var(--text-primary);">
+            </div>
+            <div class="form-group">
+              <label style="font-size: 10px;">Couleur:</label>
+              <input type="color" id="headerColor" value="#000000" style="padding: 3px; cursor: pointer;">
+            </div>
+            <div class="form-group">
+              <label style="font-size: 10px;">Police:</label>
+              <select id="headerFont" style="padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; background: var(--input-bg); color: var(--text-primary);">
+                <option value="arial" selected>Arial</option>
+                <option value="courier">Courier</option>
+                <option value="times">Times</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label style="font-size: 10px;">Justif.:</label>
+              <select id="headerAlign" style="padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; background: var(--input-bg); color: var(--text-primary);">
+                <option value="left" selected>Gauche</option>
+                <option value="center">Centre</option>
+                <option value="right">Droite</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Asset Fields Section -->
+        <div style="padding: 10px 12px; background: var(--bg-secondary); border-left: 4px solid var(--accent-green); margin-bottom: 12px; border-radius: 3px;">
+          <div style="font-weight: bold; margin-bottom: 8px; color: var(--accent-green); font-size: 12px;">📋 Champs Asset</div>
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+            <div class="form-group">
+              <label style="font-size: 10px;">Taille (pt):</label>
+              <input type="number" id="assetSize" min="8" max="20" value="11" style="padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; background: var(--input-bg); color: var(--text-primary);">
+            </div>
+            <div class="form-group">
+              <label style="font-size: 10px;">Couleur:</label>
+              <input type="color" id="assetColor" value="#000000" style="padding: 3px; cursor: pointer;">
+            </div>
+            <div class="form-group">
+              <label style="font-size: 10px;">Police:</label>
+              <select id="assetFont" style="padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; background: var(--input-bg); color: var(--text-primary);">
+                <option value="arial" selected>Arial</option>
+                <option value="courier">Courier</option>
+                <option value="times">Times</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label style="font-size: 10px;">Justif.:</label>
+              <select id="assetAlign" style="padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; background: var(--input-bg); color: var(--text-primary);">
+                <option value="left" selected>Gauche</option>
+                <option value="center">Centre</option>
+                <option value="right">Droite</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer Section -->
+        <div style="padding: 10px 12px; background: var(--bg-secondary); border-left: 4px solid var(--accent-orange); margin-bottom: 8px; border-radius: 3px;">
+          <div style="font-weight: bold; margin-bottom: 8px; color: var(--accent-orange); font-size: 12px;">📌 Pied de Page (Footer)</div>
+          <input type="text" id="customFooter" name="customFooter" placeholder="Texte après les infos" style="width: 100%; padding: 6px 8px; font-size: 12px; margin-bottom: 8px; border: 1px solid var(--border); border-radius: 3px; background: var(--input-bg); color: var(--text-primary);">
+          <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+            <div class="form-group">
+              <label style="font-size: 10px;">Taille (pt):</label>
+              <input type="number" id="footerSize" min="8" max="20" value="12" style="padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; background: var(--input-bg); color: var(--text-primary);">
+            </div>
+            <div class="form-group">
+              <label style="font-size: 10px;">Couleur:</label>
+              <input type="color" id="footerColor" value="#000000" style="padding: 3px; cursor: pointer;">
+            </div>
+            <div class="form-group">
+              <label style="font-size: 10px;">Police:</label>
+              <select id="footerFont" style="padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; background: var(--input-bg); color: var(--text-primary);">
+                <option value="arial" selected>Arial</option>
+                <option value="courier">Courier</option>
+                <option value="times">Times</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label style="font-size: 10px;">Justif.:</label>
+              <select id="footerAlign" style="padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px; font-size: 11px; background: var(--input-bg); color: var(--text-primary);">
+                <option value="left" selected>Gauche</option>
+                <option value="center">Centre</option>
+                <option value="right">Droite</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="customTemplateInput" style="margin-top: 8px; display: none; padding: 10px 12px; background: var(--bg-secondary); border-radius: 4px; border: 1px solid var(--border);">
+        <input type="text" id="newTemplateName" placeholder="Nom du modèle personnalisé" style="width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 3px; margin-bottom: 8px; background: var(--input-bg); color: var(--text-primary); font-size: 12px;">
+        <div style="display: flex; gap: 8px;">
+          <button type="button" id="btnConfirmSave" class="btn-generate" style="flex: 1; padding: 8px; margin: 0; font-size: 11px;">✓ Enregistrer</button>
+          <button type="button" id="btnCancelSave" class="btn-reset" style="flex: 1; padding: 8px; margin: 0; font-size: 11px;">✕ Annuler</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Position Selection with Inline Preview -->
+    <div class="qr-section">
+      <div class="qr-section-title">5. Positions d'Impression (AVERY J8159 - 3×8 = 24 étiquettes)</div>
+
+      <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+        Cliquez sur une position pour sélectionner et prévisualiser l'étiquette dans la case
+      </p>
+
+      <div class="position-grid" id="positionGrid">
+        <!-- Will be populated by JavaScript -->
+      </div>
+
+      <div style="margin-top: 10px; padding: 10px 12px; background: var(--bg-secondary); border-radius: 4px; font-size: 12px; border: 1px solid var(--border); color: var(--text-primary);">
+        Positions sélectionnées: <strong id="selectedCount">0</strong> étiquettes
+      </div>
+    </div>
+
+    <!-- Generate Button -->
+    <div class="btn-group">
+      <button type="submit" class="btn-generate" id="generateBtn">
+        📥 Générer PDF pour Impression
+      </button>
+      <button type="reset" class="btn-reset">🔄 Réinitialiser</button>
+    </div>
+  </form>
+</div>
+
+<script>
+// Cache bust: 2026-05-05 14:51:42 UTC
+document.addEventListener('DOMContentLoaded', function() {
+  const assetTypeRadios = document.querySelectorAll('input[name="asset_type"]');
+  const assetDropdown = document.getElementById('assetDropdown');
+  const logoFile = document.getElementById('logoFile');
+  const customText = document.getElementById('customText');
+  const form = document.getElementById('qrcodeForm');
+  const alertBox = document.getElementById('alertBox');
+  const selectedCountSpan = document.getElementById('selectedCount');
+
+  // Load assets when asset type changes
+  assetTypeRadios.forEach(radio => {
+    radio.addEventListener('change', function() {
+      loadAssets();
+      refreshAllPreviews();
+    });
+  });
+
+  // Load assets on page load
+  loadAssets();
+
+  // Add listeners to field checkboxes
+  function attachFieldCheckboxListeners() {
+    document.querySelectorAll('input[name="fields"]').forEach(checkbox => {
+      checkbox.addEventListener('change', refreshAllPreviews);
+    });
+  }
+  attachFieldCheckboxListeners();
+
+  // Generate position grid
+  generatePositionGrid();
+
+  // Handle logo preview
+  logoFile.addEventListener('change', function(e) {
+    if (this.files.length > 0) {
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        // Update the preview panel logo
+        document.getElementById('logoImg').src = event.target.result;
+        document.getElementById('logoPreview').style.display = 'block';
+      };
+      reader.readAsDataURL(this.files[0]);
+    } else {
+      document.getElementById('logoPreview').style.display = 'none';
+    }
+  });
+
+  // Handle form submission
+  form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const assetType = document.querySelector('input[name="asset_type"]:checked').value;
+    const assetId = assetDropdown.value;
+    const selectedFields = Array.from(document.querySelectorAll('input[name="fields"]:checked')).map(cb => cb.value);
+    const selectedPositions = JSON.parse(localStorage.getItem('selectedPositions') || '{}');
+
+    if (!assetId) {
+      showAlert('Veuillez sélectionner un appareil', 'error');
+      return;
+    }
+
+    if (selectedFields.length === 0) {
+      showAlert('Sélectionnez au moins un champ', 'error');
+      return;
+    }
+
+    if (Object.keys(selectedPositions).length === 0) {
+      showAlert('Sélectionnez au moins une position', 'error');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+    formData.append('asset_type', assetType);
+    formData.append('asset_id', assetId);
+    formData.append('fields', JSON.stringify(selectedFields));
+    formData.append('custom_text', customText.value);
+    formData.append('positions', JSON.stringify(selectedPositions));
+
+    // Add template parameters
+    // QR Code settings
+    formData.append('qrSize', qrSizeSelect.value);
+    formData.append('qrPosition', qrPositionSelect.value);
+    formData.append('qrColor', qrColorInput.value);
+    formData.append('qrBgColor', qrBgColorInput.value);
+    formData.append('qrBorder', qrBorderInput.value);
+
+    // Logo settings
+    formData.append('logoSize', logoSizeSlider.value);
+    formData.append('logoPosition', logoPositionSelect.value);
+    formData.append('logoOpacity', logoOpacitySlider.value);
+    formData.append('logoBorder', logoBorderCheckbox.checked);
+    formData.append('logoBorderColor', logoBorderColorInput.value);
+    formData.append('logoBorderWidth', logoBorderWidthInput.value);
+
+    // Header settings
+    formData.append('customHeader', customHeaderInput.value);
+    formData.append('headerSize', headerSizeInput.value);
+    formData.append('headerColor', headerColorInput.value);
+    formData.append('headerFont', headerFontSelect.value);
+    formData.append('headerAlign', headerAlignSelect.value);
+
+    // Asset fields settings
+    formData.append('assetSize', assetSizeInput.value);
+    formData.append('assetColor', assetColorInput.value);
+    formData.append('assetFont', assetFontSelect.value);
+    formData.append('assetAlign', assetAlignSelect.value);
+
+    // Footer settings
+    formData.append('customFooter', customFooterInput.value);
+    formData.append('footerSize', footerSizeInput.value);
+    formData.append('footerColor', footerColorInput.value);
+    formData.append('footerFont', footerFontSelect.value);
+    formData.append('footerAlign', footerAlignSelect.value);
+
+    // Background
+    formData.append('bgColor', document.getElementById('bgColor')?.value || '#ffffff');
+
+    if (logoFile.files.length > 0) {
+      formData.append('logo', logoFile.files[0]);
+    }
+
+    try {
+      document.getElementById('generateBtn').disabled = true;
+      document.getElementById('generateBtn').textContent = '⏳ Génération en cours...';
+
+      const response = await fetch('/qrcode-labels/generate', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `label_${assetId}_${new Date().toISOString().split('T')[0]}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        showAlert('PDF généré avec succès!', 'success');
+      } else {
+        showAlert('Erreur lors de la génération du PDF', 'error');
+      }
+    } catch (error) {
+      showAlert(`Erreur: ${error.message}`, 'error');
+    } finally {
+      document.getElementById('generateBtn').disabled = false;
+      document.getElementById('generateBtn').textContent = '📥 Générer PDF pour Impression';
+    }
+  });
+
+  // Load available assets
+  function loadAssets() {
+    const assetType = document.querySelector('input[name="asset_type"]:checked').value;
+    assetDropdown.innerHTML = '<option value="">-- Sélectionner --</option>';
+
+    const assets = {
+      'appareil': [
+        {% for app in appareils %}
+          {id: {{ app.id }}, nom: "{{ app.nom_machine | escape }}", ip: "{{ app.adresse_ip | escape }}", user: "{{ app.user_login | escape }}"}{{ "," if not loop.last }}
+        {% endfor %}
+      ],
+      'peripherique': [
+        {% for per in peripheriques %}
+          {id: {{ per.id }}, nom: "{{ per.nom | escape }}", ip: "", user: ""}{{ "," if not loop.last }}
+        {% endfor %}
+      ]
+    };
+
+    const typeAssets = assets[assetType] || [];
+    typeAssets.forEach(asset => {
+      const option = document.createElement('option');
+      option.value = asset.id;
+      option.textContent = asset.nom;
+      option.dataset.ip = asset.ip || '';
+      option.dataset.user = asset.user || '';
+      assetDropdown.appendChild(option);
+    });
+  }
+
+  // Refresh all previews in selected positions
+  function refreshAllPreviews() {
+    const selectedPositions = JSON.parse(localStorage.getItem('selectedPositions') || '{}');
+    Object.keys(selectedPositions).forEach(pos => {
+      showPreviewInPosition(parseInt(pos));
+    });
+  }
+
+  // Generate position grid (3×8)
+  function generatePositionGrid() {
+    const grid = document.getElementById('positionGrid');
+    const selectedPositions = JSON.parse(localStorage.getItem('selectedPositions') || '{}');
+
+    for (let i = 1; i <= 24; i++) {
+      const posBox = document.createElement('div');
+      posBox.className = 'position-box';
+      posBox.dataset.position = i;
+
+      const posLabel = document.createElement('div');
+      posLabel.className = 'position-label';
+      posLabel.textContent = `Pos ${i}`;
+
+      const previewContainer = document.createElement('div');
+      previewContainer.className = 'position-preview-container';
+      previewContainer.id = `preview-${i}`;
+
+      const clickOverlay = document.createElement('div');
+      clickOverlay.className = 'position-click-overlay';
+
+      const count = selectedPositions[i] || 0;
+      if (count > 0) {
+        posBox.classList.add('selected');
+        const countSpan = document.createElement('span');
+        countSpan.className = 'position-copy-count';
+        countSpan.textContent = `×${count}`;
+        previewContainer.appendChild(countSpan);
+      }
+
+      previewContainer.appendChild(clickOverlay);
+      posBox.appendChild(posLabel);
+      posBox.appendChild(previewContainer);
+
+      posBox.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await togglePosition(i);
+      });
+
+      grid.appendChild(posBox);
+    }
+
+    updateSelectedCount();
+  }
+
+  // Toggle position selection (true toggle: click to select, click again to deselect)
+  async function togglePosition(pos) {
+    const selectedPositions = JSON.parse(localStorage.getItem('selectedPositions') || '{}');
+    const posBox = document.querySelector(`[data-position="${pos}"]`);
+
+    if (selectedPositions[pos]) {
+      // Position is selected → deselect it
+      delete selectedPositions[pos];
+      posBox.classList.remove('selected');
+
+      // Remove preview
+      const previewContainer = document.getElementById(`preview-${pos}`);
+      if (previewContainer) {
+        const img = previewContainer.querySelector('img');
+        if (img) img.remove();
+      }
+    } else {
+      // Position not selected → select it with count=1
+      selectedPositions[pos] = 1;
+      posBox.classList.add('selected');
+
+      // Show preview in this position
+      await showPreviewInPosition(pos);
+    }
+
+    localStorage.setItem('selectedPositions', JSON.stringify(selectedPositions));
+    updateSelectedCount();
+  }
+
+  // Show preview in specific position
+  async function showPreviewInPosition(pos) {
+    const assetType = document.querySelector('input[name="asset_type"]:checked').value;
+    const assetId = assetDropdown.value;
+
+    if (!assetId) return;
+
+    const selectedFields = Array.from(document.querySelectorAll('input[name="fields"]:checked')).map(cb => cb.value);
+
+    const formData = new FormData();
+    formData.append('asset_id', assetId);
+    formData.append('asset_type', assetType);
+    selectedFields.forEach(field => {
+      formData.append('selected_fields', field);
+    });
+    formData.append('custom_text', customText.value || '');
+
+    // Add QR template parameters
+    formData.append('qrSize', qrSizeSelect.value);
+    formData.append('qrPosition', qrPositionSelect.value);
+    formData.append('qrColor', qrColorInput.value);
+    formData.append('qrBgColor', qrBgColorInput.value);
+    formData.append('qrBorder', qrBorderInput.value);
+
+    // Add logo template parameters
+    formData.append('logoSize', logoSizeSlider.value);
+    formData.append('logoPosition', logoPositionSelect.value);
+    formData.append('logoOpacity', logoOpacitySlider.value);
+    formData.append('logoBorder', logoBorderCheckbox.checked);
+    if (logoBorderCheckbox.checked) {
+      formData.append('logoBorderColor', logoBorderColorInput.value);
+      formData.append('logoBorderWidth', logoBorderWidthInput.value);
+    }
+
+    // Header settings
+    formData.append('customHeader', customHeaderInput.value);
+    formData.append('headerSize', headerSizeInput.value);
+    formData.append('headerColor', headerColorInput.value);
+    formData.append('headerFont', headerFontSelect.value);
+    formData.append('headerAlign', headerAlignSelect.value);
+
+    // Asset fields settings
+    formData.append('assetSize', assetSizeInput.value);
+    formData.append('assetColor', assetColorInput.value);
+    formData.append('assetFont', assetFontSelect.value);
+    formData.append('assetAlign', assetAlignSelect.value);
+
+    // Footer settings
+    formData.append('customFooter', customFooterInput.value);
+    formData.append('footerSize', footerSizeInput.value);
+    formData.append('footerColor', footerColorInput.value);
+    formData.append('footerFont', footerFontSelect.value);
+    formData.append('footerAlign', footerAlignSelect.value);
+
+    const logoFileInput = document.getElementById('logoFile');
+    if (logoFileInput && logoFileInput.files.length > 0) {
+      formData.append('logo', logoFileInput.files[0]);
+    }
+
+    try {
+      const response = await fetch('/qrcode-labels/preview', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const imageUrl = URL.createObjectURL(blob);
+        const previewContainer = document.getElementById(`preview-${pos}`);
+
+        // Remove old image if exists
+        const oldImg = previewContainer.querySelector('img');
+        if (oldImg) oldImg.remove();
+
+        // Add new image
+        const img = document.createElement('img');
+        img.src = imageUrl;
+        img.className = 'position-preview-image';
+        img.style.maxHeight = '100%';
+        img.style.maxWidth = '100%';
+        img.style.objectFit = 'contain';
+        previewContainer.insertBefore(img, previewContainer.firstChild);
+      }
+    } catch (error) {
+      console.error('Erreur lors de la génération de l\'aperçu:', error);
+    }
+  }
+
+  // Update selected count
+  function updateSelectedCount() {
+    const selectedPositions = JSON.parse(localStorage.getItem('selectedPositions') || '{}');
+    let total = 0;
+    Object.values(selectedPositions).forEach(count => {
+      total += count;
+    });
+    selectedCountSpan.textContent = total;
+  }
+
+  // Show alert
+  function showAlert(message, type) {
+    alertBox.textContent = message;
+    alertBox.className = `alert ${type} show`;
+    setTimeout(() => {
+      alertBox.classList.remove('show');
+    }, 5000);
+  }
+
+  // Add event listeners for preview updates
+  assetDropdown.addEventListener('change', refreshAllPreviews);
+  customText.addEventListener('input', refreshAllPreviews);
+  logoFile.addEventListener('change', refreshAllPreviews);
+
+  // Clear positions on form reset
+  form.addEventListener('reset', function() {
+    localStorage.removeItem('selectedPositions');
+    document.getElementById('positionGrid').innerHTML = '';
+    setTimeout(generatePositionGrid, 100);
+  });
+
+  // Template Management
+  const templateSelect = document.getElementById('templateSelect');
+  const qrSizeSelect = document.getElementById('qrSize');
+  const qrPositionSelect = document.getElementById('qrPosition');
+  const qrColorInput = document.getElementById('qrColor');
+  const qrBgColorInput = document.getElementById('qrBgColor');
+  const qrBorderInput = document.getElementById('qrBorder');
+  const logoSizeSlider = document.getElementById('logoSize');
+  const logoSizeValue = document.getElementById('logoSizeValue');
+  const logoPositionSelect = document.getElementById('logoPosition');
+  const logoOpacitySlider = document.getElementById('logoOpacity');
+  const logoOpacityValue = document.getElementById('logoOpacityValue');
+  const logoBorderCheckbox = document.getElementById('logoBorder');
+  const logoBorderColorDiv = document.getElementById('logoBorderColorDiv');
+  const logoBorderWidthDiv = document.getElementById('logoBorderWidthDiv');
+  const logoBorderColorInput = document.getElementById('logoBorderColor');
+  const logoBorderWidthInput = document.getElementById('logoBorderWidth');
+  // Header controls
+  const customHeaderInput = document.getElementById('customHeader');
+  const headerSizeInput = document.getElementById('headerSize');
+  const headerColorInput = document.getElementById('headerColor');
+  const headerFontSelect = document.getElementById('headerFont');
+  const headerAlignSelect = document.getElementById('headerAlign');
+
+  // Asset fields controls
+  const assetSizeInput = document.getElementById('assetSize');
+  const assetColorInput = document.getElementById('assetColor');
+  const assetFontSelect = document.getElementById('assetFont');
+  const assetAlignSelect = document.getElementById('assetAlign');
+
+  // Footer controls
+  const customFooterInput = document.getElementById('customFooter');
+  const footerSizeInput = document.getElementById('footerSize');
+  const footerColorInput = document.getElementById('footerColor');
+  const footerFontSelect = document.getElementById('footerFont');
+  const footerAlignSelect = document.getElementById('footerAlign');
+  const btnSaveTemplate = document.getElementById('btnSaveTemplate');
+  const btnLoadTemplate = document.getElementById('btnLoadTemplate');
+  const btnConfirmSave = document.getElementById('btnConfirmSave');
+  const btnCancelSave = document.getElementById('btnCancelSave');
+  const customTemplateInput = document.getElementById('customTemplateInput');
+  const newTemplateName = document.getElementById('newTemplateName');
+
+  // Handle logo border checkbox
+  logoBorderCheckbox.addEventListener('change', function() {
+    logoBorderColorDiv.style.display = this.checked ? 'block' : 'none';
+    logoBorderWidthDiv.style.display = this.checked ? 'block' : 'none';
+    refreshAllPreviews();
+  });
+
+  // Handle logo size slider
+  logoSizeSlider.addEventListener('input', function() {
+    logoSizeValue.textContent = this.value + 'mm';
+    refreshAllPreviews();
+  });
+
+  // Handle logo opacity slider
+  logoOpacitySlider.addEventListener('input', function() {
+    logoOpacityValue.textContent = this.value + '%';
+    refreshAllPreviews();
+  });
+
+  // Handle all other template parameters that need preview refresh
+  qrSizeSelect.addEventListener('change', refreshAllPreviews);
+  qrPositionSelect.addEventListener('change', refreshAllPreviews);
+  qrColorInput.addEventListener('input', refreshAllPreviews);
+  qrBgColorInput.addEventListener('input', refreshAllPreviews);
+  qrBorderInput.addEventListener('input', refreshAllPreviews);
+  logoPositionSelect.addEventListener('change', refreshAllPreviews);
+  logoBorderColorInput.addEventListener('input', refreshAllPreviews);
+  logoBorderWidthInput.addEventListener('input', refreshAllPreviews);
+
+  // Header text controls
+  customHeaderInput.addEventListener('input', refreshAllPreviews);
+  headerSizeInput.addEventListener('input', refreshAllPreviews);
+  headerColorInput.addEventListener('input', refreshAllPreviews);
+  headerFontSelect.addEventListener('change', refreshAllPreviews);
+  headerAlignSelect.addEventListener('change', refreshAllPreviews);
+
+  // Asset fields text controls
+  assetSizeInput.addEventListener('input', refreshAllPreviews);
+  assetColorInput.addEventListener('input', refreshAllPreviews);
+  assetFontSelect.addEventListener('change', refreshAllPreviews);
+  assetAlignSelect.addEventListener('change', refreshAllPreviews);
+
+  // Footer text controls
+  customFooterInput.addEventListener('input', refreshAllPreviews);
+  footerSizeInput.addEventListener('input', refreshAllPreviews);
+  footerColorInput.addEventListener('input', refreshAllPreviews);
+  footerFontSelect.addEventListener('change', refreshAllPreviews);
+  footerAlignSelect.addEventListener('change', refreshAllPreviews);
+
+  // Preset templates
+  const presetTemplates = {
+    'default': {
+      name: 'Par défaut',
+      qrSize: 'medium', qrPosition: 'center', qrColor: '#000000', qrBgColor: '#ffffff', qrBorder: 1,
+      logoSize: 8, logoPosition: 'auto', logoOpacity: 100, logoBorder: false,
+      headerSize: '12', headerColor: '#000000', headerFont: 'arial', headerAlign: 'left',
+      assetSize: '11', assetColor: '#000000', assetFont: 'arial', assetAlign: 'left',
+      footerSize: '12', footerColor: '#000000', footerFont: 'arial', footerAlign: 'left'
+    },
+    'compact': {
+      name: 'Compact',
+      qrSize: 'small', qrPosition: 'left', qrColor: '#000000', qrBgColor: '#ffffff', qrBorder: 1,
+      logoSize: 0, logoPosition: 'auto', logoOpacity: 100, logoBorder: false,
+      headerSize: '10', headerColor: '#000000', headerFont: 'arial', headerAlign: 'left',
+      assetSize: '9', assetColor: '#000000', assetFont: 'arial', assetAlign: 'left',
+      footerSize: '10', footerColor: '#000000', footerFont: 'arial', footerAlign: 'left'
+    },
+    'qr-focused': {
+      name: 'QR Code en avant',
+      qrSize: 'large', qrPosition: 'center', qrColor: '#000000', qrBgColor: '#ffffff', qrBorder: 1,
+      logoSize: 5, logoPosition: 'auto', logoOpacity: 100, logoBorder: false,
+      headerSize: '10', headerColor: '#333333', headerFont: 'arial', headerAlign: 'center',
+      assetSize: '9', assetColor: '#333333', assetFont: 'arial', assetAlign: 'center',
+      footerSize: '10', footerColor: '#333333', footerFont: 'arial', footerAlign: 'center'
+    },
+    'logo-focused': {
+      name: 'Logo en avant',
+      qrSize: 'small', qrPosition: 'right', qrColor: '#000000', qrBgColor: '#ffffff', qrBorder: 1,
+      logoSize: 25, logoPosition: 'auto', logoOpacity: 100, logoBorder: false,
+      headerSize: '12', headerColor: '#000000', headerFont: 'arial', headerAlign: 'left',
+      assetSize: '11', assetColor: '#000000', assetFont: 'arial', assetAlign: 'left',
+      footerSize: '12', footerColor: '#000000', footerFont: 'arial', footerAlign: 'left'
+    },
+    'professional': {
+      name: 'Professionnel',
+      qrSize: 'medium', qrPosition: 'center', qrColor: '#1a5490', qrBgColor: '#ffffff', qrBorder: 2,
+      logoSize: 10, logoPosition: 'top', logoOpacity: 100, logoBorder: true,
+      headerSize: '12', headerColor: '#1a5490', headerFont: 'times', headerAlign: 'center',
+      assetSize: '11', assetColor: '#1a5490', assetFont: 'times', assetAlign: 'left',
+      footerSize: '12', footerColor: '#1a5490', footerFont: 'times', footerAlign: 'right'
+    },
+    'minimal': {
+      name: 'Minimaliste',
+      qrSize: 'small', qrPosition: 'left', qrColor: '#333333', qrBgColor: '#f5f5f5', qrBorder: 0,
+      logoSize: 0, logoPosition: 'auto', logoOpacity: 100, logoBorder: false,
+      headerSize: '10', headerColor: '#333333', headerFont: 'arial', headerAlign: 'left',
+      assetSize: '9', assetColor: '#333333', assetFont: 'arial', assetAlign: 'left',
+      footerSize: '10', footerColor: '#333333', footerFont: 'arial', footerAlign: 'left'
+    }
+  };
+
+  // Load current template settings from localStorage
+  function loadTemplateSettings() {
+    const template = localStorage.getItem('currentTemplate') || 'default';
+    templateSelect.value = template;
+    applyTemplate(template);
+  }
+
+  // Apply template settings
+  function applyTemplate(templateId) {
+    let template;
+    if (presetTemplates[templateId]) {
+      template = presetTemplates[templateId];
+    } else {
+      const customTemplates = JSON.parse(localStorage.getItem('customTemplates') || '{}');
+      template = customTemplates[templateId];
+    }
+
+    if (template) {
+      // QR parameters
+      qrSizeSelect.value = template.qrSize || 'medium';
+      qrPositionSelect.value = template.qrPosition || 'center';
+      qrColorInput.value = template.qrColor || '#000000';
+      qrBgColorInput.value = template.qrBgColor || '#ffffff';
+      qrBorderInput.value = template.qrBorder || 1;
+
+      // Logo parameters
+      logoSizeSlider.value = template.logoSize || 8;
+      logoSizeValue.textContent = (template.logoSize || 8) + 'mm';
+      logoPositionSelect.value = template.logoPosition || 'auto';
+      logoOpacitySlider.value = template.logoOpacity || 100;
+      logoOpacityValue.textContent = (template.logoOpacity || 100) + '%';
+      logoBorderCheckbox.checked = template.logoBorder || false;
+      logoBorderColorDiv.style.display = logoBorderCheckbox.checked ? 'block' : 'none';
+      logoBorderWidthDiv.style.display = logoBorderCheckbox.checked ? 'block' : 'none';
+      logoBorderColorInput.value = template.logoBorderColor || '#000000';
+      logoBorderWidthInput.value = template.logoBorderWidth || 2;
+
+      // Text parameters
+      customHeaderInput.value = template.customHeader || '';
+      customFooterInput.value = template.customFooter || '';
+      headerSizeInput.value = template.headerSize || '12';
+      headerColorInput.value = template.headerColor || '#000000';
+      headerFontSelect.value = template.headerFont || 'arial';
+      headerAlignSelect.value = template.headerAlign || 'left';
+      assetSizeInput.value = template.assetSize || '11';
+      assetColorInput.value = template.assetColor || '#000000';
+      assetFontSelect.value = template.assetFont || 'arial';
+      assetAlignSelect.value = template.assetAlign || 'left';
+      footerSizeInput.value = template.footerSize || '12';
+      footerColorInput.value = template.footerColor || '#000000';
+      footerFontSelect.value = template.footerFont || 'arial';
+      footerAlignSelect.value = template.footerAlign || 'left';
+
+      localStorage.setItem('currentTemplate', templateId);
+      refreshAllPreviews();
+    }
+  }
+
+  // Template selection change
+  templateSelect.addEventListener('change', function() {
+    applyTemplate(this.value);
+  });
+
+  // Template input changes - auto-refresh previews
+  [qrSizeSelect, qrPositionSelect, qrColorInput, qrBgColorInput, qrBorderInput,
+   logoPositionSelect, logoBorderColorInput, logoBorderWidthInput,
+   headerSizeInput, headerColorInput, headerFontSelect, headerAlignSelect,
+   assetSizeInput, assetColorInput, assetFontSelect, assetAlignSelect,
+   footerSizeInput, footerColorInput, footerFontSelect, footerAlignSelect,
+   customHeaderInput, customFooterInput].forEach(control => {
+    if (control) {
+      control.addEventListener('change', refreshAllPreviews);
+      control.addEventListener('input', refreshAllPreviews);
+    }
+  });
+
+  // Save template button
+  btnSaveTemplate.addEventListener('click', function() {
+    customTemplateInput.style.display = 'block';
+    newTemplateName.focus();
+  });
+
+  // Confirm save
+  btnConfirmSave.addEventListener('click', function() {
+    const name = newTemplateName.value.trim();
+    if (!name) {
+      alert('Veuillez entrer un nom pour le modèle');
+      return;
+    }
+
+    const customTemplates = JSON.parse(localStorage.getItem('customTemplates') || '{}');
+    const templateId = 'custom_' + Date.now();
+    customTemplates[templateId] = {
+      name: name,
+      qrSize: qrSizeSelect.value,
+      qrPosition: qrPositionSelect.value,
+      qrColor: qrColorInput.value,
+      qrBgColor: qrBgColorInput.value,
+      qrBorder: parseInt(qrBorderInput.value),
+      logoSize: parseFloat(logoSizeSlider.value),
+      logoPosition: logoPositionSelect.value,
+      logoOpacity: parseInt(logoOpacitySlider.value),
+      logoBorder: logoBorderCheckbox.checked,
+      logoBorderColor: logoBorderColorInput.value,
+      logoBorderWidth: parseInt(logoBorderWidthInput.value),
+      customHeader: customHeaderInput.value,
+      customFooter: customFooterInput.value,
+      headerSize: headerSizeInput.value,
+      headerColor: headerColorInput.value,
+      headerFont: headerFontSelect.value,
+      headerAlign: headerAlignSelect.value,
+      assetSize: assetSizeInput.value,
+      assetColor: assetColorInput.value,
+      assetFont: assetFontSelect.value,
+      assetAlign: assetAlignSelect.value,
+      footerSize: footerSizeInput.value,
+      footerColor: footerColorInput.value,
+      footerFont: footerFontSelect.value,
+      footerAlign: footerAlignSelect.value
+    };
+
+    localStorage.setItem('customTemplates', JSON.stringify(customTemplates));
+    customTemplateInput.style.display = 'none';
+    newTemplateName.value = '';
+    alert(`Modèle "${name}" enregistré!`);
+    updateTemplateSelect();
+  });
+
+  // Cancel save
+  btnCancelSave.addEventListener('click', function() {
+    customTemplateInput.style.display = 'none';
+    newTemplateName.value = '';
+  });
+
+  // Load custom templates
+  btnLoadTemplate.addEventListener('click', function() {
+    const customTemplates = JSON.parse(localStorage.getItem('customTemplates') || '{}');
+    if (Object.keys(customTemplates).length === 0) {
+      alert('Aucun modèle personnalisé sauvegardé');
+      return;
+    }
+
+    let html = '<div class="template-list">';
+    Object.entries(customTemplates).forEach(([id, template]) => {
+      html += `<div class="template-item">
+        <span>${template.name}</span>
+        <div>
+          <button type="button" onclick="loadCustomTemplate('${id}')">Charger</button>
+          <button type="button" class="delete" onclick="deleteCustomTemplate('${id}')">Supprimer</button>
+        </div>
+      </div>`;
+    });
+    html += '</div>';
+
+    const modal = document.createElement('div');
+    modal.style.position = 'fixed';
+    modal.style.top = '0';
+    modal.style.left = '0';
+    modal.style.width = '100%';
+    modal.style.height = '100%';
+    modal.style.background = 'rgba(0,0,0,0.5)';
+    modal.style.display = 'flex';
+    modal.style.alignItems = 'center';
+    modal.style.justifyContent = 'center';
+    modal.style.zIndex = '10000';
+
+    const content = document.createElement('div');
+    content.style.background = 'white';
+    content.style.padding = '20px';
+    content.style.borderRadius = '8px';
+    content.style.minWidth = '400px';
+    content.innerHTML = `<h3>Mes Modèles</h3>${html}<button type="button" class="btn-reset" style="width: 100%; margin-top: 10px;" onclick="this.closest('div').remove()">Fermer</button>`;
+
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+  });
+
+  // Make functions global for inline onclick
+  window.loadCustomTemplate = function(templateId) {
+    const customTemplates = JSON.parse(localStorage.getItem('customTemplates') || '{}');
+    const template = customTemplates[templateId];
+    if (template) {
+      localStorage.setItem('currentTemplate', templateId);
+      applyTemplate(templateId);
+      document.querySelector('div[style*="position: fixed"]').remove();
+      updateTemplateSelect();
+    }
+  };
+
+  window.deleteCustomTemplate = function(templateId) {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer ce modèle?')) return;
+    const customTemplates = JSON.parse(localStorage.getItem('customTemplates') || '{}');
+    delete customTemplates[templateId];
+    localStorage.setItem('customTemplates', JSON.stringify(customTemplates));
+    document.querySelector('div[style*="position: fixed"]').remove();
+    btnLoadTemplate.click(); // Reopen modal
+  };
+
+  // Update template select options
+  function updateTemplateSelect() {
+    const customTemplates = JSON.parse(localStorage.getItem('customTemplates') || '{}');
+    const oldValue = templateSelect.value;
+
+    // Remove custom options
+    Array.from(templateSelect.options).forEach(opt => {
+      if (opt.value.startsWith('custom_')) opt.remove();
+    });
+
+    // Add custom options
+    Object.entries(customTemplates).forEach(([id, template]) => {
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = `📌 ${template.name}`;
+      templateSelect.appendChild(option);
+    });
+
+    if (customTemplates[oldValue]) {
+      templateSelect.value = oldValue;
+    }
+  }
+
+  // Initialize templates
+  loadTemplateSettings();
+  updateTemplateSelect();
+});
+</script>
+{% endblock %}

@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, f
 from werkzeug.utils import secure_filename
 from datetime import datetime, date, timedelta
 import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time, io
+from PIL import Image
 from io import BytesIO
 try:
     from reportlab.lib.pagesizes import letter, A4
@@ -8704,6 +8705,359 @@ def handle_unhandled_exception(e):
         clients=get_clients() if cid else [], client_actif_id=cid,
         client={}
     ), 500
+
+
+# ─── GENERATEUR QR CODES POUR ETIQUETTES ────────────────────────────────────
+
+@app.route('/qrcode-labels', methods=['GET'])
+@login_required
+def qrcode_labels():
+    """Affiche formulaire pour générer étiquettes QR AVERY J8159."""
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+
+    conn = get_db()
+    appareils = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine, adresse_ip, user_login FROM appareils WHERE client_id=? ORDER BY nom_machine',
+        (cid,)).fetchall()]
+    peripheriques = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, categorie || \' - \' || marque || \' \' || modele as nom '
+        'FROM peripheriques WHERE client_id=? ORDER BY categorie, marque, modele',
+        (cid,)).fetchall()]
+    conn.close()
+
+    return render_template('qrcode_generator.html',
+        appareils=appareils, peripheriques=peripheriques,
+        clients=get_clients(), client_actif_id=cid)
+
+
+@app.route('/qrcode-labels/fields', methods=['POST'])
+@login_required
+def qrcode_fields():
+    """Retourne les champs disponibles pour un appareil/périphérique."""
+    cid = get_client_id()
+    asset_type = request.form.get('asset_type', 'appareil')
+    asset_id = request.form.get('asset_id', '', type=int)
+
+    if not cid or not asset_id:
+        return jsonify({'error': 'Invalid request'}), 400
+
+    conn = get_db()
+
+    try:
+        if asset_type == 'appareil':
+            row = conn.execute(
+                'SELECT * FROM appareils WHERE id=? AND client_id=?',
+                (asset_id, cid)).fetchone()
+            asset = row_to_dict(row) if row else {}
+        else:  # peripherique
+            row = conn.execute(
+                'SELECT * FROM peripheriques WHERE id=? AND client_id=?',
+                (asset_id, cid)).fetchone()
+            asset = row_to_dict(row) if row else {}
+    finally:
+        conn.close()
+
+    if not asset:
+        return jsonify({'error': 'Asset not found'}), 404
+
+    # Decrypt credentials if present
+    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+    if 'user_password' in asset and asset['user_password']:
+        try:
+            asset['user_password'] = crypto.decrypt(asset['user_password'])
+        except:
+            asset['user_password'] = ''
+    if 'admin_password' in asset and asset['admin_password']:
+        try:
+            asset['admin_password'] = crypto.decrypt(asset['admin_password'])
+        except:
+            asset['admin_password'] = ''
+
+    # Return available fields
+    fields = {field: asset.get(field, '') for field in asset.keys()
+              if asset.get(field) not in [None, '', 0, False]}
+
+    return jsonify({'asset': asset, 'fields': fields})
+
+
+@app.route('/qrcode-labels/preview', methods=['POST'])
+@login_required
+def qrcode_preview():
+    """Génère aperçu du label en image PNG."""
+    import os
+    import io
+    import tempfile
+    from qrcode_helper import create_label_image
+    from crypto_utils import get_crypto_manager
+
+    cid = get_client_id()
+    if not cid:
+        return jsonify({'error': 'Not authenticated'}), 403
+
+    import json
+    asset_type = request.form.get('asset_type', 'appareil')
+    asset_id = request.form.get('asset_id', '', type=int)
+    selected_fields = request.form.getlist('selected_fields')
+    custom_text = request.form.get('custom_text', '')[:200]
+    logo_file = request.files.get('logo')
+
+    # Parse template parameters
+    template = {
+        # QR Code settings
+        'qrSize': request.form.get('qrSize', 'medium'),
+        'qrPosition': request.form.get('qrPosition', 'center'),
+        'qrColor': request.form.get('qrColor', '#000000'),
+        'qrBgColor': request.form.get('qrBgColor', '#ffffff'),
+        'qrBorder': int(request.form.get('qrBorder', 1)),
+        # Logo settings
+        'logoSize': float(request.form.get('logoSize', 8)),  # in mm
+        'logoPosition': request.form.get('logoPosition', 'auto'),
+        'logoOpacity': int(request.form.get('logoOpacity', 100)),
+        'logoBorder': request.form.get('logoBorder', 'false').lower() == 'true',
+        'logoBorderColor': request.form.get('logoBorderColor', '#000000'),
+        'logoBorderWidth': int(request.form.get('logoBorderWidth', 1)),
+        # Header text settings
+        'customHeader': request.form.get('customHeader', ''),
+        'headerSize': int(request.form.get('headerSize', 12)),
+        'headerColor': request.form.get('headerColor', '#000000'),
+        'headerFont': request.form.get('headerFont', 'arial'),
+        'headerAlign': request.form.get('headerAlign', 'left'),
+        # Asset fields text settings
+        'assetSize': int(request.form.get('assetSize', 10)),
+        'assetColor': request.form.get('assetColor', '#000000'),
+        'assetFont': request.form.get('assetFont', 'arial'),
+        'assetAlign': request.form.get('assetAlign', 'left'),
+        # Footer text settings
+        'customFooter': request.form.get('customFooter', ''),
+        'footerSize': int(request.form.get('footerSize', 10)),
+        'footerColor': request.form.get('footerColor', '#000000'),
+        'footerFont': request.form.get('footerFont', 'arial'),
+        'footerAlign': request.form.get('footerAlign', 'left'),
+        # Background
+        'bgColor': request.form.get('bgColor', '#ffffff')
+    }
+
+    # Get asset
+    conn = get_db()
+    try:
+        if asset_type == 'appareil':
+            row = conn.execute(
+                'SELECT * FROM appareils WHERE id=? AND client_id=?',
+                (asset_id, cid)).fetchone()
+        else:
+            row = conn.execute(
+                'SELECT * FROM peripheriques WHERE id=? AND client_id=?',
+                (asset_id, cid)).fetchone()
+        asset = row_to_dict(row) if row else {}
+    finally:
+        conn.close()
+
+    if not asset:
+        return jsonify({'error': 'Asset not found'}), 404
+
+    # Filter and decrypt
+    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+    filtered_asset = {'type': asset_type, 'id': asset_id}
+
+    for field in selected_fields:
+        if field in asset:
+            value = asset[field]
+            if field in ['user_password', 'admin_password'] and value:
+                try:
+                    value = crypto.decrypt(value)
+                except:
+                    value = ''
+            filtered_asset[field] = value
+
+    # Save logo if provided
+    logo_path = None
+    if logo_file and logo_file.filename:
+        try:
+            _, logo_path = tempfile.mkstemp(suffix='.png')
+            logo_file.save(logo_path)
+        except:
+            logo_path = None
+
+    # Generate label image
+    try:
+        logger.info(f"Template customFooter: '{template.get('customFooter', '')}'")
+        logger.info(f"Custom text param: '{custom_text}'")
+        logger.info(f"Calling create_label_image with: asset_data={filtered_asset}, template={template}")
+        label_img = create_label_image(filtered_asset, logo_path, custom_text, template)
+        logger.info(f"create_label_image returned: {type(label_img)}")
+        if isinstance(label_img, str):
+            logger.error(f"CRITICAL: create_label_image returned string: {label_img}")
+    except Exception as e:
+        logger.exception(f"Exception in create_label_image")
+        return jsonify({'error': f"Label creation failed: {str(e)}"}), 500
+    finally:
+        if logo_path:
+            try:
+                os.remove(logo_path)
+            except:
+                pass
+
+    # Verify we have an image
+    if isinstance(label_img, str):
+        logger.error(f"ERROR: label_img is string: {label_img}")
+        return jsonify({'error': f"Label creation returned error: {label_img}"}), 500
+
+    if not isinstance(label_img, Image.Image):
+        logger.error(f"ERROR: label_img is {type(label_img)}, not PIL Image!")
+        return jsonify({'error': f"Label image is invalid type: {type(label_img)}"}), 500
+
+    # Convert to PNG bytes
+    img_bytes = io.BytesIO()
+    label_img.save(img_bytes, format='PNG')
+    img_bytes.seek(0)
+
+    return send_file(img_bytes, mimetype='image/png')
+
+
+@app.route('/qrcode-labels/generate', methods=['POST'])
+@login_required
+def qrcode_generate():
+    """Génère PDF pour impression sur AVERY J8159."""
+    import os
+    import json
+    import tempfile
+    from qrcode_helper import create_label_image, create_pdf_sheet
+    from crypto_utils import get_crypto_manager
+
+    cid = get_client_id()
+    if not cid:
+        return jsonify({'error': 'Not authenticated'}), 403
+
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+
+    asset_type = request.form.get('asset_type', 'appareil')
+    asset_id = request.form.get('asset_id', '', type=int)
+    selected_fields_json = request.form.get('fields', '[]')
+    custom_text = request.form.get('custom_text', '')[:200]
+    positions_json = request.form.get('positions', '{}')
+    logo_file = request.files.get('logo')
+
+    # Parse template parameters
+    template = {
+        # QR Code settings
+        'qrSize': request.form.get('qrSize', 'medium'),
+        'qrPosition': request.form.get('qrPosition', 'center'),
+        'qrColor': request.form.get('qrColor', '#000000'),
+        'qrBgColor': request.form.get('qrBgColor', '#ffffff'),
+        'qrBorder': int(request.form.get('qrBorder', 1)),
+        # Logo settings
+        'logoSize': float(request.form.get('logoSize', 8)),  # in mm
+        'logoPosition': request.form.get('logoPosition', 'auto'),
+        'logoOpacity': int(request.form.get('logoOpacity', 100)),
+        'logoBorder': request.form.get('logoBorder', 'false').lower() == 'true',
+        'logoBorderColor': request.form.get('logoBorderColor', '#000000'),
+        'logoBorderWidth': int(request.form.get('logoBorderWidth', 1)),
+        # Header text settings
+        'customHeader': request.form.get('customHeader', ''),
+        'headerSize': int(request.form.get('headerSize', 12)),
+        'headerColor': request.form.get('headerColor', '#000000'),
+        'headerFont': request.form.get('headerFont', 'arial'),
+        'headerAlign': request.form.get('headerAlign', 'left'),
+        # Asset fields text settings
+        'assetSize': int(request.form.get('assetSize', 10)),
+        'assetColor': request.form.get('assetColor', '#000000'),
+        'assetFont': request.form.get('assetFont', 'arial'),
+        'assetAlign': request.form.get('assetAlign', 'left'),
+        # Footer text settings
+        'customFooter': request.form.get('customFooter', ''),
+        'footerSize': int(request.form.get('footerSize', 10)),
+        'footerColor': request.form.get('footerColor', '#000000'),
+        'footerFont': request.form.get('footerFont', 'arial'),
+        'footerAlign': request.form.get('footerAlign', 'left'),
+        # Background
+        'bgColor': request.form.get('bgColor', '#ffffff')
+    }
+
+    try:
+        selected_fields = json.loads(selected_fields_json)
+        positions_dict = json.loads(positions_json)
+        positions_dict = {int(k): int(v) for k, v in positions_dict.items()}
+    except:
+        return jsonify({'error': 'Invalid parameters'}), 400
+
+    # Validate positions
+    if not positions_dict or any(p < 1 or p > 24 for p in positions_dict.keys()):
+        return jsonify({'error': 'Invalid positions (1-24)'}), 400
+
+    # Get asset
+    conn = get_db()
+    try:
+        if asset_type == 'appareil':
+            row = conn.execute(
+                'SELECT * FROM appareils WHERE id=? AND client_id=?',
+                (asset_id, cid)).fetchone()
+        else:
+            row = conn.execute(
+                'SELECT * FROM peripheriques WHERE id=? AND client_id=?',
+                (asset_id, cid)).fetchone()
+        asset = row_to_dict(row) if row else {}
+    finally:
+        conn.close()
+
+    if not asset:
+        return jsonify({'error': 'Asset not found'}), 404
+
+    # Filter and decrypt
+    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+    filtered_asset = {'type': asset_type, 'id': asset_id}
+
+    for field in selected_fields:
+        if field in asset:
+            value = asset[field]
+            if field in ['user_password', 'admin_password'] and value:
+                try:
+                    value = crypto.decrypt(value)
+                except:
+                    value = ''
+            filtered_asset[field] = value
+
+    # Save logo if provided
+    logo_path = None
+    if logo_file and logo_file.filename:
+        try:
+            _, logo_path = tempfile.mkstemp(suffix='.png')
+            logo_file.save(logo_path)
+        except:
+            logo_path = None
+
+    # Generate label image
+    try:
+        label_img = create_label_image(filtered_asset, logo_path, custom_text, template)
+        pdf_bytes = create_pdf_sheet(label_img, positions_dict)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if logo_path:
+            try:
+                os.remove(logo_path)
+            except:
+                pass
+
+    # Log action
+    user = get_auth_user()
+    log_conn = get_db()
+    try:
+        asset_name = asset.get('nom_machine') or asset.get('nom') or f'{asset_type}#{asset_id}'
+        log_history(log_conn, cid, asset_type.upper(), asset_id, asset_name,
+            'GENERATE_QR_LABELS',
+            json.dumps({'fields': selected_fields, 'positions': len(positions_dict)}))
+        log_conn.commit()
+    finally:
+        log_conn.close()
+
+    # Return PDF
+    return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf',
+                     as_attachment=True,
+                     download_name=f'label_{asset_id}_{datetime.utcnow().strftime("%Y%m%d")}.pdf')
+
 
 if __name__ == '__main__':
     init_db()
