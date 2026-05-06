@@ -1,10 +1,10 @@
-PARCINFO_VERSION=2.5.0
-RELEASE_DATE=2026-04-23
-BUILD_NUMBER=2024042301
-GIT_BRANCH=main
+PARCINFO_VERSION=2.6.0
+RELEASE_DATE=2026-05-06
+BUILD_NUMBER=2024050601
+GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.5.0 - Release Candidate
-# Optimisations majeures complétées
-# Date: 23 avril 2026
-# Validé: 85% (17/20 tests)
+# Version 2.6.0 - QR Code Labels Generator
+# Générateur d'étiquettes QR pour AVERY J8159
+# Date: 6 mai 2026
+# Validé: 100% (tous les tests passés)

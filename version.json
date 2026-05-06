@@ -1,18 +1,19 @@
 {
-  "version": "2.5.0",
-  "release_date": "2026-04-26T19:11:00.000000",
+  "version": "2.6.0",
+  "release_date": "2026-05-06T22:00:00.000000",
   "github_repo": "darkmind64/parc_info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.5.0/installer.exe"
+    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.6.0/installer.exe"
   },
   "notes": {
-    "windows_installer": "Standalone installer - contains both ParcInfo.exe and installer logic. No separate files needed. Fixed: System tray disabled on macOS to prevent crashes on macOS 12.x."
+    "windows_installer": "Standalone installer with QR Code Label Generator. Generate AVERY J8159 labels with QR codes from your assets. Phone barcode scanners display asset info as readable text.",
+    "new_features": "QR Code Label Generator - Generate PDF labels with custom QR codes for asset tracking"
   },
   "checksums": {
-    "windows_installer_sha256": "D447D64C394A3B31FFA983098936F0382DC1B8B9683EF09910E2A0FB89B57BCF"
+    "windows_installer_sha256": "PENDING_BUILD"
   },
   "file_sizes": {
-    "windows_installer_bytes": 53546563
+    "windows_installer_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.5.0"
+  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.6.0"
 }

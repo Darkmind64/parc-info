@@ -6,8 +6,8 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 1.0.0  
-**Dernière mise à jour** : 2026-04-13
+**Version** : 2.6.0  
+**Dernière mise à jour** : 2026-05-06
 
 ---
 
@@ -35,6 +35,14 @@ Application web **Python/Flask** pour la gestion d'inventaire informatique avec 
 - ✅ **CSRF** : tokens sur chaque modification
 - ✅ **Audit trail** : historique complet des modifications
 - ✅ **Rôles** : admin (tous) + user (client affecté)
+
+### Étiquettes QR
+- ✅ **Générateur étiquettes** : QR codes pour AVERY J8159 (63.5×33.9mm)
+- ✅ **Format texte brut** : compatible scanner téléphone (pas JSON)
+- ✅ **Customisation** : logo, texte, couleurs, polices
+- ✅ **Export PDF** : grille 3×8 (24 labels), positionnement précis
+- ✅ **Multi-copie** : répétition de labels aux positions sélectionnées
+- ✅ **Données d'assets** : sélection dynamique des paramètres à encoder
 
 ### Uploads & Documents
 - ✅ **Documents joints** : PDF, images, guides utilisateur

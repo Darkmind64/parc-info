@@ -1,5 +1,118 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.0] - 2026-05-06 📋
+
+### ✨ NOUVELLES FONCTIONNALITÉS
+
+#### 🏷️ Générateur d'Étiquettes QR (AVERY J8159)
+- ✅ Génération de codes QR avec données d'assets en texte brut
+- ✅ Support format AVERY J8159 (63.5×33.9mm, grille 3×8 = 24 labels)
+- ✅ Sélection d'appareil ou périphérique pour génération
+- ✅ Choix multi-checkbox des paramètres à encoder
+- ✅ Customisation complète : logo, texte (header/asset/footer), couleurs, polices
+- ✅ Positionnement précis sur le sheet (positions 1-24)
+- ✅ Génération de copies multiples per position
+- ✅ Export PDF prêt pour impression
+- ✅ Contrôles texte avancés : taille dynamique, couleur, police, justification
+- ✅ Grille de positionnement visuelle interactive
+- ✅ Aperçu en temps réel du label
+
+#### 📱 QR Code Format Lisible
+- ✅ Format texte brut (pas JSON) - compatible scanners téléphone
+- ✅ Phone barcode scanner affiche le contenu directement
+- ✅ Plus de message "rechercher un code barre"
+- ✅ Données structurées avec libellés français
+- Exemple:
+  ```
+  Nom: DESKTOP-ABC123
+  IP: 192.168.1.50
+  MAC: AA:BB:CC:DD:EE:FF
+  User: admin
+  Password: SecurePass123
+  ...
+  ```
+
+#### 🎨 Interface & Design
+- ✅ Page complète avec formulaire intuitif
+- ✅ Responsive design + Dark/Light mode support
+- ✅ Variables CSS pour cohérence avec l'app
+- ✅ Navigation intégrée ("Étiquettes QR" en sidebar Inventaire)
+- ✅ Grille étiquettes avec fond blanc persistant
+
+#### 🔐 Sécurité
+- ✅ Vérification ACL avant génération
+- ✅ Isolation client_id stricte
+- ✅ Déchiffrement des credentials depuis BD
+- ✅ Audit logging dans historique
+- ✅ Validation input complète
+
+### 📦 NOUVELLES DÉPENDANCES
+
+```
+qrcode[pil]>=8.0            # QR code generation with PIL
+```
+
+### 📋 FICHIERS NOUVEAUX
+
+```
+qrcode_helper.py             # Utilities for QR generation, label & PDF creation (489 lines)
+  - generate_qr()            # Generate QR from asset data (plain text format)
+  - create_label_image()     # Create label image with logo, QR, text
+  - create_pdf_sheet()       # Create AVERY J8159 PDF sheet
+
+templates/qrcode_generator.html  # Form UI for label generation (1572 lines)
+  - Asset selection (appareil/périphérique)
+  - Parameter checkboxes (grouped by category)
+  - Logo upload & customization
+  - Text controls (Header, Asset, Footer - separated)
+  - Position grid (3×8 interactive)
+  - PDF generation & download
+```
+
+### 📋 FICHIERS MODIFIÉS
+
+```
+app.py                       # +354 lines
+  - @app.route('/qrcode-labels')              # Display form
+  - @app.route('/qrcode-labels/fields')       # AJAX: get available fields
+  - @app.route('/qrcode-labels/preview')      # AJAX: generate preview PNG
+  - @app.route('/qrcode-labels/generate')     # Generate PDF download
+
+templates/base.html          # +3 lines
+  - Navigation link: "📋 Étiquettes QR"
+
+requirements.txt             # +1 line
+  - qrcode[pil]>=8.0
+```
+
+### 🧪 TESTS & VALIDATION
+
+- ✅ QR code generation with full asset data
+- ✅ Plain text format verification
+- ✅ Empty/sparse field handling
+- ✅ Flask app imports successfully
+- ✅ Syntax check passed
+- ✅ Manual testing: Phone barcode scanner displays text correctly
+
+### 🔍 NOTES
+
+- QR content format changed from JSON to plain text for phone compatibility
+- User responsibility: Physical security of labels (credentials in cleartext)
+- Maximum QR data size: ~300 bytes (auto-scaled QR version)
+- Logo handling: PNG/JPG, 0-30mm, auto-positioning
+- Position grid: Interactive selection, multi-copy support (1-10 copies per position)
+
+### 📊 IMPACT UTILISATEUR
+
+| Aspect | Impact |
+|--------|--------|
+| Asset tracking | Meilleure avec QR codes imprimables |
+| Mobile scanning | Plus d'erreurs "rechercher un code barre" |
+| Customization | Logos, textes, couleurs personnalisables |
+| Workflow | Étiquettes AVERY standard, prêtes à imprimer |
+
+---
+
 ## [2.5.0] - 2026-04-23 🚀
 
 ### ✨ NOUVELLES FONCTIONNALITÉS
