@@ -19,10 +19,18 @@ def data(relative=''):
     return os.path.join(base, relative) if relative else base
 
 # ── Port libre ────────────────────────────────────────────────────────────────
-def free_port():
-    with socket.socket() as s:
-        s.bind(('127.0.0.1', 0))
-        return s.getsockname()[1]
+def get_port(preferred=3456):
+    """Essaie le port préféré (3456), sinon un port libre."""
+    try:
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', preferred))
+            s.close()
+        return preferred
+    except OSError:
+        # Port préféré occupé, utiliser un port libre
+        with socket.socket() as s:
+            s.bind(('127.0.0.1', 0))
+            return s.getsockname()[1]
 
 # ── Systray optionnel ─────────────────────────────────────────────────────────
 def run_systray(url, logger):
@@ -49,7 +57,7 @@ def run_systray(url, logger):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
-    port = free_port()
+    port = get_port(preferred=3456)
     url  = f'http://127.0.0.1:{port}'
 
     # Configure logging

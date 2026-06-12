@@ -65,7 +65,9 @@
       "Bash(python3 -c \"with open\\(r'E:\\\\Claude Code\\\\parc_info - docker\\\\.claude\\\\worktrees\\\\adoring-fermat-24a2c4\\\\app.py'\\) as f: print\\(len\\(f.readlines\\(\\)\\)\\)\")",
       "Bash(python3 -m py_compile \"E:\\\\Claude Code\\\\parc_info - docker\\\\.claude\\\\worktrees\\\\adoring-fermat-24a2c4\\\\app.py\")",
       "Bash(python -m py_compile \"E:\\\\Claude Code\\\\parc_info - docker\\\\.claude\\\\worktrees\\\\adoring-fermat-24a2c4\\\\app.py\")",
-      "Bash(sqlite3 parc_info.db \".tables\")"
+      "Bash(sqlite3 parc_info.db \".tables\")",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

@@ -1,5 +1,24 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.1] - 2026-06-12 🔧
+
+### 🔄 CHANGEMENTS
+
+#### 🔌 Port par défaut mis à jour
+- ✅ Port changé de 5000 → 3456
+- ✅ Meilleure compatibilité de déploiement
+- ✅ Détection automatique de port libre en fallback (launcher.py)
+- ✅ Application de développement (app.py)
+- ✅ Container Docker (Dockerfile)
+- ✅ Tests et validation (scripts de test)
+
+### 📝 NOTES DE MIGRATION
+- Mettre à jour les configurations Docker Compose/Kubernetes qui utilisent le port 5000
+- Mettre à jour les firewall rules/reverse proxy pour le port 3456
+- Les déploiements existants utilisant port 5000 seront affectés
+
+---
+
 ## [2.6.0] - 2026-05-06 📋
 
 ### ✨ NOUVELLES FONCTIONNALITÉS

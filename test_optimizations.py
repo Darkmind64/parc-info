@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 # Configuration
-BASE_URL = "http://127.0.0.1:5000"
+BASE_URL = "http://127.0.0.1:3456"
 DB_PATH = Path("parc_info.db")
 
 # Couleurs pour le terminal
