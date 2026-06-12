@@ -20,9 +20,9 @@ RUN mkdir -p /data/uploads /data/backups /app/logs
 
 VOLUME ["/data"]
 
-EXPOSE 5000
+EXPOSE 3456
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:5000', timeout=5)"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:3456', timeout=5)"
 
 CMD ["python", "app.py"]

@@ -9079,15 +9079,15 @@ if __name__ == '__main__':
     print(f"  OS      : {platform.system()}")
     print(f"  DB      : {DB_PATH}")
     print(f"  Uploads : {UPLOAD_FOLDER}")
-    print("  URL     : http://localhost:5000")
+    print("  URL     : http://localhost:3456")
     print("="*50)
 
     if not os.environ.get('RUNNING_IN_DOCKER'):
         import webbrowser
         def _open_browser():
             import time; time.sleep(1.5)
-            webbrowser.open('http://localhost:5000')
+            webbrowser.open('http://localhost:3456')
         threading.Thread(target=_open_browser, daemon=True).start()
 
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'
-    app.run(debug=debug, host='0.0.0.0', port=5000)
+    app.run(debug=debug, host='0.0.0.0', port=3456)
