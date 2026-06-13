@@ -146,6 +146,9 @@ function onCatChange(val) {
     document.getElementById('wifi-section').style.display      = isWifi ? 'block' : 'none';
     // Hide the standard password field when wifi (wifi has its own)
     document.getElementById('pwd-standard-wrap').style.display = isWifi ? 'none'  : 'block';
+    // Disable the inactive field so only the active one is submitted
+    document.getElementById('wifi_pwd_form').disabled = !isWifi;
+    document.getElementById('pwd-standard').disabled  = isWifi;
     // Auto-fill login with SSID when wifi
     if (isWifi) {
         const ssid = document.getElementById('wifi_ssid').value;
