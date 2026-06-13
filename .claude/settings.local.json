@@ -77,7 +77,12 @@
       "Bash(gh release create v2.6.1 --title 'Version 2.6.1 - Port Configuration Update' --notes ' *)",
       "Bash(docker --version)",
       "Bash(docker build *)",
-      "Bash(docker push *)"
+      "Bash(docker push *)",
+      "Bash(git fetch *)",
+      "Bash(git rebase *)",
+      "Bash(git stash *)",
+      "Bash(gh release create v2.6.2 --title 'Version 2.6.2 - Corrections Réseau Synology' --notes ' *)",
+      "Bash(grep -n \"@app.route\\('/$\\\\|@app.route\\('/api/\\\\|def index\\\\|def home\" app.py)"
     ]
   }
 }

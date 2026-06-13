@@ -12,6 +12,7 @@ echo "=========================================="
 export FLASK_APP=${FLASK_APP:-app.py}
 export FLASK_DEBUG=${FLASK_DEBUG:-0}
 export RUNNING_IN_DOCKER=1
+export DISABLE_TURSO_SYNC=${DISABLE_TURSO_SYNC:-1}
 
 # Afficher la configuration
 echo "📋 Configuration:"

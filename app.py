@@ -1572,6 +1572,10 @@ def _stop_sync_thread():
 
 def _handle_sync_config():
     """Démarre ou arrête le thread de sync selon la config db_type."""
+    # Vérifier si la sync Turso est désactivée (par défaut en Docker)
+    if os.environ.get('DISABLE_TURSO_SYNC', '0') == '1':
+        _stop_sync_thread()
+        return
     if cfg_get('db_type') == 'sync':
         _stop_sync_thread()   # redémarre avec le nouvel intervalle éventuel
         _start_sync_thread()
@@ -1587,6 +1591,9 @@ def _auto_start_sync():
     global _sync_init_done
     if not _sync_init_done:
         _sync_init_done = True
+        # Vérifier si la sync Turso est désactivée (par défaut en Docker)
+        if os.environ.get('DISABLE_TURSO_SYNC', '0') == '1':
+            return
         if cfg_get('db_type') == 'sync':
             _start_sync_thread()
 
