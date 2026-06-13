@@ -90,8 +90,11 @@ def _load_app_version():
     try:
         _vf = os.path.join(_resource_base, 'version.json')
         with open(_vf, 'r', encoding='utf-8') as _f:
-            return json.load(_f).get('version', '')
-    except Exception:
+            v = json.load(_f).get('version', '')
+        logging.getLogger('parcinfo').info(f'ParcInfo version {v} (depuis {_vf})')
+        return v
+    except Exception as e:
+        logging.getLogger('parcinfo').warning(f'version.json introuvable dans {_resource_base}: {e}')
         return ''
 APP_VERSION = _load_app_version()
 

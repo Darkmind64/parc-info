@@ -27,8 +27,9 @@ _target_arch = os.environ.get('TARGET_ARCH') or None
 # ── Ressources à embarquer (pas la BD) ────────────────────────────────────────
 
 datas = [
-    ('templates', 'templates'),    # Templates Jinja2 (25+ fichiers)
-    ('static',    'static'),       # JS, CSS, images
+    ('templates',    'templates'),    # Templates Jinja2 (25+ fichiers)
+    ('static',       'static'),       # JS, CSS, images
+    ('version.json', '.'),            # Version info (lue par _load_app_version)
 ]
 
 # Optionnel : base fabricants réseau (60k MACs)
