@@ -14,18 +14,34 @@ logger = logging.getLogger('parcinfo')
 class CryptoManager:
     """Gestionnaire de chiffrement pour les données sensibles."""
 
-    def __init__(self, secret_key_file='secret.key'):
+    def __init__(self, secret_key_file='secret.key', shared_key=None):
         """
         Initialise le gestionnaire crypto.
 
         Args:
-            secret_key_file: Chemin vers le fichier contenant la clé secrète
+            secret_key_file: Chemin vers le fichier contenant la clé secrète (par instance)
+            shared_key: Clé partagée en clair (prioritaire sur secret_key_file — utilisée
+                        pour la synchronisation multi-instances via Turso)
         """
-        self.secret_key_file = secret_key_file
-        self.cipher = self._init_cipher()
+        if shared_key:
+            self.cipher = self._init_cipher_from_key(shared_key)
+        else:
+            self.secret_key_file = secret_key_file
+            self.cipher = self._init_cipher()
+
+    def _init_cipher_from_key(self, key_str):
+        """Dérive un cipher Fernet à partir d'une clé partagée (string)."""
+        try:
+            hash_input = key_str + 'parcinfo_cipher_salt'
+            derived_key = sha256(hash_input.encode()).digest()
+            fernet_key = base64.urlsafe_b64encode(derived_key)
+            return Fernet(fernet_key)
+        except Exception as e:
+            logger.error(f"Erreur initialisation cipher depuis clé partagée: {e}")
+            return None
 
     def _init_cipher(self):
-        """Initialise ou charge la clé de chiffrement Fernet."""
+        """Initialise ou charge la clé de chiffrement Fernet depuis un fichier."""
         try:
             # Charger la clé secrète depuis le fichier
             if not os.path.exists(self.secret_key_file):
@@ -123,9 +139,11 @@ class CryptoManager:
 
 
 # Instance globale du gestionnaire crypto
-def get_crypto_manager(secret_key_file='secret.key'):
-    """Retourne l'instance du gestionnaire crypto."""
-    return CryptoManager(secret_key_file)
+def get_crypto_manager(secret_key_file='secret.key', shared_key=None):
+    """Retourne l'instance du gestionnaire crypto.
+    Si shared_key est fourni, l'utilise directement (prioritaire sur secret_key_file).
+    """
+    return CryptoManager(secret_key_file=secret_key_file, shared_key=shared_key)
 
 
 # Fonctions de commodité

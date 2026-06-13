@@ -485,6 +485,25 @@ def port_action_filter(port):
     except: return 'info'
 DB_PATH = DATABASE  # alias conservé pour compatibilité
 
+def _get_crypto_shared(cursor=None):
+    """
+    Retourne un CryptoManager utilisant la clé partagée stockée dans la table config.
+    Cette clé est synchronisée via Turso → toutes les instances la partagent.
+    Fallback sur secret.key si la clé n'est pas encore en DB.
+    """
+    try:
+        if cursor:
+            row = cursor.execute("SELECT valeur FROM config WHERE cle='crypto_key'").fetchone()
+        else:
+            conn = get_local_db()
+            row = conn.execute("SELECT valeur FROM config WHERE cle='crypto_key'").fetchone()
+            conn.close()
+        if row and row[0]:
+            return get_crypto_manager(shared_key=row[0])
+    except Exception as e:
+        logger.warning(f'_get_crypto_shared fallback sur secret.key: {e}')
+    return get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+
 def init_db():
     conn = get_db(); c = conn.cursor()
 
@@ -897,10 +916,25 @@ def init_db():
         logger.warning(f'⚠️ Erreur lors de la création des indices: {e}')
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # CLÉ DE CHIFFREMENT PARTAGÉE (synchronisée via Turso)
+    # Stockée dans config → synchronisée entre toutes les instances
+    # ═══════════════════════════════════════════════════════════════════════════
+    try:
+        existing_crypto_key = c.execute("SELECT valeur FROM config WHERE cle='crypto_key'").fetchone()
+        if not existing_crypto_key:
+            new_crypto_key = secrets.token_hex(32)
+            c.execute("INSERT OR IGNORE INTO config (cle, valeur, date_maj) VALUES (?, ?, ?)",
+                      ('crypto_key', new_crypto_key, datetime.utcnow().isoformat()))
+            conn.commit()
+            logger.info('🔑 Clé de chiffrement partagée générée et stockée dans config')
+    except Exception as e:
+        logger.warning(f'⚠️ Erreur génération crypto_key: {e}')
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # MIGRATION: Chiffrer les identifiants existants en clair
     # ═══════════════════════════════════════════════════════════════════════════
     try:
-        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        crypto = _get_crypto_shared(c)
 
         # Récupérer tous les identifiants avec mot de passe non chiffré
         not_encrypted = c.execute('''
@@ -3462,7 +3496,7 @@ def liste_identifiants():
         stats[cat] = count_result[0] if count_result else 0
 
     conn.close()
-    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+    crypto = _get_crypto_shared()
     for i in ids_:
         if i.get('mot_de_passe'):
             i['mot_de_passe'] = crypto.decrypt(i['mot_de_passe']) or i['mot_de_passe']
@@ -3532,7 +3566,7 @@ def nouvel_identifiant():
             return redirect(request.url)
         conn = get_db()
         # ✅ Chiffrer le mot de passe avant stockage
-        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        crypto = _get_crypto_shared()
         mdp_chiffre = crypto.encrypt(f.get('mot_de_passe','')) if f.get('mot_de_passe') else ''
         conn.execute('''INSERT INTO identifiants (client_id,categorie,nom,login,mot_de_passe,url,
             description,notes,date_expiration,wifi_ssid,wifi_securite,date_creation,date_maj)
@@ -3573,7 +3607,7 @@ def editer_identifiant(id):
             return redirect(request.url)
         _old = row_to_dict(conn.execute('SELECT * FROM identifiants WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
         # ✅ Chiffrer le mot de passe avant mise à jour
-        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        crypto = _get_crypto_shared()
         mdp_chiffre = crypto.encrypt(f.get('mot_de_passe','')) if f.get('mot_de_passe') else ''
         conn.execute('''UPDATE identifiants SET categorie=?,nom=?,login=?,mot_de_passe=?,url=?,
             description=?,notes=?,date_expiration=?,wifi_ssid=?,wifi_securite=?,date_maj=?
@@ -3596,7 +3630,7 @@ def editer_identifiant(id):
     conn.close()
     # ✅ Déchiffrer le mot de passe pour l'affichage
     if ident and ident.get('mot_de_passe'):
-        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        crypto = _get_crypto_shared()
         ident['mot_de_passe'] = crypto.decrypt(ident['mot_de_passe']) or ident['mot_de_passe']
     return render_template('form_identifiant.html', identifiant=ident, action='Modifier',
                            client=client, clients=get_clients(), client_actif_id=cid,
@@ -3624,7 +3658,7 @@ def api_get_mdp(id):
     conn.close()
     if not row: return jsonify({'error': 'not found'}), 404
     # ✅ Déchiffrer le mot de passe
-    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+    crypto = _get_crypto_shared()
     mdp_dechiffre = crypto.decrypt(row[0]) if row[0] else ''
     return jsonify({'mdp': mdp_dechiffre})
 
@@ -6193,7 +6227,7 @@ def popup_identifiant(id):
         return 'Identifiant introuvable', 404
     # ✅ Déchiffrer le mot de passe
     if ident.get('mot_de_passe'):
-        crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        crypto = _get_crypto_shared()
         ident['mot_de_passe'] = crypto.decrypt(ident['mot_de_passe']) or ident['mot_de_passe']
     # Format dates
     today = date.today()
@@ -8775,7 +8809,7 @@ def qrcode_fields():
         return jsonify({'error': 'Asset not found'}), 404
 
     # Decrypt credentials if present
-    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+    crypto = _get_crypto_shared()
     if 'user_password' in asset and asset['user_password']:
         try:
             asset['user_password'] = crypto.decrypt(asset['user_password'])
@@ -8802,7 +8836,6 @@ def qrcode_preview():
     import io
     import tempfile
     from qrcode_helper import create_label_image
-    from crypto_utils import get_crypto_manager
 
     cid = get_client_id()
     if not cid:
@@ -8870,7 +8903,7 @@ def qrcode_preview():
         return jsonify({'error': 'Asset not found'}), 404
 
     # Filter and decrypt
-    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+    crypto = _get_crypto_shared()
     filtered_asset = {'type': asset_type, 'id': asset_id}
 
     for field in selected_fields:
@@ -8936,7 +8969,6 @@ def qrcode_generate():
     import json
     import tempfile
     from qrcode_helper import create_label_image, create_pdf_sheet
-    from crypto_utils import get_crypto_manager
 
     cid = get_client_id()
     if not cid:
@@ -9018,7 +9050,7 @@ def qrcode_generate():
         return jsonify({'error': 'Asset not found'}), 404
 
     # Filter and decrypt
-    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+    crypto = _get_crypto_shared()
     filtered_asset = {'type': asset_type, 'id': asset_id}
 
     for field in selected_fields:
