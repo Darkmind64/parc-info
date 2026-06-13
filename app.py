@@ -9090,4 +9090,45 @@ if __name__ == '__main__':
         threading.Thread(target=_open_browser, daemon=True).start()
 
     debug = os.environ.get('FLASK_DEBUG', '0') == '1'
-    app.run(debug=debug, host='0.0.0.0', port=3456)
+
+    # Configuration pour Docker (Synology, etc.)
+    if os.environ.get('RUNNING_IN_DOCKER'):
+        # Utiliser Gunicorn pour Docker (plus robuste que Werkzeug)
+        try:
+            from gunicorn.app.base import BaseApplication
+
+            class GunicornApp(BaseApplication):
+                def __init__(self, app, options=None):
+                    self.application = app
+                    self.options = options or {}
+                    super().__init__()
+
+                def load_config(self):
+                    for key, value in self.options.items():
+                        if key in self.cfg.settings and value is not None:
+                            self.cfg.set(key.lower(), value)
+
+                def load(self):
+                    return self.application
+
+            # Configuration optimisée pour Synology/Docker
+            options = {
+                'bind': '0.0.0.0:3456',
+                'workers': 2,
+                'worker_class': 'sync',
+                'threads': 2,
+                'timeout': 120,
+                'keepalive': 5,
+                'max_requests': 1000,
+                'max_requests_jitter': 100,
+            }
+            print("🚀 Lancement avec Gunicorn (production)")
+            GunicornApp(app, options).run()
+        except ImportError:
+            # Fallback pour Werkzeug si Gunicorn non disponible
+            print("⚠️  Gunicorn non trouvé, utilisation de Werkzeug (non recommandé en prod)")
+            app.run(debug=debug, host='0.0.0.0', port=3456,
+                   use_reloader=False, threaded=True)
+    else:
+        # Mode développement (ouverture automatique du navigateur)
+        app.run(debug=debug, host='0.0.0.0', port=3456, threaded=True)
