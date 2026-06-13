@@ -1572,8 +1572,9 @@ def _stop_sync_thread():
 
 def _handle_sync_config():
     """Démarre ou arrête le thread de sync selon la config db_type."""
-    # Vérifier si la sync Turso est désactivée (par défaut en Docker)
+    # Vérifier si la sync Turso est explicitement désactivée
     if os.environ.get('DISABLE_TURSO_SYNC', '0') == '1':
+        logger.info('Sync Turso désactivée (DISABLE_TURSO_SYNC=1)')
         _stop_sync_thread()
         return
     if cfg_get('db_type') == 'sync':
@@ -1591,8 +1592,9 @@ def _auto_start_sync():
     global _sync_init_done
     if not _sync_init_done:
         _sync_init_done = True
-        # Vérifier si la sync Turso est désactivée (par défaut en Docker)
+        # Vérifier si la sync Turso est explicitement désactivée
         if os.environ.get('DISABLE_TURSO_SYNC', '0') == '1':
+            logger.info('Sync Turso désactivée (DISABLE_TURSO_SYNC=1)')
             return
         if cfg_get('db_type') == 'sync':
             _start_sync_thread()
@@ -9100,42 +9102,21 @@ if __name__ == '__main__':
 
     # Configuration pour Docker (Synology, etc.)
     if os.environ.get('RUNNING_IN_DOCKER'):
-        # Utiliser Gunicorn pour Docker (plus robuste que Werkzeug)
+        # En Docker, utiliser Werkzeug directement (plus stable que Gunicorn)
+        print("🚀 Lancement avec Werkzeug (multi-threaded)")
+        print(f"   Host: 0.0.0.0:3456")
+        print(f"   Threaded: True")
+        print(f"   Debug: {debug}")
+        print(f"   Reloader: False")
         try:
-            from gunicorn.app.base import BaseApplication
-
-            class GunicornApp(BaseApplication):
-                def __init__(self, app, options=None):
-                    self.application = app
-                    self.options = options or {}
-                    super().__init__()
-
-                def load_config(self):
-                    for key, value in self.options.items():
-                        if key in self.cfg.settings and value is not None:
-                            self.cfg.set(key.lower(), value)
-
-                def load(self):
-                    return self.application
-
-            # Configuration optimisée pour Synology/Docker
-            options = {
-                'bind': '0.0.0.0:3456',
-                'workers': 2,
-                'worker_class': 'sync',
-                'threads': 2,
-                'timeout': 120,
-                'keepalive': 5,
-                'max_requests': 1000,
-                'max_requests_jitter': 100,
-            }
-            print("🚀 Lancement avec Gunicorn (production)")
-            GunicornApp(app, options).run()
-        except ImportError:
-            # Fallback pour Werkzeug si Gunicorn non disponible
-            print("⚠️  Gunicorn non trouvé, utilisation de Werkzeug (non recommandé en prod)")
             app.run(debug=debug, host='0.0.0.0', port=3456,
                    use_reloader=False, threaded=True)
+        except Exception as e:
+            print(f"❌ Erreur Flask: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
     else:
         # Mode développement (ouverture automatique du navigateur)
+        print("🚀 Lancement en mode développement")
         app.run(debug=debug, host='0.0.0.0', port=3456, threaded=True)

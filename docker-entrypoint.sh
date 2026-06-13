@@ -12,7 +12,9 @@ echo "=========================================="
 export FLASK_APP=${FLASK_APP:-app.py}
 export FLASK_DEBUG=${FLASK_DEBUG:-0}
 export RUNNING_IN_DOCKER=1
-export DISABLE_TURSO_SYNC=${DISABLE_TURSO_SYNC:-1}
+# DISABLE_TURSO_SYNC: mettre à 1 pour désactiver la sync Turso (utile si pas de Turso configuré)
+# Par défaut : 0 (sync activée si Turso est configuré dans les réglages de l'app)
+export DISABLE_TURSO_SYNC=${DISABLE_TURSO_SYNC:-0}
 
 # Afficher la configuration
 echo "📋 Configuration:"
