@@ -485,33 +485,81 @@ def port_action_filter(port):
     except: return 'info'
 DB_PATH = DATABASE  # alias conservé pour compatibilité
 
+_crypto_shared_cache = None   # CryptoManager en cache mémoire (valide pour toute la durée du process)
+_crypto_shared_lock  = __import__('threading').Lock()
+
 def _get_crypto_shared(cursor=None):
     """
-    Retourne un CryptoManager avec une clé partagée entre toutes les instances.
+    Retourne un CryptoManager dont la clé est lue DIRECTEMENT depuis Turso
+    (source de vérité unique, indépendante du token utilisé).
 
-    Stratégie (par ordre de priorité) :
-    1. Si Turso est configuré → dérive la clé depuis turso_url+turso_token.
-       Toutes les instances avec les mêmes credentials Turso auront la même clé,
-       sans aucun besoin de synchronisation de la clé elle-même.
-    2. Sinon → fallback sur secret.key (clé locale par instance).
+    - Turso configuré → lit/crée 'crypto_key' dans la table config de Turso.
+      Toutes les instances (même tokens différents) lisent la même base →
+      même clé, déchiffrement garanti entre instances.
+    - Turso non configuré → clé locale (secret.key).
+    - Cache mémoire : l'appel HTTP Turso n'est fait qu'une seule fois par
+      démarrage.
     """
+    global _crypto_shared_cache
+    with _crypto_shared_lock:
+        if _crypto_shared_cache is not None:
+            return _crypto_shared_cache
+
+    mgr = _build_crypto_shared(cursor)
+    if mgr is not None:
+        with _crypto_shared_lock:
+            _crypto_shared_cache = mgr
+        return mgr
+    return get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+
+
+def _build_crypto_shared(cursor=None):
+    """Construit le CryptoManager partagé (appelé une seule fois)."""
     try:
         if cursor:
             url_row   = cursor.execute("SELECT valeur FROM config WHERE cle='turso_url'").fetchone()
             token_row = cursor.execute("SELECT valeur FROM config WHERE cle='turso_token'").fetchone()
         else:
-            conn = get_local_db()
-            url_row   = conn.execute("SELECT valeur FROM config WHERE cle='turso_url'").fetchone()
-            token_row = conn.execute("SELECT valeur FROM config WHERE cle='turso_token'").fetchone()
-            conn.close()
+            _c = get_local_db()
+            url_row   = _c.execute("SELECT valeur FROM config WHERE cle='turso_url'").fetchone()
+            token_row = _c.execute("SELECT valeur FROM config WHERE cle='turso_token'").fetchone()
+            _c.close()
+
         turso_url   = (url_row[0]   or '').strip() if url_row   else ''
         turso_token = (token_row[0] or '').strip() if token_row else ''
-        if turso_url and turso_token:
-            seed = f"{turso_url}:{turso_token}:parcinfo_identifiants"
-            return get_crypto_manager(shared_key=seed)
+
+        if not turso_url or not turso_token:
+            return None  # Turso non configuré → fallback local
+
+        from database import TursoConnection
+        turso = TursoConnection(turso_url, turso_token)
+
+        row = turso.execute("SELECT valeur FROM config WHERE cle='crypto_key'").fetchone()
+        if row and row[0]:
+            key = row[0]
+        else:
+            # Première instance → générer la clé et l'écrire dans Turso
+            key = secrets.token_hex(32)
+            now = datetime.utcnow().isoformat()
+            turso.execute(
+                "INSERT OR REPLACE INTO config (cle, valeur, date_maj) VALUES (?, ?, ?)",
+                ('crypto_key', key, now)
+            )
+            logger.info('🔑 Clé crypto générée et stockée dans Turso')
+
+        logger.info('🔑 Clé crypto chargée depuis Turso (partagée entre instances)')
+        return get_crypto_manager(shared_key=key)
+
     except Exception as e:
-        logger.warning(f'_get_crypto_shared fallback sur secret.key: {e}')
-    return get_crypto_manager(os.path.join(_data_base, 'secret.key'))
+        logger.warning(f'_build_crypto_shared Turso inaccessible ({e}), fallback local')
+        return None
+
+
+def _invalidate_crypto_cache():
+    """Vide le cache crypto (à appeler si les credentials Turso changent)."""
+    global _crypto_shared_cache
+    with _crypto_shared_lock:
+        _crypto_shared_cache = None
 
 def init_db():
     conn = get_db(); c = conn.cursor()
@@ -1448,6 +1496,10 @@ def api_config_save():
         cfg_set_batch(valid_config, auth_user_id=auth_user_id)
 
     cfg_invalidate()
+
+    # Invalider le cache crypto si les credentials Turso ont changé
+    if any(k in valid_config for k in ('turso_url', 'turso_token', 'db_type')):
+        _invalidate_crypto_cache()
 
     # ✓ Optimisation: ne reconfigurer la sync que si db_type a changé
     new_db_type = cfg_get('db_type', auth_user_id=auth_user_id)
