@@ -1,9 +1,9 @@
 {
-  "version": "2.6.6",
+  "version": "2.6.12",
   "release_date": "2026-06-13T12:00:00.000000",
   "github_repo": "darkmind64/parc_info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.6.6/installer.exe"
+    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.6.12/installer.exe"
   },
   "notes": {
     "windows_installer": "Standalone installer - Stabilité Docker améliorée (Werkzeug, sync Turso).",
@@ -15,5 +15,5 @@
   "file_sizes": {
     "windows_installer_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.6.6"
+  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.6.12"
 }

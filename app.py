@@ -84,10 +84,11 @@ from cache_utils    import get_cache_manager, cache_result, invalidate_cache_pat
 from search_utils   import search_global, search_autocomplete
 from app_update_routes import register_update_routes
 
-# Version de l'application (lue une fois au démarrage depuis version.json)
+# Version de l'application (lue depuis version.json dans _resource_base)
+# _resource_base = _MEIPASS en mode PyInstaller, dossier source sinon
 def _load_app_version():
     try:
-        _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'version.json')
+        _vf = os.path.join(_resource_base, 'version.json')
         with open(_vf, 'r', encoding='utf-8') as _f:
             return json.load(_f).get('version', '')
     except Exception:
