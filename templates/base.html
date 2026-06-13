@@ -169,6 +169,11 @@
             background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent);
             animation: blink 2s infinite;
         }
+        .nav-brand-version {
+            font-size: .6rem; font-family: 'Share Tech Mono', monospace;
+            color: var(--text-muted); letter-spacing: 1px;
+            opacity: .7; margin-left: -.2rem;
+        }
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
         nav a {
             color: var(--text-secondary); text-decoration: none; padding: 0 0.9rem; height: 50px;
@@ -733,7 +738,7 @@
 {% set contrats_active = ep in ['liste_contrats','nouveau_contrat','editer_contrat','detail_contrat'] %}
 {% set secu_active = ep in ['liste_identifiants','nouvel_identifiant','editer_identifiant','liste_utilisateurs','nouvel_utilisateur','editer_utilisateur','droits_utilisateur'] %}
 <nav>
-    <a href="/" class="nav-brand">PARCINFO</a>
+    <a href="/" class="nav-brand">PARCINFO{% if app_version %}<span class="nav-brand-version">v{{ app_version }}</span>{% endif %}</a>
 
     <!-- SEARCH BAR -->
     <div style="display:flex;align-items:center;margin-left:1rem;margin-right:1rem;flex:0 0 auto;">

@@ -84,6 +84,16 @@ from cache_utils    import get_cache_manager, cache_result, invalidate_cache_pat
 from search_utils   import search_global, search_autocomplete
 from app_update_routes import register_update_routes
 
+# Version de l'application (lue une fois au démarrage depuis version.json)
+def _load_app_version():
+    try:
+        _vf = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'version.json')
+        with open(_vf, 'r', encoding='utf-8') as _f:
+            return json.load(_f).get('version', '')
+    except Exception:
+        return ''
+APP_VERSION = _load_app_version()
+
 # ─── HELPER: Retry pour requêtes DB verrouillées ─────────────────────────────
 def retry_db_query(query_func, max_retries=5):
     """
@@ -1417,6 +1427,7 @@ def inject_cfg():
         'type_css_defaults': _TYPE_CSS_DEFAULTS,
         'type_badge_defaults': _TYPE_BADGE_DEFAULTS,
         'type_badges': type_badges,
+        'app_version': APP_VERSION,
     }
 
 # ─── REGISTER UPDATE NOTIFICATION ROUTES ──────────────────────────────────────
