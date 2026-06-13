@@ -1572,8 +1572,9 @@ def _stop_sync_thread():
 
 def _handle_sync_config():
     """Démarre ou arrête le thread de sync selon la config db_type."""
-    # Vérifier si la sync Turso est désactivée (par défaut en Docker)
+    # Vérifier si la sync Turso est explicitement désactivée
     if os.environ.get('DISABLE_TURSO_SYNC', '0') == '1':
+        logger.info('Sync Turso désactivée (DISABLE_TURSO_SYNC=1)')
         _stop_sync_thread()
         return
     if cfg_get('db_type') == 'sync':
@@ -1591,8 +1592,9 @@ def _auto_start_sync():
     global _sync_init_done
     if not _sync_init_done:
         _sync_init_done = True
-        # Vérifier si la sync Turso est désactivée (par défaut en Docker)
+        # Vérifier si la sync Turso est explicitement désactivée
         if os.environ.get('DISABLE_TURSO_SYNC', '0') == '1':
+            logger.info('Sync Turso désactivée (DISABLE_TURSO_SYNC=1)')
             return
         if cfg_get('db_type') == 'sync':
             _start_sync_thread()

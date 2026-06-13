@@ -85,7 +85,9 @@
       "Bash(grep -n \"@app.route\\('/$\\\\|@app.route\\('/api/\\\\|def index\\\\|def home\" app.py)",
       "Bash(gh release create v2.6.3 --title 'Version 2.6.3 - Turso Sync Fix' --notes ' *)",
       "Bash(gh release create v2.6.4 --title 'Version 2.6.4 - Gunicorn Worker Fix' --notes ' *)",
-      "Bash(git commit -m 'fix: Use Werkzeug in Docker instead of Gunicorn \\(simpler, more stable\\) *)"
+      "Bash(git commit -m 'fix: Use Werkzeug in Docker instead of Gunicorn \\(simpler, more stable\\) *)",
+      "Bash(gh release create v2.6.5 --title 'Version 2.6.5 - Werkzeug for Docker/Synology' --notes ' *)",
+      "Bash(git commit -m 'fix: Désactiver la synchronisation Turso par défaut en Docker \\(#5\\) *)"
     ]
   }
 }
