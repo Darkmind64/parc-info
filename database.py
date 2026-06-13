@@ -705,10 +705,42 @@ def _sync_one_table(tbl: str, local, turso, deleted_ids: set = None) -> tuple:
                 elif td > ld:
                     pull_list.append(tr)
     else:
-        # Tables sans colonne id : INSERT OR IGNORE
-        sql_replace = f"INSERT OR IGNORE INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
-        push_list = [list(r) for r in local_raw]
-        pull_list = [list(r) for r in turso_raw]
+        # Tables sans colonne 'id' (ex: config avec cle TEXT PRIMARY KEY)
+        # Résolution par date_maj si disponible, sinon INSERT OR IGNORE
+        pk_col = None
+        try:
+            pk_info = local.execute(f"PRAGMA table_info([{tbl}])").fetchall()
+            for ci in pk_info:
+                if ci[5] == 1:   # ci[5] = pk flag
+                    pk_col = ci[1]
+                    break
+        except Exception:
+            pass
+
+        if pk_col and pk_col in cols and date_col:
+            pk_idx   = cols.index(pk_col)
+            date_idx = cols.index(date_col)
+            local_map = {r[pk_idx]: list(r) for r in local_raw}
+            turso_map = {r[pk_idx]: list(r) for r in turso_raw}
+            for k in set(local_map) | set(turso_map):
+                lr = local_map.get(k)
+                tr = turso_map.get(k)
+                if lr is not None and tr is None:
+                    push_list.append(lr)
+                elif tr is not None and lr is None:
+                    pull_list.append(tr)
+                else:
+                    ld = str(lr[date_idx] or '')
+                    td = str(tr[date_idx] or '')
+                    if ld >= td:
+                        push_list.append(lr)   # local plus récent → push
+                    else:
+                        pull_list.append(tr)   # turso plus récent → pull
+        else:
+            # Pas de PK identifiable ou pas de date_maj → INSERT OR IGNORE
+            sql_replace = f"INSERT OR IGNORE INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
+            push_list = [list(r) for r in local_raw]
+            pull_list = [list(r) for r in turso_raw]
 
     # ── Push local → Turso (upsert) ──────────────────────────────────────
     if push_list:

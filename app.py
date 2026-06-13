@@ -487,19 +487,28 @@ DB_PATH = DATABASE  # alias conservé pour compatibilité
 
 def _get_crypto_shared(cursor=None):
     """
-    Retourne un CryptoManager utilisant la clé partagée stockée dans la table config.
-    Cette clé est synchronisée via Turso → toutes les instances la partagent.
-    Fallback sur secret.key si la clé n'est pas encore en DB.
+    Retourne un CryptoManager avec une clé partagée entre toutes les instances.
+
+    Stratégie (par ordre de priorité) :
+    1. Si Turso est configuré → dérive la clé depuis turso_url+turso_token.
+       Toutes les instances avec les mêmes credentials Turso auront la même clé,
+       sans aucun besoin de synchronisation de la clé elle-même.
+    2. Sinon → fallback sur secret.key (clé locale par instance).
     """
     try:
         if cursor:
-            row = cursor.execute("SELECT valeur FROM config WHERE cle='crypto_key'").fetchone()
+            url_row   = cursor.execute("SELECT valeur FROM config WHERE cle='turso_url'").fetchone()
+            token_row = cursor.execute("SELECT valeur FROM config WHERE cle='turso_token'").fetchone()
         else:
             conn = get_local_db()
-            row = conn.execute("SELECT valeur FROM config WHERE cle='crypto_key'").fetchone()
+            url_row   = conn.execute("SELECT valeur FROM config WHERE cle='turso_url'").fetchone()
+            token_row = conn.execute("SELECT valeur FROM config WHERE cle='turso_token'").fetchone()
             conn.close()
-        if row and row[0]:
-            return get_crypto_manager(shared_key=row[0])
+        turso_url   = (url_row[0]   or '').strip() if url_row   else ''
+        turso_token = (token_row[0] or '').strip() if token_row else ''
+        if turso_url and turso_token:
+            seed = f"{turso_url}:{turso_token}:parcinfo_identifiants"
+            return get_crypto_manager(shared_key=seed)
     except Exception as e:
         logger.warning(f'_get_crypto_shared fallback sur secret.key: {e}')
     return get_crypto_manager(os.path.join(_data_base, 'secret.key'))
@@ -917,19 +926,6 @@ def init_db():
 
     # ═══════════════════════════════════════════════════════════════════════════
     # CLÉ DE CHIFFREMENT PARTAGÉE (synchronisée via Turso)
-    # Stockée dans config → synchronisée entre toutes les instances
-    # ═══════════════════════════════════════════════════════════════════════════
-    try:
-        existing_crypto_key = c.execute("SELECT valeur FROM config WHERE cle='crypto_key'").fetchone()
-        if not existing_crypto_key:
-            new_crypto_key = secrets.token_hex(32)
-            c.execute("INSERT OR IGNORE INTO config (cle, valeur, date_maj) VALUES (?, ?, ?)",
-                      ('crypto_key', new_crypto_key, datetime.utcnow().isoformat()))
-            conn.commit()
-            logger.info('🔑 Clé de chiffrement partagée générée et stockée dans config')
-    except Exception as e:
-        logger.warning(f'⚠️ Erreur génération crypto_key: {e}')
-
     # ═══════════════════════════════════════════════════════════════════════════
     # MIGRATION: Chiffrer les identifiants existants en clair
     # ═══════════════════════════════════════════════════════════════════════════
