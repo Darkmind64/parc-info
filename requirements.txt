@@ -6,3 +6,4 @@ reportlab>=4.0.0
 cryptography>=41.0.0
 flask-compress>=1.14.0
 qrcode[pil]>=8.0
+gunicorn>=21.2.0
