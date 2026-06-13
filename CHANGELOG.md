@@ -1,5 +1,64 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.6] - 2026-06-13 🔄
+
+### 🔧 CORRECTIONS
+
+#### 🔗 Sync Turso réactivée par défaut
+- ✅ `DISABLE_TURSO_SYNC` revient à `0` par défaut (était `1` depuis v2.6.3)
+- ✅ La sync est active si Turso est configuré dans les réglages de l'app
+- ✅ Pour désactiver : ajouter `DISABLE_TURSO_SYNC=1` à l'environnement Docker
+
+### 📝 NOTES
+- Nécessite configuration Turso dans **Outils → Base de données** pour que la sync fonctionne
+- Sans Turso configuré, l'app fonctionne normalement en mode local
+
+---
+
+## [2.6.5] - 2026-06-13 🔧
+
+### 🔧 CORRECTIONS
+
+#### 🚀 Remplacement Gunicorn → Werkzeug (Docker)
+- ✅ Suppression de Gunicorn — workers crashaient avec code 255 sur Synology
+- ✅ Werkzeug `threaded=True, use_reloader=False` : stable et performant
+- ✅ Démarrage plus rapide et fiable sur NAS ARM/x86
+- ✅ Gunicorn reste dans `requirements.txt` mais n'est plus utilisé
+
+---
+
+## [2.6.4] - 2026-06-13 🔧
+
+### 🔧 CORRECTIONS
+
+#### ⚙️ Gunicorn worker class gthread
+- ✅ Tentative de correction crash Gunicorn (code 255) avec `worker_class=gthread`
+- ⚠️ Cette approche a été remplacée en v2.6.5 (Werkzeug)
+
+---
+
+## [2.6.3] - 2026-06-12 🔧
+
+### 🔧 CORRECTIONS
+
+#### 🌐 Résolution DNS au démarrage
+- ✅ `DISABLE_TURSO_SYNC=1` par défaut pour éviter erreurs DNS si Turso non configuré
+- ✅ Démarrage Docker propre sans tentatives de connexion Turso échouées
+- ⚠️ Cette valeur a été inversée en v2.6.6
+
+---
+
+## [2.6.2] - 2026-06-12 🔧
+
+### 🔧 CORRECTIONS
+
+#### 🛠️ Ajout Gunicorn pour Synology
+- ✅ Gunicorn ajouté comme serveur WSGI pour Docker
+- ✅ Meilleure gestion multi-connexions
+- ⚠️ Problèmes de crash workers sur Synology — remplacé par Werkzeug en v2.6.5
+
+---
+
 ## [2.6.1] - 2026-06-12 🔧
 
 ### 🔄 CHANGEMENTS
