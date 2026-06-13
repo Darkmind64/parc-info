@@ -3462,7 +3462,10 @@ def liste_identifiants():
         stats[cat] = count_result[0] if count_result else 0
 
     conn.close()
+    crypto = get_crypto_manager(os.path.join(_data_base, 'secret.key'))
     for i in ids_:
+        if i.get('mot_de_passe'):
+            i['mot_de_passe'] = crypto.decrypt(i['mot_de_passe']) or i['mot_de_passe']
         if i.get('date_expiration'):
             try:
                 d = date.fromisoformat(i['date_expiration'])
