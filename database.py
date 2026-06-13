@@ -201,12 +201,13 @@ class _TCursor:
 class TursoConnection:
     """Connexion Turso cloud via l'API HTTP pipeline libSQL."""
 
-    def __init__(self, url: str, token: str):
+    def __init__(self, url: str, token: str, timeout: int = 15):
         # Turso URLs peuvent être libsql:// ou https:// — l'API HTTP ne supporte que https://
         url = url.rstrip('/')
         url = url.replace('libsql://', 'https://', 1)
-        self._url    = url
-        self._token  = token
+        self._url     = url
+        self._token   = token
+        self._timeout = timeout
         self.lastrowid  = None
         self.rowcount   = 0
 
@@ -224,7 +225,7 @@ class TursoConnection:
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
             data = _json.loads(resp.read())
         results = data.get("results", [])
         # Last item is the "close" response — ignore it
@@ -632,6 +633,9 @@ def _bidirectional_sync(local, turso) -> tuple:
             pass
 
 
+_BLOB_SYNC_EXCLUDE = frozenset({'contenu_blob'})
+
+
 def _sync_one_table(tbl: str, local, turso, deleted_ids: set = None) -> tuple:
     """
     Synchronise une table bidirectionnellement en tenant compte du journal
@@ -641,19 +645,35 @@ def _sync_one_table(tbl: str, local, turso, deleted_ids: set = None) -> tuple:
     if deleted_ids is None:
         deleted_ids = set()
 
-    cols = _get_cols(local, tbl)
-    if not cols:
-        cols = _get_cols(turso, tbl)
-    if not cols:
+    all_cols = _get_cols(local, tbl)
+    if not all_cols:
+        all_cols = _get_cols(turso, tbl)
+    if not all_cols:
         return 0, 0
 
-    has_id   = 'id'      in cols
-    date_col = next((c for c in ('date_maj', 'date') if c in cols), None)
+    # Exclure les colonnes BLOB volumineuses du sync DB (gérées par uploads_sync.py).
+    # Sans ça, chaque cycle lit tous les blobs depuis Turso → timeout HTTP sur gros fichiers.
+    blob_excluded = [c for c in all_cols if c in _BLOB_SYNC_EXCLUDE]
+    cols = [c for c in all_cols if c not in _BLOB_SYNC_EXCLUDE]
+
+    has_id   = 'id' in cols
+    # Ajouter date_upload à la liste des colonnes de datation reconnues
+    date_col = next((c for c in ('date_maj', 'date_upload', 'date') if c in cols), None)
 
     col_str      = ', '.join(f'[{c}]' for c in cols)
     col_list_br  = ', '.join(f'[{c}]' for c in cols)
     placeholders = ', '.join(['?'] * len(cols))
-    sql_replace  = f"INSERT OR REPLACE INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
+
+    # ON CONFLICT DO UPDATE pour préserver les BLOBs existants en local
+    if has_id and blob_excluded:
+        non_id_cols = [c for c in cols if c != 'id']
+        set_clause  = ', '.join(f'[{c}]=excluded.[{c}]' for c in non_id_cols)
+        sql_replace = (
+            f"INSERT INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
+            f" ON CONFLICT([id]) DO UPDATE SET {set_clause}"
+        )
+    else:
+        sql_replace = f"INSERT OR REPLACE INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
 
     # ── Lire les deux côtés ───────────────────────────────────────────────
     local_raw = local.execute(f"SELECT {col_str} FROM [{tbl}]").fetchall()

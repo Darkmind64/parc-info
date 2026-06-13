@@ -29,10 +29,11 @@ from datetime import datetime
 logger = logging.getLogger('parcinfo')
 
 
-def _get_turso_connection():
+def _get_turso_connection(timeout: int = 60):
     """
     Retourne une TursoConnection si url+token sont configurés, None sinon.
     Fonctionne pour tous les modes (local, turso, sync).
+    Timeout plus long (60s) que le sync DB standard (15s) pour les transferts de BLOBs.
     """
     try:
         from config_helpers import cfg_get
@@ -40,7 +41,7 @@ def _get_turso_connection():
         token = cfg_get('turso_token', '').strip()
         if url and token:
             from database import TursoConnection
-            return TursoConnection(url, token)
+            return TursoConnection(url, token, timeout=timeout)
     except Exception as e:
         logger.warning(f"uploads_sync: impossible de créer la connexion Turso : {e}")
     return None
@@ -116,46 +117,70 @@ def _push_documents_to_turso(table_name: str, upload_folder: str) -> None:
 def _pull_documents_from_turso(table_name: str, upload_folder: str) -> None:
     """
     Pull Turso → local : télécharge depuis Turso les fichiers absents sur cette machine.
+
+    Fetch en deux temps pour éviter de télécharger tous les BLOBs en une seule
+    requête HTTP (timeout inévitable si plusieurs gros fichiers existent dans Turso).
     """
     try:
         turso = _get_turso_connection()
         if not turso:
             return
 
-        remote_docs = turso.execute(f'''
-            SELECT id, nom_fichier, contenu_blob FROM {table_name}
+        # Étape 1 : récupérer uniquement les IDs + noms (pas les BLOBs)
+        meta_rows = turso.execute(f'''
+            SELECT id, nom_fichier FROM {table_name}
             WHERE contenu_blob IS NOT NULL
+              AND nom_fichier IS NOT NULL AND nom_fichier != ''
         ''').fetchall()
 
+        if not meta_rows:
+            return
+
+        os.makedirs(upload_folder, exist_ok=True)
         count = 0
 
-        for row in remote_docs:
-            nom_fichier = row['nom_fichier']
-            blob        = row['contenu_blob']
+        for meta in meta_rows:
+            doc_id      = meta[0]        # id
+            nom_fichier = meta[1]        # nom_fichier
 
-            if not nom_fichier or not blob:
+            if not nom_fichier:
                 continue
 
             local_path = os.path.join(upload_folder, nom_fichier)
             if os.path.exists(local_path):
                 continue  # déjà présent localement
 
+            # Étape 2 : télécharger le BLOB individuellement
             try:
-                os.makedirs(upload_folder, exist_ok=True)
+                blob_row = turso.execute(
+                    f'SELECT contenu_blob FROM {table_name} WHERE id=?', (doc_id,)
+                ).fetchone()
+                if not blob_row:
+                    continue
+                blob = blob_row[0]
+                if not blob:
+                    continue
+
                 with open(local_path, 'wb') as f:
                     f.write(blob)
                 count += 1
                 logger.debug(
-                    f"pull {table_name} id={row['id']}: {nom_fichier} "
+                    f"pull {table_name} id={doc_id}: {nom_fichier} "
                     f"({len(blob):,} octets) ← Turso"
                 )
+            except urllib.error.HTTPError as e:
+                body = e.read().decode('utf-8', errors='replace')
+                logger.warning(
+                    f"pull {table_name} id={doc_id} ({nom_fichier}): "
+                    f"HTTP {e.code} — {body[:300]}"
+                )
             except Exception as e:
-                logger.warning(f"pull {table_name} id={row['id']}: ERREUR écriture {local_path} : {e}")
+                logger.warning(f"pull {table_name} id={doc_id} ({nom_fichier}): ERREUR : {e}")
 
         if count:
             logger.info(f"uploads_sync pull: {count} fichier(s) récupéré(s) depuis Turso ({table_name})")
 
-    except Exception as e:
+    except Exception:
         logger.exception(f"_pull_documents_from_turso({table_name}) a échoué")
 
 
