@@ -9122,15 +9122,25 @@ if __name__ == '__main__':
             options = {
                 'bind': '0.0.0.0:3456',
                 'workers': 2,
-                'worker_class': 'sync',
-                'threads': 2,
+                'worker_class': 'gthread',  # gthread au lieu de sync
+                'threads': 4,                # 4 threads
                 'timeout': 120,
                 'keepalive': 5,
                 'max_requests': 1000,
                 'max_requests_jitter': 100,
+                'loglevel': 'debug',         # Debug logging
+                'access_log_format': '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s',
+                'error_logfile': '-',        # Log to stdout
             }
-            print("🚀 Lancement avec Gunicorn (production)")
-            GunicornApp(app, options).run()
+            print("🚀 Lancement avec Gunicorn (production - gthread)")
+            print(f"   Workers: 2, Threads: 4 par worker = 8 connexions concurrentes")
+            try:
+                GunicornApp(app, options).run()
+            except Exception as e:
+                print(f"❌ Erreur Gunicorn: {e}")
+                print("🔄 Fallback vers Werkzeug (dev server)")
+                app.run(debug=debug, host='0.0.0.0', port=3456,
+                       use_reloader=False, threaded=True)
         except ImportError:
             # Fallback pour Werkzeug si Gunicorn non disponible
             print("⚠️  Gunicorn non trouvé, utilisation de Werkzeug (non recommandé en prod)")
