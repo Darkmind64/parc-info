@@ -2,7 +2,8 @@
 database.py — Connexion SQLite / Turso et utilitaires bas niveau.
 DATABASE et UPLOAD_FOLDER sont initialisés par app.py au démarrage.
 """
-import sqlite3, threading, json as _json, urllib.request, urllib.error, base64
+import sqlite3, threading, json as _json, urllib.request, urllib.error, base64, http.client
+from urllib.parse import urlparse
 
 # Chemins configurés au démarrage par app.py (ou le launcher)
 DATABASE:     str = ''
@@ -199,7 +200,12 @@ class _TCursor:
 # ─── CONNEXION TURSO ─────────────────────────────────────────────────────────
 
 class TursoConnection:
-    """Connexion Turso cloud via l'API HTTP pipeline libSQL."""
+    """Connexion Turso cloud via l'API HTTP pipeline libSQL.
+
+    Utilise une connexion HTTPS persistante (keep-alive) pour éviter une
+    résolution DNS par requête — important sur Synology où les requêtes DNS
+    répétées depuis Docker perturbent le réseau hôte (Hyper Backup, etc).
+    """
 
     def __init__(self, url: str, token: str, timeout: int = 15):
         # Turso URLs peuvent être libsql:// ou https:// — l'API HTTP ne supporte que https://
@@ -208,25 +214,46 @@ class TursoConnection:
         self._url     = url
         self._token   = token
         self._timeout = timeout
+        parsed        = urlparse(url)
+        self._host    = parsed.netloc
+        self._conn: http.client.HTTPSConnection | None = None
         self.lastrowid  = None
         self.rowcount   = 0
 
+    def _get_conn(self) -> http.client.HTTPSConnection:
+        """Retourne la connexion persistante, en la recréant si nécessaire."""
+        if self._conn is None:
+            self._conn = http.client.HTTPSConnection(self._host, timeout=self._timeout)
+        return self._conn
+
+    def close(self):
+        """Ferme la connexion persistante."""
+        if self._conn:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
     def _pipeline(self, statements: list) -> list:
-        """Envoie une liste de requêtes en un seul appel HTTP. Retourne la liste des résultats."""
+        """Envoie une liste de requêtes en un seul appel HTTP persistant."""
         payload = _json.dumps({
             "requests": statements + [{"type": "close"}]
         }).encode()
-        req = urllib.request.Request(
-            f"{self._url}/v2/pipeline",
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {self._token}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Content-Type": "application/json",
+            "Connection": "keep-alive",
+        }
+        conn = self._get_conn()
+        try:
+            conn.request("POST", "/v2/pipeline", body=payload, headers=headers)
+            resp = conn.getresponse()
             data = _json.loads(resp.read())
+        except Exception:
+            # Connexion brisée → reset pour le prochain appel
+            self.close()
+            raise
         results = data.get("results", [])
         # Last item is the "close" response — ignore it
         return results[: len(statements)]

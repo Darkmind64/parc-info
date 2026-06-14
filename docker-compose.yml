@@ -18,6 +18,11 @@ services:
       # Synology : /volume1/docker/parcinfo
       # Linux    : /opt/parcinfo/data
       - /volume1/docker/parcinfo:/data
+    # DNS externes pour éviter de saturer le resolver Docker embarqué (127.0.0.11)
+    # sur Synology, les résolutions DNS répétées peuvent perturber Hyper Backup.
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     logging:
       driver: json-file
       options:

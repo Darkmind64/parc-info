@@ -1,5 +1,22 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.16] - 2026-06-14 🔧
+
+### 🔧 CORRECTIONS
+
+#### 🌐 Fix perturbation réseau Docker sur Synology (Hyper Backup)
+- ✅ Connexion Turso partagée dans `uploads_sync` : 1 seule résolution DNS par cycle (vs 6 avant)
+- ✅ `TursoConnection` HTTP keep-alive : la socket TCP reste ouverte entre les requêtes
+- ✅ `dns: [8.8.8.8, 1.1.1.1]` dans `docker-compose.yml` : contourne le resolver Docker embarqué qui saturait sur Synology
+- ✅ Fix sync uploads : exclusion `contenu_blob` du sync DB (évite timeout 15s), pull blob par blob, reconnaissance de `date_upload`
+- ✅ `version.json` inclus dans le build PyInstaller (fix numéro de version sous Windows)
+
+### 📝 NOTES
+- Sur Synology, le DNS Docker embarqué (`127.0.0.11`) pouvait saturer sous 6 requêtes DNS consécutives, faisant perdre la connexion à Hyper Backup. Cette version réduit à 1 résolution DNS par cycle de 60s.
+- Si tu utilises un `docker-compose.yml` personnalisé, ajoute `dns: [8.8.8.8, 1.1.1.1]` dans le service `parcinfo`.
+
+---
+
 ## [2.6.6] - 2026-06-13 🔄
 
 ### 🔧 CORRECTIONS

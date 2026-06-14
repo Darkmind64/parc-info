@@ -31,9 +31,11 @@ logger = logging.getLogger('parcinfo')
 
 def _get_turso_connection(timeout: int = 60):
     """
-    Retourne une TursoConnection si url+token sont configurés, None sinon.
-    Fonctionne pour tous les modes (local, turso, sync).
-    Timeout plus long (60s) que le sync DB standard (15s) pour les transferts de BLOBs.
+    Retourne une TursoConnection persistante (keep-alive) si Turso est configuré.
+    Timeout 60s pour les transferts de BLOBs (vs 15s pour le sync DB).
+    La connexion HTTPS est réutilisée entre les requêtes → 1 seule résolution DNS
+    par cycle au lieu d'une par table (6+), ce qui évite de saturer le DNS Docker
+    sur Synology et d'interférer avec Hyper Backup.
     """
     try:
         from config_helpers import cfg_get
@@ -47,7 +49,7 @@ def _get_turso_connection(timeout: int = 60):
     return None
 
 
-def _push_documents_to_turso(table_name: str, upload_folder: str) -> None:
+def _push_documents_to_turso(table_name: str, upload_folder: str, turso=None) -> None:
     """
     Push local → Turso : pour chaque record Turso avec contenu_blob=NULL,
     si le fichier physique existe sur CETTE machine → lit et envoie le BLOB.
@@ -55,9 +57,13 @@ def _push_documents_to_turso(table_name: str, upload_folder: str) -> None:
     Note : interroge Turso directement (pas la SQLite locale) car :
     - mode 'turso'  : l'INSERT est allé dans Turso, local SQLite est vide
     - mode 'sync'   : sync_once() a déjà poussé le record vers Turso avant l'appel
+
+    turso : connexion partagée optionnelle (évite de créer une connexion par table)
     """
+    _own_conn = turso is None
     try:
-        turso = _get_turso_connection()
+        if _own_conn:
+            turso = _get_turso_connection()
         if not turso:
             return  # Turso non configuré → rien à faire
 
@@ -112,17 +118,24 @@ def _push_documents_to_turso(table_name: str, upload_folder: str) -> None:
 
     except Exception as e:
         logger.exception(f"_push_documents_to_turso({table_name}) a échoué")
+    finally:
+        if _own_conn and turso:
+            turso.close()
 
 
-def _pull_documents_from_turso(table_name: str, upload_folder: str) -> None:
+def _pull_documents_from_turso(table_name: str, upload_folder: str, turso=None) -> None:
     """
     Pull Turso → local : télécharge depuis Turso les fichiers absents sur cette machine.
 
     Fetch en deux temps pour éviter de télécharger tous les BLOBs en une seule
     requête HTTP (timeout inévitable si plusieurs gros fichiers existent dans Turso).
+
+    turso : connexion partagée optionnelle (évite de créer une connexion par table)
     """
+    _own_conn = turso is None
     try:
-        turso = _get_turso_connection()
+        if _own_conn:
+            turso = _get_turso_connection()
         if not turso:
             return
 
@@ -182,6 +195,9 @@ def _pull_documents_from_turso(table_name: str, upload_folder: str) -> None:
 
     except Exception:
         logger.exception(f"_pull_documents_from_turso({table_name}) a échoué")
+    finally:
+        if _own_conn and turso:
+            turso.close()
 
 
 def _cleanup_orphaned_files(upload_folder: str) -> None:
@@ -250,7 +266,13 @@ def _cleanup_orphaned_files(upload_folder: str) -> None:
 
 
 def sync_uploads() -> None:
-    """Cycle complet push + pull + cleanup pour toutes les tables documents."""
+    """Cycle complet push + pull + cleanup pour toutes les tables documents.
+
+    Une seule TursoConnection est créée et partagée entre toutes les opérations
+    pour éviter de multiples résolutions DNS consécutives (6 par cycle).
+    Sur Synology sous Docker, les DNS lookups répétés saturent le resolver
+    embarqué et perturbent les autres services réseau (ex. Hyper Backup).
+    """
     from database import UPLOAD_FOLDER
 
     tables = [
@@ -259,9 +281,16 @@ def sync_uploads() -> None:
         'documents_peripheriques',
     ]
 
-    for table in tables:
-        _push_documents_to_turso(table, UPLOAD_FOLDER)
-        _pull_documents_from_turso(table, UPLOAD_FOLDER)
+    # Créer une seule connexion partagée pour tout le cycle
+    turso = _get_turso_connection()
+
+    try:
+        for table in tables:
+            _push_documents_to_turso(table, UPLOAD_FOLDER, turso=turso)
+            _pull_documents_from_turso(table, UPLOAD_FOLDER, turso=turso)
+    finally:
+        if turso:
+            turso.close()
 
     # Supprimer les fichiers physiques dont le record a été supprimé
     _cleanup_orphaned_files(UPLOAD_FOLDER)
