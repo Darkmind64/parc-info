@@ -1,0 +1,4 @@
+# Forcer LF pour tous les scripts shell (évite les CRLF Windows qui cassent Docker)
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
+Dockerfile text eol=lf

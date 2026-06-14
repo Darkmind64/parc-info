@@ -23,9 +23,9 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Copier le code de l'application
 COPY . .
 
-# Copier l'entrypoint
+# Copier l'entrypoint et forcer les fins de ligne LF (évite les CRLF Windows)
 COPY docker-entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Créer les répertoires de données
 RUN mkdir -p /data/uploads /data/backups /app/logs && \
