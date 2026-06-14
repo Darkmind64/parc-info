@@ -1,5 +1,16 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.17] - 2026-06-14 🔧
+
+### 🔧 CORRECTIONS
+
+#### 🔗 Fix sync Turso : toutes les tables bloquées en "Request-sent"
+- ✅ `TursoConnection.close()` avait un stub `pass` en bas de classe qui **écrasait** l'implémentation réelle (Python prend la dernière définition)
+- ✅ Résultat : sur toute erreur réseau, la connexion restait en état "Request-sent", et toutes les tables suivantes levaient `CannotSendRequest` avec le message "Request-sent"
+- ✅ Fix : suppression du stub redondant — la vraie méthode `close()` (reset de la socket HTTPS) est maintenant utilisée
+
+---
+
 ## [2.6.16] - 2026-06-14 🔧
 
 ### 🔧 CORRECTIONS

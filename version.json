@@ -1,13 +1,13 @@
 {
-  "version": "2.6.16",
-  "release_date": "2026-06-14T10:00:00.000000",
+  "version": "2.6.17",
+  "release_date": "2026-06-14T12:00:00.000000",
   "github_repo": "darkmind64/parc_info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.6.16/installer.exe"
+    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.6.17/installer.exe"
   },
   "notes": {
-    "windows_installer": "Standalone installer - Fix DNS Docker Synology.",
-    "new_features": "Fix perturbation réseau Docker sur Synology : connexion Turso partagée (1 DNS lookup/cycle vs 6), DNS externes 8.8.8.8/1.1.1.1 dans docker-compose"
+    "windows_installer": "Standalone installer - Fix sync Turso : toutes tables Request-sent.",
+    "new_features": "Fix TursoConnection.close() écrasé par un stub pass → connexion bloquée en Request-sent sur toute erreur réseau"
   },
   "checksums": {
     "windows_installer_sha256": "PENDING_BUILD"
@@ -15,5 +15,5 @@
   "file_sizes": {
     "windows_installer_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.6.16"
+  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.6.17"
 }

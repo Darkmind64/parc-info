@@ -315,7 +315,6 @@ class TursoConnection:
             self.execute(sql, params)
 
     def commit(self): pass   # auto-commit en Turso HTTP
-    def close(self):  pass
 
     def row_factory(self, *_): pass   # compat shim (non utilisé)
 
