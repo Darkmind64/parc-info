@@ -493,7 +493,7 @@ def sync_once() -> tuple:
 
 
 def _ensure_turso_schema(local, turso):
-    """Crée les tables manquantes et ajoute les colonnes manquantes dans Turso."""
+    """Crée les tables, colonnes et triggers manquants dans Turso."""
     cur = local.execute(
         "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     for row in cur.fetchall():
@@ -524,6 +524,26 @@ def _ensure_turso_schema(local, turso):
                         pass
         except Exception:
             pass
+
+    # 3. Répliquer les triggers _trg_journal_* sur Turso : indispensable pour que
+    #    Turso tienne son propre _sync_journal, alimenté par les écritures de
+    #    TOUTES les instances (pas seulement celle qui exécute ce cycle de sync).
+    #    C'est ce journal Turso que chaque instance relit ensuite (pull) pour
+    #    récupérer les changements faits ailleurs.
+    try:
+        trig_cur = local.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='trigger' AND name LIKE '_trg_journal_%'")
+        for row in trig_cur.fetchall():
+            ddl = row[1]
+            if not ddl:
+                continue
+            safe_ddl = ddl.replace('CREATE TRIGGER', 'CREATE TRIGGER IF NOT EXISTS', 1)
+            try:
+                turso.execute(safe_ddl)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 def _get_cols(conn, tbl: str) -> list:
@@ -556,51 +576,12 @@ def _get_user_tables(conn) -> list:
     return [r[0] for r in cur.fetchall()]
 
 
-def _sync_deletion_log(local, turso):
-    """
-    Synchronise _sync_deletions bidirectionnellement (merge simple).
-    Doit être appelée AVANT la sync des tables de données.
-    """
-    # Push local → Turso
-    try:
-        local_dels = local.execute(
-            "SELECT tbl, record_id, deleted_at FROM _sync_deletions").fetchall()
-        if local_dels:
-            sql = "INSERT OR IGNORE INTO _sync_deletions (tbl, record_id, deleted_at) VALUES (?,?,?)"
-            stmts = [(sql, [r[0], r[1], r[2]]) for r in local_dels]
-            for i in range(0, len(stmts), _BATCH_SIZE):
-                turso.pipeline_exec(stmts[i: i + _BATCH_SIZE])
-    except Exception:
-        pass
-    # Pull Turso → local
-    try:
-        turso_dels = turso.execute(
-            "SELECT tbl, record_id, deleted_at FROM _sync_deletions").fetchall()
-        if turso_dels:
-            local.executemany(
-                "INSERT OR IGNORE INTO _sync_deletions (tbl, record_id, deleted_at) VALUES (?,?,?)",
-                [(r[0], r[1], r[2]) for r in turso_dels])
-            local.commit()
-    except Exception:
-        pass
-
-
-def _load_deletion_log(local) -> dict:
-    """
-    Retourne {table: set(record_ids)} pour toutes les suppressions connues.
-    """
-    try:
-        rows = local.execute("SELECT tbl, record_id FROM _sync_deletions").fetchall()
-        result: dict = {}
-        for r in rows:
-            result.setdefault(r[0], set()).add(r[1])
-        return result
-    except Exception:
-        return {}
-
-
 def _cleanup_deletion_log(local, turso, days: int = 30):
-    """Supprime les entrées de _sync_deletions vieilles de plus de `days` jours."""
+    """Supprime les entrées de _sync_deletions vieilles de plus de `days` jours.
+
+    Table legacy conservée pour compatibilité (encore alimentée par les triggers
+    _trg_del_* dans app.py) mais non utilisée par la sync actuelle, basée sur
+    _sync_journal (voir _sync_using_journal ci-dessous)."""
     cutoff = f"datetime('now','-{days} days')"
     sql = f"DELETE FROM _sync_deletions WHERE deleted_at < {cutoff}"
     try:
@@ -613,103 +594,226 @@ def _cleanup_deletion_log(local, turso, days: int = 30):
         pass
 
 
+def _cleanup_sync_journal(turso, days: int = 30):
+    """Purge les entrées _sync_journal de Turso vieilles de plus de `days` jours.
+
+    Borne la croissance du journal partagé. Suppose qu'aucune instance ne reste
+    hors-ligne plus de `days` jours sans se resynchroniser (sinon elle manquera
+    les changements les plus anciens et nécessitera une resync complète manuelle).
+    """
+    cutoff = f"datetime('now','-{days} days')"
+    try:
+        turso.execute(f"DELETE FROM _sync_journal WHERE timestamp < {cutoff}")
+    except Exception:
+        pass
+
+
+_BLOB_SYNC_EXCLUDE = frozenset({'contenu_blob'})
+
+
+def _pk_column(conn, tbl: str) -> str:
+    """Retourne le nom de la colonne clé primaire d'une table (fallback 'id').
+
+    Toujours résolu depuis `local` (jamais Turso : PRAGMA table_info via l'API
+    HTTP Turso n'est pas fiable), le schéma Turso étant un miroir du schéma local.
+    """
+    try:
+        info = conn.execute(f"PRAGMA table_info([{tbl}])").fetchall()
+        for row in info:
+            if row[5] == 1:   # row[5] = pk flag
+                return row[1]
+    except Exception:
+        pass
+    return 'id'
+
+
+def _apply_table_changes(source, target, tbl: str, pk_col: str, changes: dict):
+    """
+    Applique à `target` les changements (INSERT/UPDATE/DELETE) d'une table lus
+    depuis `source`. `changes` = {'INSERT': set(ids), 'UPDATE': set(ids), 'DELETE': set(ids)}.
+
+    Utilisé dans les deux sens : push (source=local, target=turso) et
+    pull (source=turso, target=local). Toute exception réseau remonte à
+    l'appelant (qui décide de retenter au prochain cycle plutôt que de
+    perdre silencieusement la modification).
+    """
+    all_cols = _get_cols(source, tbl)
+    if not all_cols:
+        all_cols = _get_cols(target, tbl)
+    if not all_cols:
+        return
+
+    blob_excluded = [c for c in all_cols if c in _BLOB_SYNC_EXCLUDE]
+    cols = [c for c in all_cols if c not in _BLOB_SYNC_EXCLUDE]
+    col_list_br  = ', '.join(f'[{c}]' for c in cols)
+    placeholders = ', '.join(['?'] * len(cols))
+    has_pk = pk_col in cols
+    to_turso = isinstance(target, TursoConnection)
+
+    upsert_ids = changes.get('INSERT', set()) | changes.get('UPDATE', set())
+    if upsert_ids:
+        rows = source.execute(
+            f"SELECT {col_list_br} FROM [{tbl}] WHERE [{pk_col}] IN "
+            f"({','.join('?' * len(upsert_ids))})",
+            list(upsert_ids)
+        ).fetchall()
+
+        if rows:
+            if has_pk and blob_excluded:
+                # ON CONFLICT DO UPDATE pour préserver les BLOBs déjà présents côté cible
+                non_pk_cols = [c for c in cols if c != pk_col]
+                set_clause = ', '.join(f'[{c}]=excluded.[{c}]' for c in non_pk_cols)
+                sql_upsert = (
+                    f"INSERT INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
+                    f" ON CONFLICT([{pk_col}]) DO UPDATE SET {set_clause}"
+                )
+            else:
+                sql_upsert = f"INSERT OR REPLACE INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
+
+            if to_turso:
+                stmts = [(sql_upsert, list(r)) for r in rows]
+                for i in range(0, len(stmts), _BATCH_SIZE):
+                    target.pipeline_exec(stmts[i: i + _BATCH_SIZE])
+            else:
+                target.executemany(sql_upsert, [list(r) for r in rows])
+                target.commit()
+
+    del_ids = changes.get('DELETE', set())
+    if del_ids and has_pk:
+        if to_turso:
+            del_stmts = [(f"DELETE FROM [{tbl}] WHERE [{pk_col}]=?", [rid]) for rid in del_ids]
+            for i in range(0, len(del_stmts), _BATCH_SIZE):
+                target.pipeline_exec(del_stmts[i: i + _BATCH_SIZE])
+        else:
+            for rid in del_ids:
+                target.execute(f"DELETE FROM [{tbl}] WHERE [{pk_col}]=?", (rid,))
+            target.commit()
+
+
 def _sync_using_journal(local, turso) -> tuple:
     """
-    Synchronise en lisant depuis le journal de modifications _sync_journal.
-    Avec < 10 modifications/jour, cela réduit les reads/writes de 99%.
+    Synchronise en utilisant le journal de modifications _sync_journal, dans les
+    DEUX sens :
+
+    - PUSH (local → Turso) : les entrées du journal LOCAL sont envoyées à Turso.
+      Seules les entrées effectivement poussées avec succès sont retirées du
+      journal local — une erreur réseau ne fait donc pas perdre la modification,
+      elle est retentée au cycle suivant.
+
+    - PULL (Turso → local) : Turso tient son PROPRE _sync_journal, alimenté par
+      les mêmes triggers (répliqués sur Turso par _ensure_turso_schema) qui se
+      déclenchent quand N'IMPORTE QUELLE instance y écrit. Cette instance retient
+      un curseur local (_sync_meta.last_pulled_journal_id) et ne relit que les
+      entrées Turso plus récentes que ce curseur — peu importe qui les a produites.
+
+    Avec < 10 modifications/jour, ceci réduit les reads/writes Turso de ~99%
+    tout en synchronisant réellement toutes les instances entre elles.
     Retourne (stats_dict, errors_list).
     """
-    # Lire le journal local
+    local.execute("""CREATE TABLE IF NOT EXISTS _sync_meta (
+        key   TEXT PRIMARY KEY,
+        value TEXT)""")
+    local.execute("CREATE TABLE IF NOT EXISTS _sync_applying (id INTEGER PRIMARY KEY)")
+    local.commit()
+
+    stats, errors = {}, []
+
+    # ── PUSH : journal local → Turso ──────────────────────────────────────
     try:
         journal_entries = local.execute(
-            "SELECT tbl, record_id, action FROM _sync_journal ORDER BY timestamp"
+            "SELECT id, tbl, record_id, action FROM _sync_journal ORDER BY id"
         ).fetchall()
     except Exception:
         journal_entries = []
 
-    if not journal_entries:
-        return {}, []  # Rien à syncer
+    if journal_entries:
+        by_table: dict = {}
+        for jid, tbl, record_id, action in journal_entries:
+            g = by_table.setdefault(tbl, {'INSERT': set(), 'UPDATE': set(), 'DELETE': set(), 'jids': []})
+            g[action].add(record_id)
+            g['jids'].append(jid)
 
-    # Grouper par table
-    changes_by_table = {}
-    for tbl, record_id, action in journal_entries:
-        if tbl not in changes_by_table:
-            changes_by_table[tbl] = {'INSERT': set(), 'UPDATE': set(), 'DELETE': set()}
-        changes_by_table[tbl][action].add(record_id)
+        for tbl, changes in by_table.items():
+            try:
+                pk_col = _pk_column(local, tbl)
+                _apply_table_changes(local, turso, tbl, pk_col, changes)
+                # Succès uniquement : purger les entrées de journal traitées pour cette table
+                jids = changes['jids']
+                for i in range(0, len(jids), _BATCH_SIZE):
+                    chunk = jids[i:i + _BATCH_SIZE]
+                    local.execute(
+                        f"DELETE FROM _sync_journal WHERE id IN ({','.join('?' * len(chunk))})",
+                        chunk)
+                local.commit()
+                stats.setdefault(tbl, {})['pushed'] = len(changes['INSERT'] | changes['UPDATE'])
+                stats[tbl]['pushed_deletes'] = len(changes['DELETE'])
+            except Exception as e:
+                # Échec (réseau/Turso) : on NE supprime PAS ces entrées → retentées au prochain cycle
+                errors.append(f'push {tbl}: {e}')
 
-    stats, errors = {}, []
-
-    # Pour chaque table modifiée
-    for tbl, changes in changes_by_table.items():
-        try:
-            # Récupérer les colonnes
-            all_cols = _get_cols(local, tbl)
-            if not all_cols:
-                continue
-
-            # Exclure les BLOBs
-            blob_excluded = [c for c in all_cols if c in _BLOB_SYNC_EXCLUDE]
-            cols = [c for c in all_cols if c not in _BLOB_SYNC_EXCLUDE]
-            col_str = ', '.join(f'[{c}]' for c in cols)
-            col_list_br = ', '.join(f'[{c}]' for c in cols)
-            placeholders = ', '.join(['?'] * len(cols))
-
-            has_id = 'id' in cols
-
-            # PUSH : envoyer les changements locaux à Turso
-            push_ids = changes['INSERT'] | changes['UPDATE']
-            if push_ids:
-                rows = local.execute(
-                    f"SELECT {col_str} FROM [{tbl}] WHERE id IN ({','.join('?' * len(push_ids))})",
-                    list(push_ids)
-                ).fetchall()
-
-                if rows:
-                    if has_id and blob_excluded:
-                        non_id_cols = [c for c in cols if c != 'id']
-                        set_clause = ', '.join(f'[{c}]=excluded.[{c}]' for c in non_id_cols)
-                        sql_upsert = (
-                            f"INSERT INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
-                            f" ON CONFLICT([id]) DO UPDATE SET {set_clause}"
-                        )
-                    else:
-                        sql_upsert = f"INSERT OR REPLACE INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
-
-                    stmts = [(sql_upsert, list(r)) for r in rows]
-                    for i in range(0, len(stmts), _BATCH_SIZE):
-                        turso.pipeline_exec(stmts[i: i + _BATCH_SIZE])
-
-            # DELETE : propager les suppressions à Turso
-            if changes['DELETE'] and has_id:
-                del_stmts = [(f"DELETE FROM [{tbl}] WHERE id=?", [rid])
-                             for rid in changes['DELETE']]
-                for i in range(0, len(del_stmts), _BATCH_SIZE):
-                    try:
-                        turso.pipeline_exec(del_stmts[i: i + _BATCH_SIZE])
-                    except Exception:
-                        pass
-
-            stats[tbl] = {
-                'pushed': len(push_ids),
-                'deleted': len(changes['DELETE'])
-            }
-        except Exception as e:
-            errors.append(f'{tbl}: {e}')
-
-    # Nettoyer le journal après sync réussie
+    # ── PULL : journal Turso (toutes instances) → local ──────────────────
     try:
-        local.execute("DELETE FROM _sync_journal")
-        local.commit()
+        row = local.execute(
+            "SELECT value FROM _sync_meta WHERE key='last_pulled_journal_id'").fetchone()
+        last_pulled = int(row[0]) if row and row[0] else 0
     except Exception:
-        pass
+        last_pulled = 0
+
+    try:
+        remote_entries = turso.execute(
+            "SELECT id, tbl, record_id, action FROM _sync_journal WHERE id > ? ORDER BY id",
+            (last_pulled,)
+        ).fetchall()
+    except Exception:
+        remote_entries = []
+
+    if remote_entries:
+        by_table = {}
+        max_id = last_pulled
+        for rid, tbl, record_id, action in remote_entries:
+            g = by_table.setdefault(tbl, {'INSERT': set(), 'UPDATE': set(), 'DELETE': set()})
+            g[action].add(record_id)
+            max_id = max(max_id, rid)
+
+        # Garde anti-rebouclage : le temps d'appliquer le pull, les triggers locaux
+        # _trg_journal_* ne doivent pas se redéclencher (sinon la donnée qu'on vient
+        # de recevoir est aussitôt re-marquée "modifiée localement", et un futur push
+        # la renverrait — avec un état potentiellement périmé si entre-temps la ligne
+        # est réécrite — ce qui écraserait silencieusement les changements distants).
+        local.execute("INSERT OR IGNORE INTO _sync_applying (id) VALUES (1)")
+        local.commit()
+        try:
+            for tbl, changes in by_table.items():
+                try:
+                    pk_col = _pk_column(local, tbl)
+                    _apply_table_changes(turso, local, tbl, pk_col, changes)
+                    stats.setdefault(tbl, {})['pulled'] = len(changes['INSERT'] | changes['UPDATE'])
+                    stats[tbl]['pulled_deletes'] = len(changes['DELETE'])
+                except Exception as e:
+                    errors.append(f'pull {tbl}: {e}')
+        finally:
+            local.execute("DELETE FROM _sync_applying")
+            local.commit()
+
+        # Le curseur avance même si certaines tables ont échoué : ces erreurs sont
+        # rares (table renommée/supprimée) et une nouvelle tentative indéfinie sur
+        # la même entrée n'apporterait rien ; elles sont visibles dans errors/logs.
+        try:
+            local.execute(
+                "INSERT INTO _sync_meta (key, value) VALUES ('last_pulled_journal_id', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (str(max_id),))
+            local.commit()
+        except Exception:
+            pass
 
     return stats, errors
 
 
 def _bidirectional_sync(local, turso) -> tuple:
     """
-    Synchronise toutes les tables en utilisant le journal de modifications.
-    Change-tracking: ne syncer que ce qui a changé.
+    Synchronise toutes les tables via le journal de modifications, dans les deux
+    sens (push local→Turso, pull Turso→local — voir _sync_using_journal).
     Retourne (stats_dict, errors_list).
     """
     # Désactiver les FK locales pour éviter les erreurs d'ordre lors du pull
@@ -720,12 +824,11 @@ def _bidirectional_sync(local, turso) -> tuple:
         pass
 
     try:
-        # Utiliser le nouveau système de journal optimisé
         stats, errors = _sync_using_journal(local, turso)
 
-        # Étape 4 : nettoyage des anciennes suppressions
         try:
             _cleanup_deletion_log(local, turso)
+            _cleanup_sync_journal(turso)
         except Exception:
             pass
 
@@ -737,165 +840,3 @@ def _bidirectional_sync(local, turso) -> tuple:
             local.commit()
         except Exception:
             pass
-
-
-_BLOB_SYNC_EXCLUDE = frozenset({'contenu_blob'})
-
-
-def _sync_one_table(tbl: str, local, turso, deleted_ids: set = None) -> tuple:
-    """
-    Synchronise une table bidirectionnellement en tenant compte du journal
-    de suppressions.
-    Retourne (pushed_count, pulled_count).
-    """
-    if deleted_ids is None:
-        deleted_ids = set()
-
-    all_cols = _get_cols(local, tbl)
-    if not all_cols:
-        all_cols = _get_cols(turso, tbl)
-    if not all_cols:
-        return 0, 0
-
-    # Exclure les colonnes BLOB volumineuses du sync DB (gérées par uploads_sync.py).
-    # Sans ça, chaque cycle lit tous les blobs depuis Turso → timeout HTTP sur gros fichiers.
-    blob_excluded = [c for c in all_cols if c in _BLOB_SYNC_EXCLUDE]
-    cols = [c for c in all_cols if c not in _BLOB_SYNC_EXCLUDE]
-
-    has_id   = 'id' in cols
-    # Ajouter date_upload à la liste des colonnes de datation reconnues
-    date_col = next((c for c in ('date_maj', 'date_upload', 'date') if c in cols), None)
-
-    col_str      = ', '.join(f'[{c}]' for c in cols)
-    col_list_br  = ', '.join(f'[{c}]' for c in cols)
-    placeholders = ', '.join(['?'] * len(cols))
-
-    # ON CONFLICT DO UPDATE pour préserver les BLOBs existants en local
-    if has_id and blob_excluded:
-        non_id_cols = [c for c in cols if c != 'id']
-        set_clause  = ', '.join(f'[{c}]=excluded.[{c}]' for c in non_id_cols)
-        sql_replace = (
-            f"INSERT INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
-            f" ON CONFLICT([id]) DO UPDATE SET {set_clause}"
-        )
-    else:
-        sql_replace = f"INSERT OR REPLACE INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
-
-    # ── Lire les deux côtés ───────────────────────────────────────────────
-    local_raw = local.execute(f"SELECT {col_str} FROM [{tbl}]").fetchall()
-    try:
-        turso_raw = turso.execute(f"SELECT {col_str} FROM [{tbl}]").fetchall()
-    except Exception:
-        turso_raw = []   # table absente sur Turso
-
-    push_list: list = []        # local → Turso (upsert)
-    pull_list: list = []        # Turso → local (upsert)
-    del_from_turso: list = []   # IDs à supprimer sur Turso
-    del_from_local: list = []   # IDs à supprimer en local
-
-    if has_id:
-        id_idx    = cols.index('id')
-        local_map = {r[id_idx]: list(r) for r in local_raw}
-        turso_map = {r[id_idx]: list(r) for r in turso_raw}
-        all_ids   = set(local_map) | set(turso_map)
-
-        for rid in all_ids:
-            lr = local_map.get(rid)
-            tr = turso_map.get(rid)
-
-            if lr is not None and tr is None:
-                # Existe en local, absent de Turso
-                if rid in deleted_ids:
-                    # Supprimé sur une autre machine et propagé → supprimer en local
-                    del_from_local.append(rid)
-                else:
-                    # Nouveau en local → pousser vers Turso
-                    push_list.append(lr)
-
-            elif tr is not None and lr is None:
-                # Existe sur Turso, absent en local
-                if rid in deleted_ids:
-                    # Supprimé localement → propager la suppression à Turso
-                    del_from_turso.append(rid)
-                else:
-                    # Nouveau sur Turso (autre machine) → tirer en local
-                    pull_list.append(tr)
-
-            elif lr is not None and tr is not None and date_col:
-                # Existe des deux côtés → conflit résolu par date_maj
-                d_idx = cols.index(date_col)
-                ld    = str(lr[d_idx] or '')
-                td    = str(tr[d_idx] or '')
-                if ld > td:
-                    push_list.append(lr)
-                elif td > ld:
-                    pull_list.append(tr)
-    else:
-        # Tables sans colonne 'id' (ex: config avec cle TEXT PRIMARY KEY)
-        # Résolution par date_maj si disponible, sinon INSERT OR IGNORE
-        pk_col = None
-        try:
-            pk_info = local.execute(f"PRAGMA table_info([{tbl}])").fetchall()
-            for ci in pk_info:
-                if ci[5] == 1:   # ci[5] = pk flag
-                    pk_col = ci[1]
-                    break
-        except Exception:
-            pass
-
-        if pk_col and pk_col in cols and date_col:
-            pk_idx   = cols.index(pk_col)
-            date_idx = cols.index(date_col)
-            local_map = {r[pk_idx]: list(r) for r in local_raw}
-            turso_map = {r[pk_idx]: list(r) for r in turso_raw}
-            for k in set(local_map) | set(turso_map):
-                lr = local_map.get(k)
-                tr = turso_map.get(k)
-                if lr is not None and tr is None:
-                    push_list.append(lr)
-                elif tr is not None and lr is None:
-                    pull_list.append(tr)
-                else:
-                    ld = str(lr[date_idx] or '')
-                    td = str(tr[date_idx] or '')
-                    if ld >= td:
-                        push_list.append(lr)   # local plus récent → push
-                    else:
-                        pull_list.append(tr)   # turso plus récent → pull
-        else:
-            # Pas de PK identifiable ou pas de date_maj → INSERT OR IGNORE
-            sql_replace = f"INSERT OR IGNORE INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
-            push_list = [list(r) for r in local_raw]
-            pull_list = [list(r) for r in turso_raw]
-
-    # ── Push local → Turso (upsert) ──────────────────────────────────────
-    if push_list:
-        stmts = [(sql_replace, row) for row in push_list]
-        for i in range(0, len(stmts), _BATCH_SIZE):
-            turso.pipeline_exec(stmts[i: i + _BATCH_SIZE])
-
-    # ── Pull Turso → local (upsert) ──────────────────────────────────────
-    if pull_list:
-        local.executemany(sql_replace, pull_list)
-        local.commit()
-
-    # ── Propager suppressions locales → Turso ────────────────────────────
-    if del_from_turso and has_id:
-        del_stmts = [(f"DELETE FROM [{tbl}] WHERE id=?", [rid])
-                     for rid in del_from_turso]
-        for i in range(0, len(del_stmts), _BATCH_SIZE):
-            try:
-                turso.pipeline_exec(del_stmts[i: i + _BATCH_SIZE])
-            except Exception:
-                pass
-
-    # ── Appliquer suppressions distantes → local ─────────────────────────
-    if del_from_local and has_id:
-        for rid in del_from_local:
-            try:
-                local.execute(f"DELETE FROM [{tbl}] WHERE id=?", (rid,))
-            except Exception:
-                pass
-        local.commit()
-
-    return len(push_list), len(pull_list)

@@ -1350,42 +1350,73 @@ def init_db():
         UNIQUE(tbl, record_id) ON CONFLICT REPLACE)''')
 
     # TABLE DE CHANGE-TRACKING : enregistre INSERT/UPDATE/DELETE pour optimiser la sync
+    # record_id est TEXT (pas INTEGER) pour supporter aussi les tables à clé texte (ex: config.cle)
     c.execute('''CREATE TABLE IF NOT EXISTS _sync_journal (
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
         tbl       TEXT    NOT NULL,
-        record_id INTEGER NOT NULL,
+        record_id TEXT    NOT NULL,
         action    TEXT    NOT NULL,  -- 'INSERT', 'UPDATE', 'DELETE'
         timestamp TEXT    NOT NULL,
         UNIQUE(tbl, record_id, action) ON CONFLICT REPLACE)''')
 
+    # Garde anti-rebouclage : quand la sync applique une donnée reçue de Turso
+    # (pull) dans les tables locales, ces écritures NE DOIVENT PAS re-déclencher
+    # les triggers _trg_journal_* ci-dessous (sinon la donnée qu'on vient de
+    # recevoir est immédiatement re-marquée comme "modification locale" et
+    # repoussée au cycle suivant — avec un vieil état si la ligne existait déjà,
+    # ce qui écrase silencieusement les changements faits par une autre instance).
+    # database.py insère une ligne ici le temps d'appliquer le pull, puis la retire.
+    c.execute('''CREATE TABLE IF NOT EXISTS _sync_applying (id INTEGER PRIMARY KEY)''')
+
     # Triggers : enregistre automatiquement chaque modification dans _sync_journal
-    _TRACKED_JOURNAL = ['appareils','peripheriques','identifiants','contrats',
-                        'utilisateurs','services','clients','baie_slots',
-                        'outils','kb_articles','kb_categories',
-                        'documents_appareils','documents_contrats',
-                        'documents_peripheriques','baie_photos',
-                        'types_droits','droits_utilisateurs',
-                        'contrats_appareils','contrats_peripheriques',
-                        'peripheriques_appareils','parc_general','historique','plans',
-                        'maintenances','interventions','licences_appareils']
-    for _t in _TRACKED_JOURNAL:
+    # Toutes les tables de données sont couvertes (auth_users, client_partages, config, etc.
+    # inclus — leur absence empêchait la sync entre instances de ces données critiques).
+    # Valeur = nom de la colonne clé primaire ('id' pour la quasi-totalité, 'cle' pour config).
+    _TRACKED_JOURNAL = {
+        'appareils': 'id', 'peripheriques': 'id', 'identifiants': 'id', 'contrats': 'id',
+        'utilisateurs': 'id', 'services': 'id', 'clients': 'id', 'baie_slots': 'id',
+        'outils': 'id', 'kb_articles': 'id', 'kb_categories': 'id',
+        'documents_appareils': 'id', 'documents_contrats': 'id',
+        'documents_peripheriques': 'id', 'baie_photos': 'id',
+        'types_droits': 'id', 'droits_utilisateurs': 'id',
+        'contrats_appareils': 'id', 'contrats_peripheriques': 'id',
+        'peripheriques_appareils': 'id', 'parc_general': 'id', 'historique': 'id', 'plans': 'id',
+        'maintenances': 'id', 'interventions': 'id', 'licences_appareils': 'id',
+        # Tables précédemment oubliées (jamais synchronisées entre instances) :
+        'auth_users': 'id', 'client_partages': 'id',
+        'config_listes': 'id', 'user_preferences': 'id',
+        'documents_interventions': 'id', 'interventions_appareils': 'id',
+        'interventions_peripheriques': 'id', 'maintenance_notifications': 'id',
+        'config': 'cle',   # seule table à clé texte (pas de colonne 'id')
+    }
+    # DROP + CREATE (pas IF NOT EXISTS) : garantit que la définition du trigger
+    # correspond toujours au code, même après une mise à jour de cette liste sur
+    # une base déjà initialisée (CREATE TRIGGER IF NOT EXISTS ne mettrait pas à
+    # jour un trigger déjà présent avec une ancienne définition).
+    for _t, _pk in _TRACKED_JOURNAL.items():
+        c.execute(f"DROP TRIGGER IF EXISTS _trg_journal_ins_{_t}")
+        c.execute(f"DROP TRIGGER IF EXISTS _trg_journal_upd_{_t}")
+        c.execute(f"DROP TRIGGER IF EXISTS _trg_journal_del_{_t}")
         # INSERT trigger
-        c.execute(f"""CREATE TRIGGER IF NOT EXISTS _trg_journal_ins_{_t}
-            AFTER INSERT ON {_t} BEGIN
+        c.execute(f"""CREATE TRIGGER _trg_journal_ins_{_t}
+            AFTER INSERT ON {_t}
+            WHEN NOT EXISTS (SELECT 1 FROM _sync_applying) BEGIN
                 INSERT OR REPLACE INTO _sync_journal (tbl, record_id, action, timestamp)
-                VALUES ('{_t}', NEW.id, 'INSERT', datetime('now'));
+                VALUES ('{_t}', NEW.{_pk}, 'INSERT', datetime('now'));
             END""")
         # UPDATE trigger
-        c.execute(f"""CREATE TRIGGER IF NOT EXISTS _trg_journal_upd_{_t}
-            AFTER UPDATE ON {_t} BEGIN
+        c.execute(f"""CREATE TRIGGER _trg_journal_upd_{_t}
+            AFTER UPDATE ON {_t}
+            WHEN NOT EXISTS (SELECT 1 FROM _sync_applying) BEGIN
                 INSERT OR REPLACE INTO _sync_journal (tbl, record_id, action, timestamp)
-                VALUES ('{_t}', NEW.id, 'UPDATE', datetime('now'));
+                VALUES ('{_t}', NEW.{_pk}, 'UPDATE', datetime('now'));
             END""")
         # DELETE trigger
-        c.execute(f"""CREATE TRIGGER IF NOT EXISTS _trg_journal_del_{_t}
-            AFTER DELETE ON {_t} BEGIN
+        c.execute(f"""CREATE TRIGGER _trg_journal_del_{_t}
+            AFTER DELETE ON {_t}
+            WHEN NOT EXISTS (SELECT 1 FROM _sync_applying) BEGIN
                 INSERT OR REPLACE INTO _sync_journal (tbl, record_id, action, timestamp)
-                VALUES ('{_t}', OLD.id, 'DELETE', datetime('now'));
+                VALUES ('{_t}', OLD.{_pk}, 'DELETE', datetime('now'));
             END""")
 
     # Triggers : enregistre automatiquement chaque suppression dans _sync_deletions
