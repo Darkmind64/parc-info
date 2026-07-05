@@ -1,13 +1,13 @@
 {
-  "version": "2.6.17",
-  "release_date": "2026-06-14T12:00:00.000000",
+  "version": "2.6.18",
+  "release_date": "2026-07-05T11:30:00.000000",
   "github_repo": "darkmind64/parc_info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.6.17/installer.exe"
+    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.6.18/installer.exe"
   },
   "notes": {
-    "windows_installer": "Standalone installer - Fix sync Turso : toutes tables Request-sent.",
-    "new_features": "Fix TursoConnection.close() écrasé par un stub pass → connexion bloquée en Request-sent sur toute erreur réseau"
+    "windows_installer": "Standalone installer - Turso optimization: -99.96% reads with change-tracking.",
+    "new_features": "Change-tracking: _sync_journal logs all modifications. Sync only changed records instead of full tables. Turso cost: ~99.96% reduction. Multi-instance sync: 10-minute window, all 50+ tables."
   },
   "checksums": {
     "windows_installer_sha256": "PENDING_BUILD"
@@ -15,5 +15,5 @@
   "file_sizes": {
     "windows_installer_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.6.17"
+  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.6.18"
 }

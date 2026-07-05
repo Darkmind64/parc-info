@@ -6,8 +6,8 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.6.0  
-**Dernière mise à jour** : 2026-05-06
+**Version** : 2.6.18  
+**Dernière mise à jour** : 2026-07-05
 
 ---
 
