@@ -1,13 +1,13 @@
 {
-  "version": "2.6.19",
-  "release_date": "2026-07-05T13:45:00.000000",
+  "version": "2.6.20",
+  "release_date": "2026-07-05T14:30:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.19/installer.exe"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.20/installer.exe"
   },
   "notes": {
-    "windows_installer": "Standalone installer - Fix: sync Turso reellement bidirectionnelle (2.6.18 etait push-only).",
-    "new_features": "Fix critique: la sync 2.6.18 ne remontait jamais les changements distants (push-only) et oubliait 9 tables (dont auth_users, client_partages). Turso tient maintenant son propre journal partage entre instances, toutes les tables sont couvertes, et aucune modification n'est perdue en cas d'erreur reseau."
+    "windows_installer": "Standalone installer - Fix: heure de derniere sync affichee avec un decalage (probleme de fuseau horaire).",
+    "new_features": "Fix: le badge 'derniere sync' affichait un decalage (ex: '2h' juste apres une sync) quand serveur et navigateur ne sont pas dans le meme fuseau horaire. L'heure est maintenant transmise en UTC explicite et convertie correctement cote navigateur."
   },
   "checksums": {
     "windows_installer_sha256": "PENDING_BUILD"
@@ -15,5 +15,5 @@
   "file_sizes": {
     "windows_installer_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.19"
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.20"
 }

@@ -1,5 +1,21 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.20] - 2026-07-05 🔧
+
+### 🔧 CORRECTION
+
+#### 🕐 Décalage horaire sur l'affichage "dernière synchronisation"
+- ✅ `last_sync` était stocké en heure locale du serveur, sans indicateur de fuseau —
+  le JavaScript l'interprétait alors comme l'heure locale du **navigateur**, provoquant
+  un décalage silencieux dès que serveur et navigateur ne sont pas dans le même fuseau
+  (ex : serveur en UTC dans Docker, navigateur à Paris → écart de 2h affiché juste
+  après une synchronisation qui vient de s'exécuter)
+- ✅ Fix : l'heure est désormais transmise en UTC avec un suffixe `Z` explicite et
+  non-ambigu ; l'affichage humain (tooltip, panneau paramètres) convertit correctement
+  vers l'heure locale du navigateur au lieu d'un simple remplacement de texte
+
+---
+
 ## [2.6.19] - 2026-07-05 🔧
 
 ### 🔧 CORRECTION CRITIQUE
