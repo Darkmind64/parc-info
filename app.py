@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, make_response, send_file
 from werkzeug.utils import secure_filename
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time, io
 from PIL import Image
 from io import BytesIO
@@ -7418,7 +7418,12 @@ def _watchdog_cycle():
     except Exception:
         pass
     with _ping_cache_lock:
-        _watchdog_state['last_cycle'] = datetime.now().isoformat()
+        # UTC + 'Z' explicite : sans indicateur de fuseau, le JS qui affiche cette
+        # heure (new Date(...).toLocaleTimeString(...) dans base.html) l'interprète
+        # comme une heure locale déjà correcte et ne fait aucune conversion — d'où un
+        # décalage identique au fuseau du serveur vs celui du navigateur (même bug
+        # que _sync_state['last_sync'], voir database.py:sync_once).
+        _watchdog_state['last_cycle'] = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
         _watchdog_state['cycle_count'] += 1
 
 def _watchdog_loop():
