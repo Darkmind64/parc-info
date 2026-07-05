@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.21] - 2026-07-05 🔧
+
+### 🔧 CORRECTION
+
+#### 🕐 Décalage horaire sur l'affichage de la surveillance réseau (watchdog)
+- ✅ `_watchdog_state['last_cycle']` avait exactement le même défaut que `last_sync`
+  corrigé en 2.6.20 : heure locale serveur sans indicateur de fuseau, exposée via
+  `/api/ping/summary` et `/api/ping/status`, affichée dans la barre du haut
+  ("dernier : HH:MM:SS") avec un décalage correspondant à l'écart de fuseau entre
+  serveur et navigateur
+- ✅ Fix : heure transmise en UTC avec suffixe `Z` explicite, comme pour la sync Turso
+
+---
+
 ## [2.6.20] - 2026-07-05 🔧
 
 ### 🔧 CORRECTION

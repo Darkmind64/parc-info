@@ -1,13 +1,13 @@
 {
-  "version": "2.6.20",
-  "release_date": "2026-07-05T14:30:00.000000",
+  "version": "2.6.21",
+  "release_date": "2026-07-05T14:45:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.20/installer.exe"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.21/installer.exe"
   },
   "notes": {
-    "windows_installer": "Standalone installer - Fix: heure de derniere sync affichee avec un decalage (probleme de fuseau horaire).",
-    "new_features": "Fix: le badge 'derniere sync' affichait un decalage (ex: '2h' juste apres une sync) quand serveur et navigateur ne sont pas dans le meme fuseau horaire. L'heure est maintenant transmise en UTC explicite et convertie correctement cote navigateur."
+    "windows_installer": "Standalone installer - Fix: meme decalage horaire corrige sur l'affichage de la surveillance reseau (watchdog).",
+    "new_features": "Fix: le badge de surveillance reseau (barre du haut) affichait le meme decalage horaire que la sync Turso corrigee en 2.6.20 (ex: heure du dernier cycle affichee 2h en retard). Meme correction appliquee : heure transmise en UTC explicite."
   },
   "checksums": {
     "windows_installer_sha256": "PENDING_BUILD"
@@ -15,5 +15,5 @@
   "file_sizes": {
     "windows_installer_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.20"
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.21"
 }
