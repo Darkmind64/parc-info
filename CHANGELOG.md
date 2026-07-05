@@ -1,5 +1,36 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.19] - 2026-07-05 🔧
+
+### 🔧 CORRECTION CRITIQUE
+
+#### 🔗 Fix sync Turso : la 2.6.18 ne synchronisait pas réellement entre instances
+La sync par journal livrée en 2.6.18 ne poussait les changements que dans un seul sens
+(local → Turso) et oubliait 9 tables, dont `auth_users` et `client_partages`. Concrètement,
+avec plusieurs instances, les modifications faites sur l'une n'apparaissaient jamais sur
+les autres — l'inverse de l'objectif recherché.
+
+- ✅ Sync réellement bidirectionnelle : Turso tient son propre `_sync_journal` (mêmes
+  triggers répliqués côté Turso), alimenté par les écritures de toutes les instances.
+  Chaque instance retient un curseur et ne relit que les entrées plus récentes.
+- ✅ Toutes les tables couvertes : ajout de `auth_users`, `client_partages`, `config`,
+  `config_listes`, `user_preferences`, `documents_interventions`,
+  `interventions_appareils`, `interventions_peripheriques`, `maintenance_notifications`.
+- ✅ Plus de perte silencieuse : le journal local n'est purgé que par table et seulement
+  après succès du push (retry automatique en cas d'erreur réseau transitoire).
+- ✅ Correctif d'un effet de bord découvert en testant le point ci-dessus : appliquer les
+  données reçues (pull) re-déclenchait les triggers locaux et pouvait écraser une
+  modification distante avec une donnée périmée au cycle suivant — corrigé par une garde
+  (`_sync_applying`) désactivant la journalisation pendant l'application du pull.
+
+### 🧹 NETTOYAGE
+- Correction des références au port 5000 (obsolète depuis le passage à 3456) dans
+  `docker-compose.yml`, `docker-compose.synology.yml` et le template de release CI
+- Correction des liens `darkmind64/parc_info` → `darkmind64/parc-info` (404)
+- Archivage de 31 documents de session obsolètes (avril 2026) dans `docs/archive/`
+
+---
+
 ## [2.6.18] - 2026-07-05 🚀
 
 ### 🚀 OPTIMISATION

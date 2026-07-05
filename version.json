@@ -1,13 +1,13 @@
 {
-  "version": "2.6.18",
-  "release_date": "2026-07-05T11:30:00.000000",
+  "version": "2.6.19",
+  "release_date": "2026-07-05T13:45:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.18/installer.exe"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.19/installer.exe"
   },
   "notes": {
-    "windows_installer": "Standalone installer - Turso optimization: -99.96% reads with change-tracking.",
-    "new_features": "Change-tracking: _sync_journal logs all modifications. Sync only changed records instead of full tables. Turso cost: ~99.96% reduction. Multi-instance sync: 10-minute window, all 50+ tables."
+    "windows_installer": "Standalone installer - Fix: sync Turso reellement bidirectionnelle (2.6.18 etait push-only).",
+    "new_features": "Fix critique: la sync 2.6.18 ne remontait jamais les changements distants (push-only) et oubliait 9 tables (dont auth_users, client_partages). Turso tient maintenant son propre journal partage entre instances, toutes les tables sont couvertes, et aucune modification n'est perdue en cas d'erreur reseau."
   },
   "checksums": {
     "windows_installer_sha256": "PENDING_BUILD"
@@ -15,5 +15,5 @@
   "file_sizes": {
     "windows_installer_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.18"
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.19"
 }
