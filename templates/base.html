@@ -3101,6 +3101,17 @@ function _syncRelTime(iso) {
     return 'il y a ' + Math.floor(diff/3600) + 'h';
 }
 
+/* Formate un ISO datetime (UTC, suffixe Z) en heure locale du navigateur, pour
+   affichage humain (tooltip, panneau paramètres). Ne PAS utiliser un simple
+   replace('T',' ') sur la chaîne UTC : elle afficherait l'heure serveur, pas
+   l'heure locale du visiteur. */
+function _syncLocalTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso.replace('T', ' ');
+    return d.toLocaleString();
+}
+
 /* Met à jour le badge topbar depuis un état de sync */
 function _applyTopbarSync(d) {
     const wrap  = document.getElementById('topbar-sync-wrap');
@@ -3128,7 +3139,7 @@ function _applyTopbarSync(d) {
         if (icon)  icon.textContent  = '\u2713';
         if (label) label.textContent = _syncRelTime(d.last_sync);
         const total = Object.values(d.stats || {}).reduce((s,t) => s+(t.pushed||0)+(t.pulled||0), 0);
-        btn.title = 'Dernière sync : ' + d.last_sync.replace('T',' ')
+        btn.title = 'Dernière sync : ' + _syncLocalTime(d.last_sync)
                   + (total ? '\n' + total + ' enregistrement(s) mis à jour' : '\nAucune modification')
                   + '\nCliquer pour synchroniser maintenant';
     } else {
@@ -3149,7 +3160,7 @@ function _applySyncPanel(d) {
     } else if (d.last_sync) {
         const total = Object.values(d.stats || {}).reduce((s,t) => s+(t.pushed||0)+(t.pulled||0), 0);
         txt.style.color = d.last_error ? 'var(--accent-orange)' : 'var(--accent-green)';
-        txt.textContent = '\u2713 Dernière sync : ' + d.last_sync.replace('T',' ')
+        txt.textContent = '\u2713 Dernière sync : ' + _syncLocalTime(d.last_sync)
                         + (total ? ' (' + total + ' mise(s) à jour)' : ' (aucune modification)');
     } else {
         txt.style.color = 'var(--text-secondary)';

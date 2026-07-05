@@ -479,8 +479,13 @@ def sync_once() -> tuple:
             local.commit()
             local.close()
 
-        from datetime import datetime as _dt
-        _sync_state['last_sync']  = _dt.now().isoformat(timespec='seconds')
+        from datetime import datetime as _dt, timezone as _tz
+        # UTC + suffixe 'Z' explicite : sans indicateur de fuseau, le JS qui calcule
+        # "il y a Xh" (templates/base.html:_syncRelTime) interprète la chaîne comme
+        # une heure LOCALE AU NAVIGATEUR, alors qu'elle était l'heure locale du
+        # serveur — un décalage silencieux dès que serveur et navigateur ne sont pas
+        # dans le même fuseau (ex: serveur en UTC dans Docker, navigateur à Paris).
+        _sync_state['last_sync'] = _dt.now(_tz.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
         _sync_state['last_error'] = '; '.join(errors) if errors else None
         _sync_state['stats']      = stats
         return (len(errors) == 0), stats, _sync_state['last_error']
