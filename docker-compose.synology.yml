@@ -92,7 +92,7 @@ services:
 
     # Health check plus long (plus de délai de démarrage sur petit NAS)
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:3456/"]
       interval: 60s         # Vérification moins fréquente
       timeout: 15s          # Plus de timeout
       retries: 3
@@ -134,7 +134,7 @@ services:
 
     # Health check normal pour NAS stables
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:3456/"]
       interval: 30s
       timeout: 10s
       retries: 3

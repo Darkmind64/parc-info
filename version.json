@@ -1,9 +1,9 @@
 {
   "version": "2.6.18",
   "release_date": "2026-07-05T11:30:00.000000",
-  "github_repo": "darkmind64/parc_info",
+  "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc_info/releases/download/v2.6.18/installer.exe"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.18/installer.exe"
   },
   "notes": {
     "windows_installer": "Standalone installer - Turso optimization: -99.96% reads with change-tracking.",
@@ -15,5 +15,5 @@
   "file_sizes": {
     "windows_installer_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc_info/releases/tag/v2.6.18"
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.18"
 }

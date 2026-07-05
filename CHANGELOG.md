@@ -1,5 +1,30 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.18] - 2026-07-05 🚀
+
+### 🚀 OPTIMISATION
+
+#### 📉 Réduction drastique de l'utilisation Turso (reads/writes)
+- ✅ Intervalle de sync par défaut : 30s → 600s (10 minutes)
+- ✅ Change-tracking : nouvelle table `_sync_journal` alimentée par des triggers sur chaque
+  table de données — la sync ne lit plus l'intégralité des tables à chaque cycle, seulement
+  ce qui a changé depuis le dernier cycle
+- ✅ Sync réellement bidirectionnelle : Turso tient son propre `_sync_journal` (répliqué via
+  les mêmes triggers), chaque instance retient un curseur et ne relit que les entrées plus
+  récentes — corrige un premier jet push-only qui ne propageait pas les changements distants
+- ✅ Toutes les tables sont couvertes, y compris `auth_users`, `client_partages`, `config`
+  (précédemment absentes de la sync entre instances)
+- ✅ Aucune perte silencieuse : le journal local n'est purgé que par table et seulement après
+  succès du push (retry automatique en cas d'erreur réseau transitoire)
+- ✅ Garde anti-rebouclage (`_sync_applying`) : empêche que l'application des données reçues
+  (pull) ne soit elle-même journalisée comme une modification locale
+
+**Impact estimé** : -99% de reads/writes Turso pour un usage à faible fréquence de
+modification (quelques dizaines de changements/jour), tout en gardant une synchronisation
+complète et fiable entre plusieurs instances.
+
+---
+
 ## [2.6.17] - 2026-06-14 🔧
 
 ### 🔧 CORRECTIONS

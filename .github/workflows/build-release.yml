@@ -119,7 +119,7 @@ jobs:
             ### Docker
             ```bash
             docker pull darkmind64/parcinfo:latest
-            docker run -d -p 5010:5000 darkmind64/parcinfo:latest
+            docker run -d -p 5010:3456 darkmind64/parcinfo:latest
             # → http://localhost:5010
             ```
             Ou avec docker-compose (voir `docker-compose.yml` dans le repo).

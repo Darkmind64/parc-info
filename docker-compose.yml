@@ -6,7 +6,7 @@ services:
     container_name: parcinfo-app
     restart: unless-stopped
     ports:
-      - "5010:5000"
+      - "5010:3456"
     environment:
       - FLASK_DEBUG=0
       - PYTHONUNBUFFERED=1
