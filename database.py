@@ -632,8 +632,18 @@ def _bidirectional_sync(local, turso) -> tuple:
         # Étape 2 : charger le journal mergé
         deleted_by_table = _load_deletion_log(local)
 
-        # Étape 3 : synchroniser toutes les tables de données (sauf _sync_deletions)
-        tables = [t for t in _get_user_tables(local) if t != '_sync_deletions']
+        # Étape 3 : synchroniser les tables critiques uniquement
+        # Avec < 10 modifications/jour, syncer TOUTES les 50+ tables est coûteux inutilement
+        # Whitelist: tables qui changent souvent ET sont critiques pour multi-instance
+        CRITICAL_TABLES = {
+            'clients',              # Configuration client
+            'appareils',            # Inventaire principal
+            'contrats',             # Contrats importants
+            'peripheriques',        # Périphériques
+            'utilisateurs',         # Utilisateurs finaux
+        }
+        tables = [t for t in _get_user_tables(local)
+                  if t in CRITICAL_TABLES and t != '_sync_deletions']
         stats, errors = {}, []
         for tbl in tables:
             try:

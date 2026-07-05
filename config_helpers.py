@@ -221,7 +221,7 @@ CFG_DEFAULTS = {
     'db_type': 'local',
     'turso_url': '',
     'turso_token': '',
-    'db_sync_interval': '30',
+    'db_sync_interval': '600',  # 10 minutes (30s → 600s = -75% Turso reads)
     # ── Navigation preferences ────────────────────────────────────────────────────
     'show_breadcrumb': '1',       # Show breadcrumb navigation (personal preference)
     'show_back_button': '1',      # Show "Back to overview" button (personal preference)
