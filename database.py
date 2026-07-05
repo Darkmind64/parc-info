@@ -613,9 +613,103 @@ def _cleanup_deletion_log(local, turso, days: int = 30):
         pass
 
 
+def _sync_using_journal(local, turso) -> tuple:
+    """
+    Synchronise en lisant depuis le journal de modifications _sync_journal.
+    Avec < 10 modifications/jour, cela réduit les reads/writes de 99%.
+    Retourne (stats_dict, errors_list).
+    """
+    # Lire le journal local
+    try:
+        journal_entries = local.execute(
+            "SELECT tbl, record_id, action FROM _sync_journal ORDER BY timestamp"
+        ).fetchall()
+    except Exception:
+        journal_entries = []
+
+    if not journal_entries:
+        return {}, []  # Rien à syncer
+
+    # Grouper par table
+    changes_by_table = {}
+    for tbl, record_id, action in journal_entries:
+        if tbl not in changes_by_table:
+            changes_by_table[tbl] = {'INSERT': set(), 'UPDATE': set(), 'DELETE': set()}
+        changes_by_table[tbl][action].add(record_id)
+
+    stats, errors = {}, []
+
+    # Pour chaque table modifiée
+    for tbl, changes in changes_by_table.items():
+        try:
+            # Récupérer les colonnes
+            all_cols = _get_cols(local, tbl)
+            if not all_cols:
+                continue
+
+            # Exclure les BLOBs
+            blob_excluded = [c for c in all_cols if c in _BLOB_SYNC_EXCLUDE]
+            cols = [c for c in all_cols if c not in _BLOB_SYNC_EXCLUDE]
+            col_str = ', '.join(f'[{c}]' for c in cols)
+            col_list_br = ', '.join(f'[{c}]' for c in cols)
+            placeholders = ', '.join(['?'] * len(cols))
+
+            has_id = 'id' in cols
+
+            # PUSH : envoyer les changements locaux à Turso
+            push_ids = changes['INSERT'] | changes['UPDATE']
+            if push_ids:
+                rows = local.execute(
+                    f"SELECT {col_str} FROM [{tbl}] WHERE id IN ({','.join('?' * len(push_ids))})",
+                    list(push_ids)
+                ).fetchall()
+
+                if rows:
+                    if has_id and blob_excluded:
+                        non_id_cols = [c for c in cols if c != 'id']
+                        set_clause = ', '.join(f'[{c}]=excluded.[{c}]' for c in non_id_cols)
+                        sql_upsert = (
+                            f"INSERT INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
+                            f" ON CONFLICT([id]) DO UPDATE SET {set_clause}"
+                        )
+                    else:
+                        sql_upsert = f"INSERT OR REPLACE INTO [{tbl}] ({col_list_br}) VALUES ({placeholders})"
+
+                    stmts = [(sql_upsert, list(r)) for r in rows]
+                    for i in range(0, len(stmts), _BATCH_SIZE):
+                        turso.pipeline_exec(stmts[i: i + _BATCH_SIZE])
+
+            # DELETE : propager les suppressions à Turso
+            if changes['DELETE'] and has_id:
+                del_stmts = [(f"DELETE FROM [{tbl}] WHERE id=?", [rid])
+                             for rid in changes['DELETE']]
+                for i in range(0, len(del_stmts), _BATCH_SIZE):
+                    try:
+                        turso.pipeline_exec(del_stmts[i: i + _BATCH_SIZE])
+                    except Exception:
+                        pass
+
+            stats[tbl] = {
+                'pushed': len(push_ids),
+                'deleted': len(changes['DELETE'])
+            }
+        except Exception as e:
+            errors.append(f'{tbl}: {e}')
+
+    # Nettoyer le journal après sync réussie
+    try:
+        local.execute("DELETE FROM _sync_journal")
+        local.commit()
+    except Exception:
+        pass
+
+    return stats, errors
+
+
 def _bidirectional_sync(local, turso) -> tuple:
     """
-    Synchronise toutes les tables local ↔ Turso avec gestion des suppressions.
+    Synchronise toutes les tables en utilisant le journal de modifications.
+    Change-tracking: ne syncer que ce qui a changé.
     Retourne (stats_dict, errors_list).
     """
     # Désactiver les FK locales pour éviter les erreurs d'ordre lors du pull
@@ -626,32 +720,8 @@ def _bidirectional_sync(local, turso) -> tuple:
         pass
 
     try:
-        # Étape 1 : synchroniser le journal des suppressions en premier
-        _sync_deletion_log(local, turso)
-
-        # Étape 2 : charger le journal mergé
-        deleted_by_table = _load_deletion_log(local)
-
-        # Étape 3 : synchroniser les tables critiques uniquement
-        # Avec < 10 modifications/jour, syncer TOUTES les 50+ tables est coûteux inutilement
-        # Whitelist: tables qui changent souvent ET sont critiques pour multi-instance
-        CRITICAL_TABLES = {
-            'clients',              # Configuration client
-            'appareils',            # Inventaire principal
-            'contrats',             # Contrats importants
-            'peripheriques',        # Périphériques
-            'utilisateurs',         # Utilisateurs finaux
-        }
-        tables = [t for t in _get_user_tables(local)
-                  if t in CRITICAL_TABLES and t != '_sync_deletions']
-        stats, errors = {}, []
-        for tbl in tables:
-            try:
-                pushed, pulled = _sync_one_table(tbl, local, turso,
-                                                 deleted_by_table.get(tbl, set()))
-                stats[tbl] = {'pushed': pushed, 'pulled': pulled}
-            except Exception as e:
-                errors.append(f'{tbl}: {e}')
+        # Utiliser le nouveau système de journal optimisé
+        stats, errors = _sync_using_journal(local, turso)
 
         # Étape 4 : nettoyage des anciennes suppressions
         try:

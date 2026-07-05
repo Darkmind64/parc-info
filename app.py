@@ -1349,6 +1349,45 @@ def init_db():
         deleted_at TEXT    NOT NULL,
         UNIQUE(tbl, record_id) ON CONFLICT REPLACE)''')
 
+    # TABLE DE CHANGE-TRACKING : enregistre INSERT/UPDATE/DELETE pour optimiser la sync
+    c.execute('''CREATE TABLE IF NOT EXISTS _sync_journal (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        tbl       TEXT    NOT NULL,
+        record_id INTEGER NOT NULL,
+        action    TEXT    NOT NULL,  -- 'INSERT', 'UPDATE', 'DELETE'
+        timestamp TEXT    NOT NULL,
+        UNIQUE(tbl, record_id, action) ON CONFLICT REPLACE)''')
+
+    # Triggers : enregistre automatiquement chaque modification dans _sync_journal
+    _TRACKED_JOURNAL = ['appareils','peripheriques','identifiants','contrats',
+                        'utilisateurs','services','clients','baie_slots',
+                        'outils','kb_articles','kb_categories',
+                        'documents_appareils','documents_contrats',
+                        'documents_peripheriques','baie_photos',
+                        'types_droits','droits_utilisateurs',
+                        'contrats_appareils','contrats_peripheriques',
+                        'peripheriques_appareils','parc_general','historique','plans',
+                        'maintenances','interventions','licences_appareils']
+    for _t in _TRACKED_JOURNAL:
+        # INSERT trigger
+        c.execute(f"""CREATE TRIGGER IF NOT EXISTS _trg_journal_ins_{_t}
+            AFTER INSERT ON {_t} BEGIN
+                INSERT OR REPLACE INTO _sync_journal (tbl, record_id, action, timestamp)
+                VALUES ('{_t}', NEW.id, 'INSERT', datetime('now'));
+            END""")
+        # UPDATE trigger
+        c.execute(f"""CREATE TRIGGER IF NOT EXISTS _trg_journal_upd_{_t}
+            AFTER UPDATE ON {_t} BEGIN
+                INSERT OR REPLACE INTO _sync_journal (tbl, record_id, action, timestamp)
+                VALUES ('{_t}', NEW.id, 'UPDATE', datetime('now'));
+            END""")
+        # DELETE trigger
+        c.execute(f"""CREATE TRIGGER IF NOT EXISTS _trg_journal_del_{_t}
+            AFTER DELETE ON {_t} BEGIN
+                INSERT OR REPLACE INTO _sync_journal (tbl, record_id, action, timestamp)
+                VALUES ('{_t}', OLD.id, 'DELETE', datetime('now'));
+            END""")
+
     # Triggers : enregistre automatiquement chaque suppression dans _sync_deletions
     _TRACKED = ['appareils','peripheriques','identifiants','contrats',
                 'utilisateurs','services','clients','baie_slots',
@@ -9216,5 +9255,5 @@ if __name__ == '__main__':
             raise
     else:
         # Mode développement (ouverture automatique du navigateur)
-        print("🚀 Lancement en mode développement")
+        print("[*] Lancement en mode developpement")
         app.run(debug=debug, host='0.0.0.0', port=3456, threaded=True)
