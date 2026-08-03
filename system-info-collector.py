@@ -415,6 +415,226 @@ def collect_system_info():
     return info
 
 
+def generate_html_report(info, client_id=None, client_name=None):
+    """Génère un rapport HTML complet avec toutes les infos collectées.
+
+    Retourne le contenu HTML et le chemin du fichier sauvegardé.
+    """
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    hostname = info.get('hostname', 'unknown')
+    mac = info.get('mac_address', 'unknown')[:8]
+    filename = f"system-info-report_{hostname}_{mac}_{timestamp}.html"
+
+    html = f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rapport Collecte Système - {hostname}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }}
+        .container {{ max-width: 1000px; margin: 20px auto; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden; }}
+        .header {{ background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%); color: white; padding: 30px; }}
+        .header h1 {{ margin-bottom: 10px; }}
+        .header p {{ opacity: 0.9; font-size: 14px; }}
+        .content {{ padding: 30px; }}
+        .section {{ margin-bottom: 30px; }}
+        .section h2 {{ border-bottom: 3px solid #3498db; padding-bottom: 10px; margin-bottom: 15px; color: #2c3e50; font-size: 18px; }}
+        .field {{ display: grid; grid-template-columns: 200px 1fr; gap: 15px; margin-bottom: 12px; align-items: start; }}
+        .field-label {{ font-weight: 600; color: #555; }}
+        .field-value {{ color: #333; word-break: break-word; }}
+        .field-value.supported {{ background: #d4edda; padding: 8px 12px; border-left: 4px solid #28a745; border-radius: 3px; }}
+        .field-value.unsupported {{ background: #fff3cd; padding: 8px 12px; border-left: 4px solid #ffc107; border-radius: 3px; color: #856404; }}
+        .list-item {{ margin-left: 20px; padding: 8px 0; }}
+        .disk {{ background: #f8f9fa; padding: 10px; margin: 8px 0; border-radius: 4px; border-left: 3px solid #3498db; }}
+        .software-list {{ background: #f8f9fa; padding: 15px; border-radius: 4px; max-height: 400px; overflow-y: auto; }}
+        .software-item {{ padding: 4px 0; font-family: monospace; font-size: 12px; }}
+        .badge {{ display: inline-block; padding: 3px 8px; border-radius: 3px; font-size: 11px; font-weight: bold; }}
+        .badge.supported {{ background: #28a745; color: white; }}
+        .badge.partial {{ background: #ffc107; color: white; }}
+        .badge.unsupported {{ background: #dc3545; color: white; }}
+        .metadata {{ background: #ecf0f1; padding: 15px; border-radius: 4px; font-size: 12px; color: #555; margin-top: 20px; }}
+        .metadata p {{ margin: 5px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Rapport Collecte Informations Système</h1>
+            <p>Généré le {datetime.utcnow().strftime("%d/%m/%Y à %H:%M:%S UTC")}</p>
+        </div>
+
+        <div class="content">
+            <!-- IDENTIFICATION -->
+            <div class="section">
+                <h2>🔍 Identification</h2>
+                <div class="field">
+                    <span class="field-label">Hostname</span>
+                    <span class="field-value supported">{info.get('hostname', 'N/A')} <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">MAC Address</span>
+                    <span class="field-value supported">{info.get('mac_address', 'N/A')} <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">IP Address(es)</span>
+                    <span class="field-value supported">{', '.join(info.get('ip_addresses', []))} <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">Marque</span>
+                    <span class="field-value supported">{info.get('brand', 'N/A')} <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">Modèle</span>
+                    <span class="field-value supported">{info.get('model', 'N/A')} <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">Numéro Série</span>
+                    <span class="field-value supported">{info.get('serial_number', 'N/A')} <span class="badge supported">API ✓</span></span>
+                </div>
+            </div>
+
+            <!-- SYSTÈME D'EXPLOITATION -->
+            <div class="section">
+                <h2>🖥️ Système d'Exploitation</h2>
+                <div class="field">
+                    <span class="field-label">OS</span>
+                    <span class="field-value supported">{info.get('os_name', 'N/A')} <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">Version</span>
+                    <span class="field-value supported">{info.get('os_version', 'N/A')} <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">Platform</span>
+                    <span class="field-value unsupported">{info.get('platform', 'N/A')} <span class="badge unsupported">Non stocké</span></span>
+                </div>
+            </div>
+
+            <!-- MATÉRIEL -->
+            <div class="section">
+                <h2>⚙️ Matériel</h2>
+                <div class="field">
+                    <span class="field-label">RAM</span>
+                    <span class="field-value supported">{info.get('ram_gb', 'N/A')} GB <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">CPU</span>
+                    <span class="field-value supported">{info.get('cpu', 'N/A')} <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">Cores CPU</span>
+                    <span class="field-value unsupported">{info.get('cpu_cores', 'N/A')} <span class="badge unsupported">Non stocké</span></span>
+                </div>
+            </div>
+
+            <!-- DISQUES -->
+            <div class="section">
+                <h2>💾 Stockage</h2>
+                <div class="field">
+                    <span class="field-label">Total Stockage</span>
+                    <span class="field-value supported">{info.get('disk_total_gb', 'N/A')} GB <span class="badge supported">API ✓</span></span>
+                </div>
+                <div class="field">
+                    <span class="field-label">Disques Détaillés</span>
+                    <div class="field-value unsupported" style="border: none; background: none; padding: 0;">
+                        <span class="badge unsupported">Non stocké individuellement</span>
+                        <div class="software-list">
+"""
+
+    if info.get('disk_drives'):
+        for drive in info.get('disk_drives', []):
+            html += f'                            <div class="disk">{drive}</div>\n'
+    else:
+        html += '                            <div style="padding: 10px; color: #999;">Aucun disque détecté</div>\n'
+
+    html += f"""                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SÉCURITÉ -->
+            <div class="section">
+                <h2>🛡️ Sécurité</h2>
+                <div class="field">
+                    <span class="field-label">Antivirus</span>
+                    <span class="field-value supported">{info.get('antivirus', 'N/A')} <span class="badge supported">API ✓</span></span>
+                </div>
+            </div>
+
+            <!-- LOGICIELS -->
+            <div class="section">
+                <h2>📦 Logiciels Installés</h2>
+                <div class="field">
+                    <span class="field-label">Total Détecté</span>
+                    <span class="field-value supported">{len(info.get('installed_software', []))} logiciel(s) <span class="badge supported">API ✓</span> (50 premiers envoyés)</span>
+                </div>
+                <div class="field">
+                    <span class="field-label">Liste</span>
+                    <div class="field-value" style="border: none; background: none; padding: 0;">
+                        <div class="software-list">
+"""
+
+    for i, soft in enumerate(info.get('installed_software', []), 1):
+        html += f'                            <div class="software-item">{i}. {soft}</div>\n'
+
+    if not info.get('installed_software'):
+        html += '                            <div style="padding: 10px; color: #999;">Aucun logiciel détecté</div>\n'
+
+    html += f"""                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- METADATA -->
+            <div class="metadata">
+                <p><strong>Client Cible :</strong> {client_name or f'ID {client_id}' or 'Non spécifié'}</p>
+                <p><strong>Timestamp Collecte :</strong> {info.get('timestamp', 'N/A')}</p>
+                <p><strong>Champs supportés par l'API :</strong> hostname, mac_address, ip_addresses, brand, model, serial_number, os, ram_gb, cpu, disk_total_gb, antivirus, installed_software</p>
+                <p><strong>Champs non stockés :</strong> platform, cpu_cores, disk_drives (individuellement)</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>"""
+
+    # Sauvegarder le rapport
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(html)
+        return html, filename
+    except Exception as e:
+        return html, None
+
+
+def get_api_payload(info, client_id=None, client_name=None):
+    """Extrait uniquement les champs supportés par l'API ParcInfo."""
+    payload = {
+        'mac_address': info.get('mac_address', ''),
+        'ip_addresses': info.get('ip_addresses', []),
+        'hostname': info.get('hostname', ''),
+        'os_name': info.get('os_name', ''),
+        'os_version': info.get('os_version', ''),
+        'brand': info.get('brand', ''),
+        'model': info.get('model', ''),
+        'serial_number': info.get('serial_number', ''),
+        'ram_gb': info.get('ram_gb', ''),
+        'cpu': info.get('cpu', ''),
+        'disk_total_gb': info.get('disk_total_gb', ''),
+        'antivirus': info.get('antivirus', ''),
+        'installed_software': info.get('installed_software', [])[:50],  # Max 50 pour l'API
+    }
+
+    # Ajouter client targeting
+    if client_id:
+        payload['client_id'] = client_id
+    if client_name:
+        payload['client_name'] = client_name
+
+    return payload
+
+
 def send_to_parcinfo(info, server_url, token=None, client_id=None, client_name=None):
     """Envoie les infos à ParcInfo via l'API.
 
@@ -430,13 +650,10 @@ def send_to_parcinfo(info, server_url, token=None, client_id=None, client_name=N
         if token:
             headers['Authorization'] = f'Bearer {token}'
 
-        # Ajouter client_id ou client_name
-        if client_id:
-            info['client_id'] = client_id
-        if client_name:
-            info['client_name'] = client_name
+        # Filtrer les champs supportés par l'API
+        payload_data = get_api_payload(info, client_id, client_name)
+        payload = json.dumps(payload_data)
 
-        payload = json.dumps(info)
         request = Request(
             f"{server_url.rstrip('/')}/api/device-info",
             data=payload.encode('utf-8'),
@@ -499,7 +716,15 @@ def main():
 
         print(f"    ✓ Logiciels détectés: {len(info.get('installed_software', []))}")
 
-    # Envoyer à ParcInfo
+    # Générer rapport HTML complet
+    if not args.quiet:
+        print(f"\n[*] Génération du rapport HTML...")
+
+    html_content, report_file = generate_html_report(info, args.client_id, args.client_name)
+    if report_file and not args.quiet:
+        print(f"    ✓ Rapport sauvegardé: {report_file}")
+
+    # Envoyer à ParcInfo (avec champs filtrés)
     if not args.quiet:
         print(f"\n[*] Envoi à {args.server}...")
         if args.client_id:
@@ -516,8 +741,13 @@ def main():
     if success:
         if not args.quiet:
             print(f"    ✓ Succès!")
-            print(f"\n[+] Résultat : {json.dumps(result, indent=2)}")
-            print("\nLe système a été enregistré dans ParcInfo.")
+            print(f"\n[+] Appareil enregistré:")
+            print(f"    ID: {result.get('device_id')}")
+            print(f"    Hostname: {result.get('hostname')}")
+            print(f"    IP: {result.get('ip_address')}")
+            print(f"    MAC: {result.get('mac_address')}")
+            if report_file:
+                print(f"\n[+] Rapport complet sauvegardé: {report_file}")
     else:
         if not args.quiet:
             print(f"    ✗ Erreur: {result}")
