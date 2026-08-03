@@ -4928,7 +4928,7 @@ def _scan_host(ip_str):
         return None
     # Après ping, laisser l'OS peupler la table ARP
     # 0.5s est suffisant même sur les réseaux chargés
-    _time.sleep(0.5)
+    time.sleep(0.5)
     # Lancer hostname + NetBIOS + OS + ports en parallèle
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
         f_hostname = ex.submit(_hostname,     ip_str)
@@ -4947,7 +4947,7 @@ def _scan_host(ip_str):
     mac = _mac_from_arp(ip_str)
     # Si toujours vide, deuxième tentative après ping supplémentaire
     if not mac:
-        _time.sleep(0.5)
+        time.sleep(0.5)
         mac = _mac_from_arp(ip_str)
     vendor       = _oui_vendor(mac)
     display_name = netbios or hostname or ip_str
