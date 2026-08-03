@@ -1,21 +1,27 @@
 {
-  "version": "2.6.23",
-  "release_date": "2026-08-03T19:40:00.000000",
+  "version": "2.6.24",
+  "release_date": "2026-08-03T14:00:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.23/installer.exe",
-    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.23/ParcInfo-2.6.23.dmg",
-    "docker": "ghcr.io/darkmind64/parc-info:2.6.23"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/installer.exe",
+    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-2.6.24.dmg",
+    "docker": "ghcr.io/darkmind64/parc-info:2.6.24",
+    "system_collector": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.py"
   },
   "notes": {
-    "windows_installer": "NEW: mDNS support allows access via parcinfo.local on local network. Just type http://parcinfo.local:3456 from any machine!",
-    "new_features": "mDNS support for local network discovery and access via http://parcinfo.local:3456 (zero-configuration networking)",
+    "new_features": "NEW: Automatic system information collection! Auto-fill device details with system-info-collector.py script",
     "improvements": [
-      "Access ParcInfo from any machine on network without IP address",
-      "Bonjour/Avahi compatible (works on Windows, macOS, Linux, Docker)",
-      "Automatic service discovery",
-      "No configuration needed - works out of the box"
-    ]
+      "Autonomous system-info-collector.py script for Windows, macOS, and Linux",
+      "Auto-fill device inventory (brand, model, serial, RAM, CPU, disk, antivirus, installed software)",
+      "New /api/device-info endpoint for direct system info submission",
+      "Enhanced network scan with optional WMI enrichment for Windows machines",
+      "Intelligent device matching by MAC address, IP, or hostname"
+    ],
+    "features": {
+      "collector": "Download system-info-collector.py and run on each machine to auto-fill inventory",
+      "scan_enrichment": "Network scan now supports optional WMI enrichment for detailed Windows system info",
+      "mdns": "Still supports mDNS access via http://parcinfo.local:3456"
+    }
   },
   "checksums": {
     "windows_installer_sha256": "PENDING_BUILD",
@@ -25,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.22"
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.24"
 }

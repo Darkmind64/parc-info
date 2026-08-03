@@ -87,7 +87,23 @@
       "Bash(gh release create v2.6.4 --title 'Version 2.6.4 - Gunicorn Worker Fix' --notes ' *)",
       "Bash(git commit -m 'fix: Use Werkzeug in Docker instead of Gunicorn \\(simpler, more stable\\) *)",
       "Bash(gh release create v2.6.5 --title 'Version 2.6.5 - Werkzeug for Docker/Synology' --notes ' *)",
-      "Bash(git commit -m 'fix: Désactiver la synchronisation Turso par défaut en Docker \\(#5\\) *)"
+      "Bash(git commit -m 'fix: Désactiver la synchronisation Turso par défaut en Docker \\(#5\\) *)",
+      "Bash(sqlite3 parc_info.db \".schema appareils\")",
+      "Bash(sqlite3 parc_info.db \"SELECT login FROM auth_users LIMIT 5;\")",
+      "Bash(ping -n 1 127.0.0.1)",
+      "Bash(arp -a)",
+      "Bash(sqlite3 parc_info.db \"PRAGMA table_info\\(config\\);\")",
+      "Bash(git commit -m 'fix: Correct NameError in network scan - replace _time with time *)",
+      "Bash(git commit *)",
+      "Bash(git tag *)",
+      "Bash(gh run *)",
+      "Bash(git commit -m 'feat: Add mDNS support for local network access via parcinfo.local *)",
+      "Bash(grep -rn \"def index\\\\|@app.route.*\\('/', \" \"/E/Claude Code/parc_info - docker/app.py\" | head -5)",
+      "Bash(grep -n \"api/system\\\\|api/info\\\\|api/device\\\\|@app.route.*health\\\\|@app.route.*status\" \"/E/Claude Code/parc_info - docker/app.py\")",
+      "Bash(grep -rn \"fetch.*api\\\\|XMLHttpRequest\\\\|$.ajax\" \"/E/Claude Code/parc_info - docker/templates/\" | grep -i \"system\\\\|info\\\\|device\\\\|navigator\" | head -10)",
+      "Bash(grep -n \"/api/ping\" \"/E/Claude Code/parc_info - docker/app.py\")",
+      "Bash(awk '/^def init_db/,/^def [^_]/' app.py)",
+      "Bash(awk 'NR==585,/^def /' app.py)"
     ]
   }
 }

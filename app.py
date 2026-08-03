@@ -1457,6 +1457,19 @@ def init_db():
         except sqlite3.OperationalError:
             pass  # Colonne existe déjà
 
+    # Migration : colonnes pour système auto-remplissage (v2.6.24)
+    cols_app3 = [r[1] for r in conn.execute('PRAGMA table_info(appareils)').fetchall()]
+    for col, defval in [
+        ('antivirus', "TEXT DEFAULT ''"),
+        ('logiciels_installes_json', "TEXT DEFAULT '[]'"),
+        ('derniere_synchro', "TEXT DEFAULT NULL"),
+    ]:
+        if col not in cols_app3:
+            try:
+                c.execute(f"ALTER TABLE appareils ADD COLUMN {col} {defval}")
+            except Exception:
+                pass
+
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
         now = datetime.utcnow().isoformat()
@@ -4929,8 +4942,87 @@ def _deviner_type(hostname, ports, os_guess="", vendor=""):
         return 'PC (Windows)'
     return 'PC'
 
-def _scan_host(ip_str):
-    """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant."""
+def _enrich_from_wmi(ip_str, hostname_hint=""):
+    """
+    Tente d'enrichir les infos du scan via WMI (Windows Management Instrumentation).
+    Récupère marque, modèle, RAM, CPU, etc. directement depuis la machine.
+
+    Retourne un dict avec les infos enrichies, ou {} si WMI non disponible ou échec.
+
+    Note: Nécessite :
+    - WMI disponible (Windows uniquement)
+    - Accès RPC à la machine (port 135)
+    - Credentials valides (optionnel - sinon utilise credentials de session)
+    """
+    enriched = {}
+
+    if _sys.platform != 'win32':
+        # WMI n'est disponible que sur Windows
+        return enriched
+
+    try:
+        import wmi
+    except ImportError:
+        # WMI non installé
+        return enriched
+
+    try:
+        # Essayer une connexion WMI distante
+        # Syntaxe : wmi.WMI("//IP/root/cimv2")
+        c = wmi.WMI(f"//{ip_str}/root/cimv2")
+
+        # Marque et modèle
+        try:
+            system = c.Win32_ComputerSystem()[0]
+            enriched['brand'] = system.Manufacturer.strip() if system.Manufacturer else ''
+            enriched['model'] = system.Model.strip() if system.Model else ''
+        except Exception:
+            pass
+
+        # RAM
+        try:
+            mem = c.Win32_PhysicalMemory()
+            total_ram_bytes = sum(int(m.Capacity) for m in mem)
+            enriched['ram_gb'] = round(total_ram_bytes / (1024 ** 3), 1)
+        except Exception:
+            pass
+
+        # CPU
+        try:
+            cpu = c.Win32_Processor()[0]
+            enriched['cpu'] = cpu.Name.strip() if cpu.Name else ''
+            enriched['cpu_cores'] = int(cpu.NumberOfCores) if hasattr(cpu, 'NumberOfCores') else None
+        except Exception:
+            pass
+
+        # Disque
+        try:
+            disk = c.Win32_LogicalDisk(Name='C:')[0]
+            enriched['disk_total_gb'] = round(int(disk.Size) / (1024 ** 3), 1)
+        except Exception:
+            pass
+
+        # Numéro de série
+        try:
+            bios = c.Win32_SystemEnclosure()[0]
+            enriched['serial_number'] = bios.SerialNumber.strip() if bios.SerialNumber else ''
+        except Exception:
+            pass
+
+        app.logger.debug(f"WMI enrichment for {ip_str}: {len(enriched)} fields")
+
+    except Exception as e:
+        app.logger.debug(f"WMI enrichment failed for {ip_str}: {e}")
+        pass
+
+    return enriched
+
+def _scan_host(ip_str, enrich_wmi=False):
+    """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant.
+
+    Optionnellement enrichit avec WMI si enrich_wmi=True et que c'est une machine Windows
+    accessible en RPC.
+    """
     if not _ping(ip_str):
         return None
     # Après ping, laisser l'OS peupler la table ARP
@@ -4959,7 +5051,8 @@ def _scan_host(ip_str):
     vendor       = _oui_vendor(mac)
     display_name = netbios or hostname or ip_str
     host_type    = _deviner_type(display_name, ports, os_guess, vendor)
-    return {
+
+    result = {
         "ip":           ip_str,
         "hostname":     hostname,
         "netbios":      netbios,
@@ -4972,7 +5065,24 @@ def _scan_host(ip_str):
         "en_ligne":     True,
     }
 
-def _run_scan(plages, nb_threads):
+    # Enrichissement WMI optionnel (pour Windows)
+    if enrich_wmi and os_guess == "Windows":
+        wmi_data = _enrich_from_wmi(ip_str, hostname)
+        # Fusionner les données WMI (sans surcharger les données de scan)
+        if wmi_data:
+            result.update({
+                'brand': wmi_data.get('brand', result.get('vendor', '')),
+                'model': wmi_data.get('model', ''),
+                'serial_number': wmi_data.get('serial_number', ''),
+                'ram_gb': wmi_data.get('ram_gb', ''),
+                'cpu': wmi_data.get('cpu', ''),
+                'cpu_cores': wmi_data.get('cpu_cores', ''),
+                'disk_total_gb': wmi_data.get('disk_total_gb', ''),
+            })
+
+    return result
+
+def _run_scan(plages, nb_threads, enrich_wmi=False):
     global scan_status
     with scan_lock:
         scan_status = {"running": True, "progress": 0, "message": "Résolution des plages...", "results": [], "errors": [], "plages": plages}
@@ -4998,7 +5108,7 @@ def _run_scan(plages, nb_threads):
                     found.append(result)
                     scan_status["results"] = list(found)
         with concurrent.futures.ThreadPoolExecutor(max_workers=nb_threads) as executor:
-            futures = {executor.submit(_scan_host, ip): ip for ip in hosts}
+            futures = {executor.submit(_scan_host, ip, enrich_wmi=enrich_wmi): ip for ip in hosts}
             for f in concurrent.futures.as_completed(futures):
                 on_done(f, futures[f])
         with scan_lock:
@@ -5026,8 +5136,9 @@ def lancer_scan():
     if not plages:
         plages = ['192.168.1.0/24']
     nb_threads = min(int(data.get('threads', 30)), 200)
-    threading.Thread(target=_run_scan, args=(plages, nb_threads), daemon=True).start()
-    return jsonify({"status": "started", "plages": plages})
+    enrich_wmi = data.get('enrich_wmi', False)  # Optionnel - enrichir via WMI
+    threading.Thread(target=_run_scan, args=(plages, nb_threads, enrich_wmi), daemon=True).start()
+    return jsonify({"status": "started", "plages": plages, "enrich_wmi": enrich_wmi})
 
 @app.route('/api/scan/status')
 def status_scan():
@@ -5064,6 +5175,250 @@ def importer_scan():
     conn.commit(); conn.close()
     return jsonify({"importes":importes,"total":len(items)})
 
+
+@app.route('/api/device-info', methods=['POST'])
+def api_device_info():
+    """
+    Endpoint pour recevoir les infos système du collecteur autonome.
+
+    POST /api/device-info
+    {
+        "mac_address": "00:1A:2B:3C:4D:5E",
+        "hostname": "DESKTOP-ABC123",
+        "ip_addresses": ["192.168.1.100"],
+        "os_name": "Windows",
+        "os_version": "11",
+        "brand": "Dell",
+        "model": "Latitude 5420",
+        "serial_number": "ABC123XYZ",
+        "ram_gb": 16,
+        "cpu": "Intel Core i7-1185G7",
+        "cpu_cores": 4,
+        "disk_total_gb": 512,
+        "antivirus": "Windows Defender",
+        "installed_software": ["Python", "VS Code", ...],
+        "timestamp": "2026-08-03T12:34:56.789012"
+    }
+
+    Matching :
+    1. MAC address si fourni
+    2. IP (première de ip_addresses)
+    3. Crée si aucun match
+    """
+    try:
+        data = request.json or {}
+
+        mac_address = data.get('mac_address', '').upper()
+        ip_addresses = data.get('ip_addresses', [])
+        ip_address = ip_addresses[0] if ip_addresses else ''
+        hostname = data.get('hostname', '')
+
+        # À cause de la sécurité navigateur, on ne demande pas d'authentification stricte
+        # On match par MAC + IP + réseau local
+        # (le collecteur est exécuté localement sur la machine)
+
+        # Chercher le client depuis les paramètres de session
+        # Ou utiliser un client "default" / "Réseau Local"
+        cid = get_client_id()
+        if not cid:
+            # Créer ou récupérer le client "Découverte réseau"
+            conn = get_db()
+            c = conn.execute('SELECT id FROM clients WHERE nom LIKE ?', ('%Découverte%',)).fetchone()
+            if not c:
+                # Créer le client s'il n'existe pas
+                conn.execute(
+                    'INSERT INTO clients (nom, contact, email, date_creation, date_maj) VALUES (?,?,?,?,?)',
+                    ('Découverte réseau', 'auto', 'auto@parcinfo.local', datetime.utcnow().isoformat(), datetime.utcnow().isoformat())
+                )
+                conn.commit()
+                cid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            else:
+                cid = c[0]
+            conn.close()
+
+        # Marque et modèle
+        brand = data.get('brand', '')
+        model = data.get('model', '')
+        serial = data.get('serial_number', '')
+
+        # Infos système
+        os_info = f"{data.get('os_name', '')} {data.get('os_version', '')}".strip()
+        ram_gb = data.get('ram_gb', '')
+        cpu = data.get('cpu', '')
+        cpu_cores = data.get('cpu_cores', '')
+        disk_gb = data.get('disk_total_gb', '')
+        antivirus = data.get('antivirus', '')
+
+        # Logiciels
+        software_list = data.get('installed_software', [])
+        software_json = json.dumps(software_list[:50]) if software_list else ''
+
+        now = datetime.utcnow().isoformat()
+        conn = get_db()
+
+        # Stratégie de matching :
+        # 1. MAC address si connu
+        # 2. IP address si fourni
+        # 3. Hostname sinon (risqué)
+        existing = None
+
+        if mac_address:
+            existing = conn.execute(
+                'SELECT id FROM appareils WHERE client_id=? AND adresse_mac=?',
+                (cid, mac_address)
+            ).fetchone()
+
+        if not existing and ip_address:
+            existing = conn.execute(
+                'SELECT id FROM appareils WHERE client_id=? AND adresse_ip=?',
+                (cid, ip_address)
+            ).fetchone()
+
+        if not existing and hostname:
+            existing = conn.execute(
+                'SELECT id FROM appareils WHERE client_id=? AND nom_machine=?',
+                (cid, hostname)
+            ).fetchone()
+
+        # Construire le nom machine
+        device_name = hostname or ip_address or f"Device-{mac_address[:8]}"
+
+        if existing:
+            # Mise à jour
+            app_id = existing[0]
+            old_row = conn.execute('SELECT * FROM appareils WHERE id=?', (app_id,)).fetchone()
+            old_data = row_to_dict(old_row) if old_row else {}
+
+            # Mettre à jour uniquement les champs fournis
+            updates = []
+            params = []
+
+            if brand and not old_data.get('marque'):
+                updates.append('marque=?')
+                params.append(brand)
+
+            if model and not old_data.get('modele'):
+                updates.append('modele=?')
+                params.append(model)
+
+            if serial and not old_data.get('numero_serie'):
+                updates.append('numero_serie=?')
+                params.append(serial)
+
+            if ip_address and not old_data.get('adresse_ip'):
+                updates.append('adresse_ip=?')
+                params.append(ip_address)
+
+            if mac_address and not old_data.get('adresse_mac'):
+                updates.append('adresse_mac=?')
+                params.append(mac_address)
+
+            if os_info and not old_data.get('os'):
+                updates.append('os=?')
+                params.append(os_info)
+
+            if ram_gb and not old_data.get('ram'):
+                updates.append('ram=?')
+                params.append(str(ram_gb))
+
+            if cpu and not old_data.get('cpu'):
+                updates.append('cpu=?')
+                params.append(cpu)
+
+            if disk_gb and not old_data.get('stockage'):
+                updates.append('stockage=?')
+                params.append(str(disk_gb))
+
+            if antivirus and not old_data.get('antivirus'):
+                updates.append('antivirus=?')
+                params.append(antivirus)
+
+            if software_json:
+                updates.append('logiciels_installes_json=?')
+                params.append(software_json)
+
+            # Toujours mettre à jour la date de dernière synchronisation
+            updates.append('derniere_synchro=?')
+            params.append(now)
+
+            if updates:
+                query = f"UPDATE appareils SET {', '.join(updates)} WHERE id=? AND client_id=?"
+                params.extend([app_id, cid])
+                conn.execute(query, params)
+
+                log_history(
+                    conn, cid, 'appareil', app_id, device_name, 'Auto-remplissage (collecteur)',
+                    {'source': 'system-info-collector', 'fields_updated': len(updates)}
+                )
+
+            conn.commit()
+            message = f"Appareil mis à jour (ID: {app_id})"
+            action = 'updated'
+        else:
+            # Création
+            conn.execute(
+                '''INSERT INTO appareils
+                   (client_id, nom_machine, adresse_ip, adresse_mac, marque, modele, numero_serie,
+                    os, ram, cpu, stockage, antivirus, logiciels_installes_json,
+                    type_appareil, statut, decouvert_scan, en_ligne, derniere_synchro, date_creation, date_maj)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (cid, device_name, ip_address, mac_address, brand, model, serial,
+                 os_info, str(ram_gb) if ram_gb else '', cpu, str(disk_gb) if disk_gb else '', antivirus, software_json,
+                 'PC', 'actif', 0, 1, now, now, now)
+            )
+            app_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+
+            log_history(
+                conn, cid, 'appareil', app_id, device_name, 'Création (collecteur système)',
+                {'source': 'system-info-collector', 'mac': mac_address, 'ip': ip_address}
+            )
+
+            conn.commit()
+            message = f"Nouvel appareil créé (ID: {app_id})"
+            action = 'created'
+
+        conn.close()
+
+        app.logger.info(f"Device info received: {device_name} ({action}) - MAC: {mac_address}, IP: {ip_address}")
+
+        return jsonify({
+            "status": "success",
+            "action": action,
+            "device_id": app_id,
+            "message": message,
+            "mac_address": mac_address,
+            "ip_address": ip_address,
+            "hostname": hostname
+        }), 200
+
+    except Exception as e:
+        app.logger.exception("Error in /api/device-info")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/download/system-info-collector', methods=['GET'])
+def download_collector():
+    """
+    Endpoint pour télécharger le collecteur autonome.
+
+    Utilisation :
+    - /download/system-info-collector → télécharge le script Python
+    """
+    collector_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'system-info-collector.py')
+
+    if not os.path.exists(collector_path):
+        return jsonify({"error": "Collecteur non trouvé"}), 404
+
+    try:
+        return send_file(
+            collector_path,
+            as_attachment=True,
+            download_name='system-info-collector.py',
+            mimetype='text/plain'
+        )
+    except Exception as e:
+        app.logger.exception("Error downloading collector")
+        return jsonify({"error": str(e)}), 500
 
 
 # --- PERIPHERIQUES -----------------------------------------------------------
