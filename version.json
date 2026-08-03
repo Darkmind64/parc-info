@@ -1,18 +1,20 @@
 {
-  "version": "2.6.22",
-  "release_date": "2026-08-03T17:00:00.000000",
+  "version": "2.6.23",
+  "release_date": "2026-08-03T19:40:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.22/installer.exe",
-    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.22/ParcInfo-2.6.22.dmg",
-    "docker": "ghcr.io/darkmind64/parc-info:2.6.22"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.23/installer.exe",
+    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.23/ParcInfo-2.6.23.dmg",
+    "docker": "ghcr.io/darkmind64/parc-info:2.6.23"
   },
   "notes": {
-    "windows_installer": "Critical fix: Network scan was broken due to NameError in _time module reference.",
-    "new_features": "Fix: Corrected undefined _time reference in network scan function - now detects devices correctly.",
-    "bug_fixes": [
-      "Network scan returning 0 results (NameError: _time not defined)",
-      "Scan host detection working properly again"
+    "windows_installer": "NEW: mDNS support allows access via parcinfo.local on local network. Just type http://parcinfo.local:3456 from any machine!",
+    "new_features": "mDNS support for local network discovery and access via http://parcinfo.local:3456 (zero-configuration networking)",
+    "improvements": [
+      "Access ParcInfo from any machine on network without IP address",
+      "Bonjour/Avahi compatible (works on Windows, macOS, Linux, Docker)",
+      "Automatic service discovery",
+      "No configuration needed - works out of the box"
     ]
   },
   "checksums": {
