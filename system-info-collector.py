@@ -670,6 +670,64 @@ def send_to_parcinfo(info, server_url, token=None, client_id=None, client_name=N
         return False, str(e)
 
 
+def upload_report_to_parcinfo(html_content, report_file, server_url, device_id, client_id):
+    """Envoie le rapport HTML à ParcInfo en tant que document joint.
+
+    Args:
+        html_content: Contenu HTML du rapport
+        report_file: Chemin du fichier HTML (ou None si généré en mémoire)
+        server_url: URL du serveur ParcInfo
+        device_id: ID de l'appareil créé/mis à jour
+        client_id: ID du client
+    """
+    try:
+        from urllib.request import Request as MultipartRequest
+        import io
+
+        # Préparer les données multipart
+        boundary = '----FormBoundary' + str(uuid.uuid4()).replace('-', '')
+        body = io.BytesIO()
+
+        # Ajouter les champs
+        body.write(f'--{boundary}\r\n'.encode())
+        body.write(b'Content-Disposition: form-data; name="device_id"\r\n\r\n')
+        body.write(f'{device_id}\r\n'.encode())
+
+        body.write(f'--{boundary}\r\n'.encode())
+        body.write(b'Content-Disposition: form-data; name="client_id"\r\n\r\n')
+        body.write(f'{client_id}\r\n'.encode())
+
+        # Ajouter le fichier
+        body.write(f'--{boundary}\r\n'.encode())
+        body.write(b'Content-Disposition: form-data; name="report"; filename="report.html"\r\n')
+        body.write(b'Content-Type: text/html\r\n\r\n')
+        if isinstance(html_content, str):
+            body.write(html_content.encode('utf-8'))
+        else:
+            body.write(html_content)
+        body.write(b'\r\n')
+
+        body.write(f'--{boundary}--\r\n'.encode())
+
+        # Envoyer la requête
+        headers = {
+            'Content-Type': f'multipart/form-data; boundary={boundary}'
+        }
+
+        request = Request(
+            f"{server_url.rstrip('/')}/api/device-info/upload-report",
+            data=body.getvalue(),
+            headers=headers,
+            method='POST'
+        )
+
+        with urlopen(request, timeout=10) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return True, result
+    except Exception as e:
+        return False, str(e)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Collecte les infos système et les envoie à ParcInfo'
@@ -748,6 +806,22 @@ def main():
             print(f"    MAC: {result.get('mac_address')}")
             if report_file:
                 print(f"\n[+] Rapport complet sauvegardé: {report_file}")
+
+        # Envoyer le rapport HTML en tant que document joint
+        if report_file and not args.quiet:
+            print(f"\n[*] Envoi du rapport vers les documents de l'appareil...")
+
+        device_id = result.get('device_id')
+        if report_file and device_id and args.client_id:
+            success_report, result_report = upload_report_to_parcinfo(
+                html_content, report_file, args.server, device_id, args.client_id
+            )
+
+            if success_report and not args.quiet:
+                print(f"    ✓ Rapport joint enregistré")
+                print(f"    Document ID: {result_report.get('document_id')}")
+            elif not args.quiet:
+                print(f"    ⚠️ Erreur lors du stockage du rapport: {result_report}")
     else:
         if not args.quiet:
             print(f"    ✗ Erreur: {result}")

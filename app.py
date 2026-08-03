@@ -5490,6 +5490,88 @@ def api_clients_public():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route('/api/device-info/upload-report', methods=['POST'])
+def api_device_info_upload_report():
+    """
+    Endpoint pour uploader le rapport HTML complet d'un appareil.
+
+    Paramètres (multipart form-data):
+    - device_id: ID de l'appareil (obligatoire)
+    - client_id: ID du client (obligatoire)
+    - report: fichier HTML (obligatoire)
+    """
+    try:
+        device_id = request.form.get('device_id')
+        client_id = request.form.get('client_id')
+        report_file = request.files.get('report')
+
+        if not device_id or not client_id or not report_file:
+            return jsonify({"status": "error", "message": "Missing parameters: device_id, client_id, report"}), 400
+
+        try:
+            device_id = int(device_id)
+            client_id = int(client_id)
+        except (ValueError, TypeError):
+            return jsonify({"status": "error", "message": "Invalid device_id or client_id"}), 400
+
+        conn = get_db()
+
+        # Vérifier que l'appareil existe et appartient au client
+        appareil = conn.execute(
+            'SELECT id, nom_machine FROM appareils WHERE id=? AND client_id=?',
+            (device_id, client_id)
+        ).fetchone()
+
+        if not appareil:
+            conn.close()
+            return jsonify({"status": "error", "message": "Device not found"}), 404
+
+        # Lire le contenu du fichier
+        try:
+            html_content = report_file.read()
+            if isinstance(html_content, bytes):
+                html_content = html_content.decode('utf-8')
+        except Exception as e:
+            conn.close()
+            return jsonify({"status": "error", "message": f"Error reading file: {str(e)}"}), 400
+
+        # Insérer le document
+        now = datetime.utcnow().isoformat()
+        conn.execute('''
+            INSERT INTO documents_appareils
+            (appareil_id, client_id, nom, description, type_doc, nom_fichier, taille, contenu_blob, date_upload)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            device_id,
+            client_id,
+            f"Rapport Système - {now}",
+            "Rapport HTML complet collecté par système-info-collector",
+            "rapport_html",
+            report_file.filename,
+            len(html_content.encode('utf-8')),
+            html_content,
+            now
+        ))
+
+        conn.commit()
+        doc_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+        conn.close()
+
+        app.logger.info(f"Report uploaded for device {device_id} (client {client_id}) - doc_id: {doc_id}")
+
+        return jsonify({
+            "status": "success",
+            "message": "Report uploaded successfully",
+            "device_id": device_id,
+            "document_id": doc_id,
+            "hostname": appareil[1]
+        }), 200
+
+    except Exception as e:
+        app.logger.exception("Error in /api/device-info/upload-report")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/download/system-info-collector', methods=['GET'])
 def download_collector():
     """

@@ -587,6 +587,56 @@ def get_api_payload(info, client_id=None, client_name=None):
     return payload
 
 
+def upload_report_to_parcinfo(html_content, report_file, server_url, device_id, client_id):
+    """Envoie le rapport HTML à ParcInfo en tant que document joint."""
+    try:
+        import io
+        from urllib.request import Request
+
+        # Préparer les données multipart
+        boundary = '----FormBoundary' + str(uuid.uuid4()).replace('-', '')
+        body = io.BytesIO()
+
+        # Ajouter les champs
+        body.write(f'--{boundary}\r\n'.encode())
+        body.write(b'Content-Disposition: form-data; name="device_id"\r\n\r\n')
+        body.write(f'{device_id}\r\n'.encode())
+
+        body.write(f'--{boundary}\r\n'.encode())
+        body.write(b'Content-Disposition: form-data; name="client_id"\r\n\r\n')
+        body.write(f'{client_id}\r\n'.encode())
+
+        # Ajouter le fichier
+        body.write(f'--{boundary}\r\n'.encode())
+        body.write(b'Content-Disposition: form-data; name="report"; filename="report.html"\r\n')
+        body.write(b'Content-Type: text/html\r\n\r\n')
+        if isinstance(html_content, str):
+            body.write(html_content.encode('utf-8'))
+        else:
+            body.write(html_content)
+        body.write(b'\r\n')
+
+        body.write(f'--{boundary}--\r\n'.encode())
+
+        # Envoyer la requête
+        headers = {
+            'Content-Type': f'multipart/form-data; boundary={boundary}'
+        }
+
+        request = Request(
+            f"{server_url.rstrip('/')}/api/device-info/upload-report",
+            data=body.getvalue(),
+            headers=headers,
+            method='POST'
+        )
+
+        with urlopen(request, timeout=10) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return True, result
+    except Exception as e:
+        return False, str(e)
+
+
 def fetch_clients(server_url):
     """Récupère la liste des clients depuis ParcInfo (endpoint public, pas d'auth requise)."""
     try:
@@ -827,13 +877,26 @@ class CollectorGUI:
                 with urlopen(request, timeout=10) as response:
                     result = json.loads(response.read().decode('utf-8'))
                     if result.get('status') == 'success':
+                        device_id = result.get('device_id')
                         msg = f"Appareil enregistré avec succès !\n\n"
-                        msg += f"ID : {result.get('device_id')}\n"
+                        msg += f"ID : {device_id}\n"
                         msg += f"Hostname : {result.get('hostname')}\n"
                         msg += f"IP : {result.get('ip_address')}\n"
                         msg += f"MAC : {result.get('mac_address')}"
+
+                        # Uploader le rapport HTML
+                        if html_content and device_id and client_id:
+                            success_report, result_report = upload_report_to_parcinfo(
+                                html_content, report_file, self.server_url, device_id, client_id
+                            )
+                            if success_report:
+                                msg += f"\n✓ Rapport joint enregistré (Doc ID: {result_report.get('document_id')})"
+                            else:
+                                msg += f"\n⚠️ Erreur lors du stockage du rapport: {result_report}"
+
                         if report_file:
                             msg += f"\n\nRapport complet sauvegardé :\n{report_file}"
+
                         messagebox.showinfo("Succès ✓", msg)
                         self.status_var.set("Envoi réussi ✓")
                     else:
