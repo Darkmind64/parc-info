@@ -6,12 +6,49 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.6.21  
-**Dernière mise à jour** : 2026-07-05
+**Version** : 2.6.24 ⭐ **NEW: Auto-fill System Information**  
+**Dernière mise à jour** : 2026-08-03
 
 ---
 
 ## ✨ Fonctionnalités Principales
+
+### 🎉 NEW v2.6.24 : Collecteur Système Auto-remplissage
+
+**Deux versions du collecteur :**
+
+#### GUI (Recommandé pour les utilisateurs) ⭐
+```bash
+python system-info-collector-gui.py
+```
+- Interface graphique intuitive
+- Sélection du client en dropdown
+- Aperçu des données avant envoi
+- Cross-platform (Windows, macOS, Linux)
+
+#### CLI (Pour automation/scripts)
+```bash
+python system-info-collector.py --client-id 5
+```
+- Déploiement en masse via Group Policy
+- Scripts d'automatisation
+- Intégration MDM
+
+**Données collectées :**
+- ✅ MAC address, Hostname, IP
+- ✅ Marque, Modèle, Numéro de série
+- ✅ OS & Version
+- ✅ RAM, CPU, Disque
+- ✅ Antivirus détecté
+- ✅ Logiciels installés
+
+**Fonctionnalités sécurité :**
+- ✅ Multi-client (isolation stricte)
+- ✅ Matching intelligent MAC→IP→hostname
+- ✅ Confirmation avant envoi
+- ✅ Token d'authentification optionnel
+
+👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)**
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -83,6 +120,33 @@ pyinstaller parcinfo.spec
 ```
 
 Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
+
+---
+
+## 📥 Téléchargements v2.6.24
+
+### Exécutables Portables
+
+| Plateforme | Télécharger | Taille |
+|-----------|----------|--------|
+| **Windows** | [ParcInfo-Setup-2.6.24.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/installer.exe) | ~35 MB |
+| **macOS** | [ParcInfo-2.6.24.dmg](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-2.6.24.dmg) | ~40 MB |
+| **Docker** | `docker pull ghcr.io/darkmind64/parc-info:2.6.24` | ~450 MB |
+
+### Collecteurs Système
+
+| Type | Télécharger | Usage |
+|------|----------|--------|
+| **GUI** ⭐ | [system-info-collector-gui.py](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.py) | Pour les utilisateurs |
+| **CLI** | [system-info-collector.py](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.py) | Pour l'automatisation |
+
+```bash
+# Ou depuis ParcInfo
+python system-info-collector-gui.py
+python system-info-collector.py --client-id 5
+```
+
+👉 [Voir la release complète](https://github.com/darkmind64/parc-info/releases/tag/v2.6.24)
 
 ---
 
