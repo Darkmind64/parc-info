@@ -1,17 +1,20 @@
 {
-  "version": "2.6.24",
-  "release_date": "2026-08-03T22:00:00.000000",
+  "version": "2.6.25",
+  "release_date": "2026-08-03T23:30:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.24",
-    "collector_gui": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.25/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.25/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.25",
+    "collector_gui": "https://github.com/darkmind64/parc-info/releases/download/v2.6.25/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/darkmind64/parc-info/releases/download/v2.6.25/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "System Information Collectors (GUI + CLI) with HTML Report Generation",
+    "new_features": "System Information Collectors (GUI + CLI) with HTML Report Generation - mDNS Access Fix",
     "improvements": [
+      "FIXED: Client list now displays correctly in GUI collector via mDNS (parcinfo.local:3456)",
+      "NEW: Public /api/clients-public endpoint for unauthenticated client list access",
+      "IMPROVED: File-based logging in collectors for easier debugging",
       "Standalone executables (no Python required for Windows)",
       "GUI collector with client selection dropdown",
       "CLI collector for batch deployment & automation",
@@ -36,5 +39,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.24"
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.25"
 }
