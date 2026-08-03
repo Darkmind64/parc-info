@@ -133,15 +133,26 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 | **macOS** | [ParcInfo-2.6.24.dmg](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-2.6.24.dmg) | ~40 MB |
 | **Docker** | `docker pull ghcr.io/darkmind64/parc-info:2.6.24` | ~450 MB |
 
-### Collecteurs Système
+### Collecteurs Système (Exécutables Autonomes)
 
-| Type | Télécharger | Usage |
-|------|----------|--------|
-| **GUI** ⭐ | [system-info-collector-gui.py](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.py) | Pour les utilisateurs |
-| **CLI** | [system-info-collector.py](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.py) | Pour l'automatisation |
+| Type | Plateforme | Télécharger | Taille | Usage |
+|------|-----------|----------|--------|-------|
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe) | 15.6 MB | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe) | 12.5 MB | Automatisation/scripts |
+
+**✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
 ```bash
-# Ou depuis ParcInfo
+# GUI (recommandé pour les utilisateurs)
+system-info-collector-gui.exe
+
+# CLI (pour les scripts/Group Policy)
+system-info-collector.exe --client-id 5
+system-info-collector.exe --client-name "Mon Entreprise"
+```
+
+**macOS & Linux :** Compilez depuis les sources :
+```bash
 python system-info-collector-gui.py
 python system-info-collector.py --client-id 5
 ```
