@@ -26,27 +26,36 @@ Script Python léger (`system-info-collector.py`) qui :
 
 ### Installation
 
-#### 1. Télécharger le script
+#### 1. Télécharger le Collecteur
 
-Deux versions disponibles :
+**Deux formats disponibles :**
 
-**Version GUI (Recommandée pour les utilisateurs)** ⭐
+### 🎉 Exécutables Autonomes (RECOMMANDÉ) - Pas Python requis
 
+| Version | OS | Télécharger | Taille |
+|---------|----|-----------:|--------|
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe) | 15.6 MB |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe) | 12.5 MB |
+
+**Usage :**
 ```bash
-# Télécharger la version avec interface graphique
-curl -o system-info-collector-gui.py http://parcinfo.local:3456/download/system-info-collector-gui
+# GUI - Double-clic pour lancer
+system-info-collector-gui.exe
 
-# Exécuter (pas besoin de ligne de commande)
-python system-info-collector-gui.py
+# CLI - Avec options
+system-info-collector.exe --client-id 5
+system-info-collector.exe --client-name "Mon Entreprise"
 ```
 
-**Ou version CLI (pour scripts/automatisation)**
+### Ou Scripts Python (si Python est disponible)
 
 ```bash
-# Télécharger la version ligne de commande
-curl -o system-info-collector.py http://parcinfo.local:3456/download/system-info-collector
+# Télécharger GUI
+curl -o system-info-collector-gui.py http://parcinfo.local:3456/download/system-info-collector-gui
+python system-info-collector-gui.py
 
-# Exécuter avec options
+# Télécharger CLI
+curl -o system-info-collector.py http://parcinfo.local:3456/download/system-info-collector
 python system-info-collector.py --client-id 5
 ```
 
@@ -200,11 +209,14 @@ Le système a été enregistré dans ParcInfo.
 | **Sélection client facile** | ✅ (dropdown) | ⚠️ (paramètre) |
 | **Déploiement auto** | ❌ | ✅ |
 | **Script/MDM** | ❌ | ✅ |
-| **Dépendances** | tkinter (built-in) | Aucune extra |
+| **Format autonome** | ✅ .exe (15 MB) | ✅ .exe (12 MB) |
+| **Python requis** | ❌ | ❌ |
+| **Support OS** | Windows/macOS/Linux | Windows/macOS/Linux |
 
 **Recommandation :**
-- **Utilisateurs individuels** → GUI
-- **Déploiement en masse** → CLI + GPO/MDM
+- **Utilisateurs Windows individuels** → [system-info-collector-gui.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe) (double-clic)
+- **Déploiement masse Windows** → [system-info-collector.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe) via GPO/MDM
+- **macOS/Linux** → Scripts Python (Python 3.8+ requis)
 
 ---
 
