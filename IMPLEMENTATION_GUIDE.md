@@ -254,6 +254,78 @@ python system-info-collector.py --server http://192.168.1.100:5000 --client-id 5
 python system-info-collector.py --client-id 5  # (affichage complet par défaut)
 ```
 
+---
+
+## 📄 Rapport HTML Généré (NEW v2.6.24)
+
+Chaque collecte génère **deux artefacts** :
+
+### 1️⃣ Rapport HTML Local
+
+**Fichier :** `system-info-report_{hostname}_{mac}_{timestamp}.html`
+
+**Contenu :**
+- ✅ **Toutes les infos** collectées (même non-stockées en BD)
+- ✅ **Formatage professionnel** : sections, badges, CSS
+- ✅ **Badges** : indique "API ✓" vs "Non stocké"
+- ✅ **Détail complet** : jusqu'à 200 logiciels, tous les disques
+
+**Sections :**
+1. **🔍 Identification** : hostname, MAC, IP, brand, model, serial
+2. **🖥️ Système d'Exploitation** : OS, version, platform
+3. **⚙️ Matériel** : RAM, CPU, cores
+4. **💾 Stockage** : disques individuels (C:, D:, etc.) + total
+5. **🛡️ Sécurité** : antivirus détecté
+6. **📦 Logiciels** : liste complète (200+)
+7. **📋 Métadonnées** : timestamp, client, champs supportés
+
+**Exemple :**
+```html
+HTML formaté professionnel avec :
+- Identité visuelle (header, footer)
+- Tableaux avec code couleur
+- Badges "API ✓" en vert / "Non stocké" en jaune
+- Sections collapsibles (JavaScript)
+```
+
+### 2️⃣ Document ParcInfo (Stocké en BD)
+
+**Endpoint :** POST `/api/device-info/upload-report`
+
+**Où :** Détail Appareil → Onglet "Documents"
+
+**Propriétés :**
+- **Type** : Rapport HTML système
+- **Description** : "Rapport HTML complet collecté par système-info-collector"
+- **Format** : HTML text (table `documents_appareils.contenu_blob`)
+- **Lié à** : Appareil créé/mis à jour
+- **Accessible** : En lecture depuis l'UI ParcInfo
+
+**Avantages :**
+- 📚 Historique complet persisté
+- 🔗 Tracabilité (qui a collecté, quand)
+- 💾 Sauvegarde centralisée
+- 🔍 Recherche/audit facile
+
+---
+
+## 🗺️ Correspondance des Champs (NEW v2.6.24)
+
+**Voir le document complet :** [COLLECTOR_FIELD_MAPPING.md](COLLECTOR_FIELD_MAPPING.md)
+
+### Résumé
+
+| Status | Count | Exemple |
+|--------|-------|---------|
+| ✅ Collectés + Stockés en BD | 12 | hostname, MAC, IP, OS, RAM, CPU, disk, antivirus, software |
+| ⚠️ Partiellement stockés | 2 | os_version, disk_drives (total only) |
+| ❌ Non collectés (impossible) | 14 | user, service, location, purchase_date, etc. |
+
+**Données sensibles JAMAIS collectées :**
+- ❌ Mots de passe utilisateur
+- ❌ Clés administrateur
+- ❌ Credentials sensibles
+
 ### Données Collectées
 
 #### ✅ Toujours Collectées

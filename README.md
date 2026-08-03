@@ -13,42 +13,63 @@ Application web **Python/Flask** pour la gestion d'inventaire informatique avec 
 
 ## ✨ Fonctionnalités Principales
 
-### 🎉 NEW v2.6.24 : Collecteur Système Auto-remplissage
+### 🎉 NEW v2.6.24 : Collecteur Système + Rapport HTML Persisté
 
-**Deux versions du collecteur :**
+**Deux versions du collecteur (exécutables autonomes) :**
 
-#### GUI (Recommandé pour les utilisateurs) ⭐
+#### GUI (Recommandé) ⭐ 15.6 MB
 ```bash
-python system-info-collector-gui.py
+system-info-collector-gui.exe  # Windows
+# ou python system-info-collector-gui.py
 ```
-- Interface graphique intuitive
-- Sélection du client en dropdown
-- Aperçu des données avant envoi
-- Cross-platform (Windows, macOS, Linux)
+- ✅ Interface graphique Tkinter
+- ✅ Sélection client en dropdown (fetch API)
+- ✅ Aperçu formaté des données avant envoi
+- ✅ Cross-platform (Windows, macOS, Linux)
+- ✅ **NEW** : Rapport HTML généré + stocké
 
-#### CLI (Pour automation/scripts)
+#### CLI (Automation/Scripts) 12.5 MB
 ```bash
-python system-info-collector.py --client-id 5
+system-info-collector.exe --client-id 5  # Windows
+# ou python system-info-collector.py --client-id 5
 ```
-- Déploiement en masse via Group Policy
-- Scripts d'automatisation
-- Intégration MDM
+- ✅ Déploiement en masse via Group Policy
+- ✅ Scripts d'automatisation / MDM
+- ✅ Mode silencieux (--quiet)
+- ✅ **NEW** : Rapport HTML avec logs
 
-**Données collectées :**
-- ✅ MAC address, Hostname, IP
-- ✅ Marque, Modèle, Numéro de série
-- ✅ OS & Version
-- ✅ RAM, CPU, Disque
-- ✅ Antivirus détecté
-- ✅ Logiciels installés
+**Données collectées (12+ champs) :**
+| Champ | Windows (WMI) | macOS | Linux |
+|-------|---|---|---|
+| MAC, Hostname, IP(s) | ✅ | ✅ | ✅ |
+| Brand, Model, Serial | ✅ | ✅ | ✅ |
+| OS & Version | ✅ | ✅ | ✅ |
+| RAM, CPU, CPU Cores | ✅ | ✅ | ✅ |
+| **All Disks** (NEW) | ✅ | ✅ | ✅ |
+| Antivirus | ✅ | ⚠️ | ⚠️ |
+| **Software (200+)** (NEW) | ✅ | ✅ | ✅ |
 
-**Fonctionnalités sécurité :**
+**Workflow Enrichi :**
+1. Collecte système complète (CLI/GUI)
+2. Génère **rapport HTML complet** (local + stocké)
+3. Filtre champs API supportés
+4. POST /api/device-info → crée/met à jour appareil
+5. POST /api/device-info/upload-report → document joint ParcInfo
+6. **Résultat** : Appareil enrichi + historique HTML complet
+
+**Sécurité & Qualité :**
 - ✅ Multi-client (isolation stricte)
 - ✅ Matching intelligent MAC→IP→hostname
-- ✅ Confirmation avant envoi
+- ✅ Confirmation avant envoi (GUI)
 - ✅ Token d'authentification optionnel
+- ✅ **NEW** : Rapport HTML préserve 100% des données
+- ✅ **NEW** : Correspondance champs documentée (COLLECTOR_FIELD_MAPPING.md)
 
-👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)**
+👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
+
+**Télécharger les exécutables :** 👇
+- [system-info-collector.exe (CLI, 12.5 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI, 15.6 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
