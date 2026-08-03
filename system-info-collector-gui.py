@@ -251,9 +251,9 @@ def collect_system_info():
 
 
 def fetch_clients(server_url):
-    """Récupère la liste des clients depuis ParcInfo."""
+    """Récupère la liste des clients depuis ParcInfo (endpoint public, pas d'auth requise)."""
     try:
-        url = f"{server_url.rstrip('/')}/api/clients"
+        url = f"{server_url.rstrip('/')}/api/clients-public"
         with urlopen(url, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
             return data if isinstance(data, list) else []

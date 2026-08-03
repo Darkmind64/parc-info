@@ -103,7 +103,17 @@
       "Bash(grep -rn \"fetch.*api\\\\|XMLHttpRequest\\\\|$.ajax\" \"/E/Claude Code/parc_info - docker/templates/\" | grep -i \"system\\\\|info\\\\|device\\\\|navigator\" | head -10)",
       "Bash(grep -n \"/api/ping\" \"/E/Claude Code/parc_info - docker/app.py\")",
       "Bash(awk '/^def init_db/,/^def [^_]/' app.py)",
-      "Bash(awk 'NR==585,/^def /' app.py)"
+      "Bash(awk 'NR==585,/^def /' app.py)",
+      "Bash(gh release create v2.6.24 --title 'v2.6.24 - Auto-fill System Information' --notes ' *)",
+      "Bash(git commit -m 'docs: Update README for v2.6.24 with new auto-fill features *)",
+      "Bash(python -m PyInstaller collector-cli.spec --onefile --clean)",
+      "Bash(python -m PyInstaller collector-cli.spec --clean)",
+      "Bash(python -m PyInstaller collector-gui.spec --clean)",
+      "Bash(gh release *)",
+      "Bash(gh api *)",
+      "Bash(git commit -m 'docs: Update README with standalone executables *)",
+      "Bash(git commit -m 'docs: Add standalone executables to implementation guide *)",
+      "Bash(rm -rf build dist)"
     ]
   }
 }

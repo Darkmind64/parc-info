@@ -5449,6 +5449,47 @@ def api_device_info():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route('/api/clients-public', methods=['GET'])
+def api_clients_public():
+    """
+    Endpoint PUBLIC pour récupérer la liste des clients (sans authentification).
+
+    Utilisé par le collecteur système GUI pour afficher les clients disponibles.
+
+    Retourne :
+    [
+      {"id": 1, "nom": "Mon Entreprise"},
+      {"id": 2, "nom": "Client A"},
+      ...
+    ]
+    """
+    try:
+        conn = get_db()
+        clients = [
+            {"id": row[0], "nom": row[1]}
+            for row in conn.execute('SELECT id, nom FROM clients ORDER BY nom').fetchall()
+        ]
+        conn.close()
+
+        if not clients:
+            # S'il n'y a aucun client, créer un défaut
+            conn = get_db()
+            conn.execute(
+                "INSERT INTO clients (nom, date_creation, date_maj) VALUES (?, ?, ?)",
+                ("Client par défaut", datetime.utcnow().isoformat(), datetime.utcnow().isoformat())
+            )
+            conn.commit()
+            new_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.close()
+            clients = [{"id": new_id, "nom": "Client par défaut"}]
+
+        return jsonify(clients), 200
+
+    except Exception as e:
+        app.logger.exception("Error in /api/clients-public")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/download/system-info-collector', methods=['GET'])
 def download_collector():
     """
