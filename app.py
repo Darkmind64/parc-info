@@ -5213,28 +5213,81 @@ def api_device_info():
         ip_address = ip_addresses[0] if ip_addresses else ''
         hostname = data.get('hostname', '')
 
-        # À cause de la sécurité navigateur, on ne demande pas d'authentification stricte
-        # On match par MAC + IP + réseau local
-        # (le collecteur est exécuté localement sur la machine)
+        # Le collecteur DOIT spécifier le client cible
+        # Stratégies :
+        # 1. Paramètre client_id dans le JSON
+        # 2. Token d'authentification (valide un user qui a accès)
+        # 3. Client par défaut (fallback)
 
-        # Chercher le client depuis les paramètres de session
-        # Ou utiliser un client "default" / "Réseau Local"
-        cid = get_client_id()
+        cid = None
+
+        # 1. Essayer client_id du JSON
+        cid_param = data.get('client_id')
+        if cid_param:
+            try:
+                cid = int(cid_param)
+                # Vérifier que ce client existe
+                conn_test = get_db()
+                exists = conn_test.execute('SELECT id FROM clients WHERE id=?', (cid,)).fetchone()
+                conn_test.close()
+                if not exists:
+                    return jsonify({"status": "error", "message": f"Client ID {cid} not found"}), 404
+            except (ValueError, TypeError):
+                return jsonify({"status": "error", "message": "Invalid client_id parameter"}), 400
+
+        # 1b. Essayer client_name (fallback)
         if not cid:
-            # Créer ou récupérer le client "Découverte réseau"
-            conn = get_db()
-            c = conn.execute('SELECT id FROM clients WHERE nom LIKE ?', ('%Découverte%',)).fetchone()
-            if not c:
+            client_name = data.get('client_name')
+            if client_name:
+                conn_name = get_db()
+                client_row = conn_name.execute('SELECT id FROM clients WHERE nom=?', (client_name,)).fetchone()
+                conn_name.close()
+                if client_row:
+                    cid = client_row[0]
+                else:
+                    return jsonify({"status": "error", "message": f"Client '{client_name}' not found"}), 404
+
+        # 2. Si pas de client_id, vérifier token d'auth
+        if not cid:
+            token = data.get('token') or request.headers.get('Authorization', '').replace('Bearer ', '')
+            if token:
+                conn_token = get_db()
+                # Chercher un user avec ce token (simple vérification)
+                # Dans une vraie implémentation, générer des tokens API
+                # Pour l'instant, utiliser une clé secrète simple
+                api_secret = cfg_get('api_collector_secret', '')
+                if api_secret and token == api_secret:
+                    # Token valide - utiliser le premier client de l'admin
+                    user = conn_token.execute('SELECT id FROM auth_users WHERE role="admin" LIMIT 1').fetchone()
+                    if user:
+                        client = conn_token.execute('SELECT id FROM clients WHERE auth_user_id=? LIMIT 1',
+                                                   (user[0],)).fetchone()
+                        if client:
+                            cid = client[0]
+                conn_token.close()
+
+        # 3. Fallback : client "Découverte réseau" ou premier client
+        if not cid:
+            conn_fall = get_db()
+            # Chercher client "Découverte réseau"
+            c = conn_fall.execute('SELECT id FROM clients WHERE nom LIKE ?', ('%Découverte%',)).fetchone()
+            if c:
+                cid = c[0]
+            else:
                 # Créer le client s'il n'existe pas
-                conn.execute(
+                conn_fall.execute(
                     'INSERT INTO clients (nom, contact, email, date_creation, date_maj) VALUES (?,?,?,?,?)',
                     ('Découverte réseau', 'auto', 'auto@parcinfo.local', datetime.utcnow().isoformat(), datetime.utcnow().isoformat())
                 )
-                conn.commit()
-                cid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-            else:
-                cid = c[0]
-            conn.close()
+                conn_fall.commit()
+                cid = conn_fall.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn_fall.close()
+
+            # Avertir que le client "Découverte réseau" est utilisé
+            app.logger.warning(f"Device info received without explicit client_id - using default 'Découverte réseau' (ID: {cid}). Specify 'client_id' in request to target a specific client.")
+
+        if not cid:
+            return jsonify({"status": "error", "message": "No valid client found - specify client_id or configure collector token"}), 400
 
         # Marque et modèle
         brand = data.get('brand', '')

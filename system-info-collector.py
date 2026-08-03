@@ -329,12 +329,26 @@ def collect_system_info():
     return info
 
 
-def send_to_parcinfo(info, server_url, token=None):
-    """Envoie les infos à ParcInfo via l'API."""
+def send_to_parcinfo(info, server_url, token=None, client_id=None, client_name=None):
+    """Envoie les infos à ParcInfo via l'API.
+
+    Args:
+        info: Dict des informations système
+        server_url: URL du serveur ParcInfo
+        token: Token d'authentification (optionnel)
+        client_id: ID du client cible (optionnel)
+        client_name: Nom du client cible (optionnel - sera résolu en ID)
+    """
     try:
         headers = {'Content-Type': 'application/json'}
         if token:
             headers['Authorization'] = f'Bearer {token}'
+
+        # Ajouter client_id ou client_name
+        if client_id:
+            info['client_id'] = client_id
+        if client_name:
+            info['client_name'] = client_name
 
         payload = json.dumps(info)
         request = Request(
@@ -361,6 +375,10 @@ def main():
                        help='URL du serveur ParcInfo (défaut: http://parcinfo.local:3456)')
     parser.add_argument('--token', default=None,
                        help='Token d\'authentification (optionnel)')
+    parser.add_argument('--client-id', type=int, default=None,
+                       help='ID du client cible (ex: --client-id 5)')
+    parser.add_argument('--client-name', default=None,
+                       help='Nom du client cible (ex: --client-name "Mon Entreprise")')
     parser.add_argument('--quiet', action='store_true',
                        help='Mode silencieux (pas d\'affichage)')
 
@@ -388,8 +406,16 @@ def main():
     # Envoyer à ParcInfo
     if not args.quiet:
         print(f"\n[*] Envoi à {args.server}...")
+        if args.client_id:
+            print(f"    Client ID: {args.client_id}")
+        elif args.client_name:
+            print(f"    Client: {args.client_name}")
+        else:
+            print(f"    ⚠️ No client specified - will use default or prompt")
 
-    success, result = send_to_parcinfo(info, args.server, args.token)
+    success, result = send_to_parcinfo(info, args.server, args.token,
+                                      client_id=args.client_id,
+                                      client_name=args.client_name)
 
     if success:
         if not args.quiet:

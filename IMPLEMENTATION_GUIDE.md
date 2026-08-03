@@ -42,25 +42,40 @@ Ou télécharger directement depuis : `/static/system-info-collector.py`
 
 #### 2. Exécuter sur chaque machine
 
+**Spécifier le client cible :**
+
+```bash
+# Par ID du client (recommandé)
+python system-info-collector.py --client-id 5
+
+# Par nom du client
+python system-info-collector.py --client-name "Mon Entreprise"
+
+# Avec token d'authentification (sécurisé)
+python system-info-collector.py --client-id 5 --token ABC123XYZ
+
+# Serveur personnalisé
+python system-info-collector.py --server http://192.168.1.100:3456 --client-id 5
+```
+
+⚠️ **Important :** Si `--client-id` ou `--client-name` n'est pas spécifié, le collecteur utilise un client "Découverte réseau" par défaut (attention à la confusion entre clients !)
+
 **Windows:**
 ```powershell
-# Sans admin :
-python system-info-collector.py
-
-# Avec proxy :
-python system-info-collector.py --server http://192.168.1.100:3456
+python system-info-collector.py --client-id 5
+python system-info-collector.py --client-name "Mon Entreprise"
 ```
 
 **macOS:**
 ```bash
-python3 system-info-collector.py
+python3 system-info-collector.py --client-id 5
 ```
 
 **Linux:**
 ```bash
-python3 system-info-collector.py
+python3 system-info-collector.py --client-id 5
 # Ou avec sudo pour infos système complets :
-sudo python3 system-info-collector.py
+sudo python3 system-info-collector.py --client-id 5
 ```
 
 #### 3. Exemple de sortie
@@ -97,17 +112,38 @@ ParcInfo System Information Collector v1.0
 Le système a été enregistré dans ParcInfo.
 ```
 
-### Options
+### Découvrir les IDs des Clients
+
+1. **Via l'interface ParcInfo :**
+   - Aller à : Inventaire → Parc Général
+   - Noter l'ID du client dans l'URL ou les détails
+
+2. **Via SQLite (direct) :**
+   ```bash
+   sqlite3 parc_info.db "SELECT id, nom FROM clients;"
+   # Résultat :
+   # 1|Mon Entreprise
+   # 2|Client A
+   # 3|Client B
+   ```
+
+3. **Via API :**
+   ```bash
+   curl http://parcinfo.local:3456/api/clients
+   # (nécessite authentification)
+   ```
+
+### Options Additionnelles
 
 ```bash
-# Serveur personnalisé
-python system-info-collector.py --server http://my-server:3456
-
-# Token d'authentification (optionnel)
-python system-info-collector.py --token ABC123XYZ
-
 # Mode silencieux (pas d'affichage)
-python system-info-collector.py --quiet
+python system-info-collector.py --client-id 5 --quiet
+
+# Serveur personnalisé + port
+python system-info-collector.py --server http://192.168.1.100:5000 --client-id 5
+
+# Debug verbose
+python system-info-collector.py --client-id 5  # (affichage complet par défaut)
 ```
 
 ### Données Collectées
@@ -338,6 +374,53 @@ curl -X POST http://parcinfo.local:3456/api/scan/lancer \
 
 ---
 
+## ⚠️ CLIENT CIBLE : CRITIQUE !!!
+
+**TOUJOURS spécifier `--client-id` ou `--client-name`** :
+
+```bash
+# ✅ CORRECT - machine créée dans le bon client
+python system-info-collector.py --client-id 5
+
+# ✅ AUSSI BON - résolut le nom du client
+python system-info-collector.py --client-name "Mon Entreprise"
+
+# ❌ DANGEREUX - machine créée dans "Découverte réseau" (confusion !)
+python system-info-collector.py  # Sans --client-id
+```
+
+### Pourquoi c'est important ?
+
+- ParcInfo supporte **plusieurs clients** (multi-tenant)
+- Chaque client a son propre inventaire
+- Si vous oubliez `--client-id`, la machine va **par défaut** au client "Découverte réseau"
+- Résultats : **mélange de données, audit trail confus, accès perdus**
+
+### Comment trouver votre Client ID ?
+
+**Avant de lancer le collecteur :**
+
+```bash
+# 1. Direct dans SQLite (si accès)
+sqlite3 parc_info.db "SELECT id, nom FROM clients;"
+
+# Résultat exemple :
+# 1|Mon Entreprise
+# 2|Client A
+# 3|Client B
+
+# 2. Ou dans ParcInfo UI : Inventaire → Parc Général
+# Regarder l'URL ou demander à l'admin
+```
+
+**Puis lancez le collecteur avec le bon ID :**
+
+```bash
+python system-info-collector.py --client-id 1
+```
+
+---
+
 ## 🐛 Dépannage
 
 ### Le collecteur ne peut pas se connecter
@@ -354,13 +437,32 @@ python system-info-collector.py --server http://192.168.1.100:3456
 ### Les données ne sont pas à jour
 
 ```bash
-# Relancer le collecteur
-python system-info-collector.py
+# Relancer le collecteur avec le bon client
+python system-info-collector.py --client-id 1
 
-# Ou via API directement :
+# Ou via API avec client_id :
 curl -X POST http://parcinfo.local:3456/api/device-info \
   -H "Content-Type: application/json" \
-  -d '{"mac_address": "00:1A:2B:3C:4D:5E", ...}'
+  -d '{
+    "mac_address": "00:1A:2B:3C:4D:5E",
+    "client_id": 1,
+    ...
+  }'
+```
+
+### La machine s'est créée dans le mauvais client
+
+**Symptôme :** Machine visible dans "Découverte réseau" au lieu de votre client
+
+**Solution :**
+1. Vérifier le log du collecteur
+2. Relancer avec `--client-id` correct
+3. Optionnel : Supprimer la machine mal créée (Inventaire → Appareils → Supprimer)
+4. Relancer le collecteur
+
+```bash
+# BON DÉPLOIEMENT
+python system-info-collector.py --client-id 5 --server http://parcinfo.local:3456
 ```
 
 ### WMI enrichment est lent
