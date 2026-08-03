@@ -122,9 +122,20 @@ def get_system_info_windows():
         except Exception:
             pass
 
+        # Tous les disques logiques
         try:
-            disk = c.Win32_LogicalDisk(Name='C:')[0]
-            info['disk_total_gb'] = round(int(disk.Size) / (1024 ** 3), 1)
+            disks = c.Win32_LogicalDisk()
+            disk_list = []
+            total_disk = 0
+            for disk in disks:
+                if disk.DriveType == 3:  # Local Disk
+                    drive_letter = disk.Name
+                    size_gb = round(int(disk.Size) / (1024 ** 3), 1) if disk.Size else 0
+                    disk_list.append(f"{drive_letter} ({size_gb} GB)")
+                    total_disk += size_gb
+            if disk_list:
+                info['disk_drives'] = disk_list
+                info['disk_total_gb'] = total_disk
         except Exception:
             pass
 
@@ -174,6 +185,34 @@ def get_system_info_mac():
     except Exception:
         pass
 
+    # Tous les disques via df
+    try:
+        result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=5)
+        lines = result.stdout.strip().split('\n')[1:]
+        disk_list = []
+        total_disk = 0
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 2:
+                device = parts[0]
+                size_str = parts[1]
+                try:
+                    if 'T' in size_str:
+                        size_gb = float(size_str.replace('T', '')) * 1024
+                    elif 'G' in size_str:
+                        size_gb = float(size_str.replace('G', ''))
+                    else:
+                        continue
+                    disk_list.append(f"{device} ({round(size_gb, 1)} GB)")
+                    total_disk += size_gb
+                except Exception:
+                    pass
+        if disk_list:
+            info['disk_drives'] = disk_list
+            info['disk_total_gb'] = round(total_disk, 1)
+    except Exception:
+        pass
+
     return info
 
 
@@ -216,17 +255,98 @@ def get_system_info_linux():
     except Exception:
         pass
 
+    # Tous les disques
     try:
-        result = subprocess.run(['df', '/'], capture_output=True, text=True, timeout=5)
-        lines = result.stdout.strip().split('\n')
-        if len(lines) > 1:
-            parts = lines[1].split()
+        result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=5)
+        lines = result.stdout.strip().split('\n')[1:]
+        disk_list = []
+        total_disk = 0
+        for line in lines:
+            parts = line.split()
             if len(parts) >= 2:
-                info['disk_total_gb'] = round(int(parts[1]) / (1024 * 1024), 1)
+                device = parts[0]
+                size_str = parts[1]
+                try:
+                    if 'T' in size_str:
+                        size_gb = float(size_str.replace('T', '')) * 1024
+                    elif 'G' in size_str:
+                        size_gb = float(size_str.replace('G', ''))
+                    elif 'M' in size_str:
+                        size_gb = float(size_str.replace('M', '')) / 1024
+                    else:
+                        continue
+                    disk_list.append(f"{device} ({round(size_gb, 1)} GB)")
+                    total_disk += size_gb
+                except Exception:
+                    pass
+        if disk_list:
+            info['disk_drives'] = disk_list
+            info['disk_total_gb'] = round(total_disk, 1)
     except Exception:
         pass
 
     return info
+
+
+def get_installed_software():
+    """Récupère la liste des logiciels installés (max 200)."""
+    software = []
+
+    if IS_WINDOWS:
+        try:
+            import winreg
+            hive = winreg.HKEY_LOCAL_MACHINE
+            paths = [
+                r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+                r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+            ]
+            for path in paths:
+                try:
+                    with winreg.OpenKey(hive, path) as key:
+                        count = winreg.QueryInfoKey(key)[0]
+                        for i in range(count):
+                            try:
+                                subkey_name = winreg.EnumKey(key, i)
+                                with winreg.OpenKey(key, subkey_name) as subkey:
+                                    try:
+                                        display_name = winreg.QueryValueEx(subkey, 'DisplayName')[0]
+                                        if display_name and len(display_name.strip()) > 0:
+                                            software.append(display_name.strip())
+                                    except WindowsError:
+                                        pass
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    elif IS_MAC:
+        try:
+            result = subprocess.run(['ls', '/Applications'], capture_output=True, text=True, timeout=5)
+            software.extend([app.replace('.app', '') for app in result.stdout.split('\n') if app.endswith('.app')])
+        except Exception:
+            pass
+        try:
+            result = subprocess.run(['ls', '/usr/local/opt'], capture_output=True, text=True, timeout=5)
+            software.extend([pkg for pkg in result.stdout.split('\n') if pkg.strip()])
+        except Exception:
+            pass
+
+    elif IS_LINUX:
+        try:
+            result = subprocess.run(['dpkg', '--get-selections'], capture_output=True, text=True, timeout=10)
+            software.extend([line.split()[0] for line in result.stdout.split('\n') if 'install' in line])
+        except Exception:
+            pass
+        if not software:
+            try:
+                result = subprocess.run(['rpm', '-qa'], capture_output=True, text=True, timeout=10)
+                software.extend([line.strip() for line in result.stdout.split('\n') if line.strip()])
+            except Exception:
+                pass
+
+    return sorted(list(set(software)))[:200]
 
 
 def collect_system_info():
@@ -246,6 +366,9 @@ def collect_system_info():
         info.update(get_system_info_mac())
     elif IS_LINUX:
         info.update(get_system_info_linux())
+
+    # Logiciels (limité à 200)
+    info['installed_software'] = get_installed_software()[:200]
 
     return info
 
@@ -411,7 +534,17 @@ class CollectorGUI:
         summary.append(f"│ RAM                : {self.system_info.get('ram_gb', 'N/A')} GB")
         summary.append(f"│ CPU                : {self.system_info.get('cpu', 'N/A')}")
         summary.append(f"│ CPU Cores          : {self.system_info.get('cpu_cores', 'N/A')}")
-        summary.append(f"│ Stockage           : {self.system_info.get('disk_total_gb', 'N/A')} GB")
+
+        # Affichage des disques (multiples ou simple)
+        disk_drives = self.system_info.get('disk_drives', [])
+        if disk_drives:
+            summary.append(f"│ Disques :")
+            for drive in disk_drives:
+                summary.append(f"│   - {drive}")
+            summary.append(f"│ Total Stockage     : {self.system_info.get('disk_total_gb', 'N/A')} GB")
+        else:
+            summary.append(f"│ Stockage           : {self.system_info.get('disk_total_gb', 'N/A')} GB")
+
         summary.append("└")
         summary.append("")
 
@@ -420,6 +553,19 @@ class CollectorGUI:
         if av:
             summary.append("┌─ SÉCURITÉ")
             summary.append(f"│ Antivirus          : {av}")
+            summary.append("└")
+            summary.append("")
+
+        # Section Logiciels
+        software_list = self.system_info.get('installed_software', [])
+        if software_list:
+            summary.append("┌─ LOGICIELS INSTALLÉS")
+            summary.append(f"│ Total détecté      : {len(software_list)} logiciel(s)")
+            summary.append("│ Premiers 10 :")
+            for i, soft in enumerate(software_list[:10], 1):
+                summary.append(f"│   {i}. {soft}")
+            if len(software_list) > 10:
+                summary.append(f"│   ... et {len(software_list) - 10} autres")
             summary.append("└")
             summary.append("")
 

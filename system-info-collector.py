@@ -131,10 +131,20 @@ def get_system_info_windows():
         except Exception:
             pass
 
-        # Disque principal
+        # Tous les disques logiques
         try:
-            disk = c.Win32_LogicalDisk(Name='C:')[0]
-            info['disk_total_gb'] = round(int(disk.Size) / (1024 ** 3), 1)
+            disks = c.Win32_LogicalDisk()
+            disk_list = []
+            total_disk = 0
+            for disk in disks:
+                if disk.DriveType == 3:  # Local Disk
+                    drive_letter = disk.Name
+                    size_gb = round(int(disk.Size) / (1024 ** 3), 1) if disk.Size else 0
+                    disk_list.append(f"{drive_letter} ({size_gb} GB)")
+                    total_disk += size_gb
+            if disk_list:
+                info['disk_drives'] = disk_list
+                info['disk_total_gb'] = total_disk
         except Exception:
             pass
 
@@ -187,6 +197,35 @@ def get_system_info_mac():
     except Exception:
         pass
 
+    # Tous les disques via df
+    try:
+        result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=5)
+        lines = result.stdout.strip().split('\n')[1:]  # Skip header
+        disk_list = []
+        total_disk = 0
+        for line in lines:
+            parts = line.split()
+            if len(parts) >= 2:
+                device = parts[0]
+                size_str = parts[1]
+                try:
+                    # Convertir la taille en GB
+                    if 'T' in size_str:
+                        size_gb = float(size_str.replace('T', '')) * 1024
+                    elif 'G' in size_str:
+                        size_gb = float(size_str.replace('G', ''))
+                    else:
+                        continue
+                    disk_list.append(f"{device} ({round(size_gb, 1)} GB)")
+                    total_disk += size_gb
+                except Exception:
+                    pass
+        if disk_list:
+            info['disk_drives'] = disk_list
+            info['disk_total_gb'] = round(total_disk, 1)
+    except Exception:
+        pass
+
     return info
 
 
@@ -233,14 +272,34 @@ def get_system_info_linux():
     except Exception:
         pass
 
-    # Disque
+    # Tous les disques
     try:
-        result = subprocess.run(['df', '/'], capture_output=True, text=True, timeout=5)
-        lines = result.stdout.strip().split('\n')
-        if len(lines) > 1:
-            parts = lines[1].split()
+        result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=5)
+        lines = result.stdout.strip().split('\n')[1:]  # Skip header
+        disk_list = []
+        total_disk = 0
+        for line in lines:
+            parts = line.split()
             if len(parts) >= 2:
-                info['disk_total_gb'] = round(int(parts[1]) / (1024 * 1024), 1)
+                device = parts[0]
+                size_str = parts[1]
+                try:
+                    # Convertir la taille en GB
+                    if 'T' in size_str:
+                        size_gb = float(size_str.replace('T', '')) * 1024
+                    elif 'G' in size_str:
+                        size_gb = float(size_str.replace('G', ''))
+                    elif 'M' in size_str:
+                        size_gb = float(size_str.replace('M', '')) / 1024
+                    else:
+                        continue
+                    disk_list.append(f"{device} ({round(size_gb, 1)} GB)")
+                    total_disk += size_gb
+                except Exception:
+                    pass
+        if disk_list:
+            info['disk_drives'] = disk_list
+            info['disk_total_gb'] = round(total_disk, 1)
     except Exception:
         pass
 
@@ -248,7 +307,7 @@ def get_system_info_linux():
 
 
 def get_installed_software():
-    """Récupère la liste des logiciels installés."""
+    """Récupère la liste des logiciels installés (max 200)."""
     software = []
 
     if IS_WINDOWS:
@@ -281,26 +340,53 @@ def get_installed_software():
             pass
 
     elif IS_MAC:
+        # /Applications
         try:
             result = subprocess.run(['ls', '/Applications'], capture_output=True, text=True, timeout=5)
-            software = [app.replace('.app', '') for app in result.stdout.split('\n') if app.endswith('.app')]
+            software.extend([app.replace('.app', '') for app in result.stdout.split('\n') if app.endswith('.app')])
+        except Exception:
+            pass
+
+        # /usr/local/opt (Homebrew)
+        try:
+            result = subprocess.run(['ls', '/usr/local/opt'], capture_output=True, text=True, timeout=5)
+            software.extend([pkg for pkg in result.stdout.split('\n') if pkg.strip()])
+        except Exception:
+            pass
+
+        # pkgutil pour les packages installés
+        try:
+            result = subprocess.run(['pkgutil', '--packages'], capture_output=True, text=True, timeout=10)
+            software.extend([line.strip() for line in result.stdout.split('\n') if line.strip()])
         except Exception:
             pass
 
     elif IS_LINUX:
-        # Récupérer les paquets installés
+        # Debian/Ubuntu (dpkg)
         try:
-            result = subprocess.run(['dpkg', '--get-selections'], capture_output=True, text=True, timeout=5)
-            software = [line.split()[0] for line in result.stdout.split('\n') if 'install' in line]
+            result = subprocess.run(['dpkg', '--get-selections'], capture_output=True, text=True, timeout=10)
+            software.extend([line.split()[0] for line in result.stdout.split('\n') if 'install' in line])
         except Exception:
+            pass
+
+        # RedHat/CentOS (rpm)
+        if not software:
             try:
-                result = subprocess.run(['rpm', '-qa'], capture_output=True, text=True, timeout=5)
-                software = result.stdout.split('\n')
+                result = subprocess.run(['rpm', '-qa'], capture_output=True, text=True, timeout=10)
+                software.extend([line.strip() for line in result.stdout.split('\n') if line.strip()])
             except Exception:
                 pass
 
-    # Limiter à 100 logiciels pour ne pas surcharger
-    return sorted(set(software))[:100]
+        # Arch Linux (pacman)
+        if not software:
+            try:
+                result = subprocess.run(['pacman', '-Q'], capture_output=True, text=True, timeout=10)
+                software.extend([line.split()[0] for line in result.stdout.split('\n') if line.strip()])
+            except Exception:
+                pass
+
+    # Limiter à 200 logiciels pour ne pas surcharger
+    return sorted(list(set(software)))[:200]
 
 
 def collect_system_info():
@@ -323,8 +409,8 @@ def collect_system_info():
     elif IS_LINUX:
         info.update(get_system_info_linux())
 
-    # Logiciels (limité)
-    info['installed_software'] = get_installed_software()[:50]
+    # Logiciels (limité à 200)
+    info['installed_software'] = get_installed_software()[:200]
 
     return info
 
@@ -400,7 +486,17 @@ def main():
         print(f"    ✓ OS: {info.get('os_name', 'N/A')} {info.get('os_version', '')}")
         print(f"    ✓ RAM: {info.get('ram_gb', 'N/A')} GB")
         print(f"    ✓ CPU: {info.get('cpu', 'N/A')} ({info.get('cpu_cores', 'N/A')} cores)")
-        print(f"    ✓ Disque: {info.get('disk_total_gb', 'N/A')} GB")
+
+        # Affichage des disques (multiples ou simple)
+        disk_drives = info.get('disk_drives', [])
+        if disk_drives:
+            print(f"    ✓ Disques:")
+            for drive in disk_drives:
+                print(f"         - {drive}")
+            print(f"         Total: {info.get('disk_total_gb', 'N/A')} GB")
+        else:
+            print(f"    ✓ Disque total: {info.get('disk_total_gb', 'N/A')} GB")
+
         print(f"    ✓ Logiciels détectés: {len(info.get('installed_software', []))}")
 
     # Envoyer à ParcInfo
