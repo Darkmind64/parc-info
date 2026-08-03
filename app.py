@@ -15,6 +15,13 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
+# ─── mDNS SUPPORT (parcinfo.local) ────────────────────────────────────────────
+try:
+    from zeroconf import ServiceInfo, Zeroconf
+    MDNS_AVAILABLE = True
+except ImportError:
+    MDNS_AVAILABLE = False
+
 # ─── LOGGING ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -1449,6 +1456,19 @@ def init_db():
             c.execute(f"ALTER TABLE {table} ADD COLUMN date_sync TEXT DEFAULT ''")
         except sqlite3.OperationalError:
             pass  # Colonne existe déjà
+
+    # Migration : colonnes pour système auto-remplissage (v2.6.24)
+    cols_app3 = [r[1] for r in conn.execute('PRAGMA table_info(appareils)').fetchall()]
+    for col, defval in [
+        ('antivirus', "TEXT DEFAULT ''"),
+        ('logiciels_installes_json', "TEXT DEFAULT '[]'"),
+        ('derniere_synchro', "TEXT DEFAULT NULL"),
+    ]:
+        if col not in cols_app3:
+            try:
+                c.execute(f"ALTER TABLE appareils ADD COLUMN {col} {defval}")
+            except Exception:
+                pass
 
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
@@ -4922,8 +4942,87 @@ def _deviner_type(hostname, ports, os_guess="", vendor=""):
         return 'PC (Windows)'
     return 'PC'
 
-def _scan_host(ip_str):
-    """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant."""
+def _enrich_from_wmi(ip_str, hostname_hint=""):
+    """
+    Tente d'enrichir les infos du scan via WMI (Windows Management Instrumentation).
+    Récupère marque, modèle, RAM, CPU, etc. directement depuis la machine.
+
+    Retourne un dict avec les infos enrichies, ou {} si WMI non disponible ou échec.
+
+    Note: Nécessite :
+    - WMI disponible (Windows uniquement)
+    - Accès RPC à la machine (port 135)
+    - Credentials valides (optionnel - sinon utilise credentials de session)
+    """
+    enriched = {}
+
+    if _sys.platform != 'win32':
+        # WMI n'est disponible que sur Windows
+        return enriched
+
+    try:
+        import wmi
+    except ImportError:
+        # WMI non installé
+        return enriched
+
+    try:
+        # Essayer une connexion WMI distante
+        # Syntaxe : wmi.WMI("//IP/root/cimv2")
+        c = wmi.WMI(f"//{ip_str}/root/cimv2")
+
+        # Marque et modèle
+        try:
+            system = c.Win32_ComputerSystem()[0]
+            enriched['brand'] = system.Manufacturer.strip() if system.Manufacturer else ''
+            enriched['model'] = system.Model.strip() if system.Model else ''
+        except Exception:
+            pass
+
+        # RAM
+        try:
+            mem = c.Win32_PhysicalMemory()
+            total_ram_bytes = sum(int(m.Capacity) for m in mem)
+            enriched['ram_gb'] = round(total_ram_bytes / (1024 ** 3), 1)
+        except Exception:
+            pass
+
+        # CPU
+        try:
+            cpu = c.Win32_Processor()[0]
+            enriched['cpu'] = cpu.Name.strip() if cpu.Name else ''
+            enriched['cpu_cores'] = int(cpu.NumberOfCores) if hasattr(cpu, 'NumberOfCores') else None
+        except Exception:
+            pass
+
+        # Disque
+        try:
+            disk = c.Win32_LogicalDisk(Name='C:')[0]
+            enriched['disk_total_gb'] = round(int(disk.Size) / (1024 ** 3), 1)
+        except Exception:
+            pass
+
+        # Numéro de série
+        try:
+            bios = c.Win32_SystemEnclosure()[0]
+            enriched['serial_number'] = bios.SerialNumber.strip() if bios.SerialNumber else ''
+        except Exception:
+            pass
+
+        app.logger.debug(f"WMI enrichment for {ip_str}: {len(enriched)} fields")
+
+    except Exception as e:
+        app.logger.debug(f"WMI enrichment failed for {ip_str}: {e}")
+        pass
+
+    return enriched
+
+def _scan_host(ip_str, enrich_wmi=False):
+    """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant.
+
+    Optionnellement enrichit avec WMI si enrich_wmi=True et que c'est une machine Windows
+    accessible en RPC.
+    """
     if not _ping(ip_str):
         return None
     # Après ping, laisser l'OS peupler la table ARP
@@ -4952,7 +5051,8 @@ def _scan_host(ip_str):
     vendor       = _oui_vendor(mac)
     display_name = netbios or hostname or ip_str
     host_type    = _deviner_type(display_name, ports, os_guess, vendor)
-    return {
+
+    result = {
         "ip":           ip_str,
         "hostname":     hostname,
         "netbios":      netbios,
@@ -4965,7 +5065,24 @@ def _scan_host(ip_str):
         "en_ligne":     True,
     }
 
-def _run_scan(plages, nb_threads):
+    # Enrichissement WMI optionnel (pour Windows)
+    if enrich_wmi and os_guess == "Windows":
+        wmi_data = _enrich_from_wmi(ip_str, hostname)
+        # Fusionner les données WMI (sans surcharger les données de scan)
+        if wmi_data:
+            result.update({
+                'brand': wmi_data.get('brand', result.get('vendor', '')),
+                'model': wmi_data.get('model', ''),
+                'serial_number': wmi_data.get('serial_number', ''),
+                'ram_gb': wmi_data.get('ram_gb', ''),
+                'cpu': wmi_data.get('cpu', ''),
+                'cpu_cores': wmi_data.get('cpu_cores', ''),
+                'disk_total_gb': wmi_data.get('disk_total_gb', ''),
+            })
+
+    return result
+
+def _run_scan(plages, nb_threads, enrich_wmi=False):
     global scan_status
     with scan_lock:
         scan_status = {"running": True, "progress": 0, "message": "Résolution des plages...", "results": [], "errors": [], "plages": plages}
@@ -4991,7 +5108,7 @@ def _run_scan(plages, nb_threads):
                     found.append(result)
                     scan_status["results"] = list(found)
         with concurrent.futures.ThreadPoolExecutor(max_workers=nb_threads) as executor:
-            futures = {executor.submit(_scan_host, ip): ip for ip in hosts}
+            futures = {executor.submit(_scan_host, ip, enrich_wmi=enrich_wmi): ip for ip in hosts}
             for f in concurrent.futures.as_completed(futures):
                 on_done(f, futures[f])
         with scan_lock:
@@ -5019,8 +5136,9 @@ def lancer_scan():
     if not plages:
         plages = ['192.168.1.0/24']
     nb_threads = min(int(data.get('threads', 30)), 200)
-    threading.Thread(target=_run_scan, args=(plages, nb_threads), daemon=True).start()
-    return jsonify({"status": "started", "plages": plages})
+    enrich_wmi = data.get('enrich_wmi', False)  # Optionnel - enrichir via WMI
+    threading.Thread(target=_run_scan, args=(plages, nb_threads, enrich_wmi), daemon=True).start()
+    return jsonify({"status": "started", "plages": plages, "enrich_wmi": enrich_wmi})
 
 @app.route('/api/scan/status')
 def status_scan():
@@ -5057,6 +5175,451 @@ def importer_scan():
     conn.commit(); conn.close()
     return jsonify({"importes":importes,"total":len(items)})
 
+
+@app.route('/api/device-info', methods=['POST'])
+def api_device_info():
+    """
+    Endpoint pour recevoir les infos système du collecteur autonome.
+
+    POST /api/device-info
+    {
+        "mac_address": "00:1A:2B:3C:4D:5E",
+        "hostname": "DESKTOP-ABC123",
+        "ip_addresses": ["192.168.1.100"],
+        "os_name": "Windows",
+        "os_version": "11",
+        "brand": "Dell",
+        "model": "Latitude 5420",
+        "serial_number": "ABC123XYZ",
+        "ram_gb": 16,
+        "cpu": "Intel Core i7-1185G7",
+        "cpu_cores": 4,
+        "disk_total_gb": 512,
+        "antivirus": "Windows Defender",
+        "installed_software": ["Python", "VS Code", ...],
+        "timestamp": "2026-08-03T12:34:56.789012"
+    }
+
+    Matching :
+    1. MAC address si fourni
+    2. IP (première de ip_addresses)
+    3. Crée si aucun match
+    """
+    try:
+        data = request.json or {}
+
+        mac_address = data.get('mac_address', '').upper()
+        ip_addresses = data.get('ip_addresses', [])
+        ip_address = ip_addresses[0] if ip_addresses else ''
+        hostname = data.get('hostname', '')
+
+        # Le collecteur DOIT spécifier le client cible
+        # Stratégies :
+        # 1. Paramètre client_id dans le JSON
+        # 2. Token d'authentification (valide un user qui a accès)
+        # 3. Client par défaut (fallback)
+
+        cid = None
+
+        # 1. Essayer client_id du JSON
+        cid_param = data.get('client_id')
+        if cid_param:
+            try:
+                cid = int(cid_param)
+                # Vérifier que ce client existe
+                conn_test = get_db()
+                exists = conn_test.execute('SELECT id FROM clients WHERE id=?', (cid,)).fetchone()
+                conn_test.close()
+                if not exists:
+                    return jsonify({"status": "error", "message": f"Client ID {cid} not found"}), 404
+            except (ValueError, TypeError):
+                return jsonify({"status": "error", "message": "Invalid client_id parameter"}), 400
+
+        # 1b. Essayer client_name (fallback)
+        if not cid:
+            client_name = data.get('client_name')
+            if client_name:
+                conn_name = get_db()
+                client_row = conn_name.execute('SELECT id FROM clients WHERE nom=?', (client_name,)).fetchone()
+                conn_name.close()
+                if client_row:
+                    cid = client_row[0]
+                else:
+                    return jsonify({"status": "error", "message": f"Client '{client_name}' not found"}), 404
+
+        # 2. Si pas de client_id, vérifier token d'auth
+        if not cid:
+            token = data.get('token') or request.headers.get('Authorization', '').replace('Bearer ', '')
+            if token:
+                conn_token = get_db()
+                # Chercher un user avec ce token (simple vérification)
+                # Dans une vraie implémentation, générer des tokens API
+                # Pour l'instant, utiliser une clé secrète simple
+                api_secret = cfg_get('api_collector_secret', '')
+                if api_secret and token == api_secret:
+                    # Token valide - utiliser le premier client de l'admin
+                    user = conn_token.execute('SELECT id FROM auth_users WHERE role="admin" LIMIT 1').fetchone()
+                    if user:
+                        client = conn_token.execute('SELECT id FROM clients WHERE auth_user_id=? LIMIT 1',
+                                                   (user[0],)).fetchone()
+                        if client:
+                            cid = client[0]
+                conn_token.close()
+
+        # 3. Fallback : client "Découverte réseau" ou premier client
+        if not cid:
+            conn_fall = get_db()
+            # Chercher client "Découverte réseau"
+            c = conn_fall.execute('SELECT id FROM clients WHERE nom LIKE ?', ('%Découverte%',)).fetchone()
+            if c:
+                cid = c[0]
+            else:
+                # Créer le client s'il n'existe pas
+                conn_fall.execute(
+                    'INSERT INTO clients (nom, contact, email, date_creation, date_maj) VALUES (?,?,?,?,?)',
+                    ('Découverte réseau', 'auto', 'auto@parcinfo.local', datetime.utcnow().isoformat(), datetime.utcnow().isoformat())
+                )
+                conn_fall.commit()
+                cid = conn_fall.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn_fall.close()
+
+            # Avertir que le client "Découverte réseau" est utilisé
+            app.logger.warning(f"Device info received without explicit client_id - using default 'Découverte réseau' (ID: {cid}). Specify 'client_id' in request to target a specific client.")
+
+        if not cid:
+            return jsonify({"status": "error", "message": "No valid client found - specify client_id or configure collector token"}), 400
+
+        # Marque et modèle
+        brand = data.get('brand', '')
+        model = data.get('model', '')
+        serial = data.get('serial_number', '')
+
+        # Infos système
+        os_info = f"{data.get('os_name', '')} {data.get('os_version', '')}".strip()
+        ram_gb = data.get('ram_gb', '')
+        cpu = data.get('cpu', '')
+        cpu_cores = data.get('cpu_cores', '')
+        disk_gb = data.get('disk_total_gb', '')
+        antivirus = data.get('antivirus', '')
+
+        # Logiciels
+        software_list = data.get('installed_software', [])
+        software_json = json.dumps(software_list[:50]) if software_list else ''
+
+        now = datetime.utcnow().isoformat()
+        conn = get_db()
+
+        # Stratégie de matching :
+        # 1. MAC address si connu
+        # 2. IP address si fourni
+        # 3. Hostname sinon (risqué)
+        existing = None
+
+        if mac_address:
+            existing = conn.execute(
+                'SELECT id FROM appareils WHERE client_id=? AND adresse_mac=?',
+                (cid, mac_address)
+            ).fetchone()
+
+        if not existing and ip_address:
+            existing = conn.execute(
+                'SELECT id FROM appareils WHERE client_id=? AND adresse_ip=?',
+                (cid, ip_address)
+            ).fetchone()
+
+        if not existing and hostname:
+            existing = conn.execute(
+                'SELECT id FROM appareils WHERE client_id=? AND nom_machine=?',
+                (cid, hostname)
+            ).fetchone()
+
+        # Construire le nom machine
+        device_name = hostname or ip_address or f"Device-{mac_address[:8]}"
+
+        if existing:
+            # Mise à jour
+            app_id = existing[0]
+            old_row = conn.execute('SELECT * FROM appareils WHERE id=?', (app_id,)).fetchone()
+            old_data = row_to_dict(old_row) if old_row else {}
+
+            # Mettre à jour uniquement les champs fournis
+            updates = []
+            params = []
+
+            if brand and not old_data.get('marque'):
+                updates.append('marque=?')
+                params.append(brand)
+
+            if model and not old_data.get('modele'):
+                updates.append('modele=?')
+                params.append(model)
+
+            if serial and not old_data.get('numero_serie'):
+                updates.append('numero_serie=?')
+                params.append(serial)
+
+            if ip_address and not old_data.get('adresse_ip'):
+                updates.append('adresse_ip=?')
+                params.append(ip_address)
+
+            if mac_address and not old_data.get('adresse_mac'):
+                updates.append('adresse_mac=?')
+                params.append(mac_address)
+
+            if os_info and not old_data.get('os'):
+                updates.append('os=?')
+                params.append(os_info)
+
+            if ram_gb and not old_data.get('ram'):
+                updates.append('ram=?')
+                params.append(str(ram_gb))
+
+            if cpu and not old_data.get('cpu'):
+                updates.append('cpu=?')
+                params.append(cpu)
+
+            if disk_gb and not old_data.get('stockage'):
+                updates.append('stockage=?')
+                params.append(str(disk_gb))
+
+            if antivirus and not old_data.get('antivirus'):
+                updates.append('antivirus=?')
+                params.append(antivirus)
+
+            if software_json:
+                updates.append('logiciels_installes_json=?')
+                params.append(software_json)
+
+            # Toujours mettre à jour la date de dernière synchronisation
+            updates.append('derniere_synchro=?')
+            params.append(now)
+
+            if updates:
+                query = f"UPDATE appareils SET {', '.join(updates)} WHERE id=? AND client_id=?"
+                params.extend([app_id, cid])
+                conn.execute(query, params)
+
+                log_history(
+                    conn, cid, 'appareil', app_id, device_name, 'Auto-remplissage (collecteur)',
+                    {'source': 'system-info-collector', 'fields_updated': len(updates)}
+                )
+
+            conn.commit()
+            message = f"Appareil mis à jour (ID: {app_id})"
+            action = 'updated'
+        else:
+            # Création
+            conn.execute(
+                '''INSERT INTO appareils
+                   (client_id, nom_machine, adresse_ip, adresse_mac, marque, modele, numero_serie,
+                    os, ram, cpu, stockage, antivirus, logiciels_installes_json,
+                    type_appareil, statut, decouvert_scan, en_ligne, derniere_synchro, date_creation, date_maj)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (cid, device_name, ip_address, mac_address, brand, model, serial,
+                 os_info, str(ram_gb) if ram_gb else '', cpu, str(disk_gb) if disk_gb else '', antivirus, software_json,
+                 'PC', 'actif', 0, 1, now, now, now)
+            )
+            app_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+
+            log_history(
+                conn, cid, 'appareil', app_id, device_name, 'Création (collecteur système)',
+                {'source': 'system-info-collector', 'mac': mac_address, 'ip': ip_address}
+            )
+
+            conn.commit()
+            message = f"Nouvel appareil créé (ID: {app_id})"
+            action = 'created'
+
+        conn.close()
+
+        app.logger.info(f"Device info received: {device_name} ({action}) - MAC: {mac_address}, IP: {ip_address}")
+
+        return jsonify({
+            "status": "success",
+            "action": action,
+            "device_id": app_id,
+            "message": message,
+            "mac_address": mac_address,
+            "ip_address": ip_address,
+            "hostname": hostname
+        }), 200
+
+    except Exception as e:
+        app.logger.exception("Error in /api/device-info")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/clients-public', methods=['GET'])
+def api_clients_public():
+    """
+    Endpoint PUBLIC pour récupérer la liste des clients (sans authentification).
+
+    Utilisé par le collecteur système GUI pour afficher les clients disponibles.
+
+    Retourne :
+    [
+      {"id": 1, "nom": "Mon Entreprise"},
+      {"id": 2, "nom": "Client A"},
+      ...
+    ]
+    """
+    try:
+        conn = get_db()
+        clients = [
+            {"id": row[0], "nom": row[1]}
+            for row in conn.execute('SELECT id, nom FROM clients ORDER BY nom').fetchall()
+        ]
+        conn.close()
+
+        if not clients:
+            # S'il n'y a aucun client, créer un défaut
+            conn = get_db()
+            conn.execute(
+                "INSERT INTO clients (nom, date_creation, date_maj) VALUES (?, ?, ?)",
+                ("Client par défaut", datetime.utcnow().isoformat(), datetime.utcnow().isoformat())
+            )
+            conn.commit()
+            new_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            conn.close()
+            clients = [{"id": new_id, "nom": "Client par défaut"}]
+
+        return jsonify(clients), 200
+
+    except Exception as e:
+        app.logger.exception("Error in /api/clients-public")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/device-info/upload-report', methods=['POST'])
+def api_device_info_upload_report():
+    """
+    Endpoint pour uploader le rapport HTML complet d'un appareil.
+
+    Paramètres (multipart form-data):
+    - device_id: ID de l'appareil (obligatoire)
+    - client_id: ID du client (obligatoire)
+    - report: fichier HTML (obligatoire)
+    """
+    try:
+        device_id = request.form.get('device_id')
+        client_id = request.form.get('client_id')
+        report_file = request.files.get('report')
+
+        if not device_id or not client_id or not report_file:
+            return jsonify({"status": "error", "message": "Missing parameters: device_id, client_id, report"}), 400
+
+        try:
+            device_id = int(device_id)
+            client_id = int(client_id)
+        except (ValueError, TypeError):
+            return jsonify({"status": "error", "message": "Invalid device_id or client_id"}), 400
+
+        conn = get_db()
+
+        # Vérifier que l'appareil existe et appartient au client
+        appareil = conn.execute(
+            'SELECT id, nom_machine FROM appareils WHERE id=? AND client_id=?',
+            (device_id, client_id)
+        ).fetchone()
+
+        if not appareil:
+            conn.close()
+            return jsonify({"status": "error", "message": "Device not found"}), 404
+
+        # Lire le contenu du fichier
+        try:
+            html_content = report_file.read()
+            if isinstance(html_content, bytes):
+                html_content = html_content.decode('utf-8')
+        except Exception as e:
+            conn.close()
+            return jsonify({"status": "error", "message": f"Error reading file: {str(e)}"}), 400
+
+        # Insérer le document
+        now = datetime.utcnow().isoformat()
+        conn.execute('''
+            INSERT INTO documents_appareils
+            (appareil_id, client_id, nom, description, type_doc, nom_fichier, taille, contenu_blob, date_upload)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            device_id,
+            client_id,
+            f"Rapport Système - {now}",
+            "Rapport HTML complet collecté par système-info-collector",
+            "rapport_html",
+            report_file.filename,
+            len(html_content.encode('utf-8')),
+            html_content,
+            now
+        ))
+
+        conn.commit()
+        doc_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+        conn.close()
+
+        app.logger.info(f"Report uploaded for device {device_id} (client {client_id}) - doc_id: {doc_id}")
+
+        return jsonify({
+            "status": "success",
+            "message": "Report uploaded successfully",
+            "device_id": device_id,
+            "document_id": doc_id,
+            "hostname": appareil[1]
+        }), 200
+
+    except Exception as e:
+        app.logger.exception("Error in /api/device-info/upload-report")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/download/system-info-collector', methods=['GET'])
+def download_collector():
+    """
+    Endpoint pour télécharger le collecteur CLI (ligne de commande).
+
+    Utilisation :
+    - /download/system-info-collector → télécharge le script Python CLI
+    """
+    collector_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'system-info-collector.py')
+
+    if not os.path.exists(collector_path):
+        return jsonify({"error": "Collecteur non trouvé"}), 404
+
+    try:
+        return send_file(
+            collector_path,
+            as_attachment=True,
+            download_name='system-info-collector.py',
+            mimetype='text/plain'
+        )
+    except Exception as e:
+        app.logger.exception("Error downloading collector")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/download/system-info-collector-gui', methods=['GET'])
+def download_collector_gui():
+    """
+    Endpoint pour télécharger le collecteur GUI (interface graphique).
+
+    Utilisation :
+    - /download/system-info-collector-gui → télécharge le script Python avec GUI
+    """
+    collector_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'system-info-collector-gui.py')
+
+    if not os.path.exists(collector_path):
+        return jsonify({"error": "Collecteur GUI non trouvé"}), 404
+
+    try:
+        return send_file(
+            collector_path,
+            as_attachment=True,
+            download_name='system-info-collector-gui.py',
+            mimetype='text/plain'
+        )
+    except Exception as e:
+        app.logger.exception("Error downloading collector GUI")
+        return jsonify({"error": str(e)}), 500
 
 
 # --- PERIPHERIQUES -----------------------------------------------------------
@@ -9241,6 +9804,56 @@ def qrcode_generate():
                      download_name=f'label_{asset_id}_{datetime.utcnow().strftime("%Y%m%d")}.pdf')
 
 
+# ─── MDNS REGISTRATION ────────────────────────────────────────────────────────
+_mdns_instance = None
+
+def _register_mdns():
+    """Register ParcInfo on mDNS (parcinfo.local)"""
+    global _mdns_instance
+    if not MDNS_AVAILABLE:
+        return
+
+    try:
+        # Get local IP address
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+
+        # Create mDNS service info
+        info = ServiceInfo(
+            "_http._tcp.local.",
+            name="ParcInfo._http._tcp.local.",
+            addresses=[socket.inet_aton(local_ip)],
+            port=3456,
+            properties={
+                "path": "/",
+                "version": "2.6.22",
+                "description": "IT Asset Management"
+            },
+            server="parcinfo.local."
+        )
+
+        # Register the service
+        _mdns_instance = Zeroconf()
+        _mdns_instance.register_service(info)
+        logger.info(f"✅ mDNS registered: http://parcinfo.local:3456 ({local_ip})")
+    except Exception as e:
+        logger.warning(f"⚠️ mDNS registration failed: {e}")
+
+def _unregister_mdns():
+    """Unregister mDNS service on shutdown"""
+    global _mdns_instance
+    if _mdns_instance:
+        try:
+            _mdns_instance.unregister_service(ServiceInfo(
+                "_http._tcp.local.",
+                name="ParcInfo._http._tcp.local.",
+                addresses=[],
+                port=3456
+            ))
+            _mdns_instance.close()
+        except Exception as e:
+            logger.warning(f"⚠️ mDNS unregistration failed: {e}")
+
 if __name__ == '__main__':
     init_db()
 
@@ -9263,6 +9876,10 @@ if __name__ == '__main__':
     print(f"  Uploads : {UPLOAD_FOLDER}")
     print("  URL     : http://localhost:3456")
     print("="*50)
+
+    # Register mDNS service (parcinfo.local)
+    _register_mdns()
+    print("  [mDNS] : http://parcinfo.local:3456")
 
     if not os.environ.get('RUNNING_IN_DOCKER'):
         import webbrowser

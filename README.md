@@ -6,12 +6,70 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.6.21  
-**Dernière mise à jour** : 2026-07-05
+**Version** : 2.6.24 ⭐ **NEW: Auto-fill System Information**  
+**Dernière mise à jour** : 2026-08-03
 
 ---
 
 ## ✨ Fonctionnalités Principales
+
+### 🎉 NEW v2.6.24 : Collecteur Système + Rapport HTML Persisté
+
+**Deux versions du collecteur (exécutables autonomes) :**
+
+#### GUI (Recommandé) ⭐ 15.6 MB
+```bash
+system-info-collector-gui.exe  # Windows
+# ou python system-info-collector-gui.py
+```
+- ✅ Interface graphique Tkinter
+- ✅ Sélection client en dropdown (fetch API)
+- ✅ Aperçu formaté des données avant envoi
+- ✅ Cross-platform (Windows, macOS, Linux)
+- ✅ **NEW** : Rapport HTML généré + stocké
+
+#### CLI (Automation/Scripts) 12.5 MB
+```bash
+system-info-collector.exe --client-id 5  # Windows
+# ou python system-info-collector.py --client-id 5
+```
+- ✅ Déploiement en masse via Group Policy
+- ✅ Scripts d'automatisation / MDM
+- ✅ Mode silencieux (--quiet)
+- ✅ **NEW** : Rapport HTML avec logs
+
+**Données collectées (12+ champs) :**
+| Champ | Windows (WMI) | macOS | Linux |
+|-------|---|---|---|
+| MAC, Hostname, IP(s) | ✅ | ✅ | ✅ |
+| Brand, Model, Serial | ✅ | ✅ | ✅ |
+| OS & Version | ✅ | ✅ | ✅ |
+| RAM, CPU, CPU Cores | ✅ | ✅ | ✅ |
+| **All Disks** (NEW) | ✅ | ✅ | ✅ |
+| Antivirus | ✅ | ⚠️ | ⚠️ |
+| **Software (200+)** (NEW) | ✅ | ✅ | ✅ |
+
+**Workflow Enrichi :**
+1. Collecte système complète (CLI/GUI)
+2. Génère **rapport HTML complet** (local + stocké)
+3. Filtre champs API supportés
+4. POST /api/device-info → crée/met à jour appareil
+5. POST /api/device-info/upload-report → document joint ParcInfo
+6. **Résultat** : Appareil enrichi + historique HTML complet
+
+**Sécurité & Qualité :**
+- ✅ Multi-client (isolation stricte)
+- ✅ Matching intelligent MAC→IP→hostname
+- ✅ Confirmation avant envoi (GUI)
+- ✅ Token d'authentification optionnel
+- ✅ **NEW** : Rapport HTML préserve 100% des données
+- ✅ **NEW** : Correspondance champs documentée (COLLECTOR_FIELD_MAPPING.md)
+
+👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
+
+**Télécharger les exécutables :** 👇
+- [system-info-collector.exe (CLI, 12.5 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI, 15.6 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -83,6 +141,44 @@ pyinstaller parcinfo.spec
 ```
 
 Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
+
+---
+
+## 📥 Téléchargements v2.6.24
+
+### Exécutables Portables
+
+| Plateforme | Télécharger | Taille |
+|-----------|----------|--------|
+| **Windows** | [ParcInfo-Setup-2.6.24.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/installer.exe) | ~35 MB |
+| **macOS** | [ParcInfo-2.6.24.dmg](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-2.6.24.dmg) | ~40 MB |
+| **Docker** | `docker pull ghcr.io/darkmind64/parc-info:2.6.24` | ~450 MB |
+
+### Collecteurs Système (Exécutables Autonomes)
+
+| Type | Plateforme | Télécharger | Taille | Usage |
+|------|-----------|----------|--------|-------|
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe) | 15.6 MB | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe) | 12.5 MB | Automatisation/scripts |
+
+**✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
+
+```bash
+# GUI (recommandé pour les utilisateurs)
+system-info-collector-gui.exe
+
+# CLI (pour les scripts/Group Policy)
+system-info-collector.exe --client-id 5
+system-info-collector.exe --client-name "Mon Entreprise"
+```
+
+**macOS & Linux :** Compilez depuis les sources :
+```bash
+python system-info-collector-gui.py
+python system-info-collector.py --client-id 5
+```
+
+👉 [Voir la release complète](https://github.com/darkmind64/parc-info/releases/tag/v2.6.24)
 
 ---
 

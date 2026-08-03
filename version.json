@@ -1,19 +1,32 @@
 {
-  "version": "2.6.22",
-  "release_date": "2026-08-03T17:00:00.000000",
+  "version": "2.6.24",
+  "release_date": "2026-08-03T22:00:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.22/installer.exe",
-    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.22/ParcInfo-2.6.22.dmg",
-    "docker": "ghcr.io/darkmind64/parc-info:2.6.22"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.24",
+    "collector_gui": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe"
   },
   "notes": {
-    "windows_installer": "Critical fix: Network scan was broken due to NameError in _time module reference.",
-    "new_features": "Fix: Corrected undefined _time reference in network scan function - now detects devices correctly.",
-    "bug_fixes": [
-      "Network scan returning 0 results (NameError: _time not defined)",
-      "Scan host detection working properly again"
-    ]
+    "new_features": "System Information Collectors (GUI + CLI) with HTML Report Generation",
+    "improvements": [
+      "Standalone executables (no Python required for Windows)",
+      "GUI collector with client selection dropdown",
+      "CLI collector for batch deployment & automation",
+      "HTML report generation (local + storage in ParcInfo)",
+      "Enhanced software detection (up to 200 packages)",
+      "All disks enumeration support",
+      "12+ system fields collection (MAC, IP, OS, RAM, CPU, storage, AV, software)",
+      "Complete field mapping documentation"
+    ],
+    "features": {
+      "collectors": "GUI & CLI executables for system info auto-fill",
+      "html_reports": "Professional formatted reports stored as device documents",
+      "multi_platform": "Windows/macOS/Linux support",
+      "field_mapping": "Complete correspondence of collected vs BD fields"
+    }
   },
   "checksums": {
     "windows_installer_sha256": "PENDING_BUILD",
@@ -23,5 +36,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.22"
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.24"
 }
