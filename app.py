@@ -15,6 +15,13 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
+# ─── mDNS SUPPORT (parcinfo.local) ────────────────────────────────────────────
+try:
+    from zeroconf import ServiceInfo, Zeroconf
+    MDNS_AVAILABLE = True
+except ImportError:
+    MDNS_AVAILABLE = False
+
 # ─── LOGGING ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -9241,6 +9248,56 @@ def qrcode_generate():
                      download_name=f'label_{asset_id}_{datetime.utcnow().strftime("%Y%m%d")}.pdf')
 
 
+# ─── MDNS REGISTRATION ────────────────────────────────────────────────────────
+_mdns_instance = None
+
+def _register_mdns():
+    """Register ParcInfo on mDNS (parcinfo.local)"""
+    global _mdns_instance
+    if not MDNS_AVAILABLE:
+        return
+
+    try:
+        # Get local IP address
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+
+        # Create mDNS service info
+        info = ServiceInfo(
+            "_http._tcp.local.",
+            name="ParcInfo._http._tcp.local.",
+            addresses=[socket.inet_aton(local_ip)],
+            port=3456,
+            properties={
+                "path": "/",
+                "version": "2.6.22",
+                "description": "IT Asset Management"
+            },
+            server="parcinfo.local."
+        )
+
+        # Register the service
+        _mdns_instance = Zeroconf()
+        _mdns_instance.register_service(info)
+        logger.info(f"✅ mDNS registered: http://parcinfo.local:3456 ({local_ip})")
+    except Exception as e:
+        logger.warning(f"⚠️ mDNS registration failed: {e}")
+
+def _unregister_mdns():
+    """Unregister mDNS service on shutdown"""
+    global _mdns_instance
+    if _mdns_instance:
+        try:
+            _mdns_instance.unregister_service(ServiceInfo(
+                "_http._tcp.local.",
+                name="ParcInfo._http._tcp.local.",
+                addresses=[],
+                port=3456
+            ))
+            _mdns_instance.close()
+        except Exception as e:
+            logger.warning(f"⚠️ mDNS unregistration failed: {e}")
+
 if __name__ == '__main__':
     init_db()
 
@@ -9263,6 +9320,10 @@ if __name__ == '__main__':
     print(f"  Uploads : {UPLOAD_FOLDER}")
     print("  URL     : http://localhost:3456")
     print("="*50)
+
+    # Register mDNS service (parcinfo.local)
+    _register_mdns()
+    print("  [mDNS] : http://parcinfo.local:3456")
 
     if not os.environ.get('RUNNING_IN_DOCKER'):
         import webbrowser
