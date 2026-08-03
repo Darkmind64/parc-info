@@ -24,6 +24,18 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import threading
+import logging
+
+# Configure logging to file for debugging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - [%(levelname)s] %(message)s',
+    handlers=[
+        logging.FileHandler('collector-gui.log', mode='a'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger('collector-gui')
 
 # Platform detection
 IS_WINDOWS = sys.platform == 'win32'
@@ -641,10 +653,15 @@ def fetch_clients(server_url):
     """Récupère la liste des clients depuis ParcInfo (endpoint public, pas d'auth requise)."""
     try:
         url = f"{server_url.rstrip('/')}/api/clients-public"
+        logger.debug(f"Fetching clients from: {url}")
         with urlopen(url, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
-            return data if isinstance(data, list) else []
+            logger.debug(f"Response: {data}")
+            result = data if isinstance(data, list) else []
+            logger.debug(f"Returning {len(result)} clients")
+            return result
     except Exception as e:
+        logger.error(f"ERROR fetching clients: {type(e).__name__}: {str(e)}", exc_info=True)
         return []
 
 
@@ -747,13 +764,27 @@ class CollectorGUI:
         self.root.update()
 
         def fetch():
-            self.clients = fetch_clients(self.server_url)
-            client_names = [f"{c.get('id', 'N/A')} - {c.get('nom', 'Inconnu')}" for c in self.clients]
-            self.client_combo['values'] = client_names
-            if client_names:
-                self.client_combo.current(0)
-                self._on_client_selected()
-            self.status_var.set("Prêt à envoyer ✓")
+            try:
+                logger.debug(f"Fetching clients from server: {self.server_url}")
+                self.clients = fetch_clients(self.server_url)
+                logger.debug(f"Got {len(self.clients)} clients: {self.clients}")
+
+                if not self.clients:
+                    logger.warning("No clients returned - showing default message")
+                    self.client_combo['values'] = ["Aucun client trouvé"]
+                    self.status_var.set("Erreur: Aucun client disponible")
+                    return
+
+                client_names = [f"{c.get('id', 'N/A')} - {c.get('nom', 'Inconnu')}" for c in self.clients]
+                logger.debug(f"Client names: {client_names}")
+                self.client_combo['values'] = client_names
+                if client_names:
+                    self.client_combo.current(0)
+                    self._on_client_selected()
+                self.status_var.set("Prêt à envoyer ✓")
+            except Exception as e:
+                logger.exception(f"ERROR in _fetch_clients: {type(e).__name__}: {str(e)}")
+                self.status_var.set("Erreur lors de la récupération des clients")
 
         thread = threading.Thread(target=fetch, daemon=True)
         thread.start()

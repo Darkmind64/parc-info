@@ -113,7 +113,18 @@
       "Bash(gh api *)",
       "Bash(git commit -m 'docs: Update README with standalone executables *)",
       "Bash(git commit -m 'docs: Add standalone executables to implementation guide *)",
-      "Bash(rm -rf build dist)"
+      "Bash(rm -rf build dist)",
+      "Bash(git pull *)",
+      "Bash(gh pr create --title 'v2.6.24: System Information Collectors + HTML Reports' --body ' *)",
+      "Bash(git commit -m 'resolve: Merge master into feature branch - v2.6.24 *)",
+      "Bash(gh release create v2.6.24 --title 'ParcInfo v2.6.24 — System Information Collectors + HTML Reports' --notes ' *)",
+      "Bash(docker run *)",
+      "Bash(timeout 5 python app.py)",
+      "Bash(python -c ' *)",
+      "Bash(sqlite3 parc_info.db \"SELECT id, nom FROM clients LIMIT 5;\")",
+      "Read(//tmp/**)",
+      "PowerShell(Stop-Process -Name python -Force -ErrorAction SilentlyContinue)",
+      "Bash(python -m PyInstaller collector-gui.spec --clean --noconfirm)"
     ]
   }
 }
