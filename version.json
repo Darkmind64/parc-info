@@ -1,19 +1,27 @@
 {
-  "version": "2.6.21",
-  "release_date": "2026-07-05T14:45:00.000000",
+  "version": "2.6.22",
+  "release_date": "2026-08-03T17:00:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.21/installer.exe"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.22/installer.exe",
+    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.22/ParcInfo-2.6.22.dmg",
+    "docker": "ghcr.io/darkmind64/parc-info:2.6.22"
   },
   "notes": {
-    "windows_installer": "Standalone installer - Fix: meme decalage horaire corrige sur l'affichage de la surveillance reseau (watchdog).",
-    "new_features": "Fix: le badge de surveillance reseau (barre du haut) affichait le meme decalage horaire que la sync Turso corrigee en 2.6.20 (ex: heure du dernier cycle affichee 2h en retard). Meme correction appliquee : heure transmise en UTC explicite."
+    "windows_installer": "Critical fix: Network scan was broken due to NameError in _time module reference.",
+    "new_features": "Fix: Corrected undefined _time reference in network scan function - now detects devices correctly.",
+    "bug_fixes": [
+      "Network scan returning 0 results (NameError: _time not defined)",
+      "Scan host detection working properly again"
+    ]
   },
   "checksums": {
-    "windows_installer_sha256": "PENDING_BUILD"
+    "windows_installer_sha256": "PENDING_BUILD",
+    "macos_app_sha256": "PENDING_BUILD"
   },
   "file_sizes": {
-    "windows_installer_bytes": 0
+    "windows_installer_bytes": 0,
+    "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.21"
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.22"
 }
