@@ -1,26 +1,31 @@
 {
   "version": "2.6.24",
-  "release_date": "2026-08-03T14:00:00.000000",
+  "release_date": "2026-08-03T22:00:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/installer.exe",
-    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-2.6.24.dmg",
-    "docker": "ghcr.io/darkmind64/parc-info:2.6.24",
-    "system_collector": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.py"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.24",
+    "collector_gui": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "NEW: Automatic system information collection! Auto-fill device details with system-info-collector.py script",
+    "new_features": "System Information Collectors (GUI + CLI) with HTML Report Generation",
     "improvements": [
-      "Autonomous system-info-collector.py script for Windows, macOS, and Linux",
-      "Auto-fill device inventory (brand, model, serial, RAM, CPU, disk, antivirus, installed software)",
-      "New /api/device-info endpoint for direct system info submission",
-      "Enhanced network scan with optional WMI enrichment for Windows machines",
-      "Intelligent device matching by MAC address, IP, or hostname"
+      "Standalone executables (no Python required for Windows)",
+      "GUI collector with client selection dropdown",
+      "CLI collector for batch deployment & automation",
+      "HTML report generation (local + storage in ParcInfo)",
+      "Enhanced software detection (up to 200 packages)",
+      "All disks enumeration support",
+      "12+ system fields collection (MAC, IP, OS, RAM, CPU, storage, AV, software)",
+      "Complete field mapping documentation"
     ],
     "features": {
-      "collector": "Download system-info-collector.py and run on each machine to auto-fill inventory",
-      "scan_enrichment": "Network scan now supports optional WMI enrichment for detailed Windows system info",
-      "mdns": "Still supports mDNS access via http://parcinfo.local:3456"
+      "collectors": "GUI & CLI executables for system info auto-fill",
+      "html_reports": "Professional formatted reports stored as device documents",
+      "multi_platform": "Windows/macOS/Linux support",
+      "field_mapping": "Complete correspondence of collected vs BD fields"
     }
   },
   "checksums": {
