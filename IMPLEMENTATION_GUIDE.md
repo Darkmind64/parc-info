@@ -14,7 +14,7 @@ ParcInfo dispose maintenant d'une **solution complète d'auto-remplissage** qui 
 
 ---
 
-## 🚀 SOLUTION A : Collecteur Autonome (Recommandé)
+## 🚀 SOLUTION A : Collecteur Autonome (2 Versions)
 
 ### Qu'est-ce que c'est ?
 
@@ -28,19 +28,97 @@ Script Python léger (`system-info-collector.py`) qui :
 
 #### 1. Télécharger le script
 
-Le script se trouve dans le répertoire racine de ParcInfo :
+Deux versions disponibles :
+
+**Version GUI (Recommandée pour les utilisateurs)** ⭐
 
 ```bash
-# Windows PowerShell
-curl -o system-info-collector.py http://parcinfo.local:3456/static/system-info-collector.py
+# Télécharger la version avec interface graphique
+curl -o system-info-collector-gui.py http://parcinfo.local:3456/download/system-info-collector-gui
 
-# Linux/macOS
-curl -o system-info-collector.py http://parcinfo.local:3456/static/system-info-collector.py
+# Exécuter (pas besoin de ligne de commande)
+python system-info-collector-gui.py
 ```
 
-Ou télécharger directement depuis : `/static/system-info-collector.py`
+**Ou version CLI (pour scripts/automatisation)**
 
-#### 2. Exécuter sur chaque machine
+```bash
+# Télécharger la version ligne de commande
+curl -o system-info-collector.py http://parcinfo.local:3456/download/system-info-collector
+
+# Exécuter avec options
+python system-info-collector.py --client-id 5
+```
+
+### 2a. Version GUI (Recommandée pour les utilisateurs) ⭐
+
+**Avantages :**
+- ✅ Pas de ligne de commande à mémoriser
+- ✅ Interface intuitive
+- ✅ Aperçu des données avant envoi
+- ✅ Liste des clients disponibles
+- ✅ Confirmation avant transmission
+
+**Utilisation :**
+
+```bash
+# Simplement exécuter
+python system-info-collector-gui.py
+```
+
+**Ce que ça fait :**
+1. Lance une fenêtre
+2. Affiche la liste des clients disponibles
+3. Affiche les informations collectées (marque, OS, RAM, etc.)
+4. Demande de sélectionner le client cible
+5. Affiche un résumé formaté
+6. Demande confirmation avant d'envoyer
+
+**Capture d'écran (exemple) :**
+```
+┌─────────────────────────────────────────────────────┐
+│ ParcInfo - Collecteur d'Informations Système        │
+├─────────────────────────────────────────────────────┤
+│ 1. Sélectionner le Client Cible                     │
+│    [Dropdown: 1 - Mon Entreprise ▼]                 │
+│    ⚠️ IMPORTANT : Choisir le bon client             │
+├─────────────────────────────────────────────────────┤
+│ 2. Informations Collectées                          │
+│ ═══════════════════════════════════════════════════ │
+│ IDENTIFICATION                                       │
+│  Hostname            : DESKTOP-ABC123               │
+│  MAC Address         : 00:1A:2B:3C:4D:5E            │
+│  IP Address(es)      : 192.168.1.100                │
+│  Marque              : Dell                         │
+│  Modèle              : Latitude 5420                │
+│  Numéro Série        : ABC123XYZ                    │
+│                                                     │
+│ SYSTÈME D'EXPLOITATION                              │
+│  OS                  : Windows                      │
+│  Version             : 11 (22H2)                    │
+│                                                     │
+│ MATÉRIEL                                            │
+│  RAM                 : 16 GB                        │
+│  CPU                 : Intel Core i7-1185G7         │
+│  CPU Cores           : 4                            │
+│  Stockage            : 512 GB                       │
+│                                                     │
+│ SÉCURITÉ                                            │
+│  Antivirus           : Windows Defender             │
+│ ═══════════════════════════════════════════════════ │
+├─────────────────────────────────────────────────────┤
+│ [🔄 Rafraîchir] [✓ Envoyer] [✕ Annuler]            │
+├─────────────────────────────────────────────────────┤
+│ Prêt à envoyer ✓                                    │
+└─────────────────────────────────────────────────────┘
+```
+
+### 2b. Version CLI (Pour automatisation)
+
+**Avantages :**
+- ✅ Intégrable dans scripts
+- ✅ Déploiement en masse (Group Policy, MDM)
+- ✅ Options en ligne de commande
 
 **Spécifier le client cible :**
 
@@ -111,6 +189,24 @@ ParcInfo System Information Collector v1.0
 
 Le système a été enregistré dans ParcInfo.
 ```
+
+### Comparaison GUI vs CLI
+
+| Critère | GUI (Recommandé) | CLI |
+|---------|------------------|-----|
+| **Facilité** | ⭐⭐⭐⭐⭐ | ⭐⭐ |
+| **Conforme non-technicien** | ✅ | ❌ |
+| **Aperçu avant envoi** | ✅ | ❌ |
+| **Sélection client facile** | ✅ (dropdown) | ⚠️ (paramètre) |
+| **Déploiement auto** | ❌ | ✅ |
+| **Script/MDM** | ❌ | ✅ |
+| **Dépendances** | tkinter (built-in) | Aucune extra |
+
+**Recommandation :**
+- **Utilisateurs individuels** → GUI
+- **Déploiement en masse** → CLI + GPO/MDM
+
+---
 
 ### Découvrir les IDs des Clients
 

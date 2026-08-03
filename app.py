@@ -5452,10 +5452,10 @@ def api_device_info():
 @app.route('/download/system-info-collector', methods=['GET'])
 def download_collector():
     """
-    Endpoint pour télécharger le collecteur autonome.
+    Endpoint pour télécharger le collecteur CLI (ligne de commande).
 
     Utilisation :
-    - /download/system-info-collector → télécharge le script Python
+    - /download/system-info-collector → télécharge le script Python CLI
     """
     collector_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'system-info-collector.py')
 
@@ -5471,6 +5471,31 @@ def download_collector():
         )
     except Exception as e:
         app.logger.exception("Error downloading collector")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/download/system-info-collector-gui', methods=['GET'])
+def download_collector_gui():
+    """
+    Endpoint pour télécharger le collecteur GUI (interface graphique).
+
+    Utilisation :
+    - /download/system-info-collector-gui → télécharge le script Python avec GUI
+    """
+    collector_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'system-info-collector-gui.py')
+
+    if not os.path.exists(collector_path):
+        return jsonify({"error": "Collecteur GUI non trouvé"}), 404
+
+    try:
+        return send_file(
+            collector_path,
+            as_attachment=True,
+            download_name='system-info-collector-gui.py',
+            mimetype='text/plain'
+        )
+    except Exception as e:
+        app.logger.exception("Error downloading collector GUI")
         return jsonify({"error": str(e)}), 500
 
 
