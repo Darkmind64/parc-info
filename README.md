@@ -6,14 +6,14 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.6.24 ⭐ **NEW: Auto-fill System Information**  
+**Version** : 2.6.25 ⭐ **FIXED: GUI Collector Client List Display**  
 **Dernière mise à jour** : 2026-08-03
 
 ---
 
 ## ✨ Fonctionnalités Principales
 
-### 🎉 NEW v2.6.24 : Collecteur Système + Rapport HTML Persisté
+### 🎉 NEW v2.6.25 : Collecteur Système + Rapport HTML Persisté
 
 **Deux versions du collecteur (exécutables autonomes) :**
 
@@ -68,8 +68,8 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI, 12.5 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI, 15.6 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe)
+- [system-info-collector.exe (CLI, 12.5 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.25/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI, 15.6 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.25/system-info-collector-gui.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -144,22 +144,22 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.6.24
+## 📥 Téléchargements v2.6.25
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger | Taille |
 |-----------|----------|--------|
-| **Windows** | [ParcInfo-Setup-2.6.24.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/installer.exe) | ~35 MB |
-| **macOS** | [ParcInfo-2.6.24.dmg](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/ParcInfo-2.6.24.dmg) | ~40 MB |
+| **Windows** | [ParcInfo-Setup-2.6.24.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.25/installer.exe) | ~35 MB |
+| **macOS** | [ParcInfo-2.6.24.dmg](https://github.com/darkmind64/parc-info/releases/download/v2.6.25/ParcInfo-2.6.24.dmg) | ~40 MB |
 | **Docker** | `docker pull ghcr.io/darkmind64/parc-info:2.6.24` | ~450 MB |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Taille | Usage |
 |------|-----------|----------|--------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe) | 15.6 MB | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe) | 12.5 MB | Automatisation/scripts |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.25/system-info-collector-gui.exe) | 15.6 MB | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.25/system-info-collector.exe) | 12.5 MB | Automatisation/scripts |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -178,7 +178,7 @@ python system-info-collector-gui.py
 python system-info-collector.py --client-id 5
 ```
 
-👉 [Voir la release complète](https://github.com/darkmind64/parc-info/releases/tag/v2.6.24)
+👉 [Voir la release complète](https://github.com/darkmind64/parc-info/releases/tag/v2.6.25)
 
 ---
 
