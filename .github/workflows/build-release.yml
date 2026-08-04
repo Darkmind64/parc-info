@@ -11,8 +11,23 @@ jobs:
       matrix:
         include:
           - os: windows-latest
+            app: parcinfo
+            spec: parcinfo.spec
+            exe_name: ParcInfo.exe
             asset_name: ParcInfo-Windows.exe
+          - os: windows-latest
+            app: collector-cli
+            spec: collector-cli.spec
+            exe_name: system-info-collector.exe
+            asset_name: system-info-collector.exe
+          - os: windows-latest
+            app: collector-gui
+            spec: collector-gui.spec
+            exe_name: system-info-collector-gui.exe
+            asset_name: system-info-collector-gui.exe
           - os: macos-latest
+            app: parcinfo
+            spec: parcinfo.spec
             asset_name: ParcInfo-macOS-ARM.zip
 
     runs-on: ${{ matrix.os }}
@@ -34,7 +49,7 @@ jobs:
           pip install -r requirements.txt pyinstaller pillow pystray
 
       - name: Build PyInstaller
-        run: pyinstaller parcinfo.spec
+        run: pyinstaller ${{ matrix.spec }}
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
 
@@ -43,16 +58,16 @@ jobs:
         run: cd dist && zip -r ${{ matrix.asset_name }} ParcInfo.app
 
       - name: Rename exe (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.exe_name != matrix.asset_name
         shell: pwsh
-        run: Rename-Item dist\ParcInfo.exe ParcInfo-Windows.exe
+        run: Rename-Item dist\${{ matrix.exe_name }} ${{ matrix.asset_name }}
 
       - name: Upload artefact (Windows)
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: dist/ParcInfo-Windows.exe
+          path: dist/${{ matrix.asset_name }}
 
       - name: Upload artefact (macOS)
         if: runner.os == 'macOS'
@@ -112,6 +127,18 @@ jobs:
           name: ParcInfo-macOS-ARM.zip
           path: ./
 
+      - name: Download system-info-collector.exe
+        uses: actions/download-artifact@v4
+        with:
+          name: system-info-collector.exe
+          path: ./
+
+      - name: Download system-info-collector-gui.exe
+        uses: actions/download-artifact@v4
+        with:
+          name: system-info-collector-gui.exe
+          path: ./
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -126,6 +153,12 @@ jobs:
             | macOS (Apple Silicon M1+) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
             | macOS (Intel) | Utiliser `docker run` ou `ParcInfo-Windows.exe` via WSL |
             | Docker    | `docker pull darkmind64/parcinfo:${{ github.ref_name }}` |
+
+            ### Collecteurs Système
+            | Type | Fichier |
+            |------|---------|
+            | CLI  | `system-info-collector.exe` (console) |
+            | GUI  | `system-info-collector-gui.exe` (interface graphique) |
 
             ### Docker
             ```bash
@@ -143,3 +176,5 @@ jobs:
           files: |
             ./ParcInfo-Windows.exe
             ./ParcInfo-macOS-ARM.zip
+            ./system-info-collector.exe
+            ./system-info-collector-gui.exe
