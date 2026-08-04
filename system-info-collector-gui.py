@@ -672,18 +672,44 @@ class CollectorGUI:
         self.system_info = {}
         self.clients = []
         self.selected_client = None
+        self.config_file = Path.home() / '.parcinfo-collector-config.json'
 
         self.root.title("ParcInfo System Information Collector")
-        self.root.geometry("900x700")
+        self.root.geometry("900x750")
         self.root.resizable(True, True)
 
         # Couleurs
         self.bg_color = "#f0f0f0"
         self.root.configure(bg=self.bg_color)
 
+        # Charger l'URL sauvegardée si disponible
+        self._load_config()
+
         self._create_widgets()
         self._collect_info()
         self._fetch_clients()
+
+    def _load_config(self):
+        """Charge la configuration sauvegardée."""
+        try:
+            if self.config_file.exists():
+                with open(self.config_file) as f:
+                    config = json.load(f)
+                    saved_url = config.get('server_url')
+                    if saved_url:
+                        self.server_url = saved_url
+                        logger.debug(f"Loaded server URL from config: {saved_url}")
+        except Exception as e:
+            logger.debug(f"Could not load config: {e}")
+
+    def _save_config(self):
+        """Sauvegarde la configuration."""
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump({'server_url': self.server_url}, f)
+                logger.debug(f"Saved server URL to config: {self.server_url}")
+        except Exception as e:
+            logger.warning(f"Could not save config: {e}")
 
     def _create_widgets(self):
         """Crée les widgets de l'interface."""
@@ -699,6 +725,25 @@ class CollectorGUI:
         # Main content
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Section 0 : Configuration du serveur
+        server_frame = ttk.LabelFrame(main_frame, text="0. Configuration du Serveur ParcInfo")
+        server_frame.pack(fill=tk.X, pady=5)
+
+        server_input_frame = tk.Frame(server_frame)
+        server_input_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        tk.Label(server_input_frame, text="URL ParcInfo:").pack(side=tk.LEFT, padx=5)
+        self.server_url_var = tk.StringVar(value=self.server_url)
+        self.server_entry = tk.Entry(server_input_frame, textvariable=self.server_url_var, width=50)
+        self.server_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        test_btn = ttk.Button(server_input_frame, text="🔗 Tester", command=self._test_connection)
+        test_btn.pack(side=tk.LEFT, padx=5)
+
+        server_help = tk.Label(server_frame, text="Exemples: http://localhost:3456, http://192.168.1.100:3456, http://parcinfo.local:3456",
+                              font=("Arial", 8), fg="#666")
+        server_help.pack(padx=10, pady=2)
 
         # Section 1 : Sélection du client
         client_frame = ttk.LabelFrame(main_frame, text="1. Sélectionner le Client Cible")
@@ -744,6 +789,43 @@ class CollectorGUI:
         status_bar = tk.Label(self.root, textvariable=self.status_var,
                              bg="#ecf0f1", fg="#2c3e50", anchor=tk.W)
         status_bar.pack(fill=tk.X)
+
+    def _test_connection(self):
+        """Teste la connexion au serveur."""
+        new_url = self.server_url_var.get().strip()
+        if not new_url:
+            messagebox.showerror("Erreur", "L'URL du serveur ne peut pas être vide")
+            return
+
+        self.status_var.set("Test de connexion...")
+        self.root.update()
+
+        def test():
+            try:
+                test_url = f"{new_url.rstrip('/')}/api/clients-public"
+                logger.debug(f"Testing connection to: {test_url}")
+                with urlopen(test_url, timeout=5) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                    clients_count = len(data) if isinstance(data, list) else 0
+                    self.server_url = new_url
+                    self._save_config()
+                    messagebox.showinfo("Connexion ✓",
+                                      f"Connecté avec succès!\n\n"
+                                      f"URL: {new_url}\n"
+                                      f"Clients disponibles: {clients_count}\n\n"
+                                      f"Récupération de la liste des clients...")
+                    self._fetch_clients()
+                    self.status_var.set("Connecté ✓")
+            except Exception as e:
+                logger.error(f"Connection test failed: {e}")
+                messagebox.showerror("Erreur de Connexion",
+                                   f"Impossible de se connecter à {new_url}\n\n"
+                                   f"Erreur: {str(e)}\n\n"
+                                   f"Vérifiez l'URL et essayez à nouveau.")
+                self.status_var.set("Erreur de connexion")
+
+        thread = threading.Thread(target=test, daemon=True)
+        thread.start()
 
     def _collect_info(self):
         """Collecte les informations système."""
