@@ -300,6 +300,77 @@ def get_system_info_linux():
     return info
 
 
+def get_local_network_range():
+    """Détermine la plage de réseau local (ex: 192.168.1.0/24)."""
+    try:
+        # Récupère toutes les interfaces réseau
+        import socket
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+
+        # Détermine la plage de sous-réseau
+        octets = local_ip.split('.')
+        if len(octets) == 4:
+            base = '.'.join(octets[:3])
+            return base, local_ip
+    except Exception:
+        pass
+    return None, None
+
+
+def scan_network_for_parcinfo(timeout=2, progress_callback=None):
+    """
+    Scan le réseau local pour chercher des instances ParcInfo.
+    Retourne une liste de serveurs trouvés: [{"url": "...", "clients": N}, ...]
+    """
+    servers = []
+    base, local_ip = get_local_network_range()
+
+    if not base:
+        return servers
+
+    logger.debug(f"Scanning network range {base}.x for ParcInfo instances...")
+
+    # Scan les adresses 1-254 du sous-réseau
+    for i in range(1, 255):
+        if progress_callback:
+            progress_callback(f"Scan {base}.{i}...")
+
+        ip = f"{base}.{i}"
+        if ip == local_ip:
+            continue  # Skip local IP
+
+        try:
+            # Test rapide si le port 3456 est ouvert
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((ip, 3456))
+            sock.close()
+
+            if result == 0:  # Port ouvert
+                logger.debug(f"Port 3456 open on {ip}, checking if ParcInfo...")
+
+                # Vérifier que c'est ParcInfo en appelant l'endpoint
+                try:
+                    test_url = f"http://{ip}:3456/api/clients-public"
+                    with urlopen(test_url, timeout=timeout) as response:
+                        data = json.loads(response.read().decode('utf-8'))
+                        clients_count = len(data) if isinstance(data, list) else 0
+                        server_url = f"http://{ip}:3456"
+                        servers.append({
+                            'url': server_url,
+                            'ip': ip,
+                            'clients': clients_count
+                        })
+                        logger.debug(f"Found ParcInfo at {server_url} with {clients_count} clients")
+                except Exception as e:
+                    logger.debug(f"Not ParcInfo at {ip}: {e}")
+        except Exception as e:
+            logger.debug(f"Error scanning {ip}: {e}")
+
+    return servers
+
+
 def get_installed_software():
     """Récupère la liste des logiciels installés (max 200)."""
     software = []
@@ -735,11 +806,14 @@ class CollectorGUI:
 
         tk.Label(server_input_frame, text="URL ParcInfo:").pack(side=tk.LEFT, padx=5)
         self.server_url_var = tk.StringVar(value=self.server_url)
-        self.server_entry = tk.Entry(server_input_frame, textvariable=self.server_url_var, width=50)
+        self.server_entry = tk.Entry(server_input_frame, textvariable=self.server_url_var, width=40)
         self.server_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
 
         test_btn = ttk.Button(server_input_frame, text="🔗 Tester", command=self._test_connection)
-        test_btn.pack(side=tk.LEFT, padx=5)
+        test_btn.pack(side=tk.LEFT, padx=3)
+
+        scan_btn = ttk.Button(server_input_frame, text="🔍 Scan Réseau", command=self._scan_network)
+        scan_btn.pack(side=tk.LEFT, padx=3)
 
         server_help = tk.Label(server_frame, text="Exemples: http://localhost:3456, http://192.168.1.100:3456, http://parcinfo.local:3456",
                               font=("Arial", 8), fg="#666")
@@ -789,6 +863,79 @@ class CollectorGUI:
         status_bar = tk.Label(self.root, textvariable=self.status_var,
                              bg="#ecf0f1", fg="#2c3e50", anchor=tk.W)
         status_bar.pack(fill=tk.X)
+
+    def _scan_network(self):
+        """Lance un scan du réseau pour chercher des instances ParcInfo."""
+        self.status_var.set("Scan du réseau en cours...")
+        self.root.update()
+
+        def scan():
+            try:
+                logger.debug("Starting network scan for ParcInfo instances...")
+                servers = scan_network_for_parcinfo(
+                    timeout=1,
+                    progress_callback=lambda msg: self.status_var.set(msg)
+                )
+
+                if not servers:
+                    messagebox.showinfo("Scan Réseau",
+                                      "Aucune instance ParcInfo trouvée sur le réseau local.\n\n"
+                                      "Vérifiez que:\n"
+                                      "1. ParcInfo est lancé\n"
+                                      "2. C'est sur le même réseau local\n"
+                                      "3. Le port 3456 est accessible")
+                    self.status_var.set("Aucun serveur trouvé")
+                    return
+
+                # Affiche les résultats dans une fenêtre popup
+                self._show_scan_results(servers)
+                self.status_var.set("Scan terminé ✓")
+            except Exception as e:
+                logger.exception("Network scan failed")
+                messagebox.showerror("Erreur de Scan", f"Erreur lors du scan: {e}")
+                self.status_var.set("Erreur de scan")
+
+        thread = threading.Thread(target=scan, daemon=True)
+        thread.start()
+
+    def _show_scan_results(self, servers):
+        """Affiche les résultats du scan dans une fenêtre."""
+        result_window = tk.Toplevel(self.root)
+        result_window.title("Résultats du Scan Réseau")
+        result_window.geometry("600x300")
+
+        # Header
+        header = tk.Label(result_window, text=f"🎉 {len(servers)} instance(s) ParcInfo trouvée(s)",
+                         font=("Arial", 12, "bold"), bg="#2c3e50", fg="white", pady=10)
+        header.pack(fill=tk.X)
+
+        # Liste des serveurs
+        frame = tk.Frame(result_window)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        for server in servers:
+            btn_text = f"📍 {server['url']}   ({server['clients']} clients)"
+            btn = tk.Button(
+                frame,
+                text=btn_text,
+                bg="#ecf0f1",
+                fg="#2c3e50",
+                font=("Courier", 10),
+                justify=tk.LEFT,
+                command=lambda url=server['url']: self._select_found_server(url, result_window)
+            )
+            btn.pack(fill=tk.X, pady=5)
+
+        # Bouton Annuler
+        ttk.Button(frame, text="✕ Annuler", command=result_window.destroy).pack(pady=10)
+
+    def _select_found_server(self, url, window):
+        """Sélectionne un serveur trouvé par le scan."""
+        self.server_url_var.set(url)
+        self.server_url = url
+        self._save_config()
+        window.destroy()
+        self._test_connection()
 
     def _test_connection(self):
         """Teste la connexion au serveur."""
