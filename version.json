@@ -1,13 +1,13 @@
 {
-  "version": "2.6.26",
+  "version": "2.6.27",
   "release_date": "2026-08-03T23:30:00.000000",
   "github_repo": "darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.26/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.26/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.26",
-    "collector_gui": "https://github.com/darkmind64/parc-info/releases/download/v2.6.26/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/darkmind64/parc-info/releases/download/v2.6.26/system-info-collector.exe"
+    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.27/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.27/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.27",
+    "collector_gui": "https://github.com/darkmind64/parc-info/releases/download/v2.6.27/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/darkmind64/parc-info/releases/download/v2.6.27/system-info-collector.exe"
   },
   "notes": {
     "new_features": "System Information Collectors (GUI + CLI) with HTML Report Generation - mDNS Access Fix",
@@ -39,5 +39,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.26"
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.27"
 }
