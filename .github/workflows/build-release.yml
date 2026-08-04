@@ -14,6 +14,8 @@ jobs:
             asset_name: ParcInfo-Windows.exe
           - os: macos-latest
             asset_name: ParcInfo-macOS-ARM.zip
+          - os: macos-13
+            asset_name: ParcInfo-macOS-Intel.zip
 
     runs-on: ${{ matrix.os }}
     continue-on-error: true
@@ -106,10 +108,16 @@ jobs:
           name: ParcInfo-Windows.exe
           path: ./
 
-      - name: Download macOS artifact
+      - name: Download macOS ARM artifact
         uses: actions/download-artifact@v4
         with:
           name: ParcInfo-macOS-ARM.zip
+          path: ./
+
+      - name: Download macOS Intel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ParcInfo-macOS-Intel.zip
           path: ./
 
       - name: Create Release
@@ -123,7 +131,8 @@ jobs:
             | Plateforme | Fichier |
             |-----------|---------|
             | Windows   | `ParcInfo-Windows.exe` |
-            | macOS (Apple Silicon) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
+            | macOS (Apple Silicon M1+) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
+            | macOS (Intel) | `ParcInfo-macOS-Intel.zip` → dézipper → `ParcInfo.app` |
             | Docker    | `docker pull darkmind64/parcinfo:${{ github.ref_name }}` |
 
             ### Docker
@@ -142,3 +151,4 @@ jobs:
           files: |
             ./ParcInfo-Windows.exe
             ./ParcInfo-macOS-ARM.zip
+            ./ParcInfo-macOS-Intel.zip
