@@ -39,5 +39,9 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
+<<<<<<< HEAD
   "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.28"
+=======
+  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.25"
+>>>>>>> f12d0a8f1ef7a65b974724e77fbc68df185f0ed8
 }
