@@ -6,24 +6,33 @@ Generates standalone executable for Windows, macOS, Linux
 
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
+
+hiddenimports = [
+    'tkinter',
+    'json',
+    'urllib',
+    'socket',
+    'subprocess',
+    'platform',
+    'uuid',
+    'threading',
+    'ctypes',
+    'logging',
+    'logging.handlers',
+]
+if sys.platform == 'win32':
+    hiddenimports += ['winreg']
+hiddenimports += collect_submodules('reportlab')
 
 a = Analysis(
     ['system-info-collector-gui.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=[
-        'tkinter',
-        'json',
-        'urllib',
-        'socket',
-        'subprocess',
-        'platform',
-        'uuid',
-        'threading',
-    ],
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

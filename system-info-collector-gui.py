@@ -122,68 +122,121 @@ def get_os_info():
     }
 
 
-def get_system_info_windows():
-    """Collecte les infos système via WMI (Windows)."""
-    info = {}
+def _win_powershell_json(cmd, timeout=15):
+    """Exécute une commande PowerShell et parse le JSON retourné (aucune dépendance externe)."""
     try:
-        import wmi
-        c = wmi.WMI()
+        creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+        result = subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
+            capture_output=True, text=True, timeout=timeout, creationflags=creationflags
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return json.loads(result.stdout)
+    except Exception as e:
+        logger.debug(f"PowerShell command failed: {e}")
+    return None
 
-        try:
-            system = c.Win32_ComputerSystem()[0]
-            info['brand'] = system.Manufacturer.strip()
-            info['model'] = system.Model.strip()
-        except Exception:
-            pass
 
-        try:
-            bios = c.Win32_SystemEnclosure()[0]
-            info['serial_number'] = bios.SerialNumber.strip()
-        except Exception:
-            pass
+def get_system_info_windows():
+    """Collecte les infos système sur Windows via ctypes/winreg/PowerShell (aucune dépendance externe requise)."""
+    info = {}
 
-        try:
-            mem = c.Win32_PhysicalMemory()
-            total_ram_bytes = sum(int(m.Capacity) for m in mem)
-            info['ram_gb'] = round(total_ram_bytes / (1024 ** 3), 1)
-        except Exception:
-            pass
+    # RAM (kernel32 GlobalMemoryStatusEx)
+    try:
+        import ctypes
 
-        try:
-            cpu = c.Win32_Processor()[0]
-            info['cpu'] = cpu.Name.strip()
-            info['cpu_cores'] = int(cpu.NumberOfCores) if hasattr(cpu, 'NumberOfCores') else None
-        except Exception:
-            pass
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
 
-        # Tous les disques logiques
-        try:
-            disks = c.Win32_LogicalDisk()
-            disk_list = []
-            total_disk = 0
-            for disk in disks:
-                if disk.DriveType == 3:  # Local Disk
-                    drive_letter = disk.Name
-                    size_gb = round(int(disk.Size) / (1024 ** 3), 1) if disk.Size else 0
-                    disk_list.append(f"{drive_letter} ({size_gb} GB)")
-                    total_disk += size_gb
-            if disk_list:
-                info['disk_drives'] = disk_list
-                info['disk_total_gb'] = total_disk
-        except Exception:
-            pass
+        stat = MEMORYSTATUSEX()
+        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+        info['ram_gb'] = round(stat.ullTotalPhys / (1024 ** 3), 1)
+    except Exception as e:
+        logger.debug(f"RAM detection failed: {e}")
 
-        try:
-            av_products = c.Win32_SecurityCenter1()[0]
-            av_list = av_products.AntivirusProduct if hasattr(av_products, 'AntivirusProduct') else None
-            if av_list:
-                avs = [av.split('\\')[0] for av in (av_list if isinstance(av_list, list) else [av_list])]
-                info['antivirus'] = ', '.join(avs)
-        except Exception:
-            pass
+    # CPU nom (registre) + cores (os.cpu_count)
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+        cpu_name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+        winreg.CloseKey(key)
+        info['cpu'] = cpu_name.strip()
+    except Exception as e:
+        logger.debug(f"CPU name detection failed: {e}")
 
-    except ImportError:
-        pass
+    try:
+        import os as _os
+        info['cpu_cores'] = _os.cpu_count()
+    except Exception as e:
+        logger.debug(f"CPU cores detection failed: {e}")
+
+    # Disques logiques fixes (kernel32)
+    try:
+        import ctypes
+        import string
+
+        disk_list = []
+        total_disk = 0.0
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+        for i, letter in enumerate(string.ascii_uppercase):
+            if bitmask & (1 << i):
+                drive = f"{letter}:\\"
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+                if drive_type == 3:  # DRIVE_FIXED
+                    total_bytes = ctypes.c_ulonglong(0)
+                    free_bytes = ctypes.c_ulonglong(0)
+                    ok = ctypes.windll.kernel32.GetDiskFreeSpaceExW(
+                        drive, None, ctypes.byref(total_bytes), ctypes.byref(free_bytes)
+                    )
+                    if ok:
+                        size_gb = round(total_bytes.value / (1024 ** 3), 1)
+                        disk_list.append(f"{letter}: ({size_gb} GB)")
+                        total_disk += size_gb
+        if disk_list:
+            info['disk_drives'] = disk_list
+            info['disk_total_gb'] = round(total_disk, 1)
+    except Exception as e:
+        logger.debug(f"Disk detection failed: {e}")
+
+    # Marque / modèle (PowerShell CIM - natif Windows, aucune dépendance)
+    system_data = _win_powershell_json(
+        "Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model | ConvertTo-Json -Compress"
+    )
+    if system_data:
+        info['brand'] = (system_data.get('Manufacturer') or '').strip()
+        info['model'] = (system_data.get('Model') or '').strip()
+
+    # Numéro de série (BIOS)
+    bios_data = _win_powershell_json(
+        "Get-CimInstance Win32_BIOS | Select-Object SerialNumber | ConvertTo-Json -Compress"
+    )
+    if bios_data:
+        info['serial_number'] = (bios_data.get('SerialNumber') or '').strip()
+
+    # Antivirus (SecurityCenter2)
+    av_data = _win_powershell_json(
+        "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct "
+        "-ErrorAction SilentlyContinue | Select-Object displayName | ConvertTo-Json -Compress"
+    )
+    if av_data:
+        if isinstance(av_data, list):
+            avs = [d.get('displayName', '') for d in av_data if d.get('displayName')]
+        else:
+            name = av_data.get('displayName', '')
+            avs = [name] if name else []
+        if avs:
+            info['antivirus'] = ', '.join(avs)
 
     return info
 
@@ -668,19 +721,18 @@ def generate_html_report(info, client_id=None, client_name=None):
 
 def generate_pdf_report(info, client_id=None, client_name=None):
     """Génère un rapport PDF complet avec toutes les infos collectées."""
-    from reportlab.lib.pagesizes import letter, A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
-    from reportlab.lib import colors
-    from datetime import datetime
-
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     hostname = info.get('hostname', 'unknown')
     mac = info.get('mac_address', 'unknown')[:8]
     filename = f"system-info-report_{hostname}_{mac}_{timestamp}.pdf"
 
     try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib import colors
+
         doc = SimpleDocTemplate(filename, pagesize=A4)
         styles = getSampleStyleSheet()
         story = []
@@ -721,19 +773,21 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         })
 
         # Matériel
+        ram_val = info.get('ram_gb', '')
+        ram_display = f"{ram_val} GB" if ram_val not in ('', None) else 'N/A'
+        disk_val = info.get('disk_total_gb', '')
+        disk_display = f"{disk_val} GB" if disk_val not in ('', None) else 'N/A'
         hardware_data = {
-            "CPU": info.get('cpu_model', 'N/A'),
+            "CPU": info.get('cpu', 'N/A'),
             "Cores": info.get('cpu_cores', 'N/A'),
-            "RAM": info.get('ram_gb', 'N/A'),
-            "Disque total": info.get('disk_total_gb', 'N/A'),
+            "RAM": ram_display,
+            "Disque total": disk_display,
         }
         add_section("💻 Matériel", hardware_data)
 
         # Réseau
         add_section("🌐 Réseau", {
-            "IP Locale": info.get('local_ip', 'N/A'),
-            "DNS": info.get('dns_servers', 'N/A'),
-            "Gateway": info.get('default_gateway', 'N/A'),
+            "Adresse(s) IP": ', '.join(info.get('ip_addresses', [])) or 'N/A',
         })
 
         # Logiciels (limité à 20)
@@ -758,7 +812,7 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         return pdf_content, filename
 
     except Exception as e:
-        print(f"Erreur génération PDF: {e}")
+        logger.exception(f"Erreur génération PDF: {e}")
         return None, None
 
 
@@ -1256,11 +1310,18 @@ class CollectorGUI:
 
         def send():
             try:
+                logger.debug(f"System info collected: {self.system_info}")
+
                 # Générer le rapport PDF
                 pdf_content, report_file = generate_pdf_report(self.system_info, client_id, client_name)
+                if pdf_content:
+                    logger.debug(f"PDF report generated: {report_file} ({len(pdf_content)} bytes)")
+                else:
+                    logger.warning("PDF report generation returned no content")
 
                 # Filtrer les champs pour l'API
                 payload_data = get_api_payload(self.system_info, client_id, client_name)
+                logger.debug(f"API payload: {payload_data}")
                 payload = json.dumps(payload_data)
 
                 headers = {'Content-Type': 'application/json'}
@@ -1273,6 +1334,7 @@ class CollectorGUI:
 
                 with urlopen(request, timeout=10) as response:
                     result = json.loads(response.read().decode('utf-8'))
+                    logger.debug(f"API response: {result}")
                     if result.get('status') == 'success':
                         device_id = result.get('device_id')
                         msg = f"Appareil enregistré avec succès !\n\n"
@@ -1287,8 +1349,10 @@ class CollectorGUI:
                                 pdf_content, report_file, self.server_url, device_id, client_id
                             )
                             if success_report:
+                                logger.debug(f"Report uploaded: {result_report}")
                                 msg += f"\n✓ Rapport joint enregistré (Doc ID: {result_report.get('document_id')})"
                             else:
+                                logger.error(f"Report upload failed: {result_report}")
                                 msg += f"\n⚠️ Erreur lors du stockage du rapport: {result_report}"
 
                         if report_file:
@@ -1297,9 +1361,11 @@ class CollectorGUI:
                         messagebox.showinfo("Succès ✓", msg)
                         self.status_var.set("Envoi réussi ✓")
                     else:
+                        logger.error(f"API returned error: {result}")
                         messagebox.showerror("Erreur", result.get('message', 'Erreur inconnue'))
                         self.status_var.set("Erreur lors de l'envoi")
             except Exception as e:
+                logger.exception(f"ERROR in send(): {type(e).__name__}: {str(e)}")
                 messagebox.showerror("Erreur de Connexion", str(e))
                 self.status_var.set("Erreur de connexion")
 

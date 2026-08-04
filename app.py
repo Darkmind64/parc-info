@@ -3904,7 +3904,7 @@ def telecharger_document(id):
             return send_file(
                 io.BytesIO(doc['contenu_blob']),
                 as_attachment=True,
-                download_name=doc['nom']
+                download_name=doc.get('nom_fichier') or doc['nom']
             )
 
         # Fallback: servir depuis fichier local
@@ -3963,7 +3963,7 @@ def apercu_document(id):
             return send_file(
                 io.BytesIO(doc['contenu_blob']),
                 as_attachment=False,
-                download_name=doc.get('nom', 'document')
+                download_name=doc.get('nom_fichier') or doc.get('nom', 'document')
             )
 
         # Fallback: servir depuis fichier local

@@ -115,75 +115,121 @@ def get_os_info():
     }
 
 
-def get_system_info_windows():
-    """Collecte les infos système via WMI (Windows)."""
-    info = {}
+def _win_powershell_json(cmd, timeout=15):
+    """Exécute une commande PowerShell et parse le JSON retourné (aucune dépendance externe)."""
     try:
-        import wmi
-        c = wmi.WMI()
-
-        # Marque et modèle (BIOS/System)
-        try:
-            system = c.Win32_ComputerSystem()[0]
-            info['brand'] = system.Manufacturer.strip()
-            info['model'] = system.Model.strip()
-        except Exception:
-            pass
-
-        # Numéro de série
-        try:
-            bios = c.Win32_SystemEnclosure()[0]
-            info['serial_number'] = bios.SerialNumber.strip()
-        except Exception:
-            pass
-
-        # RAM
-        try:
-            mem = c.Win32_PhysicalMemory()
-            total_ram_bytes = sum(int(m.Capacity) for m in mem)
-            info['ram_gb'] = round(total_ram_bytes / (1024 ** 3), 1)
-        except Exception:
-            pass
-
-        # CPU
-        try:
-            cpu = c.Win32_Processor()[0]
-            info['cpu'] = cpu.Name.strip()
-            info['cpu_cores'] = int(cpu.NumberOfCores) if hasattr(cpu, 'NumberOfCores') else None
-        except Exception:
-            pass
-
-        # Tous les disques logiques
-        try:
-            disks = c.Win32_LogicalDisk()
-            disk_list = []
-            total_disk = 0
-            for disk in disks:
-                if disk.DriveType == 3:  # Local Disk
-                    drive_letter = disk.Name
-                    size_gb = round(int(disk.Size) / (1024 ** 3), 1) if disk.Size else 0
-                    disk_list.append(f"{drive_letter} ({size_gb} GB)")
-                    total_disk += size_gb
-            if disk_list:
-                info['disk_drives'] = disk_list
-                info['disk_total_gb'] = total_disk
-        except Exception:
-            pass
-
-        # Antivirus
-        try:
-            av_products = c.Win32_SecurityCenter1()[0]
-            av_list = av_products.AntivirusProduct if hasattr(av_products, 'AntivirusProduct') else None
-            if av_list:
-                # av_list est une liste de strings du type "displayName\\{UUID}"
-                avs = [av.split('\\')[0] for av in (av_list if isinstance(av_list, list) else [av_list])]
-                info['antivirus'] = ', '.join(avs)
-        except Exception:
-            pass
-
-    except ImportError:
-        # WMI non disponible, utiliser alternatives
+        creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+        result = subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
+            capture_output=True, text=True, timeout=timeout, creationflags=creationflags
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return json.loads(result.stdout)
+    except Exception:
         pass
+    return None
+
+
+def get_system_info_windows():
+    """Collecte les infos système sur Windows via ctypes/winreg/PowerShell (aucune dépendance externe requise)."""
+    info = {}
+
+    # RAM (kernel32 GlobalMemoryStatusEx)
+    try:
+        import ctypes
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        stat = MEMORYSTATUSEX()
+        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+        info['ram_gb'] = round(stat.ullTotalPhys / (1024 ** 3), 1)
+    except Exception:
+        pass
+
+    # CPU nom (registre) + cores (os.cpu_count)
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+        cpu_name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+        winreg.CloseKey(key)
+        info['cpu'] = cpu_name.strip()
+    except Exception:
+        pass
+
+    try:
+        import os as _os
+        info['cpu_cores'] = _os.cpu_count()
+    except Exception:
+        pass
+
+    # Disques logiques fixes (kernel32)
+    try:
+        import ctypes
+        import string
+
+        disk_list = []
+        total_disk = 0.0
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+        for i, letter in enumerate(string.ascii_uppercase):
+            if bitmask & (1 << i):
+                drive = f"{letter}:\\"
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+                if drive_type == 3:  # DRIVE_FIXED
+                    total_bytes = ctypes.c_ulonglong(0)
+                    free_bytes = ctypes.c_ulonglong(0)
+                    ok = ctypes.windll.kernel32.GetDiskFreeSpaceExW(
+                        drive, None, ctypes.byref(total_bytes), ctypes.byref(free_bytes)
+                    )
+                    if ok:
+                        size_gb = round(total_bytes.value / (1024 ** 3), 1)
+                        disk_list.append(f"{letter}: ({size_gb} GB)")
+                        total_disk += size_gb
+        if disk_list:
+            info['disk_drives'] = disk_list
+            info['disk_total_gb'] = round(total_disk, 1)
+    except Exception:
+        pass
+
+    # Marque / modèle (PowerShell CIM - natif Windows, aucune dépendance)
+    system_data = _win_powershell_json(
+        "Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model | ConvertTo-Json -Compress"
+    )
+    if system_data:
+        info['brand'] = (system_data.get('Manufacturer') or '').strip()
+        info['model'] = (system_data.get('Model') or '').strip()
+
+    # Numéro de série (BIOS)
+    bios_data = _win_powershell_json(
+        "Get-CimInstance Win32_BIOS | Select-Object SerialNumber | ConvertTo-Json -Compress"
+    )
+    if bios_data:
+        info['serial_number'] = (bios_data.get('SerialNumber') or '').strip()
+
+    # Antivirus (SecurityCenter2)
+    av_data = _win_powershell_json(
+        "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct "
+        "-ErrorAction SilentlyContinue | Select-Object displayName | ConvertTo-Json -Compress"
+    )
+    if av_data:
+        if isinstance(av_data, list):
+            avs = [d.get('displayName', '') for d in av_data if d.get('displayName')]
+        else:
+            name = av_data.get('displayName', '')
+            avs = [name] if name else []
+        if avs:
+            info['antivirus'] = ', '.join(avs)
 
     return info
 
