@@ -5294,8 +5294,9 @@ def api_device_info():
         model = data.get('model', '')
         serial = data.get('serial_number', '')
 
-        # Infos système
-        os_info = f"{data.get('os_name', '')} {data.get('os_version', '')}".strip()
+        # Infos système (séparées et complètes)
+        os_name = data.get('os_name', '').strip()
+        os_version = data.get('os_version', '').strip()
         ram_gb = data.get('ram_gb', '')
         cpu = data.get('cpu', '')
         cpu_cores = data.get('cpu_cores', '')
@@ -5366,9 +5367,13 @@ def api_device_info():
                 updates.append('adresse_mac=?')
                 params.append(mac_address)
 
-            if os_info and not old_data.get('os'):
+            if os_name and not old_data.get('os'):
                 updates.append('os=?')
-                params.append(os_info)
+                params.append(os_name)
+
+            if os_version and not old_data.get('version_os'):
+                updates.append('version_os=?')
+                params.append(os_version)
 
             if ram_gb and not old_data.get('ram'):
                 updates.append('ram=?')
@@ -5412,11 +5417,11 @@ def api_device_info():
             conn.execute(
                 '''INSERT INTO appareils
                    (client_id, nom_machine, adresse_ip, adresse_mac, marque, modele, numero_serie,
-                    os, ram, cpu, stockage, antivirus, logiciels_installes_json,
+                    os, version_os, ram, cpu, stockage, antivirus, logiciels_installes_json,
                     type_appareil, statut, decouvert_scan, en_ligne, derniere_synchro, date_creation, date_maj)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (cid, device_name, ip_address, mac_address, brand, model, serial,
-                 os_info, str(ram_gb) if ram_gb else '', cpu, str(disk_gb) if disk_gb else '', antivirus, software_json,
+                 os_name, os_version, str(ram_gb) if ram_gb else '', cpu, str(disk_gb) if disk_gb else '', antivirus, software_json,
                  'PC', 'actif', 0, 1, now, now, now)
             )
             app_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
