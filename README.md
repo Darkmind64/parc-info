@@ -6,14 +6,14 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.6.25 ⭐ **FIXED: GUI Collector Client List Display**  
-**Dernière mise à jour** : 2026-08-03
+**Version** : 2.6.28 ⭐ **FIXED: CSRF 403 + OS/RAM Display + Document Download Errors**  
+**Dernière mise à jour** : 2026-08-04
 
 ---
 
 ## ✨ Fonctionnalités Principales
 
-### 🎉 NEW v2.6.25 : Collecteur Système + Rapport HTML Persisté
+### 🎉 v2.6.28 : Collecteur Système + Fixes Critiques
 
 **Deux versions du collecteur (exécutables autonomes) :**
 
@@ -68,8 +68,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI, 12.5 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.25/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI, 15.6 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.25/system-info-collector-gui.exe)
+- [system-info-collector.exe (CLI, 12 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI, 15 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/system-info-collector-gui.exe)
+- [ParcInfo.exe (Serveur, 44 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/ParcInfo.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -144,7 +145,7 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.6.25
+## 📥 Téléchargements v2.6.28
 
 ### Exécutables Portables
 
