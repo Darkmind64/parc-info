@@ -90,19 +90,29 @@ jobs:
           cache-to: type=gha,mode=max
 
   release:
-    needs: build
+    needs: [build, docker]
     runs-on: ubuntu-latest
 
     permissions:
       contents: write
 
     steps:
-      - name: Télécharger artefacts
-        uses: dawidd6/action-download-artifact@v3
-        with:
-          path: artifacts
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Créer la release GitHub
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ParcInfo-Windows.exe
+          path: ./
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ParcInfo-macOS-ARM.zip
+          path: ./
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: ParcInfo ${{ github.ref_name }}
@@ -130,5 +140,5 @@ jobs:
             xattr -cr ParcInfo.app
             ```
           files: |
-            artifacts/ParcInfo-Windows.exe/ParcInfo-Windows.exe
-            artifacts/ParcInfo-macOS-ARM.zip/ParcInfo-macOS-ARM.zip
+            ./ParcInfo-Windows.exe
+            ./ParcInfo-macOS-ARM.zip
