@@ -82,6 +82,11 @@ def validate_csrf_request():
         return
     if request.path in ('/login', '/logout'):
         return
+    # Exclure les endpoints API autonomes (collecteurs, scripts externes)
+    if request.path.startswith('/api/'):
+        # Les APIs autonomes n'envoient pas de token CSRF
+        # Ils sont protégés par client_id ou token d'authentification spécifique
+        return
     expected = session.get('csrf_token')
     received = (request.form.get('csrf_token')
                 or request.headers.get('X-CSRF-Token'))
