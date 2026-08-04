@@ -630,6 +630,101 @@ def generate_html_report(info, client_id=None, client_name=None):
         return html, None
 
 
+def generate_pdf_report(info, client_id=None, client_name=None):
+    """Génère un rapport PDF complet avec toutes les infos collectées."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib import colors
+
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        hostname = info.get('hostname', 'unknown')
+        mac = info.get('mac_address', 'unknown')[:8]
+        filename = f"system-info-report_{hostname}_{mac}_{timestamp}.pdf"
+
+        doc = SimpleDocTemplate(filename, pagesize=A4)
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Titre
+        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#2c3e50'), spaceAfter=6)
+        story.append(Paragraph("📊 Rapport Collecte Système", title_style))
+        story.append(Paragraph(f"Généré le {datetime.utcnow().strftime('%d/%m/%Y à %H:%M:%S UTC')}", styles['Normal']))
+        story.append(Spacer(1, 0.3*inch))
+
+        # Fonction helper pour ajouter une section
+        def add_section(title, data):
+            heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor('#2c3e50'), spaceAfter=10)
+            story.append(Paragraph(title, heading_style))
+
+            table_data = [[Paragraph(f"<b>{k}</b>", styles['Normal']), Paragraph(str(v), styles['Normal'])] for k, v in data.items()]
+            if table_data:
+                table = Table(table_data, colWidths=[2*inch, 3.5*inch])
+                table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
+                    ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                    ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, -1), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 1, colors.black)
+                ]))
+                story.append(table)
+            story.append(Spacer(1, 0.3*inch))
+
+        # Sections
+        add_section("🔍 Identification", {
+            "Hostname": info.get('hostname', 'N/A'),
+            "MAC": info.get('mac_address', 'N/A'),
+            "IP(s)": ', '.join(info.get('ip_addresses', [])),
+            "Marque": info.get('brand', 'N/A'),
+            "Modèle": info.get('model', 'N/A'),
+        })
+
+        add_section("🖥️ Système", {
+            "OS": info.get('os_name', 'N/A'),
+            "Version": info.get('os_version', 'N/A'),
+        })
+
+        add_section("⚙️ Matériel", {
+            "CPU": info.get('cpu', 'N/A'),
+            "Cores": info.get('cpu_cores', 'N/A'),
+            "RAM": info.get('ram_gb', 'N/A'),
+            "Disque": info.get('disk_total_gb', 'N/A'),
+        })
+
+        # Logiciels (limité à 20)
+        software_list = info.get('installed_software', [])[:20]
+        if software_list:
+            story.append(Paragraph("<b>📦 Logiciels Installés (top 20)</b>", styles['Heading2']))
+            for i, soft in enumerate(software_list, 1):
+                story.append(Paragraph(f"{i}. {soft}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+
+        # Métadonnées
+        story.append(Spacer(1, 0.2*inch))
+        metadata_style = ParagraphStyle('Metadata', parent=styles['Normal'], fontSize=8, textColor=colors.grey)
+        story.append(Paragraph(f"<i>Rapport généré par system-info-collector | Client: {client_name or 'N/A'} (ID: {client_id or 'N/A'})</i>", metadata_style))
+
+        # Générer le PDF
+        doc.build(story)
+
+        # Lire le contenu du fichier PDF
+        with open(filename, 'rb') as f:
+            pdf_content = f.read()
+        return pdf_content, filename
+
+    except ImportError:
+        print("⚠️  reportlab non disponible, utilisation du format HTML")
+        return generate_html_report(info, client_id, client_name)
+    except Exception as e:
+        print(f"Erreur génération PDF: {e}")
+        return None, None
+
+
 def get_api_payload(info, client_id=None, client_name=None):
     """Extrait uniquement les champs supportés par l'API ParcInfo."""
     # Formater la RAM pour correspondre aux options (ex: "16" → "16 Go")
@@ -703,12 +798,12 @@ def send_to_parcinfo(info, server_url, token=None, client_id=None, client_name=N
         return False, str(e)
 
 
-def upload_report_to_parcinfo(html_content, report_file, server_url, device_id, client_id):
-    """Envoie le rapport HTML à ParcInfo en tant que document joint.
+def upload_report_to_parcinfo(report_content, report_file, server_url, device_id, client_id):
+    """Envoie le rapport (PDF ou HTML) à ParcInfo en tant que document joint.
 
     Args:
-        html_content: Contenu HTML du rapport
-        report_file: Chemin du fichier HTML (ou None si généré en mémoire)
+        report_content: Contenu du rapport (bytes ou str)
+        report_file: Chemin du fichier rapport (détermine le type)
         server_url: URL du serveur ParcInfo
         device_id: ID de l'appareil créé/mis à jour
         client_id: ID du client
@@ -716,6 +811,14 @@ def upload_report_to_parcinfo(html_content, report_file, server_url, device_id, 
     try:
         from urllib.request import Request as MultipartRequest
         import io
+
+        # Déterminer le type MIME basé sur l'extension du fichier
+        if report_file and report_file.endswith('.pdf'):
+            content_type = 'application/pdf'
+            filename = report_file
+        else:
+            content_type = 'text/html'
+            filename = 'report.html'
 
         # Préparer les données multipart
         boundary = '----FormBoundary' + str(uuid.uuid4()).replace('-', '')
@@ -732,12 +835,12 @@ def upload_report_to_parcinfo(html_content, report_file, server_url, device_id, 
 
         # Ajouter le fichier
         body.write(f'--{boundary}\r\n'.encode())
-        body.write(b'Content-Disposition: form-data; name="report"; filename="report.html"\r\n')
-        body.write(b'Content-Type: text/html\r\n\r\n')
-        if isinstance(html_content, str):
-            body.write(html_content.encode('utf-8'))
+        body.write(f'Content-Disposition: form-data; name="report"; filename="{filename}"\r\n'.encode())
+        body.write(f'Content-Type: {content_type}\r\n\r\n'.encode())
+        if isinstance(report_content, str):
+            body.write(report_content.encode('utf-8'))
         else:
-            body.write(html_content)
+            body.write(report_content)
         body.write(b'\r\n')
 
         body.write(f'--{boundary}--\r\n'.encode())
@@ -807,11 +910,11 @@ def main():
 
         print(f"    ✓ Logiciels détectés: {len(info.get('installed_software', []))}")
 
-    # Générer rapport HTML complet
+    # Générer rapport PDF
     if not args.quiet:
-        print(f"\n[*] Génération du rapport HTML...")
+        print(f"\n[*] Génération du rapport PDF...")
 
-    html_content, report_file = generate_html_report(info, args.client_id, args.client_name)
+    pdf_content, report_file = generate_pdf_report(info, args.client_id, args.client_name)
     if report_file and not args.quiet:
         print(f"    ✓ Rapport sauvegardé: {report_file}")
 
@@ -840,14 +943,14 @@ def main():
             if report_file:
                 print(f"\n[+] Rapport complet sauvegardé: {report_file}")
 
-        # Envoyer le rapport HTML en tant que document joint
+        # Envoyer le rapport PDF en tant que document joint
         if report_file and not args.quiet:
             print(f"\n[*] Envoi du rapport vers les documents de l'appareil...")
 
         device_id = result.get('device_id')
         if report_file and device_id and args.client_id:
             success_report, result_report = upload_report_to_parcinfo(
-                html_content, report_file, args.server, device_id, args.client_id
+                pdf_content, report_file, args.server, device_id, args.client_id
             )
 
             if success_report and not args.quiet:
