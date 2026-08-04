@@ -10,7 +10,7 @@ Usage:
 
 # Semantic versioning (MAJOR.MINOR.PATCH)
 __version__ = "2.6.26"
-__version_tuple__ = (2, 6, 25)
+__version_tuple__ = (2, 6, 26)
 
 # Build metadata
 GITHUB_REPO = "darkmind64/parc_info"
