@@ -5552,30 +5552,33 @@ def api_device_info_upload_report():
 
         # Lire le contenu du fichier
         try:
-            html_content = report_file.read()
-            if isinstance(html_content, bytes):
-                html_content = html_content.decode('utf-8')
+            file_content = report_file.read()
         except Exception as e:
             conn.close()
             return jsonify({"status": "error", "message": f"Error reading file: {str(e)}"}), 400
 
-        # Insérer le document
+        # Insérer le document dans la table documents_appareils
         now = datetime.utcnow().isoformat()
-        conn.execute('''
-            INSERT INTO documents_appareils
-            (appareil_id, client_id, nom, description, type_doc, nom_fichier, taille, contenu_blob, date_upload)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            device_id,
-            client_id,
-            f"Rapport Système - {now}",
-            "Rapport HTML complet collecté par système-info-collector",
-            "rapport_html",
-            report_file.filename,
-            len(html_content.encode('utf-8')),
-            html_content,
-            now
-        ))
+        try:
+            conn.execute('''
+                INSERT INTO documents_appareils
+                (appareil_id, client_id, nom, description, type_doc, nom_fichier, taille, contenu_blob, date_upload)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                device_id,
+                client_id,
+                f"Rapport Système - {now}",
+                "Rapport PDF/HTML collecté par système-info-collector",
+                "rapport_system",
+                report_file.filename,
+                len(file_content),
+                file_content,
+                now
+            ))
+        except Exception as e:
+            conn.close()
+            app.logger.exception("Error inserting document")
+            return jsonify({"status": "error", "message": f"Error inserting document: {str(e)}"}), 500
 
         conn.commit()
         doc_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
