@@ -98,7 +98,7 @@ jobs:
 
     steps:
       - name: Télécharger artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3
         with:
           path: artifacts
 
