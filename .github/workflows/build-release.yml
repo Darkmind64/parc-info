@@ -13,9 +13,8 @@ jobs:
           - os: windows-latest
             asset_name: ParcInfo-Windows.exe
           - os: macos-latest
-            asset_name: ParcInfo-macOS-ARM.zip
-          - os: macos-12
-            asset_name: ParcInfo-macOS-Intel.zip
+            asset_name: ParcInfo-macOS-Universal.zip
+            target_arch: universal2
 
     runs-on: ${{ matrix.os }}
     continue-on-error: true
@@ -39,6 +38,7 @@ jobs:
         run: pyinstaller parcinfo.spec
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"
+          TARGET_ARCH: ${{ matrix.target_arch || '' }}
 
       - name: Zip .app (macOS)
         if: runner.os == 'macOS'
@@ -108,16 +108,10 @@ jobs:
           name: ParcInfo-Windows.exe
           path: ./
 
-      - name: Download macOS ARM artifact
+      - name: Download macOS Universal artifact
         uses: actions/download-artifact@v4
         with:
-          name: ParcInfo-macOS-ARM.zip
-          path: ./
-
-      - name: Download macOS Intel artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ParcInfo-macOS-Intel.zip
+          name: ParcInfo-macOS-Universal.zip
           path: ./
 
       - name: Create Release
@@ -131,8 +125,8 @@ jobs:
             | Plateforme | Fichier |
             |-----------|---------|
             | Windows   | `ParcInfo-Windows.exe` |
-            | macOS (Apple Silicon M1+) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
-            | macOS (Intel) | `ParcInfo-macOS-Intel.zip` → dézipper → `ParcInfo.app` |
+            | macOS (Universal) | `ParcInfo-macOS-Universal.zip` → dézipper → `ParcInfo.app` |
+            |           | ✅ Fonctionne sur Apple Silicon (M1+) ET Intel |
             | Docker    | `docker pull darkmind64/parcinfo:${{ github.ref_name }}` |
 
             ### Docker
@@ -150,5 +144,4 @@ jobs:
             ```
           files: |
             ./ParcInfo-Windows.exe
-            ./ParcInfo-macOS-ARM.zip
-            ./ParcInfo-macOS-Intel.zip
+            ./ParcInfo-macOS-Universal.zip
