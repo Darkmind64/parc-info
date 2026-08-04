@@ -64,17 +64,33 @@ def get_ip_addresses():
 
 
 def get_os_info():
-    """Récupère l'OS et la version exacte."""
+    """Récupère l'OS et la version exacte avec édition (Pro/Home/Server)."""
     os_name = platform.system()  # 'Windows', 'Darwin', 'Linux'
     os_version = platform.release()
+    edition = ""
 
-    # Pour Windows, obtenir la version complète
+    # Pour Windows, obtenir la version complète et l'édition
     if IS_WINDOWS:
         try:
             import winreg
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows NT\CurrentVersion') as key:
                 display_version = winreg.QueryValueEx(key, 'DisplayVersion')[0]
-                os_version = f"{os_version} ({display_version})"
+                os_version = display_version
+                # Récupérer l'édition (Pro, Home, Server, etc)
+                try:
+                    edition_name = winreg.QueryValueEx(key, 'EditionID')[0]
+                    # Mapper les éditions Windows
+                    edition_map = {
+                        'Professional': 'Pro',
+                        'Home': 'Home',
+                        'Enterprise': 'Enterprise',
+                        'Education': 'Education',
+                        'ServerStandard': 'Server 2022',
+                        'ServerDatacenter': 'Server 2022 Datacenter',
+                    }
+                    edition = edition_map.get(edition_name, edition_name)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -86,8 +102,14 @@ def get_os_info():
         except Exception:
             pass
 
+    # Construire le nom OS complet
+    if edition:
+        full_os_name = f"Windows {os_version} {edition}"
+    else:
+        full_os_name = os_name
+
     return {
-        "os_name": os_name,
+        "os_name": full_os_name,
         "os_version": os_version,
         "platform": platform.platform()
     }
@@ -610,6 +632,17 @@ def generate_html_report(info, client_id=None, client_name=None):
 
 def get_api_payload(info, client_id=None, client_name=None):
     """Extrait uniquement les champs supportés par l'API ParcInfo."""
+    # Formater la RAM pour correspondre aux options (ex: "16" → "16 Go")
+    ram_value = info.get('ram_gb', '')
+    if ram_value:
+        try:
+            ram_num = float(ram_value)
+            ram_formatted = f"{int(ram_num)} Go" if ram_num == int(ram_num) else f"{ram_num} Go"
+        except (ValueError, TypeError):
+            ram_formatted = str(ram_value)
+    else:
+        ram_formatted = ''
+
     payload = {
         'mac_address': info.get('mac_address', ''),
         'ip_addresses': info.get('ip_addresses', []),
@@ -619,7 +652,7 @@ def get_api_payload(info, client_id=None, client_name=None):
         'brand': info.get('brand', ''),
         'model': info.get('model', ''),
         'serial_number': info.get('serial_number', ''),
-        'ram_gb': info.get('ram_gb', ''),
+        'ram_gb': ram_formatted,  # Envoi avec "Go" (ex: "16 Go")
         'cpu': info.get('cpu', ''),
         'disk_total_gb': info.get('disk_total_gb', ''),
         'antivirus': info.get('antivirus', ''),

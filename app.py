@@ -3888,23 +3888,35 @@ def upload_document(id):
 @app.route('/document/<int:id>/telecharger')
 def telecharger_document(id):
     cid = get_client_id()
+    if not cid:
+        flash('Vous devez être connecté pour télécharger un document', 'danger')
+        return redirect(url_for('page_login'))
+
     conn = get_db()
-    doc = row_to_dict(conn.execute('SELECT id, appareil_id, client_id, nom, nom_fichier, contenu_blob FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
-    conn.close()
-    if not doc:
-        flash('Document introuvable', 'danger')
+    try:
+        doc = row_to_dict(conn.execute('SELECT id, appareil_id, client_id, nom, nom_fichier, contenu_blob FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        if not doc:
+            flash('Document introuvable', 'danger')
+            return redirect(url_for('liste_appareils'))
+
+        # Préférer servir depuis BLOB si disponible (synced)
+        if doc.get('contenu_blob'):
+            return send_file(
+                io.BytesIO(doc['contenu_blob']),
+                as_attachment=True,
+                download_name=doc['nom']
+            )
+
+        # Fallback: servir depuis fichier local
+        if doc.get('nom_fichier'):
+            fichier_path = os.path.join(UPLOAD_FOLDER, doc['nom_fichier'])
+            if os.path.exists(fichier_path):
+                return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
+
+        flash('Le fichier n\'existe plus', 'danger')
         return redirect(url_for('liste_appareils'))
-
-    # Préférer servir depuis BLOB si disponible (synced)
-    if doc.get('contenu_blob'):
-        return send_file(
-            io.BytesIO(doc['contenu_blob']),
-            as_attachment=True,
-            download_name=doc['nom']
-        )
-
-    # Fallback: servir depuis fichier local
-    return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
+    finally:
+        conn.close()
 
 @app.route('/document/<int:id>/supprimer', methods=['POST'])
 def supprimer_document(id):
@@ -3937,25 +3949,32 @@ def supprimer_document(id):
 @app.route('/document/<int:id>/apercu')
 def apercu_document(id):
     cid = get_client_id()
+    if not cid:
+        return 'Unauthorized', 403
+
     conn = get_db()
-    doc = row_to_dict(conn.execute('SELECT id, appareil_id, client_id, nom, nom_fichier, contenu_blob FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
-    conn.close()
-    if not doc:
-        return 'Not found', 404
-
-    # Préférer servir depuis BLOB si disponible (synced)
-    if doc.get('contenu_blob'):
-        return send_file(
-            io.BytesIO(doc['contenu_blob']),
-            as_attachment=False,
-            download_name=doc.get('nom_fichier', 'document')
-        )
-
-    # Fallback: servir depuis fichier local
     try:
-        return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
-    except Exception:
+        doc = row_to_dict(conn.execute('SELECT id, appareil_id, client_id, nom, nom_fichier, contenu_blob FROM documents_appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        if not doc:
+            return 'Not found', 404
+
+        # Préférer servir depuis BLOB si disponible (synced)
+        if doc.get('contenu_blob'):
+            return send_file(
+                io.BytesIO(doc['contenu_blob']),
+                as_attachment=False,
+                download_name=doc.get('nom', 'document')
+            )
+
+        # Fallback: servir depuis fichier local
+        if doc.get('nom_fichier'):
+            fichier_path = os.path.join(UPLOAD_FOLDER, doc['nom_fichier'])
+            if os.path.exists(fichier_path):
+                return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
+
         return f"Fichier introuvable : {doc.get('nom_fichier', '?')}", 404
+    finally:
+        conn.close()
 
 
 # ─── API APPAREIL : IGNORER ALERTE GARANTIE ──────────────────────────────────
