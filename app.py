@@ -5321,10 +5321,11 @@ def api_device_info():
         cpu_cores = data.get('cpu_cores', '')
         disk_gb = data.get('disk_total_gb', '')
         antivirus = data.get('antivirus', '')
+        gpu = data.get('gpu', '')
 
-        # Logiciels
+        # Logiciels (liste complète - garde-fou à 2000 entrées contre un payload aberrant)
         software_list = data.get('installed_software', [])
-        software_json = json.dumps(software_list[:50]) if software_list else ''
+        software_json = json.dumps(software_list[:2000]) if software_list else ''
 
         now = datetime.utcnow().isoformat()
         conn = get_db()
@@ -5412,6 +5413,10 @@ def api_device_info():
                 updates.append('antivirus=?')
                 params.append(antivirus)
 
+            if gpu:
+                updates.append('carte_graphique=?')
+                params.append(gpu)
+
             if software_json:
                 updates.append('logiciels_installes_json=?')
                 params.append(software_json)
@@ -5438,11 +5443,11 @@ def api_device_info():
             conn.execute(
                 '''INSERT INTO appareils
                    (client_id, nom_machine, adresse_ip, adresse_mac, marque, modele, numero_serie,
-                    os, version_os, ram, cpu, stockage, antivirus, logiciels_installes_json,
+                    os, version_os, ram, cpu, stockage, antivirus, carte_graphique, logiciels_installes_json,
                     type_appareil, statut, decouvert_scan, en_ligne, derniere_synchro, date_creation, date_maj)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (cid, device_name, ip_address, mac_address, brand, model, serial,
-                 os_name, os_version, str(ram_gb) if ram_gb else '', cpu, str(disk_gb) if disk_gb else '', antivirus, software_json,
+                 os_name, os_version, str(ram_gb) if ram_gb else '', cpu, str(disk_gb) if disk_gb else '', antivirus, gpu, software_json,
                  'PC', 'actif', 0, 1, now, now, now)
             )
             app_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]

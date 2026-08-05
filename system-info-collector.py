@@ -196,13 +196,14 @@ def get_system_info_windows():
     except Exception:
         pass
 
-    # Disques logiques fixes (kernel32)
+    # Disques logiques fixes (kernel32) - taille, utilisé, libre
     try:
         import ctypes
         import string
 
         disk_list = []
         total_disk = 0.0
+        total_free = 0.0
         bitmask = ctypes.windll.kernel32.GetLogicalDrives()
         for i, letter in enumerate(string.ascii_uppercase):
             if bitmask & (1 << i):
@@ -216,13 +217,49 @@ def get_system_info_windows():
                     )
                     if ok:
                         size_gb = round(total_bytes.value / (1024 ** 3), 1)
-                        disk_list.append(f"{letter}: ({size_gb} GB)")
+                        free_gb = round(free_bytes.value / (1024 ** 3), 1)
+                        used_gb = round(size_gb - free_gb, 1)
+                        disk_list.append(f"{letter}: — {size_gb} GB total, {used_gb} GB utilisés, {free_gb} GB libres")
                         total_disk += size_gb
+                        total_free += free_gb
         if disk_list:
             info['disk_drives'] = disk_list
             info['disk_total_gb'] = round(total_disk, 1)
+            info['disk_free_gb'] = round(total_free, 1)
+            info['disk_used_gb'] = round(total_disk - total_free, 1)
     except Exception:
         pass
+
+    # Disques physiques : type (SSD/HDD) + état de santé SMART (Get-PhysicalDisk - natif Windows 8+)
+    physical_disks_data = _win_powershell_json(
+        "Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,Size,OperationalStatus "
+        "| ConvertTo-Json -Compress"
+    )
+    if physical_disks_data:
+        disks = physical_disks_data if isinstance(physical_disks_data, list) else [physical_disks_data]
+        physical_list = []
+        for d in disks:
+            name = d.get('FriendlyName') or 'Disque'
+            media = d.get('MediaType') or 'Inconnu'
+            health = d.get('HealthStatus') or 'Inconnu'
+            op_status = d.get('OperationalStatus') or ''
+            size_gb = round((d.get('Size') or 0) / (1024 ** 3), 1)
+            entry = f"{name} — {media} — {size_gb} GB — Santé (SMART): {health}"
+            if op_status and op_status != 'OK':
+                entry += f" ({op_status})"
+            physical_list.append(entry)
+        if physical_list:
+            info['physical_disks'] = physical_list
+
+    # Carte(s) graphique(s)
+    gpu_data = _win_powershell_json(
+        "Get-CimInstance Win32_VideoController | Select-Object Name | ConvertTo-Json -Compress"
+    )
+    if gpu_data:
+        gpus_raw = gpu_data if isinstance(gpu_data, list) else [gpu_data]
+        gpus = [d.get('Name', '') for d in gpus_raw if d.get('Name')]
+        if gpus:
+            info['gpu'] = ', '.join(gpus)
 
     # Marque / modèle (PowerShell CIM - natif Windows, aucune dépendance)
     system_data = _win_powershell_json(
@@ -252,6 +289,28 @@ def get_system_info_windows():
             avs = [name] if name else []
         if avs:
             info['antivirus'] = ', '.join(avs)
+
+    # Comptes utilisateurs locaux
+    users_data = _win_powershell_json(
+        "Get-CimInstance Win32_UserAccount -Filter \"LocalAccount='True'\" "
+        "| Select-Object Name,Disabled,Lockout | ConvertTo-Json -Compress"
+    )
+    if users_data:
+        users_raw = users_data if isinstance(users_data, list) else [users_data]
+        user_list = []
+        for u in users_raw:
+            name = u.get('Name', '')
+            if not name:
+                continue
+            if u.get('Disabled'):
+                status = 'Désactivé'
+            elif u.get('Lockout'):
+                status = 'Verrouillé'
+            else:
+                status = 'Actif'
+            user_list.append(f"{name} ({status})")
+        if user_list:
+            info['users'] = sorted(user_list)
 
     return info
 
@@ -397,18 +456,20 @@ def get_system_info_linux():
 
 
 def get_installed_software():
-    """Récupère la liste des logiciels installés (max 200)."""
+    """Récupère la liste complète des logiciels installés (machine + par utilisateur)."""
     software = []
 
     if IS_WINDOWS:
         try:
             import winreg
-            hive = winreg.HKEY_LOCAL_MACHINE
-            paths = [
-                r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
-                r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+            # (hive, chemin) - HKLM couvre les installs machine (64 et 32 bits sur WOW6432Node),
+            # HKCU couvre les installs propres à l'utilisateur courant (souvent absentes sinon)
+            hives = [
+                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),
+                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'),
+                (winreg.HKEY_CURRENT_USER, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),
             ]
-            for path in paths:
+            for hive, path in hives:
                 try:
                     with winreg.OpenKey(hive, path) as key:
                         count = winreg.QueryInfoKey(key)[0]
@@ -475,8 +536,7 @@ def get_installed_software():
             except Exception:
                 pass
 
-    # Limiter à 200 logiciels pour ne pas surcharger
-    return sorted(list(set(software)))[:200]
+    return sorted(set(software))
 
 
 def collect_system_info():
@@ -500,7 +560,7 @@ def collect_system_info():
         info.update(get_system_info_linux())
 
     # Logiciels (limité à 200)
-    info['installed_software'] = get_installed_software()[:200]
+    info['installed_software'] = get_installed_software()
 
     return info
 
@@ -770,19 +830,40 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         ram_display = f"{ram_val} GB" if ram_val not in ('', None) else 'N/A'
         disk_val = info.get('disk_total_gb', '')
         disk_display = f"{disk_val} GB" if disk_val not in ('', None) else 'N/A'
+        used_val = info.get('disk_used_gb', '')
+        free_val = info.get('disk_free_gb', '')
+        if used_val not in ('', None) and free_val not in ('', None):
+            disk_display += f" ({used_val} GB utilisés, {free_val} GB libres)"
         add_section("⚙️ Matériel", {
             "CPU": info.get('cpu', 'N/A'),
             "Cores": info.get('cpu_cores', 'N/A'),
             "RAM": ram_display,
+            "Carte(s) graphique(s)": info.get('gpu', 'N/A'),
             "Disque total": disk_display,
         })
 
-        # Disques détaillés
+        # Disques logiques (lettres, espace utilisé/libre)
         disk_drives = info.get('disk_drives', [])
         if disk_drives:
-            story.append(Paragraph("<b>💾 Disques Détectés</b>", styles['Heading2']))
+            story.append(Paragraph("<b>💾 Disques Logiques</b>", styles['Heading2']))
             for drive in disk_drives:
                 story.append(Paragraph(f"• {esc(drive)}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+
+        # Disques physiques (type SSD/HDD + santé SMART)
+        physical_disks = info.get('physical_disks', [])
+        if physical_disks:
+            story.append(Paragraph("<b>🔩 Disques Physiques (Type &amp; Santé SMART)</b>", styles['Heading2']))
+            for drive in physical_disks:
+                story.append(Paragraph(f"• {esc(drive)}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+
+        # Comptes utilisateurs locaux
+        users_list = info.get('users', [])
+        if users_list:
+            story.append(Paragraph(f"<b>👥 Comptes Utilisateurs Locaux ({len(users_list)})</b>", styles['Heading2']))
+            for u in users_list:
+                story.append(Paragraph(f"• {esc(u)}", styles['Normal']))
             story.append(Spacer(1, 0.2*inch))
 
         # Logiciels (liste complète)
@@ -840,7 +921,8 @@ def get_api_payload(info, client_id=None, client_name=None):
         'cpu': info.get('cpu', ''),
         'disk_total_gb': info.get('disk_total_gb', ''),
         'antivirus': info.get('antivirus', ''),
-        'installed_software': info.get('installed_software', [])[:50],  # Max 50 pour l'API
+        'gpu': info.get('gpu', ''),
+        'installed_software': info.get('installed_software', []),
     }
 
     # Ajouter client targeting
@@ -986,16 +1068,30 @@ def main():
         print(f"    ✓ OS: {info.get('os_name', 'N/A')} {info.get('os_version', '')}")
         print(f"    ✓ RAM: {info.get('ram_gb', 'N/A')} GB")
         print(f"    ✓ CPU: {info.get('cpu', 'N/A')} ({info.get('cpu_cores', 'N/A')} cores)")
+        if info.get('gpu'):
+            print(f"    ✓ GPU: {info.get('gpu')}")
 
         # Affichage des disques (multiples ou simple)
         disk_drives = info.get('disk_drives', [])
         if disk_drives:
-            print(f"    ✓ Disques:")
+            print(f"    ✓ Disques logiques:")
             for drive in disk_drives:
                 print(f"         - {drive}")
             print(f"         Total: {info.get('disk_total_gb', 'N/A')} GB")
         else:
             print(f"    ✓ Disque total: {info.get('disk_total_gb', 'N/A')} GB")
+
+        physical_disks = info.get('physical_disks', [])
+        if physical_disks:
+            print(f"    ✓ Disques physiques (Type/SMART):")
+            for drive in physical_disks:
+                print(f"         - {drive}")
+
+        users_list = info.get('users', [])
+        if users_list:
+            print(f"    ✓ Comptes utilisateurs locaux: {len(users_list)}")
+            for u in users_list:
+                print(f"         - {u}")
 
         print(f"    ✓ Logiciels détectés: {len(info.get('installed_software', []))}")
 
