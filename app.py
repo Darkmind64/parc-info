@@ -1458,6 +1458,39 @@ def init_db():
         except sqlite3.OperationalError:
             pass  # Colonne existe déjà
 
+    # Anti-collision d'ID multi-machines (sync bidirectionnelle Turso) : deux
+    # installations indépendantes qui créent chacune un nouvel enregistrement
+    # démarrent TOUTES LES DEUX leur compteur AUTOINCREMENT à 1. La sync applique
+    # ensuite un UPSERT sur cet id partagé par coïncidence : la seconde machine à
+    # synchroniser écrase silencieusement l'enregistrement de la première (confirmé :
+    # perte de données à la fois dans Turso et localement sur la première machine
+    # dès son cycle de sync suivant). On attribue donc à chaque machine un point de
+    # départ aléatoire (espace ~2^48) pour chaque table suivie, une seule fois tant
+    # que la table est encore vide - n'affecte jamais une table déjà peuplée.
+    try:
+        c.execute("SELECT valeur FROM config WHERE cle='_sync_id_offset'")
+        _offset_row = c.fetchone()
+        if _offset_row and _offset_row[0]:
+            _id_offset = int(_offset_row[0])
+        else:
+            import secrets as _secrets
+            _id_offset = _secrets.randbits(48)
+            c.execute("INSERT OR REPLACE INTO config (cle, valeur, date_maj) VALUES ('_sync_id_offset', ?, ?)",
+                      (str(_id_offset), datetime.utcnow().isoformat()))
+
+        for _tbl, _pk in _TRACKED_JOURNAL.items():
+            if _pk != 'id':
+                continue  # seules les tables à clé entière 'id' sont concernées (pas 'config', clé 'cle')
+            try:
+                _count = c.execute(f"SELECT COUNT(*) FROM [{_tbl}]").fetchone()[0]
+                _has_seq = c.execute("SELECT 1 FROM sqlite_sequence WHERE name=?", (_tbl,)).fetchone()
+                if _count == 0 and not _has_seq:
+                    c.execute("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", (_tbl, _id_offset))
+            except Exception:
+                pass
+    except Exception:
+        logger.exception("Anti-collision ID (sqlite_sequence) - échec non bloquant")
+
     # Migration : colonnes pour système auto-remplissage (v2.6.24)
     cols_app3 = [r[1] for r in conn.execute('PRAGMA table_info(appareils)').fetchall()]
     for col, defval in [
