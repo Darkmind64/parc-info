@@ -228,6 +228,8 @@ def _cleanup_orphaned_files(upload_folder: str) -> None:
             'documents_appareils',
             'documents_contrats',
             'documents_peripheriques',
+            'documents_interventions',
+            'baie_photos',
         ]
         for tbl in tables:
             try:
@@ -279,6 +281,8 @@ def sync_uploads() -> None:
         'documents_appareils',
         'documents_contrats',
         'documents_peripheriques',
+        'documents_interventions',
+        'baie_photos',
     ]
 
     # Créer une seule connexion partagée pour tout le cycle

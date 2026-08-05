@@ -1443,7 +1443,8 @@ def init_db():
             END""")
 
     # Migration : ajouter colonnes BLOB + sync si n'existent pas
-    for table in ['documents_appareils', 'documents_contrats', 'documents_peripheriques']:
+    for table in ['documents_appareils', 'documents_contrats', 'documents_peripheriques',
+                  'documents_interventions', 'baie_photos']:
         try:
             c.execute(f'ALTER TABLE {table} ADD COLUMN contenu_blob BLOB')
         except sqlite3.OperationalError:
@@ -4300,6 +4301,14 @@ def apercu_photo_baie(id):
     photo = row_to_dict(conn.execute('SELECT * FROM baie_photos WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     if not photo: return 'Not found', 404
+
+    # Préférer servir depuis BLOB si disponible (synced depuis une autre machine)
+    if photo.get('contenu_blob'):
+        return send_file(io.BytesIO(photo['contenu_blob']), as_attachment=False, download_name=photo.get('nom_fichier', 'photo'))
+
+    fichier_path = os.path.join(UPLOAD_FOLDER, photo['nom_fichier'])
+    if not os.path.exists(fichier_path):
+        return f"Fichier introuvable : {photo.get('nom_fichier', '?')}", 404
     return send_from_directory(UPLOAD_FOLDER, photo['nom_fichier'], as_attachment=False)
 
 @app.route('/api/baie/nb_u', methods=['POST'])
@@ -6920,16 +6929,19 @@ def apercu_doc_intervention(id):
     cid = get_client_id()
     conn = get_db()
     doc = row_to_dict(conn.execute(
-        'SELECT id, intervention_id, client_id, nom, nom_fichier FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        'SELECT id, intervention_id, client_id, nom, nom_fichier, contenu_blob FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
 
     if not doc:
         return 'Not found', 404
 
-    try:
-        return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
-    except Exception:
+    if doc.get('contenu_blob'):
+        return send_file(io.BytesIO(doc['contenu_blob']), as_attachment=False, download_name=doc.get('nom_fichier', 'document'))
+
+    fichier_path = os.path.join(UPLOAD_FOLDER, doc['nom_fichier'])
+    if not os.path.exists(fichier_path):
         return f"Fichier introuvable : {doc.get('nom_fichier', '?')}", 404
+    return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=False)
 
 @app.route('/intervention/document/<int:id>/telecharger')
 @login_required
@@ -6937,12 +6949,18 @@ def telecharger_doc_intervention(id):
     cid = get_client_id()
     conn = get_db()
     doc = row_to_dict(conn.execute(
-        'SELECT id, intervention_id, client_id, nom, nom_fichier FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        'SELECT id, intervention_id, client_id, nom, nom_fichier, contenu_blob FROM documents_interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
 
     if not doc:
         return 'Not found', 404
 
+    if doc.get('contenu_blob'):
+        return send_file(io.BytesIO(doc['contenu_blob']), as_attachment=True, download_name=doc['nom'])
+
+    fichier_path = os.path.join(UPLOAD_FOLDER, doc['nom_fichier'])
+    if not os.path.exists(fichier_path):
+        return f"Fichier introuvable : {doc.get('nom_fichier', '?')}", 404
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
 
 

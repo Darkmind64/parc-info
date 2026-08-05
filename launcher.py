@@ -156,6 +156,29 @@ def main():
     # (best-effort, ne bloque jamais le démarrage - voir ensure_firewall_rule())
     threading.Thread(target=ensure_firewall_rule, args=(port, logger), daemon=True).start()
 
+    # Synchronisation des documents joints (local ↔ Turso, si configuré)
+    # Ces sous-systèmes ne démarrent normalement que dans le bloc __main__ de
+    # app.py, qui ne s'exécute jamais quand app est importé comme un module ici
+    # (cause du bug "les documents joints ne se synchronisent pas" sur l'exe)
+    try:
+        from uploads_sync import start_sync_thread
+        start_sync_thread(interval=60)
+    except Exception as e:
+        logger.warning(f"Uploads sync thread failed to start (non-critical): {e}")
+
+    # Préchargement de la base OUI (fabricants réseau, utilisé par le scan réseau)
+    threading.Thread(target=flask_app._oui_load_full, daemon=True).start()
+
+    # Scheduler cron (régénération des occurrences de maintenance à 02:00,
+    # notifications de maintenance à venir à 08:00)
+    try:
+        flask_app.scheduler.add_job(flask_app._regenerate_all_maintenance_occurrences, 'cron', hour=2, minute=0)
+        flask_app.scheduler.add_job(flask_app._notify_upcoming_maintenances, 'cron', hour=8, minute=0)
+        flask_app.scheduler.start()
+        logger.info("Cron scheduler démarré (régénération à 02:00, notifications à 08:00)")
+    except Exception as e:
+        logger.warning(f"Cron scheduler failed to start (non-critical): {e}")
+
     # Auto-update au démarrage (bloquant, très rapide si pas d'update)
     logger.info("Checking for updates...")
     try:

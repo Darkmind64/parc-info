@@ -74,6 +74,11 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules('zeroconf')
 
+# Scheduler cron (maintenance) + sync uploads Turso - imports dynamiques
+# (triggers/executors/jobstores résolus par nom à l'exécution, non détectés
+# par l'analyse statique de PyInstaller)
+hiddenimports += collect_submodules('apscheduler')
+
 # ── Analyse dépendances ──────────────────────────────────────────────────────
 
 a = Analysis(
