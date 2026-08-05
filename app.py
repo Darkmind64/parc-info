@@ -5362,51 +5362,53 @@ def api_device_info():
             old_row = conn.execute('SELECT * FROM appareils WHERE id=?', (app_id,)).fetchone()
             old_data = row_to_dict(old_row) if old_row else {}
 
-            # Mettre à jour uniquement les champs fournis
+            # Mettre à jour les champs techniques fournis par le collecteur (toujours
+            # resynchronisés - ces valeurs reflètent l'état réel de la machine et ne
+            # doivent pas rester bloquées sur la première valeur enregistrée)
             updates = []
             params = []
 
-            if brand and not old_data.get('marque'):
+            if brand:
                 updates.append('marque=?')
                 params.append(brand)
 
-            if model and not old_data.get('modele'):
+            if model:
                 updates.append('modele=?')
                 params.append(model)
 
-            if serial and not old_data.get('numero_serie'):
+            if serial:
                 updates.append('numero_serie=?')
                 params.append(serial)
 
-            if ip_address and not old_data.get('adresse_ip'):
+            if ip_address:
                 updates.append('adresse_ip=?')
                 params.append(ip_address)
 
-            if mac_address and not old_data.get('adresse_mac'):
+            if mac_address:
                 updates.append('adresse_mac=?')
                 params.append(mac_address)
 
-            if os_name and not old_data.get('os'):
+            if os_name:
                 updates.append('os=?')
                 params.append(os_name)
 
-            if os_version and not old_data.get('version_os'):
+            if os_version:
                 updates.append('version_os=?')
                 params.append(os_version)
 
-            if ram_gb and not old_data.get('ram'):
+            if ram_gb:
                 updates.append('ram=?')
                 params.append(str(ram_gb))
 
-            if cpu and not old_data.get('cpu'):
+            if cpu:
                 updates.append('cpu=?')
                 params.append(cpu)
 
-            if disk_gb and not old_data.get('stockage'):
+            if disk_gb:
                 updates.append('stockage=?')
                 params.append(str(disk_gb))
 
-            if antivirus and not old_data.get('antivirus'):
+            if antivirus:
                 updates.append('antivirus=?')
                 params.append(antivirus)
 

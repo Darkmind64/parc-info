@@ -64,33 +64,60 @@ def get_ip_addresses():
 
 
 def get_os_info():
-    """Récupère l'OS et la version exacte avec édition (Pro/Home/Server)."""
+    """Récupère l'OS et la version exacte avec édition (Pro/Home/Server).
+
+    os_version = "Display Version" Windows (ex: "22H2") - le build/feature update,
+    os_name = nom complet lisible (ex: "Windows 11 Pro", "Windows Server 2022 Standard").
+
+    Note: platform.release() renvoie toujours "10" sur Windows 11 (même noyau NT 10.0) -
+    la version majeure (10 vs 11) doit être déduite du numéro de build (>= 22000 = Windows 11).
+    """
     os_name = platform.system()  # 'Windows', 'Darwin', 'Linux'
     os_version = platform.release()
-    edition = ""
+    full_os_name = os_name
 
     # Pour Windows, obtenir la version complète et l'édition
     if IS_WINDOWS:
         try:
             import winreg
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows NT\CurrentVersion') as key:
-                display_version = winreg.QueryValueEx(key, 'DisplayVersion')[0]
-                os_version = display_version
-                # Récupérer l'édition (Pro, Home, Server, etc)
+                try:
+                    os_version = winreg.QueryValueEx(key, 'DisplayVersion')[0]
+                except Exception:
+                    pass
+
+                product_name = ''
+                try:
+                    product_name = winreg.QueryValueEx(key, 'ProductName')[0]
+                except Exception:
+                    pass
+
+                edition_name = ''
                 try:
                     edition_name = winreg.QueryValueEx(key, 'EditionID')[0]
-                    # Mapper les éditions Windows
+                except Exception:
+                    pass
+
+                build_number = 0
+                try:
+                    build_number = int(winreg.QueryValueEx(key, 'CurrentBuildNumber')[0])
+                except Exception:
+                    pass
+
+                if 'Server' in product_name:
+                    # Le ProductName Windows Server contient déjà l'année (ex: "Windows Server 2022 Standard")
+                    full_os_name = product_name
+                else:
+                    major = 11 if build_number >= 22000 else 10
                     edition_map = {
                         'Professional': 'Pro',
+                        'Core': 'Home',
                         'Home': 'Home',
                         'Enterprise': 'Enterprise',
                         'Education': 'Education',
-                        'ServerStandard': 'Server 2022',
-                        'ServerDatacenter': 'Server 2022 Datacenter',
                     }
-                    edition = edition_map.get(edition_name, edition_name)
-                except Exception:
-                    pass
+                    edition = edition_map.get(edition_name, edition_name or 'Pro')
+                    full_os_name = f"Windows {major} {edition}"
         except Exception:
             pass
 
@@ -99,14 +126,9 @@ def get_os_info():
         try:
             mac_ver = platform.mac_ver()
             os_version = mac_ver[0]
+            full_os_name = "macOS"
         except Exception:
             pass
-
-    # Construire le nom OS complet
-    if edition:
-        full_os_name = f"Windows {os_version} {edition}"
-    else:
-        full_os_name = os_name
 
     return {
         "os_name": full_os_name,
@@ -679,11 +701,16 @@ def generate_html_report(info, client_id=None, client_name=None):
 def generate_pdf_report(info, client_id=None, client_name=None):
     """Génère un rapport PDF complet avec toutes les infos collectées."""
     try:
+        import html as _html
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import inch
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
         from reportlab.lib import colors
+
+        def esc(value):
+            """Échappe &, <, > pour éviter que reportlab n'interprète le texte comme du XML."""
+            return _html.escape(str(value), quote=False)
 
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         hostname = info.get('hostname', 'unknown')
@@ -703,9 +730,9 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         # Fonction helper pour ajouter une section
         def add_section(title, data):
             heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor('#2c3e50'), spaceAfter=10)
-            story.append(Paragraph(title, heading_style))
+            story.append(Paragraph(esc(title), heading_style))
 
-            table_data = [[Paragraph(f"<b>{k}</b>", styles['Normal']), Paragraph(str(v), styles['Normal'])] for k, v in data.items()]
+            table_data = [[Paragraph(f"<b>{esc(k)}</b>", styles['Normal']), Paragraph(esc(v), styles['Normal'])] for k, v in data.items()]
             if table_data:
                 table = Table(table_data, colWidths=[2*inch, 3.5*inch])
                 table.setStyle(TableStyle([
@@ -725,35 +752,51 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         add_section("🔍 Identification", {
             "Hostname": info.get('hostname', 'N/A'),
             "MAC": info.get('mac_address', 'N/A'),
-            "IP(s)": ', '.join(info.get('ip_addresses', [])),
+            "IP(s)": ', '.join(info.get('ip_addresses', [])) or 'N/A',
             "Marque": info.get('brand', 'N/A'),
             "Modèle": info.get('model', 'N/A'),
+            "Numéro de série": info.get('serial_number', 'N/A'),
+            "Date de collecte": info.get('timestamp', 'N/A'),
         })
 
         add_section("🖥️ Système", {
             "OS": info.get('os_name', 'N/A'),
             "Version": info.get('os_version', 'N/A'),
+            "Détail plateforme": info.get('platform', 'N/A'),
+            "Antivirus": info.get('antivirus', 'N/A'),
         })
 
+        ram_val = info.get('ram_gb', '')
+        ram_display = f"{ram_val} GB" if ram_val not in ('', None) else 'N/A'
+        disk_val = info.get('disk_total_gb', '')
+        disk_display = f"{disk_val} GB" if disk_val not in ('', None) else 'N/A'
         add_section("⚙️ Matériel", {
             "CPU": info.get('cpu', 'N/A'),
             "Cores": info.get('cpu_cores', 'N/A'),
-            "RAM": info.get('ram_gb', 'N/A'),
-            "Disque": info.get('disk_total_gb', 'N/A'),
+            "RAM": ram_display,
+            "Disque total": disk_display,
         })
 
-        # Logiciels (limité à 20)
-        software_list = info.get('installed_software', [])[:20]
+        # Disques détaillés
+        disk_drives = info.get('disk_drives', [])
+        if disk_drives:
+            story.append(Paragraph("<b>💾 Disques Détectés</b>", styles['Heading2']))
+            for drive in disk_drives:
+                story.append(Paragraph(f"• {esc(drive)}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+
+        # Logiciels (liste complète)
+        software_list = info.get('installed_software', [])
         if software_list:
-            story.append(Paragraph("<b>📦 Logiciels Installés (top 20)</b>", styles['Heading2']))
+            story.append(Paragraph(f"<b>📦 Logiciels Installés ({len(software_list)})</b>", styles['Heading2']))
             for i, soft in enumerate(software_list, 1):
-                story.append(Paragraph(f"{i}. {soft}", styles['Normal']))
+                story.append(Paragraph(f"{i}. {esc(soft)}", styles['Normal']))
             story.append(Spacer(1, 0.2*inch))
 
         # Métadonnées
         story.append(Spacer(1, 0.2*inch))
         metadata_style = ParagraphStyle('Metadata', parent=styles['Normal'], fontSize=8, textColor=colors.grey)
-        story.append(Paragraph(f"<i>Rapport généré par system-info-collector | Client: {client_name or 'N/A'} (ID: {client_id or 'N/A'})</i>", metadata_style))
+        story.append(Paragraph(f"<i>Rapport généré par system-info-collector | Client: {esc(client_name or 'N/A')} (ID: {client_id or 'N/A'})</i>", metadata_style))
 
         # Générer le PDF
         doc.build(story)

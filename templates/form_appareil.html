@@ -205,12 +205,12 @@ async function loadHistorique() {
         <div class="form-row cols-3">
             <div class="form-group">
                 <label>Système d'exploitation</label>
-                <select name="os">
-                    <option value="">— Sélectionner —</option>
-                    {% for os in ['Windows 11 Pro', 'Windows 11 Home', 'Windows 10 Pro', 'Windows 10 Home', 'Windows Server 2022', 'Windows Server 2019', 'Windows Server 2016', 'Ubuntu 22.04', 'Ubuntu 20.04', 'Debian 12', 'Debian 11', 'macOS Sonoma', 'macOS Ventura', 'Autre'] %}
-                    <option value="{{ os }}" {% if appareil and appareil.os == os %}selected{% endif %}>{{ os }}</option>
+                <input type="text" name="os" list="os-suggestions" value="{{ appareil.os if appareil else '' }}" placeholder="Ex: Windows 11 Pro">
+                <datalist id="os-suggestions">
+                    {% for os in ['Windows 11 Pro', 'Windows 11 Home', 'Windows 10 Pro', 'Windows 10 Home', 'Windows Server 2022 Standard', 'Windows Server 2019 Standard', 'Windows Server 2016 Standard', 'Ubuntu 22.04', 'Ubuntu 20.04', 'Debian 12', 'Debian 11', 'macOS Sonoma', 'macOS Ventura'] %}
+                    <option value="{{ os }}">
                     {% endfor %}
-                </select>
+                </datalist>
             </div>
             <div class="form-group">
                 <label>Version OS</label>
@@ -218,12 +218,12 @@ async function loadHistorique() {
             </div>
             <div class="form-group">
                 <label>RAM</label>
-                <select name="ram">
-                    <option value="">—</option>
+                <input type="text" name="ram" list="ram-suggestions" value="{{ appareil.ram if appareil else '' }}" placeholder="Ex: 16 Go">
+                <datalist id="ram-suggestions">
                     {% for r in ['2 Go', '4 Go', '8 Go', '16 Go', '32 Go', '64 Go', '128 Go'] %}
-                    <option value="{{ r }}" {% if appareil and appareil.ram == r %}selected{% endif %}>{{ r }}</option>
+                    <option value="{{ r }}">
                     {% endfor %}
-                </select>
+                </datalist>
             </div>
         </div>
         <div class="form-row cols-3">
