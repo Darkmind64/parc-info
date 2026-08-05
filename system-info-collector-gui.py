@@ -258,66 +258,180 @@ def get_system_info_windows():
         if physical_list:
             info['physical_disks'] = physical_list
 
-    # Carte(s) graphique(s)
-    gpu_data = _win_powershell_json(
-        "Get-CimInstance Win32_VideoController | Select-Object Name | ConvertTo-Json -Compress"
+    # Identification matérielle étendue : marque/modèle/domaine/BIOS/uptime/GPU
+    # (1 seul appel PowerShell groupé - chaque champ est protégé individuellement
+    # pour qu'une source manquante ne fasse pas échouer les autres)
+    core_data = _win_powershell_json(
+        "$cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue; "
+        "$bios = Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue; "
+        "$os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue; "
+        "$gpuNames = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty Name); "
+        "$uptimeHours = $null; "
+        "if ($os -and $os.LastBootUpTime) { $uptimeHours = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1) }; "
+        "$biosDate = $null; "
+        "if ($bios -and $bios.ReleaseDate) { $biosDate = $bios.ReleaseDate.ToString('yyyy-MM-dd') }; "
+        "[PSCustomObject]@{ "
+        "Manufacturer=$cs.Manufacturer; Model=$cs.Model; Domain=$cs.Domain; "
+        "PartOfDomain=$cs.PartOfDomain; Workgroup=$cs.Workgroup; "
+        "SerialNumber=$bios.SerialNumber; BiosVersion=$bios.SMBIOSBIOSVersion; "
+        "BiosReleaseDate=$biosDate; UptimeHours=$uptimeHours; GpuNames=$gpuNames "
+        "} | ConvertTo-Json -Compress -Depth 4",
+        timeout=20
     )
-    if gpu_data:
-        gpus_raw = gpu_data if isinstance(gpu_data, list) else [gpu_data]
-        gpus = [d.get('Name', '') for d in gpus_raw if d.get('Name')]
-        if gpus:
-            info['gpu'] = ', '.join(gpus)
+    if core_data:
+        info['brand'] = (core_data.get('Manufacturer') or '').strip()
+        info['model'] = (core_data.get('Model') or '').strip()
+        info['serial_number'] = (core_data.get('SerialNumber') or '').strip()
 
-    # Marque / modèle (PowerShell CIM - natif Windows, aucune dépendance)
-    system_data = _win_powershell_json(
-        "Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model | ConvertTo-Json -Compress"
+        bios_version = core_data.get('BiosVersion')
+        if isinstance(bios_version, list):
+            bios_version = ', '.join(str(v) for v in bios_version if v)
+        if bios_version:
+            info['bios_version'] = str(bios_version).strip()
+
+        if core_data.get('BiosReleaseDate'):
+            info['bios_release_date'] = core_data.get('BiosReleaseDate')
+
+        if core_data.get('PartOfDomain'):
+            info['domain'] = core_data.get('Domain') or ''
+        elif core_data.get('Workgroup'):
+            info['workgroup'] = core_data.get('Workgroup')
+
+        if core_data.get('UptimeHours') is not None:
+            info['uptime_hours'] = core_data.get('UptimeHours')
+
+        gpu_names = core_data.get('GpuNames')
+        if gpu_names:
+            gpus = gpu_names if isinstance(gpu_names, list) else [gpu_names]
+            gpus = [g for g in gpus if g]
+            if gpus:
+                info['gpu'] = ', '.join(gpus)
+
+    # Sécurité & conformité : antivirus, pare-feu, BitLocker, TPM, Secure Boot
+    # (modules non garantis selon l'édition Windows - chaque source est protégée
+    # par un try/catch PowerShell dédié pour ne pas faire échouer les autres)
+    security_data = _win_powershell_json(
+        "$av = @(); try { $av = @(Get-CimInstance -Namespace root/SecurityCenter2 "
+        "-ClassName AntivirusProduct -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty displayName) } catch {}; "
+        "$fw = @(); try { $fw = @(Get-NetFirewallProfile -ErrorAction SilentlyContinue "
+        "| Select-Object Name,Enabled) } catch {}; "
+        "$bl = @(); try { $bl = @(Get-BitLockerVolume -ErrorAction SilentlyContinue "
+        "| Select-Object MountPoint,VolumeStatus,ProtectionStatus) } catch {}; "
+        "$tpmObj = $null; try { $tpmObj = Get-Tpm -ErrorAction SilentlyContinue "
+        "| Select-Object TpmPresent,TpmReady,TpmEnabled } catch {}; "
+        "$secureBoot = $null; try { $secureBoot = Confirm-SecureBootUEFI -ErrorAction SilentlyContinue } catch {}; "
+        "[PSCustomObject]@{ Antivirus=$av; Firewall=$fw; BitLocker=$bl; Tpm=$tpmObj; SecureBoot=$secureBoot } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=20
     )
-    if system_data:
-        info['brand'] = (system_data.get('Manufacturer') or '').strip()
-        info['model'] = (system_data.get('Model') or '').strip()
+    if security_data:
+        av_names = security_data.get('Antivirus')
+        if av_names:
+            avs = av_names if isinstance(av_names, list) else [av_names]
+            avs = [a for a in avs if a]
+            if avs:
+                info['antivirus'] = ', '.join(avs)
 
-    # Numéro de série (BIOS)
-    bios_data = _win_powershell_json(
-        "Get-CimInstance Win32_BIOS | Select-Object SerialNumber | ConvertTo-Json -Compress"
-    )
-    if bios_data:
-        info['serial_number'] = (bios_data.get('SerialNumber') or '').strip()
+        fw_raw = security_data.get('Firewall')
+        if fw_raw:
+            fw_list = fw_raw if isinstance(fw_raw, list) else [fw_raw]
+            profiles = [f"{f.get('Name')}: {'Activé' if f.get('Enabled') else 'Désactivé'}" for f in fw_list if f.get('Name')]
+            if profiles:
+                info['firewall'] = profiles
 
-    # Antivirus (SecurityCenter2)
-    av_data = _win_powershell_json(
-        "Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntivirusProduct "
-        "-ErrorAction SilentlyContinue | Select-Object displayName | ConvertTo-Json -Compress"
-    )
-    if av_data:
-        if isinstance(av_data, list):
-            avs = [d.get('displayName', '') for d in av_data if d.get('displayName')]
-        else:
-            name = av_data.get('displayName', '')
-            avs = [name] if name else []
-        if avs:
-            info['antivirus'] = ', '.join(avs)
+        bl_raw = security_data.get('BitLocker')
+        if bl_raw:
+            bl_list = bl_raw if isinstance(bl_raw, list) else [bl_raw]
+            bitlocker = [
+                f"{b.get('MountPoint')}: {b.get('VolumeStatus', 'Inconnu')} "
+                f"(Protection: {b.get('ProtectionStatus', 'Inconnu')})"
+                for b in bl_list if b.get('MountPoint')
+            ]
+            if bitlocker:
+                info['bitlocker'] = bitlocker
 
-    # Comptes utilisateurs locaux
+        tpm = security_data.get('Tpm')
+        if tpm:
+            info['tpm_present'] = bool(tpm.get('TpmPresent'))
+            info['tpm_enabled'] = bool(tpm.get('TpmEnabled'))
+
+        if security_data.get('SecureBoot') is not None:
+            info['secure_boot'] = bool(security_data.get('SecureBoot'))
+
+    # Comptes utilisateurs locaux + appartenance au groupe Administrateurs
     users_data = _win_powershell_json(
-        "Get-CimInstance Win32_UserAccount -Filter \"LocalAccount='True'\" "
-        "| Select-Object Name,Disabled,Lockout | ConvertTo-Json -Compress"
+        "$users = @(Get-CimInstance Win32_UserAccount -Filter \"LocalAccount='True'\" "
+        "-ErrorAction SilentlyContinue | Select-Object Name,Disabled,Lockout); "
+        "$admins = @(); try { $admins = @(Get-LocalGroupMember -Group Administrators "
+        "-ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) } catch {}; "
+        "[PSCustomObject]@{ Users=$users; Admins=$admins } | ConvertTo-Json -Compress -Depth 4",
+        timeout=20
     )
     if users_data:
-        users_raw = users_data if isinstance(users_data, list) else [users_data]
-        user_list = []
-        for u in users_raw:
-            name = u.get('Name', '')
-            if not name:
-                continue
-            if u.get('Disabled'):
-                status = 'Désactivé'
-            elif u.get('Lockout'):
-                status = 'Verrouillé'
-            else:
-                status = 'Actif'
-            user_list.append(f"{name} ({status})")
-        if user_list:
-            info['users'] = sorted(user_list)
+        admins_raw = users_data.get('Admins') or []
+        admins_raw = admins_raw if isinstance(admins_raw, list) else [admins_raw]
+        # Les membres du groupe local Administrateurs sont retournés au format "MACHINE\Nom"
+        admin_names = {a.split('\\')[-1].lower() for a in admins_raw if a}
+
+        users_raw = users_data.get('Users')
+        if users_raw:
+            users_list = users_raw if isinstance(users_raw, list) else [users_raw]
+            user_list = []
+            for u in users_list:
+                name = u.get('Name', '')
+                if not name:
+                    continue
+                if u.get('Disabled'):
+                    status = 'Désactivé'
+                elif u.get('Lockout'):
+                    status = 'Verrouillé'
+                else:
+                    status = 'Actif'
+                if name.lower() in admin_names:
+                    status += ', Administrateur'
+                user_list.append(f"{name} ({status})")
+            if user_list:
+                info['users'] = sorted(user_list)
+
+    # Batterie (portables), adaptateurs réseau actifs, dernière mise à jour Windows
+    extras_data = _win_powershell_json(
+        "$battery = @(); try { $battery = @(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue "
+        "| Select-Object EstimatedChargeRemaining,BatteryStatus) } catch {}; "
+        "$adapters = @(); try { $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue "
+        "| Where-Object Status -eq 'Up' | Select-Object Name,InterfaceDescription,LinkSpeed) } catch {}; "
+        "$hotfix = $null; try { "
+        "$hf = Get-HotFix -ErrorAction SilentlyContinue | Sort-Object InstalledOn -Descending | Select-Object -First 1; "
+        "if ($hf) { $hfDate = $null; if ($hf.InstalledOn) { $hfDate = $hf.InstalledOn.ToString('yyyy-MM-dd') }; "
+        "$hotfix = [PSCustomObject]@{ HotFixID=$hf.HotFixID; InstalledOn=$hfDate } } "
+        "} catch {}; "
+        "[PSCustomObject]@{ Battery=$battery; Adapters=$adapters; LastUpdate=$hotfix } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=20
+    )
+    if extras_data:
+        battery_raw = extras_data.get('Battery')
+        if battery_raw:
+            battery_list = battery_raw if isinstance(battery_raw, list) else [battery_raw]
+            b = battery_list[0] if battery_list else None
+            if b and b.get('EstimatedChargeRemaining') is not None:
+                info['battery'] = f"{b.get('EstimatedChargeRemaining')}% (statut: {b.get('BatteryStatus', 'Inconnu')})"
+
+        adapters_raw = extras_data.get('Adapters')
+        if adapters_raw:
+            adapters_list = adapters_raw if isinstance(adapters_raw, list) else [adapters_raw]
+            adapters = [
+                f"{a.get('Name')} — {a.get('InterfaceDescription', '')} — {a.get('LinkSpeed', 'N/A')}"
+                for a in adapters_list if a.get('Name')
+            ]
+            if adapters:
+                info['network_adapters'] = adapters
+
+        hotfix = extras_data.get('LastUpdate')
+        if hotfix and hotfix.get('HotFixID'):
+            date_part = f" ({hotfix.get('InstalledOn')})" if hotfix.get('InstalledOn') else ''
+            info['last_windows_update'] = f"{hotfix.get('HotFixID')}{date_part}"
 
     return info
 
@@ -528,8 +642,14 @@ def scan_network_for_parcinfo(timeout=2, progress_callback=None):
 
 
 def get_installed_software():
-    """Récupère la liste complète des logiciels installés (machine + par utilisateur)."""
-    software = []
+    """Récupère la liste complète des logiciels installés (machine + par utilisateur).
+
+    Retourne une liste de dicts {name, version, publisher, install_date} - version/
+    publisher/install_date restent vides quand la source ne les fournit pas
+    (cas Mac/Linux, dont les gestionnaires de paquets énumérés ici ne donnent
+    que le nom sans requête individuelle coûteuse par paquet).
+    """
+    software = {}  # clé = nom (dédup), valeur = dict métadonnées
 
     if IS_WINDOWS:
         try:
@@ -551,10 +671,33 @@ def get_installed_software():
                                 with winreg.OpenKey(key, subkey_name) as subkey:
                                     try:
                                         display_name = winreg.QueryValueEx(subkey, 'DisplayName')[0]
-                                        if display_name and len(display_name.strip()) > 0:
-                                            software.append(display_name.strip())
                                     except WindowsError:
-                                        pass
+                                        continue
+                                    if not display_name or not display_name.strip():
+                                        continue
+                                    name = display_name.strip()
+
+                                    def _read(value_name):
+                                        try:
+                                            return winreg.QueryValueEx(subkey, value_name)[0]
+                                        except WindowsError:
+                                            return ''
+
+                                    version = str(_read('DisplayVersion') or '')
+                                    publisher = str(_read('Publisher') or '')
+                                    install_date_raw = str(_read('InstallDate') or '')
+                                    # Format registre habituel : "AAAAMMJJ" -> "AAAA-MM-JJ"
+                                    if len(install_date_raw) == 8 and install_date_raw.isdigit():
+                                        install_date = f"{install_date_raw[:4]}-{install_date_raw[4:6]}-{install_date_raw[6:8]}"
+                                    else:
+                                        install_date = install_date_raw
+
+                                    software[name] = {
+                                        'name': name,
+                                        'version': version,
+                                        'publisher': publisher,
+                                        'install_date': install_date,
+                                    }
                             except Exception:
                                 pass
                 except Exception:
@@ -563,31 +706,37 @@ def get_installed_software():
             pass
 
     elif IS_MAC:
+        names = set()
         try:
             result = subprocess.run(['ls', '/Applications'], capture_output=True, text=True, timeout=5)
-            software.extend([app.replace('.app', '') for app in result.stdout.split('\n') if app.endswith('.app')])
+            names.update(app.replace('.app', '') for app in result.stdout.split('\n') if app.endswith('.app'))
         except Exception:
             pass
         try:
             result = subprocess.run(['ls', '/usr/local/opt'], capture_output=True, text=True, timeout=5)
-            software.extend([pkg for pkg in result.stdout.split('\n') if pkg.strip()])
+            names.update(pkg for pkg in result.stdout.split('\n') if pkg.strip())
         except Exception:
             pass
+        for name in names:
+            software[name] = {'name': name, 'version': '', 'publisher': '', 'install_date': ''}
 
     elif IS_LINUX:
+        names = set()
         try:
             result = subprocess.run(['dpkg', '--get-selections'], capture_output=True, text=True, timeout=10)
-            software.extend([line.split()[0] for line in result.stdout.split('\n') if 'install' in line])
+            names.update(line.split()[0] for line in result.stdout.split('\n') if 'install' in line)
         except Exception:
             pass
-        if not software:
+        if not names:
             try:
                 result = subprocess.run(['rpm', '-qa'], capture_output=True, text=True, timeout=10)
-                software.extend([line.strip() for line in result.stdout.split('\n') if line.strip()])
+                names.update(line.strip() for line in result.stdout.split('\n') if line.strip())
             except Exception:
                 pass
+        for name in names:
+            software[name] = {'name': name, 'version': '', 'publisher': '', 'install_date': ''}
 
-    return sorted(set(software))
+    return sorted(software.values(), key=lambda s: s['name'].lower())
 
 
 def collect_system_info():
@@ -770,7 +919,13 @@ def generate_html_report(info, client_id=None, client_name=None):
 """
 
     for i, soft in enumerate(info.get('installed_software', []), 1):
-        html += f'                            <div class="software-item">{i}. {soft}</div>\n'
+        if isinstance(soft, dict):
+            label = soft.get('name', '')
+            if soft.get('version'):
+                label += f" (v{soft['version']})"
+        else:
+            label = str(soft)
+        html += f'                            <div class="software-item">{i}. {label}</div>\n'
 
     if not info.get('installed_software'):
         html += '                            <div style="padding: 10px; color: #999;">Aucun logiciel détecté</div>\n'
@@ -862,12 +1017,44 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         })
 
         # Système
+        uptime_hours = info.get('uptime_hours')
+        uptime_display = f"{round(uptime_hours / 24, 1)} jour(s)" if uptime_hours is not None else 'N/A'
+        domain_display = info.get('domain') or info.get('workgroup') or 'N/A'
+        bios_display = info.get('bios_version', 'N/A')
+        if info.get('bios_release_date'):
+            bios_display += f" ({info.get('bios_release_date')})"
         add_section("🖥️ Système", {
             "OS": info.get('os_name', 'N/A'),
             "Version": info.get('os_version', 'N/A'),
             "Détail plateforme": info.get('platform', 'N/A'),
-            "Antivirus": info.get('antivirus', 'N/A'),
+            "Domaine / Groupe de travail": domain_display,
+            "BIOS": bios_display,
+            "Uptime (depuis dernier redémarrage)": uptime_display,
+            "Dernière mise à jour Windows": info.get('last_windows_update', 'N/A'),
         })
+
+        # Sécurité & conformité
+        security_data_display = {"Antivirus": info.get('antivirus', 'N/A')}
+        if info.get('tpm_present') is not None:
+            tpm_status = 'Présent et activé' if info.get('tpm_enabled') else ('Présent mais désactivé' if info.get('tpm_present') else 'Absent')
+            security_data_display["TPM"] = tpm_status
+        if info.get('secure_boot') is not None:
+            security_data_display["Secure Boot"] = 'Activé' if info.get('secure_boot') else 'Désactivé'
+        add_section("🛡️ Sécurité & Conformité", security_data_display)
+
+        firewall = info.get('firewall', [])
+        if firewall:
+            story.append(Paragraph("<b>🔥 Pare-feu Windows</b>", styles['Heading2']))
+            for profile in firewall:
+                story.append(Paragraph(f"• {esc(profile)}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+
+        bitlocker = info.get('bitlocker', [])
+        if bitlocker:
+            story.append(Paragraph("<b>🔒 BitLocker</b>", styles['Heading2']))
+            for vol in bitlocker:
+                story.append(Paragraph(f"• {esc(vol)}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
 
         # Matériel
         ram_val = info.get('ram_gb', '')
@@ -903,6 +1090,20 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 story.append(Paragraph(f"• {esc(drive)}", styles['Normal']))
             story.append(Spacer(1, 0.2*inch))
 
+        # Batterie (portables uniquement)
+        if info.get('battery'):
+            story.append(Paragraph("<b>🔋 Batterie</b>", styles['Heading2']))
+            story.append(Paragraph(f"• {esc(info.get('battery'))}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+
+        # Adaptateurs réseau actifs
+        network_adapters = info.get('network_adapters', [])
+        if network_adapters:
+            story.append(Paragraph("<b>🌐 Adaptateurs Réseau Actifs</b>", styles['Heading2']))
+            for adapter in network_adapters:
+                story.append(Paragraph(f"• {esc(adapter)}", styles['Normal']))
+            story.append(Spacer(1, 0.2*inch))
+
         # Comptes utilisateurs locaux
         users_list = info.get('users', [])
         if users_list:
@@ -916,12 +1117,23 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             "Adresse(s) IP": ', '.join(info.get('ip_addresses', [])) or 'N/A',
         })
 
-        # Logiciels (liste complète)
+        # Logiciels (liste complète : nom, version, éditeur, date d'installation)
         software_list = info.get('installed_software', [])
         if software_list:
             story.append(Paragraph(f"<b>📦 Logiciels Installés ({len(software_list)})</b>", styles['Heading2']))
             for i, soft in enumerate(software_list, 1):
-                story.append(Paragraph(f"{i}. {esc(soft)}", styles['Normal']))
+                if isinstance(soft, dict):
+                    parts = [soft.get('name', '')]
+                    if soft.get('version'):
+                        parts.append(f"v{soft['version']}")
+                    if soft.get('publisher'):
+                        parts.append(soft['publisher'])
+                    if soft.get('install_date'):
+                        parts.append(f"installé le {soft['install_date']}")
+                    display = ' — '.join(p for p in parts if p)
+                else:
+                    display = str(soft)
+                story.append(Paragraph(f"{i}. {esc(display)}", styles['Normal']))
             story.append(Spacer(1, 0.2*inch))
 
         # Métadonnées
@@ -1365,9 +1577,18 @@ class CollectorGUI:
         summary.append("")
 
         # Section OS
+        uptime_hours = self.system_info.get('uptime_hours')
+        uptime_display = f"{round(uptime_hours / 24, 1)} jour(s)" if uptime_hours is not None else 'N/A'
+        domain_display = self.system_info.get('domain') or self.system_info.get('workgroup') or 'N/A'
         summary.append("┌─ SYSTÈME D'EXPLOITATION")
         summary.append(f"│ OS                 : {self.system_info.get('os_name', 'N/A')}")
         summary.append(f"│ Version            : {self.system_info.get('os_version', 'N/A')}")
+        summary.append(f"│ Domaine/Groupe     : {domain_display}")
+        summary.append(f"│ Uptime             : {uptime_display}")
+        if self.system_info.get('bios_version'):
+            summary.append(f"│ BIOS               : {self.system_info.get('bios_version')}")
+        if self.system_info.get('last_windows_update'):
+            summary.append(f"│ Dernière MàJ       : {self.system_info.get('last_windows_update')}")
         summary.append("└")
         summary.append("")
 
@@ -1396,14 +1617,41 @@ class CollectorGUI:
             for drive in physical_disks:
                 summary.append(f"│   - {drive}")
 
+        battery = self.system_info.get('battery')
+        if battery:
+            summary.append(f"│ Batterie           : {battery}")
+
         summary.append("└")
         summary.append("")
 
+        # Section Réseau
+        network_adapters = self.system_info.get('network_adapters', [])
+        if network_adapters:
+            summary.append("┌─ ADAPTATEURS RÉSEAU ACTIFS")
+            for adapter in network_adapters:
+                summary.append(f"│   - {adapter}")
+            summary.append("└")
+            summary.append("")
+
         # Section Sécurité
         av = self.system_info.get('antivirus')
-        if av:
-            summary.append("┌─ SÉCURITÉ")
-            summary.append(f"│ Antivirus          : {av}")
+        firewall = self.system_info.get('firewall', [])
+        bitlocker = self.system_info.get('bitlocker', [])
+        tpm_present = self.system_info.get('tpm_present')
+        secure_boot = self.system_info.get('secure_boot')
+        if av or firewall or bitlocker or tpm_present is not None or secure_boot is not None:
+            summary.append("┌─ SÉCURITÉ & CONFORMITÉ")
+            if av:
+                summary.append(f"│ Antivirus          : {av}")
+            for profile in firewall:
+                summary.append(f"│ Pare-feu           : {profile}")
+            for vol in bitlocker:
+                summary.append(f"│ BitLocker          : {vol}")
+            if tpm_present is not None:
+                tpm_status = 'Présent et activé' if self.system_info.get('tpm_enabled') else ('Présent mais désactivé' if tpm_present else 'Absent')
+                summary.append(f"│ TPM                : {tpm_status}")
+            if secure_boot is not None:
+                summary.append(f"│ Secure Boot        : {'Activé' if secure_boot else 'Désactivé'}")
             summary.append("└")
             summary.append("")
 
@@ -1424,7 +1672,13 @@ class CollectorGUI:
             summary.append(f"│ Total détecté      : {len(software_list)} logiciel(s)")
             summary.append("│ Premiers 10 :")
             for i, soft in enumerate(software_list[:10], 1):
-                summary.append(f"│   {i}. {soft}")
+                if isinstance(soft, dict):
+                    label = soft.get('name', '')
+                    if soft.get('version'):
+                        label += f" (v{soft['version']})"
+                else:
+                    label = str(soft)
+                summary.append(f"│   {i}. {label}")
             if len(software_list) > 10:
                 summary.append(f"│   ... et {len(software_list) - 10} autres")
             summary.append("└")
