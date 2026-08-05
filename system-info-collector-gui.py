@@ -535,7 +535,7 @@ def generate_html_report(info, client_id=None, client_name=None):
     """Génère un rapport HTML complet avec toutes les infos collectées."""
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     hostname = info.get('hostname', 'unknown')
-    mac = info.get('mac_address', 'unknown')[:8]
+    mac = info.get('mac_address', 'unknown').replace(':', '').replace('/', '')[:8]
     filename = f"system-info-report_{hostname}_{mac}_{timestamp}.html"
 
     html = f"""<!DOCTYPE html>
@@ -723,7 +723,7 @@ def generate_pdf_report(info, client_id=None, client_name=None):
     """Génère un rapport PDF complet avec toutes les infos collectées."""
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     hostname = info.get('hostname', 'unknown')
-    mac = info.get('mac_address', 'unknown')[:8]
+    mac = info.get('mac_address', 'unknown').replace(':', '').replace('/', '')[:8]
     filename = f"system-info-report_{hostname}_{mac}_{timestamp}.pdf"
 
     try:
