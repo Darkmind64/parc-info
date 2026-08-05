@@ -2,7 +2,7 @@
 ParcInfo — launcher.py
 Point d'entrée PyInstaller : port libre, navigateur auto, pas de console.
 """
-import sys, os, threading, time, socket, webbrowser, logging, platform
+import sys, os, threading, time, socket, webbrowser, logging, platform, subprocess
 
 # ── Résolution des chemins ────────────────────────────────────────────────────
 def res(relative=''):
@@ -55,6 +55,51 @@ def run_systray(url, logger):
     except Exception as e:
         logger.debug(f"Systray unavailable: {e}")
 
+# ── Pare-feu Windows (ouverture automatique du port) ───────────────────────────
+def ensure_firewall_rule(port, logger):
+    """Crée une règle de pare-feu Windows entrante pour le port ParcInfo.
+
+    La modification du pare-feu nécessite des privilèges administrateur - on
+    déclenche donc l'ajout via un processus netsh élevé (une seule invite UAC).
+    Si la règle existe déjà pour ce port (cas normal après le 1er lancement),
+    ou si l'utilisateur refuse l'élévation, on continue silencieusement sans
+    bloquer le démarrage : l'application reste utilisable en local dans tous
+    les cas, seul l'accès réseau externe dépend de cette règle.
+    """
+    if platform.system() != 'Windows':
+        return
+
+    no_window = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+    rule_name = f'ParcInfo-{port}'
+
+    try:
+        check = subprocess.run(
+            ['netsh', 'advfirewall', 'firewall', 'show', 'rule', f'name={rule_name}'],
+            capture_output=True, text=True, timeout=5, creationflags=no_window
+        )
+        if check.returncode == 0 and 'No rules match' not in check.stdout:
+            logger.debug(f"Firewall rule already present for port {port}")
+            return
+    except Exception as e:
+        logger.debug(f"Firewall rule check failed (non-critical): {e}")
+        return
+
+    try:
+        import ctypes
+        params = (
+            f'advfirewall firewall add rule name="{rule_name}" dir=in action=allow '
+            f'protocol=TCP localport={port}'
+        )
+        # ShellExecuteW + verbe "runas" : une seule invite UAC pour netsh.exe,
+        # sans élever le processus ParcInfo lui-même
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", "netsh.exe", params, None, 0)
+        if ret > 32:
+            logger.info(f"Demande d'ouverture du port {port} dans le pare-feu Windows envoyée (confirmation UAC requise)")
+        else:
+            logger.debug(f"Firewall elevation request returned code {ret}")
+    except Exception as e:
+        logger.debug(f"Firewall rule setup failed (non-critical): {e}")
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     port = get_port(preferred=3456)
@@ -104,6 +149,13 @@ def main():
     # Systray (optionnel — désactivé sur macOS)
     threading.Thread(target=run_systray, args=(url, logger), daemon=True).start()
 
+    # mDNS (accès via http://parcinfo.local:<port> depuis le réseau local)
+    threading.Thread(target=lambda: flask_app._register_mdns(port), daemon=True).start()
+
+    # Pare-feu Windows : ouvre automatiquement le port pour l'accès réseau
+    # (best-effort, ne bloque jamais le démarrage - voir ensure_firewall_rule())
+    threading.Thread(target=ensure_firewall_rule, args=(port, logger), daemon=True).start()
+
     # Auto-update au démarrage (bloquant, très rapide si pas d'update)
     logger.info("Checking for updates...")
     try:
@@ -122,8 +174,8 @@ def main():
         logger.warning(f"Update check failed (non-critical): {e}")
         # Continue anyway, update failure shouldn't block app startup
 
-    # Démarrer Flask
-    flask_app.app.run(host='127.0.0.1', port=port,
+    # Démarrer Flask (0.0.0.0 : accessible depuis le réseau local, pas seulement en local)
+    flask_app.app.run(host='0.0.0.0', port=port,
                       debug=False, use_reloader=False, threaded=True)
 
 if __name__ == '__main__':

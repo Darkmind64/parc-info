@@ -9841,7 +9841,7 @@ def qrcode_generate():
 # ─── MDNS REGISTRATION ────────────────────────────────────────────────────────
 _mdns_instance = None
 
-def _register_mdns():
+def _register_mdns(port=3456):
     """Register ParcInfo on mDNS (parcinfo.local)"""
     global _mdns_instance
     if not MDNS_AVAILABLE:
@@ -9857,7 +9857,7 @@ def _register_mdns():
             "_http._tcp.local.",
             name="ParcInfo._http._tcp.local.",
             addresses=[socket.inet_aton(local_ip)],
-            port=3456,
+            port=port,
             properties={
                 "path": "/",
                 "version": "2.6.22",
@@ -9869,11 +9869,11 @@ def _register_mdns():
         # Register the service
         _mdns_instance = Zeroconf()
         _mdns_instance.register_service(info)
-        logger.info(f"✅ mDNS registered: http://parcinfo.local:3456 ({local_ip})")
+        logger.info(f"✅ mDNS registered: http://parcinfo.local:{port} ({local_ip})")
     except Exception as e:
         logger.warning(f"⚠️ mDNS registration failed: {e}")
 
-def _unregister_mdns():
+def _unregister_mdns(port=3456):
     """Unregister mDNS service on shutdown"""
     global _mdns_instance
     if _mdns_instance:
@@ -9882,7 +9882,7 @@ def _unregister_mdns():
                 "_http._tcp.local.",
                 name="ParcInfo._http._tcp.local.",
                 addresses=[],
-                port=3456
+                port=port
             ))
             _mdns_instance.close()
         except Exception as e:

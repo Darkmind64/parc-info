@@ -17,6 +17,7 @@ Données:
 Entry point: launcher.py (détecte port libre, ouvre navigateur)
 """
 import sys, os
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
@@ -67,7 +68,11 @@ hiddenimports = [
 
     # Optional : pystray (system tray icon)
     'pystray', 'PIL', 'PIL.Image', 'PIL.ImageDraw',
+
+    # mDNS (http://parcinfo.local) - backends dynamiques, à embarquer explicitement
+    'ifaddr',
 ]
+hiddenimports += collect_submodules('zeroconf')
 
 # ── Analyse dépendances ──────────────────────────────────────────────────────
 
