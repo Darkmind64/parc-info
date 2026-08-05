@@ -25,7 +25,7 @@ from typing import Optional, Dict, Callable
 from urllib.request import urlopen
 from urllib.error import URLError
 
-from __version__ import __version__, __version_tuple__, GITHUB_API_RELEASES
+from __version__ import __version__, __version_tuple__, GITHUB_API_RELEASES, GITHUB_RAW_CONTENT
 
 logger = logging.getLogger("parcinfo.updater")
 
@@ -61,11 +61,10 @@ class UpdateChecker:
             version_json_url: URL to version.json (default: GitHub releases)
             callback: Callback function for notifications (update_available(version))
         """
-        self.config_dir = config_dir or Path.home() / ".parcinfo"
+        self.config_dir = Path(config_dir) if config_dir else Path.home() / ".parcinfo"
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
-        self.version_json_url = version_json_url or \
-            "https://raw.githubusercontent.com/darkmind64/parc_info/master/version.json"
+        self.version_json_url = version_json_url or f"{GITHUB_RAW_CONTENT}/version.json"
 
         self.metadata_file = self.config_dir / "update_metadata.json"
         self.callback = callback
@@ -234,14 +233,38 @@ class UpdateChecker:
             system = platform.system()
 
             if system == "Windows":
-                # Run NSIS installer silently
-                cmd = [
-                    str(installer_path),
-                    "/S" if silent else "",  # NSIS silent flag
-                    "/D=$PROGRAMFILES\\ParcInfo"
-                ]
-                subprocess.Popen(cmd)
-                logger.info("✓ Windows installer launched")
+                # ParcInfo est distribué en exécutable PORTABLE unique (pas d'installeur
+                # NSIS) : "installer_path" est en réalité le nouveau ParcInfo-Windows.exe
+                # téléchargé. Windows verrouille l'exe en cours d'exécution, donc on ne
+                # peut pas l'écraser directement depuis ce process - on délègue le
+                # remplacement à un script .bat détaché qui attend la fin de ce process
+                # (déclenchée par l'appelant juste après ce retour), remplace l'exécutable
+                # puis relance l'application.
+                if not getattr(sys, 'frozen', False):
+                    logger.warning("Mise à jour ignorée : non exécuté en tant qu'exécutable packagé (mode développement)")
+                    return False
+
+                current_exe = Path(sys.executable)
+                bat_path = self.config_dir / "_apply_update.bat"
+                # 4s de marge : le processus appelant (launcher.py) ne fait time.sleep(2)
+                # qu'APRÈS avoir programmé ce script, donc son sys.exit() arrive après
+                # ces 2s - laisser une marge évite que "move" se heurte au fichier
+                # encore verrouillé si le process met un peu plus longtemps à quitter.
+                bat_content = (
+                    "@echo off\r\n"
+                    "timeout /t 4 /nobreak > NUL\r\n"
+                    f'move /y "{installer_path}" "{current_exe}" > NUL\r\n'
+                    f'start "" "{current_exe}"\r\n'
+                    'del "%~f0"\r\n'
+                )
+                bat_path.write_text(bat_content, encoding='utf-8')
+
+                creationflags = 0
+                if hasattr(subprocess, 'CREATE_NO_WINDOW') and hasattr(subprocess, 'DETACHED_PROCESS'):
+                    creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+                subprocess.Popen(['cmd', '/c', str(bat_path)], creationflags=creationflags, close_fds=True)
+
+                logger.info("✓ Script de mise à jour programmé - l'application va redémarrer")
                 return True
 
             elif system == "Darwin":
@@ -371,18 +394,13 @@ class UpdateChecker:
             return False
 
     def _get_platform_key(self) -> str:
-        """Get platform-specific download key."""
+        """Get platform-specific download key (doit correspondre aux clés de version.json 'downloads')."""
         system = platform.system()
-        machine = platform.machine()
 
         if system == "Windows":
-            return "windows"
+            return "windows_installer"
         elif system == "Darwin":
-            # Check CPU type
-            if machine == "arm64" or "Apple" in platform.processor():
-                return "macos_arm"
-            else:
-                return "macos_intel"
+            return "macos_app"
         elif system == "Linux":
             return "linux"
         else:

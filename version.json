@@ -1,35 +1,26 @@
 {
   "version": "2.6.28",
-  "release_date": "2026-08-03T23:30:00.000000",
-  "github_repo": "darkmind64/parc-info",
+  "release_date": "2026-08-05T22:00:00.000000",
+  "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/darkmind64/parc-info/releases/download/v2.6.28/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/darkmind64/parc-info/releases/download/v2.6.28/ParcInfo-macOS-ARM.zip",
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/ParcInfo-macOS-ARM.zip",
     "docker": "docker pull darkmind64/parcinfo:v2.6.28",
-    "collector_gui": "https://github.com/darkmind64/parc-info/releases/download/v2.6.28/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/darkmind64/parc-info/releases/download/v2.6.28/system-info-collector.exe"
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "System Information Collectors (GUI + CLI) with HTML Report Generation - mDNS Access Fix",
+    "new_features": "Auto-update fixed, comprehensive system collector report, network reachability fixes",
     "improvements": [
-      "FIXED: Client list now displays correctly in GUI collector via mDNS (parcinfo.local:3456)",
-      "NEW: Public /api/clients-public endpoint for unauthenticated client list access",
-      "IMPROVED: File-based logging in collectors for easier debugging",
-      "Standalone executables (no Python required for Windows)",
-      "GUI collector with client selection dropdown",
-      "CLI collector for batch deployment & automation",
-      "HTML report generation (local + storage in ParcInfo)",
-      "Enhanced software detection (up to 200 packages)",
-      "All disks enumeration support",
-      "12+ system fields collection (MAC, IP, OS, RAM, CPU, storage, AV, software)",
-      "Complete field mapping documentation"
-    ],
-    "features": {
-      "collectors": "GUI & CLI executables for system info auto-fill",
-      "html_reports": "Professional formatted reports stored as device documents",
-      "multi_platform": "Windows/macOS/Linux support",
-      "field_mapping": "Complete correspondence of collected vs BD fields"
-    }
+      "FIXED: Auto-updater was completely non-functional since its introduction (wrong repo URL, config path type error, platform key mismatch, NSIS-style install on a portable exe)",
+      "FIXED: Windows executable was unreachable from the LAN (bound to 127.0.0.1 only) - now binds 0.0.0.0",
+      "FIXED: mDNS (parcinfo.local) and Windows Firewall rule now set up automatically on the packaged exe",
+      "FIXED: Uploads/documents sync thread never started on the packaged exe",
+      "FIXED: documents_interventions and baie_photos were missing the columns needed to sync at all",
+      "FIXED: OS name/RAM sync to device sheet (dropdown fields replaced with free-text + suggestions)",
+      "System info collector: removed WMI dependency (native Windows APIs), full software inventory with version/publisher/install date, BitLocker/firewall/TPM/Secure Boot, GPU, SMART disk health, uptime, domain, battery",
+      "System report is now a proper PDF (was HTML) with all collected data"
+    ]
   },
   "checksums": {
     "windows_installer_sha256": "PENDING_BUILD",
@@ -39,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/darkmind64/parc-info/releases/tag/v2.6.28"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.28"
 }

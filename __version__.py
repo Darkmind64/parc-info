@@ -13,7 +13,7 @@ __version__ = "2.6.28"
 __version_tuple__ = (2, 6, 28)
 
 # Build metadata
-GITHUB_REPO = "darkmind64/parc_info"
+GITHUB_REPO = "Darkmind64/parc-info"
 GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
 GITHUB_API_RELEASES = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 GITHUB_RAW_CONTENT = f"https://raw.githubusercontent.com/{GITHUB_REPO}/master"
