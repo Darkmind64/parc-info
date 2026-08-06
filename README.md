@@ -6,18 +6,18 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.6.28 ⭐ **FIXED: CSRF 403 + OS/RAM Display + Document Download Errors**  
-**Dernière mise à jour** : 2026-08-04
+**Version** : 2.6.29 ⭐ **Auto-updater fully repaired, sync journal, cross-machine sync data-loss fix**  
+**Dernière mise à jour** : 2026-08-06
 
 ---
 
 ## ✨ Fonctionnalités Principales
 
-### 🎉 v2.6.28 : Collecteur Système + Fixes Critiques
+### 🎉 v2.6.29 : Collecteur Système + Fixes Critiques
 
 **Deux versions du collecteur (exécutables autonomes) :**
 
-#### GUI (Recommandé) ⭐ 15.6 MB
+#### GUI (Recommandé) ⭐
 ```bash
 system-info-collector-gui.exe  # Windows
 # ou python system-info-collector-gui.py
@@ -26,9 +26,9 @@ system-info-collector-gui.exe  # Windows
 - ✅ Sélection client en dropdown (fetch API)
 - ✅ Aperçu formaté des données avant envoi
 - ✅ Cross-platform (Windows, macOS, Linux)
-- ✅ **NEW** : Rapport HTML généré + stocké
+- ✅ Rapport **PDF** complet généré + stocké dans ParcInfo
 
-#### CLI (Automation/Scripts) 12.5 MB
+#### CLI (Automation/Scripts)
 ```bash
 system-info-collector.exe --client-id 5  # Windows
 # ou python system-info-collector.py --client-id 5
@@ -36,41 +36,43 @@ system-info-collector.exe --client-id 5  # Windows
 - ✅ Déploiement en masse via Group Policy
 - ✅ Scripts d'automatisation / MDM
 - ✅ Mode silencieux (--quiet)
-- ✅ **NEW** : Rapport HTML avec logs
+- ✅ Rapport PDF avec logs
 
-**Données collectées (12+ champs) :**
-| Champ | Windows (WMI) | macOS | Linux |
+**Données collectées :**
+| Champ | Windows | macOS | Linux |
 |-------|---|---|---|
 | MAC, Hostname, IP(s) | ✅ | ✅ | ✅ |
 | Brand, Model, Serial | ✅ | ✅ | ✅ |
-| OS & Version | ✅ | ✅ | ✅ |
-| RAM, CPU, CPU Cores | ✅ | ✅ | ✅ |
-| **All Disks** (NEW) | ✅ | ✅ | ✅ |
-| Antivirus | ✅ | ⚠️ | ⚠️ |
-| **Software (200+)** (NEW) | ✅ | ✅ | ✅ |
+| OS & Version, Domaine | ✅ | ✅ | ⚠️ |
+| RAM, CPU, CPU Cores, GPU | ✅ | ✅ | ⚠️ |
+| Disques (logiques + SMART/SSD-HDD) | ✅ | ✅ | ⚠️ |
+| BitLocker, Pare-feu, TPM, Secure Boot | ✅ | ❌ | ❌ |
+| Antivirus, Dernière MàJ Windows, Uptime | ✅ | ⚠️ | ⚠️ |
+| Comptes utilisateurs locaux + Administrateurs | ✅ | ❌ | ❌ |
+| **Logiciels installés (liste complète, avec version/éditeur/date)** | ✅ | ✅ | ✅ |
 
 **Workflow Enrichi :**
 1. Collecte système complète (CLI/GUI)
-2. Génère **rapport HTML complet** (local + stocké)
+2. Génère **rapport PDF complet** (local + stocké)
 3. Filtre champs API supportés
 4. POST /api/device-info → crée/met à jour appareil
 5. POST /api/device-info/upload-report → document joint ParcInfo
-6. **Résultat** : Appareil enrichi + historique HTML complet
+6. **Résultat** : Appareil enrichi + rapport PDF complet en pièce jointe
 
 **Sécurité & Qualité :**
 - ✅ Multi-client (isolation stricte)
 - ✅ Matching intelligent MAC→IP→hostname
 - ✅ Confirmation avant envoi (GUI)
 - ✅ Token d'authentification optionnel
-- ✅ **NEW** : Rapport HTML préserve 100% des données
-- ✅ **NEW** : Correspondance champs documentée (COLLECTOR_FIELD_MAPPING.md)
+- ✅ Rapport PDF préserve 100% des données collectées
+- ✅ Correspondance champs documentée (COLLECTOR_FIELD_MAPPING.md)
 
 👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI, 12 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI, 15 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/system-info-collector-gui.exe)
-- [ParcInfo.exe (Serveur, 44 MB)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.28/ParcInfo.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/ParcInfo-Windows.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -145,22 +147,22 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.6.28
+## 📥 Téléchargements v2.6.29
 
 ### Exécutables Portables
 
-| Plateforme | Télécharger | Taille |
-|-----------|----------|--------|
-| **Windows** | [ParcInfo-Setup-2.6.24.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.25/installer.exe) | ~35 MB |
-| **macOS** | [ParcInfo-2.6.24.dmg](https://github.com/darkmind64/parc-info/releases/download/v2.6.25/ParcInfo-2.6.24.dmg) | ~40 MB |
-| **Docker** | `docker pull ghcr.io/darkmind64/parc-info:2.6.24` | ~450 MB |
+| Plateforme | Télécharger |
+|-----------|----------|
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/ParcInfo-macOS-ARM.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.6.29` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
-| Type | Plateforme | Télécharger | Taille | Usage |
-|------|-----------|----------|--------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.25/system-info-collector-gui.exe) | 15.6 MB | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.25/system-info-collector.exe) | 12.5 MB | Automatisation/scripts |
+| Type | Plateforme | Télécharger | Usage |
+|------|-----------|----------|-------|
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/system-info-collector.exe) | Automatisation/scripts |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 

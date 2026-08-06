@@ -17,7 +17,11 @@ Données:
 Entry point: launcher.py (détecte port libre, ouvre navigateur)
 """
 import sys, os
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
+
+sys.path.insert(0, str(Path(SPECPATH)))
+from __version__ import __version__ as _app_version
 
 block_cipher = None
 
@@ -146,8 +150,8 @@ if sys.platform == 'darwin':
         info_plist={
             'CFBundleName':                 'ParcInfo',
             'CFBundleDisplayName':          'ParcInfo',
-            'CFBundleVersion':              '1.0.0',
-            'CFBundleShortVersionString':   '1.0.0',
+            'CFBundleVersion':              _app_version,
+            'CFBundleShortVersionString':   _app_version,
             'NSHighResolutionCapable':      True,      # Retina support
             'LSBackgroundOnly':             False,     # App visible
             'NSRequiresAquaSystemAppearance': False,   # Dark mode support

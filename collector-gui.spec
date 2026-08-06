@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
+sys.path.insert(0, str(Path(SPECPATH)))
+from __version__ import __version__ as _app_version
+
 block_cipher = None
 
 hiddenimports = [
@@ -77,7 +80,7 @@ if sys.platform == 'darwin':
         info_plist={
             'NSPrincipalClass': 'NSApplication',
             'NSHighResolutionCapable': 'True',
-            'CFBundleShortVersionString': '2.6.24',
-            'CFBundleVersion': '2.6.24',
+            'CFBundleShortVersionString': _app_version,
+            'CFBundleVersion': _app_version,
         },
     )
