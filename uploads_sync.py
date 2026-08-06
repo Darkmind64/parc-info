@@ -49,7 +49,7 @@ def _get_turso_connection(timeout: int = 60):
     return None
 
 
-def _push_documents_to_turso(table_name: str, upload_folder: str, turso=None) -> None:
+def _push_documents_to_turso(table_name: str, upload_folder: str, turso=None) -> dict:
     """
     Push local → Turso : pour chaque record Turso avec contenu_blob=NULL,
     si le fichier physique existe sur CETTE machine → lit et envoie le BLOB.
@@ -59,13 +59,17 @@ def _push_documents_to_turso(table_name: str, upload_folder: str, turso=None) ->
     - mode 'sync'   : sync_once() a déjà poussé le record vers Turso avant l'appel
 
     turso : connexion partagée optionnelle (évite de créer une connexion par table)
+    Retourne {'pushed': int, 'errors': int, 'pending': int} - 'pending' = fichiers
+    référencés mais absents sur cette machine (normal si une autre machine les a
+    uploadés et ne les a pas encore poussés elle-même).
     """
+    result = {'pushed': 0, 'errors': 0, 'pending': 0}
     _own_conn = turso is None
     try:
         if _own_conn:
             turso = _get_turso_connection()
         if not turso:
-            return  # Turso non configuré → rien à faire
+            return result  # Turso non configuré → rien à faire
 
         to_push = turso.execute(f'''
             SELECT id, nom_fichier FROM {table_name}
@@ -75,10 +79,9 @@ def _push_documents_to_turso(table_name: str, upload_folder: str, turso=None) ->
         ''').fetchall()
 
         if not to_push:
-            return
+            return result
 
-        now   = datetime.now().isoformat()
-        count = 0
+        now = datetime.now().isoformat()
 
         for row in to_push:
             doc_id      = row['id']
@@ -86,7 +89,9 @@ def _push_documents_to_turso(table_name: str, upload_folder: str, turso=None) ->
             local_path  = os.path.join(upload_folder, nom_fichier)
 
             if not os.path.exists(local_path):
-                # Ce fichier n'est pas sur cette machine — ignoré
+                # Ce fichier n'est pas sur cette machine (normal si une autre
+                # machine ne l'a pas encore poussé - à surveiller si ça persiste)
+                result['pending'] += 1
                 continue
 
             try:
@@ -99,28 +104,33 @@ def _push_documents_to_turso(table_name: str, upload_folder: str, turso=None) ->
                     WHERE id=?
                 ''', (blob, now, doc_id))
 
-                count += 1
+                result['pushed'] += 1
                 logger.debug(
                     f"push {table_name} id={doc_id}: {nom_fichier} "
                     f"({len(blob):,} octets) → Turso"
                 )
             except urllib.error.HTTPError as e:
+                result['errors'] += 1
                 body = e.read().decode('utf-8', errors='replace')
                 logger.warning(
                     f"push {table_name} id={doc_id} ({nom_fichier}, {len(blob):,}B): "
                     f"HTTP {e.code} — {body[:300]}"
                 )
             except Exception as e:
+                result['errors'] += 1
                 logger.warning(f"push {table_name} id={doc_id} ({nom_fichier}): ERREUR : {e}")
 
-        if count:
-            logger.info(f"uploads_sync push: {count} fichier(s) envoyé(s) vers Turso ({table_name})")
+        if result['pushed']:
+            logger.info(f"uploads_sync push: {result['pushed']} fichier(s) envoyé(s) vers Turso ({table_name})")
 
     except Exception as e:
+        result['errors'] += 1
         logger.exception(f"_push_documents_to_turso({table_name}) a échoué")
     finally:
         if _own_conn and turso:
             turso.close()
+
+    return result
 
 
 def _pull_documents_from_turso(table_name: str, upload_folder: str, turso=None) -> None:
@@ -131,13 +141,17 @@ def _pull_documents_from_turso(table_name: str, upload_folder: str, turso=None) 
     requête HTTP (timeout inévitable si plusieurs gros fichiers existent dans Turso).
 
     turso : connexion partagée optionnelle (évite de créer une connexion par table)
+    Retourne {'pulled': int, 'errors': int, 'empty_blob': int} - 'empty_blob' =
+    enregistrements marqués comme ayant un contenu mais le BLOB est en réalité
+    vide/absent côté Turso (donnée orpheline, ne peut pas être récupérée).
     """
+    result = {'pulled': 0, 'errors': 0, 'empty_blob': 0}
     _own_conn = turso is None
     try:
         if _own_conn:
             turso = _get_turso_connection()
         if not turso:
-            return
+            return result
 
         # Étape 1 : récupérer uniquement les IDs + noms (pas les BLOBs)
         meta_rows = turso.execute(f'''
@@ -147,10 +161,9 @@ def _pull_documents_from_turso(table_name: str, upload_folder: str, turso=None) 
         ''').fetchall()
 
         if not meta_rows:
-            return
+            return result
 
         os.makedirs(upload_folder, exist_ok=True)
-        count = 0
 
         for meta in meta_rows:
             doc_id      = meta[0]        # id
@@ -172,35 +185,42 @@ def _pull_documents_from_turso(table_name: str, upload_folder: str, turso=None) 
                     continue
                 blob = blob_row[0]
                 if not blob:
+                    result['empty_blob'] += 1
+                    logger.warning(f"pull {table_name} id={doc_id} ({nom_fichier}): BLOB vide/orphelin dans Turso")
                     continue
 
                 with open(local_path, 'wb') as f:
                     f.write(blob)
-                count += 1
+                result['pulled'] += 1
                 logger.debug(
                     f"pull {table_name} id={doc_id}: {nom_fichier} "
                     f"({len(blob):,} octets) ← Turso"
                 )
             except urllib.error.HTTPError as e:
+                result['errors'] += 1
                 body = e.read().decode('utf-8', errors='replace')
                 logger.warning(
                     f"pull {table_name} id={doc_id} ({nom_fichier}): "
                     f"HTTP {e.code} — {body[:300]}"
                 )
             except Exception as e:
+                result['errors'] += 1
                 logger.warning(f"pull {table_name} id={doc_id} ({nom_fichier}): ERREUR : {e}")
 
-        if count:
-            logger.info(f"uploads_sync pull: {count} fichier(s) récupéré(s) depuis Turso ({table_name})")
+        if result['pulled']:
+            logger.info(f"uploads_sync pull: {result['pulled']} fichier(s) récupéré(s) depuis Turso ({table_name})")
 
     except Exception:
+        result['errors'] += 1
         logger.exception(f"_pull_documents_from_turso({table_name}) a échoué")
     finally:
         if _own_conn and turso:
             turso.close()
 
+    return result
 
-def _cleanup_orphaned_files(upload_folder: str) -> None:
+
+def _cleanup_orphaned_files(upload_folder: str) -> int:
     """
     Supprime les fichiers physiques dont le record DB a été supprimé.
 
@@ -211,13 +231,16 @@ def _cleanup_orphaned_files(upload_folder: str) -> None:
     Sécurité : ne touche qu'aux fichiers dont le nom commence par un préfixe
     connu de l'app (app, per, ctr, intv, baie) pour ne pas effacer des
     fichiers déposés manuellement.
+
+    Retourne le nombre de fichiers supprimés.
     """
     # Préfixes générés par les routes upload de l'app
     APP_PREFIXES = ('app', 'per', 'ctr', 'intv', 'baie')
+    count = 0
 
     try:
         if not os.path.isdir(upload_folder):
-            return
+            return count
 
         from database import get_db
         conn = get_db()
@@ -243,7 +266,6 @@ def _cleanup_orphaned_files(upload_folder: str) -> None:
                 pass
         conn.close()
 
-        count = 0
         for fname in os.listdir(upload_folder):
             # Ne toucher qu'aux fichiers uploadés par l'app
             if not fname.startswith(APP_PREFIXES):
@@ -266,6 +288,8 @@ def _cleanup_orphaned_files(upload_folder: str) -> None:
     except Exception:
         logger.exception("_cleanup_orphaned_files a échoué")
 
+    return count
+
 
 def sync_uploads() -> None:
     """Cycle complet push + pull + cleanup pour toutes les tables documents.
@@ -274,8 +298,13 @@ def sync_uploads() -> None:
     pour éviter de multiples résolutions DNS consécutives (6 par cycle).
     Sur Synology sous Docker, les DNS lookups répétés saturent le resolver
     embarqué et perturbent les autres services réseau (ex. Hyper Backup).
+
+    Journalise un résumé du cycle dans journal_synchronisation (visible dans l'UI)
+    - permet de vérifier concrètement que la synchronisation des fichiers a bien
+    lieu entre les différentes machines, et de repérer les fichiers en attente
+    ou en erreur sans avoir à consulter les logs serveur.
     """
-    from database import UPLOAD_FOLDER
+    from database import UPLOAD_FOLDER, log_sync_event
 
     tables = [
         'documents_appareils',
@@ -287,17 +316,49 @@ def sync_uploads() -> None:
 
     # Créer une seule connexion partagée pour tout le cycle
     turso = _get_turso_connection()
+    if not turso:
+        return  # Turso non configuré - rien à synchroniser, rien à journaliser
+
+    totals = {'pushed': 0, 'pulled': 0, 'errors': 0, 'pending': 0, 'empty_blob': 0}
+    per_table = {}
 
     try:
         for table in tables:
-            _push_documents_to_turso(table, UPLOAD_FOLDER, turso=turso)
-            _pull_documents_from_turso(table, UPLOAD_FOLDER, turso=turso)
+            push_res = _push_documents_to_turso(table, UPLOAD_FOLDER, turso=turso)
+            pull_res = _pull_documents_from_turso(table, UPLOAD_FOLDER, turso=turso)
+            for k, v in push_res.items():
+                totals[k] += v
+            for k, v in pull_res.items():
+                totals[k] += v
+            if any(push_res.values()) or any(pull_res.values()):
+                per_table[table] = {**push_res, **{f"pull_{k}": v for k, v in pull_res.items()}}
     finally:
         if turso:
             turso.close()
 
     # Supprimer les fichiers physiques dont le record a été supprimé
-    _cleanup_orphaned_files(UPLOAD_FOLDER)
+    cleaned = _cleanup_orphaned_files(UPLOAD_FOLDER)
+
+    activity = totals['pushed'] + totals['pulled'] + totals['errors'] + totals['empty_blob'] + cleaned
+    if activity == 0:
+        return  # Rien à signaler ce cycle - ne pas bruiter le journal
+
+    statut = 'erreur' if totals['errors'] and not (totals['pushed'] or totals['pulled']) else \
+             ('partiel' if totals['errors'] or totals['empty_blob'] else 'succes')
+    resume_parts = []
+    if totals['pushed']:
+        resume_parts.append(f"{totals['pushed']} fichier(s) envoyé(s)")
+    if totals['pulled']:
+        resume_parts.append(f"{totals['pulled']} fichier(s) reçu(s)")
+    if cleaned:
+        resume_parts.append(f"{cleaned} orphelin(s) nettoyé(s)")
+    if totals['errors']:
+        resume_parts.append(f"{totals['errors']} erreur(s)")
+    if totals['empty_blob']:
+        resume_parts.append(f"{totals['empty_blob']} fichier(s) introuvable(s) (orphelin distant)")
+
+    log_sync_event('fichiers', statut, ' · '.join(resume_parts) or 'Aucune activité',
+                    {'totals': totals, 'per_table': per_table, 'orphelins_supprimes': cleaned})
 
 
 def start_sync_thread(interval: int = 60) -> None:

@@ -454,6 +454,38 @@ def get_sync_state() -> dict:
     return dict(_sync_state)
 
 
+def log_sync_event(event_type: str, statut: str, resume: str, details: dict = None) -> None:
+    """Enregistre un événement dans le journal de synchronisation (visible dans l'UI).
+
+    event_type : 'db_sync' (réplication des lignes) ou 'fichiers' (push/pull des BLOBs)
+    statut     : 'succes' | 'erreur' | 'partiel'
+    Conserve seulement les 500 entrées les plus récentes (purge automatique).
+    """
+    try:
+        from datetime import datetime as _dt
+        conn = _local_db()
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS journal_synchronisation ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, horodatage TEXT NOT NULL, "
+            "type TEXT NOT NULL, statut TEXT NOT NULL, resume TEXT DEFAULT '', "
+            "details TEXT DEFAULT '')"
+        )
+        details_json = _json.dumps(details, ensure_ascii=False) if details else ''
+        conn.execute(
+            "INSERT INTO journal_synchronisation (horodatage, type, statut, resume, details) VALUES (?,?,?,?,?)",
+            (_dt.utcnow().isoformat(), event_type, statut, resume, details_json)
+        )
+        conn.execute(
+            "DELETE FROM journal_synchronisation WHERE id NOT IN "
+            "(SELECT id FROM journal_synchronisation ORDER BY id DESC LIMIT 500)"
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        import logging as _logging
+        _logging.getLogger('parcinfo').exception("log_sync_event a échoué (non-critique)")
+
+
 def sync_once() -> tuple:
     """
     Effectue une synchronisation complète local ↔ Turso.
@@ -488,10 +520,21 @@ def sync_once() -> tuple:
         _sync_state['last_sync'] = _dt.now(_tz.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
         _sync_state['last_error'] = '; '.join(errors) if errors else None
         _sync_state['stats']      = stats
+
+        total = sum((v.get('pushed', 0) + v.get('pulled', 0)) for v in stats.values()) if stats else 0
+        if errors:
+            log_sync_event('db_sync', 'erreur' if total == 0 else 'partiel',
+                            f"{total} enregistrement(s) - {len(errors)} erreur(s)",
+                            {'stats': stats, 'errors': errors})
+        elif total:
+            log_sync_event('db_sync', 'succes', f"{total} enregistrement(s) synchronisé(s)", {'stats': stats})
+        # Rien à synchroniser (total=0, pas d'erreur) : pas d'entrée pour ne pas bruiter le journal
+
         return (len(errors) == 0), stats, _sync_state['last_error']
     except Exception as e:
         err = str(e)
         _sync_state['last_error'] = err
+        log_sync_event('db_sync', 'erreur', 'Échec de synchronisation', {'error': err})
         return False, {}, err
     finally:
         _sync_state['running'] = False

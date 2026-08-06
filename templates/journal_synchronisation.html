@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Journal de synchronisation{% endblock %}
+
+{% block extra_styles %}
+<style>
+.sync-state-bar {
+    display:flex; gap:1.2rem; flex-wrap:wrap; align-items:center;
+    background:var(--bg-card); border:1px solid var(--border); border-radius:8px;
+    padding:.8rem 1rem; margin-bottom:1.2rem; font-size:.8rem;
+}
+.sync-state-item { display:flex; flex-direction:column; gap:.15rem; }
+.sync-state-label { font-size:.62rem; text-transform:uppercase; letter-spacing:1px; color:var(--text-muted); }
+.sync-state-value { font-family:'Share Tech Mono',monospace; }
+
+.sync-entry {
+    display:flex; align-items:flex-start; gap:.8rem;
+    padding:.6rem .2rem; border-bottom:1px solid var(--border);
+}
+.sync-entry:last-child { border:none; }
+.sync-dot {
+    width:9px; height:9px; border-radius:50%; flex-shrink:0; margin-top:.35rem;
+}
+.sync-dot.succes { background:var(--accent-green); }
+.sync-dot.partiel { background:#facc15; }
+.sync-dot.erreur { background:var(--accent-red); }
+
+.sync-body { flex:1; min-width:0; }
+.sync-resume { font-weight:600; font-size:.85rem; }
+.sync-meta { font-size:.7rem; color:var(--text-secondary); margin-top:.15rem; display:flex; gap:.5rem; flex-wrap:wrap; }
+.sync-time { font-size:.68rem; color:var(--text-muted); white-space:nowrap; font-family:'Share Tech Mono',monospace; flex-shrink:0; }
+
+.sync-badge-type {
+    font-size:.62rem; padding:.05rem .4rem; border-radius:3px; border:1px solid var(--border);
+    text-transform:uppercase; letter-spacing:.5px;
+}
+
+.sync-details { margin-top:.4rem; }
+.sync-details summary { cursor:pointer; font-size:.68rem; color:var(--accent); }
+.sync-details pre {
+    font-size:.68rem; color:var(--text-secondary); background:#0f1218;
+    border:1px solid var(--border); border-radius:4px; padding:.5rem;
+    margin-top:.3rem; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word;
+}
+
+.sync-empty { text-align:center; padding:2.5rem; color:var(--text-muted); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>📡 Journal de synchronisation</h1>
+    <p class="page-subtitle">Historique des cycles de synchronisation (base de données + fichiers joints) entre les différentes installations</p>
+</div>
+
+<div class="sync-state-bar">
+    <div class="sync-state-item">
+        <span class="sync-state-label">Dernière sync (lignes)</span>
+        <span class="sync-state-value">{{ sync_state.last_sync or 'jamais' }}</span>
+    </div>
+    <div class="sync-state-item">
+        <span class="sync-state-label">En cours</span>
+        <span class="sync-state-value">{{ 'oui' if sync_state.running else 'non' }}</span>
+    </div>
+    {% if sync_state.last_error %}
+    <div class="sync-state-item">
+        <span class="sync-state-label" style="color:var(--accent-red);">Dernière erreur</span>
+        <span class="sync-state-value" style="color:var(--accent-red);">{{ sync_state.last_error }}</span>
+    </div>
+    {% endif %}
+    <div style="flex:1;"></div>
+    <button class="btn btn-primary btn-sm" onclick="location.reload()">⟳ Actualiser</button>
+</div>
+
+{% if not entries %}
+<div class="sync-empty">
+    Aucun événement de synchronisation enregistré pour l'instant.<br>
+    <span style="font-size:.75rem;">Ce journal se remplit automatiquement dès qu'un cycle de synchronisation Turso a lieu (uniquement si la synchronisation est configurée).</span>
+</div>
+{% else %}
+<div class="card" style="padding:.5rem 1rem;">
+    {% for e in entries %}
+    <div class="sync-entry">
+        <span class="sync-dot {{ e.statut }}"></span>
+        <div class="sync-body">
+            <div class="sync-resume">
+                {{ e.resume }}
+                <span class="sync-badge-type">{{ 'lignes DB' if e.type == 'db_sync' else 'fichiers' }}</span>
+            </div>
+            {% if e.details_parsed %}
+            <details class="sync-details">
+                <summary>Voir le détail</summary>
+                <pre>{{ e.details_parsed | tojson(indent=2) }}</pre>
+            </details>
+            {% endif %}
+        </div>
+        <span class="sync-time">{{ e.horodatage[:19].replace('T', ' ') }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

@@ -1721,6 +1721,40 @@ def api_db_sync():
     return jsonify(state)
 
 
+@app.route('/journal-synchronisation')
+@login_required
+def journal_synchronisation():
+    """Historique des cycles de synchronisation (lignes DB + fichiers joints).
+
+    Permet de vérifier concrètement que la sync a lieu entre les différentes
+    machines, et de diagnostiquer des fichiers en attente/orphelins sans avoir
+    à consulter les logs serveur.
+    """
+    from database import get_local_db, get_sync_state
+    conn = get_local_db()
+    try:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS journal_synchronisation ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, horodatage TEXT NOT NULL, "
+            "type TEXT NOT NULL, statut TEXT NOT NULL, resume TEXT DEFAULT '', "
+            "details TEXT DEFAULT '')"
+        )
+        conn.commit()
+        entries = [row_to_dict(r) for r in conn.execute(
+            "SELECT * FROM journal_synchronisation ORDER BY id DESC LIMIT 200"
+        ).fetchall()]
+    finally:
+        conn.close()
+
+    for e in entries:
+        try:
+            e['details_parsed'] = json.loads(e['details']) if e.get('details') else None
+        except Exception:
+            e['details_parsed'] = None
+
+    return render_template('journal_synchronisation.html', entries=entries, sync_state=get_sync_state())
+
+
 # ─── THREAD DE SYNCHRONISATION TURSO ─────────────────────────────────────────
 
 _sync_thread: threading.Thread | None = None
