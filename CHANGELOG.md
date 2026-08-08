@@ -57,6 +57,18 @@ Le rapport HTML était un listing monospace, le PDF une suite de tableaux :
 - ✅ Sections barrettes mémoire, fiabilité disques, écrans et imprimantes,
   rendues à partir des données collectées en 2.6.31
 
+#### La page `/appareil/<id>/fiche-systeme` reçoit le même traitement
+- ✅ Bandeau **« Points d'attention »** et vignettes à bargraphs en tête de page
+- ✅ Ports TCP en écoute affichés **en cartes** colorées par sensibilité, au lieu
+  d'une liste inline `8080 (svchost) · 3389 (svchost) · …`
+- ✅ Clés de licence **en entier** avec mention de vérification, là où seuls les
+  5 derniers caractères étaient montrés
+- ✅ Nouvelle section **Périphériques USB**, distinguant ce qui est inventorié de
+  la plomberie interne
+- ✅ L'analyse (seuils, alertes, criticité des ports) est importée de
+  `collector_core` plutôt que réécrite en Jinja : la page et le PDF portent ainsi
+  exactement le même jugement sur une machine donnée
+
 ### 🔧 CORRECTIONS
 - ✅ **Encodage** : la sortie PowerShell était décodée avec l'encodage local
   (cp1252 sur un Windows français) au lieu d'UTF-8. Tout libellé accentué

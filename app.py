@@ -3934,6 +3934,62 @@ def api_get_mdp(id):
 
 # ─── DOCUMENTS APPAREILS ─────────────────────────────────────────────────────
 
+def _fiche_systeme_kpis(rapport):
+    """Vignettes chiffrées de la fiche système : valeur, barre et criticité.
+
+    Les seuils et le calcul sont ceux de `collector_core`, pour que la page et
+    le rapport PDF portent exactement le même jugement sur une machine.
+    """
+    from collector_core import (
+        BATTERY_DANGER_PCT, BATTERY_WARN_PCT, _battery_pct, _disk_level, _num,
+    )
+
+    kpis = []
+
+    total = _num(rapport.get('disk_total_gb'))
+    used = _num(rapport.get('disk_used_gb'))
+    if total and used is not None and total > 0:
+        pct = round(used / total * 100)
+        kpis.append({'label': 'Stockage', 'value': pct, 'unit': '%', 'pct': pct,
+                     'level': _disk_level(pct),
+                     'sub': '%g GB utilisés sur %g GB' % (used, total)})
+
+    ram = _num(rapport.get('ram_gb'))
+    if ram:
+        libre = _num(rapport.get('ram_free_gb'))
+        if libre is not None and ram > 0:
+            pct = round((ram - libre) / ram * 100)
+            level = 'danger' if pct >= 90 else 'warn' if pct >= 75 else 'ok'
+            sub = '%.1f GB libres sur %g GB' % (libre, ram)
+        else:
+            # Sans mesure d'occupation, la barre situe la machine sur une
+            # échelle 0–64 Go plutôt que d'inventer un pourcentage.
+            pct = min(ram / 64 * 100, 100)
+            level = 'ok' if ram >= 8 else 'warn'
+            sub = 'Confortable' if ram >= 16 else 'Correct' if ram >= 8 else 'Juste'
+        kpis.append({'label': 'Mémoire vive', 'value': ('%g' % ram), 'unit': 'GB',
+                     'pct': pct, 'level': level, 'sub': sub})
+
+    charge = _battery_pct(rapport)
+    if charge is not None:
+        level = ('danger' if charge <= BATTERY_DANGER_PCT
+                 else 'warn' if charge <= BATTERY_WARN_PCT else 'ok')
+        sante = _num(rapport.get('battery_health_percent'))
+        sub = ('Santé %g %% de la capacité d\'origine' % sante) if sante is not None else 'Charge restante'
+        kpis.append({'label': 'Batterie', 'value': charge, 'unit': '%', 'pct': charge,
+                     'level': level, 'sub': sub})
+
+    uptime = _num(rapport.get('uptime_hours'))
+    if uptime is not None:
+        jours = uptime / 24
+        kpis.append({'label': 'Sans redémarrage', 'value': '%.0f' % jours, 'unit': 'j',
+                     'pct': min(jours / 30 * 100, 100),
+                     'level': 'warn' if jours > 30 else 'ok',
+                     'sub': '%.0f heures d\'uptime' % uptime})
+
+    return kpis
+
+
 @app.route('/appareil/<int:id>/fiche-systeme')
 @login_required
 def fiche_systeme_appareil(id):
@@ -3965,9 +4021,30 @@ def fiche_systeme_appareil(id):
     # Les collectes antérieures à la v3 envoyaient une liste de chaînes
     logiciels = [s if isinstance(s, dict) else {'name': str(s)} for s in logiciels]
 
+    # Analyse et mise en forme reprises de collector_core : la page porte ainsi
+    # le même jugement que le rapport PDF sur une machine donnée.
+    alertes, kpis, ports_cartes, ports_masques = [], [], [], 0
+    if rapport:
+        try:
+            from collector_core import (
+                build_alerts, describe_listening_port, notable_ports,
+            )
+            alertes = build_alerts(rapport)
+            kpis = _fiche_systeme_kpis(rapport)
+            ports = [describe_listening_port(p)
+                     for p in (rapport.get('listening_ports') or [])
+                     if isinstance(p, dict)]
+            ports_cartes = notable_ports(ports)
+            ports_masques = len(ports) - len(ports_cartes)
+        except Exception:
+            # Une analyse qui échoue ne doit pas priver l'utilisateur de la
+            # fiche : les données brutes restent affichées.
+            logger.exception("Analyse de la fiche système")
+
     return render_template('fiche_systeme.html', appareil=a, rapport=rapport,
                            logiciels=logiciels, client=client, clients=get_clients(),
-                           client_actif_id=cid)
+                           client_actif_id=cid, alertes=alertes, kpis=kpis,
+                           ports_cartes=ports_cartes, ports_masques=ports_masques)
 
 
 @app.route('/appareil/<int:id>/documents')

@@ -35,6 +35,54 @@
 .fs-bar > span { display: block; height: 100%; background: var(--accent); }
 .fs-scroll { max-height: 480px; overflow-y: auto; }
 .fs-mono { font-family: Consolas, 'Courier New', monospace; font-size: .74rem; }
+.fs-info { background: rgba(0,201,255,.12); color: var(--accent); border: 1px solid rgba(0,201,255,.3); }
+.fs-muted{ background: rgba(148,163,184,.12); color: var(--text-secondary); border: 1px solid rgba(148,163,184,.3); }
+
+/* Points d'attention : un encadré par constat, couleur = criticité */
+.fs-alert {
+    display: flex; gap: .7rem; align-items: baseline;
+    padding: .55rem .8rem; margin-bottom: .4rem; border-radius: 3px;
+    border-left: 3px solid var(--text-secondary); background: var(--bg-secondary);
+    font-size: .84rem;
+}
+.fs-alert.lv-danger { border-left-color: var(--accent-red);    background: rgba(255,51,85,.07); }
+.fs-alert.lv-warn   { border-left-color: var(--accent-orange); background: rgba(255,140,0,.07); }
+.fs-alert.lv-info   { border-left-color: var(--accent);        background: rgba(0,201,255,.07); }
+.fs-alert.lv-ok     { border-left-color: var(--accent-green);  background: rgba(0,255,136,.07); }
+.fs-alert-detail { color: var(--text-secondary); font-size: .76rem; }
+
+/* Vignettes chiffrées */
+.fs-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr)); gap: .8rem; }
+.fs-kpi { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 4px; padding: .7rem .85rem; }
+.fs-kpi-label {
+    font-family: 'Rajdhani', sans-serif; font-size: .64rem; font-weight: 700;
+    letter-spacing: 1.5px; text-transform: uppercase; color: var(--text-secondary);
+}
+.fs-kpi-value { font-size: 1.75rem; font-weight: 700; line-height: 1.15; margin: .15rem 0 .1rem; }
+.fs-kpi-unit { font-size: .8rem; font-weight: 600; color: var(--text-secondary); margin-left: .15rem; }
+.fs-kpi-sub { font-size: .7rem; color: var(--text-secondary); margin-top: .35rem; }
+
+/* Ports en écoute sous forme de cartes */
+.fs-ports { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: .6rem; }
+.fs-port {
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-top: 2px solid var(--text-secondary); border-radius: 4px; padding: .55rem .65rem;
+}
+.fs-port.lv-danger { border-top-color: var(--accent-red); }
+.fs-port.lv-warn   { border-top-color: var(--accent-orange); }
+.fs-port.lv-ok     { border-top-color: var(--accent-green); }
+.fs-port.lv-info   { border-top-color: var(--accent); }
+.fs-port-num { font-family: Consolas, monospace; font-size: 1.15rem; font-weight: 700; line-height: 1.1; }
+.fs-port-desc { font-size: .7rem; color: var(--text-secondary); margin-top: .3rem; line-height: 1.3; }
+.fs-port-proc {
+    font-family: Consolas, monospace; font-size: .66rem; color: var(--text-secondary);
+    margin-top: .35rem; padding-top: .3rem; border-top: 1px dashed var(--border);
+}
+.fs-key {
+    font-family: Consolas, monospace; font-size: .8rem; font-weight: 700; letter-spacing: .05em;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 3px; padding: .15rem .45rem; display: inline-block;
+}
 </style>
 {% endblock %}
 
@@ -69,6 +117,52 @@
     <div class="fs-row"><span class="fs-label">{{ label }}</span><span class="fs-value">{{ value }}</span></div>
     {% endif %}
 {% endmacro %}
+
+{# ── POINTS D'ATTENTION ────────────────────────────────────────────────── #}
+{% if rapport %}
+<div class="fs-section">
+    <h3>■ Points d'attention</h3>
+    {% if alertes %}
+        {% for a in alertes %}
+        <div class="fs-alert lv-{{ a.level }}">
+            <div>
+                <strong>{{ a.titre }}</strong>
+                {% if a.detail %}<div class="fs-alert-detail">{{ a.detail }}</div>{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="fs-alert lv-ok">
+            <div><strong>Aucun point d'attention détecté</strong>
+                <div class="fs-alert-detail">Sécurité, stockage et licences dans les seuils attendus.</div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ── VUE D'ENSEMBLE ────────────────────────────────────────────────────── #}
+{% if kpis %}
+<div class="fs-section">
+    <h3>■ Vue d'ensemble</h3>
+    <div class="fs-kpis">
+        {% for k in kpis %}
+        {% set couleur = 'var(--accent-red)' if k.level == 'danger'
+                    else 'var(--accent-orange)' if k.level == 'warn'
+                    else 'var(--accent-green)' if k.level == 'ok'
+                    else 'var(--accent)' %}
+        <div class="fs-kpi">
+            <div class="fs-kpi-label">{{ k.label }}</div>
+            <div class="fs-kpi-value" style="color:{{ couleur }};">
+                {{ k.value }}<span class="fs-kpi-unit">{{ k.unit }}</span>
+            </div>
+            <div class="fs-bar"><span style="width:{{ k.pct|round(0)|int }}%;background:{{ couleur }};"></span></div>
+            <div class="fs-kpi-sub">{{ k.sub }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 {% if rapport.elevated is defined and not rapport.elevated %}
 <div class="fs-section" style="border-color:var(--accent-orange);">
@@ -369,13 +463,34 @@
     <h3>■ Licences &amp; activation</h3>
     {% if rapport.licenses %}
     <table class="fs-table">
-        <tr><th>Produit</th><th>Statut</th><th>Canal</th><th>Clé partielle</th></tr>
+        <tr><th>Produit</th><th>Statut</th><th>Canal</th><th>Clé de licence</th></tr>
         {% for l in rapport.licenses %}
         <tr>
             <td>{{ l.name }}</td>
-            <td><span class="fs-pill {{ 'fs-ok' if l.activated else 'fs-bad' }}">{{ l.status }}</span></td>
+            <td><span class="fs-pill {{ 'fs-ok' if l.activated else 'fs-warn' if l.status == 'Non active' else 'fs-bad' }}">{{ l.status }}</span></td>
             <td>{{ l.channel or '—' }}</td>
-            <td class="fs-mono">{{ ('…' ~ l.partial_key) if l.partial_key else '—' }}</td>
+            <td>
+                {% if l.full_key %}
+                    {# Clé affichée en entier, sans troncature ni masquage #}
+                    <span class="fs-key">{{ l.full_key }}</span>
+                    {% if l.key_verified %}
+                    <div style="font-size:.66rem;color:var(--accent-green);margin-top:.25rem;">
+                        Vérifiée — les 5 derniers caractères correspondent à la licence active
+                        {%- if l.key_source %} · {{ l.key_source }}{% endif %}
+                    </div>
+                    {% else %}
+                    <div style="font-size:.66rem;color:var(--accent-orange);margin-top:.25rem;">
+                        Non appairée à une licence active de cette machine
+                        {%- if l.key_source %} · {{ l.key_source }}{% endif %}
+                    </div>
+                    {% endif %}
+                {% elif l.partial_key %}
+                    <span style="font-size:.72rem;color:var(--text-secondary);">
+                        Clé complète absente de la machine (licence numérique, Click-to-Run
+                        ou KMS) — se termine par <span class="fs-mono">{{ l.partial_key }}</span>
+                    </span>
+                {% else %}—{% endif %}
+            </td>
         </tr>
         {% endfor %}
     </table>
@@ -386,6 +501,37 @@
         <span class="fs-value fs-mono">{{ rapport.oem_product_key }}</span>
     </div>
     {% endif %}
+</div>
+{% endif %}
+
+<!-- ── PÉRIPHÉRIQUES USB ────────────────────────────────────────────────── -->
+{% if rapport.usb_devices %}
+{% set usb_inventories = rapport.usb_devices | selectattr('inventoriable') | list %}
+<div class="fs-section">
+    <h3>■ Périphériques USB ({{ rapport.usb_devices|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        {{ usb_inventories|length }} repris dans l'inventaire. Les éléments « interne »
+        (concentrateurs, contrôleurs, nœuds composites) sont listés pour information
+        mais ne sont pas créés comme périphériques.
+    </div>
+    <table class="fs-table">
+        <tr><th>Périphérique</th><th>Catégorie</th><th>Identifiant</th><th>Inventaire</th></tr>
+        {% for d in rapport.usb_devices %}
+        <tr>
+            <td>{{ d.name }}{% if d.manufacturer %}
+                <div style="font-size:.7rem;color:var(--text-secondary);">{{ d.manufacturer }}</div>
+                {% endif %}</td>
+            <td>{{ d.categorie or '—' }}</td>
+            <td class="fs-mono">
+                {%- if d.vid %}{{ d.vid }}:{{ d.pid }}{% endif -%}
+                {%- if d.serial %}<div>S/N {{ d.serial }}</div>{% endif -%}
+                {%- if not d.vid and not d.serial %}—{% endif -%}
+            </td>
+            <td><span class="fs-pill {{ 'fs-ok' if d.inventoriable else 'fs-muted' }}">
+                {{ 'Inventorié' if d.inventoriable else 'Interne' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
 </div>
 {% endif %}
 
@@ -410,12 +556,29 @@
     {% endif %}
 
     {% if rapport.listening_ports %}
-    <div class="fs-label" style="font-size:.75rem;margin-bottom:.3rem;">
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
         Ports TCP en écoute ({{ rapport.listening_ports|length }})
+        {% if ports_masques %}
+        <span style="font-size:.7rem;">— {{ ports_masques }} port(s) de la plage dynamique
+        (49152+) non détaillés : attribués à la volée, ils changent à chaque redémarrage</span>
+        {% endif %}
     </div>
-    <div class="fs-value fs-mono">
-        {% for p in rapport.listening_ports %}{{ p.port }}{% if p.process %} ({{ p.process }}){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+    {% if ports_cartes %}
+    <div class="fs-ports">
+        {% for p in ports_cartes %}
+        <div class="fs-port lv-{{ p.level }}">
+            <div class="fs-port-num">{{ p.port }}</div>
+            {% if p.name %}<span class="fs-pill {{ 'fs-bad' if p.level == 'danger' else 'fs-warn' if p.level == 'warn' else 'fs-ok' if p.level == 'ok' else 'fs-info' }}">{{ p.name }}</span>{% endif %}
+            <div class="fs-port-desc">{{ p.description }}</div>
+            {% if p.process %}<div class="fs-port-proc">{{ p.process }}</div>{% endif %}
+        </div>
+        {% endfor %}
     </div>
+    {% else %}
+    <div class="fs-value" style="font-size:.78rem;color:var(--text-secondary);">
+        Aucun port de service en écoute — uniquement des ports dynamiques.
+    </div>
+    {% endif %}
     {% endif %}
 </div>
 {% endif %}
