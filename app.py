@@ -1562,6 +1562,7 @@ def inject_cfg():
 register_update_routes(app)
 
 @app.route('/api/config', methods=['GET'])
+@login_required
 def api_config_get():
     user = get_auth_user()
     auth_user_id = user['id'] if user else None
@@ -1569,6 +1570,7 @@ def api_config_get():
     return jsonify(cfg_all(auth_user_id=auth_user_id))
 
 @app.route('/api/config', methods=['POST'])
+@login_required
 def api_config_save():
     from config_helpers import cfg_set_batch
     user = get_auth_user()
@@ -1648,6 +1650,7 @@ def api_config_save():
     return jsonify({'ok': True})
 
 @app.route('/api/config/reset', methods=['POST'])
+@login_required
 def api_config_reset():
     conn = get_db()
     conn.execute('DELETE FROM config')
@@ -1874,6 +1877,7 @@ def page_outils():
                            clients=get_clients(), client_actif_id=cid)
 
 @app.route('/api/outils', methods=['GET'])
+@login_required
 def api_outils_get():
     conn = get_db()
     rows = [row_to_dict(r) for r in conn.execute(
@@ -1882,6 +1886,7 @@ def api_outils_get():
     return jsonify(rows)
 
 @app.route('/api/outils/ajouter', methods=['POST'])
+@login_required
 def api_outils_ajouter():
     d = request.json or {}
     nom  = d.get('nom','').strip()
@@ -1900,6 +1905,7 @@ def api_outils_ajouter():
     return jsonify({'ok': True, 'outils': outils})
 
 @app.route('/api/outils/<int:id>/supprimer', methods=['POST'])
+@login_required
 def api_outils_supprimer(id):
     conn = get_db()
     conn.execute('DELETE FROM outils WHERE id=?', (id,))
@@ -1907,6 +1913,7 @@ def api_outils_supprimer(id):
     return jsonify({'ok': True})
 
 @app.route('/api/outils/<int:id>/toggle', methods=['POST'])
+@login_required
 def api_outils_toggle(id):
     conn = get_db()
     conn.execute('UPDATE outils SET actif = 1 - actif WHERE id=?', (id,))
@@ -1927,6 +1934,7 @@ def liste_clients():
     return render_template('clients.html', clients=clients, client_actif_id=get_client_id())
 
 @app.route('/client/nouveau', methods=['GET','POST'])
+@login_required
 def nouveau_client():
     if request.method == 'POST':
         f = request.form
@@ -1948,6 +1956,7 @@ def nouveau_client():
     return render_template('form_client.html', client=None, action='Nouveau')
 
 @app.route('/client/<int:id>/editer', methods=['GET','POST'])
+@login_required
 def editer_client(id):
     conn = get_db()
     if request.method == 'POST':
@@ -1964,6 +1973,7 @@ def editer_client(id):
     return render_template('form_client.html', client=cl, action='Modifier')
 
 @app.route('/client/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_client(id):
     conn = get_db()
     conn.execute('PRAGMA foreign_keys = ON')
@@ -1976,6 +1986,7 @@ def supprimer_client(id):
     return redirect(url_for('liste_clients'))
 
 @app.route('/client/<int:id>/selectionner')
+@login_required
 def selectionner_client(id):
     """
     Sélectionne un client et redirige vers son dashboard.
@@ -2813,6 +2824,7 @@ def client_dashboard_view(cid):
     return single_client_dashboard(cid)
 
 @app.route('/parc', methods=['GET','POST'])
+@login_required
 def parc_general():
     cid = get_client_id()
     if not cid: return redirect(url_for('nouveau_client'))
@@ -3057,6 +3069,7 @@ def _get_logiciels_metier_list(conn, cid):
 
 
 @app.route('/appareil/nouveau', methods=['GET','POST'])
+@login_required
 def nouvel_appareil():
     cid = get_client_id()
     if not cid: return redirect(url_for('nouveau_client'))
@@ -3117,6 +3130,7 @@ def nouvel_appareil():
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/appareil/<int:id>/editer', methods=['GET','POST'])
+@login_required
 def editer_appareil(id):
     cid = get_client_id()
     conn = get_db()
@@ -3193,6 +3207,7 @@ def editer_appareil(id):
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/appareil/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_appareil(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3390,6 +3405,7 @@ def page_scan():
 # ─── SERVICES ────────────────────────────────────────────────────────────────
 
 @app.route('/services')
+@login_required
 def liste_services():
     cid = get_client_id()
     if not cid: return redirect(url_for('nouveau_client'))
@@ -3405,6 +3421,7 @@ def liste_services():
                            clients=get_clients(), client_actif_id=cid)
 
 @app.route('/service/nouveau', methods=['GET','POST'])
+@login_required
 def nouveau_service():
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3427,6 +3444,7 @@ def nouveau_service():
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/service/<int:id>/editer', methods=['GET','POST'])
+@login_required
 def editer_service(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3448,6 +3466,7 @@ def editer_service(id):
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/service/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_service(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3472,6 +3491,7 @@ def get_types_droits(cid):
     return types
 
 @app.route('/types-droits')
+@login_required
 def liste_types_droits():
     cid = get_client_id()
     if not cid: return redirect(url_for('nouveau_client'))
@@ -3484,6 +3504,7 @@ def liste_types_droits():
                            categories_droits=CATEGORIES_DROITS)
 
 @app.route('/api/type-droit', methods=['POST'])
+@login_required
 def api_creer_type_droit():
     cid = get_client_id()
     f = request.json or {}
@@ -3499,6 +3520,7 @@ def api_creer_type_droit():
     return jsonify(row)
 
 @app.route('/api/type-droit/<int:id>', methods=['PUT','DELETE'])
+@login_required
 def api_type_droit(id):
     cid = get_client_id()
     conn = get_db()
@@ -3542,6 +3564,7 @@ def liste_utilisateurs():
                            filtre_svc=filtre_svc, filtre_statut=filtre_statut)
 
 @app.route('/utilisateur/nouveau', methods=['GET','POST'])
+@login_required
 def nouvel_utilisateur():
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3573,6 +3596,7 @@ def nouvel_utilisateur():
                            services=services, client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/utilisateur/<int:id>/editer', methods=['GET','POST'])
+@login_required
 def editer_utilisateur(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3605,6 +3629,7 @@ def editer_utilisateur(id):
                            services=services, client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/utilisateur/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_utilisateur(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3620,6 +3645,7 @@ def supprimer_utilisateur(id):
     return redirect(url_for('liste_utilisateurs'))
 
 @app.route('/utilisateur/<int:id>/droits')
+@login_required
 def droits_utilisateur(id):
     cid = get_client_id()
     conn = get_db()
@@ -3644,6 +3670,7 @@ def droits_utilisateur(id):
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/api/droit', methods=['POST'])
+@login_required
 def api_ajouter_droit():
     cid = get_client_id()
     f = request.json or {}
@@ -3663,6 +3690,7 @@ def api_ajouter_droit():
     return jsonify(row)
 
 @app.route('/api/droit/<int:id>', methods=['PUT','DELETE'])
+@login_required
 def api_droit(id):
     cid = get_client_id()
     conn = get_db()
@@ -3680,6 +3708,7 @@ def api_droit(id):
     return jsonify(row)
 
 @app.route('/api/utilisateurs')
+@login_required
 def api_utilisateurs():
     cid = get_client_id()
     conn = get_db()
@@ -3766,6 +3795,7 @@ def liste_identifiants():
                            filtre_cat=filtre_cat, pagination=pagination, stats=stats)
 
 @app.route('/identifiant/nouveau', methods=['GET','POST'])
+@login_required
 def nouvel_identifiant():
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3809,6 +3839,7 @@ def nouvel_identifiant():
                            categories=get_liste_cached('categories_identifiants'))
 
 @app.route('/identifiant/<int:id>/editer', methods=['GET','POST'])
+@login_required
 def editer_identifiant(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3858,6 +3889,7 @@ def editer_identifiant(id):
                            categories=get_liste_cached('categories_identifiants'))
 
 @app.route('/identifiant/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_identifiant(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -3872,6 +3904,7 @@ def supprimer_identifiant(id):
     return redirect(url_for('liste_identifiants'))
 
 @app.route('/api/identifiant/<int:id>/mdp')
+@login_required
 def api_get_mdp(id):
     cid = get_client_id()
     conn = get_db()
@@ -3886,6 +3919,7 @@ def api_get_mdp(id):
 # ─── DOCUMENTS APPAREILS ─────────────────────────────────────────────────────
 
 @app.route('/appareil/<int:id>/documents')
+@login_required
 def documents_appareil(id):
     cid = get_client_id()
     conn = get_db()
@@ -3907,6 +3941,7 @@ def documents_appareil(id):
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/appareil/<int:id>/documents/upload', methods=['POST'])
+@login_required
 def upload_document(id):
     cid = get_client_id()
     if 'fichier' not in request.files:
@@ -3954,6 +3989,7 @@ def upload_document(id):
     return redirect(next_url)
 
 @app.route('/document/<int:id>/telecharger')
+@login_required
 def telecharger_document(id):
     cid = get_client_id()
     if not cid:
@@ -3987,6 +4023,7 @@ def telecharger_document(id):
         conn.close()
 
 @app.route('/document/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_document(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -4015,6 +4052,7 @@ def supprimer_document(id):
     return redirect(next_url)
 
 @app.route('/document/<int:id>/apercu')
+@login_required
 def apercu_document(id):
     cid = get_client_id()
     if not cid:
@@ -4066,6 +4104,7 @@ def api_garantie_ignorer(id):
 # ─── API DOCUMENTS MODALE ────────────────────────────────────────────────────
 
 @app.route('/api/appareil/<int:id>/documents')
+@login_required
 def api_docs_appareil(id):
     cid = get_client_id()
     conn = get_db()
@@ -4081,6 +4120,7 @@ def api_docs_appareil(id):
     return jsonify(docs)
 
 @app.route('/api/peripherique/<int:id>/documents')
+@login_required
 def api_docs_peripherique(id):
     cid = get_client_id()
     conn = get_db()
@@ -4098,6 +4138,7 @@ def api_docs_peripherique(id):
 # ─── DOCUMENTS PÉRIPHÉRIQUES ───────────────────────────────────────
 
 @app.route('/peripherique/<int:id>/documents/upload', methods=['POST'])
+@login_required
 def upload_doc_peripherique(id):
     cid = get_client_id()
     if 'fichier' not in request.files:
@@ -4144,6 +4185,7 @@ def upload_doc_peripherique(id):
     return redirect(url_for('editer_peripherique', id=id))
 
 @app.route('/doc-peripherique/<int:id>/telecharger')
+@login_required
 def telecharger_doc_peripherique(id):
     cid = get_client_id()
     conn = get_db()
@@ -4164,6 +4206,7 @@ def telecharger_doc_peripherique(id):
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
 
 @app.route('/doc-peripherique/<int:id>/apercu')
+@login_required
 def apercu_doc_peripherique(id):
     cid = get_client_id()
     conn = get_db()
@@ -4180,6 +4223,7 @@ def apercu_doc_peripherique(id):
         return f"Fichier introuvable : {doc.get('nom_fichier', '?')}", 404
 
 @app.route('/doc-peripherique/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_doc_peripherique(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -4237,6 +4281,7 @@ def baie_brassage():
                            photos=photos, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/api/baie/slot', methods=['POST'])
+@login_required
 def api_baie_ajouter_slot():
     cid = get_client_id()
     f = request.json or {}
@@ -4262,6 +4307,7 @@ def api_baie_ajouter_slot():
     return jsonify(slot)
 
 @app.route('/api/baie/slot/<int:id>', methods=['PUT','DELETE'])
+@login_required
 def api_baie_slot(id):
     cid = get_client_id()
     conn = get_db()
@@ -4283,6 +4329,7 @@ def api_baie_slot(id):
     return jsonify(slot)
 
 @app.route('/api/baie/slot/<int:id>/deplacer', methods=['POST'])
+@login_required
 def api_baie_deplacer_slot(id):
     '''Drag & drop : déplace un slot vers une nouvelle position/col.'''
     cid = get_client_id()
@@ -4303,6 +4350,7 @@ def api_baie_deplacer_slot(id):
     return jsonify(slot)
 
 @app.route('/api/baie/slots')
+@login_required
 def api_baie_slots():
     cid = get_client_id()
     baie_nom = request.args.get('baie', 'Baie principale')
@@ -4325,6 +4373,7 @@ def api_baie_slots():
 # ─── PHOTOS BAIE ─────────────────────────────────────────────────────────────
 
 @app.route('/baie/photo/upload', methods=['POST'])
+@login_required
 def upload_photo_baie():
     cid = get_client_id()
     if 'fichier' not in request.files:
@@ -4349,6 +4398,7 @@ def upload_photo_baie():
     return redirect(url_for('baie_brassage'))
 
 @app.route('/baie/photo/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_photo_baie(id):
     cid = get_client_id()
     conn = get_db()
@@ -4362,6 +4412,7 @@ def supprimer_photo_baie(id):
     return redirect(url_for('baie_brassage'))
 
 @app.route('/baie/photo/<int:id>/apercu')
+@login_required
 def apercu_photo_baie(id):
     cid = get_client_id()
     conn = get_db()
@@ -4379,6 +4430,7 @@ def apercu_photo_baie(id):
     return send_from_directory(UPLOAD_FOLDER, photo['nom_fichier'], as_attachment=False)
 
 @app.route('/api/baie/nb_u', methods=['POST'])
+@login_required
 def api_baie_nb_u():
     cid = get_client_id()
     data = request.json or {}
@@ -5218,6 +5270,7 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
             scan_status.update({"message": f"Erreur : {e}", "running": False})
 
 @app.route('/api/scan/lancer', methods=['POST'])
+@login_required
 def lancer_scan():
     with scan_lock:
         if scan_status["running"]: return jsonify({"error":"Scan déjà en cours"}), 400
@@ -5236,10 +5289,12 @@ def lancer_scan():
     return jsonify({"status": "started", "plages": plages, "enrich_wmi": enrich_wmi})
 
 @app.route('/api/scan/status')
+@login_required
 def status_scan():
     with scan_lock: return jsonify(dict(scan_status))
 
 @app.route('/api/scan/importer', methods=['POST'])
+@login_required
 def importer_scan():
     cid = get_client_id()
     items = request.json.get('appareils', [])
@@ -5838,6 +5893,7 @@ def liste_peripheriques():
                            stats=stats, pagination=pagination)
 
 @app.route('/peripherique/nouveau', methods=['GET','POST'])
+@login_required
 def nouveau_peripherique():
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -5882,6 +5938,7 @@ def nouveau_peripherique():
                            linked_app_ids=[int(pre_app)] if pre_app else [])
 
 @app.route('/peripherique/<int:id>/editer', methods=['GET','POST'])
+@login_required
 def editer_peripherique(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -5943,6 +6000,7 @@ def editer_peripherique(id):
                            linked_app_ids=linked_app_ids, interventions=interventions)
 
 @app.route('/peripherique/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_peripherique(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -5958,6 +6016,7 @@ def supprimer_peripherique(id):
     return redirect(url_for('liste_peripheriques'))
 
 @app.route('/api/peripheriques/appareil/<int:app_id>')
+@login_required
 def api_periph_appareil(app_id):
     cid = get_client_id()
     conn = get_db()
@@ -6054,6 +6113,7 @@ def liste_contrats():
                            pagination=pagination)
 
 @app.route('/contrat/nouveau', methods=['GET','POST'])
+@login_required
 def nouveau_contrat():
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -6108,6 +6168,7 @@ def nouveau_contrat():
                            types_contrats=get_liste_cached('types_contrats'), periodicites=PERIODICITES)
 
 @app.route('/contrat/<int:id>', methods=['GET'])
+@login_required
 def detail_contrat(id):
     cid = get_client_id()
     conn = get_db()
@@ -6133,6 +6194,7 @@ def detail_contrat(id):
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/contrat/<int:id>/editer', methods=['GET','POST'])
+@login_required
 def editer_contrat(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -6191,6 +6253,7 @@ def editer_contrat(id):
                            types_contrats=get_liste_cached('types_contrats'), periodicites=PERIODICITES)
 
 @app.route('/contrat/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_contrat(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -6203,6 +6266,7 @@ def supprimer_contrat(id):
     return redirect(url_for('liste_contrats'))
 
 @app.route('/contrat/<int:id>/document/upload', methods=['POST'])
+@login_required
 def upload_doc_contrat(id):
     cid = get_client_id()
     if 'fichier' not in request.files:
@@ -6244,6 +6308,7 @@ def upload_doc_contrat(id):
     return redirect(url_for('detail_contrat', id=id))
 
 @app.route('/contrat/document/<int:id>/supprimer', methods=['POST'])
+@login_required
 def supprimer_doc_contrat(id):
     if not can_write():
         flash('Accès en lecture seule — modification non autorisée', 'danger')
@@ -6268,6 +6333,7 @@ def supprimer_doc_contrat(id):
     return redirect(url_for('detail_contrat', id=ctr_id))
 
 @app.route('/contrat/document/<int:id>/apercu')
+@login_required
 def apercu_doc_contrat(id):
     cid = get_client_id()
     conn = get_db()
@@ -6290,6 +6356,7 @@ def apercu_doc_contrat(id):
         return f"Fichier introuvable : {doc.get('nom_fichier', '?')}", 404
 
 @app.route('/contrat/document/<int:id>/telecharger')
+@login_required
 def telecharger_doc_contrat(id):
     cid = get_client_id()
     conn = get_db()
@@ -6309,6 +6376,7 @@ def telecharger_doc_contrat(id):
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
 
 @app.route('/api/contrats/appareil/<int:app_id>')
+@login_required
 def api_contrats_appareil(app_id):
     cid = get_client_id()
     conn = get_db()
@@ -6319,6 +6387,7 @@ def api_contrats_appareil(app_id):
     return jsonify([fmt_contrat(r) for r in rows])
 
 @app.route('/api/contrats/peripherique/<int:per_id>')
+@login_required
 def api_contrats_peripherique(per_id):
     cid = get_client_id()
     conn = get_db()
@@ -7054,6 +7123,7 @@ def telecharger_doc_intervention(id):
 
 
 @app.route('/identifiant/<int:id>/popup')
+@login_required
 def popup_identifiant(id):
     cid = get_client_id()
     conn = get_db()
@@ -7882,12 +7952,14 @@ def _initialiser_liste(conn, nom: str, exclure: str = None):
             pass
 
 @app.route('/api/listes/<nom>', methods=['GET'])
+@login_required
 def api_liste_get(nom):
     if nom not in LISTE_DEFAULTS:
         return jsonify({'error': 'Liste inconnue'}), 404
     return jsonify({'nom': nom, 'valeurs': get_liste(nom), 'defaults': LISTE_DEFAULTS[nom]})
 
 @app.route('/api/listes/<nom>/ajouter', methods=['POST'])
+@login_required
 def api_liste_ajouter(nom):
     if nom not in LISTE_DEFAULTS:
         return jsonify({'error': 'Liste inconnue'}), 404
@@ -7936,6 +8008,7 @@ def api_liste_ajouter(nom):
     return jsonify({'ok': True, 'valeurs': get_liste(nom)})
 
 @app.route('/api/listes/<nom>/supprimer', methods=['POST'])
+@login_required
 def api_liste_supprimer(nom):
     if nom not in LISTE_DEFAULTS:
         return jsonify({'error': 'Liste inconnue'}), 404
@@ -7989,6 +8062,7 @@ def api_liste_supprimer(nom):
     return jsonify({'ok': True, 'valeurs': valeurs_apres})
 
 @app.route('/api/listes/<nom>/reset', methods=['POST'])
+@login_required
 def api_liste_reset(nom):
     if nom not in LISTE_DEFAULTS:
         return jsonify({'error': 'Liste inconnue'}), 404
@@ -8018,6 +8092,7 @@ def api_liste_reset(nom):
 
 
 @app.route('/api/services', methods=['GET'])
+@login_required
 def api_services_get():
     cid = get_client_id()
     if not cid: return jsonify({'error': 'no client'}), 400
@@ -8027,6 +8102,7 @@ def api_services_get():
     return jsonify({'services': [{'id':r[0],'nom':r[1],'couleur':r[2],'responsable':r[3]} for r in rows]})
 
 @app.route('/api/services/ajouter', methods=['POST'])
+@login_required
 def api_services_ajouter():
     cid = get_client_id()
     if not cid: return jsonify({'error': 'no client'}), 400
@@ -8046,6 +8122,7 @@ def api_services_ajouter():
     return jsonify({'ok': True, 'services': [{'id':r[0],'nom':r[1],'couleur':r[2],'responsable':r[3]} for r in rows]})
 
 @app.route('/api/services/supprimer', methods=['POST'])
+@login_required
 def api_services_supprimer():
     cid = get_client_id()
     if not cid: return jsonify({'error': 'no client'}), 400
@@ -8144,6 +8221,7 @@ _wd_thread = threading.Thread(target=_watchdog_loop, daemon=True, name='PingWatc
 _wd_thread.start()
 
 @app.route('/api/ping/statuts')
+@login_required
 def api_ping_statuts():
     cid = get_client_id()
     conn = get_db()
@@ -8168,6 +8246,7 @@ def api_ping_statuts():
     })
 
 @app.route('/api/ping/summary')
+@login_required
 def api_ping_summary():
     '''Résumé léger pour la topbar : nb en ligne, nb total, dernière mise à jour'''
     cid = get_client_id()
@@ -8183,11 +8262,13 @@ def api_ping_summary():
     })
 
 @app.route('/api/ping/force', methods=['POST'])
+@login_required
 def api_ping_force():
     threading.Thread(target=_watchdog_cycle, daemon=True).start()
     return jsonify({'started': True})
 
 @app.route('/api/ping/appareil/<int:id>')
+@login_required
 def api_ping_appareil(id):
     cid = get_client_id()
     conn = get_db()
@@ -8513,6 +8594,7 @@ def page_historique():
                            clients=get_clients(), client_actif_id=cid)
 
 @app.route('/api/historique/entite/<entite>/<int:entite_id>')
+@login_required
 def api_historique_entite(entite, entite_id):
     cid = get_client_id()
     conn = get_db()
@@ -8548,6 +8630,7 @@ COLS_PERIPHERIQUES = [
 # ─── EXPORT CSV APPAREILS ────────────────────────────────────────────────────
 
 @app.route('/appareils/export.csv')
+@login_required
 def export_appareils_csv():
     cid = get_client_id()
     if not cid: return redirect(url_for('nouveau_client'))
@@ -8570,6 +8653,7 @@ def export_appareils_csv():
 # ─── EXPORT CSV PÉRIPHÉRIQUES ────────────────────────────────────────────────
 
 @app.route('/peripheriques/export.csv')
+@login_required
 def export_peripheriques_csv():
     cid = get_client_id()
     if not cid: return redirect(url_for('nouveau_client'))
@@ -8592,6 +8676,7 @@ def export_peripheriques_csv():
 # ─── IMPORT CSV APPAREILS ────────────────────────────────────────────────────
 
 @app.route('/appareils/import', methods=['POST'])
+@login_required
 def import_appareils_csv():
     cid = get_client_id()
     if not cid: return redirect(url_for('liste_appareils'))
@@ -8712,6 +8797,7 @@ def import_appareils_csv():
 # ─── IMPORT CSV PÉRIPHÉRIQUES ────────────────────────────────────────────────
 
 @app.route('/peripheriques/import', methods=['POST'])
+@login_required
 def import_peripheriques_csv():
     cid = get_client_id()
     if not cid: return redirect(url_for('liste_peripheriques'))
@@ -8822,6 +8908,7 @@ def page_kb():
                            clients=get_clients(), client_actif_id=get_client_id())
 
 @app.route('/api/kb/search')
+@login_required
 def api_kb_search():
     q = request.args.get('q', '').lower().strip()
     conn = get_db()
@@ -8835,6 +8922,7 @@ def api_kb_search():
     return jsonify(results)
 
 @app.route('/api/kb/article/<int:id>')
+@login_required
 def api_kb_article(id):
     conn = get_db()
     a = row_to_dict(conn.execute(
@@ -8844,6 +8932,7 @@ def api_kb_article(id):
     return jsonify(a)
 
 @app.route('/api/kb/article', methods=['POST'])
+@login_required
 def api_kb_create_article():
     f = request.json or {}
     now = datetime.utcnow().isoformat()
@@ -8857,6 +8946,7 @@ def api_kb_create_article():
     return jsonify(a)
 
 @app.route('/api/kb/article/<int:id>', methods=['PUT'])
+@login_required
 def api_kb_update_article(id):
     f = request.json or {}
     now = datetime.utcnow().isoformat()
@@ -8869,6 +8959,7 @@ def api_kb_update_article(id):
     return jsonify(a)
 
 @app.route('/api/kb/article/<int:id>', methods=['DELETE'])
+@login_required
 def api_kb_delete_article(id):
     conn = get_db()
     conn.execute('DELETE FROM kb_articles WHERE id=?', (id,))
@@ -8876,6 +8967,7 @@ def api_kb_delete_article(id):
     return jsonify({'ok': True})
 
 @app.route('/api/kb/categories', methods=['GET'])
+@login_required
 def api_kb_categories():
     conn = get_db()
     cats = [row_to_dict(r) for r in conn.execute('SELECT * FROM kb_categories ORDER BY ordre,nom').fetchall()]
@@ -8883,6 +8975,7 @@ def api_kb_categories():
     return jsonify(cats)
 
 @app.route('/api/kb/category', methods=['POST'])
+@login_required
 def api_kb_create_category():
     f = request.json or {}
     conn = get_db()
@@ -8895,6 +8988,7 @@ def api_kb_create_category():
     return jsonify(cat)
 
 @app.route('/api/kb/category/<int:id>', methods=['DELETE'])
+@login_required
 def api_kb_delete_category(id):
     conn = get_db()
     conn.execute('DELETE FROM kb_articles WHERE categorie_id=?', (id,))
@@ -9044,6 +9138,7 @@ def _export_client_ids_for_user(conn, uid):
     return [r[0] for r in conn.execute('SELECT id FROM clients WHERE auth_user_id=?', (uid,)).fetchall()]
 
 @app.route('/export/global.json')
+@login_required
 def export_global_json():
     uid   = session.get('auth_user_id')
     scope = request.args.get('scope', 'user')
@@ -9064,6 +9159,7 @@ def export_global_json():
     return _make_json_response(data, fname)
 
 @app.route('/export/global.zip')
+@login_required
 def export_global_zip():
     uid   = session.get('auth_user_id')
     scope = request.args.get('scope', 'user')
@@ -9086,6 +9182,7 @@ def export_global_zip():
     return _make_zip_response(data, fname, fnames)
 
 @app.route('/import/global', methods=['POST'])
+@login_required
 def import_global():
     mode  = request.form.get('mode', 'merge')
     scope = request.form.get('scope', 'user')
@@ -9234,6 +9331,7 @@ def page_logout():
     return redirect(url_for('page_login'))
 
 @app.route('/profil', methods=['GET','POST'])
+@login_required
 def page_profil():
     u = get_auth_user()
     if not u:
@@ -9281,6 +9379,7 @@ def page_profil():
 # ─── ADMIN UTILISATEURS ───────────────────────────────────────────────────────
 
 @app.route('/admin/utilisateurs')
+@login_required
 def admin_utilisateurs():
     u = get_auth_user()
     if not u or u.get('role') != 'admin':
@@ -9294,6 +9393,7 @@ def admin_utilisateurs():
                            clients=get_clients(), client_actif_id=get_client_id())
 
 @app.route('/admin/utilisateur/nouveau', methods=['GET','POST'])
+@login_required
 def admin_nouvel_utilisateur():
     u = get_auth_user()
     if not u or u.get('role') != 'admin':
@@ -9328,6 +9428,7 @@ def admin_nouvel_utilisateur():
                            clients=get_clients(), client_actif_id=get_client_id())
 
 @app.route('/admin/utilisateur/<int:uid>/editer', methods=['GET','POST'])
+@login_required
 def admin_editer_utilisateur(uid):
     current = get_auth_user()
     if not current or current.get('role') != 'admin':
@@ -9363,6 +9464,7 @@ def admin_editer_utilisateur(uid):
                            clients=get_clients(), client_actif_id=get_client_id())
 
 @app.route('/admin/utilisateur/<int:uid>/supprimer', methods=['POST'])
+@login_required
 def admin_supprimer_utilisateur(uid):
     current = get_auth_user()
     if not current or current.get('role') != 'admin':
@@ -9383,6 +9485,7 @@ def admin_supprimer_utilisateur(uid):
 
 
 @app.route('/admin/email-config', methods=['GET','POST'])
+@login_required
 def admin_email_config():
     user = get_auth_user()
     if not user or user.get('role') != 'admin':
@@ -9407,6 +9510,7 @@ def admin_email_config():
 # ─── PARTAGE DE CLIENTS ───────────────────────────────────────────────────────
 
 @app.route('/client/<int:cid>/partager', methods=['GET','POST'])
+@login_required
 def partager_client(cid):
     u = get_auth_user()
     if not u:
@@ -9446,6 +9550,7 @@ def partager_client(cid):
                            all_users=all_users, clients=get_clients(), client_actif_id=get_client_id())
 
 @app.route('/user/logo/<path:filename>')
+@login_required
 def user_logo(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 

@@ -9,6 +9,7 @@ Usage (in app.py):
 """
 
 from flask import jsonify
+from auth_utils import login_required
 from update_notifier import get_notifier
 
 
@@ -24,12 +25,14 @@ def register_update_routes(app):
     """
 
     @app.route('/api/updates/status', methods=['GET'])
+    @login_required
     def get_update_status():
         """Get current update status and notification."""
         notifier = get_notifier()
         return jsonify(notifier.status)
 
     @app.route('/api/updates/check', methods=['POST'])
+    @login_required
     def check_updates():
         """Check for updates immediately."""
         notifier = get_notifier()
@@ -50,6 +53,7 @@ def register_update_routes(app):
         })
 
     @app.route('/api/updates/install', methods=['POST'])
+    @login_required
     def install_update():
         """Install update now."""
         notifier = get_notifier()
@@ -74,6 +78,7 @@ def register_update_routes(app):
             }), 500
 
     @app.route('/api/updates/dismiss', methods=['POST'])
+    @login_required
     def dismiss_notification():
         """Dismiss update notification."""
         notifier = get_notifier()

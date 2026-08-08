@@ -1,5 +1,54 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.31] - 2026-08-08 🔒
+
+### 🔒 CORRECTIF DE SÉCURITÉ CRITIQUE
+
+#### 109 routes étaient accessibles sans authentification
+Sur les 170 routes de l'application, **58 seulement** portaient `@login_required`.
+Le point de départ était `/appareil/<id>/documents`, mais l'audit a montré que le
+problème était généralisé à presque toute l'application.
+
+Ce n'était pas qu'une fuite en lecture : `get_client_id()` (client_helpers.py)
+retombe sur `SELECT id FROM clients ORDER BY id LIMIT 1` quand la session est vide.
+Un visiteur anonyme se voyait donc attribuer le **premier client de la base** et
+pouvait consulter *et modifier* ses données.
+
+- ✅ Étaient exposés, entre autres :
+  - **Documents joints** (rapports système, factures, contrats) — consultation,
+    aperçu, téléchargement, upload et suppression, pour les appareils, les
+    périphériques et les contrats
+  - **`/api/identifiant/<id>/mdp`** — déchiffre et renvoie un mot de passe en clair
+  - **CRUD complet** : appareils, périphériques, contrats, services, utilisateurs
+    finaux, identifiants, clients, baie de brassage, plans
+  - **`/export/global.zip` et `/export/global.json`** — export intégral de la base,
+    et `/import/global` qui la réécrit
+  - **Administration** : `/admin/utilisateurs`, création/édition/suppression de
+    comptes, `/admin/email-config`, partage de client
+  - **Import/export CSV** appareils et périphériques, scan réseau, base de
+    connaissances, listes de configuration, `/api/config`
+- ✅ **`/api/updates/install`** (app_update_routes.py) permettait à n'importe qui sur
+  le réseau de déclencher l'installation d'une mise à jour — vecteur d'exécution de
+  code à distance
+- ✅ Fix : `@login_required` ajouté sur les 105 routes concernées de `app.py` et les
+  4 routes de `app_update_routes.py`
+
+#### Endpoints volontairement publics — inchangés
+`/login`, `/logout`, `/api/clients-public`, `/api/device-info`,
+`/api/device-info/upload-report`, `/download/system-info-collector` et
+`/download/system-info-collector-gui` restent accessibles sans session : ce sont les
+seuls endpoints appelés par les collecteurs système (vérifié dans
+`system-info-collector.py` et `system-info-collector-gui.py`).
+
+#### Vérification
+- Anonyme : les 101 routes GET protégées répondent `302 → /login?next=…`, les
+  POST/DELETE sensibles sont bloqués
+- Connecté : 31 pages et endpoints AJAX testés (dont `/api/config`, `/api/ping/*`,
+  `/api/listes/*`, `/api/baie/slots`, `/appareils/export.csv`, `/admin/utilisateurs`)
+  répondent tous en 200 — aucune régression sur les appels AJAX des templates
+
+---
+
 ## [2.6.21] - 2026-07-05 🔧
 
 ### 🔧 CORRECTION
