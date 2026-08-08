@@ -592,16 +592,40 @@ def _decode_digital_product_id(blob):
     return formatted if _is_plausible_key(formatted) else ''
 
 
+# Alphabet d'encodage des clés produit Microsoft : 24 caractères, sans les
+# lettres prêtant à confusion (ni O/0, ni I/1, ni voyelles). Le « N » n'en fait
+# pas partie mais apparaît bien dans les clés affichées : c'est le caractère que
+# l'algorithme Windows 8+ insère à une position variable.
+KEY_ALPHABET = 'BCDFGHJKMPQRTVWXY2346789'
+_KEY_CHARS = KEY_ALPHABET + 'N'
+_KEY_RE = re.compile(r'^[%s]{5}(-[%s]{5}){4}$' % (_KEY_CHARS, _KEY_CHARS))
+
+
+def _is_valid_key_format(key):
+    """Une clé produit Microsoft : 5 groupes de 5 caractères d'un alphabet fixe."""
+    return bool(_KEY_RE.match((key or '').strip().upper()))
+
+
 def _is_plausible_key(key):
     """Écarte les clés décodées depuis un blob vide.
 
     Sous Windows 10/11 avec licence numérique, DigitalProductId existe mais sa
     zone de clé est à zéro : le décodage produit alors « BBBBB-BBBBB-… », soit
-    l'index 0 répété. Une vraie clé comporte au moins cinq caractères
-    distincts.
+    l'index 0 répété. Une vraie clé comporte au moins cinq caractères distincts.
     """
-    letters = set((key or '').replace('-', ''))
-    return len(letters) >= 5
+    if not _is_valid_key_format(key):
+        return False
+    return len(set(key.replace('-', ''))) >= 5
+
+
+def _registry_string(root, path, value_name):
+    try:
+        import winreg
+        with winreg.OpenKey(root, path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+            value, _ = winreg.QueryValueEx(key, value_name)
+            return str(value).strip()
+    except Exception:
+        return ''
 
 
 def _read_registry_binary(root, path, value_name):
@@ -617,101 +641,166 @@ def _read_registry_binary(root, path, value_name):
         return None
 
 
-def collect_licenses():
-    """Collecte les licences avec leur clé produit complète.
+def windows_key_candidates():
+    """Toutes les sources exploitables d'une clé produit Windows complète.
 
-    Retourne une liste de dicts : editeur, produit, cle, statut, source.
-    La clé est renvoyée en entier (jamais tronquée) — c'est le but recherché.
+    Il n'existe pas de source unique qui fonctionne partout — d'où le balayage :
+
+      - `BackupProductKeyDefault` : clé complète en clair, déposée par Windows
+        lors de l'activation. Présente sur les installations retail et volume
+        avec clé saisie, c'est la source la plus fiable quand elle existe.
+      - `OA3xOriginalProductKey` : clé OEM gravée dans la table ACPI MSDM des
+        machines préinstallées. Attention, sur une machine réinstallée avec une
+        autre clé, elle ne correspond plus à la licence active.
+      - `DigitalProductId` : blob du registre, décodable sur Windows 7/8 et sur
+        les installations où une clé a été saisie. Sur Windows 10/11 en licence
+        numérique, sa zone de clé est remplie de zéros.
+
+    Retourne une liste de (clé, source), sans doublon.
+    """
+    if not IS_WINDOWS:
+        return []
+    try:
+        import winreg
+    except Exception:
+        return []
+
+    HKLM = winreg.HKEY_LOCAL_MACHINE
+    CV = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+    candidats = []
+
+    def add(cle, source):
+        cle = (cle or '').strip().upper()
+        if _is_plausible_key(cle) and not any(c == cle for c, _ in candidats):
+            candidats.append((cle, source))
+
+    add(_registry_string(HKLM, CV + r'\SoftwareProtectionPlatform',
+                         'BackupProductKeyDefault'), 'Registre (clé installée)')
+
+    oem = _ps_json(
+        "try { Get-CimInstance -ClassName SoftwareLicensingService -ErrorAction Stop "
+        "| Select-Object OA3xOriginalProductKey | ConvertTo-Json -Compress } catch {}",
+        timeout=20)
+    for row in _as_list(oem):
+        add(row.get('OA3xOriginalProductKey'), 'BIOS OEM (table MSDM)')
+
+    blob = _read_registry_binary(HKLM, CV, 'DigitalProductId')
+    if blob:
+        add(_decode_digital_product_id(blob), 'Registre (DigitalProductId)')
+
+    return candidats
+
+
+def _licence_entry(editeur, produit, cle, statut, source, partielle='', verifiee=False):
+    """Fabrique une entrée de licence normalisée."""
+    return {
+        'editeur': editeur,
+        'produit': produit,
+        'cle': cle or '',
+        'cle_complete': bool(cle),
+        'cle_verifiee': bool(cle) and verifiee,
+        'cle_partielle': partielle or '',
+        'statut': statut,
+        'source': source,
+    }
+
+
+def _appairer_cle(candidats, partielle):
+    """Retrouve, parmi les clés récupérées, celle de la licence réellement active.
+
+    Windows n'expose publiquement que les 5 derniers caractères de la clé en
+    service (`PartialProductKey`). Ces 5 caractères servent donc de contrôle :
+    une clé complète dont la fin ne correspond pas n'est pas celle qui est
+    installée — cas classique d'une machine OEM réinstallée avec une autre
+    licence, où la clé du BIOS subsiste sans être utilisée.
+
+    Retourne (appairée, autres).
+    """
+    partielle = (partielle or '').strip().upper()
+    if not partielle:
+        return (None, list(candidats))
+    appairee = None
+    autres = []
+    for cle, source in candidats:
+        if appairee is None and cle.endswith(partielle):
+            appairee = (cle, source)
+        else:
+            autres.append((cle, source))
+    return (appairee, autres)
+
+
+_LICENCE_STATUTS = {
+    0: 'Non licencié', 1: 'Activé', 2: 'Période de grâce', 3: 'Grâce OEM',
+    4: 'Grâce hors tolérance', 5: 'Non autorisé', 6: 'Notification',
+}
+
+
+def collect_licenses():
+    """Collecte les licences installées avec leur clé produit complète.
+
+    La clé est renvoyée en entier, jamais tronquée. Quand elle n'est pas
+    récupérable — licence numérique Windows, Office Click-to-Run, activation
+    KMS — aucune clé n'existe sur la machine : le champ reste vide et
+    `cle_partielle` porte les 5 derniers caractères, seule information que
+    Windows expose. Afficher un « XXXXX-XXXXX-XXXXX-XXXXX-ABCDE » à la place
+    donnerait l'illusion d'une vraie clé.
     """
     if not IS_WINDOWS:
         return []
 
     licences = []
-    seen_keys = set()
+    candidats = windows_key_candidates()
 
-    def add(editeur, produit, cle, statut, source, complete=True, partielle=''):
-        cle = (cle or '').strip()
-        if not produit:
-            return
-        # Une même clé peut remonter par deux voies (BIOS + registre) : on ne
-        # la liste qu'une fois, en gardant la première source rencontrée.
-        if cle and cle in seen_keys:
-            return
-        if cle:
-            seen_keys.add(cle)
-        licences.append({
-            'editeur': editeur,
-            'produit': produit,
-            'cle': cle,
-            'cle_complete': bool(cle) and complete,
-            'cle_partielle': partielle,
-            'statut': statut,
-            'source': source,
-        })
-
-    # 1. Clé OEM gravée dans le BIOS (machines préinstallées) — clé complète.
-    oem = _ps_json(
-        "try { Get-CimInstance -ClassName SoftwareLicensingService -ErrorAction Stop "
-        "| Select-Object OA3xOriginalProductKey | ConvertTo-Json -Compress } catch {}",
-        timeout=20,
-    )
-    for row in _as_list(oem):
-        key = (row.get('OA3xOriginalProductKey') or '').strip()
-        if key:
-            add('Microsoft', 'Windows (clé OEM BIOS)', key, 'Préinstallée', 'BIOS OA3')
-
-    # 2. Clé installée, décodée depuis le registre — complète elle aussi.
-    try:
-        import winreg
-        blob = _read_registry_binary(
-            winreg.HKEY_LOCAL_MACHINE,
-            r'SOFTWARE\Microsoft\Windows NT\CurrentVersion',
-            'DigitalProductId',
-        )
-    except Exception:
-        blob = None
-    decoded = _decode_digital_product_id(blob) if blob else ''
-
-    # 3. État d'activation + édition (la clé partielle sert de recoupement).
-    products = _ps_json(
+    produits = _ps_json(
         "$p = @(); try { $p = @(Get-CimInstance -ClassName SoftwareLicensingProduct "
         "-Filter 'PartialProductKey IS NOT NULL' -ErrorAction SilentlyContinue "
         "| Select-Object Name,Description,LicenseStatus,PartialProductKey) } catch {}; "
         "$p | ConvertTo-Json -Compress -Depth 3",
-        timeout=25,
-    )
-    status_labels = {
-        0: 'Non licencié', 1: 'Activé', 2: 'Période de grâce', 3: 'Grâce OEM',
-        4: 'Grâce hors tolérance', 5: 'Non autorisé', 6: 'Notification',
-    }
-    for row in _as_list(products):
-        name = (row.get('Name') or '').strip()
-        if not name:
+        timeout=25)
+
+    restants = list(candidats)
+    vu_windows = False
+
+    for row in _as_list(produits):
+        nom = (row.get('Name') or '').strip()
+        if not nom:
             continue
-        statut = status_labels.get(row.get('LicenseStatus'), 'Inconnu')
-        partial = (row.get('PartialProductKey') or '').strip()
-        # Le décodage registre ne concerne que Windows : on ne l'attache jamais
-        # à une licence Office.
-        cle = decoded if ('windows' in name.lower() and decoded) else ''
-        if cle:
-            add('Microsoft', name, cle, statut, 'Registre Windows',
-                complete=True, partielle=partial)
-        else:
-            # Licence numérique ou MAK : la clé complète n'existe nulle part sur
-            # la machine, seuls les 5 derniers caractères sont exposés. Mieux
-            # vaut l'annoncer que d'afficher « XXXXX-…-ABCDE » qui aurait l'air
-            # d'une vraie clé tronquée.
-            add('Microsoft', name, '', statut, 'Windows Licensing',
-                complete=False, partielle=partial)
+        statut = _LICENCE_STATUTS.get(row.get('LicenseStatus'), 'Inconnu')
+        partielle = (row.get('PartialProductKey') or '').strip()
+        est_windows = 'windows' in nom.lower()
 
-    # 4. Licences Office : DigitalProductId sous chaque GUID d'enregistrement.
-    licences.extend(_collect_office_licenses(seen_keys))
+        if est_windows:
+            vu_windows = True
+            appairee, restants = _appairer_cle(restants, partielle)
+            if appairee:
+                licences.append(_licence_entry(
+                    'Microsoft', nom, appairee[0], statut, appairee[1],
+                    partielle=partielle, verifiee=True))
+                continue
 
+        licences.append(_licence_entry(
+            'Microsoft', nom, '', statut, 'Windows Licensing', partielle=partielle))
+
+    # Clés complètes retrouvées mais ne correspondant à aucune licence active :
+    # les signaler telles quelles plutôt que de les taire ou de les présenter
+    # comme la licence en service.
+    if vu_windows or not produits:
+        for cle, source in restants:
+            licences.append(_licence_entry(
+                'Microsoft', 'Windows — clé récupérée, non active', cle,
+                'Non active', source, verifiee=False))
+
+    licences.extend(_collect_office_licenses(licences))
     return licences
 
 
-def _collect_office_licenses(seen_keys):
-    """Parcourt les clés de registre d'enregistrement Office."""
+def _collect_office_licenses(deja):
+    """Clés Office issues du registre d'enregistrement (installations MSI).
+
+    Office Click-to-Run et Microsoft 365 ne stockent aucune clé produit : la
+    licence est un jeton, et seul `PartialProductKey` reste consultable. Rien à
+    récupérer dans ce cas, ce que le rapport indique explicitement.
+    """
     if not IS_WINDOWS:
         return []
     try:
@@ -719,53 +808,53 @@ def _collect_office_licenses(seen_keys):
     except Exception:
         return []
 
-    found = []
+    connues = {l['cle'] for l in deja if l.get('cle')}
+    partielles = {l['cle_partielle']: l for l in deja if l.get('cle_partielle')}
+    trouvees = []
+
     for base in (r'SOFTWARE\Microsoft\Office', r'SOFTWARE\Wow6432Node\Microsoft\Office'):
         try:
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base, 0,
                                 winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as root:
-                for i in range(winreg.QueryInfoKey(root)[0]):
-                    version = winreg.EnumKey(root, i)
-                    reg_path = f'{base}\\{version}\\Registration'
-                    try:
-                        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0,
-                                            winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as regk:
-                            for j in range(winreg.QueryInfoKey(regk)[0]):
-                                guid = winreg.EnumKey(regk, j)
-                                blob = _read_registry_binary(
-                                    winreg.HKEY_LOCAL_MACHINE, f'{reg_path}\\{guid}',
-                                    'DigitalProductId')
-                                if not blob:
-                                    continue
-                                cle = _decode_digital_product_id(blob)
-                                if not cle or cle in seen_keys:
-                                    continue
-                                seen_keys.add(cle)
-                                produit = _registry_string(
-                                    winreg.HKEY_LOCAL_MACHINE, f'{reg_path}\\{guid}',
-                                    'ProductName') or f'Microsoft Office {version}'
-                                found.append({
-                                    'editeur': 'Microsoft',
-                                    'produit': produit,
-                                    'cle': cle,
-                                    'statut': 'Installée',
-                                    'source': 'Registre Office',
-                                })
-                    except OSError:
-                        continue
+                versions = [winreg.EnumKey(root, i)
+                            for i in range(winreg.QueryInfoKey(root)[0])]
         except OSError:
             continue
-    return found
 
+        for version in versions:
+            reg_path = '%s\\%s\\Registration' % (base, version)
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0,
+                                    winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as regk:
+                    guids = [winreg.EnumKey(regk, i)
+                             for i in range(winreg.QueryInfoKey(regk)[0])]
+            except OSError:
+                continue
 
-def _registry_string(root, path, value_name):
-    try:
-        import winreg
-        with winreg.OpenKey(root, path, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
-            value, _ = winreg.QueryValueEx(key, value_name)
-            return str(value).strip()
-    except Exception:
-        return ''
+            for guid in guids:
+                chemin = '%s\\%s' % (reg_path, guid)
+                blob = _read_registry_binary(winreg.HKEY_LOCAL_MACHINE, chemin,
+                                             'DigitalProductId')
+                if not blob:
+                    continue
+                cle = _decode_digital_product_id(blob)
+                if not cle or cle in connues:
+                    continue
+                connues.add(cle)
+                produit = (_registry_string(winreg.HKEY_LOCAL_MACHINE, chemin, 'ProductName')
+                           or 'Microsoft Office %s' % version)
+                # Si une licence Office active se termine par ces 5 caractères,
+                # la clé récupérée est bien la sienne : on complète l'entrée
+                # existante au lieu d'en créer une seconde.
+                cible = partielles.get(cle[-5:])
+                if cible is not None and not cible['cle']:
+                    cible.update({'cle': cle, 'cle_complete': True,
+                                  'cle_verifiee': True, 'source': 'Registre Office'})
+                    continue
+                trouvees.append(_licence_entry(
+                    'Microsoft', produit, cle, 'Installée', 'Registre Office',
+                    verifiee=False))
+    return trouvees
 
 
 def collect_extended_info():
@@ -1082,9 +1171,15 @@ def _licenses_html(licences):
         if lic.get('cle'):
             # Clé affichée en entier, sans troncature ni masquage.
             cle_html = f'<code class="licence-key">{_esc(lic["cle"])}</code>'
+            if lic.get('cle_verifiee'):
+                cle_html += ('<div class="licence-check">Vérifiée : les 5 derniers '
+                             'caractères correspondent à la licence active.</div>')
+            else:
+                cle_html += ('<div class="licence-warn">Non appairée à une licence '
+                             'active de cette machine.</div>')
         elif lic.get('cle_partielle'):
-            cle_html = ('<span class="licence-partial">Clé complète non exposée par '
-                        'Windows (licence numérique ou MAK) — se termine par '
+            cle_html = ('<span class="licence-partial">Clé complète absente de la machine '
+                        '(licence numérique, Click-to-Run ou KMS) — se termine par '
                         f'<code>{_esc(lic["cle_partielle"])}</code></span>')
         else:
             cle_html = '<span class="licence-partial">Aucune clé exposée</span>'
@@ -1258,6 +1353,8 @@ h2 .count{background:#eef1f5;color:#6b7280;border-radius:20px;padding:1px 9px;
 .licence-key{background:#1e3a5f;color:#fff;padding:4px 10px;border-radius:5px;
  font-size:.86rem;letter-spacing:.06em;display:inline-block;font-weight:600}
 .licence-partial{font-size:.78rem;color:#6b7280}
+.licence-check{font-size:.71rem;color:#0e9f6e;margin-top:4px;font-weight:600}
+.licence-warn{font-size:.71rem;color:#c27803;margin-top:4px;font-weight:600}
 .licence-partial code{background:#f3f4f6;padding:1px 5px;border-radius:3px;
  font-weight:600;color:#1f2937}
 .disk-row{margin-bottom:13px}
@@ -1893,13 +1990,23 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 if lic.get('cle'):
                     # Clé complète, en monospace sur fond sombre pour être
                     # relisible sans ambiguïté (0/O, 1/I) depuis un tirage papier.
-                    cle_cell = Paragraph(_pdf_escape(lic['cle']), S['key'])
+                    # Teintes claires : la cellule est sur fond sombre.
+                    if lic.get('cle_verifiee'):
+                        mention = ('<br/><font size="6.3" color="#7bdcb5">Vérifiée : les 5 '
+                                   'derniers caractères correspondent à la licence active.</font>')
+                    else:
+                        mention = ('<br/><font size="6.3" color="#fbd38d">Non appairée à une '
+                                   'licence active de cette machine.</font>')
+                    cle_cell = Paragraph(
+                        '<font face="Courier-Bold" size="9.5" color="#ffffff">'
+                        f'{_pdf_escape(lic["cle"])}</font>{mention}', S['body'])
                     extra.append(('BACKGROUND', (1, i), (1, i), colors.HexColor('#1e3a5f')))
                 elif lic.get('cle_partielle'):
                     cle_cell = Paragraph(
-                        'Clé complète non exposée par Windows (licence numérique ou '
-                        f'MAK) — se termine par <font face="Courier-Bold">'
-                        f'{_pdf_escape(lic["cle_partielle"])}</font>', S['small'])
+                        'Clé complète absente de la machine (licence numérique, '
+                        'Click-to-Run ou KMS) — se termine par '
+                        f'<font face="Courier-Bold">{_pdf_escape(lic["cle_partielle"])}</font>',
+                        S['small'])
                 else:
                     cle_cell = Paragraph('Aucune clé exposée', S['small'])
                 ok = lic.get('statut') in ('Activé', 'Préinstallée', 'Installée')

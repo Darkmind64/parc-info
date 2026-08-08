@@ -806,6 +806,10 @@ def get_api_payload(info, client_id=None, client_name=None):
         # sont transmis — hubs racine, contrôleurs et nœuds composites restent
         # dans le rapport mais n'ont pas leur place dans un inventaire.
         'usb_devices': [d for d in info.get('usb_devices', []) if d.get('inventoriable')],
+        # Licences : seules celles dont la clé complète a été récupérée sont
+        # transmises. Une licence sans clé exploitable (licence numérique,
+        # Office Click-to-Run, KMS) n'a rien à inscrire dans la fiche appareil.
+        'licenses': [l for l in info.get('licenses', []) if l.get('cle')],
     }
 
     if client_id:

@@ -1,5 +1,51 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.33] - 2026-08-08 🔑
+
+### 🔑 CLÉS DE LICENCE VÉRIFIÉES ET ENREGISTRÉES
+
+#### Report automatique dans la fiche appareil
+- ✅ Les clés relevées par le collecteur alimentent la section **« Licences
+  logiciels »** de la fiche appareil (`licences_appareils`)
+- ✅ Seules les licences dont la **clé complète** a été récupérée y sont écrites :
+  une licence sans clé exploitable n'aurait rien à y inscrire
+- ✅ Aucune ligne existante n'est modifiée ni supprimée, et la même clé n'est
+  jamais ajoutée deux fois — une licence saisie à la main reste intacte
+
+#### Fiabilisation de la récupération
+Il n'existe pas de source unique qui fonctionne partout, d'où un balayage :
+
+| Source | Cas couvert |
+|--------|-------------|
+| `BackupProductKeyDefault` | Clé complète en clair déposée à l'activation — retail et volume avec clé saisie |
+| `OA3xOriginalProductKey` | Clé OEM gravée dans la table ACPI MSDM des machines préinstallées |
+| `DigitalProductId` (décodé) | Windows 7/8 et installations où une clé a été saisie |
+| `Registration\<GUID>\DigitalProductId` | Office en installation MSI |
+
+#### Contrôle de correction
+- ✅ Windows n'expose publiquement que les **5 derniers caractères** de la clé en
+  service (`PartialProductKey`). Ces 5 caractères servent de contrôle : une clé
+  complète dont la fin correspond est **certifiée** être celle qui est installée
+- ✅ Une clé récupérée dont la fin ne correspond pas est signalée comme **« non
+  appairée »** au lieu d'être présentée comme la licence active — cas d'une
+  machine OEM réinstallée avec une autre licence, où la clé du BIOS subsiste
+- ✅ Seules les clés au format valide sont retenues (25 caractères, alphabet
+  Microsoft sans O/0 ni I/1)
+- ✅ **Correction** : la validation de format rejetait les clés contenant un `N`,
+  alors que l'algorithme Windows 8+ en insère un par construction à une position
+  variable. Toute clé de ce type aurait été écartée à tort
+
+#### Limite assumée
+Trois cas ne stockent **aucune clé** sur la machine, par conception de Microsoft :
+- **Windows en licence numérique** (liée au matériel / compte Microsoft)
+- **Office Click-to-Run et Microsoft 365** (jetons de licence, pas de clé)
+- **Activation KMS**
+
+Dans ces cas le rapport l'indique explicitement, avec les 5 derniers caractères
+comme seule information disponible. Aucune clé factice n'est affichée.
+
+---
+
 ## [2.6.32] - 2026-08-08 📊
 
 ### ✨ FICHE SYSTÈME GRAPHIQUE

@@ -5477,6 +5477,11 @@ def api_device_info():
             usb_devices = []
         usb_devices = usb_devices[:200]
 
+        # Licences avec clé complète récupérée par le collecteur
+        collected_licenses = data.get('licenses') or []
+        if not isinstance(collected_licenses, list):
+            collected_licenses = []
+
         now = datetime.utcnow().isoformat()
         conn = get_db()
 
@@ -5615,6 +5620,16 @@ def api_device_info():
         # affecté à la fiche appareil est reporté sur les fiches périphériques,
         # y compris pour un appareil déjà existant à qui un utilisateur a été
         # assigné manuellement entre deux collectes.
+        lic_ajoutees = 0
+        if collected_licenses:
+            lic_ajoutees = _sync_licences_from_collector(
+                conn, cid, app_id, collected_licenses)
+            if lic_ajoutees:
+                log_history(
+                    conn, cid, 'appareil', app_id, device_name,
+                    'Licences relevées (collecteur)', {'ajoutees': lic_ajoutees})
+                conn.commit()
+
         usb_crees = usb_maj = 0
         if usb_devices:
             _row_user = conn.execute(
@@ -5641,7 +5656,8 @@ def api_device_info():
             "ip_address": ip_address,
             "hostname": hostname,
             "usb_peripheriques_crees": usb_crees,
-            "usb_peripheriques_maj": usb_maj
+            "usb_peripheriques_maj": usb_maj,
+            "licences_ajoutees": lic_ajoutees
         }), 200
 
     except Exception as e:
@@ -8327,6 +8343,52 @@ def api_ping_appareil(id):
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 # Types d'appareils qui doivent apparaître automatiquement dans les périphériques
+def _sync_licences_from_collector(conn, client_id, appareil_id, licences):
+    """Enregistre les clés de licence remontées par le collecteur.
+
+    Seules les licences dont la clé complète a été récupérée arrivent ici : une
+    licence numérique Windows ou un Office Click-to-Run n'expose aucune clé, il
+    n'y aurait rien à stocker.
+
+    Les lignes existantes ne sont jamais modifiées ni supprimées — une licence
+    saisie à la main reste intacte, et la même clé n'est pas ajoutée deux fois.
+    Le formulaire de la fiche appareil réenregistre l'ensemble des licences à
+    chaque sauvegarde (`_save_licences`), ce qui suffit à les faire persister
+    puisqu'elles y sont rendues comme les autres.
+
+    Retourne le nombre de licences ajoutées.
+    """
+    if not licences:
+        return 0
+
+    existantes = set()
+    for row in conn.execute(
+            'SELECT cle_licence, editeur, produit FROM licences_appareils WHERE appareil_id=?',
+            (appareil_id,)).fetchall():
+        cle = (row[0] or '').strip().upper()
+        if cle:
+            existantes.add(cle)
+
+    now = datetime.utcnow().isoformat()
+    ajoutees = 0
+    for lic in licences[:50]:
+        if not isinstance(lic, dict):
+            continue
+        cle = (lic.get('cle') or '').strip().upper()
+        produit = (lic.get('produit') or '').strip()
+        if not cle or not produit or cle in existantes:
+            continue
+        existantes.add(cle)
+        conn.execute(
+            'INSERT INTO licences_appareils'
+            ' (appareil_id, client_id, editeur, produit, cle_licence, contrat_id, date_creation)'
+            ' VALUES (?,?,?,?,?,NULL,?)',
+            (appareil_id, client_id, (lic.get('editeur') or 'Microsoft').strip(),
+             produit, cle, now))
+        ajoutees += 1
+    return ajoutees
+
+
 def _normalize_name(text):
     """Normalise un nom pour comparaison : casse, accents et espaces multiples."""
     import unicodedata
