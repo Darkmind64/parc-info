@@ -1,10 +1,10 @@
-PARCINFO_VERSION=2.6.31
+PARCINFO_VERSION=2.6.32
 RELEASE_DATE=2026-08-08
-BUILD_NUMBER=2026080801
+BUILD_NUMBER=2026080803
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.6.31 - Correctif de sécurité : authentification des routes
-# 109 routes étaient accessibles sans @login_required (données client
-# lisibles et modifiables par un visiteur anonyme)
+# Version 2.6.32 - Inventaire USB, fiche système graphique, clés vérifiées
+# Balayage de toutes les sources de clé produit, appairage sur les 5
+# derniers caractères, report automatique dans la fiche appareil
 # Date: 8 août 2026

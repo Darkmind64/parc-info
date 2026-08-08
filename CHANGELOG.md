@@ -1,5 +1,84 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.32] - 2026-08-08 🔌
+
+### 🖱️ INVENTAIRE USB AUTOMATIQUE
+- ✅ Les périphériques USB connectés sont détectés et créés dans la section
+  Périphériques, aux côtés des écrans et imprimantes déjà gérés en 2.6.31
+- ✅ **Regroupement des nœuds PnP** : Windows expose un périphérique physique
+  sous plusieurs nœuds (une imprimante multifonction remonte comme
+  « composite » + « stockage de masse » + « prise en charge d'impression »).
+  Sans regroupement, une seule imprimante aurait créé quatre fiches
+- ✅ Classification vers les catégories existantes, avec règle impression +
+  numérisation → multifonction. Hubs racine, contrôleurs et nœuds composites
+  sont listés dans le rapport mais jamais inventoriés
+- ✅ Identité `source_usb_id` (VID:PID + série) : les collectes répétées ne
+  créent pas de doublon. Avec numéro de série l'identité vaut pour le client
+  entier (le périphérique suit la machine s'il est déplacé) ; sans série elle
+  est limitée à la machine, pour que deux souris identiques sur deux postes ne
+  fusionnent pas
+
+### 👤 REPORT DE L'UTILISATEUR SUR LES PÉRIPHÉRIQUES
+- ✅ L'utilisateur affecté à la fiche appareil est reporté sur **toutes** les
+  fiches périphériques rattachées — écrans, imprimantes et USB
+- ✅ `appareils.utilisateur` étant du texte libre et `peripheriques.utilisateur_id`
+  une clé étrangère, le rapprochement se fait sur le nom dans les deux ordres
+  (« Jean Dupont » comme « Dupont Jean »), sans jamais créer d'utilisateur
+  fantôme si rien ne correspond
+- ✅ Propagation également lors d'une réaffectation ultérieure, sans jamais
+  écraser une affectation saisie à la main sur un périphérique précis
+
+### 🔑 CLÉS DE LICENCE COMPLÈTES ET VÉRIFIÉES
+- ✅ Les clés récupérées alimentent la section « Licences logiciels » de la
+  fiche appareil, sans doublon et sans toucher aux lignes existantes
+- ✅ Balayage de toutes les sources : `BackupProductKeyDefault` (clé installée,
+  en clair), clé OEM du firmware, décodage du `DigitalProductId`, registre Office
+- ✅ **Contrôle de correction** : Windows n'expose que les 5 derniers caractères
+  de la clé en service, ils servent de somme de contrôle. Une clé dont la fin
+  correspond est certifiée être celle installée ; une clé dont la fin ne
+  correspond pas est signalée « non appairée » plutôt que présentée comme la
+  licence active (machine OEM réinstallée avec une autre licence)
+- ✅ **Correction** : la validation de format rejetait les clés contenant un `N`,
+  que l'algorithme Windows 8+ insère pourtant par construction
+- ⚠️ Limite assumée : Windows en licence numérique, Office Click-to-Run/365 et
+  l'activation KMS ne stockent **aucune** clé sur la machine. Le rapport
+  l'indique explicitement au lieu d'afficher une clé factice
+
+### 📊 FICHE SYSTÈME GRAPHIQUE
+Le rapport HTML était un listing monospace, le PDF une suite de tableaux :
+- ✅ Bandeau **« Points d'attention »** : disque saturé, antivirus absent,
+  pare-feu désactivé, TPM, Secure Boot, volume non chiffré, batterie critique
+  ou usée, ports sensibles en écoute, licence non activée
+- ✅ Vignettes chiffrées à bargraphs — la mémoire affiche l'occupation réelle
+  grâce à `ram_free_gb` relevé depuis la 2.6.31
+- ✅ Pastilles de sécurité colorées, barres par disque logique
+- ✅ **Ports en écoute sous forme de cartes**, colorées par sensibilité. Les
+  ports de la plage dynamique (49152+) sont comptés mais pas détaillés
+- ✅ Sections barrettes mémoire, fiabilité disques, écrans et imprimantes,
+  rendues à partir des données collectées en 2.6.31
+
+#### La page `/appareil/<id>/fiche-systeme` reçoit le même traitement
+- ✅ Bandeau **« Points d'attention »** et vignettes à bargraphs en tête de page
+- ✅ Ports TCP en écoute affichés **en cartes** colorées par sensibilité, au lieu
+  d'une liste inline `8080 (svchost) · 3389 (svchost) · …`
+- ✅ Clés de licence **en entier** avec mention de vérification, là où seuls les
+  5 derniers caractères étaient montrés
+- ✅ Nouvelle section **Périphériques USB**, distinguant ce qui est inventorié de
+  la plomberie interne
+- ✅ L'analyse (seuils, alertes, criticité des ports) est importée de
+  `collector_core` plutôt que réécrite en Jinja : la page et le PDF portent ainsi
+  exactement le même jugement sur une machine donnée
+
+### 🔧 CORRECTIONS
+- ✅ **Encodage** : la sortie PowerShell était décodée avec l'encodage local
+  (cp1252 sur un Windows français) au lieu d'UTF-8. Tout libellé accentué
+  remonté par la collecte était silencieusement corrompu — noms de
+  périphériques, comptes utilisateurs, adaptateurs réseau, fabricants
+- ✅ `.claude/launch.json` déclarait le port 5000 alors que `app.py` écoute
+  sur 3456
+
+---
+
 ## [2.6.31] - 2026-08-08 🔒 🖥️
 
 ### 🖥️ COLLECTEUR SYSTÈME — PARITÉ BELARC ADVISOR

@@ -4,13 +4,17 @@
     {
       "name": "ParcInfo — Flask Dev Server",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["app.py"],
-      "port": 5000
+      "runtimeArgs": [
+        "app.py"
+      ],
+      "port": 3456
     },
     {
       "name": "ParcInfo — Launcher (port auto)",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["launcher.py"],
+      "runtimeArgs": [
+        "launcher.py"
+      ],
       "port": 5000
     }
   ]

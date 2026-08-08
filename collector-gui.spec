@@ -29,6 +29,9 @@ hiddenimports = [
     'logging',
     'logging.handlers',
 ]
+# Module partagé de collecte/rapport : déclaré explicitement pour ne pas
+# dépendre uniquement de la détection d'import par l'analyse PyInstaller.
+hiddenimports += ['collector_report']
 if sys.platform == 'win32':
     hiddenimports += ['winreg']
 hiddenimports += collect_submodules('reportlab')
