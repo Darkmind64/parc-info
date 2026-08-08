@@ -220,6 +220,63 @@ def _pull_documents_from_turso(table_name: str, upload_folder: str, turso=None) 
     return result
 
 
+def _materialize_local_blobs(table_name: str, upload_folder: str) -> int:
+    """
+    Écrit sur disque les fichiers présents en base locale (contenu_blob) mais
+    absents du dossier uploads.
+
+    Rattrape les enregistrements créés par des versions antérieures de
+    /api/device-info/upload-report, qui stockaient le rapport UNIQUEMENT comme
+    blob local sans jamais écrire le fichier. Comme contenu_blob est exclu de la
+    réplication des lignes et que le push lit depuis le disque, ces documents ne
+    pouvaient jamais être transférés : les autres machines voyaient la ligne mais
+    obtenaient "Fichier introuvable". Les matérialiser ici les rend synchronisables
+    rétroactivement, sans intervention manuelle.
+
+    Retourne le nombre de fichiers écrits.
+    """
+    count = 0
+    try:
+        from database import get_local_db
+        conn = get_local_db()
+        try:
+            rows = conn.execute(
+                f"SELECT id, nom_fichier FROM {table_name} "
+                f"WHERE contenu_blob IS NOT NULL AND nom_fichier IS NOT NULL AND nom_fichier != ''"
+            ).fetchall()
+        except Exception:
+            conn.close()
+            return count
+
+        os.makedirs(upload_folder, exist_ok=True)
+        for row in rows:
+            nom_fichier = row['nom_fichier']
+            local_path = os.path.join(upload_folder, nom_fichier)
+            if os.path.exists(local_path):
+                continue
+            try:
+                blob_row = conn.execute(
+                    f"SELECT contenu_blob FROM {table_name} WHERE id=?", (row['id'],)
+                ).fetchone()
+                blob = blob_row[0] if blob_row else None
+                if not blob:
+                    continue
+                with open(local_path, 'wb') as f:
+                    f.write(blob)
+                count += 1
+                logger.info(
+                    f"materialize {table_name} id={row['id']}: {nom_fichier} "
+                    f"({len(blob):,} octets) écrit sur disque (rattrapage)"
+                )
+            except Exception as e:
+                logger.warning(f"materialize {table_name} id={row['id']} ({nom_fichier}): ERREUR : {e}")
+        conn.close()
+    except Exception:
+        logger.exception(f"_materialize_local_blobs({table_name}) a échoué")
+
+    return count
+
+
 def _cleanup_orphaned_files(upload_folder: str) -> int:
     """
     Supprime les fichiers physiques dont le record DB a été supprimé.
@@ -321,9 +378,14 @@ def sync_uploads() -> None:
 
     totals = {'pushed': 0, 'pulled': 0, 'errors': 0, 'pending': 0, 'empty_blob': 0}
     per_table = {}
+    materialized = 0
 
     try:
         for table in tables:
+            # Rattrapage : rendre synchronisables les documents stockés uniquement
+            # en blob local (anciens rapports du collecteur) - doit précéder le push,
+            # qui lit le contenu depuis le disque
+            materialized += _materialize_local_blobs(table, UPLOAD_FOLDER)
             push_res = _push_documents_to_turso(table, UPLOAD_FOLDER, turso=turso)
             pull_res = _pull_documents_from_turso(table, UPLOAD_FOLDER, turso=turso)
             for k, v in push_res.items():
@@ -339,13 +401,15 @@ def sync_uploads() -> None:
     # Supprimer les fichiers physiques dont le record a été supprimé
     cleaned = _cleanup_orphaned_files(UPLOAD_FOLDER)
 
-    activity = totals['pushed'] + totals['pulled'] + totals['errors'] + totals['empty_blob'] + cleaned
+    activity = totals['pushed'] + totals['pulled'] + totals['errors'] + totals['empty_blob'] + cleaned + materialized
     if activity == 0:
         return  # Rien à signaler ce cycle - ne pas bruiter le journal
 
     statut = 'erreur' if totals['errors'] and not (totals['pushed'] or totals['pulled']) else \
              ('partiel' if totals['errors'] or totals['empty_blob'] else 'succes')
     resume_parts = []
+    if materialized:
+        resume_parts.append(f"{materialized} fichier(s) restauré(s) depuis la base")
     if totals['pushed']:
         resume_parts.append(f"{totals['pushed']} fichier(s) envoyé(s)")
     if totals['pulled']:
@@ -358,7 +422,8 @@ def sync_uploads() -> None:
         resume_parts.append(f"{totals['empty_blob']} fichier(s) introuvable(s) (orphelin distant)")
 
     log_sync_event('fichiers', statut, ' · '.join(resume_parts) or 'Aucune activité',
-                    {'totals': totals, 'per_table': per_table, 'orphelins_supprimes': cleaned})
+                    {'totals': totals, 'per_table': per_table,
+                     'orphelins_supprimes': cleaned, 'fichiers_restaures': materialized})
 
 
 def start_sync_thread(interval: int = 60) -> None:

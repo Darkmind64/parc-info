@@ -5640,7 +5640,29 @@ def api_device_info_upload_report():
             conn.close()
             return jsonify({"status": "error", "message": f"Error reading file: {str(e)}"}), 400
 
+        # Écrire le fichier sur disque, comme TOUTES les autres routes d'upload.
+        # Indispensable pour la synchronisation multi-machines : contenu_blob est
+        # exclu de la réplication des lignes (_BLOB_SYNC_EXCLUDE), et le transfert
+        # des fichiers vers Turso (_push_documents_to_turso) lit le contenu DEPUIS
+        # LE DISQUE. Un rapport stocké uniquement en blob local n'était donc jamais
+        # transférable : les autres machines voyaient la ligne dans la liste mais
+        # obtenaient "Fichier introuvable" à l'ouverture.
+        # Le préfixe "app<id>_" est aussi requis par _cleanup_orphaned_files() pour
+        # reconnaître le fichier comme géré par l'application.
+        safe = secure_filename(report_file.filename or 'rapport.pdf') or 'rapport.pdf'
+        unique = f"app{device_id}_{int(time.time())}_{safe}"
+        try:
+            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+            with open(os.path.join(UPLOAD_FOLDER, unique), 'wb') as _f:
+                _f.write(file_content)
+        except Exception as e:
+            conn.close()
+            app.logger.exception("Error saving report file to disk")
+            return jsonify({"status": "error", "message": f"Error saving file: {str(e)}"}), 500
+
         # Insérer le document dans la table documents_appareils
+        # (contenu_blob conservé en plus du fichier : l'aperçu reste instantané sur
+        # cette machine, et le fichier disque alimente la synchronisation)
         now = datetime.utcnow().isoformat()
         try:
             conn.execute('''
@@ -5653,7 +5675,7 @@ def api_device_info_upload_report():
                 f"Rapport Système - {now}",
                 "Rapport PDF/HTML collecté par système-info-collector",
                 "rapport_system",
-                report_file.filename,
+                unique,
                 len(file_content),
                 file_content,
                 now

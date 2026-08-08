@@ -1,17 +1,19 @@
 {
-  "version": "2.6.29",
-  "release_date": "2026-08-06T09:30:00.000000",
+  "version": "2.6.30",
+  "release_date": "2026-08-08T09:30:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.29",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.29/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.30",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Sync journal, cross-machine ID collision fix, auto-updater fully repaired",
+    "new_features": "Correction majeure : les rapports du collecteur ne se synchronisaient jamais entre machines",
     "improvements": [
+      "FIXED: Collector reports were stored only as a DB blob with no file on disk - since blobs are excluded from row replication and the file transfer reads from disk, these documents could NEVER sync. Other machines saw the entry but got 'Fichier introuvable'. Reports are now written to disk like every other upload route.",
+      "NEW: Existing collector reports stuck in that state are automatically restored to disk on the next sync cycle - no manual action needed.",
       "FIXED: Auto-updater was completely non-functional since its introduction (wrong repo URL, config path type error, platform key mismatch, NSIS-style install on a portable exe)",
       "FIXED: Cross-machine AUTOINCREMENT id collisions could silently overwrite/lose synced records (documents, devices, etc.) when two installations both created new rows independently",
       "NEW: Sync journal page (/journal-synchronisation) - see database and file sync activity, including pending/orphaned files, without reading server logs",
@@ -32,5 +34,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.29"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.30"
 }
