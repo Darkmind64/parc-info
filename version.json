@@ -1,20 +1,22 @@
 {
-  "version": "2.6.33",
-  "release_date": "2026-08-08T21:00:00.000000",
+  "version": "2.6.34",
+  "release_date": "2026-08-08T22:30:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.33/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.33/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.33",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.33/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.33/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.34/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.34/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.34",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.34/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.34/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Barre d'occupation par volume dans la fiche système",
+    "new_features": "Badges pare-feu et comptes, code couleur des correctifs, cartes réseau physiques avec IP et plage",
     "improvements": [
-      "NEW: Chaque volume logique dispose de sa propre barre d'occupation dans la fiche système, avec pourcentage, espace libre et code couleur (vert / orange au-delà de 75 % / rouge au-delà de 90 %). La capacité totale ne donnait qu'une moyenne : un disque saturé parmi plusieurs passait inaperçu.",
-      "FIXED: Le workflow docker-build-push, réactivé par erreur, faisait double emploi avec le job Docker de build-release.yml — deux publications concurrentes de la même image sur le même tag, dont une en mono-architecture. Il est supprimé, build-release.yml reste l'unique publieur (amd64 + arm64).",
-      "CI: Toutes les actions GitHub passent aux versions majeures courantes (checkout v7, setup-python v7, upload/download-artifact v7/v8, docker/* v4 et v7, action-gh-release v3). Les précédentes ciblaient Node.js 20, déprécié et forcé en Node 24 par les runners."
+      "NEW: Profils de pare-feu affichés en badges Activé / Désactivé.",
+      "NEW: Les comptes locaux indiquent le type d'utilisateur (Administrateur / Utilisateur standard) et le type de compte (Local, Microsoft, Microsoft Entra, Domaine), en badges.",
+      "NEW: Les correctifs Windows sont colorés par type — les mises à jour de sécurité ressortent des mises à jour ordinaires dans une liste qui compte souvent plus de cent lignes.",
+      "NEW: Les cartes réseau physiques sont mises en évidence et remontées en tête, devant les interfaces virtuelles créées par Hyper-V, WSL, Docker ou un VPN. Chaque carte affiche son adresse IPv4 et la plage réseau correspondante.",
+      "FIXED: Aucun compte n'était jamais signalé comme administrateur sur un Windows non anglophone : le groupe était interrogé par son nom « Administrators », qui n'existe pas sur un Windows français (« Administrateurs »), ce qui levait une GroupNotFoundException silencieuse. Il est désormais résolu par son SID connu S-1-5-32-544."
     ]
   },
   "checksums": {
@@ -25,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.33"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.34"
 }

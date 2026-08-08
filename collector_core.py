@@ -1399,6 +1399,12 @@ def _win_security():
     ]
     if profiles:
         info['firewall'] = profiles
+        # Forme structurée : évite d'avoir à réanalyser « Domain: Activé » à
+        # l'affichage pour décider de la couleur du badge.
+        info['firewall_profiles'] = [
+            {'name': _clean(f.get('Name')), 'enabled': bool(f.get('Enabled'))}
+            for f in _as_list(security_data.get('Firewall')) if f.get('Name')
+        ]
 
     bitlocker = [
         f"{b.get('MountPoint')}: {b.get('VolumeStatus', 'Inconnu')} "
@@ -1419,41 +1425,109 @@ def _win_security():
     return info
 
 
+# PrincipalSource de Get-LocalUser → libellé du type de compte.
+_ACCOUNT_SOURCES = {
+    'local': 'Local',
+    'microsoftaccount': 'Microsoft',
+    'azuread': 'Microsoft Entra',
+    'activedirectory': 'Domaine',
+}
+
+
 def _win_users():
-    """Comptes utilisateurs locaux + appartenance au groupe Administrateurs."""
+    """Comptes locaux : état, appartenance Administrateurs et type de compte.
+
+    Le groupe Administrateurs est résolu par son SID connu S-1-5-32-544 et non
+    par son nom : « Administrators » n'existe pas sur un Windows français, où le
+    groupe s'appelle « Administrateurs ». L'interrogation par nom levait donc une
+    GroupNotFoundException et aucun compte n'était jamais signalé comme
+    administrateur sur un Windows non anglophone.
+    """
     info = {}
     users_data = _win_powershell_json(
-        "$users = @(Get-CimInstance Win32_UserAccount -Filter \"LocalAccount='True'\" "
-        "-ErrorAction SilentlyContinue | Select-Object Name,Disabled,Lockout); "
-        "$admins = @(); try { $admins = @(Get-LocalGroupMember -Group Administrators "
-        "-ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) } catch {}; "
-        "[PSCustomObject]@{ Users=$users; Admins=$admins } | ConvertTo-Json -Compress -Depth 4",
-        timeout=25
+        "$users = @(Get-LocalUser -ErrorAction SilentlyContinue "
+        "| Select-Object Name,Enabled,Description,"
+        "@{N='Source';E={[string]$_.PrincipalSource}},@{N='SID';E={$_.SID.Value}}); "
+        "$admins = @(); try { "
+        "$grp = (Get-LocalGroup -ErrorAction SilentlyContinue "
+        "| Where-Object { $_.SID.Value -eq 'S-1-5-32-544' }).Name; "
+        "if ($grp) { $admins = @(Get-LocalGroupMember -Group $grp -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty Name) } } catch {}; "
+        "$locked = @(); try { $locked = @(Get-CimInstance Win32_UserAccount "
+        "-Filter \"LocalAccount='True' AND Lockout=True\" -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty Name) } catch {}; "
+        "[PSCustomObject]@{ Users=$users; Admins=$admins; Locked=$locked } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=30
     )
     if not users_data:
         return info
 
-    # Les membres du groupe local Administrateurs sont retournés au format "MACHINE\Nom"
+    # Les membres du groupe sont retournés au format "MACHINE\Nom"
     admin_names = {a.split('\\')[-1].lower() for a in _as_list(users_data.get('Admins')) if a}
+    locked_names = {str(n).lower() for n in _as_list(users_data.get('Locked')) if n}
 
+    details = []
     user_list = []
     for u in _as_list(users_data.get('Users')):
-        name = u.get('Name', '')
+        name = _clean(u.get('Name'))
         if not name:
             continue
-        if u.get('Disabled'):
-            status = 'Désactivé'
-        elif u.get('Lockout'):
-            status = 'Verrouillé'
+        if u.get('Enabled') is False:
+            statut = 'Désactivé'
+        elif name.lower() in locked_names:
+            statut = 'Verrouillé'
         else:
-            status = 'Actif'
-        if name.lower() in admin_names:
-            status += ', Administrateur'
-        user_list.append(f"{name} ({status})")
+            statut = 'Actif'
+        est_admin = name.lower() in admin_names
+        source = _clean(u.get('Source')).lower()
+        details.append({
+            'name': name,
+            'status': statut,
+            'enabled': u.get('Enabled') is not False,
+            'admin': est_admin,
+            'role': 'Administrateur' if est_admin else 'Utilisateur standard',
+            'account_type': _ACCOUNT_SOURCES.get(source, source.capitalize() or 'Local'),
+            'description': _clean(u.get('Description')),
+        })
+        # Forme textuelle conservée : le résumé et les rapports s'en servent
+        libelle = statut + (', Administrateur' if est_admin else '')
+        user_list.append(f"{name} ({libelle})")
+
     if user_list:
         info['users'] = sorted(user_list)
+        info['users_details'] = sorted(details, key=lambda d: d['name'].lower())
 
     return info
+
+
+def _ip_entries(raw):
+    """Normalise les adresses IPv4 d'une carte et calcule leur plage.
+
+    Une adresse seule ne dit pas sur quel réseau la machine est branchée :
+    192.168.1.101/24 appartient au réseau 192.168.1.0/24. La plage est calculée
+    ici plutôt qu'à l'affichage, pour que la page et le rapport concordent.
+    """
+    entries = []
+    for item in _as_list(raw):
+        if not isinstance(item, dict):
+            continue
+        adresse = _clean(item.get('IPAddress'))
+        if not adresse:
+            continue
+        prefixe = item.get('PrefixLength')
+        reseau = ''
+        try:
+            import ipaddress
+            reseau = str(ipaddress.ip_network('%s/%d' % (adresse, int(prefixe)), strict=False))
+        except (ImportError, ValueError, TypeError):
+            reseau = ''
+        entries.append({
+            'address': adresse,
+            'prefix': prefixe if isinstance(prefixe, int) else None,
+            'network': reseau,
+        })
+    return entries
 
 
 def _win_extras():
@@ -1495,7 +1569,12 @@ def _win_extras():
         "if ($st -or $fu) { $wear = [PSCustomObject]@{ Designed=$st.DesignedCapacity; "
         "Full=$fu.FullChargedCapacity; Cycles=$cy.CycleCount } } } catch {}; "
         "$adapters = @(); try { $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue "
-        "| Where-Object Status -eq 'Up' | Select-Object Name,InterfaceDescription,LinkSpeed,MacAddress) } catch {}; "
+        "| Where-Object Status -eq 'Up' | ForEach-Object { "
+        "$ips = @(Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 "
+        "-ErrorAction SilentlyContinue | Select-Object IPAddress,PrefixLength); "
+        "[PSCustomObject]@{ Name=$_.Name; InterfaceDescription=$_.InterfaceDescription; "
+        "LinkSpeed=$_.LinkSpeed; MacAddress=$_.MacAddress; Virtual=$_.Virtual; "
+        "MediaType=$_.MediaType; IPs=$ips } }) } catch {}; "
         "[PSCustomObject]@{ Battery=$battery; BatteryWear=$wear; Adapters=$adapters } "
         "| ConvertTo-Json -Compress -Depth 4",
         timeout=25
@@ -1536,6 +1615,12 @@ def _win_extras():
             'description': a.get('InterfaceDescription', ''),
             'link_speed': a.get('LinkSpeed', ''),
             'mac_address': a.get('MacAddress', ''),
+            # Distinguer le matériel réel des interfaces créées par Hyper-V,
+            # WSL, Docker ou un VPN : sur un poste de développement les
+            # secondes sont largement majoritaires et noient les premières.
+            'physical': a.get('Virtual') is False,
+            'media_type': _clean(a.get('MediaType')),
+            'ip_addresses': _ip_entries(a.get('IPs')),
         })
     if adapters:
         info['network_adapters'] = adapters

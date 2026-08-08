@@ -1,5 +1,43 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.34] - 2026-08-08 🏷️
+
+### 🏷️ BADGES ET MISE EN ÉVIDENCE DANS LA FICHE SYSTÈME
+
+#### Pare-feu
+- ✅ Chaque profil (Domaine, Privé, Public) affiche un badge **Activé** / **Désactivé**
+- ✅ La forme structurée `firewall_profiles` évite de réanalyser la chaîne
+  « Domain: Activé » à l'affichage pour décider de la couleur
+
+#### Comptes utilisateurs
+- ✅ Tableau avec **type d'utilisateur** (Administrateur / Utilisateur standard)
+  et **type de compte** (Local, Microsoft, Microsoft Entra, Domaine), en badges
+- ✅ La description du compte est reprise quand Windows en fournit une
+- ✅ **Correction importante** : aucun compte n'était jamais signalé comme
+  administrateur sur un Windows non anglophone. Le groupe était interrogé par
+  son nom, « Administrators », qui n'existe pas sur un Windows français où il
+  s'appelle « Administrateurs » — l'appel levait une `GroupNotFoundException`
+  avalée silencieusement, et la liste des administrateurs restait vide. Le
+  groupe est désormais résolu par son **SID connu `S-1-5-32-544`**, indépendant
+  de la langue. Sur la machine de test, 3 comptes administrateurs qui
+  n'apparaissaient pas comme tels remontent correctement
+
+#### Correctifs Windows
+- ✅ Code couleur par type : les **mises à jour de sécurité** en rouge se
+  distinguent des mises à jour ordinaires, des correctifs à chaud et des
+  service packs. Utile sur une liste qui dépasse souvent la centaine de lignes
+
+#### Réseau
+- ✅ Les **cartes physiques sont mises en évidence** et remontées en tête de
+  tableau. Sur un poste avec Hyper-V, WSL, Docker ou un VPN, les interfaces
+  virtuelles sont largement majoritaires et noyaient le matériel réel — ici,
+  1 carte physique pour 7 virtuelles
+- ✅ Chaque carte affiche son **adresse IPv4 et la plage réseau** correspondante
+  (192.168.1.101/24 → 192.168.1.0/24). La plage est calculée à la collecte, pas
+  à l'affichage, pour que la page et le rapport concordent
+
+---
+
 ## [2.6.33] - 2026-08-08 💾
 
 ### 💾 UNE BARRE PAR VOLUME

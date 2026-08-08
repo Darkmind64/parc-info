@@ -78,6 +78,15 @@
     font-family: Consolas, monospace; font-size: .66rem; color: var(--text-secondary);
     margin-top: .35rem; padding-top: .3rem; border-top: 1px dashed var(--border);
 }
+/* Badges alignés (pare-feu) */
+.fs-badges { display: flex; flex-direction: column; gap: .25rem; margin-top: .2rem; }
+.fs-badge-line { display: flex; align-items: center; gap: .5rem; font-size: .8rem; }
+.fs-badge-nom { min-width: 72px; color: var(--text-secondary); }
+
+/* Carte réseau physique : surlignée pour ressortir des interfaces virtuelles */
+tr.fs-nic-phys > td { background: rgba(0,201,255,.06); }
+tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
+
 /* Volumes logiques : une barre par disque, occupé vs libre en un coup d'œil */
 .fs-volumes { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: .7rem 1.2rem; }
 .fs-volume { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 4px; padding: .5rem .7rem; }
@@ -472,7 +481,19 @@
             {% endif %}
         </div>
         <div>
-            {% if rapport.firewall %}
+            {% if rapport.firewall_profiles %}
+            <div class="fs-label" style="font-size:.75rem;">Pare-feu</div>
+            <div class="fs-badges">
+                {% for f in rapport.firewall_profiles %}
+                <span class="fs-badge-line">
+                    <span class="fs-badge-nom">{{ f.name }}</span>
+                    <span class="fs-pill {{ 'fs-ok' if f.enabled else 'fs-bad' }}">
+                        {{ 'Activé' if f.enabled else 'Désactivé' }}</span>
+                </span>
+                {% endfor %}
+            </div>
+            {% elif rapport.firewall %}
+            {# Collectes antérieures : uniquement la forme textuelle #}
             <div class="fs-label" style="font-size:.75rem;">Pare-feu</div>
             {% for f in rapport.firewall %}<div class="fs-value">• {{ f }}</div>{% endfor %}
             {% endif %}
@@ -568,12 +589,36 @@
 <div class="fs-section">
     <h3>■ Réseau</h3>
     {% if rapport.network_adapter_details %}
+    {% set physiques = rapport.network_adapter_details | selectattr('physical') | list %}
+    {% if physiques %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Cartes physiques ({{ physiques|length }})
+    </div>
+    {% endif %}
     <table class="fs-table" style="margin-bottom:.9rem;">
-        <tr><th>Interface</th><th>Description</th><th>Débit</th><th>MAC</th></tr>
-        {% for a in rapport.network_adapter_details %}
-        <tr>
-            <td>{{ a.name }}</td>
+        <tr><th>Interface</th><th>Description</th><th>Adresse IP / plage</th><th>Débit</th><th>MAC</th></tr>
+        {# Les cartes physiques d'abord : sur un poste avec Hyper-V, WSL ou un
+           VPN, les interfaces virtuelles sont majoritaires et noieraient le
+           matériel réel. #}
+        {% for a in rapport.network_adapter_details | sort(attribute='physical', reverse=true) %}
+        <tr {% if a.physical %}class="fs-nic-phys"{% endif %}>
+            <td>
+                <strong>{{ a.name }}</strong>
+                <span class="fs-pill {{ 'fs-ok' if a.physical else 'fs-muted' }}"
+                      style="margin-left:.35rem;">{{ 'Physique' if a.physical else 'Virtuelle' }}</span>
+            </td>
             <td>{{ a.description or '—' }}</td>
+            <td class="fs-mono">
+                {% if a.ip_addresses %}
+                    {% for ip in a.ip_addresses %}
+                    <div>{{ ip.address }}{% if ip.prefix %}/{{ ip.prefix }}{% endif %}
+                        {% if ip.network %}
+                        <span style="color:var(--text-secondary);">· {{ ip.network }}</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}—{% endif %}
+            </td>
             <td>{{ a.link_speed or '—' }}</td>
             <td class="fs-mono">{{ a.mac_address or '—' }}</td>
         </tr>
@@ -615,9 +660,30 @@
 {% if rapport.users %}
 <div class="fs-section">
     <h3>■ Comptes utilisateurs locaux ({{ rapport.users|length }})</h3>
+    {% if rapport.users_details %}
+    <table class="fs-table">
+        <tr><th>Compte</th><th>État</th><th>Type d'utilisateur</th><th>Type de compte</th></tr>
+        {% for u in rapport.users_details %}
+        <tr>
+            <td>
+                <strong>{{ u.name }}</strong>
+                {% if u.description %}
+                <div style="font-size:.7rem;color:var(--text-secondary);">{{ u.description }}</div>
+                {% endif %}
+            </td>
+            <td><span class="fs-pill {{ 'fs-ok' if u.enabled else 'fs-muted' }}">{{ u.status }}</span></td>
+            <td><span class="fs-pill {{ 'fs-warn' if u.admin else 'fs-info' }}">{{ u.role }}</span></td>
+            <td><span class="fs-pill {{ 'fs-muted' if u.account_type == 'Local' else 'fs-info' }}">
+                {{ u.account_type }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    {# Collectes antérieures : uniquement la forme textuelle #}
     <div class="fs-grid">
         {% for u in rapport.users %}<div class="fs-value">• {{ u }}</div>{% endfor %}
     </div>
+    {% endif %}
 </div>
 {% endif %}
 
@@ -629,10 +695,19 @@
         <table class="fs-table">
             <tr><th>Correctif</th><th>Installé le</th><th>Type</th></tr>
             {% for h in rapport.hotfixes %}
+            {# Un correctif de sécurité ne se lit pas comme une mise à jour
+               ordinaire : la couleur permet de les repérer dans une liste
+               qui compte souvent plus de cent lignes. #}
+            {% set t = (h.description or '')|lower %}
+            {% set classe = 'fs-bad' if 'security' in t or 'sécurité' in t
+                       else 'fs-warn' if 'hotfix' in t or 'correctif' in t
+                       else 'fs-info' if 'service pack' in t
+                       else 'fs-muted' %}
             <tr>
                 <td class="fs-mono">{{ h.id }}</td>
                 <td>{{ h.installed_on or '—' }}</td>
-                <td>{{ h.description or '—' }}</td>
+                <td>{% if h.description %}<span class="fs-pill {{ classe }}">{{ h.description }}</span>
+                    {% else %}—{% endif %}</td>
             </tr>
             {% endfor %}
         </table>
