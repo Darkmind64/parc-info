@@ -3934,6 +3934,32 @@ def api_get_mdp(id):
 
 # ─── DOCUMENTS APPAREILS ─────────────────────────────────────────────────────
 
+def _fiche_systeme_disques(rapport):
+    """Décompose les volumes logiques pour un affichage en barres.
+
+    `disk_drives` est une liste de lignes déjà formatées par le collecteur, dont
+    le format diffère selon l'OS. `_parse_drive` sait lire celui de Windows ;
+    quand la ligne n'est pas reconnue (macOS, Linux), on la restitue telle
+    quelle plutôt que d'inventer un pourcentage.
+    """
+    from collector_core import _disk_level, _parse_drive
+
+    volumes = []
+    for ligne in rapport.get('disk_drives') or []:
+        analyse = _parse_drive(str(ligne))
+        if analyse and analyse[1] and analyse[2] is not None:
+            libelle, total, utilise, libre = analyse
+            pct = round(utilise / total * 100) if total else 0
+            volumes.append({
+                'libelle': libelle, 'total': total, 'utilise': utilise,
+                'libre': libre if libre is not None else total - utilise,
+                'pct': pct, 'level': _disk_level(pct), 'brut': None,
+            })
+        else:
+            volumes.append({'libelle': '', 'brut': str(ligne)})
+    return volumes
+
+
 def _fiche_systeme_kpis(rapport):
     """Vignettes chiffrées de la fiche système : valeur, barre et criticité.
 
@@ -4023,7 +4049,7 @@ def fiche_systeme_appareil(id):
 
     # Analyse et mise en forme reprises de collector_core : la page porte ainsi
     # le même jugement que le rapport PDF sur une machine donnée.
-    alertes, kpis, ports_cartes, ports_masques = [], [], [], 0
+    alertes, kpis, disques, ports_cartes, ports_masques = [], [], [], [], 0
     if rapport:
         try:
             from collector_core import (
@@ -4031,6 +4057,7 @@ def fiche_systeme_appareil(id):
             )
             alertes = build_alerts(rapport)
             kpis = _fiche_systeme_kpis(rapport)
+            disques = _fiche_systeme_disques(rapport)
             ports = [describe_listening_port(p)
                      for p in (rapport.get('listening_ports') or [])
                      if isinstance(p, dict)]
@@ -4044,7 +4071,8 @@ def fiche_systeme_appareil(id):
     return render_template('fiche_systeme.html', appareil=a, rapport=rapport,
                            logiciels=logiciels, client=client, clients=get_clients(),
                            client_actif_id=cid, alertes=alertes, kpis=kpis,
-                           ports_cartes=ports_cartes, ports_masques=ports_masques)
+                           disques=disques, ports_cartes=ports_cartes,
+                           ports_masques=ports_masques)
 
 
 @app.route('/appareil/<int:id>/documents')
