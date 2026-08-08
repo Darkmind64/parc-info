@@ -3016,9 +3016,13 @@ def _licenses_html(licences):
                         f'<code>{_esc(lic["partial_key"])}</code></span>')
         else:
             cle_html = '<span class="licence-partial">Aucune clé exposée</span>'
+        # Expression sortie de la f-string : les guillemets imbriqués de même
+        # type n'y sont légaux qu'à partir de Python 3.12, or le projet cible
+        # 3.8+ et l'image Docker tourne en 3.11.
+        source = lic.get('key_source') or lic.get('channel') or 'Windows Licensing'
         rows.append(
             f'<tr><td><strong>{_esc(lic.get("name"))}</strong>'
-            f'<div class="meta">{_esc('Microsoft')} · {_esc(lic.get('key_source') or lic.get('channel') or 'Windows Licensing')}</div></td>'
+            f'<div class="meta">Microsoft · {_esc(source)}</div></td>'
             f'<td>{cle_html}</td>'
             f'<td>{_pill_html(lic.get("status") or "Inconnu", "ok" if ok else "warn")}</td></tr>')
     return ('<table class="tbl"><thead><tr><th>Produit</th><th>Clé de licence</th>'
@@ -3863,11 +3867,11 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                     cle_cell = Paragraph('Aucune clé exposée', S['small'])
                 ok = lic.get('activated')
                 fg, bg = _LEVEL_COLORS['ok' if ok else 'warn']
+                source = lic.get('key_source') or lic.get('channel') or 'Windows Licensing'
                 rows.append([
                     Paragraph(f'<b>{_pdf_escape(lic.get("name"))}</b><br/>'
                               f'<font size="6.8" color="#6b7280">'
-                              f'{_pdf_escape('Microsoft')} · '
-                              f'{_pdf_escape(lic.get('key_source') or lic.get('channel') or 'Windows Licensing')}</font>', S['body']),
+                              f'Microsoft · {_pdf_escape(source)}</font>', S['body']),
                     cle_cell,
                     Paragraph(f'<font color="{fg}"><b>'
                               f'{_pdf_escape(lic.get("status") or "Inconnu")}</b></font>', S['body']),
