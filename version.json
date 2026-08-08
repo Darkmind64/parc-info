@@ -1,22 +1,23 @@
 {
-  "version": "2.6.34",
-  "release_date": "2026-08-08T22:30:00.000000",
+  "version": "2.6.35",
+  "release_date": "2026-08-08T23:15:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.34/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.34/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.34",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.34/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.34/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.35/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.35/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.35",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.35/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.35/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Badges pare-feu et comptes, code couleur des correctifs, cartes réseau physiques avec IP et plage",
+    "new_features": "Imprimantes physiques/virtuelles et USB/réseau, périphériques USB détaillés, état réel de l'antivirus",
     "improvements": [
-      "NEW: Profils de pare-feu affichés en badges Activé / Désactivé.",
-      "NEW: Les comptes locaux indiquent le type d'utilisateur (Administrateur / Utilisateur standard) et le type de compte (Local, Microsoft, Microsoft Entra, Domaine), en badges.",
-      "NEW: Les correctifs Windows sont colorés par type — les mises à jour de sécurité ressortent des mises à jour ordinaires dans une liste qui compte souvent plus de cent lignes.",
-      "NEW: Les cartes réseau physiques sont mises en évidence et remontées en tête, devant les interfaces virtuelles créées par Hyper-V, WSL, Docker ou un VPN. Chaque carte affiche son adresse IPv4 et la plage réseau correspondante.",
-      "FIXED: Aucun compte n'était jamais signalé comme administrateur sur un Windows non anglophone : le groupe était interrogé par son nom « Administrators », qui n'existe pas sur un Windows français (« Administrateurs »), ce qui levait une GroupNotFoundException silencieuse. Il est désormais résolu par son SID connu S-1-5-32-544."
+      "NEW: Les imprimantes distinguent physique / virtuelle et USB / réseau / local. Le raccordement est déduit du nom du port : Win32_Printer.Network rapporte « non-réseau » même pour une imprimante WSD parfaitement réseau.",
+      "NEW: Les périphériques USB remontent marque, modèle, date de première connexion, version et date du pilote. Le modèle vient du nom que le périphérique déclare lui-même (BusReportedDeviceDesc), bien plus parlant que le libellé du pilote : « DCP-195C » au lieu de « Dispositif de stockage de masse USB ».",
+      "NEW: Ce même nom déclaré sert aussi à classer le matériel — une souris Logitech qui remontait en « Autre » est désormais correctement rangée en « Souris ».",
+      "NEW: L'antivirus affiche son état réel (Actif, Inactif, signatures obsolètes) par décodage du productState du Centre de sécurité Windows. Un antivirus installé mais désactivé s'affichait jusqu'ici comme un antivirus opérationnel.",
+      "Le badge de service des ports TCP passe à droite du numéro, et les mises à jour Windows ordinaires prennent un jaune sourd qui ne concurrence plus le rouge des correctifs de sécurité.",
+      "Les tableaux larges défilent dans leur propre conteneur au lieu de pousser la page en débordement horizontal."
     ]
   },
   "checksums": {
@@ -27,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.34"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.35"
 }

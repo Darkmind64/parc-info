@@ -121,6 +121,32 @@ _VIRTUAL_PRINTER_HINTS = (
 )
 
 
+# Préfixes de port identifiant un raccordement local par câble. ESDPRT est le
+# moniteur de port Epson, DOT4 celui de HP : tous deux sont des ports USB.
+_USB_PRINTER_PORTS = ('usb', 'esdprt', 'dot4', 'usbprint')
+_LOCAL_PRINTER_PORTS = ('lpt', 'com')
+
+
+def printer_connection(port, network=False):
+    """Déduit le raccordement d'une imprimante depuis son port.
+
+    `Win32_Printer.Network` n'est pas fiable : une imprimante WSD parfaitement
+    réseau y est rapportée comme non-réseau. Le nom du port, lui, est explicite.
+    """
+    p = (port or '').lower()
+    if p.startswith(_USB_PRINTER_PORTS):
+        return 'USB'
+    if p.startswith('wsd-') or p.startswith('ip_') or p.startswith('\\\\'):
+        return 'Réseau'
+    if re.match(r'^\d{1,3}(\.\d{1,3}){3}', p):
+        return 'Réseau'
+    if p.startswith(_LOCAL_PRINTER_PORTS):
+        return 'Local'
+    if network:
+        return 'Réseau'
+    return ''
+
+
 def is_virtual_printer(name, driver, port):
     """Distingue une imprimante virtuelle d'une imprimante physique."""
     haystack = f"{name} {driver}".lower()
@@ -296,6 +322,23 @@ def _clean_manufacturer(value):
     return re.sub(r'\s*\((x64|x86|amd64)\)\s*$', '', value, flags=re.IGNORECASE).strip()
 
 
+def _usb_date(valeur):
+    """Normalise une date PnP (MM/JJ/AAAA hh:mm:ss) en AAAA-MM-JJ.
+
+    Les propriétés PnP sont rendues au format court de la culture du système ;
+    on ne conserve que la date, seule information utile en inventaire.
+    """
+    texte = _clean(valeur)
+    if not texte:
+        return ''
+    m = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})', texte)
+    if m:
+        mois, jour, annee = m.groups()
+        return '%s-%02d-%02d' % (annee, int(mois), int(jour))
+    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', texte)
+    return m.group(0) if m else texte[:10]
+
+
 def _classify_usb(name, win_class=''):
     """Déduit une catégorie ParcInfo depuis le libellé et la classe Windows."""
     label = _strip_accents(name or '').lower()
@@ -382,9 +425,17 @@ def _merge_usb_nodes(nodes):
             inventory_name = (f'{manufacturer} — périphérique USB' if manufacturer
                               else f'Périphérique USB {best["vid"]}:{best["pid"]}')
 
+        # Modèle : le nom déclaré par le périphérique prime sur le libellé du
+        # pilote, qui est souvent générique.
+        modele = next((n.get('bus_desc') for n in group
+                       if n.get('bus_desc') and not _is_generic_label(n['bus_desc'])), '')
+        dates_install = sorted(d for d in (n.get('install_date') for n in group) if d)
+        pilote = next((n for n in group if n.get('driver_version')), {})
+
         devices.append({
             'name': best['name'],
-            'inventory_name': inventory_name,
+            'inventory_name': modele or inventory_name,
+            'model': modele,
             'manufacturer': manufacturer,
             'serial': serial,
             'vid': best['vid'],
@@ -392,6 +443,11 @@ def _merge_usb_nodes(nodes):
             'categorie': categorie,
             'inventoriable': inventoriable,
             'nodes': len(group),
+            # Première apparition du matériel sur la machine
+            'install_date': dates_install[0] if dates_install else '',
+            'driver_version': pilote.get('driver_version', ''),
+            'driver_date': pilote.get('driver_date', ''),
+            'win_class': next((n.get('win_class') for n in group if n.get('win_class')), ''),
         })
     return sorted(devices, key=lambda x: (x['categorie'], x['name']))
 
@@ -433,12 +489,25 @@ def collect_usb_devices():
 
 
 def _collect_usb_windows():
+    # BusReportedDeviceDesc est le nom que le périphérique déclare lui-même : il
+    # est souvent bien plus parlant que le libellé du pilote ("DCP-195C" plutôt
+    # que "Dispositif de stockage de masse USB", "Mouse" plutôt que
+    # "Périphérique d'entrée USB"). InstallDate donne la date de premier
+    # branchement. Les propriétés sont demandées en un seul appel par nœud.
     data = _win_powershell_json(
+        "$keys = @('DEVPKEY_Device_BusReportedDeviceDesc','DEVPKEY_Device_InstallDate',"
+        "'DEVPKEY_Device_DriverDate','DEVPKEY_Device_DriverVersion'); "
         "$d = @(); try { $d = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue "
-        "| Where-Object { $_.InstanceId -like 'USB\\*' } "
-        "| Select-Object FriendlyName,Class,InstanceId,Manufacturer,Status) } catch {}; "
-        "$d | ConvertTo-Json -Compress -Depth 3",
-        timeout=25,
+        "| Where-Object { $_.InstanceId -like 'USB\\*' } | ForEach-Object { "
+        "$dev = $_; $props = @{}; "
+        "try { Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName $keys "
+        "-ErrorAction SilentlyContinue | ForEach-Object { "
+        "if ($_.Data) { $props[$_.KeyName] = [string]$_.Data } } } catch {}; "
+        "[PSCustomObject]@{ FriendlyName=$dev.FriendlyName; Class=$dev.Class; "
+        "InstanceId=$dev.InstanceId; Manufacturer=$dev.Manufacturer; Status=$dev.Status; "
+        "Props=$props } }) } catch {}; "
+        "$d | ConvertTo-Json -Compress -Depth 4",
+        timeout=90,
     )
     nodes = []
     for d in _as_list(data):
@@ -447,13 +516,23 @@ def _collect_usb_windows():
             continue
         instance_id = d.get('InstanceId') or ''
         vid, pid = _parse_vid_pid(instance_id)
+        props = d.get('Props') or {}
+        bus_desc = _clean(props.get('DEVPKEY_Device_BusReportedDeviceDesc'))
         nodes.append({
             'name': name,
+            'bus_desc': bus_desc,
             'manufacturer': (d.get('Manufacturer') or '').strip(),
             'serial': _usb_serial_from_instance_id(instance_id),
             'vid': vid,
             'pid': pid,
-            'categorie': _classify_usb(name, d.get('Class')),
+            'win_class': _clean(d.get('Class')),
+            'install_date': _usb_date(props.get('DEVPKEY_Device_InstallDate')),
+            'driver_date': _usb_date(props.get('DEVPKEY_Device_DriverDate')),
+            'driver_version': _clean(props.get('DEVPKEY_Device_DriverVersion')),
+            # Le nom déclaré par le périphérique sert aussi à le classer : c'est
+            # lui qui dit « Mouse » là où le pilote ne dit que « périphérique
+            # d'entrée USB ».
+            'categorie': _classify_usb(f'{name} {bus_desc}', d.get('Class')),
         })
     return _merge_usb_nodes(nodes)
 
@@ -1254,6 +1333,7 @@ def _win_inventory():
             # Les imprimantes virtuelles restent dans le rapport mais ne doivent
             # pas polluer l'inventaire matériel côté serveur
             'virtual': is_virtual_printer(name, driver, port),
+            'connection': printer_connection(port, bool(p.get('Network'))),
         })
     if printers:
         info['printers'] = printers
@@ -1364,6 +1444,35 @@ def _win_licensing():
     return info
 
 
+def _decode_antivirus_state(nom, product_state):
+    """Décode le `productState` du Centre de sécurité Windows.
+
+    C'est un entier dont l'écriture hexadécimale sur 6 chiffres porte trois
+    informations : le fournisseur, l'état de la protection temps réel et la
+    fraîcheur des signatures. Sans ce décodage, un antivirus installé mais
+    désactivé s'affiche exactement comme un antivirus opérationnel.
+    """
+    actif = a_jour = None
+    try:
+        brut = '%06x' % int(product_state)
+        # Octet du milieu : bit 0x10 = protection temps réel active
+        actif = bool(int(brut[2:4], 16) & 0x10)
+        # Dernier octet : 0x00 = signatures à jour
+        a_jour = int(brut[4:6], 16) == 0
+    except (TypeError, ValueError):
+        pass
+
+    if actif is None:
+        statut = 'État inconnu'
+    elif not actif:
+        statut = 'Inactif'
+    elif a_jour is False:
+        statut = 'Actif, signatures obsolètes'
+    else:
+        statut = 'Actif'
+    return {'name': nom, 'enabled': actif, 'up_to_date': a_jour, 'status': statut}
+
+
 def _win_security():
     """Antivirus, pare-feu, BitLocker, TPM, Secure Boot.
 
@@ -1374,7 +1483,7 @@ def _win_security():
     security_data = _win_powershell_json(
         "$av = @(); try { $av = @(Get-CimInstance -Namespace root/SecurityCenter2 "
         "-ClassName AntivirusProduct -ErrorAction SilentlyContinue "
-        "| Select-Object -ExpandProperty displayName) } catch {}; "
+        "| Select-Object displayName,productState) } catch {}; "
         "$fw = @(); try { $fw = @(Get-NetFirewallProfile -ErrorAction SilentlyContinue "
         "| Select-Object Name,Enabled) } catch {}; "
         "$bl = @(); try { $bl = @(Get-BitLockerVolume -ErrorAction SilentlyContinue "
@@ -1389,9 +1498,19 @@ def _win_security():
     if not security_data:
         return info
 
-    avs = [a for a in _as_list(security_data.get('Antivirus')) if a]
-    if avs:
-        info['antivirus'] = ', '.join(avs)
+    produits = []
+    for a in _as_list(security_data.get('Antivirus')):
+        if isinstance(a, dict):
+            nom = _clean(a.get('displayName'))
+            if nom:
+                produits.append(_decode_antivirus_state(nom, a.get('productState')))
+        elif a:
+            # Collecte antérieure : seul le nom était remonté
+            produits.append({'name': _clean(a), 'enabled': None, 'up_to_date': None,
+                             'status': 'État inconnu'})
+    if produits:
+        info['antivirus'] = ', '.join(p['name'] for p in produits)
+        info['antivirus_products'] = produits
 
     profiles = [
         f"{f.get('Name')}: {'Activé' if f.get('Enabled') else 'Désactivé'}"
