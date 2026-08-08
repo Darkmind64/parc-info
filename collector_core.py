@@ -1,0 +1,4111 @@
+#!/usr/bin/env python3
+"""
+Noyau de collecte partagé par les deux collecteurs ParcInfo.
+
+`system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI) étaient
+auparavant deux copies de la même logique de collecte, et elles avaient déjà
+divergé (le GUI avait perdu le support pkgutil/pacman). Tout le code de collecte,
+de génération de rapport et d'appel API vit désormais ici ; les deux scripts ne
+gardent que leur interface (argparse d'un côté, tkinter de l'autre).
+
+Aucune dépendance externe n'est requise pour la collecte (ctypes / winreg /
+PowerShell sur Windows, outils système sur macOS et Linux). reportlab n'est
+nécessaire que pour le rapport PDF, avec repli automatique sur HTML.
+"""
+
+import io
+import json
+import os
+import platform
+import re
+import socket
+import string
+import subprocess
+import sys
+import uuid
+from datetime import datetime
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+__all__ = [
+    'IS_WINDOWS', 'IS_MAC', 'IS_LINUX',
+    'collect_system_info', 'build_summary_lines',
+    'generate_pdf_report', 'generate_html_report',
+    'get_api_payload', 'send_to_parcinfo', 'upload_report_to_parcinfo',
+    'fetch_clients', 'is_elevated',
+]
+
+# Platform detection
+IS_WINDOWS = sys.platform == 'win32'
+IS_MAC = sys.platform == 'darwin'
+IS_LINUX = sys.platform == 'linux'
+
+COLLECTOR_VERSION = '3.0'
+
+# ════════════════════════════════════════════════════════════════════════════
+# TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
+# ════════════════════════════════════════════════════════════════════════════
+
+# Win32_SystemEnclosure.ChassisTypes
+CHASSIS_TYPES = {
+    1: 'Autre', 2: 'Inconnu', 3: 'Desktop', 4: 'Desktop faible encombrement',
+    5: 'Pizza Box', 6: 'Mini tour', 7: 'Tour', 8: 'Portable', 9: 'Laptop',
+    10: 'Notebook', 11: 'Ordinateur de poche', 12: 'Station d\'accueil',
+    13: 'Tout-en-un', 14: 'Sub-notebook', 15: 'Compact', 16: 'Lunch Box',
+    17: 'Châssis principal', 18: 'Châssis d\'extension', 19: 'Sous-châssis',
+    20: 'Châssis d\'extension de bus', 21: 'Châssis de périphériques',
+    22: 'Châssis de stockage', 23: 'Châssis rackable', 24: 'PC scellé',
+    28: 'Blade', 29: 'Blade Enclosure', 30: 'Tablette', 31: 'Convertible',
+    32: 'Détachable', 33: 'IoT Gateway', 34: 'Mini PC', 35: 'Stick PC',
+}
+# Châssis correspondant à une machine transportable (→ type_appareil "Laptop")
+CHASSIS_PORTABLE = {8, 9, 10, 11, 14}
+CHASSIS_TABLET = {30, 31, 32}
+
+# Win32_PhysicalMemory.SMBIOSMemoryType
+MEMORY_TYPES = {
+    20: 'DDR', 21: 'DDR2', 22: 'DDR2 FB-DIMM', 24: 'DDR3', 25: 'FBD2',
+    26: 'DDR4', 27: 'LPDDR', 28: 'LPDDR2', 29: 'LPDDR3', 30: 'LPDDR4',
+    34: 'DDR5', 35: 'LPDDR5',
+}
+
+# Win32_PhysicalMemory.FormFactor
+MEMORY_FORM_FACTORS = {8: 'DIMM', 12: 'SODIMM', 13: 'SRIMM', 15: 'RIMM'}
+
+# SoftwareLicensingProduct.LicenseStatus
+LICENSE_STATUS = {
+    0: 'Non licencié', 1: 'Activé', 2: 'Délai de grâce initial',
+    3: 'Délai de grâce supplémentaire', 4: 'Délai de grâce (non authentique)',
+    5: 'Notification', 6: 'Délai de grâce étendu',
+}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# HELPERS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _as_list(value):
+    """Normalise une valeur PowerShell en liste.
+
+    ConvertTo-Json sérialise un tableau d'un seul élément comme un objet nu :
+    sans cette normalisation, un poste à une seule barrette / un seul écran
+    ferait échouer les boucles côté Python.
+    """
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _clean(value):
+    """Nettoie une chaîne WMI (None, espaces, valeurs de remplissage OEM)."""
+    if value is None:
+        return ''
+    text = str(value).strip()
+    # Les OEM laissent souvent ces valeurs de gabarit dans le SMBIOS
+    placeholders = {
+        'to be filled by o.e.m.', 'default string', 'system manufacturer',
+        'system product name', 'not specified', 'none', 'not available',
+        'o.e.m.', 'unknown', '<bad index>',
+    }
+    return '' if text.lower() in placeholders else text
+
+
+# Ports et pilotes des imprimantes virtuelles (PDF, XPS, fax, OneNote, RMM…).
+# Sans ce filtre, un poste Windows standard injecte 6 à 8 fausses imprimantes
+# dans l'inventaire des périphériques à chaque collecte.
+_VIRTUAL_PRINTER_PORTS = {'portprompt:', 'nul:', 'shrfax:', 'ad_port', 'file:'}
+_VIRTUAL_PRINTER_HINTS = (
+    'xps document writer', 'print to pdf', 'onenote', 'fax', 'pdf converter',
+    'send to microsoft', 'anydesk', 'pdfcreator', 'cutepdf', 'foxit reader pdf',
+    'microsoft software printer driver', 'remote desktop easy print',
+)
+
+
+def is_virtual_printer(name, driver, port):
+    """Distingue une imprimante virtuelle d'une imprimante physique."""
+    haystack = f"{name} {driver}".lower()
+    if any(hint in haystack for hint in _VIRTUAL_PRINTER_HINTS):
+        return True
+
+    port_lower = (port or '').lower()
+    if port_lower in _VIRTUAL_PRINTER_PORTS:
+        return True
+    # Ports applicatifs (paquets UWP) et ports fichier
+    return port_lower.startswith('microsoft.') or '*.pdf' in port_lower
+
+
+def is_elevated():
+    """Indique si le collecteur tourne avec des privilèges administrateur.
+
+    Plusieurs sources (SMART détaillé, TPM, BitLocker, clé OEM) exigent
+    l'élévation : sans cette information, un champ vide serait indiscernable
+    d'un champ inaccessible.
+    """
+    try:
+        if IS_WINDOWS:
+            import ctypes
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        return os.geteuid() == 0
+    except Exception:
+        return False
+
+
+def _win_powershell_json(cmd, timeout=25):
+    """Exécute une commande PowerShell et parse le JSON retourné.
+
+    L'encodage est forcé des deux côtés : PowerShell 5.1 écrit sur la console
+    avec la page de code OEM, et `text=True` décoderait avec l'encodage local
+    (cp1252 sur un Windows français). Sans cela, tout libellé accentué remonté
+    par la collecte est silencieusement corrompu — noms de périphériques,
+    comptes utilisateurs, descriptions d'adaptateurs réseau, fabricants.
+    """
+    try:
+        creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+        prelude = '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; '
+        result = subprocess.run(
+            ['powershell', '-NoProfile', '-NonInteractive', '-Command', prelude + cmd],
+            capture_output=True, timeout=timeout, creationflags=creationflags
+        )
+        if result.returncode == 0:
+            out = (result.stdout or b'').decode('utf-8', errors='replace')
+            if out.strip():
+                return json.loads(out)
+    except Exception:
+        pass
+    return None
+
+
+def _run(cmd, timeout=10):
+    """Exécute une commande et retourne stdout (chaîne vide en cas d'échec)."""
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        return (result.stdout or b'').decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PÉRIPHÉRIQUES USB
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Classes de périphériques Windows (Get-PnpDevice) → catégories ParcInfo.
+# Les catégories correspondent exactement à `categories_peripheriques` de
+# config_helpers.py, sinon la liste déroulante de la fiche périphérique
+# afficherait une valeur hors liste.
+_WIN_CLASS_TO_CATEGORIE = {
+    'keyboard': 'Clavier',
+    'mouse': 'Souris',
+    'printer': 'Imprimante',
+    'printqueue': 'Imprimante',
+    'image': 'Scanner',
+    'camera': 'Webcam',
+    'media': 'Casque / Micro',
+    'audioendpoint': 'Casque / Micro',
+    'diskdrive': 'Disque dur externe',
+    'usbdevice': 'Cle USB',
+    'wpd': 'Telephone mobile',
+    'net': 'Adaptateur reseau',
+    'smartcardreader': 'Lecteur de cartes',
+    'monitor': 'Ecran',
+    'battery': 'Onduleur / UPS',
+}
+
+# Repli par mots-clés dans le libellé quand la classe est générique ('USB',
+# 'HIDClass'…), ce qui est le cas de la majorité des périphériques réels.
+# Ordre significatif : le premier motif trouvé gagne.
+_USB_NAME_PATTERNS = [
+    (r'\b(webcam|web cam|facetime|caméra|camera)\b', 'Webcam'),
+    (r'\b(headset|casque|micro|microphone|headphone)\b', 'Casque / Micro'),
+    (r'\b(speaker|haut.?parleur|soundbar)\b', 'Haut-parleurs'),
+    (r'\b(keyboard|clavier)\b', 'Clavier'),
+    (r'\b(mouse|souris|trackball)\b', 'Souris'),
+    (r'\b(scanner|scanjet|perfection)\b', 'Scanner'),
+    (r'\b(multifonction|mfp|all.?in.?one)\b', 'Imprimante multifonction'),
+    (r'\b(printer|imprimante|laserjet|officejet|deskjet|ecotank)\b', 'Imprimante'),
+    (r'\b(dock|docking|thunderbolt dock)\b', 'Docking station'),
+    (r'\b(hub)\b', 'Hub USB'),
+    (r'\b(card reader|lecteur de carte|cardreader|smart card)\b', 'Lecteur de cartes'),
+    (r'\b(ups|onduleur|smart.?ups)\b', 'Onduleur / UPS'),
+    (r'\b(ethernet|gigabit|wireless|wi.?fi|wlan|bluetooth|lan adapter)\b', 'Adaptateur reseau'),
+    (r'\b(flash disk|flash drive|clé usb|cle usb|usb drive|datatraveler|cruzer)\b', 'Cle USB'),
+    (r'\b(disque|disk|ssd|hdd|portable drive|my passport|elements)\b', 'Disque dur externe'),
+    (r'\b(monitor|écran|ecran|display)\b', 'Ecran'),
+    (r'\b(phone|téléphone|telephone|iphone|android)\b', 'Telephone mobile'),
+    (r'\b(badge|proximity reader)\b', 'Badge / Lecteur de badge'),
+]
+
+# Libellés de plomberie interne. Windows expose un périphérique physique sous
+# plusieurs nœuds PnP : une imprimante multifonction remonte à la fois comme
+# « périphérique composite », « stockage de masse » et « prise en charge
+# d'impression ». Ces nœuds sont conservés pour le regroupement mais ne servent
+# jamais de libellé, et un groupe qui n'en contient que ne devient pas un
+# périphérique ParcInfo.
+# Les libellés dépendent de la langue de Windows : les accents sont retirés
+# avant comparaison, et les variantes FR/EN sont listées côte à côte.
+_USB_GENERIC = re.compile(
+    r'(root hub|hub usb racine|generic usb hub|concentrateur usb|'
+    r'usb composite device|peripherique usb composite|'
+    r'usb input device|peripherique d.entree usb|usb printing support|'
+    r'prise en charge d.impression usb|usb mass storage device|'
+    r'dispositif de stockage de masse usb|hid.compliant|conforme hid|'
+    r'unknown usb device|peripherique usb inconnu|generic usb device|'
+    r'peripherique usb generique|host controller|controleur|'
+    r'usb attached scsi|usb\s*[23]\.\d+\s*hub)',
+    re.IGNORECASE,
+)
+
+# Ordre de spécificité : quand plusieurs nœuds d'un même périphérique donnent
+# des catégories différentes, la plus spécifique gagne.
+_CATEGORIE_PRIORITE = [
+    # Webcam avant Scanner : une webcam remonte en classe Windows « Image »,
+    # comme un scanner. Un vrai multifonction est capté par la règle dédiée
+    # ci-dessous avant d'arriver ici.
+    'Imprimante multifonction', 'Imprimante', 'Webcam', 'Scanner',
+    'Casque / Micro', 'Haut-parleurs', 'Clavier', 'Souris', 'Docking station',
+    'Disque dur externe', 'Cle USB', 'Lecteur de cartes', 'Adaptateur reseau',
+    'Telephone mobile', 'Ecran', 'Badge / Lecteur de badge', 'Onduleur / UPS',
+    'Hub USB', 'Autre',
+]
+
+
+def _strip_accents(text):
+    """Compare les libellés sans dépendre des accents (Windows FR vs EN)."""
+    import unicodedata
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', text or '')
+        if unicodedata.category(c) != 'Mn'
+    )
+
+
+def _is_generic_label(name):
+    return bool(_USB_GENERIC.search(_strip_accents(name or '')))
+
+
+def _clean_manufacturer(value):
+    """Écarte les fabricants génériques attribués par Windows.
+
+    Windows renseigne « (Périphériques système standard) » ou « (Contrôleur
+    hôte USB standard) » pour les pilotes intégrés : ce n'est pas un fabricant.
+    """
+    value = (value or '').strip()
+    if not value or value.startswith('('):
+        return ''
+    if re.search(r'standard|microsoft|generic|g[ée]n[ée]rique', value, re.IGNORECASE):
+        return ''
+    # « Logitech (x64) » → « Logitech »
+    return re.sub(r'\s*\((x64|x86|amd64)\)\s*$', '', value, flags=re.IGNORECASE).strip()
+
+
+def _classify_usb(name, win_class=''):
+    """Déduit une catégorie ParcInfo depuis le libellé et la classe Windows."""
+    label = _strip_accents(name or '').lower()
+    for pattern, categorie in _USB_NAME_PATTERNS:
+        if re.search(pattern, label):
+            return categorie
+    mapped = _WIN_CLASS_TO_CATEGORIE.get((win_class or '').lower())
+    return mapped or 'Autre'
+
+
+def _merge_usb_nodes(nodes):
+    """Regroupe les nœuds PnP appartenant au même périphérique physique.
+
+    Windows présente un seul périphérique sous plusieurs nœuds (interface HID,
+    nœud composite parent, fonction d'impression…). Sans regroupement, une
+    imprimante multifonction créerait quatre périphériques dans ParcInfo.
+
+    Le regroupement se fait sur VID/PID. Si un même VID/PID porte plusieurs
+    numéros de série distincts, il s'agit réellement de plusieurs exemplaires
+    du même modèle et ils sont séparés.
+    """
+    by_vidpid = {}
+    for node in nodes:
+        key = (node['vid'], node['pid']) if node['vid'] else ('name', node['name'].lower())
+        by_vidpid.setdefault(key, []).append(node)
+
+    groups = []
+    for key, group in by_vidpid.items():
+        serials = {n['serial'] for n in group if n['serial']}
+        if len(serials) > 1:
+            # Plusieurs exemplaires du même modèle : un groupe par série.
+            for serial in sorted(serials):
+                groups.append([n for n in group if n['serial'] in ('', serial)])
+        else:
+            groups.append(group)
+
+    devices = []
+    for group in groups:
+        named = [n for n in group if not _is_generic_label(n['name'])]
+        serial = next((n['serial'] for n in group if n['serial']), '')
+        # Un groupe entièrement générique (hub racine, contrôleur) reste listé
+        # dans le rapport mais n'ira pas dans l'inventaire. Un périphérique qui
+        # expose un vrai numéro de série est en revanche un matériel réel même
+        # si Windows ne lui donne qu'un libellé générique : c'est le cas des
+        # claviers et souris HID, qu'il serait faux d'ignorer.
+        inventoriable = bool(named) or bool(serial)
+
+        cats = {n['categorie'] for n in group if n['categorie'] != 'Autre'}
+        # Un périphérique exposant à la fois numérisation et impression est un
+        # multifonction, pas deux appareils distincts. La fonction impression
+        # apparaît sous un libellé générique ("Prise en charge d'impression
+        # USB"), d'où la recherche sur l'ensemble des nœuds du groupe.
+        has_print_node = any(
+            re.search(r'(impression|printing|printer|imprimante)',
+                      _strip_accents(n['name']), re.IGNORECASE)
+            for n in group
+        )
+        if 'Scanner' in cats and (has_print_node or 'Imprimante' in cats):
+            categorie = 'Imprimante multifonction'
+        elif cats:
+            categorie = min(cats, key=lambda c: _CATEGORIE_PRIORITE.index(c)
+                            if c in _CATEGORIE_PRIORITE else 99)
+        else:
+            categorie = 'Autre'
+
+        # Libellé : le nœud qui porte la catégorie retenue est le plus
+        # représentatif ("HD USB Camera" plutôt que "Périphérique USB
+        # composite"). À défaut, n'importe quel nœud nommé.
+        preferred = [n for n in named if n['categorie'] == categorie] or named or group
+        best = max(preferred, key=lambda n: len(n['name']))
+
+        # Fabricant : celui du nœud retenu d'abord — les autres nœuds d'un même
+        # périphérique portent souvent le nom du pilote générique qui les gère
+        # (« Dispositif de stockage USB compatible ») plutôt que le fabricant.
+        manufacturer = _clean_manufacturer(best['manufacturer']) or next(
+            (m for m in (_clean_manufacturer(n['manufacturer']) for n in group) if m), '')
+
+        # `name` reste le libellé réel de Windows — c'est ce que le rapport doit
+        # montrer. `inventory_name` est la version présentable utilisée pour
+        # créer le périphérique dans ParcInfo, pour éviter d'y inscrire
+        # « Périphérique USB composite ».
+        inventory_name = best['name']
+        if not named:
+            inventory_name = (f'{manufacturer} — périphérique USB' if manufacturer
+                              else f'Périphérique USB {best["vid"]}:{best["pid"]}')
+
+        devices.append({
+            'name': best['name'],
+            'inventory_name': inventory_name,
+            'manufacturer': manufacturer,
+            'serial': serial,
+            'vid': best['vid'],
+            'pid': best['pid'],
+            'categorie': categorie,
+            'inventoriable': inventoriable,
+            'nodes': len(group),
+        })
+    return sorted(devices, key=lambda x: (x['categorie'], x['name']))
+
+
+def _usb_serial_from_instance_id(instance_id):
+    """Extrait le numéro de série d'un InstanceId Windows.
+
+    'USB\\VID_0781&PID_5583\\4C530001120523111593' → numéro de série réel.
+    'USB\\VID_046D&PID_C52B\\5&2f4d1b3&0&2'        → chemin de port, pas un
+    numéro de série : Windows en génère un quand le périphérique n'en expose
+    aucun. Le signe '&' est le marqueur de ce cas.
+    """
+    if not instance_id:
+        return ''
+    tail = instance_id.rsplit('\\', 1)[-1]
+    if '&' in tail or not tail:
+        return ''
+    return tail.strip()
+
+
+def _parse_vid_pid(instance_id):
+    m = re.search(r'VID_([0-9A-Fa-f]{4}).*?PID_([0-9A-Fa-f]{4})', instance_id or '')
+    return (m.group(1).upper(), m.group(2).upper()) if m else ('', '')
+
+
+def collect_usb_devices():
+    """Liste les périphériques USB connectés.
+
+    Retourne une liste de dicts :
+        name, manufacturer, serial, vid, pid, categorie, inventoriable
+    """
+    if IS_WINDOWS:
+        return _collect_usb_windows()
+    if IS_MAC:
+        return _collect_usb_macos()
+    if IS_LINUX:
+        return _collect_usb_linux()
+    return []
+
+
+def _collect_usb_windows():
+    data = _win_powershell_json(
+        "$d = @(); try { $d = @(Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue "
+        "| Where-Object { $_.InstanceId -like 'USB\\*' } "
+        "| Select-Object FriendlyName,Class,InstanceId,Manufacturer,Status) } catch {}; "
+        "$d | ConvertTo-Json -Compress -Depth 3",
+        timeout=25,
+    )
+    nodes = []
+    for d in _as_list(data):
+        name = (d.get('FriendlyName') or '').strip()
+        if not name:
+            continue
+        instance_id = d.get('InstanceId') or ''
+        vid, pid = _parse_vid_pid(instance_id)
+        nodes.append({
+            'name': name,
+            'manufacturer': (d.get('Manufacturer') or '').strip(),
+            'serial': _usb_serial_from_instance_id(instance_id),
+            'vid': vid,
+            'pid': pid,
+            'categorie': _classify_usb(name, d.get('Class')),
+        })
+    return _merge_usb_nodes(nodes)
+
+
+def _collect_usb_macos():
+    out = _run(['system_profiler', 'SPUSBDataType', '-json'], timeout=30)
+    if not out.strip():
+        return []
+    try:
+        payload = json.loads(out)
+    except Exception:
+        return []
+
+    nodes = []
+
+    def walk(items):
+        for item in items or []:
+            name = (item.get('_name') or '').strip()
+            # Les contrôleurs de bus n'ont ni vendor_id ni serial : on descend
+            # dans leurs enfants sans les inventorier eux-mêmes.
+            if name and item.get('vendor_id'):
+                vid = re.sub(r'^0x', '', str(item.get('vendor_id', ''))).split()[0].upper()
+                pid = re.sub(r'^0x', '', str(item.get('product_id', ''))).split()[0].upper()
+                nodes.append({
+                    'name': name,
+                    'manufacturer': (item.get('manufacturer') or '').strip(),
+                    'serial': (item.get('serial_num') or '').strip(),
+                    'vid': vid,
+                    'pid': pid,
+                    'categorie': _classify_usb(name),
+                })
+            walk(item.get('_items'))
+
+    walk(payload.get('SPUSBDataType'))
+    return _merge_usb_nodes(nodes)
+
+
+def _collect_usb_linux():
+    out = _run(['lsusb'], timeout=15)
+    nodes = []
+    for line in out.splitlines():
+        m = re.match(r'Bus \d+ Device \d+: ID ([0-9a-f]{4}):([0-9a-f]{4})\s*(.*)', line.strip())
+        if not m:
+            continue
+        vid, pid, name = m.group(1).upper(), m.group(2).upper(), (m.group(3) or '').strip()
+        if not name:
+            name = f'Périphérique USB {vid}:{pid}'
+        nodes.append({
+            'name': name,
+            'manufacturer': name.split(',')[0].strip() if ',' in name else '',
+            'serial': '',
+            'vid': vid,
+            'pid': pid,
+            'categorie': _classify_usb(name),
+        })
+    return _merge_usb_nodes(nodes)
+
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# CLÉS DE LICENCE
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Windows n'expose publiquement que les 5 derniers caractères de la clé en
+# service. Récupérer la clé complète demande de balayer plusieurs sources, et
+# aucune ne fonctionne dans tous les cas :
+#
+#   - `BackupProductKeyDefault` : clé complète en clair déposée par Windows à
+#     l'activation. Présente sur les installations retail et volume avec clé
+#     saisie. C'est la source la plus fiable quand elle existe.
+#   - `OA3xOriginalProductKey` : clé OEM gravée dans la table ACPI MSDM des
+#     machines préinstallées. Sur une machine réinstallée avec une autre
+#     licence, elle subsiste sans correspondre à la licence active.
+#   - `DigitalProductId` : blob du registre, décodable sur Windows 7/8 et sur
+#     les installations où une clé a été saisie. Sur Windows 10/11 en licence
+#     numérique, sa zone de clé est remplie de zéros.
+#
+# Trois cas ne stockent aucune clé sur la machine, par conception : licence
+# numérique Windows, Office Click-to-Run / Microsoft 365, et activation KMS.
+
+# Alphabet d'encodage des clés produit Microsoft : 24 caractères, sans les
+# lettres prêtant à confusion (ni O/0, ni I/1, ni voyelles). Le « N » n'en fait
+# pas partie mais apparaît bien dans les clés affichées : c'est le caractère que
+# l'algorithme Windows 8+ insère à une position variable.
+KEY_ALPHABET = 'BCDFGHJKMPQRTVWXY2346789'
+_KEY_CHARS = KEY_ALPHABET + 'N'
+_KEY_RE = re.compile(r'^[%s]{5}(-[%s]{5}){4}$' % (_KEY_CHARS, _KEY_CHARS))
+
+
+def _is_valid_key_format(key):
+    """Une clé produit Microsoft : 5 groupes de 5 caractères d'un alphabet fixe."""
+    return bool(_KEY_RE.match((key or '').strip().upper()))
+
+
+def _is_plausible_key(key):
+    """Écarte les clés décodées depuis un blob vide.
+
+    Sous Windows 10/11 en licence numérique, DigitalProductId existe mais sa
+    zone de clé est à zéro : le décodage produit alors « BBBBB-BBBBB-… », soit
+    l'index 0 répété. Une vraie clé comporte au moins cinq caractères distincts.
+    """
+    if not _is_valid_key_format(key):
+        return False
+    return len(set(key.replace('-', ''))) >= 5
+
+
+def _decode_digital_product_id(blob):
+    """Décode un blob DigitalProductId du registre en clé produit lisible.
+
+    Algorithme Microsoft : base 24 sur les octets 52..66. Les clés Windows 8+
+    encodent un « N » à une position variable, signalée par un bit de l'octet 66.
+    """
+    if not blob or len(blob) < 67:
+        return ''
+    data = bytearray(blob[52:67])
+
+    is_win8 = (data[14] // 6) & 1
+    data[14] = (data[14] & 0xF7) | ((is_win8 & 2) * 4)
+
+    key = ''
+    last = 0
+    for _ in range(25):
+        current = 0
+        for j in range(14, -1, -1):
+            current = (current * 256) ^ data[j]
+            data[j] = current // 24
+            current %= 24
+        last = current
+        key = KEY_ALPHABET[current] + key
+
+    if is_win8:
+        key = key[1:last + 1] + 'N' + key[last + 1:]
+
+    formatted = '-'.join(key[i:i + 5] for i in range(0, len(key), 5))
+    return formatted if _is_plausible_key(formatted) else ''
+
+
+def _registry_string(path, value_name):
+    """Lit une valeur texte du registre dans la vue 64 bits."""
+    if not IS_WINDOWS:
+        return ''
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0,
+                            winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+            value, _ = winreg.QueryValueEx(key, value_name)
+            return str(value).strip()
+    except Exception:
+        return ''
+
+
+def _registry_binary(path, value_name):
+    """Lit une valeur binaire du registre dans la vue 64 bits."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path, 0,
+                            winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+            data, _ = winreg.QueryValueEx(key, value_name)
+            return bytes(data)
+    except Exception:
+        return None
+
+
+def windows_key_candidates(oem_key=''):
+    """Toutes les clés produit Windows complètes récupérables sur la machine.
+
+    Retourne une liste de (clé, source), sans doublon, par ordre de fiabilité.
+    `oem_key` est la clé firmware déjà relevée par la collecte, passée ici pour
+    éviter une seconde interrogation WMI.
+    """
+    if not IS_WINDOWS:
+        return []
+
+    CV = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+    candidats = []
+
+    def add(cle, source):
+        cle = (cle or '').strip().upper()
+        if _is_plausible_key(cle) and not any(c == cle for c, _ in candidats):
+            candidats.append((cle, source))
+
+    add(_registry_string(CV + r'\SoftwareProtectionPlatform',
+                         'BackupProductKeyDefault'), 'Registre (clé installée)')
+    add(oem_key, 'BIOS OEM (table MSDM)')
+    add(_decode_digital_product_id(_registry_binary(CV, 'DigitalProductId')),
+        'Registre (DigitalProductId)')
+    return candidats
+
+
+def _office_key_candidates():
+    """Clés Office issues du registre d'enregistrement (installations MSI).
+
+    Office Click-to-Run et Microsoft 365 ne stockent aucune clé produit : la
+    licence est un jeton. Rien à récupérer dans ce cas.
+    """
+    if not IS_WINDOWS:
+        return []
+    try:
+        import winreg
+    except Exception:
+        return []
+
+    trouvees = []
+    for base in (r'SOFTWARE\Microsoft\Office', r'SOFTWARE\Wow6432Node\Microsoft\Office'):
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base, 0,
+                                winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as root:
+                versions = [winreg.EnumKey(root, i)
+                            for i in range(winreg.QueryInfoKey(root)[0])]
+        except OSError:
+            continue
+        for version in versions:
+            reg_path = '%s\\%s\\Registration' % (base, version)
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path, 0,
+                                    winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as regk:
+                    guids = [winreg.EnumKey(regk, i)
+                             for i in range(winreg.QueryInfoKey(regk)[0])]
+            except OSError:
+                continue
+            for guid in guids:
+                chemin = '%s\\%s' % (reg_path, guid)
+                cle = _decode_digital_product_id(_registry_binary(chemin, 'DigitalProductId'))
+                if cle and not any(c == cle for c, _ in trouvees):
+                    trouvees.append((cle, 'Registre Office'))
+    return trouvees
+
+
+def enrich_licenses_with_keys(info):
+    """Complète les licences relevées avec leur clé produit entière.
+
+    Le contrôle de correction repose sur `partial_key` : Windows n'expose que
+    les 5 derniers caractères de la clé en service, ils servent donc de somme de
+    contrôle. Une clé complète dont la fin correspond est certifiée être celle
+    qui est installée ; une clé dont la fin ne correspond pas est conservée mais
+    signalée comme non appairée, plutôt que présentée comme la licence active.
+    """
+    licences = info.get('licenses') or []
+    candidats = windows_key_candidates(info.get('oem_product_key', ''))
+    candidats += _office_key_candidates()
+    if not candidats and not licences:
+        return
+
+    restants = list(candidats)
+    for lic in licences:
+        partielle = (lic.get('partial_key') or '').strip().upper()
+        lic.setdefault('full_key', '')
+        lic.setdefault('key_source', '')
+        lic.setdefault('key_verified', False)
+        if not partielle:
+            continue
+        for i, (cle, source) in enumerate(restants):
+            if cle.endswith(partielle):
+                lic['full_key'] = cle
+                lic['key_source'] = source
+                lic['key_verified'] = True
+                restants.pop(i)
+                break
+
+    # Clés complètes retrouvées mais ne correspondant à aucune licence active :
+    # les signaler telles quelles plutôt que de les taire.
+    for cle, source in restants:
+        licences.append({
+            'name': 'Windows — clé récupérée, non active',
+            'description': '',
+            'partial_key': cle[-5:],
+            'status': 'Non active',
+            'activated': False,
+            'channel': '',
+            'full_key': cle,
+            'key_source': source,
+            'key_verified': False,
+        })
+
+    if licences:
+        info['licenses'] = licences
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# IDENTITÉ
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_mac_address():
+    """Récupère l'adresse MAC réelle de la machine."""
+    try:
+        mac = uuid.getnode()
+        mac_str = ':'.join(['{:02x}'.format((mac >> (i << 3)) & 0xff) for i in range(5, -1, -1)])
+        return mac_str.upper()
+    except Exception:
+        return ""
+
+
+def get_hostname():
+    """Récupère le nom d'hôte exact."""
+    try:
+        return socket.gethostname()
+    except Exception:
+        return ""
+
+
+def get_fqdn():
+    """Nom DNS complet de la machine (alimente la colonne nom_dns de ParcInfo)."""
+    try:
+        fqdn = socket.getfqdn()
+        # getfqdn() retombe sur le hostname court quand la résolution échoue :
+        # dans ce cas il n'y a pas de vrai nom DNS à remonter
+        return fqdn if fqdn and '.' in fqdn else ''
+    except Exception:
+        return ''
+
+
+def get_ip_addresses():
+    """Récupère toutes les adresses IP locales."""
+    ips = []
+    try:
+        hostname = socket.gethostname()
+        ips = socket.gethostbyname_ex(hostname)[2]
+    except Exception:
+        pass
+    return [ip for ip in ips if not ip.startswith('127.')]
+
+
+def get_os_info():
+    """Récupère l'OS et la version exacte avec édition (Pro/Home/Server).
+
+    os_version = "Display Version" Windows (ex: "22H2") - le build/feature update,
+    os_name = nom complet lisible (ex: "Windows 11 Pro", "Windows Server 2022 Standard").
+
+    Note: platform.release() renvoie toujours "10" sur Windows 11 (même noyau NT 10.0) -
+    la version majeure (10 vs 11) doit être déduite du numéro de build (>= 22000 = Windows 11).
+    """
+    os_name = platform.system()  # 'Windows', 'Darwin', 'Linux'
+    os_version = platform.release()
+    full_os_name = os_name
+    extra = {}
+
+    # Pour Windows, obtenir la version complète et l'édition
+    if IS_WINDOWS:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows NT\CurrentVersion') as key:
+                def _reg(name):
+                    try:
+                        return winreg.QueryValueEx(key, name)[0]
+                    except Exception:
+                        return ''
+
+                os_version = _reg('DisplayVersion') or os_version
+                product_name = _reg('ProductName')
+                edition_name = _reg('EditionID')
+                ubr = _reg('UBR')
+
+                try:
+                    build_number = int(_reg('CurrentBuildNumber') or 0)
+                except Exception:
+                    build_number = 0
+
+                if build_number:
+                    extra['os_build'] = f"{build_number}.{ubr}" if ubr else str(build_number)
+
+                registered_owner = _reg('RegisteredOwner')
+                registered_org = _reg('RegisteredOrganization')
+                if registered_owner:
+                    extra['registered_owner'] = registered_owner
+                if registered_org:
+                    extra['registered_organization'] = registered_org
+
+                if 'Server' in product_name:
+                    # Le ProductName Windows Server contient déjà l'année
+                    full_os_name = product_name
+                    extra['is_server'] = True
+                else:
+                    major = 11 if build_number >= 22000 else 10
+                    edition_map = {
+                        'Professional': 'Pro',
+                        'Core': 'Home',
+                        'Home': 'Home',
+                        'Enterprise': 'Enterprise',
+                        'Education': 'Education',
+                    }
+                    edition = edition_map.get(edition_name, edition_name or 'Pro')
+                    full_os_name = f"Windows {major} {edition}"
+        except Exception:
+            pass
+
+    # Pour macOS
+    if IS_MAC:
+        try:
+            mac_ver = platform.mac_ver()
+            os_version = mac_ver[0]
+            full_os_name = "macOS"
+        except Exception:
+            pass
+
+    # Pour Linux, lire le nom de distribution dans /etc/os-release
+    if IS_LINUX:
+        try:
+            with open('/etc/os-release', 'r') as f:
+                fields = {}
+                for line in f:
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        fields[k.strip()] = v.strip().strip('"')
+            if fields.get('PRETTY_NAME'):
+                full_os_name = fields['PRETTY_NAME']
+            elif fields.get('NAME'):
+                full_os_name = fields['NAME']
+            if fields.get('VERSION_ID'):
+                os_version = fields['VERSION_ID']
+        except Exception:
+            pass
+
+    info = {
+        "os_name": full_os_name,
+        "os_version": os_version,
+        "platform": platform.platform(),
+        "architecture": platform.machine(),
+    }
+    info.update(extra)
+    return info
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# COLLECTE WINDOWS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _win_base_hardware():
+    """RAM totale, CPU, disques logiques via ctypes/winreg (sans PowerShell)."""
+    info = {}
+
+    # RAM (kernel32 GlobalMemoryStatusEx)
+    try:
+        import ctypes
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        stat = MEMORYSTATUSEX()
+        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+        info['ram_gb'] = round(stat.ullTotalPhys / (1024 ** 3), 1)
+        info['ram_free_gb'] = round(stat.ullAvailPhys / (1024 ** 3), 1)
+    except Exception:
+        pass
+
+    # CPU nom (registre) + cores (os.cpu_count)
+    try:
+        import winreg
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
+        cpu_name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
+        winreg.CloseKey(key)
+        info['cpu'] = cpu_name.strip()
+    except Exception:
+        pass
+
+    try:
+        info['cpu_cores'] = os.cpu_count()
+    except Exception:
+        pass
+
+    # Disques logiques fixes (kernel32) - taille, utilisé, libre
+    try:
+        import ctypes
+
+        disk_list = []
+        total_disk = 0.0
+        total_free = 0.0
+        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
+        for i, letter in enumerate(string.ascii_uppercase):
+            if bitmask & (1 << i):
+                drive = f"{letter}:\\"
+                drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+                if drive_type == 3:  # DRIVE_FIXED
+                    total_bytes = ctypes.c_ulonglong(0)
+                    free_bytes = ctypes.c_ulonglong(0)
+                    ok = ctypes.windll.kernel32.GetDiskFreeSpaceExW(
+                        drive, None, ctypes.byref(total_bytes), ctypes.byref(free_bytes)
+                    )
+                    if ok:
+                        size_gb = round(total_bytes.value / (1024 ** 3), 1)
+                        free_gb = round(free_bytes.value / (1024 ** 3), 1)
+                        used_gb = round(size_gb - free_gb, 1)
+                        disk_list.append(f"{letter}: — {size_gb} GB total, {used_gb} GB utilisés, {free_gb} GB libres")
+                        total_disk += size_gb
+                        total_free += free_gb
+        if disk_list:
+            info['disk_drives'] = disk_list
+            info['disk_total_gb'] = round(total_disk, 1)
+            info['disk_free_gb'] = round(total_free, 1)
+            info['disk_used_gb'] = round(total_disk - total_free, 1)
+    except Exception:
+        pass
+
+    return info
+
+
+def _win_core():
+    """Identification matérielle : marque/modèle/domaine/BIOS/uptime/GPU.
+
+    Un seul appel PowerShell groupé - chaque champ est protégé individuellement
+    pour qu'une source manquante ne fasse pas échouer les autres.
+    """
+    info = {}
+    core_data = _win_powershell_json(
+        "$cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue; "
+        "$bios = Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue; "
+        "$os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue; "
+        "$gpuNames = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty Name); "
+        "$uptimeHours = $null; "
+        "if ($os -and $os.LastBootUpTime) { $uptimeHours = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1) }; "
+        "$installDate = $null; "
+        "if ($os -and $os.InstallDate) { $installDate = $os.InstallDate.ToString('yyyy-MM-dd') }; "
+        "$biosDate = $null; "
+        "if ($bios -and $bios.ReleaseDate) { $biosDate = $bios.ReleaseDate.ToString('yyyy-MM-dd') }; "
+        "$tz = $null; try { $tz = (Get-TimeZone -ErrorAction SilentlyContinue).Id } catch {}; "
+        "[PSCustomObject]@{ "
+        "Manufacturer=$cs.Manufacturer; Model=$cs.Model; Domain=$cs.Domain; "
+        "PartOfDomain=$cs.PartOfDomain; Workgroup=$cs.Workgroup; LoggedOnUser=$cs.UserName; "
+        "SerialNumber=$bios.SerialNumber; BiosVersion=$bios.SMBIOSBIOSVersion; "
+        "BiosManufacturer=$bios.Manufacturer; BiosReleaseDate=$biosDate; "
+        "UptimeHours=$uptimeHours; OsInstallDate=$installDate; TimeZone=$tz; "
+        "GpuNames=$gpuNames } | ConvertTo-Json -Compress -Depth 4",
+        timeout=25
+    )
+    if not core_data:
+        return info
+
+    info['brand'] = _clean(core_data.get('Manufacturer'))
+    info['model'] = _clean(core_data.get('Model'))
+    info['serial_number'] = _clean(core_data.get('SerialNumber'))
+
+    bios_version = core_data.get('BiosVersion')
+    if isinstance(bios_version, list):
+        bios_version = ', '.join(str(v) for v in bios_version if v)
+    if bios_version:
+        info['bios_version'] = _clean(bios_version)
+    if core_data.get('BiosManufacturer'):
+        info['bios_manufacturer'] = _clean(core_data.get('BiosManufacturer'))
+    if core_data.get('BiosReleaseDate'):
+        info['bios_release_date'] = core_data.get('BiosReleaseDate')
+
+    if core_data.get('PartOfDomain'):
+        info['domain'] = core_data.get('Domain') or ''
+    elif core_data.get('Workgroup'):
+        info['workgroup'] = core_data.get('Workgroup')
+
+    if core_data.get('LoggedOnUser'):
+        info['logged_on_user'] = core_data.get('LoggedOnUser')
+    if core_data.get('UptimeHours') is not None:
+        info['uptime_hours'] = core_data.get('UptimeHours')
+    if core_data.get('OsInstallDate'):
+        info['os_install_date'] = core_data.get('OsInstallDate')
+    if core_data.get('TimeZone'):
+        info['timezone'] = core_data.get('TimeZone')
+
+    gpus = [g for g in _as_list(core_data.get('GpuNames')) if g]
+    if gpus:
+        info['gpu'] = ', '.join(gpus)
+
+    return info
+
+
+def _win_hardware_detail():
+    """Carte mère, châssis, barrettes mémoire, CPU détaillé, GPU détaillé.
+
+    C'est le cœur de la parité Belarc : la mémoire par slot répond à
+    "peut-on upgrader cette machine ?" sans démonter le poste.
+    """
+    info = {}
+    data = _win_powershell_json(
+        "$bb = Get-CimInstance Win32_BaseBoard -ErrorAction SilentlyContinue | Select-Object -First 1 "
+        "Manufacturer,Product,Version,SerialNumber; "
+        "$enc = Get-CimInstance Win32_SystemEnclosure -ErrorAction SilentlyContinue | Select-Object -First 1 "
+        "ChassisTypes,SMBIOSAssetTag,SerialNumber; "
+        "$cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue; "
+        "$cpus = @(Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Object "
+        "Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed,L2CacheSize,L3CacheSize,"
+        "SocketDesignation,VirtualizationFirmwareEnabled,AddressWidth); "
+        "$mem = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue | Select-Object "
+        "BankLabel,DeviceLocator,Capacity,Speed,ConfiguredClockSpeed,Manufacturer,PartNumber,"
+        "SerialNumber,SMBIOSMemoryType,FormFactor); "
+        "$memArr = Get-CimInstance Win32_PhysicalMemoryArray -ErrorAction SilentlyContinue "
+        "| Select-Object -First 1 MaxCapacityEx,MemoryDevices; "
+        "$gpu = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Select-Object "
+        "Name,DriverVersion,CurrentHorizontalResolution,CurrentVerticalResolution,CurrentRefreshRate,"
+        "@{N='DriverDate';E={ if ($_.DriverDate) { $_.DriverDate.ToString('yyyy-MM-dd') } else { '' } }}); "
+        "$gpuVram = @(); try { $gpuVram = @(Get-ItemProperty -Path "
+        "'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0*' "
+        "-ErrorAction SilentlyContinue | Where-Object { $_.'HardwareInformation.qwMemorySize' } "
+        "| Select-Object DriverDesc,@{N='Vram';E={ [uint64]$_.'HardwareInformation.qwMemorySize' }}) } catch {}; "
+        "[PSCustomObject]@{ BaseBoard=$bb; Enclosure=$enc; PCSystemType=$cs.PCSystemType; "
+        "HypervisorPresent=$cs.HypervisorPresent; Cpus=$cpus; Memory=$mem; MemoryArray=$memArr; "
+        "Gpu=$gpu; GpuVram=$gpuVram } | ConvertTo-Json -Compress -Depth 5",
+        timeout=35
+    )
+    if not data:
+        return info
+
+    # ── Carte mère ─────────────────────────────────────────────────────────
+    bb = data.get('BaseBoard') or {}
+    if bb:
+        info['motherboard'] = {
+            'manufacturer': _clean(bb.get('Manufacturer')),
+            'model': _clean(bb.get('Product')),
+            'version': _clean(bb.get('Version')),
+            'serial_number': _clean(bb.get('SerialNumber')),
+        }
+
+    # ── Châssis (→ type d'appareil) ────────────────────────────────────────
+    enc = data.get('Enclosure') or {}
+    chassis_codes = [c for c in _as_list(enc.get('ChassisTypes')) if isinstance(c, int)]
+    if chassis_codes:
+        code = chassis_codes[0]
+        info['chassis_type'] = CHASSIS_TYPES.get(code, f'Code {code}')
+        info['chassis_code'] = code
+    if _clean(enc.get('SMBIOSAssetTag')):
+        info['asset_tag'] = _clean(enc.get('SMBIOSAssetTag'))
+
+    if data.get('HypervisorPresent'):
+        info['hypervisor_present'] = True
+
+    # ── CPU détaillé ───────────────────────────────────────────────────────
+    cpus = _as_list(data.get('Cpus'))
+    if cpus:
+        first = cpus[0]
+        info['cpu_sockets'] = len(cpus)
+        if first.get('NumberOfCores'):
+            info['cpu_physical_cores'] = sum(c.get('NumberOfCores') or 0 for c in cpus)
+        if first.get('NumberOfLogicalProcessors'):
+            info['cpu_logical_cores'] = sum(c.get('NumberOfLogicalProcessors') or 0 for c in cpus)
+        if first.get('MaxClockSpeed'):
+            info['cpu_max_clock_mhz'] = first.get('MaxClockSpeed')
+        if first.get('L3CacheSize'):
+            info['cpu_l3_cache_kb'] = first.get('L3CacheSize')
+        if first.get('L2CacheSize'):
+            info['cpu_l2_cache_kb'] = first.get('L2CacheSize')
+        if first.get('SocketDesignation'):
+            info['cpu_socket'] = _clean(first.get('SocketDesignation'))
+        if first.get('VirtualizationFirmwareEnabled') is not None:
+            info['cpu_virtualization'] = bool(first.get('VirtualizationFirmwareEnabled'))
+        if first.get('AddressWidth'):
+            info['cpu_address_width'] = first.get('AddressWidth')
+
+    # ── Barrettes mémoire par slot ─────────────────────────────────────────
+    modules = []
+    for m in _as_list(data.get('Memory')):
+        capacity = m.get('Capacity') or 0
+        try:
+            capacity_gb = round(int(capacity) / (1024 ** 3), 1)
+        except (TypeError, ValueError):
+            capacity_gb = 0
+        mem_type = MEMORY_TYPES.get(m.get('SMBIOSMemoryType'), '')
+        modules.append({
+            'slot': _clean(m.get('DeviceLocator')) or _clean(m.get('BankLabel')) or 'Slot inconnu',
+            'bank': _clean(m.get('BankLabel')),
+            'capacity_gb': capacity_gb,
+            'type': mem_type,
+            'form_factor': MEMORY_FORM_FACTORS.get(m.get('FormFactor'), ''),
+            # ConfiguredClockSpeed = fréquence réelle, Speed = fréquence nominale
+            'speed_mhz': m.get('ConfiguredClockSpeed') or m.get('Speed') or '',
+            'rated_speed_mhz': m.get('Speed') or '',
+            'manufacturer': _clean(m.get('Manufacturer')),
+            'part_number': _clean(m.get('PartNumber')),
+            'serial_number': _clean(m.get('SerialNumber')),
+        })
+    if modules:
+        info['memory_modules'] = modules
+
+    mem_arr = data.get('MemoryArray') or {}
+    if mem_arr.get('MemoryDevices'):
+        info['memory_slots_total'] = mem_arr.get('MemoryDevices')
+        info['memory_slots_used'] = len(modules)
+        info['memory_slots_free'] = max(0, mem_arr.get('MemoryDevices') - len(modules))
+    if mem_arr.get('MaxCapacityEx'):
+        try:
+            # MaxCapacityEx est exprimé en kilo-octets
+            info['memory_max_gb'] = round(int(mem_arr['MaxCapacityEx']) / (1024 ** 2), 1)
+        except (TypeError, ValueError):
+            pass
+
+    # ── GPU détaillé ───────────────────────────────────────────────────────
+    # AdapterRAM de Win32_VideoController est un int32 signé : il déborde
+    # au-delà de 4 Go et renvoie des valeurs aberrantes. La VRAM réelle se lit
+    # dans le registre (qwMemorySize), d'où la jointure sur le nom du pilote.
+    vram_by_name = {}
+    for entry in _as_list(data.get('GpuVram')):
+        desc = _clean(entry.get('DriverDesc'))
+        if desc and entry.get('Vram'):
+            vram_by_name[desc.lower()] = entry['Vram']
+
+    gpu_details = []
+    for g in _as_list(data.get('Gpu')):
+        name = _clean(g.get('Name'))
+        if not name:
+            continue
+        entry = {
+            'name': name,
+            'driver_version': _clean(g.get('DriverVersion')),
+            'driver_date': _clean(g.get('DriverDate')),
+        }
+        vram = vram_by_name.get(name.lower())
+        if vram:
+            entry['vram_gb'] = round(int(vram) / (1024 ** 3), 1)
+        h, v = g.get('CurrentHorizontalResolution'), g.get('CurrentVerticalResolution')
+        if h and v:
+            entry['resolution'] = f"{h}x{v}"
+            if g.get('CurrentRefreshRate'):
+                entry['resolution'] += f" @ {g.get('CurrentRefreshRate')} Hz"
+        gpu_details.append(entry)
+    if gpu_details:
+        info['gpu_details'] = gpu_details
+
+    return info
+
+
+def _win_inventory():
+    """Écrans, imprimantes, fiabilité des disques, ports en écoute."""
+    info = {}
+    data = _win_powershell_json(
+        # Écrans : WmiMonitorID expose des tableaux d'entiers UTF-16 terminés par
+        # des zéros, il faut les reconstituer en chaînes côté PowerShell
+        "$mon = @(); try { $mon = @(Get-CimInstance -Namespace root\\wmi -ClassName WmiMonitorID "
+        "-ErrorAction SilentlyContinue | ForEach-Object { [PSCustomObject]@{ "
+        "Manufacturer = (($_.ManufacturerName | Where-Object { $_ -gt 0 }) | ForEach-Object { [char]$_ }) -join ''; "
+        "Model = (($_.UserFriendlyName | Where-Object { $_ -gt 0 }) | ForEach-Object { [char]$_ }) -join ''; "
+        "Serial = (($_.SerialNumberID | Where-Object { $_ -gt 0 }) | ForEach-Object { [char]$_ }) -join ''; "
+        "Year = $_.YearOfManufacture } }) } catch {}; "
+        "$printers = @(); try { $printers = @(Get-CimInstance Win32_Printer -ErrorAction SilentlyContinue "
+        "| Select-Object Name,DriverName,PortName,Network,Default,Shared) } catch {}; "
+        # Fiabilité disque : heures de fonctionnement / usure SSD / température
+        "$rel = @(); try { $rel = @(Get-PhysicalDisk -ErrorAction SilentlyContinue | ForEach-Object { "
+        "$d = $_; $c = $null; try { $c = $d | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue } catch {}; "
+        "if ($c) { [PSCustomObject]@{ Name=$d.FriendlyName; Serial=$d.SerialNumber; "
+        "PowerOnHours=$c.PowerOnHours; Wear=$c.Wear; Temperature=$c.Temperature; "
+        "ReadErrors=$c.ReadErrorsTotal; WriteErrors=$c.WriteErrorsTotal } } }) } catch {}; "
+        "$ports = @(); try { $pmap = @{}; "
+        "Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $pmap[[string]$_.Id] = $_.ProcessName }; "
+        "$ports = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue "
+        "| Group-Object LocalPort | ForEach-Object { $g = $_.Group | Select-Object -First 1; "
+        "[PSCustomObject]@{ Port=[int]$_.Name; Process=$pmap[[string]$g.OwningProcess] } } "
+        "| Sort-Object Port) } catch {}; "
+        "[PSCustomObject]@{ Monitors=$mon; Printers=$printers; Reliability=$rel; Ports=$ports } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=40
+    )
+    if not data:
+        return info
+
+    # ── Écrans ─────────────────────────────────────────────────────────────
+    monitors = []
+    for m in _as_list(data.get('Monitors')):
+        model = _clean(m.get('Model'))
+        manufacturer = _clean(m.get('Manufacturer'))
+        if not model and not manufacturer:
+            continue
+        # Les écrans sans EDID complet (dummy HDMI, KVM, adaptateurs) renvoient
+        # un série "0" : le garder créerait un périphérique dédoublonné sur "0"
+        serial = _clean(m.get('Serial'))
+        if serial and not serial.strip('0'):
+            serial = ''
+        monitors.append({
+            'manufacturer': manufacturer,
+            'model': model,
+            'serial_number': serial,
+            'year': m.get('Year') or '',
+        })
+    if monitors:
+        info['monitors'] = monitors
+
+    # ── Imprimantes ────────────────────────────────────────────────────────
+    printers = []
+    for p in _as_list(data.get('Printers')):
+        name = _clean(p.get('Name'))
+        if not name:
+            continue
+        driver = _clean(p.get('DriverName'))
+        port = _clean(p.get('PortName'))
+        printers.append({
+            'name': name,
+            'driver': driver,
+            'port': port,
+            'network': bool(p.get('Network')),
+            'default': bool(p.get('Default')),
+            'shared': bool(p.get('Shared')),
+            # Les imprimantes virtuelles restent dans le rapport mais ne doivent
+            # pas polluer l'inventaire matériel côté serveur
+            'virtual': is_virtual_printer(name, driver, port),
+        })
+    if printers:
+        info['printers'] = printers
+
+    # ── Fiabilité / usure des disques ──────────────────────────────────────
+    reliability = []
+    for r in _as_list(data.get('Reliability')):
+        name = _clean(r.get('Name'))
+        if not name:
+            continue
+        entry = {'name': name, 'serial_number': _clean(r.get('Serial'))}
+        for src, dst in (('PowerOnHours', 'power_on_hours'), ('Wear', 'wear_percent'),
+                         ('Temperature', 'temperature_c'), ('ReadErrors', 'read_errors'),
+                         ('WriteErrors', 'write_errors')):
+            if r.get(src) is not None:
+                entry[dst] = r.get(src)
+        reliability.append(entry)
+    if reliability:
+        info['disk_reliability'] = reliability
+
+    # ── Ports TCP en écoute ────────────────────────────────────────────────
+    ports = []
+    for p in _as_list(data.get('Ports')):
+        if p.get('Port') is None:
+            continue
+        ports.append({'port': p.get('Port'), 'process': _clean(p.get('Process'))})
+    if ports:
+        info['listening_ports'] = ports
+
+    return info
+
+
+def _win_licensing():
+    """Licences Windows/Office, activation, et liste complète des correctifs."""
+    info = {}
+    data = _win_powershell_json(
+        # Le filtre WQL est indispensable : énumérer SoftwareLicensingProduct
+        # sans filtre parcourt plusieurs centaines d'entrées et prend >30 s
+        "$lic = @(); try { $lic = @(Get-CimInstance SoftwareLicensingProduct "
+        "-Filter 'PartialProductKey IS NOT NULL' -ErrorAction SilentlyContinue "
+        "| Select-Object Name,Description,PartialProductKey,LicenseStatus,ProductKeyChannel,GenuineStatus) } catch {}; "
+        "$olic = @(); try { $olic = @(Get-CimInstance OfficeSoftwareProtectionProduct "
+        "-Filter 'PartialProductKey IS NOT NULL' -ErrorAction SilentlyContinue "
+        "| Select-Object Name,Description,PartialProductKey,LicenseStatus,ProductKeyChannel) } catch {}; "
+        "$oem = ''; try { $oem = (Get-CimInstance SoftwareLicensingService "
+        "-ErrorAction SilentlyContinue).OA3xOriginalProductKey } catch {}; "
+        "$hf = @(); try { $hf = @(Get-HotFix -ErrorAction SilentlyContinue "
+        "| Select-Object HotFixID,Description,@{N='InstalledOn';E={ if ($_.InstalledOn) "
+        "{ $_.InstalledOn.ToString('yyyy-MM-dd') } else { '' } }}) } catch {}; "
+        "[PSCustomObject]@{ Licenses=$lic; OfficeLicenses=$olic; OemKey=$oem; HotFixes=$hf } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=60
+    )
+    if not data:
+        return info
+
+    licenses = []
+    for source in ('Licenses', 'OfficeLicenses'):
+        for lic in _as_list(data.get(source)):
+            name = _clean(lic.get('Name'))
+            if not name:
+                continue
+            status_code = lic.get('LicenseStatus')
+            licenses.append({
+                'name': name,
+                'description': _clean(lic.get('Description')),
+                'partial_key': _clean(lic.get('PartialProductKey')),
+                'status': LICENSE_STATUS.get(status_code, f'Code {status_code}'),
+                'activated': status_code == 1,
+                'channel': _clean(lic.get('ProductKeyChannel')),
+            })
+    if licenses:
+        info['licenses'] = licenses
+        # Le produit Windows lui-même sert de statut d'activation global
+        windows_lic = next((l for l in licenses if 'windows' in l['name'].lower()), None)
+        if windows_lic:
+            info['windows_activated'] = windows_lic['activated']
+            info['windows_license_channel'] = windows_lic['channel']
+
+    if _clean(data.get('OemKey')):
+        info['oem_product_key'] = _clean(data.get('OemKey'))
+
+    # Compléter chaque licence avec sa clé entière quand elle est récupérable,
+    # et vérifier qu'il s'agit bien de celle en service.
+    try:
+        enrich_licenses_with_keys(info)
+    except Exception:
+        pass
+
+    hotfixes = []
+    for hf in _as_list(data.get('HotFixes')):
+        hf_id = _clean(hf.get('HotFixID'))
+        if not hf_id:
+            continue
+        hotfixes.append({
+            'id': hf_id,
+            'description': _clean(hf.get('Description')),
+            'installed_on': _clean(hf.get('InstalledOn')),
+        })
+    if hotfixes:
+        # Tri décroissant par date ; les correctifs sans date passent en fin
+        hotfixes.sort(key=lambda h: h['installed_on'] or '', reverse=True)
+        info['hotfixes'] = hotfixes
+        latest = hotfixes[0]
+        date_part = f" ({latest['installed_on']})" if latest['installed_on'] else ''
+        info['last_windows_update'] = f"{latest['id']}{date_part}"
+
+    return info
+
+
+def _win_security():
+    """Antivirus, pare-feu, BitLocker, TPM, Secure Boot.
+
+    Modules non garantis selon l'édition Windows - chaque source est protégée
+    par un try/catch PowerShell dédié pour ne pas faire échouer les autres.
+    """
+    info = {}
+    security_data = _win_powershell_json(
+        "$av = @(); try { $av = @(Get-CimInstance -Namespace root/SecurityCenter2 "
+        "-ClassName AntivirusProduct -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty displayName) } catch {}; "
+        "$fw = @(); try { $fw = @(Get-NetFirewallProfile -ErrorAction SilentlyContinue "
+        "| Select-Object Name,Enabled) } catch {}; "
+        "$bl = @(); try { $bl = @(Get-BitLockerVolume -ErrorAction SilentlyContinue "
+        "| Select-Object MountPoint,VolumeStatus,ProtectionStatus) } catch {}; "
+        "$tpmObj = $null; try { $tpmObj = Get-Tpm -ErrorAction SilentlyContinue "
+        "| Select-Object TpmPresent,TpmReady,TpmEnabled } catch {}; "
+        "$secureBoot = $null; try { $secureBoot = Confirm-SecureBootUEFI -ErrorAction SilentlyContinue } catch {}; "
+        "[PSCustomObject]@{ Antivirus=$av; Firewall=$fw; BitLocker=$bl; Tpm=$tpmObj; SecureBoot=$secureBoot } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=25
+    )
+    if not security_data:
+        return info
+
+    avs = [a for a in _as_list(security_data.get('Antivirus')) if a]
+    if avs:
+        info['antivirus'] = ', '.join(avs)
+
+    profiles = [
+        f"{f.get('Name')}: {'Activé' if f.get('Enabled') else 'Désactivé'}"
+        for f in _as_list(security_data.get('Firewall')) if f.get('Name')
+    ]
+    if profiles:
+        info['firewall'] = profiles
+
+    bitlocker = [
+        f"{b.get('MountPoint')}: {b.get('VolumeStatus', 'Inconnu')} "
+        f"(Protection: {b.get('ProtectionStatus', 'Inconnu')})"
+        for b in _as_list(security_data.get('BitLocker')) if b.get('MountPoint')
+    ]
+    if bitlocker:
+        info['bitlocker'] = bitlocker
+
+    tpm = security_data.get('Tpm')
+    if tpm:
+        info['tpm_present'] = bool(tpm.get('TpmPresent'))
+        info['tpm_enabled'] = bool(tpm.get('TpmEnabled'))
+
+    if security_data.get('SecureBoot') is not None:
+        info['secure_boot'] = bool(security_data.get('SecureBoot'))
+
+    return info
+
+
+def _win_users():
+    """Comptes utilisateurs locaux + appartenance au groupe Administrateurs."""
+    info = {}
+    users_data = _win_powershell_json(
+        "$users = @(Get-CimInstance Win32_UserAccount -Filter \"LocalAccount='True'\" "
+        "-ErrorAction SilentlyContinue | Select-Object Name,Disabled,Lockout); "
+        "$admins = @(); try { $admins = @(Get-LocalGroupMember -Group Administrators "
+        "-ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) } catch {}; "
+        "[PSCustomObject]@{ Users=$users; Admins=$admins } | ConvertTo-Json -Compress -Depth 4",
+        timeout=25
+    )
+    if not users_data:
+        return info
+
+    # Les membres du groupe local Administrateurs sont retournés au format "MACHINE\Nom"
+    admin_names = {a.split('\\')[-1].lower() for a in _as_list(users_data.get('Admins')) if a}
+
+    user_list = []
+    for u in _as_list(users_data.get('Users')):
+        name = u.get('Name', '')
+        if not name:
+            continue
+        if u.get('Disabled'):
+            status = 'Désactivé'
+        elif u.get('Lockout'):
+            status = 'Verrouillé'
+        else:
+            status = 'Actif'
+        if name.lower() in admin_names:
+            status += ', Administrateur'
+        user_list.append(f"{name} ({status})")
+    if user_list:
+        info['users'] = sorted(user_list)
+
+    return info
+
+
+def _win_extras():
+    """Batterie (dont usure réelle), adaptateurs réseau actifs, disques physiques."""
+    info = {}
+
+    # Disques physiques : type (SSD/HDD) + état de santé SMART (natif Windows 8+)
+    physical_disks_data = _win_powershell_json(
+        "Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,Size,OperationalStatus "
+        "| ConvertTo-Json -Compress"
+    )
+    if physical_disks_data:
+        physical_list = []
+        for d in _as_list(physical_disks_data):
+            name = d.get('FriendlyName') or 'Disque'
+            media = d.get('MediaType') or 'Inconnu'
+            health = d.get('HealthStatus') or 'Inconnu'
+            op_status = d.get('OperationalStatus') or ''
+            size_gb = round((d.get('Size') or 0) / (1024 ** 3), 1)
+            entry = f"{name} — {media} — {size_gb} GB — Santé (SMART): {health}"
+            if op_status and op_status != 'OK':
+                entry += f" ({op_status})"
+            physical_list.append(entry)
+        if physical_list:
+            info['physical_disks'] = physical_list
+
+    extras_data = _win_powershell_json(
+        "$battery = @(); try { $battery = @(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue "
+        "| Select-Object EstimatedChargeRemaining,BatteryStatus) } catch {}; "
+        # Win32_Battery.DesignCapacity est presque toujours vide : l'usure réelle
+        # ne s'obtient que via les classes root\wmi du pilote ACPI
+        "$wear = $null; try { "
+        "$st = Get-CimInstance -Namespace root\\wmi -ClassName BatteryStaticData -ErrorAction SilentlyContinue "
+        "| Select-Object -First 1; "
+        "$fu = Get-CimInstance -Namespace root\\wmi -ClassName BatteryFullChargedCapacity -ErrorAction SilentlyContinue "
+        "| Select-Object -First 1; "
+        "$cy = Get-CimInstance -Namespace root\\wmi -ClassName BatteryCycleCount -ErrorAction SilentlyContinue "
+        "| Select-Object -First 1; "
+        "if ($st -or $fu) { $wear = [PSCustomObject]@{ Designed=$st.DesignedCapacity; "
+        "Full=$fu.FullChargedCapacity; Cycles=$cy.CycleCount } } } catch {}; "
+        "$adapters = @(); try { $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue "
+        "| Where-Object Status -eq 'Up' | Select-Object Name,InterfaceDescription,LinkSpeed,MacAddress) } catch {}; "
+        "[PSCustomObject]@{ Battery=$battery; BatteryWear=$wear; Adapters=$adapters } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=25
+    )
+    if not extras_data:
+        return info
+
+    battery_list = _as_list(extras_data.get('Battery'))
+    b = battery_list[0] if battery_list else None
+    if b and b.get('EstimatedChargeRemaining') is not None:
+        info['battery'] = f"{b.get('EstimatedChargeRemaining')}% (statut: {b.get('BatteryStatus', 'Inconnu')})"
+        info['battery_charge_percent'] = b.get('EstimatedChargeRemaining')
+
+    wear = extras_data.get('BatteryWear')
+    if wear and wear.get('Designed') and wear.get('Full'):
+        try:
+            designed = float(wear['Designed'])
+            full = float(wear['Full'])
+            if designed > 0:
+                health = round(full / designed * 100, 1)
+                info['battery_health_percent'] = health
+                info['battery_wear_percent'] = round(100 - health, 1)
+                info['battery_designed_capacity_mwh'] = int(designed)
+                info['battery_full_capacity_mwh'] = int(full)
+        except (TypeError, ValueError):
+            pass
+    if wear and wear.get('Cycles'):
+        info['battery_cycles'] = wear['Cycles']
+
+    adapters = []
+    adapter_details = []
+    for a in _as_list(extras_data.get('Adapters')):
+        if not a.get('Name'):
+            continue
+        adapters.append(f"{a.get('Name')} — {a.get('InterfaceDescription', '')} — {a.get('LinkSpeed', 'N/A')}")
+        adapter_details.append({
+            'name': a.get('Name'),
+            'description': a.get('InterfaceDescription', ''),
+            'link_speed': a.get('LinkSpeed', ''),
+            'mac_address': a.get('MacAddress', ''),
+        })
+    if adapters:
+        info['network_adapters'] = adapters
+        info['network_adapter_details'] = adapter_details
+
+    return info
+
+
+def get_system_info_windows():
+    """Collecte Windows complète (ctypes/winreg/PowerShell, sans dépendance externe)."""
+    info = {}
+    for collector in (_win_base_hardware, _win_core, _win_hardware_detail,
+                      _win_inventory, _win_licensing, _win_security,
+                      _win_users, _win_extras):
+        try:
+            info.update(collector() or {})
+        except Exception:
+            # Un bloc en échec ne doit jamais empêcher les autres de remonter
+            pass
+    return info
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# COLLECTE macOS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _mac_profiler_json(datatype, timeout=25):
+    """Interroge system_profiler en JSON (plus fiable que le parsing texte)."""
+    out = _run(['system_profiler', '-json', datatype], timeout=timeout)
+    if not out.strip():
+        return None
+    try:
+        return json.loads(out).get(datatype)
+    except Exception:
+        return None
+
+
+def get_system_info_mac():
+    """Collecte les infos système via system_profiler (macOS)."""
+    info = {}
+
+    # ── Matériel de base ───────────────────────────────────────────────────
+    try:
+        result = subprocess.run(['system_profiler', 'SPHardwareDataType'],
+                                capture_output=True, text=True, timeout=20)
+        for line in result.stdout.split('\n'):
+            if 'Model Identifier:' in line:
+                info['model'] = line.split(':', 1)[1].strip()
+            elif 'Model Name:' in line:
+                info['brand'] = 'Apple'
+                model_name = line.split(':', 1)[1].strip()
+                info.setdefault('model', model_name)
+                info['model_name'] = model_name
+            elif 'Serial Number' in line:
+                info['serial_number'] = line.split(':', 1)[1].strip()
+            elif 'Total Number of Cores:' in line:
+                try:
+                    info['cpu_physical_cores'] = int(line.split(':', 1)[1].strip().split()[0])
+                except Exception:
+                    pass
+            elif 'Processor Cores:' in line:
+                try:
+                    info['cpu_cores'] = int(line.split(':', 1)[1].strip())
+                except Exception:
+                    pass
+            elif 'Chip:' in line or 'Processor Name:' in line:
+                info['cpu'] = line.split(':', 1)[1].strip()
+            elif 'Memory:' in line:
+                try:
+                    info['ram_gb'] = float(line.split(':', 1)[1].strip().split()[0])
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    info.setdefault('cpu_cores', os.cpu_count())
+
+    # ── Barrettes mémoire ──────────────────────────────────────────────────
+    try:
+        mem_data = _mac_profiler_json('SPMemoryDataType') or []
+        modules = []
+        for bank in mem_data:
+            for key, value in bank.items():
+                if not isinstance(value, dict):
+                    continue
+                size = str(value.get('dimm_size', ''))
+                if not size or size.lower() in ('empty', 'vide'):
+                    continue
+                try:
+                    capacity_gb = float(size.upper().replace('GB', '').strip())
+                except ValueError:
+                    capacity_gb = 0
+                modules.append({
+                    'slot': key,
+                    'capacity_gb': capacity_gb,
+                    'type': value.get('dimm_type', ''),
+                    'speed_mhz': value.get('dimm_speed', ''),
+                    'manufacturer': value.get('dimm_manufacturer', ''),
+                    'part_number': value.get('dimm_part_number', ''),
+                    'serial_number': value.get('dimm_serial_number', ''),
+                })
+        if modules:
+            info['memory_modules'] = modules
+            info['memory_slots_used'] = len(modules)
+    except Exception:
+        pass
+
+    # ── Écrans ─────────────────────────────────────────────────────────────
+    try:
+        displays = _mac_profiler_json('SPDisplaysDataType') or []
+        monitors = []
+        for gpu in displays:
+            for screen in gpu.get('spdisplays_ndrvs', []) or []:
+                name = screen.get('_name', '')
+                if not name:
+                    continue
+                monitors.append({
+                    'manufacturer': '',
+                    'model': name,
+                    'serial_number': screen.get('_spdisplays_display-serial-number', ''),
+                    'year': '',
+                })
+        if monitors:
+            info['monitors'] = monitors
+    except Exception:
+        pass
+
+    # ── Batterie (usure réelle) ────────────────────────────────────────────
+    try:
+        power = _mac_profiler_json('SPPowerDataType') or []
+        for section in power:
+            health = section.get('sppower_battery_health_info') or {}
+            charge = section.get('sppower_battery_charge_info') or {}
+            if health.get('sppower_battery_cycle_count') is not None:
+                info['battery_cycles'] = health['sppower_battery_cycle_count']
+            if health.get('sppower_battery_health'):
+                info['battery_health_status'] = health['sppower_battery_health']
+            if charge.get('sppower_battery_state_of_charge') is not None:
+                pct = charge['sppower_battery_state_of_charge']
+                info['battery_charge_percent'] = pct
+                info['battery'] = f"{pct}%"
+    except Exception:
+        pass
+
+    # ── Disques ────────────────────────────────────────────────────────────
+    info.update(_unix_disks())
+
+    # ── Pare-feu applicatif macOS ──────────────────────────────────────────
+    try:
+        fw = _run(['/usr/libexec/ApplicationFirewall/socketfilterfw', '--getglobalstate'], timeout=5)
+        if fw.strip():
+            info['firewall'] = [f"macOS: {'Activé' if 'enabled' in fw.lower() else 'Désactivé'}"]
+    except Exception:
+        pass
+
+    # ── FileVault (équivalent BitLocker) ───────────────────────────────────
+    try:
+        fv = _run(['fdesetup', 'status'], timeout=10)
+        if fv.strip():
+            info['bitlocker'] = [f"FileVault: {'Activé' if 'On' in fv else 'Désactivé'}"]
+    except Exception:
+        pass
+
+    # ── Comptes locaux ─────────────────────────────────────────────────────
+    try:
+        out = _run(['dscl', '.', '-list', '/Users'], timeout=10)
+        users = [u for u in out.split('\n') if u.strip() and not u.startswith('_')]
+        admins = set()
+        admin_out = _run(['dscl', '.', '-read', '/Groups/admin', 'GroupMembership'], timeout=10)
+        if admin_out:
+            admins = set(admin_out.replace('GroupMembership:', '').split())
+        if users:
+            info['users'] = sorted(
+                f"{u} (Actif{', Administrateur' if u in admins else ''})"
+                for u in users if u not in ('daemon', 'nobody', 'root')
+            )
+    except Exception:
+        pass
+
+    # ── Uptime ─────────────────────────────────────────────────────────────
+    info.update(_unix_uptime())
+
+    return info
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# COLLECTE LINUX
+# ════════════════════════════════════════════════════════════════════════════
+
+def _unix_disks():
+    """Disques via df (commun macOS / Linux)."""
+    info = {}
+    try:
+        result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=10)
+        lines = result.stdout.strip().split('\n')[1:]  # Skip header
+        disk_list = []
+        total_disk = 0.0
+        total_free = 0.0
+        seen = set()
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            device, size_str, used_str, avail_str = parts[0], parts[1], parts[2], parts[3]
+            # Les pseudo-systèmes de fichiers gonflent artificiellement le total
+            if not device.startswith('/dev/') or device in seen:
+                continue
+            seen.add(device)
+
+            def to_gb(value):
+                value = value.strip()
+                try:
+                    if value.endswith('T'):
+                        return float(value[:-1]) * 1024
+                    if value.endswith('G'):
+                        return float(value[:-1])
+                    if value.endswith('M'):
+                        return float(value[:-1]) / 1024
+                except ValueError:
+                    pass
+                return None
+
+            size_gb = to_gb(size_str)
+            if size_gb is None:
+                continue
+            used_gb = to_gb(used_str) or 0
+            free_gb = to_gb(avail_str) or 0
+            disk_list.append(
+                f"{device} — {round(size_gb, 1)} GB total, "
+                f"{round(used_gb, 1)} GB utilisés, {round(free_gb, 1)} GB libres"
+            )
+            total_disk += size_gb
+            total_free += free_gb
+        if disk_list:
+            info['disk_drives'] = disk_list
+            info['disk_total_gb'] = round(total_disk, 1)
+            info['disk_free_gb'] = round(total_free, 1)
+            info['disk_used_gb'] = round(total_disk - total_free, 1)
+    except Exception:
+        pass
+    return info
+
+
+def _unix_uptime():
+    """Uptime en heures (commun macOS / Linux)."""
+    info = {}
+    try:
+        if IS_LINUX:
+            with open('/proc/uptime', 'r') as f:
+                info['uptime_hours'] = round(float(f.read().split()[0]) / 3600, 1)
+        elif IS_MAC:
+            out = _run(['sysctl', '-n', 'kern.boottime'], timeout=5)
+            # Format : { sec = 1699999999, usec = 0 } ...
+            if 'sec =' in out:
+                boot = int(out.split('sec =')[1].split(',')[0].strip())
+                delta = datetime.now().timestamp() - boot
+                info['uptime_hours'] = round(delta / 3600, 1)
+    except Exception:
+        pass
+    return info
+
+
+def get_system_info_linux():
+    """Collecte les infos système sur Linux."""
+    info = {}
+
+    # ── Marque / modèle / série via DMI (lisible sans sudo depuis /sys) ────
+    dmi_map = {
+        'sys_vendor': 'brand',
+        'product_name': 'model',
+        'product_serial': 'serial_number',
+        'chassis_type': 'chassis_code',
+        'board_vendor': '_board_vendor',
+        'board_name': '_board_name',
+        'board_version': '_board_version',
+        'board_serial': '_board_serial',
+        'bios_version': 'bios_version',
+        'bios_vendor': 'bios_manufacturer',
+        'bios_date': 'bios_release_date',
+    }
+    dmi = {}
+    for filename, key in dmi_map.items():
+        try:
+            with open(f'/sys/class/dmi/id/{filename}', 'r') as f:
+                value = _clean(f.read())
+                if value:
+                    dmi[key] = value
+        except Exception:
+            pass
+
+    for key, value in dmi.items():
+        if not key.startswith('_'):
+            info[key] = value
+
+    if dmi.get('chassis_code'):
+        try:
+            code = int(dmi['chassis_code'])
+            info['chassis_code'] = code
+            info['chassis_type'] = CHASSIS_TYPES.get(code, f'Code {code}')
+        except ValueError:
+            info.pop('chassis_code', None)
+
+    if dmi.get('_board_name') or dmi.get('_board_vendor'):
+        info['motherboard'] = {
+            'manufacturer': dmi.get('_board_vendor', ''),
+            'model': dmi.get('_board_name', ''),
+            'version': dmi.get('_board_version', ''),
+            'serial_number': dmi.get('_board_serial', ''),
+        }
+
+    # ── CPU depuis /proc/cpuinfo ───────────────────────────────────────────
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            lines = f.readlines()
+        for line in lines:
+            if line.startswith('model name'):
+                info['cpu'] = line.split(':', 1)[1].strip()
+                break
+        info['cpu_cores'] = sum(1 for line in lines if line.startswith('processor'))
+        info['cpu_logical_cores'] = info['cpu_cores']
+        cores_per_socket = {line.split(':', 1)[1].strip()
+                            for line in lines if line.startswith('cpu cores')}
+        if cores_per_socket:
+            try:
+                info['cpu_physical_cores'] = int(next(iter(cores_per_socket)))
+            except ValueError:
+                pass
+    except Exception:
+        pass
+
+    # ── RAM depuis /proc/meminfo ───────────────────────────────────────────
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            for line in f:
+                if line.startswith('MemTotal:'):
+                    info['ram_gb'] = round(int(line.split()[1]) / (1024 * 1024), 1)
+                elif line.startswith('MemAvailable:'):
+                    info['ram_free_gb'] = round(int(line.split()[1]) / (1024 * 1024), 1)
+    except Exception:
+        pass
+
+    # ── Barrettes mémoire (dmidecode, nécessite root) ──────────────────────
+    if is_elevated():
+        try:
+            out = _run(['dmidecode', '-t', 'memory'], timeout=15)
+            modules = []
+            current = {}
+            for line in out.split('\n'):
+                stripped = line.strip()
+                if stripped.startswith('Memory Device'):
+                    if current.get('capacity_gb'):
+                        modules.append(current)
+                    current = {}
+                elif ':' in stripped and current is not None:
+                    key, value = [p.strip() for p in stripped.split(':', 1)]
+                    if key == 'Size' and 'No Module' not in value:
+                        try:
+                            if 'GB' in value:
+                                current['capacity_gb'] = float(value.replace('GB', '').strip())
+                            elif 'MB' in value:
+                                current['capacity_gb'] = round(float(value.replace('MB', '').strip()) / 1024, 1)
+                        except ValueError:
+                            pass
+                    elif key == 'Locator':
+                        current['slot'] = value
+                    elif key == 'Type':
+                        current['type'] = value
+                    elif key == 'Configured Memory Speed':
+                        current['speed_mhz'] = value
+                    elif key == 'Manufacturer':
+                        current['manufacturer'] = value
+                    elif key == 'Part Number':
+                        current['part_number'] = value
+                    elif key == 'Serial Number':
+                        current['serial_number'] = value
+            if current.get('capacity_gb'):
+                modules.append(current)
+            if modules:
+                info['memory_modules'] = modules
+                info['memory_slots_used'] = len(modules)
+        except Exception:
+            pass
+
+    # ── Disques ────────────────────────────────────────────────────────────
+    info.update(_unix_disks())
+
+    # ── Type et santé des disques physiques (lsblk + smartctl) ─────────────
+    try:
+        out = _run(['lsblk', '-d', '-o', 'NAME,SIZE,ROTA,MODEL', '-J'], timeout=10)
+        if out.strip():
+            devices = json.loads(out).get('blockdevices', [])
+            physical = []
+            for d in devices:
+                if d.get('name', '').startswith(('loop', 'ram', 'sr')):
+                    continue
+                media = 'HDD' if d.get('rota') in (True, '1', 1) else 'SSD'
+                physical.append(f"{d.get('model') or d.get('name')} — {media} — {d.get('size', '?')}")
+            if physical:
+                info['physical_disks'] = physical
+    except Exception:
+        pass
+
+    # ── Écrans (EDID exposé par le noyau, sans dépendance X) ───────────────
+    try:
+        monitors = []
+        drm_root = '/sys/class/drm'
+        if os.path.isdir(drm_root):
+            for entry in sorted(os.listdir(drm_root)):
+                status_path = os.path.join(drm_root, entry, 'status')
+                if not os.path.exists(status_path):
+                    continue
+                with open(status_path) as f:
+                    if f.read().strip() != 'connected':
+                        continue
+                monitors.append({
+                    'manufacturer': '',
+                    'model': entry.replace('card0-', '').replace('card1-', ''),
+                    'serial_number': '',
+                    'year': '',
+                })
+        if monitors:
+            info['monitors'] = monitors
+    except Exception:
+        pass
+
+    # ── Imprimantes (CUPS) ─────────────────────────────────────────────────
+    try:
+        out = _run(['lpstat', '-p'], timeout=10)
+        printers = [
+            {'name': line.split()[1], 'driver': '', 'port': '', 'network': False,
+             'default': False, 'shared': False}
+            for line in out.split('\n') if line.startswith('printer ') and len(line.split()) > 1
+        ]
+        if printers:
+            info['printers'] = printers
+    except Exception:
+        pass
+
+    # ── Comptes locaux ─────────────────────────────────────────────────────
+    try:
+        users = []
+        admins = set()
+        try:
+            with open('/etc/group') as f:
+                for line in f:
+                    parts = line.split(':')
+                    if len(parts) >= 4 and parts[0] in ('sudo', 'wheel', 'admin'):
+                        admins.update(u for u in parts[3].strip().split(',') if u)
+        except Exception:
+            pass
+        with open('/etc/passwd') as f:
+            for line in f:
+                parts = line.split(':')
+                if len(parts) < 7:
+                    continue
+                name, uid, shell = parts[0], parts[2], parts[6].strip()
+                # Les comptes de service ont un UID < 1000 ou un shell nologin
+                if not uid.isdigit() or int(uid) < 1000 or 'nologin' in shell or 'false' in shell:
+                    continue
+                status = 'Actif'
+                if name in admins:
+                    status += ', Administrateur'
+                users.append(f"{name} ({status})")
+        if users:
+            info['users'] = sorted(users)
+    except Exception:
+        pass
+
+    # ── Ports TCP en écoute ────────────────────────────────────────────────
+    try:
+        out = _run(['ss', '-tlnp'], timeout=10)
+        ports = {}
+        for line in out.split('\n')[1:]:
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            local = parts[3]
+            if ':' not in local:
+                continue
+            try:
+                port = int(local.rsplit(':', 1)[1])
+            except ValueError:
+                continue
+            process = ''
+            if 'users:' in line:
+                try:
+                    process = line.split('users:')[1].split('"')[1]
+                except IndexError:
+                    pass
+            ports.setdefault(port, process)
+        if ports:
+            info['listening_ports'] = [
+                {'port': p, 'process': proc} for p, proc in sorted(ports.items())
+            ]
+    except Exception:
+        pass
+
+    # ── Uptime ─────────────────────────────────────────────────────────────
+    info.update(_unix_uptime())
+
+    # ── Domaine / groupe de travail ────────────────────────────────────────
+    try:
+        domain = socket.getfqdn()
+        if domain and '.' in domain:
+            info['domain'] = domain.split('.', 1)[1]
+    except Exception:
+        pass
+
+    return info
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# LOGICIELS INSTALLÉS
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_installed_software():
+    """Récupère la liste complète des logiciels installés (machine + par utilisateur).
+
+    Retourne une liste de dicts {name, version, publisher, install_date} - version/
+    publisher/install_date restent vides quand la source ne les fournit pas
+    (cas Mac/Linux, dont les gestionnaires de paquets énumérés ici ne donnent
+    que le nom sans requête individuelle coûteuse par paquet).
+    """
+    software = {}  # clé = nom (dédup), valeur = dict métadonnées
+
+    if IS_WINDOWS:
+        try:
+            import winreg
+            # (hive, chemin) - HKLM couvre les installs machine (64 et 32 bits sur WOW6432Node),
+            # HKCU couvre les installs propres à l'utilisateur courant (souvent absentes sinon)
+            hives = [
+                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),
+                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'),
+                (winreg.HKEY_CURRENT_USER, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),
+            ]
+            for hive, path in hives:
+                try:
+                    with winreg.OpenKey(hive, path) as key:
+                        count = winreg.QueryInfoKey(key)[0]
+                        for i in range(count):
+                            try:
+                                subkey_name = winreg.EnumKey(key, i)
+                                with winreg.OpenKey(key, subkey_name) as subkey:
+                                    try:
+                                        display_name = winreg.QueryValueEx(subkey, 'DisplayName')[0]
+                                    except OSError:
+                                        continue
+                                    if not display_name or not display_name.strip():
+                                        continue
+                                    name = display_name.strip()
+
+                                    def _read(value_name):
+                                        try:
+                                            return winreg.QueryValueEx(subkey, value_name)[0]
+                                        except OSError:
+                                            return ''
+
+                                    version = str(_read('DisplayVersion') or '')
+                                    publisher = str(_read('Publisher') or '')
+                                    install_date_raw = str(_read('InstallDate') or '')
+                                    # Format registre habituel : "AAAAMMJJ" -> "AAAA-MM-JJ"
+                                    if len(install_date_raw) == 8 and install_date_raw.isdigit():
+                                        install_date = f"{install_date_raw[:4]}-{install_date_raw[4:6]}-{install_date_raw[6:8]}"
+                                    else:
+                                        install_date = install_date_raw
+
+                                    software[name] = {
+                                        'name': name,
+                                        'version': version,
+                                        'publisher': publisher,
+                                        'install_date': install_date,
+                                    }
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    elif IS_MAC:
+        names = set()
+        # /Applications
+        try:
+            result = subprocess.run(['ls', '/Applications'], capture_output=True, text=True, timeout=10)
+            names.update(app.replace('.app', '') for app in result.stdout.split('\n') if app.endswith('.app'))
+        except Exception:
+            pass
+
+        # /usr/local/opt (Homebrew)
+        try:
+            result = subprocess.run(['ls', '/usr/local/opt'], capture_output=True, text=True, timeout=10)
+            names.update(pkg for pkg in result.stdout.split('\n') if pkg.strip())
+        except Exception:
+            pass
+
+        # pkgutil pour les packages installés
+        try:
+            result = subprocess.run(['pkgutil', '--packages'], capture_output=True, text=True, timeout=15)
+            names.update(line.strip() for line in result.stdout.split('\n') if line.strip())
+        except Exception:
+            pass
+
+        for name in names:
+            software[name] = {'name': name, 'version': '', 'publisher': '', 'install_date': ''}
+
+    elif IS_LINUX:
+        # Debian/Ubuntu (dpkg) - le format query donne aussi version et éditeur
+        try:
+            result = subprocess.run(
+                ['dpkg-query', '-W', '-f=${Package}\t${Version}\t${Maintainer}\n'],
+                capture_output=True, text=True, timeout=20
+            )
+            for line in result.stdout.split('\n'):
+                parts = line.split('\t')
+                if parts and parts[0].strip():
+                    software[parts[0]] = {
+                        'name': parts[0],
+                        'version': parts[1] if len(parts) > 1 else '',
+                        'publisher': parts[2] if len(parts) > 2 else '',
+                        'install_date': '',
+                    }
+        except Exception:
+            pass
+
+        # RedHat/CentOS (rpm)
+        if not software:
+            try:
+                result = subprocess.run(
+                    ['rpm', '-qa', '--queryformat', '%{NAME}\t%{VERSION}-%{RELEASE}\t%{VENDOR}\n'],
+                    capture_output=True, text=True, timeout=20
+                )
+                for line in result.stdout.split('\n'):
+                    parts = line.split('\t')
+                    if parts and parts[0].strip():
+                        software[parts[0]] = {
+                            'name': parts[0],
+                            'version': parts[1] if len(parts) > 1 else '',
+                            'publisher': parts[2] if len(parts) > 2 else '',
+                            'install_date': '',
+                        }
+            except Exception:
+                pass
+
+        # Arch Linux (pacman)
+        if not software:
+            try:
+                result = subprocess.run(['pacman', '-Q'], capture_output=True, text=True, timeout=20)
+                for line in result.stdout.split('\n'):
+                    parts = line.split()
+                    if parts:
+                        software[parts[0]] = {
+                            'name': parts[0],
+                            'version': parts[1] if len(parts) > 1 else '',
+                            'publisher': '',
+                            'install_date': '',
+                        }
+            except Exception:
+                pass
+
+    return sorted(software.values(), key=lambda s: s['name'].lower())
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# TYPE D'APPAREIL
+# ════════════════════════════════════════════════════════════════════════════
+
+def guess_device_type(info):
+    """Déduit le type ParcInfo (liste `types_appareils`) à partir du châssis.
+
+    Sans cette déduction, l'API crée tous les postes en "PC", y compris les
+    portables et les serveurs.
+    """
+    if info.get('is_server'):
+        return 'Serveur'
+
+    chassis_code = info.get('chassis_code')
+    if chassis_code in CHASSIS_PORTABLE:
+        return 'MacBook' if IS_MAC else 'Laptop'
+    if chassis_code in CHASSIS_TABLET:
+        return 'Tablette'
+
+    # macOS : le nom de modèle distingue portable et fixe quand le châssis manque
+    if IS_MAC:
+        model_name = (info.get('model_name') or info.get('model') or '').lower()
+        return 'MacBook' if 'book' in model_name else 'PC'
+
+    if IS_LINUX:
+        return 'PC/Serveur (Linux)'
+
+    if IS_WINDOWS:
+        return 'PC (Windows)'
+
+    return 'PC'
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# COLLECTE GLOBALE
+# ════════════════════════════════════════════════════════════════════════════
+
+def collect_system_info():
+    """Collecte toutes les infos système."""
+    info = {
+        'collector_version': COLLECTOR_VERSION,
+        'timestamp': datetime.utcnow().isoformat(),
+        'elevated': is_elevated(),
+        'mac_address': get_mac_address(),
+        'hostname': get_hostname(),
+        'dns_name': get_fqdn(),
+        'ip_addresses': get_ip_addresses(),
+    }
+
+    # OS
+    info.update(get_os_info())
+
+    # Infos spécifiques par OS
+    try:
+        if IS_WINDOWS:
+            info.update(get_system_info_windows())
+        elif IS_MAC:
+            info.update(get_system_info_mac())
+        elif IS_LINUX:
+            info.update(get_system_info_linux())
+    except Exception:
+        pass
+
+    # Logiciels
+    info['installed_software'] = get_installed_software()
+
+    # Périphériques USB connectés. Isolé de la collecte système : une erreur ici
+    # (droits, commande absente) ne doit pas priver le rapport du reste.
+    try:
+        info['usb_devices'] = collect_usb_devices()
+    except Exception:
+        info['usb_devices'] = []
+
+    # Type d'appareil déduit
+    info['device_type'] = guess_device_type(info)
+
+    return info
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# FORMATAGE / RÉSUMÉ
+# ════════════════════════════════════════════════════════════════════════════
+
+def format_memory_module(module):
+    """Formate une barrette pour affichage : 'Slot — 16 GB DDR4 3200 MHz — Kingston (KF432)'."""
+    parts = [f"{module.get('capacity_gb', '?')} GB"]
+    if module.get('type'):
+        parts.append(module['type'])
+    if module.get('speed_mhz'):
+        parts.append(f"{module['speed_mhz']} MHz")
+    detail = ' '.join(parts)
+
+    suffix = []
+    if module.get('manufacturer'):
+        suffix.append(module['manufacturer'])
+    if module.get('part_number'):
+        suffix.append(module['part_number'])
+
+    line = f"{module.get('slot', 'Slot inconnu')} — {detail}"
+    if suffix:
+        line += f" — {' / '.join(suffix)}"
+    return line
+
+
+def format_reliability(entry):
+    """Formate l'usure d'un disque : heures de fonctionnement, usure, température."""
+    bits = []
+    if entry.get('power_on_hours') is not None:
+        hours = entry['power_on_hours']
+        bits.append(f"{hours} h ({round(hours / 8760, 1)} an(s))")
+    if entry.get('wear_percent') is not None:
+        bits.append(f"usure {entry['wear_percent']}%")
+    if entry.get('temperature_c'):
+        bits.append(f"{entry['temperature_c']} °C")
+    errors = (entry.get('read_errors') or 0) + (entry.get('write_errors') or 0)
+    if errors:
+        bits.append(f"{errors} erreur(s)")
+    return f"{entry.get('name', 'Disque')} — {', '.join(bits)}" if bits else entry.get('name', 'Disque')
+
+
+def format_license(lic):
+    """Formate une licence : 'Windows 11 Pro — Activé (OEM:DM) — clé ...XXXXX'."""
+    line = lic.get('name', '')
+    if lic.get('status'):
+        line += f" — {lic['status']}"
+    if lic.get('channel'):
+        line += f" ({lic['channel']})"
+    if lic.get('partial_key'):
+        line += f" — clé se terminant par {lic['partial_key']}"
+    return line
+
+
+def format_monitor(mon):
+    """Formate un écran : 'Dell U2419H — S/N ABC123 (2021)'."""
+    parts = [p for p in (mon.get('manufacturer'), mon.get('model')) if p]
+    line = ' '.join(parts) or 'Écran'
+    if mon.get('serial_number'):
+        line += f" — S/N {mon['serial_number']}"
+    if mon.get('year'):
+        line += f" ({mon['year']})"
+    return line
+
+
+def format_printer(pr):
+    """Formate une imprimante : 'HP LaserJet (par défaut, réseau) — port IP_192.168.1.50'."""
+    flags = []
+    if pr.get('virtual'):
+        flags.append('virtuelle')
+    if pr.get('default'):
+        flags.append('par défaut')
+    if pr.get('network'):
+        flags.append('réseau')
+    if pr.get('shared'):
+        flags.append('partagée')
+    line = pr.get('name', 'Imprimante')
+    if flags:
+        line += f" ({', '.join(flags)})"
+    if pr.get('port'):
+        line += f" — port {pr['port']}"
+    if pr.get('driver'):
+        line += f" — {pr['driver']}"
+    return line
+
+
+def build_summary_lines(info):
+    """Construit le résumé textuel partagé par la sortie CLI et l'aperçu GUI."""
+    lines = []
+
+    def section(title):
+        lines.append(f"┌─ {title}")
+
+    def field(label, value):
+        lines.append(f"│ {label:<22}: {value}")
+
+    def item(value):
+        lines.append(f"│   - {value}")
+
+    def close():
+        lines.append("└")
+        lines.append("")
+
+    # ── Identification ─────────────────────────────────────────────────────
+    section("IDENTIFICATION")
+    field("Hostname", info.get('hostname', 'N/A'))
+    if info.get('dns_name'):
+        field("Nom DNS", info['dns_name'])
+    field("Adresse MAC", info.get('mac_address', 'N/A'))
+    field("Adresse(s) IP", ', '.join(info.get('ip_addresses', [])) or 'N/A')
+    field("Type d'appareil", info.get('device_type', 'N/A'))
+    field("Marque", info.get('brand') or 'N/A')
+    field("Modèle", info.get('model') or 'N/A')
+    field("Numéro de série", info.get('serial_number') or 'N/A')
+    if info.get('asset_tag'):
+        field("Asset tag", info['asset_tag'])
+    if info.get('chassis_type'):
+        field("Châssis", info['chassis_type'])
+    close()
+
+    # ── Système ────────────────────────────────────────────────────────────
+    section("SYSTÈME D'EXPLOITATION")
+    field("OS", info.get('os_name', 'N/A'))
+    field("Version", info.get('os_version', 'N/A'))
+    if info.get('os_build'):
+        field("Build", info['os_build'])
+    if info.get('architecture'):
+        field("Architecture", info['architecture'])
+    if info.get('os_install_date'):
+        field("Installé le", info['os_install_date'])
+    field("Domaine/Groupe", info.get('domain') or info.get('workgroup') or 'N/A')
+    if info.get('logged_on_user'):
+        field("Session ouverte", info['logged_on_user'])
+    uptime = info.get('uptime_hours')
+    if uptime is not None:
+        field("Uptime", f"{round(uptime / 24, 1)} jour(s)")
+    if info.get('bios_version'):
+        bios = info['bios_version']
+        if info.get('bios_release_date'):
+            bios += f" ({info['bios_release_date']})"
+        field("BIOS", bios)
+    if info.get('hypervisor_present'):
+        field("Virtualisation", "Machine virtuelle / hyperviseur détecté")
+    close()
+
+    # ── Matériel ───────────────────────────────────────────────────────────
+    section("MATÉRIEL")
+    field("CPU", info.get('cpu', 'N/A'))
+    cores = []
+    if info.get('cpu_physical_cores'):
+        cores.append(f"{info['cpu_physical_cores']} cœurs physiques")
+    if info.get('cpu_logical_cores'):
+        cores.append(f"{info['cpu_logical_cores']} logiques")
+    if not cores and info.get('cpu_cores'):
+        cores.append(f"{info['cpu_cores']} cœurs")
+    if cores:
+        field("Cœurs", ', '.join(cores))
+    if info.get('cpu_max_clock_mhz'):
+        field("Fréquence max", f"{info['cpu_max_clock_mhz']} MHz")
+    if info.get('motherboard'):
+        mb = info['motherboard']
+        field("Carte mère", f"{mb.get('manufacturer', '')} {mb.get('model', '')}".strip() or 'N/A')
+    field("RAM", f"{info.get('ram_gb', 'N/A')} GB")
+    if info.get('memory_slots_total'):
+        field("Slots mémoire", f"{info.get('memory_slots_used', 0)}/{info['memory_slots_total']} occupés"
+                               + (f" (max {info['memory_max_gb']} GB)" if info.get('memory_max_gb') else ''))
+    if info.get('memory_modules'):
+        field("Barrettes", '')
+        for module in info['memory_modules']:
+            item(format_memory_module(module))
+    if info.get('gpu_details'):
+        field("Carte(s) graphique(s)", '')
+        for gpu in info['gpu_details']:
+            detail = gpu['name']
+            if gpu.get('vram_gb'):
+                detail += f" — {gpu['vram_gb']} GB VRAM"
+            if gpu.get('resolution'):
+                detail += f" — {gpu['resolution']}"
+            if gpu.get('driver_version'):
+                detail += f" — pilote {gpu['driver_version']}"
+            item(detail)
+    elif info.get('gpu'):
+        field("Carte graphique", info['gpu'])
+    close()
+
+    # ── Stockage ───────────────────────────────────────────────────────────
+    section("STOCKAGE")
+    disk_total = info.get('disk_total_gb', 'N/A')
+    if info.get('disk_used_gb') is not None and info.get('disk_free_gb') is not None:
+        field("Total", f"{disk_total} GB ({info['disk_used_gb']} GB utilisés, {info['disk_free_gb']} GB libres)")
+    else:
+        field("Total", f"{disk_total} GB")
+    for drive in info.get('disk_drives', []):
+        item(drive)
+    for drive in info.get('physical_disks', []):
+        item(drive)
+    for entry in info.get('disk_reliability', []):
+        item(format_reliability(entry))
+    close()
+
+    # ── Écrans / imprimantes ───────────────────────────────────────────────
+    if info.get('monitors') or info.get('printers'):
+        section("PÉRIPHÉRIQUES")
+        for mon in info.get('monitors', []):
+            item(f"Écran : {format_monitor(mon)}")
+        for pr in info.get('printers', []):
+            item(f"Imprimante : {format_printer(pr)}")
+        close()
+
+    # ── Réseau ─────────────────────────────────────────────────────────────
+    if info.get('network_adapters') or info.get('listening_ports'):
+        section("RÉSEAU")
+        for adapter in info.get('network_adapters', []):
+            item(adapter)
+        ports = info.get('listening_ports', [])
+        if ports:
+            field("Ports en écoute", f"{len(ports)} port(s) TCP")
+            preview = ', '.join(
+                f"{p['port']}" + (f" ({p['process']})" if p.get('process') else '')
+                for p in ports[:15]
+            )
+            item(preview + (' …' if len(ports) > 15 else ''))
+        close()
+
+    # ── Batterie ───────────────────────────────────────────────────────────
+    if info.get('battery') or info.get('battery_health_percent') is not None:
+        section("BATTERIE")
+        if info.get('battery'):
+            field("Charge", info['battery'])
+        if info.get('battery_health_percent') is not None:
+            field("Santé", f"{info['battery_health_percent']}% "
+                           f"(usure {info.get('battery_wear_percent', '?')}%)")
+        if info.get('battery_cycles'):
+            field("Cycles", info['battery_cycles'])
+        if info.get('battery_health_status'):
+            field("État", info['battery_health_status'])
+        close()
+
+    # ── Sécurité ───────────────────────────────────────────────────────────
+    has_security = any(info.get(k) is not None for k in ('antivirus', 'tpm_present', 'secure_boot')) \
+        or info.get('firewall') or info.get('bitlocker')
+    if has_security:
+        section("SÉCURITÉ & CONFORMITÉ")
+        if info.get('antivirus'):
+            field("Antivirus", info['antivirus'])
+        for profile in info.get('firewall', []):
+            item(f"Pare-feu {profile}")
+        for vol in info.get('bitlocker', []):
+            item(f"Chiffrement {vol}")
+        if info.get('tpm_present') is not None:
+            field("TPM", 'Présent et activé' if info.get('tpm_enabled')
+                  else ('Présent mais désactivé' if info['tpm_present'] else 'Absent'))
+        if info.get('secure_boot') is not None:
+            field("Secure Boot", 'Activé' if info['secure_boot'] else 'Désactivé')
+        close()
+
+    # ── Licences ───────────────────────────────────────────────────────────
+    if info.get('licenses') or info.get('oem_product_key'):
+        section("LICENCES & ACTIVATION")
+        if info.get('windows_activated') is not None:
+            field("Windows", 'Activé' if info['windows_activated'] else 'NON ACTIVÉ')
+        for lic in info.get('licenses', []):
+            item(format_license(lic))
+        if info.get('oem_product_key'):
+            field("Clé OEM (firmware)", info['oem_product_key'])
+        close()
+
+    # ── Mises à jour ───────────────────────────────────────────────────────
+    hotfixes = info.get('hotfixes', [])
+    if hotfixes:
+        section("MISES À JOUR")
+        field("Correctifs installés", len(hotfixes))
+        if info.get('last_windows_update'):
+            field("Dernier correctif", info['last_windows_update'])
+        for hf in hotfixes[:5]:
+            item(f"{hf['id']} — {hf.get('installed_on') or 'date inconnue'}")
+        if len(hotfixes) > 5:
+            item(f"… et {len(hotfixes) - 5} autre(s)")
+        close()
+
+    # ── Comptes ────────────────────────────────────────────────────────────
+    users = info.get('users', [])
+    if users:
+        section("COMPTES UTILISATEURS LOCAUX")
+        field("Total", f"{len(users)} compte(s)")
+        for u in users:
+            item(u)
+        close()
+
+    # ── Logiciels ──────────────────────────────────────────────────────────
+    software = info.get('installed_software', [])
+    if software:
+        section("LOGICIELS INSTALLÉS")
+        field("Total", f"{len(software)} logiciel(s)")
+        for soft in software[:10]:
+            label = soft.get('name', '') if isinstance(soft, dict) else str(soft)
+            if isinstance(soft, dict) and soft.get('version'):
+                label += f" (v{soft['version']})"
+            item(label)
+        if len(software) > 10:
+            item(f"… et {len(software) - 10} autre(s)")
+        close()
+
+    if not info.get('elevated'):
+        lines.append("⚠ Collecte sans privilèges administrateur : SMART détaillé, TPM,")
+        lines.append("  BitLocker et clé OEM peuvent être absents de ce rapport.")
+        lines.append("")
+
+    return lines
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# RAPPORTS
+# ════════════════════════════════════════════════════════════════════════════
+
+def _report_filename(info, extension):
+    """Nom de fichier normalisé : system-info-report_HOST_MAC_HORODATAGE.ext."""
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    hostname = info.get('hostname', 'unknown')
+    mac = (info.get('mac_address') or 'unknown').replace(':', '').replace('/', '')[:8]
+    return f"system-info-report_{hostname}_{mac}_{timestamp}.{extension}"
+
+
+PORT_CATALOG = {
+    20:   ('FTP-DATA', 'FTP — canal de données', 'danger'),
+    21:   ('FTP', 'FTP — transfert de fichiers en clair', 'danger'),
+    22:   ('SSH', 'SSH — terminal sécurisé', 'ok'),
+    23:   ('TELNET', 'Telnet — terminal NON chiffré', 'danger'),
+    25:   ('SMTP', 'SMTP — serveur mail sortant', 'info'),
+    53:   ('DNS', 'DNS — résolution de noms', 'info'),
+    80:   ('HTTP', 'HTTP — serveur web non chiffré', 'warn'),
+    110:  ('POP3', 'POP3 — messagerie en clair', 'warn'),
+    135:  ('RPC', 'RPC — Windows Remote Procedure Call', 'warn'),
+    137:  ('NETBIOS', 'NetBIOS — service de noms Windows', 'warn'),
+    139:  ('NETBIOS', 'NetBIOS — partage de fichiers Windows', 'warn'),
+    143:  ('IMAP', 'IMAP — messagerie en clair', 'warn'),
+    443:  ('HTTPS', 'HTTPS — serveur web sécurisé', 'ok'),
+    445:  ('SMB', 'SMB — partage de fichiers Windows', 'warn'),
+    465:  ('SMTPS', 'SMTP sur TLS', 'ok'),
+    587:  ('SUBMISSION', 'SMTP soumission (authentifié)', 'ok'),
+    631:  ('IPP', 'IPP — service d\'impression', 'info'),
+    993:  ('IMAPS', 'IMAP sur TLS', 'ok'),
+    995:  ('POP3S', 'POP3 sur TLS', 'ok'),
+    1433: ('MSSQL', 'Microsoft SQL Server', 'warn'),
+    1521: ('ORACLE', 'Oracle Database', 'warn'),
+    3306: ('MYSQL', 'MySQL / MariaDB', 'warn'),
+    3389: ('RDP', 'RDP — bureau à distance Windows', 'danger'),
+    5432: ('POSTGRES', 'PostgreSQL', 'warn'),
+    5900: ('VNC', 'VNC — bureau à distance', 'danger'),
+    5985: ('WINRM', 'WinRM — administration distante HTTP', 'warn'),
+    5986: ('WINRM-S', 'WinRM — administration distante HTTPS', 'ok'),
+    6379: ('REDIS', 'Redis', 'warn'),
+    8080: ('HTTP-ALT', 'HTTP alternatif', 'warn'),
+    8443: ('HTTPS-ALT', 'HTTPS alternatif', 'ok'),
+    9100: ('JETDIRECT', 'Impression directe (JetDirect)', 'info'),
+    27017: ('MONGODB', 'MongoDB', 'warn'),
+}
+
+
+# Plage dynamique IANA : ports attribués à la volée (endpoints RPC, sockets
+# clientes). Ils changent à chaque redémarrage et n'ont aucune valeur
+# d'inventaire — ils sont comptés mais pas détaillés dans les rapports.
+EPHEMERAL_PORT_START = 49152
+
+
+def describe_listening_port(entry):
+    """Enrichit un port relevé ({port, process}) de son service et sa criticité.
+
+    La collecte ne renvoie que le numéro et le processus propriétaire ; le nom
+    du service, sa description et son niveau de sensibilité sont déduits ici,
+    au moment du rendu.
+    """
+    port = entry.get('port')
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        port = 0
+    nom, description, niveau = describe_port(port)
+    enrichi = dict(entry)
+    enrichi.update({
+        'port': port,
+        'name': nom,
+        'description': description,
+        'level': niveau,
+        'ephemeral': port >= EPHEMERAL_PORT_START,
+    })
+    return enrichi
+
+
+def notable_ports(ports):
+    """Ports méritant une carte : tout sauf la plage dynamique."""
+    return [p for p in (ports or []) if not p.get('ephemeral')]
+
+
+def describe_port(port):
+    """Retourne (nom, description, niveau) pour un port, avec repli générique.
+
+    Le nom est vide pour un port non répertorié : afficher le numéro une
+    seconde fois en guise d'étiquette n'apporte rien.
+    """
+    if port in PORT_CATALOG:
+        return PORT_CATALOG[port]
+    if port >= EPHEMERAL_PORT_START:
+        return ('', 'Port dynamique / éphémère', 'info')
+    return ('', 'Service non répertorié', 'info')
+
+
+# ANALYSE : SEUILS, ALERTES, MISE EN ÉVIDENCE
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Seuils d'occupation disque au-delà desquels la barre change de couleur.
+DISK_WARN_PCT = 75
+DISK_DANGER_PCT = 90
+BATTERY_WARN_PCT = 40
+BATTERY_DANGER_PCT = 20
+
+_LEVEL_COLORS = {
+    'ok':     ('#0e9f6e', '#def7ec'),
+    'info':   ('#3f83f8', '#e1effe'),
+    'warn':   ('#c27803', '#fdf6b2'),
+    'danger': ('#e02424', '#fde8e8'),
+    'muted':  ('#6b7280', '#f3f4f6'),
+}
+
+
+def _num(value):
+    """Convertit en float ce qui peut l'être, sinon None."""
+    if value in ('', None):
+        return None
+    try:
+        return float(str(value).replace(',', '.').split()[0])
+    except (ValueError, TypeError, IndexError):
+        return None
+
+
+def _parse_drive(text):
+    """Extrait (libellé, total, utilisé, libre) d'une ligne de disque logique.
+
+    Le collecteur formate déjà ces lignes différemment selon l'OS ; en cas de
+    format non reconnu, on retourne None et l'appelant affiche la ligne brute
+    plutôt que d'inventer des chiffres.
+    """
+    m = re.match(
+        r'^(.+?)\s*[—-]\s*([\d.,]+)\s*GB total,\s*([\d.,]+)\s*GB utilis[ée]s?,\s*([\d.,]+)\s*GB libres?',
+        text or '', re.IGNORECASE)
+    if m:
+        return (m.group(1).strip(), _num(m.group(2)), _num(m.group(3)), _num(m.group(4)))
+    m = re.match(r'^(.+?)\s*\(([\d.,]+)\s*GB\)', text or '')
+    if m:
+        return (m.group(1).strip(), _num(m.group(2)), None, None)
+    return None
+
+
+def _battery_pct(info):
+    """Niveau de charge. collector_core expose un champ numérique dédié ;
+    l'ancien format texte « 42% (statut: …) » reste accepté en repli."""
+    if isinstance(info, dict):
+        pct = info.get('battery_charge_percent')
+        if pct is not None:
+            try:
+                return int(float(pct))
+            except (TypeError, ValueError):
+                return None
+        info = info.get('battery')
+    m = re.match(r'^(\d+)\s*%', str(info or ''))
+    return int(m.group(1)) if m else None
+
+
+def build_alerts(info):
+    """Construit la liste des points d'attention mis en évidence en tête.
+
+    Chaque alerte est un dict {level, titre, detail}. La liste est vide quand
+    tout va bien — auquel cas le rapport affiche un encadré vert.
+    """
+    alerts = []
+
+    def add(level, titre, detail=''):
+        alerts.append({'level': level, 'titre': titre, 'detail': detail})
+
+    total = _num(info.get('disk_total_gb'))
+    used = _num(info.get('disk_used_gb'))
+    if total and used is not None and total > 0:
+        pct = round(used / total * 100)
+        if pct >= DISK_DANGER_PCT:
+            add('danger', f'Disque saturé — {pct} % occupés',
+                f'{round(total - used, 1)} GB restants sur {total} GB')
+        elif pct >= DISK_WARN_PCT:
+            add('warn', f'Disque bien rempli — {pct} % occupés',
+                f'{round(total - used, 1)} GB restants sur {total} GB')
+
+    antivirus = (info.get('antivirus') or '').strip()
+    if not antivirus or antivirus.lower() in ('n/a', 'aucun', 'none'):
+        add('danger', 'Aucun antivirus détecté')
+
+    if info.get('tpm_present') is False:
+        add('warn', 'Aucune puce TPM', 'Bloque la mise à niveau vers Windows 11')
+    elif info.get('tpm_present') and not info.get('tpm_enabled'):
+        add('warn', 'TPM présent mais désactivé')
+
+    if info.get('secure_boot') is False:
+        add('warn', 'Secure Boot désactivé')
+
+    firewall_off = [p for p in info.get('firewall', []) if re.search(r'(désactiv|disabled|off)', p, re.I)]
+    if firewall_off:
+        add('danger', 'Pare-feu désactivé', ' · '.join(firewall_off[:3]))
+
+    bitlocker_off = [v for v in info.get('bitlocker', []) if re.search(r'(non chiffr|not encrypted|off|déciffr)', v, re.I)]
+    if bitlocker_off:
+        add('warn', 'Volume non chiffré', ' · '.join(bitlocker_off[:3]))
+
+    battery = _battery_pct(info)
+    if battery is not None and battery <= BATTERY_DANGER_PCT:
+        add('danger', f'Batterie très faible — {battery} %')
+
+    usure = _num(info.get('battery_wear_percent'))
+    if usure is not None and usure >= 30:
+        add('warn', 'Batterie usée — %g %% de capacité perdue' % usure,
+            info.get('battery_health_status') or '')
+
+    # Ports exposés jugés sensibles : c'est la mise en évidence la plus utile
+    # d'un rapport de parc.
+    risky = [p for p in info.get('listening_ports', []) if p.get('level') == 'danger']
+    if risky:
+        add('danger', f'{len(risky)} port(s) sensible(s) en écoute',
+            ' · '.join(f"{p['port']} ({p['name']})" for p in risky[:5]))
+
+    for lic in info.get('licenses', []):
+        # « Non active » désigne une clé récupérée hors licence en service, pas
+        # un défaut d'activation : ce n'est pas un point d'attention.
+        if lic.get('status') == 'Non active':
+            continue
+        if lic.get('activated') is False:
+            add('warn', "Licence non activée — %s" % lic.get('name', ''),
+                lic.get('status') or '')
+
+    uptime = _num(info.get('uptime_hours'))
+    if uptime and uptime > 24 * 30:
+        add('info', f'Machine non redémarrée depuis {round(uptime / 24)} jours')
+
+    return alerts
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RAPPORT HTML (« fiche système »)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _esc(value):
+    """Échappe le HTML — les libellés viennent du système, pas de nous."""
+    import html as _html
+    return _html.escape('' if value is None else str(value), quote=True)
+
+
+def _report_filename(info, extension):
+    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    hostname = re.sub(r'[^A-Za-z0-9_.-]', '_', info.get('hostname') or 'unknown')
+    mac = re.sub(r'[^0-9A-Fa-f]', '', info.get('mac_address') or '')[:8] or 'nomac'
+    return f'system-info-report_{hostname}_{mac}_{timestamp}.{extension}'
+
+
+def _bar_html(pct, level='info'):
+    """Barre de progression : un div coloré dont la largeur porte l'information."""
+    pct = max(0, min(100, int(round(pct))))
+    color = _LEVEL_COLORS.get(level, _LEVEL_COLORS['info'])[0]
+    return (f'<div class="bar"><div class="bar-fill" '
+            f'style="width:{pct}%;background:{color}"></div></div>')
+
+
+def _pill_html(text, level='info'):
+    fg, bg = _LEVEL_COLORS.get(level, _LEVEL_COLORS['info'])
+    return f'<span class="pill" style="color:{fg};background:{bg}">{_esc(text)}</span>'
+
+
+def _disk_level(pct):
+    if pct >= DISK_DANGER_PCT:
+        return 'danger'
+    if pct >= DISK_WARN_PCT:
+        return 'warn'
+    return 'ok'
+
+
+def _kpi_cards_html(info):
+    """Bandeau de vignettes chiffrées avec barres — le coup d'œil d'ouverture."""
+    cards = []
+
+    total = _num(info.get('disk_total_gb'))
+    used = _num(info.get('disk_used_gb'))
+    if total and used is not None and total > 0:
+        pct = round(used / total * 100)
+        cards.append(
+            '<div class="kpi">'
+            '<div class="kpi-head"><span class="kpi-icon">HDD</span> Stockage</div>'
+            f'<div class="kpi-value">{pct}<span class="kpi-unit">%</span></div>'
+            f'{_bar_html(pct, _disk_level(pct))}'
+            f'<div class="kpi-sub">{used:g} GB utilisés sur {total:g} GB</div>'
+            '</div>')
+
+    ram = _num(info.get('ram_gb'))
+    if ram:
+        libre = _num(info.get('ram_free_gb'))
+        if libre is not None and ram > 0:
+            pct = round((ram - libre) / ram * 100)
+            niveau = 'danger' if pct >= 90 else 'warn' if pct >= 75 else 'ok'
+            sous_titre = '%.1f GB libres sur %g GB' % (libre, ram)
+        else:
+            # Pas de mesure d'occupation : situer la machine sur une échelle
+            # 0–64 Go plutôt qu'afficher un pourcentage qui n'existe pas.
+            pct = min(ram / 64 * 100, 100)
+            niveau = 'ok' if ram >= 8 else 'warn'
+            sous_titre = 'Confortable' if ram >= 16 else 'Correct' if ram >= 8 else 'Juste'
+        cards.append(
+            '<div class="kpi">'
+            '<div class="kpi-head"><span class="kpi-icon">RAM</span> Mémoire vive</div>'
+            f'<div class="kpi-value">{ram:g}<span class="kpi-unit">GB</span></div>'
+            f'{_bar_html(pct, niveau)}'
+            f'<div class="kpi-sub">{sous_titre}</div>'
+            '</div>')
+
+    battery = _battery_pct(info)
+    if battery is not None:
+        level = ('danger' if battery <= BATTERY_DANGER_PCT
+                 else 'warn' if battery <= BATTERY_WARN_PCT else 'ok')
+        cards.append(
+            '<div class="kpi">'
+            '<div class="kpi-head"><span class="kpi-icon">BAT</span> Batterie</div>'
+            f'<div class="kpi-value">{battery}<span class="kpi-unit">%</span></div>'
+            f'{_bar_html(battery, level)}'
+            f'<div class="kpi-sub">{_esc(info.get("battery"))}</div>'
+            '</div>')
+
+    uptime = _num(info.get('uptime_hours'))
+    if uptime is not None:
+        days = uptime / 24
+        cards.append(
+            '<div class="kpi">'
+            '<div class="kpi-head"><span class="kpi-icon">UP</span> Sans redémarrage</div>'
+            f'<div class="kpi-value">{days:.0f}<span class="kpi-unit">j</span></div>'
+            f'{_bar_html(min(days / 30 * 100, 100), "warn" if days > 30 else "ok")}'
+            f'<div class="kpi-sub">{uptime:.0f} heures d\'uptime</div>'
+            '</div>')
+
+    return f'<div class="kpi-row">{"".join(cards)}</div>' if cards else ''
+
+
+def _alerts_html(alerts):
+    if not alerts:
+        fg, bg = _LEVEL_COLORS['ok']
+        return (f'<div class="alert" style="border-left-color:{fg};background:{bg}">'
+                '<div><strong>Aucun point d\'attention détecté</strong>'
+                '<div class="alert-detail">Sécurité, stockage et licences dans les '
+                'seuils attendus.</div></div></div>')
+    rows = []
+    for a in alerts:
+        fg, bg = _LEVEL_COLORS.get(a['level'], _LEVEL_COLORS['info'])
+        detail = f'<div class="alert-detail">{_esc(a["detail"])}</div>' if a.get('detail') else ''
+        rows.append(
+            f'<div class="alert" style="border-left-color:{fg};background:{bg}">'
+            f'<div><strong>{_esc(a["titre"])}</strong>{detail}</div></div>')
+    return ''.join(rows)
+
+
+def _ports_cards_html(ports):
+    """Ports à l'écoute affichés en cartes plutôt qu'en simple liste."""
+    if not ports:
+        return '<p class="empty">Aucun port TCP en écoute détecté.</p>'
+    ports = [describe_listening_port(p) for p in ports]
+    shown = notable_ports(ports)
+    hidden = len(ports) - len(shown)
+    if not shown:
+        return (f'<p class="empty">Aucun port de service en écoute — '
+                f'{hidden} port(s) dynamique(s) uniquement.</p>')
+    cards = []
+    for p in shown:
+        fg, bg = _LEVEL_COLORS.get(p['level'], _LEVEL_COLORS['info'])
+        process = f'<div class="port-proc">{_esc(p["process"])}</div>' if p.get('process') else ''
+        # Étiquette omise pour un port non répertorié : le numéro suffit.
+        badge = (f'<div class="port-name" style="background:{bg};color:{fg}">'
+                 f'{_esc(p["name"])}</div>') if p.get('name') else '<div class="port-gap"></div>'
+        cards.append(
+            f'<div class="port-card" style="border-top-color:{fg}">'
+            f'<div class="port-num" style="color:{fg}">{p["port"]}</div>'
+            f'{badge}'
+            f'<div class="port-desc">{_esc(p["description"])}</div>'
+            f'{process}</div>')
+    note = (f'<p class="hint">{hidden} port(s) de la plage dynamique '
+            f'({EPHEMERAL_PORT_START}+) ne sont pas détaillés : attribués à la volée, '
+            'ils changent à chaque redémarrage.</p>') if hidden else ''
+    return f'{note}<div class="port-grid">{"".join(cards)}</div>'
+
+
+def _usb_html(devices):
+    if not devices:
+        return '<p class="empty">Aucun périphérique USB détecté.</p>'
+    rows = []
+    for d in devices:
+        badge = (_pill_html('Inventorié', 'ok') if d.get('inventoriable')
+                 else _pill_html('Interne', 'muted'))
+        details = []
+        if d.get('serial'):
+            details.append(f'N° série {_esc(d["serial"])}')
+        if d.get('vid'):
+            details.append(f'{_esc(d["vid"])}:{_esc(d["pid"])}')
+        if d.get('manufacturer'):
+            details.append(_esc(d['manufacturer']))
+        rows.append(
+            '<tr>'
+            f'<td><strong>{_esc(d["name"])}</strong>'
+            f'<div class="meta">{" · ".join(details) or "—"}</div></td>'
+            f'<td>{_esc(d["categorie"])}</td>'
+            f'<td>{badge}</td></tr>')
+    inventories = sum(1 for d in devices if d.get('inventoriable'))
+    return (
+        f'<p class="hint">{len(devices)} périphérique(s) détecté(s), dont {inventories} '
+        'repris dans l\'inventaire ParcInfo. Les éléments « Interne » '
+        '(concentrateurs, contrôleurs, nœuds composites) sont listés pour '
+        'information mais ne sont pas créés comme périphériques.</p>'
+        '<table class="tbl"><thead><tr><th>Périphérique</th><th>Catégorie</th>'
+        f'<th>Inventaire</th></tr></thead><tbody>{"".join(rows)}</tbody></table>')
+
+
+def _licenses_html(licences):
+    if not licences:
+        return '<p class="empty">Aucune licence détectée.</p>'
+    rows = []
+    for lic in licences:
+        ok = lic.get('activated')
+        if lic.get('full_key'):
+            # Clé affichée en entier, sans troncature ni masquage.
+            cle_html = f'<code class="licence-key">{_esc(lic["full_key"])}</code>'
+            if lic.get('key_verified'):
+                cle_html += ('<div class="licence-check">Vérifiée : les 5 derniers '
+                             'caractères correspondent à la licence active.</div>')
+            else:
+                cle_html += ('<div class="licence-warn">Non appairée à une licence '
+                             'active de cette machine.</div>')
+        elif lic.get('partial_key'):
+            cle_html = ('<span class="licence-partial">Clé complète absente de la machine '
+                        '(licence numérique, Click-to-Run ou KMS) — se termine par '
+                        f'<code>{_esc(lic["partial_key"])}</code></span>')
+        else:
+            cle_html = '<span class="licence-partial">Aucune clé exposée</span>'
+        rows.append(
+            f'<tr><td><strong>{_esc(lic.get("name"))}</strong>'
+            f'<div class="meta">{_esc('Microsoft')} · {_esc(lic.get('key_source') or lic.get('channel') or 'Windows Licensing')}</div></td>'
+            f'<td>{cle_html}</td>'
+            f'<td>{_pill_html(lic.get("status") or "Inconnu", "ok" if ok else "warn")}</td></tr>')
+    return ('<table class="tbl"><thead><tr><th>Produit</th><th>Clé de licence</th>'
+            f'<th>État</th></tr></thead><tbody>{"".join(rows)}</tbody></table>')
+
+
+def _disks_html(info):
+    drives = info.get('disk_drives', [])
+    if not drives:
+        return ''
+    blocks = []
+    for raw in drives:
+        parsed = _parse_drive(raw)
+        if parsed and parsed[1] and parsed[2] is not None:
+            label, total, used, _free = parsed
+            pct = round(used / total * 100) if total else 0
+            blocks.append(
+                '<div class="disk-row">'
+                f'<div class="disk-head"><strong>{_esc(label)}</strong>'
+                f'<span>{used:g} / {total:g} GB — {pct} %</span></div>'
+                f'{_bar_html(pct, _disk_level(pct))}</div>')
+        else:
+            # Format non reconnu (macOS/Linux) : afficher la ligne telle quelle
+            # plutôt que de fabriquer un pourcentage.
+            blocks.append(f'<div class="disk-row"><strong>{_esc(raw)}</strong></div>')
+    return ''.join(blocks)
+
+
+def _security_html(info):
+    items = []
+    antivirus = (info.get('antivirus') or '').strip()
+    items.append(('Antivirus', antivirus or 'Aucun détecté',
+                  'ok' if antivirus and antivirus.lower() not in ('n/a', 'aucun') else 'danger'))
+
+    if info.get('tpm_present') is not None:
+        if info.get('tpm_enabled'):
+            items.append(('TPM', 'Présent et activé', 'ok'))
+        elif info.get('tpm_present'):
+            items.append(('TPM', 'Présent mais désactivé', 'warn'))
+        else:
+            items.append(('TPM', 'Absent', 'warn'))
+
+    if info.get('secure_boot') is not None:
+        items.append(('Secure Boot', 'Activé' if info.get('secure_boot') else 'Désactivé',
+                      'ok' if info.get('secure_boot') else 'warn'))
+
+    for profile in info.get('firewall', []):
+        level = 'danger' if re.search(r'(désactiv|disabled|off)', profile, re.I) else 'ok'
+        items.append(('Pare-feu', profile, level))
+
+    for vol in info.get('bitlocker', []):
+        level = 'warn' if re.search(r'(non chiffr|not encrypted|off)', vol, re.I) else 'ok'
+        items.append(('BitLocker', vol, level))
+
+    if info.get('last_windows_update'):
+        items.append(('Dernière mise à jour', info['last_windows_update'], 'info'))
+
+    cells = ''.join(
+        f'<div class="sec-item"><div class="sec-label">{_esc(label)}</div>'
+        f'<div>{_pill_html(value, level)}</div></div>'
+        for label, value, level in items)
+    return f'<div class="sec-grid">{cells}</div>' if items else ''
+
+
+def _kv_table_html(rows):
+    body = ''.join(f'<tr><th>{_esc(k)}</th><td>{_esc(v)}</td></tr>'
+                   for k, v in rows if v not in ('', None))
+    return f'<table class="tbl kv"><tbody>{body}</tbody></table>' if body else ''
+
+
+def _software_html(software):
+    if not software:
+        return '<p class="empty">Aucun logiciel détecté.</p>'
+    rows = []
+    for i, soft in enumerate(software, 1):
+        if isinstance(soft, dict):
+            name = soft.get('name', '')
+            version = soft.get('version', '')
+            publisher = soft.get('publisher', '')
+            install = soft.get('install_date', '')
+        else:
+            name, version, publisher, install = str(soft), '', '', ''
+        rows.append(
+            f'<tr><td class="idx">{i}</td><td>{_esc(name)}</td>'
+            f'<td class="mono">{_esc(version)}</td><td>{_esc(publisher)}</td>'
+            f'<td class="mono">{_esc(install)}</td></tr>')
+    return ('<div class="scroll"><table class="tbl"><thead><tr><th>#</th><th>Nom</th>'
+            '<th>Version</th><th>Éditeur</th><th>Installé le</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>')
+
+
+def _list_section_html(title, items):
+    """Section simple en liste — omise entièrement si la donnée est absente."""
+    if not items:
+        return ''
+    lis = ''.join(f'<li>{_esc(i)}</li>' for i in items)
+    return (f'<div class="section"><h2>{_esc(title)}'
+            f'<span class="count">{len(items)}</span></h2>'
+            f'<ul class="plain">{lis}</ul></div>')
+
+
+_REPORT_CSS = """
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+ background:#eef1f5;color:#1f2937;line-height:1.5;padding:24px 16px}
+.wrap{max-width:1100px;margin:0 auto}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);
+ overflow:hidden;margin-bottom:20px}
+.hero{background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 55%,#2b6cb0 100%);
+ color:#fff;padding:26px 28px}
+.hero h1{font-size:1.55rem;font-weight:700;letter-spacing:-.01em;margin-bottom:4px}
+.hero .sub{opacity:.85;font-size:.86rem}
+.hero-meta{display:flex;flex-wrap:wrap;gap:22px;margin-top:16px;
+ padding-top:16px;border-top:1px solid rgba(255,255,255,.18)}
+.hero-meta div{font-size:.8rem}
+.hero-meta .lbl{opacity:.7;text-transform:uppercase;letter-spacing:.06em;font-size:.66rem}
+.hero-meta .val{font-weight:600;font-size:.92rem;margin-top:2px}
+.section{padding:22px 28px;border-top:1px solid #eef1f5}
+.section:first-child{border-top:none}
+h2{font-size:1rem;font-weight:700;color:#1e3a5f;margin-bottom:14px;
+ display:flex;align-items:center;gap:8px}
+h2 .count{background:#eef1f5;color:#6b7280;border-radius:20px;padding:1px 9px;
+ font-size:.72rem;font-weight:600}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+.kpi{background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px}
+.kpi-head{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#6b7280;font-weight:700;display:flex;align-items:center;gap:6px}
+.kpi-icon{background:#1e3a5f;color:#fff;border-radius:4px;padding:1px 5px;
+ font-size:.6rem;letter-spacing:.04em}
+.kpi-value{font-size:2rem;font-weight:700;color:#1f2937;line-height:1.1;margin:6px 0 2px}
+.kpi-unit{font-size:.9rem;font-weight:600;color:#6b7280;margin-left:3px}
+.kpi-sub{font-size:.75rem;color:#6b7280;margin-top:6px}
+.bar{height:7px;background:#e5e7eb;border-radius:4px;overflow:hidden;margin-top:4px}
+.bar-fill{height:100%;border-radius:4px}
+.alert{display:flex;gap:12px;padding:11px 15px;border-left:4px solid;
+ border-radius:6px;margin-bottom:8px;font-size:.86rem}
+.alert-detail{color:#4b5563;font-size:.79rem;margin-top:2px}
+.pill{display:inline-block;padding:2px 10px;border-radius:20px;
+ font-size:.75rem;font-weight:600}
+.port-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:12px}
+.port-card{background:#fff;border:1px solid #e5e7eb;border-top:3px solid;
+ border-radius:8px;padding:12px 13px}
+.port-num{font-size:1.4rem;font-weight:700;font-family:ui-monospace,'Consolas',monospace;
+ line-height:1.1}
+.port-name{display:inline-block;padding:1px 7px;border-radius:4px;font-size:.68rem;
+ font-weight:700;letter-spacing:.03em;margin:5px 0 6px}
+.port-gap{height:9px}
+.port-desc{font-size:.74rem;color:#4b5563;line-height:1.35}
+.port-proc{font-size:.7rem;color:#6b7280;margin-top:6px;padding-top:5px;
+ border-top:1px dashed #e5e7eb;font-family:ui-monospace,'Consolas',monospace}
+.sec-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:12px}
+.sec-item{background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 13px}
+.sec-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;
+ color:#6b7280;font-weight:700;margin-bottom:5px}
+.tbl{width:100%;border-collapse:collapse;font-size:.84rem}
+.tbl th,.tbl td{text-align:left;padding:8px 11px;border-bottom:1px solid #eef1f5;
+ vertical-align:top}
+.tbl thead th{background:#f9fafb;font-size:.71rem;text-transform:uppercase;
+ letter-spacing:.05em;color:#6b7280;font-weight:700}
+.tbl.kv th{width:230px;color:#6b7280;font-weight:600;background:#f9fafb}
+.tbl tbody tr:last-child td{border-bottom:none}
+.meta{font-size:.73rem;color:#6b7280;margin-top:2px}
+.idx{color:#9ca3af;font-size:.75rem;width:44px}
+.mono,.licence-key{font-family:ui-monospace,'Consolas',monospace}
+.licence-key{background:#1e3a5f;color:#fff;padding:4px 10px;border-radius:5px;
+ font-size:.86rem;letter-spacing:.06em;display:inline-block;font-weight:600}
+.licence-partial{font-size:.78rem;color:#6b7280}
+.licence-check{font-size:.71rem;color:#0e9f6e;margin-top:4px;font-weight:600}
+.licence-warn{font-size:.71rem;color:#c27803;margin-top:4px;font-weight:600}
+.licence-partial code{background:#f3f4f6;padding:1px 5px;border-radius:3px;
+ font-weight:600;color:#1f2937}
+.disk-row{margin-bottom:13px}
+.disk-head{display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:4px}
+.disk-head span{color:#6b7280;font-size:.78rem}
+ul.plain{list-style:none;display:grid;
+ grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:5px}
+ul.plain li{background:#f9fafb;border-radius:6px;padding:7px 11px;font-size:.81rem}
+.scroll{max-height:460px;overflow-y:auto;border:1px solid #eef1f5;border-radius:8px}
+.empty,.hint{color:#6b7280;font-size:.82rem;font-style:italic}
+.hint{margin-bottom:11px;font-style:normal}
+.foot{padding:16px 28px;background:#f9fafb;color:#6b7280;font-size:.75rem}
+@media print{
+ body{background:#fff;padding:0}
+ .card{box-shadow:none;border:1px solid #e5e7eb}
+ .scroll{max-height:none;overflow:visible}
+ .port-card,.kpi,.sec-item{break-inside:avoid}
+}
+"""
+
+
+def generate_html_report(info, client_id=None, client_name=None):
+    """Génère la fiche système HTML.
+
+    Retourne (contenu, chemin_fichier). Le fichier est écrit à côté de
+    l'exécutable ; en cas d'échec d'écriture le contenu est tout de même
+    retourné pour que l'envoi vers ParcInfo reste possible.
+    """
+    filename = _report_filename(info, 'html')
+    alerts = build_alerts(info)
+
+    uptime = _num(info.get('uptime_hours'))
+    bios = info.get('bios_version', '')
+    if bios and info.get('bios_release_date'):
+        bios = f"{bios} ({info['bios_release_date']})"
+
+    identification = _kv_table_html([
+        ('Nom de machine', info.get('hostname')),
+        ('Adresse MAC', info.get('mac_address')),
+        ('Adresse(s) IP', ', '.join(info.get('ip_addresses', []))),
+        ('Marque', info.get('brand')),
+        ('Modèle', info.get('model')),
+        ('Numéro de série', info.get('serial_number')),
+        ('Domaine / Groupe de travail', info.get('domain') or info.get('workgroup')),
+    ])
+
+    systeme = _kv_table_html([
+        ("Système d'exploitation", info.get('os_name')),
+        ('Version', info.get('os_version')),
+        ('Détail plateforme', info.get('platform')),
+        ('BIOS', bios),
+        ('Processeur', info.get('cpu')),
+        ('Cœurs', info.get('cpu_cores')),
+        ('Carte graphique', info.get('gpu')),
+        ('Uptime', f"{uptime / 24:.1f} jour(s)" if uptime is not None else None),
+    ])
+
+    ports = info.get('listening_ports', [])
+    usb = info.get('usb_devices', [])
+    licences = info.get('licenses', [])
+    software = info.get('installed_software', [])
+
+    sections = [
+        f'<div class="section"><h2>Points d\'attention</h2>{_alerts_html(alerts)}</div>',
+        f'<div class="section"><h2>Vue d\'ensemble</h2>{_kpi_cards_html(info)}</div>',
+        f'<div class="section"><h2>Identification</h2>{identification}</div>',
+        f'<div class="section"><h2>Système &amp; matériel</h2>{systeme}</div>',
+    ]
+
+    security = _security_html(info)
+    if security:
+        sections.append(f'<div class="section"><h2>Sécurité &amp; conformité</h2>{security}</div>')
+
+    disks = _disks_html(info)
+    if disks:
+        sections.append(f'<div class="section"><h2>Disques logiques</h2>{disks}</div>')
+
+    sections.append(
+        '<div class="section"><h2>Ports en écoute'
+        f'<span class="count">{len(ports)}</span></h2>{_ports_cards_html(ports)}</div>')
+    sections.append(
+        '<div class="section"><h2>Périphériques USB'
+        f'<span class="count">{len(usb)}</span></h2>{_usb_html(usb)}</div>')
+    sections.append(
+        '<div class="section"><h2>Licences'
+        f'<span class="count">{len(licences)}</span></h2>{_licenses_html(licences)}</div>')
+
+    sections.append(_list_section_html(
+        'Barrettes mémoire',
+        [format_memory_module(m) for m in info.get('memory_modules', [])]))
+    sections.append(_list_section_html('Disques physiques', info.get('physical_disks', [])))
+    sections.append(_list_section_html(
+        'Fiabilité des disques',
+        [format_reliability(r) for r in info.get('disk_reliability', [])]))
+    sections.append(_list_section_html(
+        'Écrans', [format_monitor(m) for m in info.get('monitors', [])]))
+    sections.append(_list_section_html(
+        'Imprimantes', [format_printer(p) for p in info.get('printers', [])]))
+    sections.append(_list_section_html('Adaptateurs réseau', info.get('network_adapters', [])))
+    sections.append(_list_section_html('Comptes utilisateurs locaux', info.get('users', [])))
+
+    sections.append(
+        '<div class="section"><h2>Logiciels installés'
+        f'<span class="count">{len(software)}</span></h2>{_software_html(software)}</div>')
+
+    generated = datetime.utcnow().strftime('%d/%m/%Y à %H:%M:%S UTC')
+    cible = client_name or (f'ID {client_id}' if client_id else 'non spécifié')
+
+    html = f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fiche système — {_esc(info.get('hostname') or 'machine')}</title>
+<style>{_REPORT_CSS}</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="hero">
+      <h1>{_esc(info.get('hostname') or 'Machine inconnue')}</h1>
+      <div class="sub">{_esc(info.get('brand'))} {_esc(info.get('model'))} — fiche générée le {generated}</div>
+      <div class="hero-meta">
+        <div><div class="lbl">Client</div><div class="val">{_esc(cible)}</div></div>
+        <div><div class="lbl">Système</div><div class="val">{_esc(info.get('os_name') or '—')}</div></div>
+        <div><div class="lbl">Adresse IP</div><div class="val">{_esc((info.get('ip_addresses') or ['—'])[0])}</div></div>
+        <div><div class="lbl">N° de série</div><div class="val">{_esc(info.get('serial_number') or '—')}</div></div>
+      </div>
+    </div>
+    {''.join(sections)}
+    <div class="foot">
+      Rapport produit par system-info-collector · collecte du
+      {_esc(info.get('timestamp') or 'N/A')} · {len(software)} logiciel(s),
+      {len(usb)} périphérique(s) USB, {len(ports)} port(s) en écoute.
+    </div>
+  </div>
+</div>
+</body>
+</html>"""
+
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(html)
+        return html, filename
+    except Exception:
+        return html, None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RAPPORT PDF
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Les polices standard de reportlab (Helvetica) ne savent pas rendre les emoji :
+# les pictogrammes du rapport précédent sortaient en carrés vides. Les éléments
+# graphiques sont donc dessinés en vectoriel (barres, pastilles, cartes) plutôt
+# que posés en caractères Unicode.
+
+def _pdf_escape(value):
+    """Échappe les entités XML interprétées par les Paragraph de reportlab."""
+    import html as _html
+    return _html.escape('' if value is None else str(value), quote=False)
+
+
+def _build_pdf_toolkit():
+    """Importe reportlab et construit styles et flowables personnalisés.
+
+    Retourne None si reportlab est absent — l'appelant bascule alors sur le
+    rapport HTML.
+    """
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.enums import TA_LEFT
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import (
+            Flowable, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate,
+            Spacer, Table, TableStyle,
+        )
+    except ImportError:
+        return None
+
+    class ProgressBar(Flowable):
+        """Barre de progression vectorielle (largeur = valeur)."""
+
+        def __init__(self, pct, color, width=150, height=6):
+            Flowable.__init__(self)
+            self.pct = max(0, min(100, float(pct)))
+            self.color = color
+            self.width = width
+            self.height = height
+
+        def wrap(self, availWidth, availHeight):
+            self.width = min(self.width, availWidth)
+            return (self.width, self.height)
+
+        def draw(self):
+            c = self.canv
+            c.setFillColor(colors.HexColor('#e5e7eb'))
+            c.roundRect(0, 0, self.width, self.height, self.height / 2, stroke=0, fill=1)
+            filled = self.width * self.pct / 100.0
+            if filled > 0:
+                c.setFillColor(colors.HexColor(self.color))
+                # Un rayon supérieur à la moitié de la largeur fait planter
+                # roundRect : on borne pour les valeurs très faibles.
+                radius = min(self.height / 2, filled / 2)
+                c.roundRect(0, 0, filled, self.height, radius, stroke=0, fill=1)
+
+    styles = getSampleStyleSheet()
+    S = {
+        'title': ParagraphStyle('T', parent=styles['Heading1'], fontSize=19,
+                                textColor=colors.white, spaceAfter=2, leading=23),
+        'subtitle': ParagraphStyle('ST', parent=styles['Normal'], fontSize=8.5,
+                                   textColor=colors.HexColor('#c3dafe'), leading=12),
+        'h2': ParagraphStyle('H2', parent=styles['Heading2'], fontSize=11.5,
+                             textColor=colors.HexColor('#1e3a5f'), spaceBefore=13,
+                             spaceAfter=7, leading=14),
+        'body': ParagraphStyle('B', parent=styles['Normal'], fontSize=8.5, leading=11.5),
+        'small': ParagraphStyle('S', parent=styles['Normal'], fontSize=7.3,
+                                textColor=colors.HexColor('#6b7280'), leading=9.5),
+        'kpi_num': ParagraphStyle('KN', parent=styles['Normal'], fontSize=17,
+                                  leading=19, alignment=TA_LEFT),
+        'kpi_lbl': ParagraphStyle('KL', parent=styles['Normal'], fontSize=6.6,
+                                  textColor=colors.HexColor('#6b7280'), leading=9),
+        'port_num': ParagraphStyle('PN', parent=styles['Normal'], fontSize=13,
+                                   fontName='Helvetica-Bold', leading=15),
+        'mono': ParagraphStyle('M', parent=styles['Normal'], fontName='Courier',
+                               fontSize=8.5, leading=11),
+        'key': ParagraphStyle('K', parent=styles['Normal'], fontName='Courier-Bold',
+                              fontSize=9.5, textColor=colors.white, leading=13),
+        'alert': ParagraphStyle('A', parent=styles['Normal'], fontSize=8.5, leading=11),
+    }
+    return {
+        'colors': colors, 'A4': A4, 'mm': mm, 'Paragraph': Paragraph,
+        'SimpleDocTemplate': SimpleDocTemplate, 'Spacer': Spacer, 'Table': Table,
+        'TableStyle': TableStyle, 'KeepTogether': KeepTogether, 'PageBreak': PageBreak,
+        'ProgressBar': ProgressBar, 'S': S,
+    }
+
+
+def _pdf_kv_table(tk, rows, width):
+    """Tableau clé/valeur avec en-tête de ligne grisé."""
+    data = [[tk['Paragraph'](f'<b>{_pdf_escape(k)}</b>', tk['S']['body']),
+             tk['Paragraph'](_pdf_escape(v), tk['S']['body'])]
+            for k, v in rows if v not in ('', None)]
+    if not data:
+        return None
+    t = tk['Table'](data, colWidths=[width * 0.34, width * 0.66])
+    t.setStyle(tk['TableStyle']([
+        ('BACKGROUND', (0, 0), (0, -1), tk['colors'].HexColor('#f9fafb')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 7),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.4, tk['colors'].HexColor('#eef1f5')),
+        ('BOX', (0, 0), (-1, -1), 0.5, tk['colors'].HexColor('#e5e7eb')),
+    ]))
+    return t
+
+
+def _pdf_alerts(tk, alerts, width):
+    """Encadrés colorés : c'est la mise en évidence principale du rapport."""
+    flows = []
+    if not alerts:
+        fg, bg = _LEVEL_COLORS['ok']
+        t = tk['Table']([[tk['Paragraph'](
+            '<b>Aucun point d\'attention détecté</b><br/>'
+            '<font size="7.5" color="#4b5563">Sécurité, stockage et licences dans '
+            'les seuils attendus.</font>', tk['S']['alert'])]], colWidths=[width])
+        t.setStyle(tk['TableStyle']([
+            ('BACKGROUND', (0, 0), (-1, -1), tk['colors'].HexColor(bg)),
+            ('LINEBEFORE', (0, 0), (0, -1), 3, tk['colors'].HexColor(fg)),
+            ('LEFTPADDING', (0, 0), (-1, -1), 9),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        return [t]
+
+    for a in alerts:
+        fg, bg = _LEVEL_COLORS.get(a['level'], _LEVEL_COLORS['info'])
+        text = f'<b>{_pdf_escape(a["titre"])}</b>'
+        if a.get('detail'):
+            text += f'<br/><font size="7.5" color="#4b5563">{_pdf_escape(a["detail"])}</font>'
+        t = tk['Table']([[tk['Paragraph'](text, tk['S']['alert'])]], colWidths=[width])
+        t.setStyle(tk['TableStyle']([
+            ('BACKGROUND', (0, 0), (-1, -1), tk['colors'].HexColor(bg)),
+            ('LINEBEFORE', (0, 0), (0, -1), 3, tk['colors'].HexColor(fg)),
+            ('LEFTPADDING', (0, 0), (-1, -1), 9),
+            ('TOPPADDING', (0, 0), (-1, -1), 5),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ]))
+        flows.append(t)
+        flows.append(tk['Spacer'](1, 3))
+    return flows
+
+
+def _pdf_kpis(tk, info, width):
+    """Vignettes chiffrées avec barre, sur une ligne."""
+    cells = []
+
+    total = _num(info.get('disk_total_gb'))
+    used = _num(info.get('disk_used_gb'))
+    if total and used is not None and total > 0:
+        pct = round(used / total * 100)
+        cells.append(('STOCKAGE', f'{pct} %', pct, _LEVEL_COLORS[_disk_level(pct)][0],
+                      f'{used:g} / {total:g} GB'))
+
+    ram = _num(info.get('ram_gb'))
+    if ram:
+        libre = _num(info.get('ram_free_gb'))
+        if libre is not None and ram > 0:
+            pct = round((ram - libre) / ram * 100)
+            niveau = 'danger' if pct >= 90 else 'warn' if pct >= 75 else 'ok'
+            sous = '%.1f GB libres' % libre
+        else:
+            pct = min(ram / 64 * 100, 100)
+            niveau = 'ok' if ram >= 8 else 'warn'
+            sous = 'Confortable' if ram >= 16 else 'Correct' if ram >= 8 else 'Juste'
+        cells.append(('MÉMOIRE VIVE', f'{ram:g} GB', pct, _LEVEL_COLORS[niveau][0], sous))
+
+    battery = _battery_pct(info)
+    if battery is not None:
+        lvl = ('danger' if battery <= BATTERY_DANGER_PCT
+               else 'warn' if battery <= BATTERY_WARN_PCT else 'ok')
+        cells.append(('BATTERIE', f'{battery} %', battery, _LEVEL_COLORS[lvl][0], 'Charge restante'))
+
+    uptime = _num(info.get('uptime_hours'))
+    if uptime is not None:
+        days = uptime / 24
+        cells.append(('SANS REDÉMARRAGE', f'{days:.0f} j', min(days / 30 * 100, 100),
+                      _LEVEL_COLORS['warn' if days > 30 else 'ok'][0], f'{uptime:.0f} heures'))
+
+    if not cells:
+        return None
+
+    col_w = width / len(cells)
+    row = []
+    for label, value, pct, color, sub in cells:
+        inner = tk['Table']([
+            [tk['Paragraph'](label, tk['S']['kpi_lbl'])],
+            [tk['Paragraph'](f'<b>{_pdf_escape(value)}</b>', tk['S']['kpi_num'])],
+            [tk['ProgressBar'](pct, color, width=col_w - 18)],
+            [tk['Paragraph'](_pdf_escape(sub), tk['S']['kpi_lbl'])],
+        ], colWidths=[col_w - 12])
+        inner.setStyle(tk['TableStyle']([
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING', (0, 0), (-1, -1), 1),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ]))
+        row.append(inner)
+
+    t = tk['Table']([row], colWidths=[col_w] * len(cells))
+    t.setStyle(tk['TableStyle']([
+        ('BACKGROUND', (0, 0), (-1, -1), tk['colors'].HexColor('#f9fafb')),
+        ('BOX', (0, 0), (-1, -1), 0.5, tk['colors'].HexColor('#e5e7eb')),
+        ('INNERGRID', (0, 0), (-1, -1), 0.5, tk['colors'].HexColor('#e5e7eb')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 7),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+        ('LEFTPADDING', (0, 0), (-1, -1), 7),
+    ]))
+    return t
+
+
+def _pdf_port_cards(tk, ports, width, per_row=4):
+    """Ports en écoute sous forme de cartes, réparties en grille."""
+    if not ports:
+        return [tk['Paragraph']('Aucun port TCP en écoute détecté.', tk['S']['small'])]
+
+    ports = [describe_listening_port(p) for p in ports]
+    ports = [describe_listening_port(p) for p in ports]
+    shown = notable_ports(ports)
+    hidden = len(ports) - len(shown)
+    flows = []
+    if hidden:
+        flows.append(tk['Paragraph'](
+            f'{hidden} port(s) de la plage dynamique ({EPHEMERAL_PORT_START}+) ne sont '
+            'pas détaillés : attribués à la volée, ils changent à chaque redémarrage.',
+            tk['S']['small']))
+        flows.append(tk['Spacer'](1, 5))
+    if not shown:
+        flows.append(tk['Paragraph']('Aucun port de service en écoute.', tk['S']['small']))
+        return flows
+
+    col_w = width / per_row
+    for start in range(0, len(shown), per_row):
+        chunk = shown[start:start + per_row]
+        row = []
+        for p in chunk:
+            fg, bg = _LEVEL_COLORS.get(p['level'], _LEVEL_COLORS['info'])
+            body = [
+                [tk['Paragraph'](
+                    f'<font color="{fg}">{p["port"]}</font>', tk['S']['port_num'])],
+                # Étiquette omise pour un port non répertorié : le numéro suffit.
+                [tk['Paragraph'](
+                    f'<font color="{fg}" size="6.5"><b>{_pdf_escape(p["name"])}</b></font>'
+                    if p.get('name') else '&nbsp;', tk['S']['kpi_lbl'])],
+                [tk['Paragraph'](_pdf_escape(p['description']), tk['S']['small'])],
+            ]
+            if p.get('process'):
+                body.append([tk['Paragraph'](
+                    f'<font face="Courier" size="6.5">{_pdf_escape(p["process"])}</font>',
+                    tk['S']['small'])])
+            inner = tk['Table'](body, colWidths=[col_w - 14])
+            inner.setStyle(tk['TableStyle']([
+                ('LEFTPADDING', (0, 0), (-1, -1), 0),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+                ('TOPPADDING', (0, 0), (-1, -1), 1),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+            ]))
+            row.append(inner)
+        # Compléter la dernière rangée pour garder des colonnes régulières.
+        while len(row) < per_row:
+            row.append('')
+
+        t = tk['Table']([row], colWidths=[col_w] * per_row)
+        style = [
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+            ('LEFTPADDING', (0, 0), (-1, -1), 7),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 7),
+        ]
+        for i, p in enumerate(chunk):
+            fg, _bg = _LEVEL_COLORS.get(p['level'], _LEVEL_COLORS['info'])
+            style.append(('BOX', (i, 0), (i, 0), 0.5, tk['colors'].HexColor('#e5e7eb')))
+            style.append(('LINEABOVE', (i, 0), (i, 0), 2, tk['colors'].HexColor(fg)))
+        t.setStyle(tk['TableStyle'](style))
+        flows.append(t)
+        flows.append(tk['Spacer'](1, 5))
+    return flows
+
+
+def _pdf_data_table(tk, header, rows, width, col_ratios, styles_extra=None):
+    """Tableau générique à en-tête coloré."""
+    data = [[tk['Paragraph'](f'<b>{_pdf_escape(h)}</b>', tk['S']['kpi_lbl']) for h in header]]
+    data.extend(rows)
+    t = tk['Table'](data, colWidths=[width * r for r in col_ratios], repeatRows=1)
+    style = [
+        ('BACKGROUND', (0, 0), (-1, 0), tk['colors'].HexColor('#f9fafb')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING', (0, 0), (-1, -1), 6),
+        ('LINEBELOW', (0, 0), (-1, -1), 0.4, tk['colors'].HexColor('#eef1f5')),
+        ('BOX', (0, 0), (-1, -1), 0.5, tk['colors'].HexColor('#e5e7eb')),
+    ]
+    style.extend(styles_extra or [])
+    t.setStyle(tk['TableStyle'](style))
+    return t
+
+
+def generate_pdf_report(info, client_id=None, client_name=None):
+    """Génère le rapport PDF. Bascule sur le HTML si reportlab est absent."""
+    tk = _build_pdf_toolkit()
+    if tk is None:
+        return generate_html_report(info, client_id, client_name)
+
+    try:
+        filename = _report_filename(info, 'pdf')
+        colors, S = tk['colors'], tk['S']
+        Paragraph, Spacer, Table, TableStyle = (
+            tk['Paragraph'], tk['Spacer'], tk['Table'], tk['TableStyle'])
+
+        doc = tk['SimpleDocTemplate'](
+            filename, pagesize=tk['A4'],
+            leftMargin=15 * tk['mm'], rightMargin=15 * tk['mm'],
+            topMargin=13 * tk['mm'], bottomMargin=13 * tk['mm'],
+            title=f"Fiche système — {info.get('hostname', '')}",
+        )
+        width = doc.width
+        story = []
+
+        # ── Bandeau de titre ─────────────────────────────────────────────────
+        generated = datetime.utcnow().strftime('%d/%m/%Y à %H:%M:%S UTC')
+        cible = client_name or (f'ID {client_id}' if client_id else 'non spécifié')
+        header_txt = (
+            f"{_pdf_escape(info.get('brand'))} {_pdf_escape(info.get('model'))} — "
+            f"fiche générée le {generated}<br/>"
+            f"Client : {_pdf_escape(cible)} · OS : {_pdf_escape(info.get('os_name') or '—')} · "
+            f"IP : {_pdf_escape((info.get('ip_addresses') or ['—'])[0])} · "
+            f"N° série : {_pdf_escape(info.get('serial_number') or '—')}"
+        )
+        hero = Table([[Paragraph(
+            f"<b>{_pdf_escape(info.get('hostname') or 'Machine inconnue')}</b>", S['title'])],
+            [Paragraph(header_txt, S['subtitle'])]], colWidths=[width])
+        hero.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#1e3a5f')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (0, 0), 10),
+            ('BOTTOMPADDING', (0, 1), (0, 1), 10),
+        ]))
+        story.append(hero)
+        story.append(Spacer(1, 11))
+
+        # ── Points d'attention ───────────────────────────────────────────────
+        story.append(Paragraph("Points d'attention", S['h2']))
+        story.extend(_pdf_alerts(tk, build_alerts(info), width))
+
+        # ── Vue d'ensemble ───────────────────────────────────────────────────
+        kpis = _pdf_kpis(tk, info, width)
+        if kpis:
+            story.append(Paragraph("Vue d'ensemble", S['h2']))
+            story.append(kpis)
+
+        # ── Identification / Système ─────────────────────────────────────────
+        bios = info.get('bios_version', '')
+        if bios and info.get('bios_release_date'):
+            bios = f"{bios} ({info['bios_release_date']})"
+        uptime = _num(info.get('uptime_hours'))
+
+        for titre, rows in (
+            ('Identification', [
+                ('Nom de machine', info.get('hostname')),
+                ('Adresse MAC', info.get('mac_address')),
+                ('Adresse(s) IP', ', '.join(info.get('ip_addresses', []))),
+                ('Marque', info.get('brand')),
+                ('Modèle', info.get('model')),
+                ('Numéro de série', info.get('serial_number')),
+                ('Domaine / Groupe de travail', info.get('domain') or info.get('workgroup')),
+            ]),
+            ('Système & matériel', [
+                ("Système d'exploitation", info.get('os_name')),
+                ('Version', info.get('os_version')),
+                ('Détail plateforme', info.get('platform')),
+                ('BIOS', bios),
+                ('Processeur', info.get('cpu')),
+                ('Cœurs', info.get('cpu_cores')),
+                ('Carte graphique', info.get('gpu')),
+                ('Uptime', f'{uptime / 24:.1f} jour(s)' if uptime is not None else None),
+            ]),
+        ):
+            table = _pdf_kv_table(tk, rows, width)
+            if table:
+                story.append(Paragraph(titre, S['h2']))
+                story.append(table)
+
+        # ── Sécurité ─────────────────────────────────────────────────────────
+        sec_rows = []
+        antivirus = (info.get('antivirus') or '').strip()
+        sec_rows.append(('Antivirus', antivirus or 'Aucun détecté',
+                         'ok' if antivirus and antivirus.lower() not in ('n/a', 'aucun') else 'danger'))
+        if info.get('tpm_present') is not None:
+            if info.get('tpm_enabled'):
+                sec_rows.append(('TPM', 'Présent et activé', 'ok'))
+            elif info.get('tpm_present'):
+                sec_rows.append(('TPM', 'Présent mais désactivé', 'warn'))
+            else:
+                sec_rows.append(('TPM', 'Absent', 'warn'))
+        if info.get('secure_boot') is not None:
+            sec_rows.append(('Secure Boot', 'Activé' if info.get('secure_boot') else 'Désactivé',
+                             'ok' if info.get('secure_boot') else 'warn'))
+        for profile in info.get('firewall', []):
+            sec_rows.append(('Pare-feu', profile,
+                             'danger' if re.search(r'(désactiv|disabled|off)', profile, re.I) else 'ok'))
+        for vol in info.get('bitlocker', []):
+            sec_rows.append(('BitLocker', vol,
+                             'warn' if re.search(r'(non chiffr|not encrypted|off)', vol, re.I) else 'ok'))
+        if info.get('last_windows_update'):
+            sec_rows.append(('Dernière mise à jour', info['last_windows_update'], 'info'))
+
+        if sec_rows:
+            story.append(Paragraph('Sécurité & conformité', S['h2']))
+            data, extra = [], []
+            for i, (label, value, level) in enumerate(sec_rows):
+                fg, bg = _LEVEL_COLORS.get(level, _LEVEL_COLORS['info'])
+                data.append([
+                    Paragraph(f'<b>{_pdf_escape(label)}</b>', S['body']),
+                    Paragraph(f'<font color="{fg}"><b>{_pdf_escape(value)}</b></font>', S['body']),
+                ])
+                extra.append(('BACKGROUND', (1, i), (1, i), colors.HexColor(bg)))
+            t = Table(data, colWidths=[width * 0.34, width * 0.66])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f9fafb')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('LEFTPADDING', (0, 0), (-1, -1), 7),
+                ('BOX', (0, 0), (-1, -1), 0.5, colors.HexColor('#e5e7eb')),
+                ('LINEBELOW', (0, 0), (-1, -2), 0.4, colors.HexColor('#eef1f5')),
+            ] + extra))
+            story.append(t)
+
+        # ── Disques logiques ─────────────────────────────────────────────────
+        drives = info.get('disk_drives', [])
+        if drives:
+            story.append(Paragraph('Disques logiques', S['h2']))
+            for raw in drives:
+                parsed = _parse_drive(raw)
+                if parsed and parsed[1] and parsed[2] is not None:
+                    label, total, used, _free = parsed
+                    pct = round(used / total * 100) if total else 0
+                    story.append(Paragraph(
+                        f'<b>{_pdf_escape(label)}</b> — {used:g} / {total:g} GB ({pct} %)',
+                        S['body']))
+                    story.append(tk['ProgressBar'](pct, _LEVEL_COLORS[_disk_level(pct)][0],
+                                                   width=width))
+                else:
+                    story.append(Paragraph(_pdf_escape(raw), S['body']))
+                story.append(Spacer(1, 5))
+
+        # ── Ports en écoute (cartes) ─────────────────────────────────────────
+        ports = info.get('listening_ports', [])
+        story.append(Paragraph(f'Ports en écoute ({len(ports)})', S['h2']))
+        story.extend(_pdf_port_cards(tk, ports, width))
+
+        # ── Périphériques USB ────────────────────────────────────────────────
+        usb = info.get('usb_devices', [])
+        story.append(Paragraph(f'Périphériques USB ({len(usb)})', S['h2']))
+        if usb:
+            inv = sum(1 for d in usb if d.get('inventoriable'))
+            story.append(Paragraph(
+                f'{len(usb)} périphérique(s) détecté(s), dont {inv} repris dans '
+                "l'inventaire ParcInfo. Les éléments « Interne » (concentrateurs, "
+                'contrôleurs, nœuds composites) sont listés pour information.',
+                S['small']))
+            story.append(Spacer(1, 4))
+            rows, extra = [], []
+            for i, d in enumerate(usb, start=1):
+                meta = []
+                if d.get('serial'):
+                    meta.append(f'N° série {d["serial"]}')
+                if d.get('vid'):
+                    meta.append(f'{d["vid"]}:{d["pid"]}')
+                if d.get('manufacturer'):
+                    meta.append(d['manufacturer'])
+                etat, level = (('Inventorié', 'ok') if d.get('inventoriable')
+                               else ('Interne', 'muted'))
+                fg, bg = _LEVEL_COLORS[level]
+                rows.append([
+                    Paragraph(f'<b>{_pdf_escape(d["name"])}</b><br/>'
+                              f'<font size="6.8" color="#6b7280">'
+                              f'{_pdf_escape(" · ".join(meta) or "—")}</font>', S['body']),
+                    Paragraph(_pdf_escape(d['categorie']), S['body']),
+                    Paragraph(f'<font color="{fg}"><b>{etat}</b></font>', S['body']),
+                ])
+                extra.append(('BACKGROUND', (2, i), (2, i), colors.HexColor(bg)))
+            story.append(_pdf_data_table(
+                tk, ['Périphérique', 'Catégorie', 'Inventaire'], rows, width,
+                [0.55, 0.26, 0.19], extra))
+        else:
+            story.append(Paragraph('Aucun périphérique USB détecté.', S['small']))
+
+        # ── Licences ─────────────────────────────────────────────────────────
+        licences = info.get('licenses', [])
+        story.append(Paragraph(f'Licences ({len(licences)})', S['h2']))
+        if licences:
+            rows, extra = [], []
+            for i, lic in enumerate(licences, start=1):
+                if lic.get('full_key'):
+                    # Clé complète, en monospace sur fond sombre pour être
+                    # relisible sans ambiguïté (0/O, 1/I) depuis un tirage papier.
+                    # Teintes claires : la cellule est sur fond sombre.
+                    if lic.get('key_verified'):
+                        mention = ('<br/><font size="6.3" color="#7bdcb5">Vérifiée : les 5 '
+                                   'derniers caractères correspondent à la licence active.</font>')
+                    else:
+                        mention = ('<br/><font size="6.3" color="#fbd38d">Non appairée à une '
+                                   'licence active de cette machine.</font>')
+                    cle_cell = Paragraph(
+                        '<font face="Courier-Bold" size="9.5" color="#ffffff">'
+                        f'{_pdf_escape(lic["full_key"])}</font>{mention}', S['body'])
+                    extra.append(('BACKGROUND', (1, i), (1, i), colors.HexColor('#1e3a5f')))
+                elif lic.get('partial_key'):
+                    cle_cell = Paragraph(
+                        'Clé complète absente de la machine (licence numérique, '
+                        'Click-to-Run ou KMS) — se termine par '
+                        f'<font face="Courier-Bold">{_pdf_escape(lic["partial_key"])}</font>',
+                        S['small'])
+                else:
+                    cle_cell = Paragraph('Aucune clé exposée', S['small'])
+                ok = lic.get('activated')
+                fg, bg = _LEVEL_COLORS['ok' if ok else 'warn']
+                rows.append([
+                    Paragraph(f'<b>{_pdf_escape(lic.get("name"))}</b><br/>'
+                              f'<font size="6.8" color="#6b7280">'
+                              f'{_pdf_escape('Microsoft')} · '
+                              f'{_pdf_escape(lic.get('key_source') or lic.get('channel') or 'Windows Licensing')}</font>', S['body']),
+                    cle_cell,
+                    Paragraph(f'<font color="{fg}"><b>'
+                              f'{_pdf_escape(lic.get("status") or "Inconnu")}</b></font>', S['body']),
+                ])
+                extra.append(('BACKGROUND', (2, i), (2, i), colors.HexColor(bg)))
+            story.append(_pdf_data_table(
+                tk, ['Produit', 'Clé de licence', 'État'], rows, width,
+                [0.34, 0.48, 0.18], extra))
+        else:
+            story.append(Paragraph('Aucune licence détectée.', S['small']))
+
+        # ── Listes complémentaires ───────────────────────────────────────────
+        for titre, items in (
+            ('Barrettes mémoire',
+             [format_memory_module(m) for m in info.get('memory_modules', [])]),
+            ('Disques physiques', info.get('physical_disks', [])),
+            ('Fiabilité des disques',
+             [format_reliability(r) for r in info.get('disk_reliability', [])]),
+            ('Écrans', [format_monitor(m) for m in info.get('monitors', [])]),
+            ('Imprimantes', [format_printer(p) for p in info.get('printers', [])]),
+            ('Adaptateurs réseau', info.get('network_adapters', [])),
+            ('Comptes utilisateurs locaux', info.get('users', [])),
+        ):
+            if items:
+                story.append(Paragraph(f'{titre} ({len(items)})', S['h2']))
+                for item in items:
+                    story.append(Paragraph(f'• {_pdf_escape(item)}', S['body']))
+
+        # ── Logiciels ────────────────────────────────────────────────────────
+        software = info.get('installed_software', [])
+        if software:
+            story.append(tk['PageBreak']())
+            story.append(Paragraph(f'Logiciels installés ({len(software)})', S['h2']))
+            rows = []
+            for i, soft in enumerate(software, 1):
+                if isinstance(soft, dict):
+                    name, version = soft.get('name', ''), soft.get('version', '')
+                    publisher, install = soft.get('publisher', ''), soft.get('install_date', '')
+                else:
+                    name, version, publisher, install = str(soft), '', '', ''
+                rows.append([
+                    Paragraph(f'<font color="#9ca3af" size="7">{i}</font>', S['body']),
+                    Paragraph(_pdf_escape(name), S['body']),
+                    Paragraph(f'<font face="Courier" size="7.5">'
+                              f'{_pdf_escape(version)}</font>', S['body']),
+                    Paragraph(_pdf_escape(publisher), S['body']),
+                    Paragraph(f'<font size="7.5">{_pdf_escape(install)}</font>', S['body']),
+                ])
+            story.append(_pdf_data_table(
+                tk, ['#', 'Nom', 'Version', 'Éditeur', 'Installé le'], rows, width,
+                [0.06, 0.40, 0.16, 0.24, 0.14]))
+
+        story.append(Spacer(1, 10))
+        story.append(Paragraph(
+            f"Rapport produit par system-info-collector · collecte du "
+            f"{_pdf_escape(info.get('timestamp') or 'N/A')} · {len(software)} logiciel(s), "
+            f"{len(usb)} périphérique(s) USB, {len(ports)} port(s) en écoute.", S['small']))
+
+        doc.build(story)
+        with open(filename, 'rb') as f:
+            return f.read(), filename
+
+    except Exception as exc:
+        # Un PDF qui échoue ne doit pas priver l'utilisateur de rapport.
+        try:
+            print(f'Erreur génération PDF ({exc}) — repli sur le rapport HTML')
+        except Exception:
+            pass
+        return generate_html_report(info, client_id, client_name)
+
+
+_SNAPSHOT_EXCLUDE = {'installed_software'}
+
+
+def get_api_payload(info, client_id=None, client_name=None):
+    """Construit le payload envoyé à /api/device-info.
+
+    Les colonnes historiques restent alimentées à l'identique ; le snapshot
+    complet part en plus dans `system_report` pour que le serveur puisse tout
+    afficher sans avoir à parser le PDF.
+    """
+    # Formater la RAM pour correspondre aux options (ex: "16" → "16 Go")
+    ram_value = info.get('ram_gb', '')
+    if ram_value:
+        try:
+            ram_num = float(ram_value)
+            ram_formatted = f"{int(ram_num)} Go" if ram_num == int(ram_num) else f"{ram_num} Go"
+        except (ValueError, TypeError):
+            ram_formatted = str(ram_value)
+    else:
+        ram_formatted = ''
+
+    # GPU : préférer la version détaillée (avec VRAM) quand elle est disponible
+    gpu_display = info.get('gpu', '')
+    gpu_details = info.get('gpu_details', [])
+    if gpu_details:
+        gpu_display = ', '.join(
+            g['name'] + (f" ({g['vram_gb']} GB)" if g.get('vram_gb') else '')
+            for g in gpu_details
+        )
+
+    payload = {
+        'mac_address': info.get('mac_address', ''),
+        'ip_addresses': info.get('ip_addresses', []),
+        'hostname': info.get('hostname', ''),
+        'dns_name': info.get('dns_name', ''),
+        'device_type': info.get('device_type', ''),
+        'os_name': info.get('os_name', ''),
+        'os_version': info.get('os_version', ''),
+        'brand': info.get('brand', ''),
+        'model': info.get('model', ''),
+        'serial_number': info.get('serial_number', ''),
+        'ram_gb': ram_formatted,  # Envoi avec "Go" (ex: "16 Go")
+        'cpu': info.get('cpu', ''),
+        'disk_total_gb': info.get('disk_total_gb', ''),
+        'antivirus': info.get('antivirus', ''),
+        'gpu': gpu_display,
+        'installed_software': info.get('installed_software', []),
+        # Ports TCP en écoute → colonne ports_ouverts
+        'open_ports': [p['port'] for p in info.get('listening_ports', [])],
+        # Périphériques créés automatiquement côté serveur. Seuls les
+        # matériels USB réels sont transmis : hubs racine, contrôleurs et nœuds
+        # composites restent dans le rapport mais n'ont pas leur place dans un
+        # inventaire client.
+        'monitors': info.get('monitors', []),
+        'printers': info.get('printers', []),
+        'usb_devices': [d for d in info.get('usb_devices', []) if d.get('inventoriable')],
+        # Licences dont la clé complète a été récupérée : elles alimentent la
+        # section « Licences logiciels » de la fiche appareil. Une licence sans
+        # clé exploitable (licence numérique, Click-to-Run, KMS) n'aurait rien
+        # à y inscrire.
+        'licenses': [l for l in info.get('licenses', []) if l.get('full_key')],
+        # Snapshot complet pour la fiche système
+        'system_report': {k: v for k, v in info.items() if k not in _SNAPSHOT_EXCLUDE},
+    }
+
+    # Ajouter client targeting
+    if client_id:
+        payload['client_id'] = client_id
+    if client_name:
+        payload['client_name'] = client_name
+
+    return payload
+
+
+def send_to_parcinfo(info, server_url, token=None, client_id=None, client_name=None):
+    """Envoie les infos à ParcInfo via l'API.
+
+    Args:
+        info: Dict des informations système
+        server_url: URL du serveur ParcInfo
+        token: Token d'authentification (optionnel)
+        client_id: ID du client cible (optionnel)
+        client_name: Nom du client cible (optionnel - sera résolu en ID)
+    """
+    try:
+        headers = {'Content-Type': 'application/json'}
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+
+        payload = json.dumps(get_api_payload(info, client_id, client_name))
+
+        request = Request(
+            f"{server_url.rstrip('/')}/api/device-info",
+            data=payload.encode('utf-8'),
+            headers=headers,
+            method='POST'
+        )
+
+        # Le payload complet (logiciels + snapshot) est nettement plus lourd que
+        # l'ancien : 30 s laissent le serveur écrire sans couper la connexion
+        with urlopen(request, timeout=30) as response:
+            return True, json.loads(response.read().decode('utf-8'))
+    except URLError as e:
+        return False, f"Connection error: {e.reason}"
+    except Exception as e:
+        return False, str(e)
+
+
+def upload_report_to_parcinfo(report_content, report_file, server_url, device_id, client_id):
+    """Envoie le rapport (PDF ou HTML) à ParcInfo en tant que document joint.
+
+    Args:
+        report_content: Contenu du rapport (bytes ou str)
+        report_file: Chemin du fichier rapport (détermine le type)
+        server_url: URL du serveur ParcInfo
+        device_id: ID de l'appareil créé/mis à jour
+        client_id: ID du client
+    """
+    try:
+        if report_file and report_file.endswith('.pdf'):
+            content_type = 'application/pdf'
+            filename = report_file
+        else:
+            content_type = 'text/html'
+            filename = report_file or 'report.html'
+
+        boundary = '----FormBoundary' + str(uuid.uuid4()).replace('-', '')
+        body = io.BytesIO()
+
+        body.write(f'--{boundary}\r\n'.encode())
+        body.write(b'Content-Disposition: form-data; name="device_id"\r\n\r\n')
+        body.write(f'{device_id}\r\n'.encode())
+
+        body.write(f'--{boundary}\r\n'.encode())
+        body.write(b'Content-Disposition: form-data; name="client_id"\r\n\r\n')
+        body.write(f'{client_id}\r\n'.encode())
+
+        body.write(f'--{boundary}\r\n'.encode())
+        body.write(f'Content-Disposition: form-data; name="report"; filename="{filename}"\r\n'.encode())
+        body.write(f'Content-Type: {content_type}\r\n\r\n'.encode())
+        if isinstance(report_content, str):
+            body.write(report_content.encode('utf-8'))
+        else:
+            body.write(report_content)
+        body.write(b'\r\n')
+
+        body.write(f'--{boundary}--\r\n'.encode())
+
+        request = Request(
+            f"{server_url.rstrip('/')}/api/device-info/upload-report",
+            data=body.getvalue(),
+            headers={'Content-Type': f'multipart/form-data; boundary={boundary}'},
+            method='POST'
+        )
+
+        with urlopen(request, timeout=30) as response:
+            return True, json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        return False, str(e)
+
+
+def fetch_clients(server_url):
+    """Récupère la liste des clients depuis ParcInfo (endpoint public, sans auth)."""
+    try:
+        url = f"{server_url.rstrip('/')}/api/clients-public"
+        with urlopen(url, timeout=10) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            return data if isinstance(data, list) else []
+    except Exception:
+        return []

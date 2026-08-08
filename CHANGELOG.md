@@ -1,141 +1,131 @@
 # CHANGELOG - ParcInfo
 
-## [2.6.33] - 2026-08-08 🔑
+## [2.6.32] - 2026-08-08 🔌
 
-### 🔑 CLÉS DE LICENCE VÉRIFIÉES ET ENREGISTRÉES
+### 🖱️ INVENTAIRE USB AUTOMATIQUE
+- ✅ Les périphériques USB connectés sont détectés et créés dans la section
+  Périphériques, aux côtés des écrans et imprimantes déjà gérés en 2.6.31
+- ✅ **Regroupement des nœuds PnP** : Windows expose un périphérique physique
+  sous plusieurs nœuds (une imprimante multifonction remonte comme
+  « composite » + « stockage de masse » + « prise en charge d'impression »).
+  Sans regroupement, une seule imprimante aurait créé quatre fiches
+- ✅ Classification vers les catégories existantes, avec règle impression +
+  numérisation → multifonction. Hubs racine, contrôleurs et nœuds composites
+  sont listés dans le rapport mais jamais inventoriés
+- ✅ Identité `source_usb_id` (VID:PID + série) : les collectes répétées ne
+  créent pas de doublon. Avec numéro de série l'identité vaut pour le client
+  entier (le périphérique suit la machine s'il est déplacé) ; sans série elle
+  est limitée à la machine, pour que deux souris identiques sur deux postes ne
+  fusionnent pas
 
-#### Report automatique dans la fiche appareil
-- ✅ Les clés relevées par le collecteur alimentent la section **« Licences
-  logiciels »** de la fiche appareil (`licences_appareils`)
-- ✅ Seules les licences dont la **clé complète** a été récupérée y sont écrites :
-  une licence sans clé exploitable n'aurait rien à y inscrire
-- ✅ Aucune ligne existante n'est modifiée ni supprimée, et la même clé n'est
-  jamais ajoutée deux fois — une licence saisie à la main reste intacte
-
-#### Fiabilisation de la récupération
-Il n'existe pas de source unique qui fonctionne partout, d'où un balayage :
-
-| Source | Cas couvert |
-|--------|-------------|
-| `BackupProductKeyDefault` | Clé complète en clair déposée à l'activation — retail et volume avec clé saisie |
-| `OA3xOriginalProductKey` | Clé OEM gravée dans la table ACPI MSDM des machines préinstallées |
-| `DigitalProductId` (décodé) | Windows 7/8 et installations où une clé a été saisie |
-| `Registration\<GUID>\DigitalProductId` | Office en installation MSI |
-
-#### Contrôle de correction
-- ✅ Windows n'expose publiquement que les **5 derniers caractères** de la clé en
-  service (`PartialProductKey`). Ces 5 caractères servent de contrôle : une clé
-  complète dont la fin correspond est **certifiée** être celle qui est installée
-- ✅ Une clé récupérée dont la fin ne correspond pas est signalée comme **« non
-  appairée »** au lieu d'être présentée comme la licence active — cas d'une
-  machine OEM réinstallée avec une autre licence, où la clé du BIOS subsiste
-- ✅ Seules les clés au format valide sont retenues (25 caractères, alphabet
-  Microsoft sans O/0 ni I/1)
-- ✅ **Correction** : la validation de format rejetait les clés contenant un `N`,
-  alors que l'algorithme Windows 8+ en insère un par construction à une position
-  variable. Toute clé de ce type aurait été écartée à tort
-
-#### Limite assumée
-Trois cas ne stockent **aucune clé** sur la machine, par conception de Microsoft :
-- **Windows en licence numérique** (liée au matériel / compte Microsoft)
-- **Office Click-to-Run et Microsoft 365** (jetons de licence, pas de clé)
-- **Activation KMS**
-
-Dans ces cas le rapport l'indique explicitement, avec les 5 derniers caractères
-comme seule information disponible. Aucune clé factice n'est affichée.
-
----
-
-## [2.6.32] - 2026-08-08 📊
-
-### ✨ FICHE SYSTÈME GRAPHIQUE
-
-Le rapport HTML et le PDF produits par le collecteur affichaient de simples
-tableaux clé/valeur. Ils comportent désormais :
-
-- ✅ **Bandeau « Points d'attention »** en tête : disque saturé (≥ 75 % et ≥ 90 %),
-  antivirus absent, pare-feu désactivé, Secure Boot, TPM, volume non chiffré,
-  batterie critique, ports sensibles en écoute, licence non activée, machine non
-  redémarrée depuis plus d'un mois
-- ✅ **Vignettes chiffrées avec bargraphs** : stockage, mémoire vive, batterie, uptime
-- ✅ **Pastilles de statut colorées** pour la sécurité et la conformité
-- ✅ **Barres d'occupation par disque logique**
-- ✅ Le rapport HTML était très en retard sur le PDF (ni sécurité, ni disques
-  physiques, ni batterie, ni adaptateurs réseau, ni comptes locaux) et annonçait
-  « 50 premiers envoyés » alors que la limite réelle est de 2000 : il est
-  désormais à parité
-
-### 🔌 PORTS EN ÉCOUTE, EN CARTES
-
-- ✅ Le collecteur relève les ports TCP en écoute (`Get-NetTCPConnection` sous
-  Windows, `ss`/`netstat`/`lsof` ailleurs) avec le processus propriétaire
-- ✅ Affichage en **cartes** : numéro, nom de service, description, processus,
-  couleur selon la sensibilité (Telnet/FTP/RDP/VNC en rouge, SMB/HTTP en orange,
-  SSH/HTTPS en vert)
-- ✅ Les ports de la plage dynamique (49152+) sont comptés mais pas détaillés :
-  attribués à la volée, ils changeaient à chaque redémarrage et occupaient deux
-  pages entières du PDF
-
-### 🖱️ INVENTAIRE AUTOMATIQUE DES PÉRIPHÉRIQUES USB
-
-- ✅ Les périphériques USB connectés sont détectés puis **créés automatiquement
-  dans la section Périphériques**, rattachés à la machine (colonne `appareil_id`
-  et table pivot `peripheriques_appareils`)
-- ✅ **L'utilisateur affecté à la fiche appareil est reporté sur les fiches
-  périphériques** — à la création comme lors d'une réaffectation ultérieure.
-  `appareils.utilisateur` étant du texte libre et `peripheriques.utilisateur_id`
+### 👤 REPORT DE L'UTILISATEUR SUR LES PÉRIPHÉRIQUES
+- ✅ L'utilisateur affecté à la fiche appareil est reporté sur **toutes** les
+  fiches périphériques rattachées — écrans, imprimantes et USB
+- ✅ `appareils.utilisateur` étant du texte libre et `peripheriques.utilisateur_id`
   une clé étrangère, le rapprochement se fait sur le nom dans les deux ordres
   (« Jean Dupont » comme « Dupont Jean »), sans jamais créer d'utilisateur
   fantôme si rien ne correspond
-- ✅ Une affectation saisie à la main sur un périphérique précis n'est jamais
-  écrasée par la propagation
-- ✅ **Regroupement des nœuds PnP** : Windows expose un périphérique physique sous
-  plusieurs nœuds (une imprimante multifonction remonte comme « composite » +
-  « stockage de masse » + « prise en charge d'impression »). Sans regroupement,
-  une seule imprimante aurait créé quatre périphériques
-- ✅ **Classification** vers les catégories existantes de ParcInfo (Clavier,
-  Souris, Webcam, Imprimante multifonction, Casque / Micro…), avec règle dédiée
-  impression + numérisation → multifonction
-- ✅ Hubs racine, contrôleurs et nœuds composites sont listés dans le rapport pour
-  information mais **ne sont pas créés** comme périphériques
-- ✅ **Idempotent** : une nouvelle colonne `peripheriques.source_usb_id` identifie
-  le matériel d'une collecte à l'autre. Un périphérique avec numéro de série est
-  identifié à l'échelle du client (et suit donc la machine s'il est déplacé) ;
-  sans numéro de série, l'identité est limitée à la machine pour que deux souris
-  d'un même modèle sur deux postes ne fusionnent pas
+- ✅ Propagation également lors d'une réaffectation ultérieure, sans jamais
+  écraser une affectation saisie à la main sur un périphérique précis
 
-### 🔑 CLÉS DE LICENCE COMPLÈTES
+### 🔑 CLÉS DE LICENCE COMPLÈTES ET VÉRIFIÉES
+- ✅ Les clés récupérées alimentent la section « Licences logiciels » de la
+  fiche appareil, sans doublon et sans toucher aux lignes existantes
+- ✅ Balayage de toutes les sources : `BackupProductKeyDefault` (clé installée,
+  en clair), clé OEM du firmware, décodage du `DigitalProductId`, registre Office
+- ✅ **Contrôle de correction** : Windows n'expose que les 5 derniers caractères
+  de la clé en service, ils servent de somme de contrôle. Une clé dont la fin
+  correspond est certifiée être celle installée ; une clé dont la fin ne
+  correspond pas est signalée « non appairée » plutôt que présentée comme la
+  licence active (machine OEM réinstallée avec une autre licence)
+- ✅ **Correction** : la validation de format rejetait les clés contenant un `N`,
+  que l'algorithme Windows 8+ insère pourtant par construction
+- ⚠️ Limite assumée : Windows en licence numérique, Office Click-to-Run/365 et
+  l'activation KMS ne stockent **aucune** clé sur la machine. Le rapport
+  l'indique explicitement au lieu d'afficher une clé factice
 
-- ✅ Clés produit Windows (clé OEM du BIOS et décodage du `DigitalProductId` du
-  registre) et licences Office collectées et **affichées en entier**
-- ✅ Quand la clé complète n'existe pas côté machine (licence numérique ou MAK),
-  le rapport l'indique explicitement plutôt que d'afficher un
-  « XXXXX-XXXXX-XXXXX-XXXXX-ABCDE » qui aurait l'air d'une vraie clé tronquée
-- ✅ Un blob `DigitalProductId` vide décode en « BBBBB-BBBBB-… » : ce cas est
-  détecté et écarté au lieu d'être présenté comme une clé
+### 📊 FICHE SYSTÈME GRAPHIQUE
+Le rapport HTML était un listing monospace, le PDF une suite de tableaux :
+- ✅ Bandeau **« Points d'attention »** : disque saturé, antivirus absent,
+  pare-feu désactivé, TPM, Secure Boot, volume non chiffré, batterie critique
+  ou usée, ports sensibles en écoute, licence non activée
+- ✅ Vignettes chiffrées à bargraphs — la mémoire affiche l'occupation réelle
+  grâce à `ram_free_gb` relevé depuis la 2.6.31
+- ✅ Pastilles de sécurité colorées, barres par disque logique
+- ✅ **Ports en écoute sous forme de cartes**, colorées par sensibilité. Les
+  ports de la plage dynamique (49152+) sont comptés mais pas détaillés
+- ✅ Sections barrettes mémoire, fiabilité disques, écrans et imprimantes,
+  rendues à partir des données collectées en 2.6.31
 
 ### 🔧 CORRECTIONS
-
 - ✅ **Encodage** : la sortie PowerShell était décodée avec l'encodage local
   (cp1252 sur un Windows français) au lieu d'UTF-8. Tout libellé accentué
-  remonté par le collecteur était silencieusement corrompu — noms de
-  périphériques, comptes utilisateurs, descriptions d'adaptateurs réseau
-- ✅ **PDF** : les emoji des titres ne peuvent pas être rendus par les polices
-  standard de reportlab et sortaient en carrés. Les éléments graphiques sont
-  désormais vectoriels
-- ✅ `.claude/launch.json` déclarait le port 5000 alors que `app.py` écoute sur 3456
-
-### ♻️ REFACTORISATION
-
-- ✅ `system-info-collector.py` et `system-info-collector-gui.py` étaient des
-  quasi-duplicatas : 15 fonctions communes ne différant que par des commentaires
-  et le logging. La collecte étendue et les générateurs de rapport sont
-  regroupés dans **`collector_report.py`**, partagé par les deux exécutables
-  (**-785 lignes dupliquées**), déclaré dans les deux specs PyInstaller
+  remonté par la collecte était silencieusement corrompu — noms de
+  périphériques, comptes utilisateurs, adaptateurs réseau, fabricants
+- ✅ `.claude/launch.json` déclarait le port 5000 alors que `app.py` écoute
+  sur 3456
 
 ---
 
-## [2.6.31] - 2026-08-08 🔒
+## [2.6.31] - 2026-08-08 🔒 🖥️
+
+### 🖥️ COLLECTEUR SYSTÈME — PARITÉ BELARC ADVISOR
+
+#### Le collecteur ramenait beaucoup et n'en conservait presque rien
+L'API ne persistait que 13 colonnes ; tout le reste n'existait que dans le PDF
+joint. Par ailleurs, les collecteurs CLI et GUI étaient deux copies des mêmes
+~700 lignes, et elles avaient **déjà divergé** : la version GUI avait
+silencieusement perdu la détection logicielle `pkgutil` (macOS) et `pacman` (Arch).
+
+- ✅ **`collector_core.py`** porte désormais toute la collecte, la génération de
+  rapports, le payload API et les appels réseau. Les deux scripts d'entrée ne
+  gardent que leur interface (argparse / tkinter).
+- ⚠️ Conséquence : le collecteur n'est plus un fichier autonome, donc
+  `/download/system-info-collector[-gui]` sert une **archive ZIP** (script +
+  `collector_core.py` + LISEZMOI) au lieu d'un `.py` qui échouerait à l'import.
+
+#### Nouvelles données collectées
+- ✅ **Barrettes mémoire par slot** : capacité, type, fréquence réelle, fabricant,
+  référence, n° série — plus slots occupés/libres et capacité maximale. Répond à
+  « peut-on upgrader cette machine ? » sans ouvrir le boîtier.
+- ✅ **Carte mère**, type de châssis, asset tag, **CPU détaillé** (cœurs physiques
+  et logiques, cache, sockets, virtualisation matérielle)
+- ✅ **GPU avec VRAM lue dans le registre** — `Win32_VideoController.AdapterRAM`
+  est un int32 signé qui déborde au-delà de 4 Go
+- ✅ **Licences Windows/Office** : statut d'activation, canal, clé partielle, et la
+  clé OEM inscrite dans le firmware. `SoftwareLicensingProduct` est interrogé avec
+  un filtre WQL — sans filtre, l'énumération dépasse 30 s à elle seule.
+- ✅ **Usure et fiabilité des disques** (heures de fonctionnement, usure SSD %,
+  température, compteurs d'erreurs) — le statut SMART « Healthy » ne prévenait de rien
+- ✅ **Santé réelle de la batterie** (capacité d'origine vs réelle, usure %, cycles)
+  depuis les classes du pilote ACPI : `Win32_Battery.DesignCapacity` est presque
+  toujours vide, seul le niveau de charge était remonté
+- ✅ **Écrans** (modèle, n° série EDID, année), **imprimantes**, liste complète des
+  correctifs, date d'installation de l'OS, propriétaire enregistré, fuseau horaire,
+  session ouverte, détection d'hyperviseur
+- ✅ **macOS et Linux** rapprochés de Windows : barrettes, écrans, imprimantes,
+  ports en écoute, comptes locaux, type de disque, cycles batterie, distribution
+- ✅ Le collecteur indique s'il a tourné **en administrateur** : un champ TPM,
+  BitLocker ou SMART vide ne se confond plus avec un champ inaccessible
+
+#### Exploitation côté serveur
+- ✅ Nouvelle colonne **`rapport_systeme_json`** : snapshot complet (plafond 1 Mo)
+- ✅ Nouvelle page **`/appareil/<id>/fiche-systeme`** : 11 sections, dont la liste
+  logicielle qui était écrite en base et affichée nulle part
+- ✅ **Écrans et imprimantes créés automatiquement** dans l'inventaire des
+  périphériques et rattachés à la machine, en idempotent sur le n° série. Les
+  imprimantes virtuelles (Print to PDF, XPS, fax, OneNote, AnyDesk) et les écrans
+  sans EDID exploitable sont exclus — sans ce filtre, un poste Windows standard
+  injectait 8 périphériques fantômes à chaque collecte.
+- ✅ **`nom_dns`, `ports_ouverts` et `type_appareil`** enfin remplis ; le type est
+  déduit du châssis SMBIOS et n'écrase jamais un type corrigé à la main
+
+#### Vérification
+Test bout-en-bout sur une machine Windows 10 réelle : 876 logiciels, snapshot de
+12,8 Ko, deuxième passe sans aucun doublon (0 périphérique créé, 1 seul appareil),
+fiche système rendue avec ses 11 sections, archive de téléchargement conforme.
+
+---
 
 ### 🔒 CORRECTIF DE SÉCURITÉ CRITIQUE
 

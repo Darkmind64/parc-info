@@ -14,6 +14,9 @@ from __version__ import __version__ as _app_version
 block_cipher = None
 
 hiddenimports = [
+    # collector_core porte toute la logique de collecte partagée avec le CLI :
+    # sans lui dans hiddenimports, l'exécutable démarre puis échoue à l'import
+    'collector_core',
     'tkinter',
     'json',
     'urllib',
@@ -35,7 +38,7 @@ hiddenimports += collect_submodules('reportlab')
 
 a = Analysis(
     ['system-info-collector-gui.py'],
-    pathex=[],
+    pathex=[str(Path(SPECPATH))],
     binaries=[],
     datas=[],
     hiddenimports=hiddenimports,

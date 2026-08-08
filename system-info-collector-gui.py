@@ -5,33 +5,35 @@ ParcInfo System Information Collector - GUI Edition
 Interface graphique pour collecter et envoyer les informations système à ParcInfo.
 Permet de sélectionner le client cible et valider les données avant envoi.
 
+Toute la logique de collecte vit dans `collector_core.py`, partagé avec le
+collecteur CLI ; ce script ne contient que l'interface graphique et la
+découverte réseau des serveurs ParcInfo.
+
 Utilisation :
     python system-info-collector-gui.py
     python system-info-collector-gui.py --server http://192.168.1.100:3456
 """
 
-import sys
-import platform
-import socket
-import subprocess
-import json
 import argparse
-import uuid
-from pathlib import Path
-from urllib.request import urlopen, Request
-from urllib.error import URLError
-from datetime import datetime
-import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
-import threading
+import json
 import logging
+import socket
+import sys
+import threading
+import tkinter as tk
+from pathlib import Path
+from tkinter import messagebox, scrolledtext, ttk
+from urllib.request import urlopen
 
-# Collecte étendue (USB, ports, licences) et génération des rapports : module
-# partagé avec le collecteur CLI, embarqué automatiquement par PyInstaller.
-from collector_report import (
-    collect_extended_info,
-    generate_html_report,
+from collector_core import (
+    COLLECTOR_VERSION,
+    build_summary_lines,
+    collect_system_info,
+    fetch_clients,
     generate_pdf_report,
+    is_elevated,
+    send_to_parcinfo,
+    upload_report_to_parcinfo,
 )
 
 # Configure logging to file for debugging
@@ -45,552 +47,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger('collector-gui')
 
-# Platform detection
-IS_WINDOWS = sys.platform == 'win32'
-IS_MAC = sys.platform == 'darwin'
-IS_LINUX = sys.platform == 'linux'
 
-
-def get_mac_address():
-    """Récupère l'adresse MAC réelle de la machine."""
-    try:
-        mac = uuid.getnode()
-        mac_str = ':'.join(['{:02x}'.format((mac >> (i << 3)) & 0xff) for i in range(5, -1, -1)])
-        return mac_str.upper()
-    except Exception:
-        return ""
-
-
-def get_hostname():
-    """Récupère le nom d'hôte exact."""
-    try:
-        return socket.gethostname()
-    except Exception:
-        return ""
-
-
-def get_ip_addresses():
-    """Récupère toutes les adresses IP locales."""
-    ips = []
-    try:
-        hostname = socket.gethostname()
-        ips = socket.gethostbyname_ex(hostname)[2]
-    except Exception:
-        pass
-    return [ip for ip in ips if not ip.startswith('127.')]
-
-
-def get_os_info():
-    """Récupère l'OS et la version exacte avec édition (Pro/Home/Server).
-
-    os_version = "Display Version" Windows (ex: "22H2") - le build/feature update,
-    os_name = nom complet lisible (ex: "Windows 11 Pro", "Windows Server 2022 Standard").
-
-    Note: platform.release() renvoie toujours "10" sur Windows 11 (même noyau NT 10.0) -
-    la version majeure (10 vs 11) doit être déduite du numéro de build (>= 22000 = Windows 11).
-    """
-    os_name = platform.system()
-    os_version = platform.release()
-    full_os_name = os_name
-
-    if IS_WINDOWS:
-        try:
-            import winreg
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows NT\CurrentVersion') as key:
-                try:
-                    os_version = winreg.QueryValueEx(key, 'DisplayVersion')[0]
-                except Exception:
-                    pass
-
-                product_name = ''
-                try:
-                    product_name = winreg.QueryValueEx(key, 'ProductName')[0]
-                except Exception:
-                    pass
-
-                edition_name = ''
-                try:
-                    edition_name = winreg.QueryValueEx(key, 'EditionID')[0]
-                except Exception:
-                    pass
-
-                build_number = 0
-                try:
-                    build_number = int(winreg.QueryValueEx(key, 'CurrentBuildNumber')[0])
-                except Exception:
-                    pass
-
-                if 'Server' in product_name:
-                    # Le ProductName Windows Server contient déjà l'année (ex: "Windows Server 2022 Standard")
-                    full_os_name = product_name
-                else:
-                    major = 11 if build_number >= 22000 else 10
-                    edition_map = {
-                        'Professional': 'Pro',
-                        'Core': 'Home',
-                        'Home': 'Home',
-                        'Enterprise': 'Enterprise',
-                        'Education': 'Education',
-                    }
-                    edition = edition_map.get(edition_name, edition_name or 'Pro')
-                    full_os_name = f"Windows {major} {edition}"
-        except Exception:
-            pass
-
-    if IS_MAC:
-        try:
-            mac_ver = platform.mac_ver()
-            os_version = mac_ver[0]
-            full_os_name = "macOS"
-        except Exception:
-            pass
-
-    return {
-        "os_name": full_os_name,
-        "os_version": os_version,
-        "platform": platform.platform()
-    }
-
-
-def _win_powershell_json(cmd, timeout=15):
-    """Exécute une commande PowerShell et parse le JSON retourné (aucune dépendance externe)."""
-    try:
-        creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-        result = subprocess.run(
-            ['powershell', '-NoProfile', '-NonInteractive', '-Command', cmd],
-            capture_output=True, text=True, timeout=timeout, creationflags=creationflags
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return json.loads(result.stdout)
-    except Exception as e:
-        logger.debug(f"PowerShell command failed: {e}")
-    return None
-
-
-def get_system_info_windows():
-    """Collecte les infos système sur Windows via ctypes/winreg/PowerShell (aucune dépendance externe requise)."""
-    info = {}
-
-    # RAM (kernel32 GlobalMemoryStatusEx)
-    try:
-        import ctypes
-
-        class MEMORYSTATUSEX(ctypes.Structure):
-            _fields_ = [
-                ("dwLength", ctypes.c_ulong),
-                ("dwMemoryLoad", ctypes.c_ulong),
-                ("ullTotalPhys", ctypes.c_ulonglong),
-                ("ullAvailPhys", ctypes.c_ulonglong),
-                ("ullTotalPageFile", ctypes.c_ulonglong),
-                ("ullAvailPageFile", ctypes.c_ulonglong),
-                ("ullTotalVirtual", ctypes.c_ulonglong),
-                ("ullAvailVirtual", ctypes.c_ulonglong),
-                ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
-            ]
-
-        stat = MEMORYSTATUSEX()
-        stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
-        ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
-        info['ram_gb'] = round(stat.ullTotalPhys / (1024 ** 3), 1)
-    except Exception as e:
-        logger.debug(f"RAM detection failed: {e}")
-
-    # CPU nom (registre) + cores (os.cpu_count)
-    try:
-        import winreg
-        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0")
-        cpu_name, _ = winreg.QueryValueEx(key, "ProcessorNameString")
-        winreg.CloseKey(key)
-        info['cpu'] = cpu_name.strip()
-    except Exception as e:
-        logger.debug(f"CPU name detection failed: {e}")
-
-    try:
-        import os as _os
-        info['cpu_cores'] = _os.cpu_count()
-    except Exception as e:
-        logger.debug(f"CPU cores detection failed: {e}")
-
-    # Disques logiques fixes (kernel32) - taille, utilisé, libre
-    try:
-        import ctypes
-        import string
-
-        disk_list = []
-        total_disk = 0.0
-        total_free = 0.0
-        bitmask = ctypes.windll.kernel32.GetLogicalDrives()
-        for i, letter in enumerate(string.ascii_uppercase):
-            if bitmask & (1 << i):
-                drive = f"{letter}:\\"
-                drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
-                if drive_type == 3:  # DRIVE_FIXED
-                    total_bytes = ctypes.c_ulonglong(0)
-                    free_bytes = ctypes.c_ulonglong(0)
-                    ok = ctypes.windll.kernel32.GetDiskFreeSpaceExW(
-                        drive, None, ctypes.byref(total_bytes), ctypes.byref(free_bytes)
-                    )
-                    if ok:
-                        size_gb = round(total_bytes.value / (1024 ** 3), 1)
-                        free_gb = round(free_bytes.value / (1024 ** 3), 1)
-                        used_gb = round(size_gb - free_gb, 1)
-                        disk_list.append(f"{letter}: — {size_gb} GB total, {used_gb} GB utilisés, {free_gb} GB libres")
-                        total_disk += size_gb
-                        total_free += free_gb
-        if disk_list:
-            info['disk_drives'] = disk_list
-            info['disk_total_gb'] = round(total_disk, 1)
-            info['disk_free_gb'] = round(total_free, 1)
-            info['disk_used_gb'] = round(total_disk - total_free, 1)
-    except Exception as e:
-        logger.debug(f"Disk detection failed: {e}")
-
-    # Disques physiques : type (SSD/HDD) + état de santé SMART (Get-PhysicalDisk - natif Windows 8+)
-    physical_disks_data = _win_powershell_json(
-        "Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,Size,OperationalStatus "
-        "| ConvertTo-Json -Compress"
-    )
-    if physical_disks_data:
-        disks = physical_disks_data if isinstance(physical_disks_data, list) else [physical_disks_data]
-        physical_list = []
-        for d in disks:
-            name = d.get('FriendlyName') or 'Disque'
-            media = d.get('MediaType') or 'Inconnu'
-            health = d.get('HealthStatus') or 'Inconnu'
-            op_status = d.get('OperationalStatus') or ''
-            size_gb = round((d.get('Size') or 0) / (1024 ** 3), 1)
-            entry = f"{name} — {media} — {size_gb} GB — Santé (SMART): {health}"
-            if op_status and op_status != 'OK':
-                entry += f" ({op_status})"
-            physical_list.append(entry)
-        if physical_list:
-            info['physical_disks'] = physical_list
-
-    # Identification matérielle étendue : marque/modèle/domaine/BIOS/uptime/GPU
-    # (1 seul appel PowerShell groupé - chaque champ est protégé individuellement
-    # pour qu'une source manquante ne fasse pas échouer les autres)
-    core_data = _win_powershell_json(
-        "$cs = Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue; "
-        "$bios = Get-CimInstance Win32_BIOS -ErrorAction SilentlyContinue; "
-        "$os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue; "
-        "$gpuNames = @(Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue "
-        "| Select-Object -ExpandProperty Name); "
-        "$uptimeHours = $null; "
-        "if ($os -and $os.LastBootUpTime) { $uptimeHours = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1) }; "
-        "$biosDate = $null; "
-        "if ($bios -and $bios.ReleaseDate) { $biosDate = $bios.ReleaseDate.ToString('yyyy-MM-dd') }; "
-        "[PSCustomObject]@{ "
-        "Manufacturer=$cs.Manufacturer; Model=$cs.Model; Domain=$cs.Domain; "
-        "PartOfDomain=$cs.PartOfDomain; Workgroup=$cs.Workgroup; "
-        "SerialNumber=$bios.SerialNumber; BiosVersion=$bios.SMBIOSBIOSVersion; "
-        "BiosReleaseDate=$biosDate; UptimeHours=$uptimeHours; GpuNames=$gpuNames "
-        "} | ConvertTo-Json -Compress -Depth 4",
-        timeout=20
-    )
-    if core_data:
-        info['brand'] = (core_data.get('Manufacturer') or '').strip()
-        info['model'] = (core_data.get('Model') or '').strip()
-        info['serial_number'] = (core_data.get('SerialNumber') or '').strip()
-
-        bios_version = core_data.get('BiosVersion')
-        if isinstance(bios_version, list):
-            bios_version = ', '.join(str(v) for v in bios_version if v)
-        if bios_version:
-            info['bios_version'] = str(bios_version).strip()
-
-        if core_data.get('BiosReleaseDate'):
-            info['bios_release_date'] = core_data.get('BiosReleaseDate')
-
-        if core_data.get('PartOfDomain'):
-            info['domain'] = core_data.get('Domain') or ''
-        elif core_data.get('Workgroup'):
-            info['workgroup'] = core_data.get('Workgroup')
-
-        if core_data.get('UptimeHours') is not None:
-            info['uptime_hours'] = core_data.get('UptimeHours')
-
-        gpu_names = core_data.get('GpuNames')
-        if gpu_names:
-            gpus = gpu_names if isinstance(gpu_names, list) else [gpu_names]
-            gpus = [g for g in gpus if g]
-            if gpus:
-                info['gpu'] = ', '.join(gpus)
-
-    # Sécurité & conformité : antivirus, pare-feu, BitLocker, TPM, Secure Boot
-    # (modules non garantis selon l'édition Windows - chaque source est protégée
-    # par un try/catch PowerShell dédié pour ne pas faire échouer les autres)
-    security_data = _win_powershell_json(
-        "$av = @(); try { $av = @(Get-CimInstance -Namespace root/SecurityCenter2 "
-        "-ClassName AntivirusProduct -ErrorAction SilentlyContinue "
-        "| Select-Object -ExpandProperty displayName) } catch {}; "
-        "$fw = @(); try { $fw = @(Get-NetFirewallProfile -ErrorAction SilentlyContinue "
-        "| Select-Object Name,Enabled) } catch {}; "
-        "$bl = @(); try { $bl = @(Get-BitLockerVolume -ErrorAction SilentlyContinue "
-        "| Select-Object MountPoint,VolumeStatus,ProtectionStatus) } catch {}; "
-        "$tpmObj = $null; try { $tpmObj = Get-Tpm -ErrorAction SilentlyContinue "
-        "| Select-Object TpmPresent,TpmReady,TpmEnabled } catch {}; "
-        "$secureBoot = $null; try { $secureBoot = Confirm-SecureBootUEFI -ErrorAction SilentlyContinue } catch {}; "
-        "[PSCustomObject]@{ Antivirus=$av; Firewall=$fw; BitLocker=$bl; Tpm=$tpmObj; SecureBoot=$secureBoot } "
-        "| ConvertTo-Json -Compress -Depth 4",
-        timeout=20
-    )
-    if security_data:
-        av_names = security_data.get('Antivirus')
-        if av_names:
-            avs = av_names if isinstance(av_names, list) else [av_names]
-            avs = [a for a in avs if a]
-            if avs:
-                info['antivirus'] = ', '.join(avs)
-
-        fw_raw = security_data.get('Firewall')
-        if fw_raw:
-            fw_list = fw_raw if isinstance(fw_raw, list) else [fw_raw]
-            profiles = [f"{f.get('Name')}: {'Activé' if f.get('Enabled') else 'Désactivé'}" for f in fw_list if f.get('Name')]
-            if profiles:
-                info['firewall'] = profiles
-
-        bl_raw = security_data.get('BitLocker')
-        if bl_raw:
-            bl_list = bl_raw if isinstance(bl_raw, list) else [bl_raw]
-            bitlocker = [
-                f"{b.get('MountPoint')}: {b.get('VolumeStatus', 'Inconnu')} "
-                f"(Protection: {b.get('ProtectionStatus', 'Inconnu')})"
-                for b in bl_list if b.get('MountPoint')
-            ]
-            if bitlocker:
-                info['bitlocker'] = bitlocker
-
-        tpm = security_data.get('Tpm')
-        if tpm:
-            info['tpm_present'] = bool(tpm.get('TpmPresent'))
-            info['tpm_enabled'] = bool(tpm.get('TpmEnabled'))
-
-        if security_data.get('SecureBoot') is not None:
-            info['secure_boot'] = bool(security_data.get('SecureBoot'))
-
-    # Comptes utilisateurs locaux + appartenance au groupe Administrateurs
-    users_data = _win_powershell_json(
-        "$users = @(Get-CimInstance Win32_UserAccount -Filter \"LocalAccount='True'\" "
-        "-ErrorAction SilentlyContinue | Select-Object Name,Disabled,Lockout); "
-        "$admins = @(); try { $admins = @(Get-LocalGroupMember -Group Administrators "
-        "-ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name) } catch {}; "
-        "[PSCustomObject]@{ Users=$users; Admins=$admins } | ConvertTo-Json -Compress -Depth 4",
-        timeout=20
-    )
-    if users_data:
-        admins_raw = users_data.get('Admins') or []
-        admins_raw = admins_raw if isinstance(admins_raw, list) else [admins_raw]
-        # Les membres du groupe local Administrateurs sont retournés au format "MACHINE\Nom"
-        admin_names = {a.split('\\')[-1].lower() for a in admins_raw if a}
-
-        users_raw = users_data.get('Users')
-        if users_raw:
-            users_list = users_raw if isinstance(users_raw, list) else [users_raw]
-            user_list = []
-            for u in users_list:
-                name = u.get('Name', '')
-                if not name:
-                    continue
-                if u.get('Disabled'):
-                    status = 'Désactivé'
-                elif u.get('Lockout'):
-                    status = 'Verrouillé'
-                else:
-                    status = 'Actif'
-                if name.lower() in admin_names:
-                    status += ', Administrateur'
-                user_list.append(f"{name} ({status})")
-            if user_list:
-                info['users'] = sorted(user_list)
-
-    # Batterie (portables), adaptateurs réseau actifs, dernière mise à jour Windows
-    extras_data = _win_powershell_json(
-        "$battery = @(); try { $battery = @(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue "
-        "| Select-Object EstimatedChargeRemaining,BatteryStatus) } catch {}; "
-        "$adapters = @(); try { $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue "
-        "| Where-Object Status -eq 'Up' | Select-Object Name,InterfaceDescription,LinkSpeed) } catch {}; "
-        "$hotfix = $null; try { "
-        "$hf = Get-HotFix -ErrorAction SilentlyContinue | Sort-Object InstalledOn -Descending | Select-Object -First 1; "
-        "if ($hf) { $hfDate = $null; if ($hf.InstalledOn) { $hfDate = $hf.InstalledOn.ToString('yyyy-MM-dd') }; "
-        "$hotfix = [PSCustomObject]@{ HotFixID=$hf.HotFixID; InstalledOn=$hfDate } } "
-        "} catch {}; "
-        "[PSCustomObject]@{ Battery=$battery; Adapters=$adapters; LastUpdate=$hotfix } "
-        "| ConvertTo-Json -Compress -Depth 4",
-        timeout=20
-    )
-    if extras_data:
-        battery_raw = extras_data.get('Battery')
-        if battery_raw:
-            battery_list = battery_raw if isinstance(battery_raw, list) else [battery_raw]
-            b = battery_list[0] if battery_list else None
-            if b and b.get('EstimatedChargeRemaining') is not None:
-                info['battery'] = f"{b.get('EstimatedChargeRemaining')}% (statut: {b.get('BatteryStatus', 'Inconnu')})"
-
-        adapters_raw = extras_data.get('Adapters')
-        if adapters_raw:
-            adapters_list = adapters_raw if isinstance(adapters_raw, list) else [adapters_raw]
-            adapters = [
-                f"{a.get('Name')} — {a.get('InterfaceDescription', '')} — {a.get('LinkSpeed', 'N/A')}"
-                for a in adapters_list if a.get('Name')
-            ]
-            if adapters:
-                info['network_adapters'] = adapters
-
-        hotfix = extras_data.get('LastUpdate')
-        if hotfix and hotfix.get('HotFixID'):
-            date_part = f" ({hotfix.get('InstalledOn')})" if hotfix.get('InstalledOn') else ''
-            info['last_windows_update'] = f"{hotfix.get('HotFixID')}{date_part}"
-
-    return info
-
-
-def get_system_info_mac():
-    """Collecte les infos système via system_profiler (macOS)."""
-    info = {}
-    try:
-        result = subprocess.run(['system_profiler', 'SPHardwareDataType'],
-                               capture_output=True, text=True, timeout=10)
-        lines = result.stdout.split('\n')
-
-        for line in lines:
-            if 'Model Identifier:' in line:
-                info['model'] = line.split(':', 1)[1].strip()
-            elif 'Model Name:' in line:
-                info['brand'] = 'Apple'
-                model_name = line.split(':', 1)[1].strip()
-                if 'model' not in info:
-                    info['model'] = model_name
-            elif 'Serial Number' in line:
-                info['serial_number'] = line.split(':', 1)[1].strip()
-            elif 'Processor Cores:' in line:
-                info['cpu_cores'] = int(line.split(':', 1)[1].strip())
-            elif 'Processor Name:' in line:
-                info['cpu'] = line.split(':', 1)[1].strip()
-            elif 'Memory:' in line:
-                try:
-                    mem_str = line.split(':', 1)[1].strip().split()[0]
-                    info['ram_gb'] = float(mem_str)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    # Tous les disques via df
-    try:
-        result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=5)
-        lines = result.stdout.strip().split('\n')[1:]
-        disk_list = []
-        total_disk = 0
-        for line in lines:
-            parts = line.split()
-            if len(parts) >= 2:
-                device = parts[0]
-                size_str = parts[1]
-                try:
-                    if 'T' in size_str:
-                        size_gb = float(size_str.replace('T', '')) * 1024
-                    elif 'G' in size_str:
-                        size_gb = float(size_str.replace('G', ''))
-                    else:
-                        continue
-                    disk_list.append(f"{device} ({round(size_gb, 1)} GB)")
-                    total_disk += size_gb
-                except Exception:
-                    pass
-        if disk_list:
-            info['disk_drives'] = disk_list
-            info['disk_total_gb'] = round(total_disk, 1)
-    except Exception:
-        pass
-
-    return info
-
-
-def get_system_info_linux():
-    """Collecte les infos système sur Linux."""
-    info = {}
-
-    try:
-        result = subprocess.run(['sudo', 'dmidecode', '-t', 'system'],
-                               capture_output=True, text=True, timeout=5)
-        lines = result.stdout.split('\n')
-        for line in lines:
-            if 'Manufacturer:' in line:
-                info['brand'] = line.split(':', 1)[1].strip()
-            elif 'Product Name:' in line:
-                info['model'] = line.split(':', 1)[1].strip()
-            elif 'Serial Number:' in line:
-                info['serial_number'] = line.split(':', 1)[1].strip()
-    except Exception:
-        pass
-
-    try:
-        with open('/proc/cpuinfo', 'r') as f:
-            lines = f.readlines()
-            for line in lines:
-                if line.startswith('model name'):
-                    info['cpu'] = line.split(':', 1)[1].strip()
-                    break
-            info['cpu_cores'] = sum(1 for line in lines if line.startswith('processor'))
-    except Exception:
-        pass
-
-    try:
-        with open('/proc/meminfo', 'r') as f:
-            for line in f:
-                if line.startswith('MemTotal:'):
-                    kb = int(line.split()[1])
-                    info['ram_gb'] = round(kb / (1024 * 1024), 1)
-                    break
-    except Exception:
-        pass
-
-    # Tous les disques
-    try:
-        result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=5)
-        lines = result.stdout.strip().split('\n')[1:]
-        disk_list = []
-        total_disk = 0
-        for line in lines:
-            parts = line.split()
-            if len(parts) >= 2:
-                device = parts[0]
-                size_str = parts[1]
-                try:
-                    if 'T' in size_str:
-                        size_gb = float(size_str.replace('T', '')) * 1024
-                    elif 'G' in size_str:
-                        size_gb = float(size_str.replace('G', ''))
-                    elif 'M' in size_str:
-                        size_gb = float(size_str.replace('M', '')) / 1024
-                    else:
-                        continue
-                    disk_list.append(f"{device} ({round(size_gb, 1)} GB)")
-                    total_disk += size_gb
-                except Exception:
-                    pass
-        if disk_list:
-            info['disk_drives'] = disk_list
-            info['disk_total_gb'] = round(total_disk, 1)
-    except Exception:
-        pass
-
-    return info
-
+# ════════════════════════════════════════════════════════════════════════════
+# DÉCOUVERTE RÉSEAU (spécifique au GUI)
+# ════════════════════════════════════════════════════════════════════════════
 
 def get_local_network_range():
     """Détermine la plage de réseau local (ex: 192.168.1.0/24)."""
     try:
-        # Récupère toutes les interfaces réseau
-        import socket
         hostname = socket.gethostname()
         local_ip = socket.gethostbyname(hostname)
 
-        # Détermine la plage de sous-réseau
         octets = local_ip.split('.')
         if len(octets) == 4:
-            base = '.'.join(octets[:3])
-            return base, local_ip
+            return '.'.join(octets[:3]), local_ip
     except Exception:
         pass
     return None, None
@@ -609,14 +79,13 @@ def scan_network_for_parcinfo(timeout=2, progress_callback=None):
 
     logger.debug(f"Scanning network range {base}.x for ParcInfo instances...")
 
-    # Scan les adresses 1-254 du sous-réseau
     for i in range(1, 255):
         if progress_callback:
             progress_callback(f"Scan {base}.{i}...")
 
         ip = f"{base}.{i}"
         if ip == local_ip:
-            continue  # Skip local IP
+            continue
 
         try:
             # Test rapide si le port 3456 est ouvert
@@ -628,7 +97,7 @@ def scan_network_for_parcinfo(timeout=2, progress_callback=None):
             if result == 0:  # Port ouvert
                 logger.debug(f"Port 3456 open on {ip}, checking if ParcInfo...")
 
-                # Vérifier que c'est ParcInfo en appelant l'endpoint
+                # Vérifier que c'est ParcInfo en appelant l'endpoint public
                 try:
                     test_url = f"http://{ip}:3456/api/clients-public"
                     with urlopen(test_url, timeout=timeout) as response:
@@ -649,250 +118,9 @@ def scan_network_for_parcinfo(timeout=2, progress_callback=None):
     return servers
 
 
-def get_installed_software():
-    """Récupère la liste complète des logiciels installés (machine + par utilisateur).
-
-    Retourne une liste de dicts {name, version, publisher, install_date} - version/
-    publisher/install_date restent vides quand la source ne les fournit pas
-    (cas Mac/Linux, dont les gestionnaires de paquets énumérés ici ne donnent
-    que le nom sans requête individuelle coûteuse par paquet).
-    """
-    software = {}  # clé = nom (dédup), valeur = dict métadonnées
-
-    if IS_WINDOWS:
-        try:
-            import winreg
-            # (hive, chemin) - HKLM couvre les installs machine (64 et 32 bits sur WOW6432Node),
-            # HKCU couvre les installs propres à l'utilisateur courant (souvent absentes sinon)
-            hives = [
-                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),
-                (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'),
-                (winreg.HKEY_CURRENT_USER, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),
-            ]
-            for hive, path in hives:
-                try:
-                    with winreg.OpenKey(hive, path) as key:
-                        count = winreg.QueryInfoKey(key)[0]
-                        for i in range(count):
-                            try:
-                                subkey_name = winreg.EnumKey(key, i)
-                                with winreg.OpenKey(key, subkey_name) as subkey:
-                                    try:
-                                        display_name = winreg.QueryValueEx(subkey, 'DisplayName')[0]
-                                    except WindowsError:
-                                        continue
-                                    if not display_name or not display_name.strip():
-                                        continue
-                                    name = display_name.strip()
-
-                                    def _read(value_name):
-                                        try:
-                                            return winreg.QueryValueEx(subkey, value_name)[0]
-                                        except WindowsError:
-                                            return ''
-
-                                    version = str(_read('DisplayVersion') or '')
-                                    publisher = str(_read('Publisher') or '')
-                                    install_date_raw = str(_read('InstallDate') or '')
-                                    # Format registre habituel : "AAAAMMJJ" -> "AAAA-MM-JJ"
-                                    if len(install_date_raw) == 8 and install_date_raw.isdigit():
-                                        install_date = f"{install_date_raw[:4]}-{install_date_raw[4:6]}-{install_date_raw[6:8]}"
-                                    else:
-                                        install_date = install_date_raw
-
-                                    software[name] = {
-                                        'name': name,
-                                        'version': version,
-                                        'publisher': publisher,
-                                        'install_date': install_date,
-                                    }
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    elif IS_MAC:
-        names = set()
-        try:
-            result = subprocess.run(['ls', '/Applications'], capture_output=True, text=True, timeout=5)
-            names.update(app.replace('.app', '') for app in result.stdout.split('\n') if app.endswith('.app'))
-        except Exception:
-            pass
-        try:
-            result = subprocess.run(['ls', '/usr/local/opt'], capture_output=True, text=True, timeout=5)
-            names.update(pkg for pkg in result.stdout.split('\n') if pkg.strip())
-        except Exception:
-            pass
-        for name in names:
-            software[name] = {'name': name, 'version': '', 'publisher': '', 'install_date': ''}
-
-    elif IS_LINUX:
-        names = set()
-        try:
-            result = subprocess.run(['dpkg', '--get-selections'], capture_output=True, text=True, timeout=10)
-            names.update(line.split()[0] for line in result.stdout.split('\n') if 'install' in line)
-        except Exception:
-            pass
-        if not names:
-            try:
-                result = subprocess.run(['rpm', '-qa'], capture_output=True, text=True, timeout=10)
-                names.update(line.strip() for line in result.stdout.split('\n') if line.strip())
-            except Exception:
-                pass
-        for name in names:
-            software[name] = {'name': name, 'version': '', 'publisher': '', 'install_date': ''}
-
-    return sorted(software.values(), key=lambda s: s['name'].lower())
-
-
-def collect_system_info():
-    """Collecte toutes les infos système."""
-    info = {
-        'timestamp': datetime.utcnow().isoformat(),
-        'mac_address': get_mac_address(),
-        'hostname': get_hostname(),
-        'ip_addresses': get_ip_addresses(),
-    }
-
-    info.update(get_os_info())
-
-    if IS_WINDOWS:
-        info.update(get_system_info_windows())
-    elif IS_MAC:
-        info.update(get_system_info_mac())
-    elif IS_LINUX:
-        info.update(get_system_info_linux())
-
-    info['installed_software'] = get_installed_software()
-
-    # Périphériques USB, ports à l'écoute et clés de licence
-    info.update(collect_extended_info())
-
-    return info
-
-
-def get_api_payload(info, client_id=None, client_name=None):
-    """Extrait uniquement les champs supportés par l'API ParcInfo."""
-    # Formater la RAM pour correspondre aux options (ex: "16" → "16 Go")
-    ram_value = info.get('ram_gb', '')
-    if ram_value:
-        try:
-            ram_num = float(ram_value)
-            ram_formatted = f"{int(ram_num)} Go" if ram_num == int(ram_num) else f"{ram_num} Go"
-        except (ValueError, TypeError):
-            ram_formatted = str(ram_value)
-    else:
-        ram_formatted = ''
-
-    payload = {
-        'mac_address': info.get('mac_address', ''),
-        'ip_addresses': info.get('ip_addresses', []),
-        'hostname': info.get('hostname', ''),
-        'os_name': info.get('os_name', ''),
-        'os_version': info.get('os_version', ''),
-        'brand': info.get('brand', ''),
-        'model': info.get('model', ''),
-        'serial_number': info.get('serial_number', ''),
-        'ram_gb': ram_formatted,  # Envoi avec "Go" (ex: "16 Go")
-        'cpu': info.get('cpu', ''),
-        'disk_total_gb': info.get('disk_total_gb', ''),
-        'antivirus': info.get('antivirus', ''),
-        'gpu': info.get('gpu', ''),
-        'installed_software': info.get('installed_software', []),
-        # Périphériques USB : ParcInfo en crée/met à jour les fiches
-        # périphériques rattachées à cette machine. Seuls les matériels réels
-        # sont transmis — hubs racine, contrôleurs et nœuds composites restent
-        # dans le rapport mais n'ont pas leur place dans un inventaire.
-        'usb_devices': [d for d in info.get('usb_devices', []) if d.get('inventoriable')],
-        # Licences : seules celles dont la clé complète a été récupérée sont
-        # transmises. Une licence sans clé exploitable (licence numérique,
-        # Office Click-to-Run, KMS) n'a rien à inscrire dans la fiche appareil.
-        'licenses': [l for l in info.get('licenses', []) if l.get('cle')],
-    }
-
-    if client_id:
-        payload['client_id'] = client_id
-    if client_name:
-        payload['client_name'] = client_name
-
-    return payload
-
-
-def upload_report_to_parcinfo(report_content, report_file, server_url, device_id, client_id):
-    """Envoie le rapport (PDF ou HTML) à ParcInfo en tant que document joint."""
-    try:
-        import io
-        from urllib.request import Request
-
-        # Déterminer le type MIME basé sur l'extension du fichier
-        if report_file and report_file.endswith('.pdf'):
-            content_type = 'application/pdf'
-            filename = report_file
-        else:
-            content_type = 'text/html'
-            filename = 'report.html'
-
-        # Préparer les données multipart
-        boundary = '----FormBoundary' + str(uuid.uuid4()).replace('-', '')
-        body = io.BytesIO()
-
-        # Ajouter les champs
-        body.write(f'--{boundary}\r\n'.encode())
-        body.write(b'Content-Disposition: form-data; name="device_id"\r\n\r\n')
-        body.write(f'{device_id}\r\n'.encode())
-
-        body.write(f'--{boundary}\r\n'.encode())
-        body.write(b'Content-Disposition: form-data; name="client_id"\r\n\r\n')
-        body.write(f'{client_id}\r\n'.encode())
-
-        # Ajouter le fichier
-        body.write(f'--{boundary}\r\n'.encode())
-        body.write(f'Content-Disposition: form-data; name="report"; filename="{filename}"\r\n'.encode())
-        body.write(f'Content-Type: {content_type}\r\n\r\n'.encode())
-        if isinstance(report_content, str):
-            body.write(report_content.encode('utf-8'))
-        else:
-            body.write(report_content)
-        body.write(b'\r\n')
-
-        body.write(f'--{boundary}--\r\n'.encode())
-
-        # Envoyer la requête
-        headers = {
-            'Content-Type': f'multipart/form-data; boundary={boundary}'
-        }
-
-        request = Request(
-            f"{server_url.rstrip('/')}/api/device-info/upload-report",
-            data=body.getvalue(),
-            headers=headers,
-            method='POST'
-        )
-
-        with urlopen(request, timeout=10) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return True, result
-    except Exception as e:
-        return False, str(e)
-
-
-def fetch_clients(server_url):
-    """Récupère la liste des clients depuis ParcInfo (endpoint public, pas d'auth requise)."""
-    try:
-        url = f"{server_url.rstrip('/')}/api/clients-public"
-        logger.debug(f"Fetching clients from: {url}")
-        with urlopen(url, timeout=5) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            logger.debug(f"Response: {data}")
-            result = data if isinstance(data, list) else []
-            logger.debug(f"Returning {len(result)} clients")
-            return result
-    except Exception as e:
-        logger.error(f"ERROR fetching clients: {type(e).__name__}: {str(e)}", exc_info=True)
-        return []
-
+# ════════════════════════════════════════════════════════════════════════════
+# INTERFACE
+# ════════════════════════════════════════════════════════════════════════════
 
 class CollectorGUI:
     def __init__(self, root, server_url):
@@ -903,7 +131,7 @@ class CollectorGUI:
         self.selected_client = None
         self.config_file = Path.home() / '.parcinfo-collector-config.json'
 
-        self.root.title("ParcInfo System Information Collector")
+        self.root.title(f"ParcInfo System Information Collector v{COLLECTOR_VERSION}")
         self.root.geometry("900x750")
         self.root.resizable(True, True)
 
@@ -948,7 +176,7 @@ class CollectorGUI:
         header.pack_propagate(False)
 
         title_label = tk.Label(header, text="ParcInfo - Collecteur d'Informations Système",
-                              font=("Arial", 16, "bold"), bg="#2c3e50", fg="white")
+                               font=("Arial", 16, "bold"), bg="#2c3e50", fg="white")
         title_label.pack(pady=10)
 
         # Main content
@@ -974,7 +202,7 @@ class CollectorGUI:
         scan_btn.pack(side=tk.LEFT, padx=3)
 
         server_help = tk.Label(server_frame, text="Exemples: http://localhost:3456, http://192.168.1.100:3456, http://parcinfo.local:3456",
-                              font=("Arial", 8), fg="#666")
+                               font=("Arial", 8), fg="#666")
         server_help.pack(padx=10, pady=2)
 
         # Section 1 : Sélection du client
@@ -988,7 +216,7 @@ class CollectorGUI:
         self.client_combo.bind('<<ComboboxSelected>>', lambda e: self._on_client_selected())
 
         client_help = tk.Label(client_frame, text="⚠️ IMPORTANT : Sélectionner le client correct pour éviter le mélange de données",
-                              font=("Arial", 9), fg="#c0392b")
+                               font=("Arial", 9), fg="#c0392b")
         client_help.pack(padx=10, pady=5)
 
         # Section 2 : Résumé des infos collectées
@@ -1005,21 +233,21 @@ class CollectorGUI:
         action_frame.pack(fill=tk.X, padx=10, pady=10)
 
         refresh_btn = ttk.Button(action_frame, text="🔄 Rafraîchir les Infos",
-                                command=self._collect_info)
+                                 command=self._collect_info)
         refresh_btn.pack(side=tk.LEFT, padx=5)
 
         send_btn = ttk.Button(action_frame, text="✓ Envoyer à ParcInfo",
-                             command=self._send_data)
+                              command=self._send_data)
         send_btn.pack(side=tk.LEFT, padx=5)
 
         cancel_btn = ttk.Button(action_frame, text="✕ Annuler",
-                               command=self.root.quit)
+                                command=self.root.quit)
         cancel_btn.pack(side=tk.LEFT, padx=5)
 
         # Status bar
         self.status_var = tk.StringVar(value="En attente...")
         status_bar = tk.Label(self.root, textvariable=self.status_var,
-                             bg="#ecf0f1", fg="#2c3e50", anchor=tk.W)
+                              bg="#ecf0f1", fg="#2c3e50", anchor=tk.W)
         status_bar.pack(fill=tk.X)
 
     def _scan_network(self):
@@ -1037,15 +265,14 @@ class CollectorGUI:
 
                 if not servers:
                     messagebox.showinfo("Scan Réseau",
-                                      "Aucune instance ParcInfo trouvée sur le réseau local.\n\n"
-                                      "Vérifiez que:\n"
-                                      "1. ParcInfo est lancé\n"
-                                      "2. C'est sur le même réseau local\n"
-                                      "3. Le port 3456 est accessible")
+                                        "Aucune instance ParcInfo trouvée sur le réseau local.\n\n"
+                                        "Vérifiez que:\n"
+                                        "1. ParcInfo est lancé\n"
+                                        "2. C'est sur le même réseau local\n"
+                                        "3. Le port 3456 est accessible")
                     self.status_var.set("Aucun serveur trouvé")
                     return
 
-                # Affiche les résultats dans une fenêtre popup
                 self._show_scan_results(servers)
                 self.status_var.set("Scan terminé ✓")
             except Exception as e:
@@ -1062,12 +289,10 @@ class CollectorGUI:
         result_window.title("Résultats du Scan Réseau")
         result_window.geometry("600x300")
 
-        # Header
         header = tk.Label(result_window, text=f"🎉 {len(servers)} instance(s) ParcInfo trouvée(s)",
-                         font=("Arial", 12, "bold"), bg="#2c3e50", fg="white", pady=10)
+                          font=("Arial", 12, "bold"), bg="#2c3e50", fg="white", pady=10)
         header.pack(fill=tk.X)
 
-        # Liste des serveurs
         frame = tk.Frame(result_window)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
@@ -1084,7 +309,6 @@ class CollectorGUI:
             )
             btn.pack(fill=tk.X, pady=5)
 
-        # Bouton Annuler
         ttk.Button(frame, text="✕ Annuler", command=result_window.destroy).pack(pady=10)
 
     def _select_found_server(self, url, window):
@@ -1115,18 +339,18 @@ class CollectorGUI:
                     self.server_url = new_url
                     self._save_config()
                     messagebox.showinfo("Connexion ✓",
-                                      f"Connecté avec succès!\n\n"
-                                      f"URL: {new_url}\n"
-                                      f"Clients disponibles: {clients_count}\n\n"
-                                      f"Récupération de la liste des clients...")
+                                        f"Connecté avec succès!\n\n"
+                                        f"URL: {new_url}\n"
+                                        f"Clients disponibles: {clients_count}\n\n"
+                                        f"Récupération de la liste des clients...")
                     self._fetch_clients()
                     self.status_var.set("Connecté ✓")
             except Exception as e:
                 logger.error(f"Connection test failed: {e}")
                 messagebox.showerror("Erreur de Connexion",
-                                   f"Impossible de se connecter à {new_url}\n\n"
-                                   f"Erreur: {str(e)}\n\n"
-                                   f"Vérifiez l'URL et essayez à nouveau.")
+                                     f"Impossible de se connecter à {new_url}\n\n"
+                                     f"Erreur: {str(e)}\n\n"
+                                     f"Vérifiez l'URL et essayez à nouveau.")
                 self.status_var.set("Erreur de connexion")
 
         thread = threading.Thread(target=test, daemon=True)
@@ -1154,7 +378,7 @@ class CollectorGUI:
             try:
                 logger.debug(f"Fetching clients from server: {self.server_url}")
                 self.clients = fetch_clients(self.server_url)
-                logger.debug(f"Got {len(self.clients)} clients: {self.clients}")
+                logger.debug(f"Got {len(self.clients)} clients")
 
                 if not self.clients:
                     logger.warning("No clients returned - showing default message")
@@ -1163,7 +387,6 @@ class CollectorGUI:
                     return
 
                 client_names = [f"{c.get('id', 'N/A')} - {c.get('nom', 'Inconnu')}" for c in self.clients]
-                logger.debug(f"Client names: {client_names}")
                 self.client_combo['values'] = client_names
                 if client_names:
                     self.client_combo.current(0)
@@ -1187,136 +410,11 @@ class CollectorGUI:
         self.summary_text.config(state=tk.NORMAL)
         self.summary_text.delete(1.0, tk.END)
 
-        summary = []
-        summary.append("═" * 80)
-        summary.append("INFORMATIONS SYSTÈME COLLECTÉES".center(80))
-        summary.append("═" * 80)
-        summary.append("")
+        lines = ["═" * 80, "INFORMATIONS SYSTÈME COLLECTÉES".center(80), "═" * 80, ""]
+        lines.extend(build_summary_lines(self.system_info))
+        lines.extend(["═" * 80, "Prêt à envoyer vers ParcInfo", "═" * 80])
 
-        # Section Identification
-        summary.append("┌─ IDENTIFICATION")
-        summary.append(f"│ Hostname           : {self.system_info.get('hostname', 'N/A')}")
-        summary.append(f"│ MAC Address        : {self.system_info.get('mac_address', 'N/A')}")
-        summary.append(f"│ IP Address(es)     : {', '.join(self.system_info.get('ip_addresses', []))}")
-        summary.append(f"│ Marque             : {self.system_info.get('brand', 'N/A')}")
-        summary.append(f"│ Modèle             : {self.system_info.get('model', 'N/A')}")
-        summary.append(f"│ Numéro Série       : {self.system_info.get('serial_number', 'N/A')}")
-        summary.append("└")
-        summary.append("")
-
-        # Section OS
-        uptime_hours = self.system_info.get('uptime_hours')
-        uptime_display = f"{round(uptime_hours / 24, 1)} jour(s)" if uptime_hours is not None else 'N/A'
-        domain_display = self.system_info.get('domain') or self.system_info.get('workgroup') or 'N/A'
-        summary.append("┌─ SYSTÈME D'EXPLOITATION")
-        summary.append(f"│ OS                 : {self.system_info.get('os_name', 'N/A')}")
-        summary.append(f"│ Version            : {self.system_info.get('os_version', 'N/A')}")
-        summary.append(f"│ Domaine/Groupe     : {domain_display}")
-        summary.append(f"│ Uptime             : {uptime_display}")
-        if self.system_info.get('bios_version'):
-            summary.append(f"│ BIOS               : {self.system_info.get('bios_version')}")
-        if self.system_info.get('last_windows_update'):
-            summary.append(f"│ Dernière MàJ       : {self.system_info.get('last_windows_update')}")
-        summary.append("└")
-        summary.append("")
-
-        # Section Matériel
-        summary.append("┌─ MATÉRIEL")
-        summary.append(f"│ RAM                : {self.system_info.get('ram_gb', 'N/A')} GB")
-        summary.append(f"│ CPU                : {self.system_info.get('cpu', 'N/A')}")
-        summary.append(f"│ CPU Cores          : {self.system_info.get('cpu_cores', 'N/A')}")
-        gpu = self.system_info.get('gpu')
-        if gpu:
-            summary.append(f"│ Carte(s) graphique : {gpu}")
-
-        # Affichage des disques (multiples ou simple)
-        disk_drives = self.system_info.get('disk_drives', [])
-        if disk_drives:
-            summary.append(f"│ Disques logiques :")
-            for drive in disk_drives:
-                summary.append(f"│   - {drive}")
-            summary.append(f"│ Total Stockage     : {self.system_info.get('disk_total_gb', 'N/A')} GB")
-        else:
-            summary.append(f"│ Stockage           : {self.system_info.get('disk_total_gb', 'N/A')} GB")
-
-        physical_disks = self.system_info.get('physical_disks', [])
-        if physical_disks:
-            summary.append(f"│ Disques physiques (Type/SMART) :")
-            for drive in physical_disks:
-                summary.append(f"│   - {drive}")
-
-        battery = self.system_info.get('battery')
-        if battery:
-            summary.append(f"│ Batterie           : {battery}")
-
-        summary.append("└")
-        summary.append("")
-
-        # Section Réseau
-        network_adapters = self.system_info.get('network_adapters', [])
-        if network_adapters:
-            summary.append("┌─ ADAPTATEURS RÉSEAU ACTIFS")
-            for adapter in network_adapters:
-                summary.append(f"│   - {adapter}")
-            summary.append("└")
-            summary.append("")
-
-        # Section Sécurité
-        av = self.system_info.get('antivirus')
-        firewall = self.system_info.get('firewall', [])
-        bitlocker = self.system_info.get('bitlocker', [])
-        tpm_present = self.system_info.get('tpm_present')
-        secure_boot = self.system_info.get('secure_boot')
-        if av or firewall or bitlocker or tpm_present is not None or secure_boot is not None:
-            summary.append("┌─ SÉCURITÉ & CONFORMITÉ")
-            if av:
-                summary.append(f"│ Antivirus          : {av}")
-            for profile in firewall:
-                summary.append(f"│ Pare-feu           : {profile}")
-            for vol in bitlocker:
-                summary.append(f"│ BitLocker          : {vol}")
-            if tpm_present is not None:
-                tpm_status = 'Présent et activé' if self.system_info.get('tpm_enabled') else ('Présent mais désactivé' if tpm_present else 'Absent')
-                summary.append(f"│ TPM                : {tpm_status}")
-            if secure_boot is not None:
-                summary.append(f"│ Secure Boot        : {'Activé' if secure_boot else 'Désactivé'}")
-            summary.append("└")
-            summary.append("")
-
-        # Section Utilisateurs
-        users_list = self.system_info.get('users', [])
-        if users_list:
-            summary.append("┌─ COMPTES UTILISATEURS LOCAUX")
-            summary.append(f"│ Total détecté      : {len(users_list)} compte(s)")
-            for u in users_list:
-                summary.append(f"│   - {u}")
-            summary.append("└")
-            summary.append("")
-
-        # Section Logiciels
-        software_list = self.system_info.get('installed_software', [])
-        if software_list:
-            summary.append("┌─ LOGICIELS INSTALLÉS")
-            summary.append(f"│ Total détecté      : {len(software_list)} logiciel(s)")
-            summary.append("│ Premiers 10 :")
-            for i, soft in enumerate(software_list[:10], 1):
-                if isinstance(soft, dict):
-                    label = soft.get('name', '')
-                    if soft.get('version'):
-                        label += f" (v{soft['version']})"
-                else:
-                    label = str(soft)
-                summary.append(f"│   {i}. {label}")
-            if len(software_list) > 10:
-                summary.append(f"│   ... et {len(software_list) - 10} autres")
-            summary.append("└")
-            summary.append("")
-
-        summary.append("═" * 80)
-        summary.append("Prêt à envoyer vers ParcInfo")
-        summary.append("═" * 80)
-
-        self.summary_text.insert(tk.END, "\n".join(summary))
+        self.summary_text.insert(tk.END, "\n".join(lines))
         self.summary_text.config(state=tk.DISABLED)
 
     def _send_data(self):
@@ -1328,7 +426,6 @@ class CollectorGUI:
         client_id = self.selected_client.get('id')
         client_name = self.selected_client.get('nom', 'Inconnu')
 
-        # Confirmation
         msg = f"Envoyer les informations vers le client :\n\n📍 {client_id} - {client_name}\n\nEtes-vous sûr ?"
         if not messagebox.askyesno("Confirmation", msg):
             return
@@ -1338,8 +435,6 @@ class CollectorGUI:
 
         def send():
             try:
-                logger.debug(f"System info collected: {self.system_info}")
-
                 # Générer le rapport PDF
                 pdf_content, report_file = generate_pdf_report(self.system_info, client_id, client_name)
                 if pdf_content:
@@ -1347,51 +442,49 @@ class CollectorGUI:
                 else:
                     logger.warning("PDF report generation returned no content")
 
-                # Filtrer les champs pour l'API
-                payload_data = get_api_payload(self.system_info, client_id, client_name)
-                logger.debug(f"API payload: {payload_data}")
-                payload = json.dumps(payload_data)
-
-                headers = {'Content-Type': 'application/json'}
-                request = Request(
-                    f"{self.server_url.rstrip('/')}/api/device-info",
-                    data=payload.encode('utf-8'),
-                    headers=headers,
-                    method='POST'
+                success, result = send_to_parcinfo(
+                    self.system_info, self.server_url,
+                    client_id=client_id, client_name=client_name
                 )
 
-                with urlopen(request, timeout=10) as response:
-                    result = json.loads(response.read().decode('utf-8'))
-                    logger.debug(f"API response: {result}")
-                    if result.get('status') == 'success':
-                        device_id = result.get('device_id')
-                        msg = f"Appareil enregistré avec succès !\n\n"
-                        msg += f"ID : {device_id}\n"
-                        msg += f"Hostname : {result.get('hostname')}\n"
-                        msg += f"IP : {result.get('ip_address')}\n"
-                        msg += f"MAC : {result.get('mac_address')}"
+                if not success:
+                    logger.error(f"API call failed: {result}")
+                    messagebox.showerror("Erreur de Connexion", str(result))
+                    self.status_var.set("Erreur de connexion")
+                    return
 
-                        # Uploader le rapport PDF
-                        if pdf_content and device_id and client_id:
-                            success_report, result_report = upload_report_to_parcinfo(
-                                pdf_content, report_file, self.server_url, device_id, client_id
-                            )
-                            if success_report:
-                                logger.debug(f"Report uploaded: {result_report}")
-                                msg += f"\n✓ Rapport joint enregistré (Doc ID: {result_report.get('document_id')})"
-                            else:
-                                logger.error(f"Report upload failed: {result_report}")
-                                msg += f"\n⚠️ Erreur lors du stockage du rapport: {result_report}"
+                if result.get('status') != 'success':
+                    logger.error(f"API returned error: {result}")
+                    messagebox.showerror("Erreur", result.get('message', 'Erreur inconnue'))
+                    self.status_var.set("Erreur lors de l'envoi")
+                    return
 
-                        if report_file:
-                            msg += f"\n\nRapport complet sauvegardé :\n{report_file}"
+                device_id = result.get('device_id')
+                msg = "Appareil enregistré avec succès !\n\n"
+                msg += f"ID : {device_id}\n"
+                msg += f"Hostname : {result.get('hostname')}\n"
+                msg += f"IP : {result.get('ip_address')}\n"
+                msg += f"MAC : {result.get('mac_address')}"
+                if result.get('peripherals_created'):
+                    msg += f"\nPériphériques créés : {result.get('peripherals_created')}"
 
-                        messagebox.showinfo("Succès ✓", msg)
-                        self.status_var.set("Envoi réussi ✓")
+                # Uploader le rapport PDF
+                if pdf_content and device_id and client_id:
+                    success_report, result_report = upload_report_to_parcinfo(
+                        pdf_content, report_file, self.server_url, device_id, client_id
+                    )
+                    if success_report:
+                        logger.debug(f"Report uploaded: {result_report}")
+                        msg += f"\n✓ Rapport joint enregistré (Doc ID: {result_report.get('document_id')})"
                     else:
-                        logger.error(f"API returned error: {result}")
-                        messagebox.showerror("Erreur", result.get('message', 'Erreur inconnue'))
-                        self.status_var.set("Erreur lors de l'envoi")
+                        logger.error(f"Report upload failed: {result_report}")
+                        msg += f"\n⚠️ Erreur lors du stockage du rapport: {result_report}"
+
+                if report_file:
+                    msg += f"\n\nRapport complet sauvegardé :\n{report_file}"
+
+                messagebox.showinfo("Succès ✓", msg)
+                self.status_var.set("Envoi réussi ✓")
             except Exception as e:
                 logger.exception(f"ERROR in send(): {type(e).__name__}: {str(e)}")
                 messagebox.showerror("Erreur de Connexion", str(e))
@@ -1406,12 +499,16 @@ def main():
         description='Collecteur d\'informations système avec interface graphique'
     )
     parser.add_argument('--server', default='http://parcinfo.local:3456',
-                       help='URL du serveur ParcInfo (défaut: http://parcinfo.local:3456)')
+                        help='URL du serveur ParcInfo (défaut: http://parcinfo.local:3456)')
 
     args = parser.parse_args()
 
+    if not is_elevated():
+        logger.warning("Collecteur lancé sans privilèges administrateur - "
+                       "SMART détaillé, TPM, BitLocker et clé OEM peuvent manquer")
+
     root = tk.Tk()
-    app = CollectorGUI(root, args.server)
+    CollectorGUI(root, args.server)
     root.mainloop()
 
 
