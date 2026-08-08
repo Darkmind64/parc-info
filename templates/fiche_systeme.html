@@ -1,0 +1,496 @@
+{% extends "base.html" %}
+{% block title %}Fiche système — {{ appareil.nom_machine }}{% endblock %}
+
+{% block extra_styles %}
+<style>
+.fs-section {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px;
+    padding: 1rem 1.2rem; margin-bottom: 1rem;
+}
+.fs-section > h3 {
+    font-family: 'Rajdhani', sans-serif; font-size: .75rem; font-weight: 700;
+    letter-spacing: 2px; text-transform: uppercase; color: var(--accent);
+    margin: 0 0 .8rem 0; padding-bottom: .5rem; border-bottom: 1px solid var(--border);
+}
+.fs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .35rem 1.5rem; }
+.fs-row { display: grid; grid-template-columns: 170px 1fr; gap: .6rem; font-size: .82rem; padding: .22rem 0; }
+.fs-label { color: var(--text-secondary); }
+.fs-value { color: var(--text-primary); word-break: break-word; }
+.fs-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+.fs-table th {
+    text-align: left; color: var(--text-secondary); font-weight: 600;
+    border-bottom: 1px solid var(--border); padding: .35rem .5rem; white-space: nowrap;
+}
+.fs-table td { padding: .32rem .5rem; border-bottom: 1px solid var(--border); }
+.fs-table tr:last-child td { border-bottom: none; }
+.fs-pill {
+    display: inline-block; padding: .1rem .45rem; border-radius: 3px;
+    font-size: .62rem; font-weight: 700; letter-spacing: .03em;
+}
+.fs-ok   { background: rgba(0,255,136,.12); color: var(--accent-green); border: 1px solid rgba(0,255,136,.3); }
+.fs-warn { background: rgba(255,140,0,.12); color: var(--accent-orange); border: 1px solid rgba(255,140,0,.3); }
+.fs-bad  { background: rgba(255,51,85,.12); color: var(--accent-red); border: 1px solid rgba(255,51,85,.3); }
+.fs-empty { text-align: center; padding: 2.5rem; color: var(--text-secondary); }
+.fs-bar { height: 6px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; margin-top: 3px; }
+.fs-bar > span { display: block; height: 100%; background: var(--accent); }
+.fs-scroll { max-height: 480px; overflow-y: auto; }
+.fs-mono { font-family: Consolas, 'Courier New', monospace; font-size: .74rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Fiche système — <span>{{ appareil.nom_machine or '?' }}</span></h1>
+    <p>
+        <span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        · {{ appareil.marque or '' }} {{ appareil.modele or '' }}
+        {% if appareil.derniere_synchro %}
+        · Dernière collecte : {{ appareil.derniere_synchro[:19]|replace('T', ' ') }} UTC
+        {% endif %}
+    </p>
+</div>
+
+<div class="actions-row" style="margin-bottom:1rem;">
+    <a href="/appareil/{{ appareil.id }}/editer" class="btn btn-primary btn-sm">← Retour à la fiche</a>
+    <a href="/appareil/{{ appareil.id }}/documents" class="btn btn-sm">📎 Documents</a>
+</div>
+
+{% if not rapport and not logiciels %}
+<div class="fs-section">
+    <div class="fs-empty">
+        Aucune collecte système n'a encore été reçue pour cet appareil.<br>
+        <small>Lancez <span class="fs-mono">system-info-collector</span> sur la machine pour alimenter cette fiche.</small>
+    </div>
+</div>
+{% else %}
+
+{% macro row(label, value) %}
+    {% if value not in (None, '', []) %}
+    <div class="fs-row"><span class="fs-label">{{ label }}</span><span class="fs-value">{{ value }}</span></div>
+    {% endif %}
+{% endmacro %}
+
+{% if rapport.elevated is defined and not rapport.elevated %}
+<div class="fs-section" style="border-color:var(--accent-orange);">
+    <span class="fs-pill fs-warn">COLLECTE NON ÉLEVÉE</span>
+    <span style="font-size:.8rem;margin-left:.5rem;color:var(--text-secondary);">
+        Le collecteur a tourné sans privilèges administrateur : SMART détaillé, TPM,
+        BitLocker et clé OEM peuvent manquer ci-dessous.
+    </span>
+</div>
+{% endif %}
+
+<!-- ── IDENTIFICATION & SYSTÈME ─────────────────────────────────────────── -->
+<div class="fs-section">
+    <h3>■ Identification &amp; système</h3>
+    <div class="fs-grid">
+        <div>
+            {{ row("Nom de la machine", rapport.hostname or appareil.nom_machine) }}
+            {{ row("Nom DNS", rapport.dns_name or appareil.nom_dns) }}
+            {{ row("Type d'appareil", rapport.device_type or appareil.type_appareil) }}
+            {{ row("Châssis", rapport.chassis_type) }}
+            {{ row("Marque", rapport.brand or appareil.marque) }}
+            {{ row("Modèle", rapport.model or appareil.modele) }}
+            {{ row("Numéro de série", rapport.serial_number or appareil.numero_serie) }}
+            {{ row("Asset tag", rapport.asset_tag) }}
+            {{ row("Adresse MAC", rapport.mac_address or appareil.adresse_mac) }}
+            {{ row("Adresse(s) IP", rapport.ip_addresses|join(', ') if rapport.ip_addresses else appareil.adresse_ip) }}
+        </div>
+        <div>
+            {{ row("Système", rapport.os_name or appareil.os) }}
+            {{ row("Version", rapport.os_version or appareil.version_os) }}
+            {{ row("Build", rapport.os_build) }}
+            {{ row("Architecture", rapport.architecture) }}
+            {{ row("Installé le", rapport.os_install_date) }}
+            {{ row("Propriétaire enregistré", rapport.registered_owner) }}
+            {{ row("Domaine / Groupe", rapport.domain or rapport.workgroup) }}
+            {{ row("Session ouverte", rapport.logged_on_user) }}
+            {{ row("Fuseau horaire", rapport.timezone) }}
+            {% if rapport.uptime_hours is not none and rapport.uptime_hours is defined %}
+            {{ row("Uptime", (rapport.uptime_hours / 24)|round(1) ~ " jour(s)") }}
+            {% endif %}
+            {% if rapport.hypervisor_present %}
+            {{ row("Virtualisation", "Machine virtuelle / hyperviseur détecté") }}
+            {% endif %}
+            {{ row("BIOS", (rapport.bios_version ~ (' (' ~ rapport.bios_release_date ~ ')' if rapport.bios_release_date else '')) if rapport.bios_version else '') }}
+        </div>
+    </div>
+</div>
+
+<!-- ── PROCESSEUR & CARTE MÈRE ──────────────────────────────────────────── -->
+{% if rapport.cpu or rapport.motherboard %}
+<div class="fs-section">
+    <h3>■ Processeur &amp; carte mère</h3>
+    <div class="fs-grid">
+        <div>
+            {{ row("Processeur", rapport.cpu) }}
+            {% if rapport.cpu_physical_cores or rapport.cpu_logical_cores %}
+            {{ row("Cœurs", (rapport.cpu_physical_cores or '?')|string ~ " physiques / " ~ (rapport.cpu_logical_cores or '?')|string ~ " logiques") }}
+            {% else %}
+            {{ row("Cœurs", rapport.cpu_cores) }}
+            {% endif %}
+            {{ row("Sockets", rapport.cpu_sockets) }}
+            {{ row("Socket", rapport.cpu_socket) }}
+            {% if rapport.cpu_max_clock_mhz %}{{ row("Fréquence max", rapport.cpu_max_clock_mhz ~ " MHz") }}{% endif %}
+            {% if rapport.cpu_l3_cache_kb %}{{ row("Cache L3", rapport.cpu_l3_cache_kb ~ " KB") }}{% endif %}
+            {% if rapport.cpu_virtualization is defined and rapport.cpu_virtualization is not none %}
+            {{ row("Virtualisation matérielle", "Activée" if rapport.cpu_virtualization else "Désactivée") }}
+            {% endif %}
+        </div>
+        <div>
+            {% if rapport.motherboard %}
+            {{ row("Carte mère", (rapport.motherboard.manufacturer ~ ' ' ~ rapport.motherboard.model)|trim) }}
+            {{ row("Version", rapport.motherboard.version) }}
+            {{ row("N° série carte mère", rapport.motherboard.serial_number) }}
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── MÉMOIRE ──────────────────────────────────────────────────────────── -->
+{% if rapport.ram_gb or rapport.memory_modules %}
+<div class="fs-section">
+    <h3>■ Mémoire</h3>
+    <div class="fs-grid" style="margin-bottom:.8rem;">
+        <div>
+            {% if rapport.ram_gb %}{{ row("RAM totale", rapport.ram_gb ~ " GB") }}{% endif %}
+            {% if rapport.ram_free_gb %}{{ row("RAM disponible", rapport.ram_free_gb ~ " GB") }}{% endif %}
+        </div>
+        <div>
+            {% if rapport.memory_slots_total %}
+            {{ row("Slots", (rapport.memory_slots_used or 0)|string ~ " / " ~ rapport.memory_slots_total|string ~ " occupés"
+                            ~ (" — " ~ rapport.memory_slots_free|string ~ " libre(s)" if rapport.memory_slots_free else "")) }}
+            {% endif %}
+            {% if rapport.memory_max_gb %}{{ row("Capacité maximale", rapport.memory_max_gb ~ " GB") }}{% endif %}
+        </div>
+    </div>
+    {% if rapport.memory_modules %}
+    <table class="fs-table">
+        <tr><th>Slot</th><th>Capacité</th><th>Type</th><th>Fréquence</th><th>Fabricant</th><th>Référence</th><th>N° série</th></tr>
+        {% for m in rapport.memory_modules %}
+        <tr>
+            <td>{{ m.slot or '—' }}</td>
+            <td>{{ m.capacity_gb }} GB</td>
+            <td>{{ m.type or '—' }}</td>
+            <td>{{ (m.speed_mhz ~ ' MHz') if m.speed_mhz else '—' }}</td>
+            <td>{{ m.manufacturer or '—' }}</td>
+            <td class="fs-mono">{{ m.part_number or '—' }}</td>
+            <td class="fs-mono">{{ m.serial_number or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── STOCKAGE ─────────────────────────────────────────────────────────── -->
+{% if rapport.disk_total_gb or rapport.disk_drives or rapport.disk_reliability %}
+<div class="fs-section">
+    <h3>■ Stockage</h3>
+    {% if rapport.disk_total_gb %}
+    <div class="fs-row" style="grid-template-columns:170px 1fr;">
+        <span class="fs-label">Capacité totale</span>
+        <span class="fs-value">
+            {{ rapport.disk_total_gb }} GB
+            {% if rapport.disk_used_gb is not none and rapport.disk_used_gb is defined %}
+                — {{ rapport.disk_used_gb }} GB utilisés, {{ rapport.disk_free_gb }} GB libres
+                {% set pct = (rapport.disk_used_gb / rapport.disk_total_gb * 100)|round(0)|int if rapport.disk_total_gb else 0 %}
+                <div class="fs-bar"><span style="width:{{ pct }}%;{% if pct >= 90 %}background:var(--accent-red);{% elif pct >= 75 %}background:var(--accent-orange);{% endif %}"></span></div>
+            {% endif %}
+        </span>
+    </div>
+    {% endif %}
+
+    {% if rapport.disk_drives %}
+    <div style="margin-top:.8rem;">
+        <div class="fs-label" style="font-size:.75rem;margin-bottom:.3rem;">Volumes logiques</div>
+        {% for d in rapport.disk_drives %}<div class="fs-value fs-mono">• {{ d }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if rapport.physical_disks %}
+    <div style="margin-top:.8rem;">
+        <div class="fs-label" style="font-size:.75rem;margin-bottom:.3rem;">Disques physiques</div>
+        {% for d in rapport.physical_disks %}<div class="fs-value fs-mono">• {{ d }}</div>{% endfor %}
+    </div>
+    {% endif %}
+
+    {% if rapport.disk_reliability %}
+    <div style="margin-top:.9rem;">
+        <div class="fs-label" style="font-size:.75rem;margin-bottom:.3rem;">Usure &amp; fiabilité</div>
+        <table class="fs-table">
+            <tr><th>Disque</th><th>Heures</th><th>Usure</th><th>Température</th><th>Erreurs</th></tr>
+            {% for r in rapport.disk_reliability %}
+            <tr>
+                <td>{{ r.name }}</td>
+                <td>{% if r.power_on_hours is defined %}{{ r.power_on_hours }} h ({{ (r.power_on_hours / 8760)|round(1) }} an(s)){% else %}—{% endif %}</td>
+                <td>
+                    {% if r.wear_percent is defined %}
+                        <span class="fs-pill {% if r.wear_percent >= 80 %}fs-bad{% elif r.wear_percent >= 50 %}fs-warn{% else %}fs-ok{% endif %}">{{ r.wear_percent }}%</span>
+                    {% else %}—{% endif %}
+                </td>
+                <td>{% if r.temperature_c %}{{ r.temperature_c }} °C{% else %}—{% endif %}</td>
+                <td>{{ (r.read_errors or 0) + (r.write_errors or 0) }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── GRAPHIQUE, ÉCRANS, IMPRIMANTES ───────────────────────────────────── -->
+{% if rapport.gpu_details or rapport.monitors or rapport.printers %}
+<div class="fs-section">
+    <h3>■ Affichage &amp; impression</h3>
+    {% if rapport.gpu_details %}
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Carte graphique</th><th>VRAM</th><th>Résolution</th><th>Pilote</th></tr>
+        {% for g in rapport.gpu_details %}
+        <tr>
+            <td>{{ g.name }}</td>
+            <td>{{ (g.vram_gb ~ ' GB') if g.vram_gb else '—' }}</td>
+            <td>{{ g.resolution or '—' }}</td>
+            <td class="fs-mono">{{ g.driver_version or '—' }}{{ ' (' ~ g.driver_date ~ ')' if g.driver_date else '' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.monitors %}
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Écran</th><th>Fabricant</th><th>N° série</th><th>Année</th></tr>
+        {% for m in rapport.monitors %}
+        <tr>
+            <td>{{ m.model or '—' }}</td>
+            <td>{{ m.manufacturer or '—' }}</td>
+            <td class="fs-mono">{{ m.serial_number or '—' }}</td>
+            <td>{{ m.year or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.printers %}
+    <table class="fs-table">
+        <tr><th>Imprimante</th><th>Pilote</th><th>Port</th><th></th></tr>
+        {% for p in rapport.printers %}
+        <tr>
+            <td>{{ p.name }}</td>
+            <td>{{ p.driver or '—' }}</td>
+            <td class="fs-mono">{{ p.port or '—' }}</td>
+            <td>
+                {% if p.default %}<span class="fs-pill fs-ok">DÉFAUT</span>{% endif %}
+                {% if p.network %}<span class="fs-pill fs-warn">RÉSEAU</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── BATTERIE ─────────────────────────────────────────────────────────── -->
+{% if rapport.battery or rapport.battery_health_percent is defined %}
+<div class="fs-section">
+    <h3>■ Batterie</h3>
+    <div class="fs-grid">
+        <div>
+            {{ row("Charge actuelle", rapport.battery) }}
+            {{ row("Cycles de charge", rapport.battery_cycles) }}
+            {{ row("État", rapport.battery_health_status) }}
+        </div>
+        <div>
+            {% if rapport.battery_health_percent is defined and rapport.battery_health_percent is not none %}
+            <div class="fs-row">
+                <span class="fs-label">Santé</span>
+                <span class="fs-value">
+                    <span class="fs-pill {% if rapport.battery_health_percent < 60 %}fs-bad{% elif rapport.battery_health_percent < 80 %}fs-warn{% else %}fs-ok{% endif %}">
+                        {{ rapport.battery_health_percent }}%
+                    </span>
+                    de la capacité d'origine (usure {{ rapport.battery_wear_percent }}%)
+                </span>
+            </div>
+            {% endif %}
+            {% if rapport.battery_designed_capacity_mwh %}
+            {{ row("Capacité d'origine", rapport.battery_designed_capacity_mwh ~ " mWh") }}
+            {{ row("Capacité réelle", rapport.battery_full_capacity_mwh ~ " mWh") }}
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── SÉCURITÉ ─────────────────────────────────────────────────────────── -->
+{% if rapport.antivirus or rapport.firewall or rapport.bitlocker or rapport.tpm_present is defined or rapport.secure_boot is defined %}
+<div class="fs-section">
+    <h3>■ Sécurité &amp; conformité</h3>
+    <div class="fs-grid">
+        <div>
+            {{ row("Antivirus", rapport.antivirus) }}
+            {% if rapport.tpm_present is defined and rapport.tpm_present is not none %}
+            <div class="fs-row">
+                <span class="fs-label">TPM</span>
+                <span class="fs-value">
+                    {% if rapport.tpm_enabled %}<span class="fs-pill fs-ok">PRÉSENT ET ACTIVÉ</span>
+                    {% elif rapport.tpm_present %}<span class="fs-pill fs-warn">PRÉSENT, DÉSACTIVÉ</span>
+                    {% else %}<span class="fs-pill fs-bad">ABSENT</span>{% endif %}
+                </span>
+            </div>
+            {% endif %}
+            {% if rapport.secure_boot is defined and rapport.secure_boot is not none %}
+            <div class="fs-row">
+                <span class="fs-label">Secure Boot</span>
+                <span class="fs-value">
+                    {% if rapport.secure_boot %}<span class="fs-pill fs-ok">ACTIVÉ</span>
+                    {% else %}<span class="fs-pill fs-bad">DÉSACTIVÉ</span>{% endif %}
+                </span>
+            </div>
+            {% endif %}
+        </div>
+        <div>
+            {% if rapport.firewall %}
+            <div class="fs-label" style="font-size:.75rem;">Pare-feu</div>
+            {% for f in rapport.firewall %}<div class="fs-value">• {{ f }}</div>{% endfor %}
+            {% endif %}
+            {% if rapport.bitlocker %}
+            <div class="fs-label" style="font-size:.75rem;margin-top:.5rem;">Chiffrement des volumes</div>
+            {% for b in rapport.bitlocker %}<div class="fs-value">• {{ b }}</div>{% endfor %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── LICENCES ─────────────────────────────────────────────────────────── -->
+{% if rapport.licenses or rapport.oem_product_key %}
+<div class="fs-section">
+    <h3>■ Licences &amp; activation</h3>
+    {% if rapport.licenses %}
+    <table class="fs-table">
+        <tr><th>Produit</th><th>Statut</th><th>Canal</th><th>Clé partielle</th></tr>
+        {% for l in rapport.licenses %}
+        <tr>
+            <td>{{ l.name }}</td>
+            <td><span class="fs-pill {{ 'fs-ok' if l.activated else 'fs-bad' }}">{{ l.status }}</span></td>
+            <td>{{ l.channel or '—' }}</td>
+            <td class="fs-mono">{{ ('…' ~ l.partial_key) if l.partial_key else '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+    {% if rapport.oem_product_key %}
+    <div class="fs-row" style="margin-top:.7rem;">
+        <span class="fs-label">Clé OEM (firmware)</span>
+        <span class="fs-value fs-mono">{{ rapport.oem_product_key }}</span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── RÉSEAU ───────────────────────────────────────────────────────────── -->
+{% if rapport.network_adapter_details or rapport.network_adapters or rapport.listening_ports %}
+<div class="fs-section">
+    <h3>■ Réseau</h3>
+    {% if rapport.network_adapter_details %}
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Interface</th><th>Description</th><th>Débit</th><th>MAC</th></tr>
+        {% for a in rapport.network_adapter_details %}
+        <tr>
+            <td>{{ a.name }}</td>
+            <td>{{ a.description or '—' }}</td>
+            <td>{{ a.link_speed or '—' }}</td>
+            <td class="fs-mono">{{ a.mac_address or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% elif rapport.network_adapters %}
+    {% for a in rapport.network_adapters %}<div class="fs-value fs-mono">• {{ a }}</div>{% endfor %}
+    {% endif %}
+
+    {% if rapport.listening_ports %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.3rem;">
+        Ports TCP en écoute ({{ rapport.listening_ports|length }})
+    </div>
+    <div class="fs-value fs-mono">
+        {% for p in rapport.listening_ports %}{{ p.port }}{% if p.process %} ({{ p.process }}){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── COMPTES ──────────────────────────────────────────────────────────── -->
+{% if rapport.users %}
+<div class="fs-section">
+    <h3>■ Comptes utilisateurs locaux ({{ rapport.users|length }})</h3>
+    <div class="fs-grid">
+        {% for u in rapport.users %}<div class="fs-value">• {{ u }}</div>{% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ── CORRECTIFS ───────────────────────────────────────────────────────── -->
+{% if rapport.hotfixes %}
+<div class="fs-section">
+    <h3>■ Correctifs Windows installés ({{ rapport.hotfixes|length }})</h3>
+    <div class="fs-scroll">
+        <table class="fs-table">
+            <tr><th>Correctif</th><th>Installé le</th><th>Type</th></tr>
+            {% for h in rapport.hotfixes %}
+            <tr>
+                <td class="fs-mono">{{ h.id }}</td>
+                <td>{{ h.installed_on or '—' }}</td>
+                <td>{{ h.description or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── LOGICIELS ────────────────────────────────────────────────────────── -->
+{% if logiciels %}
+<div class="fs-section">
+    <h3>■ Logiciels installés ({{ logiciels|length }})</h3>
+    <input type="text" id="fs-soft-filter" placeholder="Filtrer par nom ou éditeur…"
+           style="width:100%;max-width:360px;margin-bottom:.7rem;padding:.4rem .6rem;font-size:.8rem;
+                  background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);">
+    <div class="fs-scroll">
+        <table class="fs-table" id="fs-soft-table">
+            <tr><th>Nom</th><th>Version</th><th>Éditeur</th><th>Installé le</th></tr>
+            {% for s in logiciels %}
+            <tr>
+                <td>{{ s.name }}</td>
+                <td class="fs-mono">{{ s.version or '—' }}</td>
+                <td>{{ s.publisher or '—' }}</td>
+                <td>{{ s.install_date or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Filtrage local de la liste logicielle (elle peut dépasser le millier de lignes)
+document.addEventListener('DOMContentLoaded', function () {
+    var input = document.getElementById('fs-soft-filter');
+    var table = document.getElementById('fs-soft-table');
+    if (!input || !table) return;
+
+    input.addEventListener('input', function () {
+        var needle = input.value.toLowerCase();
+        var rows = table.rows;
+        // rows[0] est l'en-tête : on démarre à 1
+        for (var i = 1; i < rows.length; i++) {
+            rows[i].style.display = rows[i].textContent.toLowerCase().indexOf(needle) !== -1 ? '' : 'none';
+        }
+    });
+});
+</script>
+{% endblock %}

@@ -1,195 +1,219 @@
-# Collecteur Système - Correspondance des Champs
+# Collecteur Système — Correspondance des Champs
 
 ## 📋 Vue d'ensemble
 
-Ce document détaille la correspondance entre les champs collectés par le collecteur système et les champs disponibles dans la table `appareils` de ParcInfo.
+Ce document détaille ce que collecte le collecteur système ParcInfo et où chaque
+donnée atterrit côté serveur.
 
-**Généré par :** système-info-collector.py (CLI) / system-info-collector-gui.py (GUI)
-**Date :** 2026-08-03
+**Généré par :** `collector_core.py` (logique partagée)
+→ `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
----
-
-## ✅ Champs Collectés et Stockés
-
-| Champ Collecté | Champ BD | Table | Statut | Notes |
-|---|---|---|---|---|
-| `hostname` | `nom_machine` | appareils | ✅ Stocké | Nom de la machine |
-| `mac_address` | `adresse_mac` | appareils | ✅ Stocké | Adresse MAC (identifiant) |
-| `ip_addresses[0]` | `adresse_ip` | appareils | ✅ Stocké | Première adresse IP |
-| `os_name + os_version` | `os` | appareils | ✅ Stocké | Système d'exploitation complet |
-| `os_version` | `version_os` | appareils | ⚠️ Partiellement | Version OS seulement |
-| `brand` | `marque` | appareils | ✅ Stocké | Marque du constructeur |
-| `model` | `modele` | appareils | ✅ Stocké | Modèle exact |
-| `serial_number` | `numero_serie` | appareils | ✅ Stocké | Numéro de série |
-| `ram_gb` | `ram` | appareils | ✅ Stocké | RAM totale en GB |
-| `cpu` | `cpu` | appareils | ✅ Stocké | Modèle du processeur |
-| `disk_total_gb` | `stockage` | appareils | ✅ Stocké | Stockage total en GB |
-| `antivirus` | `antivirus` | appareils | ✅ Stocké | Antivirus détecté |
-| `installed_software` | `logiciels_installes_json` | appareils | ✅ Stocké | JSON array (max 50) |
-| `cpu_cores` | N/A | - | ❌ Non stocké | Pas de colonne dédiée |
-| `platform` | N/A | - | ❌ Non stocké | Info système brute |
-| `disk_drives` | N/A | - | ❌ Non stocké | Disques individuels (pas de colonne) |
+**Version collecteur :** 3.0 · **Version ParcInfo :** 2.6.31+
 
 ---
 
-## 📊 Rapport HTML Détails
+## 🏗️ Architecture
 
-Le rapport HTML généré localement et stocké en tant que document inclut **tous** les champs collectés :
-
-### Sections du Rapport
-
-1. **🔍 Identification** (✅ tous stockés)
-   - Hostname → `nom_machine`
-   - MAC Address → `adresse_mac`
-   - IP Addresses → `adresse_ip` (première)
-   - Marque → `marque`
-   - Modèle → `modele`
-   - Numéro Série → `numero_serie`
-
-2. **🖥️ Système d'Exploitation** (✅ tous stockés)
-   - OS → `os`
-   - Version → `version_os` + `os`
-   - Platform → **Non stocké** (info système brute)
-
-3. **⚙️ Matériel** (⚠️ partiellement)
-   - RAM → `ram` ✅
-   - CPU → `cpu` ✅
-   - CPU Cores → **Non stocké** ❌
-
-4. **💾 Stockage** (⚠️ partiellement)
-   - Total Stockage → `stockage` ✅
-   - Disques Détaillés → **Non stocké individuellement** ❌
-
-5. **🛡️ Sécurité** (✅ tous stockés)
-   - Antivirus → `antivirus` ✅
-
-6. **📦 Logiciels** (✅ stocké avec limite)
-   - Installed Software → `logiciels_installes_json` ✅
-   - Limite API : 50 premiers
-   - Rapport : jusqu'à 200
-
----
-
-## 🔄 Flux de Données
+Depuis la v3.0, **toute la logique de collecte vit dans `collector_core.py`**.
+Les deux scripts d'entrée ne portent plus que leur interface (argparse d'un côté,
+tkinter de l'autre). Avant cela, les deux fichiers étaient des copies qui avaient
+déjà divergé — la version GUI avait silencieusement perdu la détection logicielle
+`pkgutil` (macOS) et `pacman` (Arch).
 
 ```
-┌─────────────────────────────────────┐
-│  Collecte Système (CLI/GUI)         │
-│  • WMI (Windows)                    │
-│  • system_profiler (macOS)          │
-│  • /proc + dmidecode (Linux)        │
-└────────────┬────────────────────────┘
-             │
-             ├──→ [1] Générer Rapport HTML Complet
-             │        (tous les champs)
-             │        └──→ Sauvegarder localement
-             │
-             ├──→ [2] Filtrer Payload API
-             │        (champs supportés seulement)
-             │
-             └──→ [3] POST /api/device-info
-                      ├─ Créer/Mettre à jour appareil
-                      │  avec champs supportés
-                      │
-                      └─→ POST /api/device-info/upload-report
-                         └─ Stocker rapport HTML
-                            en tant que document_appareils
+collector_core.py           ← collecte, rapports, payload API, appels réseau
+├── system-info-collector.py       (CLI : argparse + affichage console)
+└── system-info-collector-gui.py   (GUI : tkinter + découverte réseau)
 ```
+
+⚠️ **Le collecteur n'est plus un fichier autonome.** `collector_core.py` doit
+accompagner le script d'entrée. Les routes `/download/system-info-collector[-gui]`
+servent donc une **archive ZIP** contenant les deux fichiers.
 
 ---
 
-## ⚠️ Champs NON Collectés (But Disponibles dans la BD)
+## 🗄️ Destinations côté serveur
 
-Les champs suivants **existent** dans la table `appareils` mais ne sont **pas remplis** par le collecteur :
+### 1. Colonnes dédiées de `appareils`
 
-| Champ BD | Type | Raison |
+| Champ collecté | Colonne BD | Notes |
 |---|---|---|
-| `utilisateur` | TEXT | Non disponible en tant qu'utilisateur system |
-| `service` | TEXT | Infos métier, non détectables |
-| `localisation` | TEXT | Non détectable automatiquement |
-| `date_achat` | TEXT | Donnée historique (achat) |
-| `duree_garantie` | INTEGER | Métadonnées de garantie |
-| `date_fin_garantie` | TEXT | Calculable si date_achat + durée |
-| `fournisseur` | TEXT | Donnée métier |
-| `prix_achat` | REAL | Donnée historique |
-| `numero_commande` | TEXT | Donnée de suivi achat |
-| `user_login` | TEXT | Credentials utilisateur |
-| `user_password` | TEXT | **Sécurité** - jamais collecter |
-| `admin_login` | TEXT | Credentials admin |
-| `admin_password` | TEXT | **Sécurité** - jamais collecter |
-| `anydesk_id` | TEXT | Tool externe, hors scope |
-| `anydesk_password` | TEXT | **Sécurité** - jamais collecter |
-| `nom_dns` | TEXT | Détectable via reverse DNS (futur) |
-| `ports_ouverts` | TEXT | Scan réseau séparé (futur) |
-| `type_appareil` | TEXT | Détecté mais pas spécialisé |
+| `hostname` | `nom_machine` | |
+| `dns_name` | `nom_dns` | FQDN, vide si la résolution échoue |
+| `device_type` | `type_appareil` | Déduit du châssis SMBIOS. N'écrase pas un type saisi à la main |
+| `mac_address` | `adresse_mac` | Clé de rapprochement principale |
+| `ip_addresses[0]` | `adresse_ip` | |
+| `brand` / `model` / `serial_number` | `marque` / `modele` / `numero_serie` | Valeurs de gabarit OEM filtrées |
+| `os_name` / `os_version` | `os` / `version_os` | |
+| `ram_gb` | `ram` | Envoyé formaté (« 16 Go ») |
+| `cpu` | `cpu` | |
+| `disk_total_gb` | `stockage` | |
+| `gpu` | `carte_graphique` | Avec VRAM quand elle est lisible |
+| `antivirus` | `antivirus` | |
+| `open_ports` | `ports_ouverts` | Ports TCP en écoute, format identique au scan réseau |
+| `installed_software` | `logiciels_installes_json` | Liste complète, plafond 2000 entrées |
+| *(tout le reste)* | `rapport_systeme_json` | **Snapshot JSON complet**, plafond 1 Mo |
+| *(horodatage)* | `derniere_synchro` | Mis à jour à chaque collecte |
+
+### 2. Table `peripheriques` (création automatique)
+
+| Source | Catégorie | Dédoublonnage |
+|---|---|---|
+| `monitors[]` | `Ecran` | Numéro de série EDID ; entrées sans modèle ignorées |
+| `printers[]` | `Imprimante` | Marque + modèle ; **imprimantes virtuelles exclues** |
+
+Le rattachement se fait via `peripheriques_appareils`. L'opération est
+**idempotente** : relancer le collecteur ne crée aucun doublon.
+
+Les imprimantes virtuelles (Print to PDF, XPS Document Writer, fax, OneNote,
+AnyDesk, PDFCreator…) restent visibles dans le rapport mais sont exclues de
+l'inventaire matériel — sans ce filtre, un poste Windows standard injecte 6 à 8
+fausses imprimantes à chaque collecte.
+
+### 3. Page « Fiche système »
+
+`/appareil/<id>/fiche-systeme` restitue l'intégralité de `rapport_systeme_json` :
+identification, processeur/carte mère, mémoire par slot, stockage et usure,
+affichage/impression, batterie, sécurité, licences, réseau, comptes, correctifs
+et logiciels (avec filtre de recherche).
+
+Accessible depuis le bouton **🖥 Fiche système** de la fiche appareil.
 
 ---
 
-## 🎯 Optimisations Futures
+## 📦 Données collectées
 
-### Court terme
-- [ ] Collecter `nom_dns` via reverse DNS lookup
-- [ ] Détecter type_appareil plus précis (laptop vs desktop vs VM)
+### Identification
+`hostname` · `dns_name` · `mac_address` · `ip_addresses` · `brand` · `model` ·
+`serial_number` · `asset_tag` · `chassis_type` / `chassis_code` · `device_type`
 
-### Moyen terme
-- [ ] Support scan réseau → `ports_ouverts`
-- [ ] Enrichissement WMI → infos constructeur détaillées
-- [ ] macOS system_profiler → modèle exact vs identifiant
+### Système
+`os_name` (avec édition) · `os_version` · `os_build` · `architecture` ·
+`os_install_date` · `registered_owner` · `registered_organization` · `timezone` ·
+`domain` / `workgroup` · `logged_on_user` · `uptime_hours` · `hypervisor_present` ·
+`bios_version` · `bios_manufacturer` · `bios_release_date`
 
-### Long terme
-- [ ] Intégration LDAP/AD → `utilisateur`, `service`
-- [ ] Gestion configurations → `localisation` from mobile app
-- [ ] Suivi historique → `date_achat`, `prix_achat` (CMDB import)
+### Carte mère & processeur
+`motherboard{manufacturer, model, version, serial_number}` · `cpu` ·
+`cpu_sockets` · `cpu_physical_cores` · `cpu_logical_cores` · `cpu_max_clock_mhz` ·
+`cpu_l2_cache_kb` · `cpu_l3_cache_kb` · `cpu_socket` · `cpu_virtualization` ·
+`cpu_address_width`
+
+### Mémoire
+`ram_gb` · `ram_free_gb` · `memory_slots_total` / `_used` / `_free` ·
+`memory_max_gb` ·
+`memory_modules[]{slot, bank, capacity_gb, type, form_factor, speed_mhz,
+rated_speed_mhz, manufacturer, part_number, serial_number}`
+
+> `speed_mhz` est la fréquence **réelle** (`ConfiguredClockSpeed`), pas la
+> fréquence nominale de la barrette — une DDR4-3600 bridée à 2400 apparaît à 2400.
+
+### Stockage
+`disk_total_gb` / `_used_gb` / `_free_gb` · `disk_drives[]` (volumes logiques) ·
+`physical_disks[]` (type SSD/HDD + santé SMART) ·
+`disk_reliability[]{name, serial_number, power_on_hours, wear_percent,
+temperature_c, read_errors, write_errors}`
+
+### Graphique & affichage
+`gpu` · `gpu_details[]{name, vram_gb, driver_version, driver_date, resolution}` ·
+`monitors[]{manufacturer, model, serial_number, year}`
+
+> La VRAM est lue dans le registre (`qwMemorySize`) et non via
+> `Win32_VideoController.AdapterRAM`, qui est un int32 signé et déborde au-delà de 4 Go.
+
+### Impression
+`printers[]{name, driver, port, network, default, shared, virtual}`
+
+### Batterie
+`battery` · `battery_charge_percent` · `battery_health_percent` ·
+`battery_wear_percent` · `battery_designed_capacity_mwh` ·
+`battery_full_capacity_mwh` · `battery_cycles` · `battery_health_status` (macOS)
+
+> L'usure réelle vient des classes `root\wmi` du pilote ACPI :
+> `Win32_Battery.DesignCapacity` est presque toujours vide.
+
+### Réseau
+`network_adapters[]` · `network_adapter_details[]{name, description, link_speed,
+mac_address}` · `listening_ports[]{port, process}`
+
+### Sécurité
+`antivirus` · `firewall[]` · `bitlocker[]` (FileVault sur macOS) ·
+`tpm_present` · `tpm_enabled` · `secure_boot`
+
+### Licences & mises à jour
+`licenses[]{name, description, partial_key, status, activated, channel}` ·
+`windows_activated` · `windows_license_channel` · `oem_product_key` ·
+`hotfixes[]{id, description, installed_on}` · `last_windows_update`
+
+### Comptes & logiciels
+`users[]` (statut + appartenance au groupe Administrateurs) ·
+`installed_software[]{name, version, publisher, install_date}`
+
+### Métadonnées
+`collector_version` · `timestamp` · `elevated` · `platform`
 
 ---
 
-## 🔍 Checklist de Complétude
+## 🔐 Privilèges
 
-### Windows (WMI)
-- [x] Marque + Modèle (Win32_ComputerSystem)
-- [x] Numéro série (Win32_SystemEnclosure)
-- [x] RAM totale (Win32_PhysicalMemory)
-- [x] CPU + Cores (Win32_Processor)
-- [x] Tous les disques (Win32_LogicalDisk)
-- [x] Antivirus (Win32_SecurityCenter1)
-- [x] Logiciels installés (Registre Uninstall)
+`elevated` indique si le collecteur a tourné en administrateur. **Sans élévation**,
+les sources suivantes sont inaccessibles et absentes du rapport :
 
-### macOS (system_profiler + df)
-- [x] Marque (Apple constant)
-- [x] Modèle + Identifiant (SPHardwareDataType)
-- [x] Numéro série (SPHardwareDataType)
-- [x] RAM totale (SPHardwareDataType)
-- [x] CPU + Cores (SPHardwareDataType)
-- [x] Tous les disques (df -h)
-- [ ] Antivirus (requires scanning /Library/Security)
-- [x] Applications (ls /Applications + /usr/local/opt + pkgutil)
+- SMART détaillé (`disk_reliability` — heures, usure, température)
+- TPM (`Get-Tpm`)
+- BitLocker (`Get-BitLockerVolume`)
+- Clé OEM firmware (`OA3xOriginalProductKey`)
+- Barrettes mémoire sur Linux (`dmidecode`)
 
-### Linux (dmidecode + /proc + df)
-- [x] Marque + Modèle (dmidecode system)
-- [x] Numéro série (dmidecode system)
-- [x] RAM totale (/proc/meminfo)
-- [x] CPU + Cores (/proc/cpuinfo)
-- [x] Tous les disques (df -h)
-- [ ] Antivirus (distribution-specific)
-- [x] Logiciels installés (dpkg, rpm, pacman)
+Le rapport PDF, le résumé console et la fiche système affichent tous un
+avertissement explicite dans ce cas : un champ vide ne doit pas être confondu
+avec un champ inaccessible.
 
 ---
 
-## 📄 Documents Générés
+## 🖥️ Couverture par système
 
-### Rapport HTML Local
-- **Nom** : `system-info-report_{hostname}_{mac}_{timestamp}.html`
-- **Contenu** : Tous les champs collectés (200+ logiciels max)
-- **Stockage** : Répertoire courant (ou variable d'env REPORT_DIR)
-- **Badges** : Indique champs "API ✓" vs "Non stocké"
+| Donnée | Windows | macOS | Linux |
+|---|:---:|:---:|:---:|
+| Identification, OS, CPU, RAM, disques | ✅ | ✅ | ✅ |
+| Carte mère / châssis | ✅ | — | ✅ (`/sys/class/dmi`) |
+| Barrettes mémoire par slot | ✅ | ✅ | ⚠️ root requis |
+| Écrans | ✅ (EDID) | ✅ | ⚠️ nom du connecteur seul |
+| Imprimantes | ✅ | — | ✅ (CUPS) |
+| Usure disque / SMART détaillé | ✅ | — | ⚠️ type seul (`lsblk`) |
+| Usure batterie | ✅ | ✅ | — |
+| Licences / activation | ✅ | — | — |
+| Correctifs | ✅ | — | — |
+| Chiffrement | ✅ BitLocker | ✅ FileVault | — |
+| Pare-feu | ✅ | ✅ | — |
+| TPM / Secure Boot | ✅ | — | — |
+| Ports en écoute | ✅ | — | ✅ (`ss`) |
+| Comptes locaux | ✅ | ✅ | ✅ |
+| Logiciels (nom+version+éditeur) | ✅ | ⚠️ nom seul | ✅ dpkg/rpm/pacman |
 
-### Document ParcInfo
-- **Table** : `documents_appareils`
-- **Type** : `rapport_html`
-- **Nom** : `Rapport Système - {timestamp}`
-- **Description** : "Rapport HTML complet collecté par système-info-collector"
-- **Contenu** : `contenu_blob` (HTML text)
-- **Lié à** : Appareil créé/mis à jour (appareil_id)
+---
+
+## ⚙️ Performance
+
+La collecte Windows tient en **8 appels PowerShell groupés** (~15-20 s au total)
+plutôt qu'un appel par donnée. Chaque bloc est protégé par son propre `try/catch`
+côté PowerShell **et** côté Python : une source indisponible (module absent,
+privilège manquant, édition Windows différente) ne fait jamais échouer les autres.
+
+Point d'attention : `SoftwareLicensingProduct` doit impérativement être interrogé
+avec un filtre WQL (`PartialProductKey IS NOT NULL`). Sans filtre, l'énumération
+parcourt plusieurs centaines d'entrées et dépasse 30 s à elle seule.
+
+---
+
+## 🚫 Champs volontairement non collectés
+
+| Champ BD | Raison |
+|---|---|
+| `utilisateur`, `service`, `localisation` | Données métier, non détectables |
+| `date_achat`, `prix_achat`, `fournisseur`, `numero_commande` | Historique d'achat |
+| `duree_garantie`, `date_fin_garantie` | Métadonnées contractuelles |
+| `user_password`, `admin_password`, `anydesk_password` | **Sécurité — jamais collecté** |
 
 ---
 
@@ -197,34 +221,36 @@ Les champs suivants **existent** dans la table `appareils` mais ne sont **pas re
 
 ### CLI
 ```bash
-# Collecter + envoyer + générer rapport + uploader
+# Collecter + envoyer + générer le rapport + joindre le PDF
 python system-info-collector.py --server http://parcinfo.local:3456 --client-id 1
 
-# Mode silencieux (rapports locaux seulement)
-python system-info-collector.py --quiet
+# Collecter et générer le rapport sans rien envoyer
+python system-info-collector.py --no-send
+
+# Mode silencieux
+python system-info-collector.py --quiet --client-id 1
 ```
 
 ### GUI
 ```bash
-# Interface graphique interactive
 python system-info-collector-gui.py --server http://parcinfo.local:3456
-
-# Sélectionner client → affiche rapport preview → envoyer → documents créés
 ```
+Sélection du client → aperçu des données → envoi → périphériques et rapport créés.
+
+> Lancer de préférence en administrateur (voir section Privilèges).
 
 ---
 
-## 📞 Support
+## ➕ Ajouter un champ
 
-Pour ajouter des champs :
-1. Vérifier disponibilité dans la table `appareils`
-2. Implémenter collection dans les 3 fonctions OS (Windows/macOS/Linux)
-3. Ajouter au `get_api_payload()` pour l'API
-4. Inclure dans rapport HTML
-5. Tester sur les 3 OS
+1. Collecter dans `collector_core.py` (fonction `_win_*` / `get_system_info_mac` /
+   `get_system_info_linux`) — un seul endroit, les deux collecteurs en héritent
+2. L'afficher dans `build_summary_lines()` (console + aperçu GUI)
+3. L'ajouter au rapport PDF dans `generate_pdf_report()`
+4. Si le champ mérite une colonne dédiée : l'ajouter à `get_api_payload()`,
+   à la migration dans `init_db()` et à `/api/device-info`
+   — sinon il part déjà dans `system_report` et s'affiche via `fiche_systeme.html`
 
 ---
 
-**Dernière mise à jour** : 2026-08-03
-**Version Collecteur** : v2.1
-**Version ParcInfo** : v2.6.24+
+**Dernière mise à jour** : 2026-08-08

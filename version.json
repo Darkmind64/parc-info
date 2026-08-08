@@ -10,12 +10,25 @@
     "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Correctif de sécurité majeur : 109 routes étaient accessibles sans authentification",
+    "new_features": "Correctif de sécurité majeur (109 routes accessibles sans authentification) et collecteur système à parité Belarc Advisor avec fiche système complète dans l'interface web",
     "improvements": [
       "SECURITY: 105 routes de app.py et 4 routes de app_update_routes.py n'avaient pas @login_required - seules 58 des 170 routes étaient protégées. Un visiteur non authentifié pouvait lire ET modifier les données du premier client de la base (get_client_id() retourne le premier client quand la session est vide).",
       "SECURITY: étaient notamment exposés - les documents joints (rapports système, factures, contrats) en consultation/téléchargement/upload/suppression, /api/identifiant/<id>/mdp qui déchiffre et renvoie un mot de passe en clair, le CRUD complet appareils/périphériques/contrats/services/utilisateurs/clients, l'export global (/export/global.zip) et l'import global, l'administration des utilisateurs et le partage de client.",
       "SECURITY: /api/updates/install permettait à n'importe qui sur le réseau de déclencher l'installation d'une mise à jour (vecteur d'exécution de code à distance).",
-      "Les endpoints volontairement publics restent inchangés : /login, /logout, /api/clients-public, /api/device-info, /api/device-info/upload-report et les deux /download/system-info-collector* utilisés par le collecteur."
+      "Les endpoints volontairement publics restent inchangés : /login, /logout, /api/clients-public, /api/device-info, /api/device-info/upload-report et les deux /download/system-info-collector* utilisés par le collecteur.",
+      "NEW: Shared collector_core.py - the CLI and GUI collectors were duplicated copies that had already drifted apart (the GUI had silently lost pkgutil/pacman software detection)",
+      "NEW: Memory modules per slot (capacity, type, speed, manufacturer, part number, serial) plus slots used/free and max capacity - answers 'can this machine be upgraded?' without opening it",
+      "NEW: Motherboard, chassis type, asset tag, detailed CPU (physical/logical cores, cache, sockets, virtualization) and GPU (VRAM read from the registry, driver version/date, resolution)",
+      "NEW: Windows/Office licences with activation status, channel, partial key, and the OEM key embedded in firmware",
+      "NEW: Disk wear and reliability (power-on hours, SSD wear %, temperature, error counts) - the previous SMART 'Healthy' status warned of nothing",
+      "NEW: Real battery health (design vs actual capacity, wear %, cycle count) instead of just the charge level",
+      "NEW: Monitors (model, serial, year) and printers are collected and automatically created as peripherals, linked to the device - virtual printers (Print to PDF, XPS, fax) are excluded",
+      "NEW: Full Windows hotfix list, OS install date, registered owner, timezone, logged-on user, hypervisor detection",
+      "NEW: 'Fiche système' page (/appareil/<id>/fiche-systeme) - everything the collector reports is now stored server-side in rapport_systeme_json and viewable in the web UI, including the software list that was written to the DB but displayed nowhere",
+      "NEW: The collector now fills nom_dns, ports_ouverts and type_appareil (deduced from the SMBIOS chassis) - devices were all created as generic 'PC'",
+      "NEW: macOS and Linux collection brought closer to Windows (memory modules, monitors, printers, listening ports, local accounts, disk type, battery cycles, distribution name)",
+      "NEW: The collector reports whether it ran elevated - an empty TPM/BitLocker/SMART field is no longer indistinguishable from an inaccessible one",
+      "CHANGED: /download/system-info-collector now serves a ZIP (entry script + collector_core.py) since the collector is no longer a single self-contained file"
     ]
   },
   "checksums": {

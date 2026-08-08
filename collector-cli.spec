@@ -10,14 +10,17 @@ from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
-hiddenimports = ['json', 'urllib', 'socket', 'subprocess', 'platform', 'uuid', 'ctypes']
+# collector_core porte toute la logique de collecte partagée avec le GUI :
+# sans lui dans hiddenimports, l'exécutable démarre puis échoue à l'import
+hiddenimports = ['collector_core', 'json', 'urllib', 'socket', 'subprocess',
+                 'platform', 'uuid', 'ctypes']
 if sys.platform == 'win32':
     hiddenimports += ['winreg']
 hiddenimports += collect_submodules('reportlab')
 
 a = Analysis(
     ['system-info-collector.py'],
-    pathex=[],
+    pathex=[str(Path(SPECPATH))],
     binaries=[],
     datas=[],
     hiddenimports=hiddenimports,
