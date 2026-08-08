@@ -78,6 +78,13 @@
     font-family: Consolas, monospace; font-size: .66rem; color: var(--text-secondary);
     margin-top: .35rem; padding-top: .3rem; border-top: 1px dashed var(--border);
 }
+/* Volumes logiques : une barre par disque, occupé vs libre en un coup d'œil */
+.fs-volumes { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: .7rem 1.2rem; }
+.fs-volume { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 4px; padding: .5rem .7rem; }
+.fs-volume-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .2rem; }
+.fs-volume-nom { font-family: Consolas, monospace; font-weight: 700; font-size: .85rem; }
+.fs-volume-pct { font-weight: 700; font-size: .78rem; }
+.fs-volume-detail { font-size: .7rem; color: var(--text-secondary); margin-top: .3rem; }
 .fs-key {
     font-family: Consolas, monospace; font-size: .8rem; font-weight: 700; letter-spacing: .05em;
     background: var(--bg-secondary); border: 1px solid var(--border);
@@ -296,10 +303,31 @@
     </div>
     {% endif %}
 
-    {% if rapport.disk_drives %}
-    <div style="margin-top:.8rem;">
-        <div class="fs-label" style="font-size:.75rem;margin-bottom:.3rem;">Volumes logiques</div>
-        {% for d in rapport.disk_drives %}<div class="fs-value fs-mono">• {{ d }}</div>{% endfor %}
+    {% if disques %}
+    <div style="margin-top:.9rem;">
+        <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">Volumes logiques</div>
+        <div class="fs-volumes">
+            {% for v in disques %}
+            {% if v.brut %}
+            {# Format non reconnu (macOS, Linux) : ligne restituée telle quelle #}
+            <div class="fs-value fs-mono">• {{ v.brut }}</div>
+            {% else %}
+            {% set couleur = 'var(--accent-red)' if v.level == 'danger'
+                        else 'var(--accent-orange)' if v.level == 'warn'
+                        else 'var(--accent-green)' %}
+            <div class="fs-volume">
+                <div class="fs-volume-head">
+                    <span class="fs-volume-nom">{{ v.libelle }}</span>
+                    <span class="fs-volume-pct" style="color:{{ couleur }};">{{ v.pct }} %</span>
+                </div>
+                <div class="fs-bar"><span style="width:{{ v.pct }}%;background:{{ couleur }};"></span></div>
+                <div class="fs-volume-detail">
+                    {{ v.utilise }} GB utilisés · <strong>{{ v.libre }} GB libres</strong> · {{ v.total }} GB au total
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
 

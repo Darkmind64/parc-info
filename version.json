@@ -1,26 +1,20 @@
 {
-  "version": "2.6.32",
-  "release_date": "2026-08-08T19:00:00.000000",
+  "version": "2.6.33",
+  "release_date": "2026-08-08T21:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.32/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.32/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.32",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.32/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.32/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.33/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.33/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.33",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.33/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.33/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Inventaire USB automatique, fiche système graphique et clés de licence vérifiées",
+    "new_features": "Barre d'occupation par volume dans la fiche système",
     "improvements": [
-      "NEW: Les périphériques USB connectés sont détectés et créés automatiquement dans la section Périphériques, aux côtés des écrans et imprimantes déjà gérés. Regroupement des nœuds PnP : une imprimante multifonction ne crée plus quatre fiches.",
-      "NEW: L'utilisateur affecté à la fiche appareil est reporté sur toutes les fiches périphériques rattachées — écrans, imprimantes et USB — à la création comme lors d'une réaffectation, sans jamais écraser une affectation manuelle.",
-      "NEW: Les clés de licence complètes alimentent la section « Licences logiciels » de la fiche appareil.",
-      "NEW: Balayage de toutes les sources de clé produit (BackupProductKeyDefault, clé OEM du firmware, décodage DigitalProductId) et appairage sur les 5 derniers caractères exposés par Windows, qui certifie que la clé récupérée est bien celle en service.",
-      "NEW: La fiche système HTML et le PDF passent d'un listing monospace à un rendu graphique : bandeau de points d'attention, vignettes à bargraphs (stockage, mémoire réellement occupée, batterie, uptime), pastilles de sécurité, ports en écoute sous forme de cartes colorées par sensibilité.",
-      "FIXED: La sortie PowerShell était décodée avec l'encodage local (cp1252) au lieu d'UTF-8 — tout libellé accentué remonté par la collecte était silencieusement corrompu (périphériques, comptes utilisateurs, adaptateurs réseau, fabricants).",
-      "FIXED: La validation de format des clés rejetait celles contenant un N, alors que l'algorithme Windows 8+ en insère un par construction.",
-      "FIXED: .claude/launch.json déclarait le port 5000 alors que app.py écoute sur 3456.",
-      "Limite assumée : Windows en licence numérique, Office Click-to-Run/365 et l'activation KMS ne stockent aucune clé sur la machine. Le rapport l'indique au lieu d'afficher une clé factice."
+      "NEW: Chaque volume logique dispose de sa propre barre d'occupation dans la fiche système, avec pourcentage, espace libre et code couleur (vert / orange au-delà de 75 % / rouge au-delà de 90 %). La capacité totale ne donnait qu'une moyenne : un disque saturé parmi plusieurs passait inaperçu.",
+      "FIXED: Le workflow docker-build-push, réactivé par erreur, faisait double emploi avec le job Docker de build-release.yml — deux publications concurrentes de la même image sur le même tag, dont une en mono-architecture. Il est supprimé, build-release.yml reste l'unique publieur (amd64 + arm64).",
+      "CI: Toutes les actions GitHub passent aux versions majeures courantes (checkout v7, setup-python v7, upload/download-artifact v7/v8, docker/* v4 et v7, action-gh-release v3). Les précédentes ciblaient Node.js 20, déprécié et forcé en Node 24 par les runners."
     ]
   },
   "checksums": {
@@ -31,5 +25,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.32"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.33"
 }

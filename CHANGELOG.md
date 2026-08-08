@@ -1,5 +1,35 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.33] - 2026-08-08 💾
+
+### 💾 UNE BARRE PAR VOLUME
+- ✅ Chaque volume logique a désormais sa propre barre d'occupation dans la
+  fiche système : pourcentage, espace libre mis en avant, et code couleur
+  (vert, orange au-delà de 75 %, rouge au-delà de 90 %)
+- ✅ La capacité totale ne donnait qu'une moyenne — sur une machine à plusieurs
+  disques, un volume saturé restait invisible derrière un total confortable
+- ✅ Les lignes dont le format n'est pas reconnu (macOS, Linux) restent
+  affichées telles quelles plutôt que de se voir attribuer un pourcentage
+  inventé. Le découpage réutilise `_parse_drive` de `collector_core`, comme le
+  PDF
+
+### 🔧 CORRECTION CI
+- ✅ **`docker-build-push.yml` supprimé** : réactivé par erreur à la version
+  précédente, il faisait double emploi avec le job `docker` de
+  `build-release.yml`. Les deux workflows publiaient la même image sur le même
+  tag en même temps, l'un en multi-architecture (amd64 + arm64), l'autre en
+  amd64 seul — le résultat dépendait de qui finissait en dernier. C'est
+  précisément pour cela qu'il avait été désactivé en 9fcc288.
+  `build-release.yml` redevient l'unique publieur
+- ✅ Toutes les actions GitHub passent aux versions majeures courantes :
+  `checkout` v7, `setup-python` v7, `upload-artifact` v7,
+  `download-artifact` v8, `docker/setup-buildx-action` v4,
+  `docker/login-action` v4, `docker/build-push-action` v7,
+  `action-gh-release` v3. Les précédentes ciblaient Node.js 20, déprécié et
+  déjà forcé en Node 24 par les runners
+
+---
+
 ## [2.6.32] - 2026-08-08 🔌
 
 ### 🖱️ INVENTAIRE USB AUTOMATIQUE
