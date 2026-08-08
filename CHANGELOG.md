@@ -1,5 +1,44 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.35] - 2026-08-08 🖨️
+
+### 🖨️ IMPRIMANTES TYPÉES
+- ✅ Distinction **physique / virtuelle** et **USB / Réseau / Local**, en badges,
+  les physiques remontées en tête
+- ✅ Le raccordement est déduit du **nom du port**, pas du drapeau `Network` de
+  `Win32_Printer` : sur la machine de test, deux imprimantes WSD parfaitement
+  réseau y sont rapportées comme non-réseau. `USB001` et `ESDPRT001` (port Epson)
+  valent USB, `WSD-…`, `IP_…`, une IP nue ou un chemin UNC valent Réseau
+- ✅ 4 imprimantes physiques sur 11 sur la machine de test — les 7 virtuelles
+  (PDF, XPS, fax, OneNote, AnyDesk) restent listées mais jamais inventoriées
+
+### 🔌 PÉRIPHÉRIQUES USB DÉTAILLÉS
+- ✅ Marque, **modèle**, date de première connexion, version et date du pilote
+- ✅ Le modèle vient de `BusReportedDeviceDesc`, le nom que le périphérique
+  déclare lui-même : « DCP-195C » au lieu de « Dispositif de stockage de masse
+  USB », « CP2102 USB to UART Bridge Controller » au lieu du libellé du pilote
+- ✅ Ce nom déclaré **améliore aussi la classification** : une souris Logitech
+  M500s qui remontait en « Autre » sous le libellé « Périphérique d'entrée USB »
+  est désormais rangée en « Souris » — Windows ne disait « Mouse » que là
+- ✅ Coût mesuré : ~14 s pour 40 nœuds, en un seul appel de propriétés par nœud
+
+### 🛡️ ÉTAT RÉEL DE L'ANTIVIRUS
+- ✅ Badge **Actif / Inactif / Actif, signatures obsolètes**, par décodage du
+  `productState` du Centre de sécurité Windows (protection temps réel et
+  fraîcheur des signatures)
+- ✅ Jusqu'ici seul le nom du produit était affiché : un antivirus installé mais
+  **désactivé** se présentait exactement comme un antivirus opérationnel
+
+### 🎨 LISIBILITÉ
+- ✅ Le badge de service des ports TCP passe **à droite du numéro** : carte plus
+  compacte, port et service se lisent d'un bloc
+- ✅ Les mises à jour Windows ordinaires prennent un **jaune sourd** qui ne
+  concurrence plus le rouge des correctifs de sécurité
+- ✅ Les tableaux larges (imprimantes, USB) défilent dans leur propre conteneur
+  au lieu de pousser la page entière en débordement horizontal
+
+---
+
 ## [2.6.34] - 2026-08-08 🏷️
 
 ### 🏷️ BADGES ET MISE EN ÉVIDENCE DANS LA FICHE SYSTÈME

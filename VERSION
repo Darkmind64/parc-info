@@ -1,10 +1,10 @@
-PARCINFO_VERSION=2.6.34
+PARCINFO_VERSION=2.6.35
 RELEASE_DATE=2026-08-08
-BUILD_NUMBER=2026080805
+BUILD_NUMBER=2026080806
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.6.34 - Badges pare-feu et comptes, cartes physiques
+# Version 2.6.35 - Imprimantes typees, USB detaille, etat antivirus
 # Balayage de toutes les sources de clé produit, appairage sur les 5
 # derniers caractères, report automatique dans la fiche appareil
 # Date: 8 août 2026
