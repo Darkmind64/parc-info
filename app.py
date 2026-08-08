@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, make_response, send_file
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, make_response, send_file, abort
 from werkzeug.utils import secure_filename
 from datetime import datetime, date, timedelta, timezone
 import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time, io
@@ -1492,11 +1492,14 @@ def init_db():
         logger.exception("Anti-collision ID (sqlite_sequence) - échec non bloquant")
 
     # Migration : colonnes pour système auto-remplissage (v2.6.24)
+    # rapport_systeme_json (v2.6.30) stocke le snapshot complet du collecteur :
+    # sans lui, 90 % des données collectées n'existaient que dans le PDF joint
     cols_app3 = [r[1] for r in conn.execute('PRAGMA table_info(appareils)').fetchall()]
     for col, defval in [
         ('antivirus', "TEXT DEFAULT ''"),
         ('logiciels_installes_json', "TEXT DEFAULT '[]'"),
         ('derniere_synchro', "TEXT DEFAULT NULL"),
+        ('rapport_systeme_json', "TEXT DEFAULT ''"),
     ]:
         if col not in cols_app3:
             try:
@@ -3885,6 +3888,42 @@ def api_get_mdp(id):
 
 # ─── DOCUMENTS APPAREILS ─────────────────────────────────────────────────────
 
+@app.route('/appareil/<int:id>/fiche-systeme')
+@login_required
+def fiche_systeme_appareil(id):
+    """Affiche le snapshot complet remonté par le collecteur système.
+
+    Le collecteur remonte bien plus que les colonnes dédiées de `appareils`
+    (mémoire par slot, licences, usure SSD, écrans, correctifs…) : tout cela
+    est stocké tel quel dans rapport_systeme_json et rendu ici.
+    """
+    cid = get_client_id()
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    a = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    conn.close()
+
+    if not a:
+        abort(404)
+
+    def _parse(raw, fallback):
+        if not raw:
+            return fallback
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return fallback
+
+    rapport = _parse(a.get('rapport_systeme_json'), {})
+    logiciels = _parse(a.get('logiciels_installes_json'), [])
+    # Les collectes antérieures à la v3 envoyaient une liste de chaînes
+    logiciels = [s if isinstance(s, dict) else {'name': str(s)} for s in logiciels]
+
+    return render_template('fiche_systeme.html', appareil=a, rapport=rapport,
+                           logiciels=logiciels, client=client, clients=get_clients(),
+                           client_actif_id=cid)
+
+
 @app.route('/appareil/<int:id>/documents')
 def documents_appareil(id):
     cid = get_client_id()
@@ -5271,6 +5310,95 @@ def importer_scan():
     return jsonify({"importes":importes,"total":len(items)})
 
 
+def _sync_collector_peripherals(conn, cid, appareil_id, monitors, printers):
+    """Crée dans l'inventaire les écrans et imprimantes remontés par le collecteur.
+
+    Idempotent : chaque collecte relance la même liste, il ne doit donc rien se
+    créer en double. La clé de dédoublonnage est le numéro de série quand il
+    existe (les écrans EDID en fournissent un), sinon le couple marque/modèle
+    pour ce client.
+
+    Retourne le nombre de périphériques réellement créés.
+    """
+    created = 0
+    now = datetime.utcnow().isoformat()
+
+    def upsert(categorie, marque, modele, numero_serie, description):
+        nonlocal created
+        marque, modele = (marque or '').strip(), (modele or '').strip()
+        numero_serie = (numero_serie or '').strip()
+        if not modele and not marque:
+            return
+
+        if numero_serie:
+            existing = conn.execute(
+                'SELECT id FROM peripheriques WHERE client_id=? AND categorie=? AND numero_serie=?',
+                (cid, categorie, numero_serie)).fetchone()
+        else:
+            existing = conn.execute(
+                'SELECT id FROM peripheriques WHERE client_id=? AND categorie=? AND marque=? AND modele=?',
+                (cid, categorie, marque, modele)).fetchone()
+
+        if existing:
+            pid = existing[0]
+        else:
+            conn.execute(
+                '''INSERT INTO peripheriques
+                   (client_id, categorie, marque, modele, numero_serie, description,
+                    statut, date_creation, date_maj)
+                   VALUES (?,?,?,?,?,?,?,?,?)''',
+                (cid, categorie, marque, modele, numero_serie, description, 'actif', now, now))
+            pid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            created += 1
+            log_history(conn, cid, 'peripherique', pid,
+                        f"{marque} {modele}".strip() or categorie,
+                        'Création (collecteur système)',
+                        {'source': 'system-info-collector', 'appareil_id': appareil_id})
+
+        # Rattachement à la machine, que le périphérique soit neuf ou déjà connu
+        conn.execute(
+            'INSERT OR IGNORE INTO peripheriques_appareils (peripherique_id, appareil_id) VALUES (?,?)',
+            (pid, appareil_id))
+
+    try:
+        for mon in monitors[:20]:
+            if not isinstance(mon, dict):
+                continue
+            # Un EDID incomplet (dummy HDMI, KVM, splitter) ne donne qu'un
+            # fabricant illisible : sans modèle, la fiche n'a aucune valeur
+            if not (mon.get('model') or '').strip():
+                continue
+            year = mon.get('year')
+            upsert('Ecran', mon.get('manufacturer'), mon.get('model'),
+                   mon.get('serial_number'),
+                   f"Détecté automatiquement{f' — année {year}' if year else ''}")
+
+        for pr in printers[:20]:
+            if not isinstance(pr, dict):
+                continue
+            # Print to PDF, XPS, fax, OneNote… ne sont pas du matériel
+            if pr.get('virtual'):
+                continue
+            # Win32_Printer ne sépare pas marque et modèle : le nom porte tout
+            details = []
+            if pr.get('driver'):
+                details.append(f"Pilote : {pr['driver']}")
+            if pr.get('port'):
+                details.append(f"Port : {pr['port']}")
+            if pr.get('network'):
+                details.append('Imprimante réseau')
+            upsert('Imprimante', '', pr.get('name'), '',
+                   ' — '.join(['Détectée automatiquement'] + details))
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        app.logger.exception("Création des périphériques depuis le collecteur")
+        return 0
+
+    return created
+
+
 @app.route('/api/device-info', methods=['POST'])
 def api_device_info():
     """
@@ -5398,10 +5526,31 @@ def api_device_info():
         disk_gb = data.get('disk_total_gb', '')
         antivirus = data.get('antivirus', '')
         gpu = data.get('gpu', '')
+        dns_name = (data.get('dns_name') or '').strip()
+        device_type = (data.get('device_type') or '').strip()
+
+        # Ports TCP en écoute → colonne ports_ouverts (format identique au scan réseau)
+        open_ports = data.get('open_ports') or []
+        ports_str = ', '.join(str(p) for p in open_ports[:200]) if open_ports else ''
 
         # Logiciels (liste complète - garde-fou à 2000 entrées contre un payload aberrant)
         software_list = data.get('installed_software', [])
         software_json = json.dumps(software_list[:2000]) if software_list else ''
+
+        # Snapshot complet du collecteur (mémoire par slot, licences, SMART, écrans…)
+        # Plafonné à 1 Mo : au-delà, c'est un payload aberrant, pas un inventaire
+        system_report = data.get('system_report') or {}
+        system_report_json = ''
+        if system_report:
+            try:
+                candidate = json.dumps(system_report, ensure_ascii=False)
+                if len(candidate) <= 1_000_000:
+                    system_report_json = candidate
+                else:
+                    app.logger.warning(
+                        f"system_report ignoré ({len(candidate)} octets > 1 Mo) pour {hostname or mac_address}")
+            except (TypeError, ValueError):
+                app.logger.warning("system_report non sérialisable - ignoré")
 
         now = datetime.utcnow().isoformat()
         conn = get_db()
@@ -5493,9 +5642,28 @@ def api_device_info():
                 updates.append('carte_graphique=?')
                 params.append(gpu)
 
+            if dns_name:
+                updates.append('nom_dns=?')
+                params.append(dns_name)
+
+            if ports_str:
+                updates.append('ports_ouverts=?')
+                params.append(ports_str)
+
+            # Le type est déduit du châssis SMBIOS. On ne l'écrase que s'il est
+            # vide ou resté sur le 'PC' générique posé par les anciennes versions :
+            # un type corrigé à la main par un technicien doit primer.
+            if device_type and (old_data.get('type_appareil') or 'PC') == 'PC':
+                updates.append('type_appareil=?')
+                params.append(device_type)
+
             if software_json:
                 updates.append('logiciels_installes_json=?')
                 params.append(software_json)
+
+            if system_report_json:
+                updates.append('rapport_systeme_json=?')
+                params.append(system_report_json)
 
             # Toujours mettre à jour la date de dernière synchronisation
             updates.append('derniere_synchro=?')
@@ -5518,13 +5686,15 @@ def api_device_info():
             # Création
             conn.execute(
                 '''INSERT INTO appareils
-                   (client_id, nom_machine, adresse_ip, adresse_mac, marque, modele, numero_serie,
-                    os, version_os, ram, cpu, stockage, antivirus, carte_graphique, logiciels_installes_json,
+                   (client_id, nom_machine, nom_dns, adresse_ip, adresse_mac, marque, modele, numero_serie,
+                    os, version_os, ram, cpu, stockage, antivirus, carte_graphique, ports_ouverts,
+                    logiciels_installes_json, rapport_systeme_json,
                     type_appareil, statut, decouvert_scan, en_ligne, derniere_synchro, date_creation, date_maj)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (cid, device_name, ip_address, mac_address, brand, model, serial,
-                 os_name, os_version, str(ram_gb) if ram_gb else '', cpu, str(disk_gb) if disk_gb else '', antivirus, gpu, software_json,
-                 'PC', 'actif', 0, 1, now, now, now)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                (cid, device_name, dns_name, ip_address, mac_address, brand, model, serial,
+                 os_name, os_version, str(ram_gb) if ram_gb else '', cpu, str(disk_gb) if disk_gb else '',
+                 antivirus, gpu, ports_str, software_json, system_report_json,
+                 device_type or 'PC', 'actif', 0, 1, now, now, now)
             )
             app_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
 
@@ -5537,6 +5707,11 @@ def api_device_info():
             message = f"Nouvel appareil créé (ID: {app_id})"
             action = 'created'
 
+        # Écrans et imprimantes détectés → inventaire des périphériques
+        peripherals_created = _sync_collector_peripherals(
+            conn, cid, app_id, data.get('monitors') or [], data.get('printers') or []
+        )
+
         conn.close()
 
         app.logger.info(f"Device info received: {device_name} ({action}) - MAC: {mac_address}, IP: {ip_address}")
@@ -5545,10 +5720,12 @@ def api_device_info():
             "status": "success",
             "action": action,
             "device_id": app_id,
+            "client_id": cid,
             "message": message,
             "mac_address": mac_address,
             "ip_address": ip_address,
-            "hostname": hostname
+            "hostname": hostname,
+            "peripherals_created": peripherals_created
         }), 200
 
     except Exception as e:
@@ -5704,29 +5881,53 @@ def api_device_info_upload_report():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+def _send_collector_bundle(entry_script, archive_name):
+    """Renvoie une archive ZIP contenant le script d'entrée et collector_core.py.
+
+    Les collecteurs ne sont plus des fichiers autonomes : toute la logique de
+    collecte vit dans collector_core.py, partagé par les deux. Servir le seul
+    script d'entrée livrerait un collecteur qui échoue à l'import.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    files = [entry_script, 'collector_core.py']
+
+    missing = [f for f in files if not os.path.exists(os.path.join(base_dir, f))]
+    if missing:
+        return jsonify({"error": f"Collecteur incomplet, fichier(s) manquant(s): {', '.join(missing)}"}), 404
+
+    try:
+        import zipfile
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for name in files:
+                archive.write(os.path.join(base_dir, name), arcname=name)
+            archive.writestr('LISEZMOI.txt', (
+                "Collecteur systeme ParcInfo\r\n"
+                "==========================\r\n\r\n"
+                "Decompressez les deux fichiers dans le MEME dossier, puis lancez :\r\n"
+                f"    python {entry_script} --server <URL> --client-id <ID>\r\n\r\n"
+                "collector_core.py contient la logique de collecte : il doit rester\r\n"
+                "a cote du script principal.\r\n\r\n"
+                "Lancez de preference en administrateur : sans elevation, le SMART\r\n"
+                "detaille, le TPM, BitLocker et la cle OEM ne sont pas lisibles.\r\n"
+            ))
+        buffer.seek(0)
+        return send_file(buffer, as_attachment=True, download_name=archive_name,
+                         mimetype='application/zip')
+    except Exception as e:
+        app.logger.exception(f"Error building collector bundle for {entry_script}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/download/system-info-collector', methods=['GET'])
 def download_collector():
     """
     Endpoint pour télécharger le collecteur CLI (ligne de commande).
 
     Utilisation :
-    - /download/system-info-collector → télécharge le script Python CLI
+    - /download/system-info-collector → archive ZIP (script CLI + collector_core.py)
     """
-    collector_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'system-info-collector.py')
-
-    if not os.path.exists(collector_path):
-        return jsonify({"error": "Collecteur non trouvé"}), 404
-
-    try:
-        return send_file(
-            collector_path,
-            as_attachment=True,
-            download_name='system-info-collector.py',
-            mimetype='text/plain'
-        )
-    except Exception as e:
-        app.logger.exception("Error downloading collector")
-        return jsonify({"error": str(e)}), 500
+    return _send_collector_bundle('system-info-collector.py', 'system-info-collector.zip')
 
 
 @app.route('/download/system-info-collector-gui', methods=['GET'])
@@ -5735,23 +5936,9 @@ def download_collector_gui():
     Endpoint pour télécharger le collecteur GUI (interface graphique).
 
     Utilisation :
-    - /download/system-info-collector-gui → télécharge le script Python avec GUI
+    - /download/system-info-collector-gui → archive ZIP (script GUI + collector_core.py)
     """
-    collector_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'system-info-collector-gui.py')
-
-    if not os.path.exists(collector_path):
-        return jsonify({"error": "Collecteur GUI non trouvé"}), 404
-
-    try:
-        return send_file(
-            collector_path,
-            as_attachment=True,
-            download_name='system-info-collector-gui.py',
-            mimetype='text/plain'
-        )
-    except Exception as e:
-        app.logger.exception("Error downloading collector GUI")
-        return jsonify({"error": str(e)}), 500
+    return _send_collector_bundle('system-info-collector-gui.py', 'system-info-collector-gui.zip')
 
 
 # --- PERIPHERIQUES -----------------------------------------------------------

@@ -1,29 +1,30 @@
 {
-  "version": "2.6.30",
-  "release_date": "2026-08-08T09:30:00.000000",
+  "version": "2.6.31",
+  "release_date": "2026-08-08T14:30:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.30",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.31",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Correction majeure : les rapports du collecteur ne se synchronisaient jamais entre machines",
+    "new_features": "Collecteur système : parité Belarc Advisor — mémoire par slot, carte mère, licences, usure SSD/batterie, écrans, imprimantes, et fiche système complète dans l'interface web",
     "improvements": [
-      "FIXED: Collector reports were stored only as a DB blob with no file on disk - since blobs are excluded from row replication and the file transfer reads from disk, these documents could NEVER sync. Other machines saw the entry but got 'Fichier introuvable'. Reports are now written to disk like every other upload route.",
-      "NEW: Existing collector reports stuck in that state are automatically restored to disk on the next sync cycle - no manual action needed.",
-      "FIXED: Auto-updater was completely non-functional since its introduction (wrong repo URL, config path type error, platform key mismatch, NSIS-style install on a portable exe)",
-      "FIXED: Cross-machine AUTOINCREMENT id collisions could silently overwrite/lose synced records (documents, devices, etc.) when two installations both created new rows independently",
-      "NEW: Sync journal page (/journal-synchronisation) - see database and file sync activity, including pending/orphaned files, without reading server logs",
-      "FIXED: Windows executable was unreachable from the LAN (bound to 127.0.0.1 only) - now binds 0.0.0.0",
-      "FIXED: mDNS (parcinfo.local) and Windows Firewall rule now set up automatically on the packaged exe",
-      "FIXED: Uploads/documents sync thread never started on the packaged exe",
-      "FIXED: documents_interventions and baie_photos were missing the columns needed to sync at all",
-      "FIXED: OS name/RAM sync to device sheet (dropdown fields replaced with free-text + suggestions)",
-      "System info collector: removed WMI dependency (native Windows APIs), full software inventory with version/publisher/install date, BitLocker/firewall/TPM/Secure Boot, GPU, SMART disk health, uptime, domain, battery",
-      "System report is now a proper PDF (was HTML) with all collected data"
+      "NEW: Shared collector_core.py - the CLI and GUI collectors were duplicated copies that had already drifted apart (the GUI had silently lost pkgutil/pacman software detection)",
+      "NEW: Memory modules per slot (capacity, type, speed, manufacturer, part number, serial) plus slots used/free and max capacity - answers 'can this machine be upgraded?' without opening it",
+      "NEW: Motherboard, chassis type, asset tag, detailed CPU (physical/logical cores, cache, sockets, virtualization) and GPU (VRAM read from the registry, driver version/date, resolution)",
+      "NEW: Windows/Office licences with activation status, channel, partial key, and the OEM key embedded in firmware",
+      "NEW: Disk wear and reliability (power-on hours, SSD wear %, temperature, error counts) - the previous SMART 'Healthy' status warned of nothing",
+      "NEW: Real battery health (design vs actual capacity, wear %, cycle count) instead of just the charge level",
+      "NEW: Monitors (model, serial, year) and printers are collected and automatically created as peripherals, linked to the device - virtual printers (Print to PDF, XPS, fax) are excluded",
+      "NEW: Full Windows hotfix list, OS install date, registered owner, timezone, logged-on user, hypervisor detection",
+      "NEW: 'Fiche système' page (/appareil/<id>/fiche-systeme) - everything the collector reports is now stored server-side in rapport_systeme_json and viewable in the web UI, including the software list that was written to the DB but displayed nowhere",
+      "NEW: The collector now fills nom_dns, ports_ouverts and type_appareil (deduced from the SMBIOS chassis) - devices were all created as generic 'PC'",
+      "NEW: macOS and Linux collection brought closer to Windows (memory modules, monitors, printers, listening ports, local accounts, disk type, battery cycles, distribution name)",
+      "NEW: The collector reports whether it ran elevated - an empty TPM/BitLocker/SMART field is no longer indistinguishable from an inaccessible one",
+      "CHANGED: /download/system-info-collector now serves a ZIP (entry script + collector_core.py) since the collector is no longer a single self-contained file"
     ]
   },
   "checksums": {
@@ -34,5 +35,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.30"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.31"
 }

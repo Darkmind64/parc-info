@@ -667,6 +667,12 @@ async function loadHistorique() {
         <button type="submit" class="btn btn-success">&#10003; {{ action }} l'appareil</button>
         <a href="/appareils" class="btn btn-primary">← Retour</a>
         {% if action == 'Modifier' and appareil and appareil.id %}
+        <a href="/appareil/{{ appareil.id }}/fiche-systeme" class="btn btn-primary"
+           title="Détail complet remonté par le collecteur système (mémoire, licences, SMART, logiciels…)">
+            🖥 Fiche système{% if appareil.derniere_synchro %} · {{ appareil.derniere_synchro[:10] }}{% endif %}
+        </a>
+        {% endif %}
+        {% if action == 'Modifier' and appareil and appareil.id %}
         <form method="POST" action="/appareil/{{ appareil.id }}/supprimer"
               onsubmit="return confirm('Supprimer « {{ appareil.nom_machine|e }} » ? Cette action est irréversible.')"
               style="margin:0;margin-left:auto;">
