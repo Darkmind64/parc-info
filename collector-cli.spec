@@ -11,6 +11,9 @@ from PyInstaller.utils.hooks import collect_submodules
 block_cipher = None
 
 hiddenimports = ['json', 'urllib', 'socket', 'subprocess', 'platform', 'uuid', 'ctypes']
+# Module partagé de collecte/rapport : déclaré explicitement pour ne pas
+# dépendre uniquement de la détection d'import par l'analyse PyInstaller.
+hiddenimports += ['collector_report']
 if sys.platform == 'win32':
     hiddenimports += ['winreg']
 hiddenimports += collect_submodules('reportlab')

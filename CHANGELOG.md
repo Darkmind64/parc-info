@@ -1,5 +1,94 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.32] - 2026-08-08 📊
+
+### ✨ FICHE SYSTÈME GRAPHIQUE
+
+Le rapport HTML et le PDF produits par le collecteur affichaient de simples
+tableaux clé/valeur. Ils comportent désormais :
+
+- ✅ **Bandeau « Points d'attention »** en tête : disque saturé (≥ 75 % et ≥ 90 %),
+  antivirus absent, pare-feu désactivé, Secure Boot, TPM, volume non chiffré,
+  batterie critique, ports sensibles en écoute, licence non activée, machine non
+  redémarrée depuis plus d'un mois
+- ✅ **Vignettes chiffrées avec bargraphs** : stockage, mémoire vive, batterie, uptime
+- ✅ **Pastilles de statut colorées** pour la sécurité et la conformité
+- ✅ **Barres d'occupation par disque logique**
+- ✅ Le rapport HTML était très en retard sur le PDF (ni sécurité, ni disques
+  physiques, ni batterie, ni adaptateurs réseau, ni comptes locaux) et annonçait
+  « 50 premiers envoyés » alors que la limite réelle est de 2000 : il est
+  désormais à parité
+
+### 🔌 PORTS EN ÉCOUTE, EN CARTES
+
+- ✅ Le collecteur relève les ports TCP en écoute (`Get-NetTCPConnection` sous
+  Windows, `ss`/`netstat`/`lsof` ailleurs) avec le processus propriétaire
+- ✅ Affichage en **cartes** : numéro, nom de service, description, processus,
+  couleur selon la sensibilité (Telnet/FTP/RDP/VNC en rouge, SMB/HTTP en orange,
+  SSH/HTTPS en vert)
+- ✅ Les ports de la plage dynamique (49152+) sont comptés mais pas détaillés :
+  attribués à la volée, ils changeaient à chaque redémarrage et occupaient deux
+  pages entières du PDF
+
+### 🖱️ INVENTAIRE AUTOMATIQUE DES PÉRIPHÉRIQUES USB
+
+- ✅ Les périphériques USB connectés sont détectés puis **créés automatiquement
+  dans la section Périphériques**, rattachés à la machine (colonne `appareil_id`
+  et table pivot `peripheriques_appareils`)
+- ✅ **L'utilisateur affecté à la fiche appareil est reporté sur les fiches
+  périphériques** — à la création comme lors d'une réaffectation ultérieure.
+  `appareils.utilisateur` étant du texte libre et `peripheriques.utilisateur_id`
+  une clé étrangère, le rapprochement se fait sur le nom dans les deux ordres
+  (« Jean Dupont » comme « Dupont Jean »), sans jamais créer d'utilisateur
+  fantôme si rien ne correspond
+- ✅ Une affectation saisie à la main sur un périphérique précis n'est jamais
+  écrasée par la propagation
+- ✅ **Regroupement des nœuds PnP** : Windows expose un périphérique physique sous
+  plusieurs nœuds (une imprimante multifonction remonte comme « composite » +
+  « stockage de masse » + « prise en charge d'impression »). Sans regroupement,
+  une seule imprimante aurait créé quatre périphériques
+- ✅ **Classification** vers les catégories existantes de ParcInfo (Clavier,
+  Souris, Webcam, Imprimante multifonction, Casque / Micro…), avec règle dédiée
+  impression + numérisation → multifonction
+- ✅ Hubs racine, contrôleurs et nœuds composites sont listés dans le rapport pour
+  information mais **ne sont pas créés** comme périphériques
+- ✅ **Idempotent** : une nouvelle colonne `peripheriques.source_usb_id` identifie
+  le matériel d'une collecte à l'autre. Un périphérique avec numéro de série est
+  identifié à l'échelle du client (et suit donc la machine s'il est déplacé) ;
+  sans numéro de série, l'identité est limitée à la machine pour que deux souris
+  d'un même modèle sur deux postes ne fusionnent pas
+
+### 🔑 CLÉS DE LICENCE COMPLÈTES
+
+- ✅ Clés produit Windows (clé OEM du BIOS et décodage du `DigitalProductId` du
+  registre) et licences Office collectées et **affichées en entier**
+- ✅ Quand la clé complète n'existe pas côté machine (licence numérique ou MAK),
+  le rapport l'indique explicitement plutôt que d'afficher un
+  « XXXXX-XXXXX-XXXXX-XXXXX-ABCDE » qui aurait l'air d'une vraie clé tronquée
+- ✅ Un blob `DigitalProductId` vide décode en « BBBBB-BBBBB-… » : ce cas est
+  détecté et écarté au lieu d'être présenté comme une clé
+
+### 🔧 CORRECTIONS
+
+- ✅ **Encodage** : la sortie PowerShell était décodée avec l'encodage local
+  (cp1252 sur un Windows français) au lieu d'UTF-8. Tout libellé accentué
+  remonté par le collecteur était silencieusement corrompu — noms de
+  périphériques, comptes utilisateurs, descriptions d'adaptateurs réseau
+- ✅ **PDF** : les emoji des titres ne peuvent pas être rendus par les polices
+  standard de reportlab et sortaient en carrés. Les éléments graphiques sont
+  désormais vectoriels
+- ✅ `.claude/launch.json` déclarait le port 5000 alors que `app.py` écoute sur 3456
+
+### ♻️ REFACTORISATION
+
+- ✅ `system-info-collector.py` et `system-info-collector-gui.py` étaient des
+  quasi-duplicatas : 15 fonctions communes ne différant que par des commentaires
+  et le logging. La collecte étendue et les générateurs de rapport sont
+  regroupés dans **`collector_report.py`**, partagé par les deux exécutables
+  (**-785 lignes dupliquées**), déclaré dans les deux specs PyInstaller
+
+---
+
 ## [2.6.31] - 2026-08-08 🔒
 
 ### 🔒 CORRECTIF DE SÉCURITÉ CRITIQUE

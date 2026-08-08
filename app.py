@@ -1504,6 +1504,15 @@ def init_db():
             except Exception:
                 pass
 
+    # Migration : identité USB des périphériques créés par le collecteur.
+    # Sans cette colonne, chaque collecte recréerait les mêmes périphériques.
+    cols_periph = [r[1] for r in conn.execute('PRAGMA table_info(peripheriques)').fetchall()]
+    if 'source_usb_id' not in cols_periph:
+        try:
+            c.execute("ALTER TABLE peripheriques ADD COLUMN source_usb_id TEXT DEFAULT ''")
+        except Exception:
+            pass
+
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
         now = datetime.utcnow().isoformat()
@@ -3109,6 +3118,8 @@ def nouvel_appareil():
         _save_licences(conn, new_id, cid, request.form)
         log_history(conn, cid, 'appareil', new_id, request.form.get('nom_machine','') or 'Nouvel appareil', 'Création')
         _sync_appareil_to_periph(conn, new_id, cid)
+        _propager_utilisateur_aux_peripheriques(
+            conn, new_id, cid, '', request.form.get('utilisateur', ''))
         conn.commit(); conn.close()
         flash('Appareil ajouté avec succès', 'success')
         return redirect(url_for('liste_appareils'))
@@ -3168,6 +3179,8 @@ def editer_appareil(id):
         _save_licences(conn, id, cid, request.form)
         log_history(conn, cid, 'appareil', id, nom, 'Modification', _details_a)
         _sync_appareil_to_periph(conn, id, cid)
+        _propager_utilisateur_aux_peripheriques(
+            conn, id, cid, _old.get('utilisateur', ''), request.form.get('utilisateur', ''))
         conn.commit(); conn.close()
         flash('Appareil mis à jour', 'success')
         return redirect(url_for('liste_appareils'))
@@ -5458,6 +5471,12 @@ def api_device_info():
         software_list = data.get('installed_software', [])
         software_json = json.dumps(software_list[:2000]) if software_list else ''
 
+        # Périphériques USB (même garde-fou contre un payload aberrant)
+        usb_devices = data.get('usb_devices') or []
+        if not isinstance(usb_devices, list):
+            usb_devices = []
+        usb_devices = usb_devices[:200]
+
         now = datetime.utcnow().isoformat()
         conn = get_db()
 
@@ -5592,6 +5611,23 @@ def api_device_info():
             message = f"Nouvel appareil créé (ID: {app_id})"
             action = 'created'
 
+        # Périphériques USB : création/rattachement à la machine. L'utilisateur
+        # affecté à la fiche appareil est reporté sur les fiches périphériques,
+        # y compris pour un appareil déjà existant à qui un utilisateur a été
+        # assigné manuellement entre deux collectes.
+        usb_crees = usb_maj = 0
+        if usb_devices:
+            _row_user = conn.execute(
+                'SELECT utilisateur FROM appareils WHERE id=?', (app_id,)).fetchone()
+            usb_crees, usb_maj = _sync_usb_peripheriques(
+                conn, cid, app_id, usb_devices, _row_user[0] if _row_user else '')
+            if usb_crees or usb_maj:
+                log_history(
+                    conn, cid, 'appareil', app_id, device_name,
+                    'Périphériques USB synchronisés (collecteur)',
+                    {'crees': usb_crees, 'mis_a_jour': usb_maj})
+            conn.commit()
+
         conn.close()
 
         app.logger.info(f"Device info received: {device_name} ({action}) - MAC: {mac_address}, IP: {ip_address}")
@@ -5603,7 +5639,9 @@ def api_device_info():
             "message": message,
             "mac_address": mac_address,
             "ip_address": ip_address,
-            "hostname": hostname
+            "hostname": hostname,
+            "usb_peripheriques_crees": usb_crees,
+            "usb_peripheriques_maj": usb_maj
         }), 200
 
     except Exception as e:
@@ -8289,6 +8327,175 @@ def api_ping_appareil(id):
 # ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 # Types d'appareils qui doivent apparaître automatiquement dans les périphériques
+def _normalize_name(text):
+    """Normalise un nom pour comparaison : casse, accents et espaces multiples."""
+    import unicodedata
+    text = unicodedata.normalize('NFD', str(text or ''))
+    text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
+    return ' '.join(text.lower().split())
+
+
+def _resolve_utilisateur_id(conn, client_id, texte):
+    """Retrouve l'utilisateur final correspondant au texte libre de la fiche appareil.
+
+    `appareils.utilisateur` est un champ texte libre alors que
+    `peripheriques.utilisateur_id` est une clé étrangère vers `utilisateurs` :
+    le rapprochement se fait sur le nom, dans les deux ordres possibles
+    (« Jean Dupont » comme « Dupont Jean »).
+
+    Aucun utilisateur n'est créé si rien ne correspond : laisser le champ vide
+    vaut mieux qu'inventer une fiche utilisateur à partir d'une saisie libre.
+    """
+    cible = _normalize_name(texte)
+    if not cible:
+        return None
+    rows = conn.execute(
+        'SELECT id, nom, prenom FROM utilisateurs WHERE client_id=?', (client_id,)).fetchall()
+    for r in rows:
+        uid, nom, prenom = r[0], r[1] or '', r[2] or ''
+        candidats = {
+            _normalize_name('%s %s' % (prenom, nom)),
+            _normalize_name('%s %s' % (nom, prenom)),
+            _normalize_name(nom),
+        }
+        candidats.discard('')
+        if cible in candidats:
+            return uid
+    return None
+
+
+def _propager_utilisateur_aux_peripheriques(conn, appareil_id, client_id,
+                                            ancien_texte, nouveau_texte):
+    """Reporte l'utilisateur de la fiche appareil sur ses périphériques.
+
+    Un périphérique rattaché à une machine est, dans les faits, utilisé par la
+    personne à qui la machine est affectée. La propagation ne touche que les
+    périphériques sans utilisateur ou portant encore l'ancien titulaire : une
+    affectation saisie à la main sur un périphérique précis n'est jamais écrasée.
+    """
+    nouvel_id = _resolve_utilisateur_id(conn, client_id, nouveau_texte)
+    ancien_id = _resolve_utilisateur_id(conn, client_id, ancien_texte)
+    if nouvel_id is None and ancien_id is None:
+        return 0
+
+    # Périphériques liés, via la colonne directe comme via la table pivot.
+    rows = conn.execute(
+        'SELECT DISTINCT p.id, p.utilisateur_id FROM peripheriques p'
+        ' LEFT JOIN peripheriques_appareils pa ON pa.peripherique_id = p.id'
+        ' WHERE p.client_id=? AND (p.appareil_id=? OR pa.appareil_id=?)',
+        (client_id, appareil_id, appareil_id)).fetchall()
+
+    now = datetime.utcnow().isoformat()
+    touches = 0
+    for pid, courant in rows:
+        if courant is None or (ancien_id is not None and courant == ancien_id):
+            if courant == nouvel_id:
+                continue
+            conn.execute('UPDATE peripheriques SET utilisateur_id=?, date_maj=? WHERE id=?',
+                         (nouvel_id, now, pid))
+            touches += 1
+    return touches
+
+
+def _usb_identity(device):
+    """Clé d'identité stable d'un périphérique USB.
+
+    Sert à retrouver le même matériel d'une collecte à l'autre plutôt que d'en
+    recréer une fiche à chaque exécution du collecteur.
+    """
+    vid = (device.get('vid') or '').upper()
+    pid = (device.get('pid') or '').upper()
+    serial = (device.get('serial') or '').strip()
+    if vid and serial:
+        return '%s:%s:%s' % (vid, pid, serial)
+    if vid:
+        return '%s:%s' % (vid, pid)
+    return 'name:' + _normalize_name(device.get('inventory_name') or device.get('name'))
+
+
+def _sync_usb_peripheriques(conn, client_id, appareil_id, usb_devices, utilisateur_texte):
+    """Crée ou met à jour les périphériques USB remontés par le collecteur.
+
+    Règle de rapprochement :
+      - périphérique exposant un numéro de série → identité unique à l'échelle
+        du client, ce qui permet de le rattacher à sa nouvelle machine s'il a
+        été déplacé ;
+      - sans numéro de série → identité limitée à la machine, sinon deux souris
+        d'un même modèle sur deux postes fusionneraient en une seule fiche.
+
+    Les champs déjà renseignés ne sont pas écrasés : ces fiches sont créées
+    automatiquement mais restent modifiables à la main.
+
+    Retourne (créés, mis_à_jour).
+    """
+    if not usb_devices:
+        return (0, 0)
+
+    now = datetime.utcnow().isoformat()
+    utilisateur_id = _resolve_utilisateur_id(conn, client_id, utilisateur_texte)
+    crees = maj = 0
+
+    for device in usb_devices:
+        if not isinstance(device, dict):
+            continue
+        nom = (device.get('inventory_name') or device.get('name') or '').strip()
+        if not nom:
+            continue
+        categorie = (device.get('categorie') or 'Autre').strip()
+        marque = (device.get('manufacturer') or '').strip()
+        serial = (device.get('serial') or '').strip()
+        identite = _usb_identity(device)
+
+        existing = None
+        if serial:
+            existing = conn.execute(
+                'SELECT id, appareil_id, utilisateur_id, categorie, marque, modele'
+                ' FROM peripheriques WHERE client_id=? AND source_usb_id=?',
+                (client_id, identite)).fetchone()
+            if not existing:
+                # Fiche déjà saisie à la main avec ce numéro de série : la
+                # reprendre plutôt que d'en créer un doublon.
+                existing = conn.execute(
+                    'SELECT id, appareil_id, utilisateur_id, categorie, marque, modele'
+                    ' FROM peripheriques WHERE client_id=? AND numero_serie=? AND numero_serie!=""',
+                    (client_id, serial)).fetchone()
+        else:
+            existing = conn.execute(
+                'SELECT id, appareil_id, utilisateur_id, categorie, marque, modele'
+                ' FROM peripheriques WHERE client_id=? AND source_usb_id=? AND appareil_id=?',
+                (client_id, identite, appareil_id)).fetchone()
+
+        if existing:
+            pid, _old_app, old_user, old_cat, old_marque, old_modele = existing
+            conn.execute(
+                'UPDATE peripheriques SET source_usb_id=?, appareil_id=?, categorie=?,'
+                ' marque=?, modele=?, utilisateur_id=?, date_maj=? WHERE id=?',
+                (identite, appareil_id,
+                 old_cat or categorie,
+                 old_marque or marque,
+                 old_modele or nom,
+                 old_user if old_user is not None else utilisateur_id,
+                 now, pid))
+            maj += 1
+        else:
+            conn.execute(
+                'INSERT INTO peripheriques'
+                ' (client_id, appareil_id, utilisateur_id, categorie, marque, modele,'
+                '  numero_serie, description, statut, source_usb_id, date_creation, date_maj)'
+                ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                (client_id, appareil_id, utilisateur_id, categorie, marque, nom,
+                 serial, 'Détecté automatiquement par le collecteur système (USB %s)' % identite,
+                 'actif', identite, now, now))
+            pid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            crees += 1
+
+        conn.execute(
+            'INSERT OR IGNORE INTO peripheriques_appareils (peripherique_id, appareil_id)'
+            ' VALUES (?,?)', (pid, appareil_id))
+
+    return (crees, maj)
+
+
 _APPAREIL_PERIPH_MAP = {
     'Imprimante':              'Imprimante',
     'Imprimante multifonction':'Imprimante multifonction',

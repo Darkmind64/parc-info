@@ -1,21 +1,26 @@
 {
-  "version": "2.6.31",
-  "release_date": "2026-08-08T15:00:00.000000",
+  "version": "2.6.32",
+  "release_date": "2026-08-08T17:30:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.31",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.32/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.32/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.32",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.32/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.32/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Correctif de sécurité majeur : 109 routes étaient accessibles sans authentification",
+    "new_features": "Fiche système graphique (bargraphs, alertes, cartes de ports) et inventaire automatique des périphériques USB",
     "improvements": [
-      "SECURITY: 105 routes de app.py et 4 routes de app_update_routes.py n'avaient pas @login_required - seules 58 des 170 routes étaient protégées. Un visiteur non authentifié pouvait lire ET modifier les données du premier client de la base (get_client_id() retourne le premier client quand la session est vide).",
-      "SECURITY: étaient notamment exposés - les documents joints (rapports système, factures, contrats) en consultation/téléchargement/upload/suppression, /api/identifiant/<id>/mdp qui déchiffre et renvoie un mot de passe en clair, le CRUD complet appareils/périphériques/contrats/services/utilisateurs/clients, l'export global (/export/global.zip) et l'import global, l'administration des utilisateurs et le partage de client.",
-      "SECURITY: /api/updates/install permettait à n'importe qui sur le réseau de déclencher l'installation d'une mise à jour (vecteur d'exécution de code à distance).",
-      "Les endpoints volontairement publics restent inchangés : /login, /logout, /api/clients-public, /api/device-info, /api/device-info/upload-report et les deux /download/system-info-collector* utilisés par le collecteur."
+      "NEW: La fiche système HTML et le PDF affichent désormais un bandeau « Points d'attention » (disque saturé, antivirus absent, pare-feu désactivé, Secure Boot, BitLocker, ports sensibles en écoute, licence non activée), des vignettes chiffrées avec bargraphs (stockage, RAM, batterie, uptime) et des pastilles de statut colorées.",
+      "NEW: Les ports en écoute sont relevés par le collecteur et présentés sous forme de cartes, avec nom de service, description et processus propriétaire. Les ports de la plage dynamique (49152+) sont comptés mais pas détaillés.",
+      "NEW: Les périphériques USB connectés sont détectés puis créés automatiquement dans la section Périphériques, rattachés à la machine. L'utilisateur affecté à la fiche appareil est reporté sur les fiches périphériques, à la création comme lors d'une réaffectation ultérieure.",
+      "NEW: Clés de licence Windows/Office collectées et affichées en entier. Quand Windows n'expose pas la clé complète (licence numérique ou MAK), le rapport le dit explicitement au lieu d'afficher une clé tronquée trompeuse.",
+      "FIXED: La sortie PowerShell était décodée avec l'encodage local (cp1252) au lieu d'UTF-8 — tout libellé accentué remonté par le collecteur était silencieusement corrompu (noms de périphériques, comptes utilisateurs, adaptateurs réseau).",
+      "FIXED: Les emoji des titres du PDF ne pouvaient pas être rendus par les polices standard de reportlab. Les éléments graphiques sont désormais vectoriels.",
+      "FIXED: Le rapport HTML était très en retard sur le PDF (ni sécurité, ni disques physiques, ni batterie, ni réseau, ni comptes) et annonçait « 50 premiers envoyés » alors que la limite est de 2000.",
+      "FIXED: .claude/launch.json déclarait le port 5000 alors que app.py écoute sur 3456.",
+      "REFACTOR: Les deux collecteurs (CLI et GUI) partageaient 15 fonctions quasi identiques. La collecte étendue et les générateurs de rapport sont désormais dans collector_report.py, partagé par les deux exécutables (-785 lignes dupliquées)."
     ]
   },
   "checksums": {
@@ -26,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.31"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.32"
 }
