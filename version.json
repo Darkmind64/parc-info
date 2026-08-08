@@ -1,29 +1,21 @@
 {
-  "version": "2.6.30",
-  "release_date": "2026-08-08T09:30:00.000000",
+  "version": "2.6.31",
+  "release_date": "2026-08-08T15:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.30",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.30/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.31",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.31/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Correction majeure : les rapports du collecteur ne se synchronisaient jamais entre machines",
+    "new_features": "Correctif de sécurité majeur : 109 routes étaient accessibles sans authentification",
     "improvements": [
-      "FIXED: Collector reports were stored only as a DB blob with no file on disk - since blobs are excluded from row replication and the file transfer reads from disk, these documents could NEVER sync. Other machines saw the entry but got 'Fichier introuvable'. Reports are now written to disk like every other upload route.",
-      "NEW: Existing collector reports stuck in that state are automatically restored to disk on the next sync cycle - no manual action needed.",
-      "FIXED: Auto-updater was completely non-functional since its introduction (wrong repo URL, config path type error, platform key mismatch, NSIS-style install on a portable exe)",
-      "FIXED: Cross-machine AUTOINCREMENT id collisions could silently overwrite/lose synced records (documents, devices, etc.) when two installations both created new rows independently",
-      "NEW: Sync journal page (/journal-synchronisation) - see database and file sync activity, including pending/orphaned files, without reading server logs",
-      "FIXED: Windows executable was unreachable from the LAN (bound to 127.0.0.1 only) - now binds 0.0.0.0",
-      "FIXED: mDNS (parcinfo.local) and Windows Firewall rule now set up automatically on the packaged exe",
-      "FIXED: Uploads/documents sync thread never started on the packaged exe",
-      "FIXED: documents_interventions and baie_photos were missing the columns needed to sync at all",
-      "FIXED: OS name/RAM sync to device sheet (dropdown fields replaced with free-text + suggestions)",
-      "System info collector: removed WMI dependency (native Windows APIs), full software inventory with version/publisher/install date, BitLocker/firewall/TPM/Secure Boot, GPU, SMART disk health, uptime, domain, battery",
-      "System report is now a proper PDF (was HTML) with all collected data"
+      "SECURITY: 105 routes de app.py et 4 routes de app_update_routes.py n'avaient pas @login_required - seules 58 des 170 routes étaient protégées. Un visiteur non authentifié pouvait lire ET modifier les données du premier client de la base (get_client_id() retourne le premier client quand la session est vide).",
+      "SECURITY: étaient notamment exposés - les documents joints (rapports système, factures, contrats) en consultation/téléchargement/upload/suppression, /api/identifiant/<id>/mdp qui déchiffre et renvoie un mot de passe en clair, le CRUD complet appareils/périphériques/contrats/services/utilisateurs/clients, l'export global (/export/global.zip) et l'import global, l'administration des utilisateurs et le partage de client.",
+      "SECURITY: /api/updates/install permettait à n'importe qui sur le réseau de déclencher l'installation d'une mise à jour (vecteur d'exécution de code à distance).",
+      "Les endpoints volontairement publics restent inchangés : /login, /logout, /api/clients-public, /api/device-info, /api/device-info/upload-report et les deux /download/system-info-collector* utilisés par le collecteur."
     ]
   },
   "checksums": {
@@ -34,5 +26,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.30"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.31"
 }
