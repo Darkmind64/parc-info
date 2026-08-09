@@ -773,13 +773,15 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     </div>
     <div class="fs-wide">
     <table class="fs-table">
-        <tr><th>Type</th><th>Occurrences</th><th>Dernière</th><th>Message</th><th>Source</th></tr>
+        <tr><th>Type</th><th>Occurrences</th><th>Dernière</th><th>Disque</th>
+            <th>Message</th><th>Source</th></tr>
         {% for i in rapport.system_incidents %}
         <tr>
             <td><span class="fs-pill {{ 'fs-bad' if i.level == 'danger' else 'fs-warn' }}">
                 {{ i.category }}</span></td>
             <td><strong>{{ i.count }}</strong></td>
             <td class="fs-mono">{{ i.last_seen }}</td>
+            <td>{% if i.disk %}<span class="fs-mono">{{ i.disk }}</span>{% else %}—{% endif %}</td>
             <td>{{ i.message }}</td>
             <td class="fs-mono">{{ i.provider }}/{{ i.event_id }}</td>
         </tr>
@@ -865,6 +867,42 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         </table>
     </div>
     {% endif %}
+</div>
+{% endif %}
+
+<!-- ── TÂCHES PLANIFIÉES ────────────────────────────────────────────────── -->
+{% if rapport.scheduled_tasks %}
+{% set taches_ko = rapport.scheduled_tasks | selectattr('failed') | list %}
+<div class="fs-section">
+    <h3>■ Tâches planifiées ({{ rapport.scheduled_tasks|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Tâches hors dossier <span class="fs-mono">\Microsoft\</span> — celles de Windows
+        lui-même se comptent par centaines et n'apprennent rien. {{ taches_ko|length }}
+        en échec à leur dernière exécution.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Tâche</th><th>État</th><th>Dernière exécution</th><th>Résultat</th>
+            <th>Exécutable</th></tr>
+        {# Les tâches en échec d'abord : ce sont elles qui expliquent un
+           traitement qui ne s'est pas fait. #}
+        {% for t in rapport.scheduled_tasks | sort(attribute='failed', reverse=true) %}
+        <tr>
+            <td><strong>{{ t.name }}</strong>
+                {% if t.author %}
+                <div style="font-size:.68rem;color:var(--text-secondary);">{{ t.author }}</div>
+                {% endif %}</td>
+            <td><span class="fs-pill {{ 'fs-ok' if t.state == 'Ready'
+                                   else 'fs-muted' if t.state == 'Disabled'
+                                   else 'fs-info' }}">{{ t.state or '—' }}</span></td>
+            <td class="fs-mono">{{ t.last_run or 'jamais' }}</td>
+            <td>{% if t.failed %}<span class="fs-pill fs-bad">Échec</span>
+                {% else %}<span class="fs-pill fs-ok">OK</span>{% endif %}</td>
+            <td class="fs-mono" style="word-break:break-all;">{{ t.action or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
 </div>
 {% endif %}
 

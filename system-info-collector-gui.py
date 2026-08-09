@@ -36,6 +36,14 @@ from collector_core import (
     upload_report_to_parcinfo,
 )
 
+# La console Windows est en cp1252 : le journal du collecteur contient des
+# libellés accentués et des pictogrammes, qui y lèveraient un UnicodeEncodeError.
+for _flux in (sys.stdout, sys.stderr):
+    try:
+        _flux.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        pass
+
 # Configure logging to file for debugging
 logging.basicConfig(
     level=logging.DEBUG,
@@ -244,7 +252,14 @@ class CollectorGUI:
                                 command=self.root.quit)
         cancel_btn.pack(side=tk.LEFT, padx=5)
 
-        # Status bar
+        # Status bar + progression : la collecte dure une bonne minute, une
+        # interface figée sans indication passe pour un plantage.
+        self.progress_var = tk.DoubleVar(value=0.0)
+        self.progress_bar = ttk.Progressbar(self.root, orient=tk.HORIZONTAL,
+                                            mode='determinate', maximum=100.0,
+                                            variable=self.progress_var)
+        self.progress_bar.pack(fill=tk.X)
+
         self.status_var = tk.StringVar(value="En attente...")
         status_bar = tk.Label(self.root, textvariable=self.status_var,
                               bg="#ecf0f1", fg="#2c3e50", anchor=tk.W)
@@ -359,15 +374,31 @@ class CollectorGUI:
     def _collect_info(self):
         """Collecte les informations système."""
         self.status_var.set("Collecte des informations système...")
+        self.progress_var.set(0.0)
         self.root.update()
 
+        def avancement(fraction, libelle):
+            # La collecte tourne dans un thread : la mise à jour des widgets est
+            # renvoyée vers la boucle Tk, seule autorisée à y toucher.
+            self.root.after(0, lambda: self._afficher_avancement(fraction, libelle))
+
         def collect():
-            self.system_info = collect_system_info()
-            self._update_summary()
-            self.status_var.set("Informations collectées ✓")
+            try:
+                self.system_info = collect_system_info(progress=avancement)
+                self._update_summary()
+                self.root.after(0, lambda: self.progress_var.set(100.0))
+                self.status_var.set("Informations collectées ✓")
+            except Exception as e:
+                logger.exception("Collecte interrompue")
+                self.root.after(0, lambda: self.status_var.set(f"Erreur de collecte : {e}"))
 
         thread = threading.Thread(target=collect, daemon=True)
         thread.start()
+
+    def _afficher_avancement(self, fraction, libelle):
+        """Reporte l'avancement dans la barre et l'étiquette d'état."""
+        self.progress_var.set(round(fraction * 100, 1))
+        self.status_var.set("%s… (%d %%)" % (libelle, round(fraction * 100)))
 
     def _fetch_clients(self):
         """Récupère la liste des clients."""

@@ -1,23 +1,21 @@
 {
-  "version": "2.6.36",
-  "release_date": "2026-08-09T00:30:00.000000",
+  "version": "2.6.37",
+  "release_date": "2026-08-09T09:30:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.36/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.36/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.36",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.36/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.36/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.37/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.37/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.37",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.37/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.37/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "La fiche passe de l'inventaire au diagnostic : incidents système, mises à jour en attente, démarrage, hygiène des comptes",
+    "new_features": "Incidents disque rapprochés du matériel réel, tâches planifiées, barre de progression du collecteur",
     "improvements": [
-      "NEW: Incidents système des 30 derniers jours — arrêts inattendus, écrans bleus, erreurs disque et corruptions NTFS, regroupés par occurrence. Sur la machine de test : 35 signalements de bloc défectueux sur un disque, invisibles jusqu'ici.",
-      "NEW: Mises à jour Windows en attente, avec distinction des mises à jour de sécurité. Recherche dans le cache local pour ne pas dépendre du réseau ni d'un serveur WSUS.",
-      "NEW: Programmes lancés au démarrage, services en démarrage automatique mais arrêtés, et partages réseau en distinguant les partages d'administration des partages créés à la main.",
-      "NEW: Hygiène des comptes — mot de passe sans expiration et date de dernière connexion, avec alerte ciblée sur les comptes administrateurs concernés.",
-      "NEW: Âge du matériel estimé depuis la date du BIOS, et diagonale des écrans calculée depuis les dimensions physiques de l'EDID.",
-      "Ces signaux alimentent le bandeau « Points d'attention » : arrêts inattendus, erreurs disque, correctifs de sécurité en attente, matériel de plus de six ans, partages exposés."
+      "NEW: Les incidents disque du journal Système sont rapprochés du matériel : « \\Device\\Harddisk6\\DR6 » devient « Brother DCP-195C — USB ». Un support amovible débranché depuis l'incident est signalé comme tel plutôt qu'attribué au hasard à un disque encore présent.",
+      "NEW: Tâches planifiées hors dossier \\Microsoft\\, avec leur état, leur dernière exécution et leur résultat. Les tâches en échec remontent en tête et alimentent les points d'attention.",
+      "NEW: Le collecteur affiche sa progression — étape en cours et barre. En console interactive la barre se réécrit sur une ligne ; redirigée vers un fichier, elle retombe sur une ligne par étape. Le collecteur GUI dispose d'une barre équivalente.",
+      "FIXED: Le collecteur CLI plantait immédiatement sur une console Windows française : le premier caractère non-ASCII affiché (« ⚠ », « ✓ ») levait un UnicodeEncodeError avant même le début de la collecte. Les deux collecteurs forcent désormais leur sortie en UTF-8."
     ]
   },
   "checksums": {
@@ -28,5 +26,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.36"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.37"
 }
