@@ -782,6 +782,22 @@ def init_db():
         valeur TEXT DEFAULT '',
         date_maj TEXT DEFAULT '')''')
 
+    # JOURNAL DES MISES À JOUR DE L'APPLICATION — synchronisé entre instances,
+    # pour qu'un poste voie ce qui a été installé sur les autres.
+    # Clé TEXTE et non un id auto-incrémenté : chaque instance écrit dans sa
+    # propre base, et deux machines qui se mettent à jour le même jour
+    # produiraient le même id — la synchronisation écraserait l'une par l'autre.
+    c.execute('''CREATE TABLE IF NOT EXISTS journal_maj (
+        cle           TEXT PRIMARY KEY,
+        horodatage    TEXT NOT NULL,
+        machine       TEXT DEFAULT '',
+        mode          TEXT DEFAULT '',
+        version_avant TEXT DEFAULT '',
+        version_apres TEXT DEFAULT '',
+        statut        TEXT DEFAULT 'succes',
+        detail        TEXT DEFAULT '',
+        date_maj      TEXT DEFAULT '')''')
+
     # TABLE PRÉFÉRENCES UTILISATEUR (personnalisation par utilisateur)
     c.execute('''CREATE TABLE IF NOT EXISTS user_preferences (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1394,7 +1410,7 @@ def init_db():
         'config_listes': 'id', 'user_preferences': 'id',
         'documents_interventions': 'id', 'interventions_appareils': 'id',
         'interventions_peripheriques': 'id', 'maintenance_notifications': 'id',
-        'config': 'cle',   # seule table à clé texte (pas de colonne 'id')
+        'config': 'cle', 'journal_maj': 'cle',   # tables à clé texte (pas de colonne 'id')
     }
     # DROP + CREATE (pas IF NOT EXISTS) : garantit que la définition du trigger
     # correspond toujours au code, même après une mise à jour de cette liste sur
@@ -1881,24 +1897,27 @@ def api_db_sync():
 @app.route('/journal-synchronisation')
 @login_required
 def journal_synchronisation():
-    """Historique des cycles de synchronisation (lignes DB + fichiers joints).
+    """Journal : mises à jour de l'application, puis cycles de synchronisation.
 
-    Permet de vérifier concrètement que la sync a lieu entre les différentes
-    machines, et de diagnostiquer des fichiers en attente/orphelins sans avoir
-    à consulter les logs serveur.
+    Les mises à jour sont lues dans une table synchronisée : ce poste voit donc
+    aussi celles appliquées sur les autres installations. Les cycles de
+    synchronisation, eux, restent locaux — ils décrivent ce que CETTE instance a
+    échangé, et n'auraient pas de sens répliqués.
     """
-    from database import get_local_db, get_sync_state
+    from database import (get_local_db, get_sync_state,
+                          creer_journal_synchronisation, creer_journal_maj)
     conn = get_local_db()
     try:
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS journal_synchronisation ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, horodatage TEXT NOT NULL, "
-            "type TEXT NOT NULL, statut TEXT NOT NULL, resume TEXT DEFAULT '', "
-            "details TEXT DEFAULT '')"
-        )
+        # Définitions tenues par database.py : les dupliquer ici laissait deux
+        # copies libres de diverger sans que rien ne le signale.
+        creer_journal_synchronisation(conn)
+        creer_journal_maj(conn)
         conn.commit()
         entries = [row_to_dict(r) for r in conn.execute(
             "SELECT * FROM journal_synchronisation ORDER BY id DESC LIMIT 200"
+        ).fetchall()]
+        majs = [row_to_dict(r) for r in conn.execute(
+            "SELECT * FROM journal_maj ORDER BY horodatage DESC LIMIT 100"
         ).fetchall()]
     finally:
         conn.close()
@@ -1909,7 +1928,12 @@ def journal_synchronisation():
         except Exception:
             e['details_parsed'] = None
 
-    return render_template('journal_synchronisation.html', entries=entries, sync_state=get_sync_state())
+    machine_locale = socket.gethostname()
+    for m in majs:
+        m['locale'] = (m.get('machine') == machine_locale)
+
+    return render_template('journal_synchronisation.html', entries=entries, majs=majs,
+                           machine_locale=machine_locale, sync_state=get_sync_state())
 
 
 # ─── THREAD DE SYNCHRONISATION TURSO ─────────────────────────────────────────

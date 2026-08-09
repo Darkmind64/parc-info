@@ -17,7 +17,9 @@ Utilisation :
 import argparse
 import json
 import logging
+import os
 import socket
+import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -28,7 +30,7 @@ from urllib.request import urlopen
 from collector_core import (
     COLLECTOR_VERSION,
     get_mac_address,
-    build_summary_lines,
+    build_summary_sections,
     collect_system_info,
     fetch_clients,
     generate_pdf_report,
@@ -139,9 +141,11 @@ class CollectorGUI:
         self.clients = []
         self.selected_client = None
         self.config_file = Path.home() / '.parcinfo-collector-config.json'
+        self.attente_label = None
+        self.dernier_rapport = None
 
         self.root.title(f"ParcInfo System Information Collector v{COLLECTOR_VERSION}")
-        self.root.geometry("900x750")
+        self.root.geometry("980x900")
         self.root.resizable(True, True)
 
         # Couleurs
@@ -184,17 +188,19 @@ class CollectorGUI:
     def _create_widgets(self):
         """Crée les widgets de l'interface."""
         # Header
-        header = tk.Frame(self.root, bg="#2c3e50", height=60)
+        header = tk.Frame(self.root, bg="#2c3e50", height=46)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
 
         title_label = tk.Label(header, text="ParcInfo - Collecteur d'Informations Système",
-                               font=("Arial", 16, "bold"), bg="#2c3e50", fg="white")
-        title_label.pack(pady=10)
+                               font=("Arial", 14, "bold"), bg="#2c3e50", fg="white")
+        title_label.pack(pady=9)
 
-        # Main content
+        # Main content — placé dans la fenêtre en toute fin de méthode, une fois
+        # les barres du bas installées : un conteneur extensible posé en premier
+        # prend toute la place restante et rejette hors de l'écran ce qui est
+        # ajouté après (les boutons se retrouvaient coupés).
         main_frame = ttk.Frame(self.root)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # Section 0 : Configuration du serveur
         server_frame = ttk.LabelFrame(main_frame, text="0. Configuration du Serveur ParcInfo")
@@ -243,22 +249,46 @@ class CollectorGUI:
             font=("Arial", 9), fg="#c0392b")
         self.client_help.pack(padx=10, pady=5)
 
-        # Section 2 : Résumé des infos collectées
+        # Section 2 : Résumé des infos collectées, une rubrique par onglet.
+        # Les onglets apparaissent au fur et à mesure de la collecte : elle dure
+        # une bonne minute, et un panneau vide pendant tout ce temps donne
+        # l'impression que rien ne se passe.
         summary_frame = ttk.LabelFrame(main_frame, text="2. Informations Collectées")
         summary_frame.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        self.summary_text = scrolledtext.ScrolledText(summary_frame, height=15, width=80,
-                                                      font=("Courier", 9), bg="white")
-        self.summary_text.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
-        self.summary_text.config(state=tk.DISABLED)
+        # Onglets sur le côté et non en haut : les rubriques sont nombreuses
+        # (une quinzaine), et une barre horizontale les rogne jusqu'à
+        # « Points c », « Ident », « Sé »… — illisible. Empilés à gauche, leurs
+        # noms tiennent en entier quel qu'en soit le nombre.
+        style = ttk.Style()
+        try:
+            style.configure('Rubriques.TNotebook', tabposition='wn')
+            style.configure('Rubriques.TNotebook.Tab', padding=(8, 2), width=22)
+            notebook_style = 'Rubriques.TNotebook'
+        except tk.TclError:
+            notebook_style = 'TNotebook'
+
+        self.notebook = ttk.Notebook(summary_frame, style=notebook_style)
+        self.notebook.pack(padx=8, pady=8, fill=tk.BOTH, expand=True)
+
+        self.onglets = {}        # clé de rubrique → {'cadre', 'texte'}
+        self.ordre_onglets = []  # ordre canonique, pour insérer au bon endroit
+
+        self.attente_label = tk.Label(
+            self.notebook, text="Collecte en cours…",
+            font=("Segoe UI", 10), fg="#7f8c8d", bg="white", pady=30)
+        self.notebook.add(self.attente_label, text="  …  ")
 
         # Section 3 : Boutons d'action
         action_frame = tk.Frame(self.root, bg=self.bg_color)
-        action_frame.pack(fill=tk.X, padx=10, pady=10)
 
         refresh_btn = ttk.Button(action_frame, text="🔄 Rafraîchir les Infos",
                                  command=self._collect_info)
         refresh_btn.pack(side=tk.LEFT, padx=5)
+
+        self.pdf_btn = ttk.Button(action_frame, text="📄 Ouvrir le rapport PDF",
+                                  command=self._ouvrir_pdf, state=tk.DISABLED)
+        self.pdf_btn.pack(side=tk.LEFT, padx=5)
 
         send_btn = ttk.Button(action_frame, text="✓ Envoyer à ParcInfo",
                               command=self._send_data)
@@ -275,7 +305,6 @@ class CollectorGUI:
         debit_check = ttk.Checkbutton(
             self.root, variable=self.test_debit_var,
             text="Mesurer aussi le débit descendant (télécharge ~10 Mo)")
-        debit_check.pack(anchor=tk.W, padx=12, pady=2)
 
         # Status bar + progression : la collecte dure une bonne minute, une
         # interface figée sans indication passe pour un plantage.
@@ -283,12 +312,19 @@ class CollectorGUI:
         self.progress_bar = ttk.Progressbar(self.root, orient=tk.HORIZONTAL,
                                             mode='determinate', maximum=100.0,
                                             variable=self.progress_var)
-        self.progress_bar.pack(fill=tk.X)
 
         self.status_var = tk.StringVar(value="En attente...")
         status_bar = tk.Label(self.root, textvariable=self.status_var,
                               bg="#ecf0f1", fg="#2c3e50", anchor=tk.W)
-        status_bar.pack(fill=tk.X)
+
+        # Les barres du bas réservent leur place avant le conteneur extensible,
+        # en partant du bas : elles restent visibles quelle que soit la hauteur
+        # de la fenêtre.
+        status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        self.progress_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        debit_check.pack(side=tk.BOTTOM, anchor=tk.W, padx=12, pady=2)
+        action_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=8)
+        main_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
 
     def _scan_network(self):
         """Lance un scan du réseau pour chercher des instances ParcInfo."""
@@ -400,6 +436,9 @@ class CollectorGUI:
         """Collecte les informations système."""
         self.status_var.set("Collecte des informations système...")
         self.progress_var.set(0.0)
+        # Les données changent : le rapport déjà produit ne les décrit plus.
+        self.dernier_rapport = None
+        self.pdf_btn.config(state=tk.DISABLED)
         self.root.update()
 
         def avancement(fraction, libelle):
@@ -411,12 +450,18 @@ class CollectorGUI:
         # Tkinter ne se lit pas depuis un autre thread.
         test_debit = self.test_debit_var.get()
 
+        def partiel(donnees):
+            # Même règle que pour l'avancement : la collecte tourne dans un
+            # thread, seule la boucle Tk a le droit de toucher aux widgets.
+            self.root.after(0, lambda d=donnees: self._update_summary(d))
+
         def collect():
             try:
                 self.system_info = collect_system_info(
-                    progress=avancement, test_debit=test_debit)
+                    progress=avancement, test_debit=test_debit, on_data=partiel)
                 self.root.after(0, self._update_summary)
                 self.root.after(0, lambda: self.progress_var.set(100.0))
+                self.root.after(0, lambda: self.pdf_btn.config(state=tk.NORMAL))
                 self.status_var.set("Informations collectées ✓")
             except Exception as e:
                 logger.exception("Collecte interrompue")
@@ -505,17 +550,141 @@ class CollectorGUI:
         if 0 <= idx < len(self.clients):
             self.selected_client = self.clients[idx]
 
-    def _update_summary(self):
-        """Met à jour le résumé des infos collectées."""
-        self.summary_text.config(state=tk.NORMAL)
-        self.summary_text.delete(1.0, tk.END)
+    # ── Aperçu en onglets ───────────────────────────────────────────────────
 
-        lines = ["═" * 80, "INFORMATIONS SYSTÈME COLLECTÉES".center(80), "═" * 80, ""]
-        lines.extend(build_summary_lines(self.system_info))
-        lines.extend(["═" * 80, "Prêt à envoyer vers ParcInfo", "═" * 80])
+    def _creer_onglet(self, section, position):
+        """Crée l'onglet d'une rubrique, à sa place dans l'ordre canonique."""
+        cadre = tk.Frame(self.notebook, bg="white")
+        texte = scrolledtext.ScrolledText(
+            cadre, wrap=tk.WORD, font=("Segoe UI", 9), bg="white",
+            relief=tk.FLAT, padx=10, pady=8, cursor="arrow")
+        texte.pack(fill=tk.BOTH, expand=True)
 
-        self.summary_text.insert(tk.END, "\n".join(lines))
-        self.summary_text.config(state=tk.DISABLED)
+        # Mise en forme : des étiquettes plutôt qu'une colonne de texte brut.
+        texte.tag_configure('bloc', font=("Segoe UI", 9, "bold"), foreground="#2c3e50",
+                            spacing1=8, spacing3=3)
+        texte.tag_configure('libelle', font=("Segoe UI", 9), foreground="#7f8c8d")
+        texte.tag_configure('valeur', font=("Segoe UI", 9, "bold"), foreground="#1a252f")
+        texte.tag_configure('element', font=("Segoe UI", 9), foreground="#34495e",
+                            lmargin1=14, lmargin2=26, spacing1=1)
+        texte.tag_configure('alerte', font=("Segoe UI", 9), foreground="#c0392b",
+                            lmargin1=14, lmargin2=26, spacing1=2)
+        texte.tag_configure('note', font=("Segoe UI", 8, "italic"), foreground="#b9770e",
+                            spacing1=10)
+        texte.config(state=tk.DISABLED)
+
+        libelle = "%s %s" % (section['icone'], section['titre'])
+        # insert() refuse une position au-delà des onglets existants (« Slave
+        # index out of bounds ») : au bout, c'est add() qu'il faut appeler.
+        if position >= len(self.notebook.tabs()):
+            self.notebook.add(cadre, text=libelle)
+        else:
+            self.notebook.insert(position, cadre, text=libelle)
+        self.onglets[section['cle']] = {'cadre': cadre, 'texte': texte}
+        return texte
+
+    def _remplir_onglet(self, texte, section):
+        """Réécrit le contenu d'un onglet."""
+        # La position de défilement est conservée : sans cela, chaque
+        # rafraîchissement pendant la collecte renverrait l'utilisateur en haut
+        # de la rubrique qu'il est en train de lire.
+        position = texte.yview()
+        texte.config(state=tk.NORMAL)
+        texte.delete('1.0', tk.END)
+
+        largeur = max([len(l) for l, _ in section['champs']] or [0])
+        for libelle, valeur in section['champs']:
+            texte.insert(tk.END, '%s ' % libelle.ljust(largeur), 'libelle')
+            texte.insert(tk.END, '%s\n' % valeur, 'valeur')
+
+        alerte = section['cle'] == 'alertes'
+        for bloc in section['listes']:
+            if bloc['titre']:
+                texte.insert(tk.END, '\n%s (%d)\n' % (bloc['titre'], len(bloc['elements'])), 'bloc')
+            for element in bloc['elements']:
+                texte.insert(tk.END, '• %s\n' % element, 'alerte' if alerte else 'element')
+
+        for note in section['notes']:
+            texte.insert(tk.END, '\n⚠ %s\n' % note, 'note')
+
+        texte.config(state=tk.DISABLED)
+        try:
+            texte.yview_moveto(position[0])
+        except Exception:
+            pass
+
+    def _update_summary(self, partiel=None):
+        """Met à jour les onglets — appelé pendant la collecte puis à la fin."""
+        info = partiel if partiel is not None else self.system_info
+        if not info:
+            return
+        try:
+            sections = build_summary_sections(info)
+        except Exception:
+            logger.exception("Construction de l'aperçu")
+            return
+
+        if sections and self.attente_label is not None:
+            self.notebook.forget(self.attente_label)
+            self.attente_label = None
+
+        for section in sections:
+            if section['cle'] not in self.ordre_onglets:
+                self.ordre_onglets.append(section['cle'])
+            position = self.ordre_onglets.index(section['cle'])
+            entree = self.onglets.get(section['cle'])
+            texte = entree['texte'] if entree else self._creer_onglet(section, position)
+            self._remplir_onglet(texte, section)
+
+    def _ouvrir_pdf(self):
+        """Génère le rapport PDF et l'ouvre avec la visionneuse du système."""
+        if not self.system_info:
+            messagebox.showinfo("Rapport", "La collecte n'est pas encore terminée.")
+            return
+
+        # Le nom du rapport porte un horodatage : régénérer à chaque clic
+        # sèmerait des fichiers quasi identiques dans le dossier de travail.
+        if self.dernier_rapport and Path(self.dernier_rapport).exists():
+            self._afficher_fichier(self.dernier_rapport)
+            return
+
+        client_id = self.selected_client.get('id') if self.selected_client else None
+        client_name = self.selected_client.get('nom') if self.selected_client else None
+        self.status_var.set("Génération du rapport PDF...")
+
+        def travail():
+            try:
+                _, chemin = generate_pdf_report(self.system_info, client_id, client_name)
+                if not chemin:
+                    raise RuntimeError("Aucun fichier produit")
+                chemin_absolu = str(Path(chemin).resolve())
+                self.root.after(0, lambda: self._afficher_fichier(chemin_absolu))
+            except Exception as e:
+                logger.exception("Génération du rapport")
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Rapport", "Impossible de générer le rapport :\n%s" % e))
+                self.root.after(0, lambda: self.status_var.set("Erreur de génération du rapport"))
+
+        threading.Thread(target=travail, daemon=True).start()
+
+    def _afficher_fichier(self, chemin):
+        """Ouvre un fichier avec l'application par défaut du système."""
+        self.dernier_rapport = chemin
+        try:
+            if sys.platform == 'win32':
+                os.startfile(chemin)            # noqa: S606 - ouverture par le shell Windows
+            elif sys.platform == 'darwin':
+                subprocess.Popen(['open', chemin])
+            else:
+                subprocess.Popen(['xdg-open', chemin])
+            self.status_var.set("Rapport ouvert : %s" % chemin)
+        except Exception as e:
+            # L'ouverture peut échouer (aucune visionneuse associée) : le
+            # fichier existe malgré tout, autant en donner le chemin.
+            logger.warning("Ouverture du rapport impossible : %s", e)
+            messagebox.showinfo("Rapport généré",
+                                "Le rapport a été enregistré :\n\n%s" % chemin)
+            self.status_var.set("Rapport enregistré : %s" % chemin)
 
     def _send_data(self):
         """Envoie les données à ParcInfo."""
@@ -539,6 +708,10 @@ class CollectorGUI:
                 pdf_content, report_file = generate_pdf_report(self.system_info, client_id, client_name)
                 if pdf_content:
                     logger.debug(f"PDF report generated: {report_file} ({len(pdf_content)} bytes)")
+                    # Le bouton « Ouvrir le rapport PDF » rouvrira celui-ci
+                    # plutôt que d'en produire un second, identique.
+                    self.dernier_rapport = str(Path(report_file).resolve())
+                    self.root.after(0, lambda: self.pdf_btn.config(state=tk.NORMAL))
                 else:
                     logger.warning("PDF report generation returned no content")
 

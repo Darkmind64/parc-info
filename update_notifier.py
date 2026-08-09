@@ -14,6 +14,7 @@ Usage :
 import json
 import logging
 import os
+import socket
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -59,12 +60,25 @@ class UpdateNotifier:
             self.version_installee = self.checker.current_version
             logger.info("Démarrage sur la version %s (précédente : %s)",
                         self.checker.current_version, vue)
+            self._journaliser(vue, self.checker.current_version)
         if vue != self.checker.current_version:
             self._enregistrer_etat()
 
         self._lock = threading.Lock()
         self._thread = None
         self._stop = threading.Event()
+
+    def _journaliser(self, avant: str, apres: str) -> None:
+        """Consigne la mise à jour dans le journal partagé entre instances."""
+        try:
+            from database import log_maj_event
+            log_maj_event(machine=socket.gethostname(),
+                          version_avant=avant, version_apres=apres,
+                          mode=self.mode, statut='succes')
+        except Exception as e:
+            # Le journal est un confort : son échec ne doit pas empêcher
+            # l'application de démarrer sur sa nouvelle version.
+            logger.debug("Journal des mises à jour non alimenté : %s", e)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Cycle de vie
@@ -161,6 +175,16 @@ class UpdateNotifier:
                 self.erreur = str(e)
                 self.message = None
                 logger.error("Mise à jour interrompue : %s", e)
+                # Un échec vaut d'être consigné autant qu'une réussite : c'est
+                # la seule trace exploitable depuis un autre poste.
+                try:
+                    from database import log_maj_event
+                    log_maj_event(machine=socket.gethostname(),
+                                  version_avant=self.checker.current_version,
+                                  version_apres=self.checker.latest_version or '',
+                                  mode=self.mode, statut='echec', detail=str(e)[:400])
+                except Exception:
+                    pass
 
         threading.Thread(target=travail, daemon=True, name='InstallationMaj').start()
         return True

@@ -1,5 +1,8 @@
 # ============================================================================
-# ParcInfo v2.5.0 — Docker Compose Override pour Synology NAS
+# ParcInfo — Docker Compose Override pour Synology NAS
+#
+# Pas de numéro de version ici : ce fichier ne change pas d'une version à
+# l'autre, et le figer revenait à afficher un numéro périmé à chaque release.
 # ============================================================================
 #
 # USAGE:

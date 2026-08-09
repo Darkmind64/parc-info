@@ -1,5 +1,61 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.44] - 2026-08-09 📓
+
+### 📓 JOURNAL DES MISES À JOUR — PARTAGÉ ENTRE TOUS LES POSTES
+- ✅ Chaque mise à jour est consignée avec le **nom de l'appareil**, la version
+  d'origine, celle installée, le mode d'exécution et le résultat
+- ✅ La table est **synchronisée** : un poste voit ce qui a été installé sur les
+  autres installations, sans avoir à s'y connecter
+- ✅ **Clé textuelle et non un identifiant auto-incrémenté** : chaque instance
+  écrit dans sa propre base, et deux machines mises à jour le même jour
+  auraient produit le même numéro — la synchronisation aurait écrasé l'une par
+  l'autre
+- ✅ Les **échecs** y figurent avec leur motif : c'est la seule trace
+  consultable depuis un autre poste
+- ✅ La page Journal présente les mises à jour d'abord, les cycles de
+  synchronisation ensuite. Ces derniers restent locaux — ils décrivent ce que
+  *cette* instance a échangé et n'auraient pas de sens répliqués. La machine
+  consultée est mise en avant dans la liste
+
+### 🖥 COLLECTEUR — UN APERÇU QU'ON PEUT LIRE
+- ✅ **Onglets par rubrique** au lieu d'un bloc de texte brut : libellés en
+  gris, valeurs en gras, listes titrées et comptées
+- ✅ **Remplissage au fil de la collecte.** Elle dure une bonne minute ; un
+  panneau vide pendant tout ce temps donne l'impression que rien ne se passe.
+  Les onglets apparaissent dès que leurs données arrivent, et la position de
+  défilement est conservée à chaque rafraîchissement — sans quoi l'utilisateur
+  serait renvoyé en haut de la rubrique qu'il est en train de lire
+- ✅ **Aperçu complet** : il couvre maintenant ce que contient le rapport —
+  USB détaillés (marque, modèle, identifiant, date), diagnostic, tâches
+  planifiées, configuration réseau, environnement, hygiène, mises à jour
+  disponibles, points de vigilance
+- ✅ **Bouton « Ouvrir le rapport PDF »**, qui rouvre le rapport déjà produit
+  lors de l'envoi plutôt que d'en générer un second, identique
+- ✅ Le résumé texte du collecteur en ligne de commande **dérive des mêmes
+  rubriques** : deux constructions séparées auraient dérivé l'une de l'autre au
+  fil des ajouts
+
+#### Deux défauts d'affichage corrigés au passage
+- **Onglets rognés.** Une quinzaine de rubriques sur une barre horizontale se
+  réduisaient à « Points c », « Ident », « Sé ». Ils sont désormais **empilés à
+  gauche** : leurs noms tiennent en entier quel qu'en soit le nombre
+- **Boutons hors de la fenêtre.** Un conteneur extensible posé en premier prend
+  toute la place restante et repousse ce qui vient après ; les barres du bas
+  réservent maintenant leur place avant lui
+
+### 🧹 CE QUI AVAIT ÉTÉ LAISSÉ DE CÔTÉ
+- ✅ `journal_synchronisation` était créée **à l'identique dans `app.py` et
+  `database.py`** — deux copies libres de diverger sans que rien ne le signale.
+  Point unique désormais, dans `database.py`
+- ✅ En-tête « v2.5.0 » périmé dans `docker-compose.synology.yml`. Le numéro est
+  retiré : ce fichier ne change pas d'une version à l'autre, et le figer
+  revenait à afficher un numéro faux à chaque release
+- ✅ `backups/` ajouté au `.gitignore` — la sauvegarde automatique déposait des
+  copies de la base dans le dépôt en mode développement
+
+---
+
 ## [2.6.43] - 2026-08-09 🔄
 
 ### 🔄 MÉCANISME DE MISE À JOUR RECONSTRUIT
