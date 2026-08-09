@@ -363,7 +363,7 @@ class UpdateChecker:
             return None
 
         try:
-            with open(self.metadata_file, "r") as f:
+            with open(self.metadata_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             logger.debug(f"Failed to load metadata: {e}")
@@ -372,7 +372,7 @@ class UpdateChecker:
     def _save_metadata(self, metadata: Dict) -> None:
         """Save metadata to cache."""
         try:
-            with open(self.metadata_file, "w") as f:
+            with open(self.metadata_file, "w", encoding="utf-8") as f:
                 json.dump(metadata, f)
         except Exception as e:
             logger.debug(f"Failed to save metadata: {e}")

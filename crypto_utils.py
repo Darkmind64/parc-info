@@ -48,7 +48,7 @@ class CryptoManager:
                 logger.warning(f"Fichier clé secrète non trouvé: {self.secret_key_file}")
                 return None
 
-            with open(self.secret_key_file, 'r') as f:
+            with open(self.secret_key_file, 'r', encoding='utf-8') as f:
                 secret_key = f.read().strip()
 
             # Dériver une clé Fernet à partir de la clé secrète

@@ -1,22 +1,24 @@
 {
-  "version": "2.6.41",
-  "release_date": "2026-08-09T14:30:00.000000",
+  "version": "2.6.42",
+  "release_date": "2026-08-09T16:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.41/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.41/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.41",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.41/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.41/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.42",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Mise en page du rapport PDF : sommaire paginé, pied de page, plus aucune rubrique coupée ; reconnaissance du client signalée dans le collecteur",
+    "new_features": "Sauvegarde automatique de la base avec rotation sur les trois dernieres, et correctifs issus d'un audit du code",
     "improvements": [
-      "NEW: Les titres de rubrique ne restent plus orphelins en bas de page — un saut conditionnel reporte la rubrique entière sur la page suivante quand la place manque. Vérifié : zéro titre orphelin sur les 42 pages du rapport de référence, contre plusieurs auparavant.",
-      "NEW: Sommaire paginé en tête de rapport et pied de page sur chaque page (machine, client, numéro) : une page imprimée isolée reste identifiable, et on navigue dans un document de quarante pages sans faire défiler au jugé.",
-      "NEW: Le collecteur graphique affiche un bandeau vert quand la machine est reconnue d'après son adresse MAC : « client X présélectionné, modifiable si nécessaire ». Jusqu'ici l'information n'était que dans la barre d'état, et l'utilisateur refaisait la sélection à la main.",
-      "FIXED: Le collecteur graphique modifiait ses widgets depuis ses threads de travail, ce que Tkinter n'autorise pas — y compris la lecture de la case de test de débit. Toutes les écritures passent désormais par la boucle principale.",
-      "FIXED: « Virtualisation matérielle : False » — un booléen Python arrivait tel quel dans le rapport, au lieu de « Activée » ou « Désactivée »."
+      "NEW: Sauvegarde automatique quotidienne de la base, ne conservant que les trois dernieres. La copie passe par l'API backup de SQLite et non par un copier-coller de fichier : la base est en mode WAL, une copie brute pendant une ecriture donnerait une sauvegarde tronquee, inutilisable au moment precis ou elle servirait.",
+      "NEW: Route /api/db/sauvegarde - liste les sauvegardes, ou en declenche une (reserve aux administrateurs). Desactivable par la variable d'environnement PARCINFO_BACKUP.",
+      "FIXED: Le telechargement du fichier RDP corrompait le nom de fichier des que la machine portait un accent. L'en-tete HTTP etait construit a la main alors qu'un en-tete ne transporte que de l'ASCII : Bureau-Reception devenait Bureau-R?ception. L'en-tete suit desormais la RFC 6266, avec repli ASCII et version UTF-8 percent-encodee.",
+      "FIXED: Plusieurs fichiers etaient lus et ecrits sans encodage explicite - metadonnees de mise a jour, configuration du collecteur graphique, cle secrete. Sur un Windows francais, open() utilise cp1252 : tout contenu accentue y echouait.",
+      "FIXED: L'appel netsh du lanceur decodait sa sortie avec l'encodage local, alors qu'un Windows francais renvoie des messages accentues.",
+      "FIXED: La liste des logiciels installes etait stockee en base avec ses accents echappes, contrairement au reste des donnees JSON.",
+      "Audit verifie par ailleurs : les 35 tables synchronisees correspondent exactement au schema (seules les trois tables internes a la synchronisation en sont exclues, a raison), aucune colonne ecrite n'est absente du schema, et les requetes construites dynamiquement le sont toutes a partir de listes blanches avec valeurs parametrees."
     ]
   },
   "checksums": {
@@ -27,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.41"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.42"
 }

@@ -1,5 +1,55 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.42] - 2026-08-09 🗄️
+
+### 🗄️ SAUVEGARDE AUTOMATIQUE DE LA BASE
+- ✅ Sauvegarde quotidienne, **ne conservant que les trois dernières** ; les plus
+  anciennes sont supprimées à chaque nouvelle sauvegarde
+- ✅ La copie passe par l'**API `backup` de SQLite**, pas par un copier-coller de
+  fichier. La base tourne en mode WAL : une copie brute prise pendant une
+  écriture donne un fichier tronqué, qui se révèle inutilisable au moment précis
+  où l'on en aurait besoin
+- ✅ Au démarrage, une sauvegarde n'est faite que si la dernière date de plus
+  d'un intervalle — sans quoi chaque redémarrage en créerait une et ferait
+  tourner la rotation jusqu'à ne plus garder que des copies de la même minute
+- ✅ Deux sauvegardes simultanées ne se marchent pas dessus (verrou non bloquant)
+- ✅ Route **`/api/db/sauvegarde`** : liste les sauvegardes, ou en déclenche une
+  (réservé aux administrateurs). Désactivable par `PARCINFO_BACKUP=0`
+- ✅ Couvert par `test_sauvegarde.py` : intégrité SQLite de la copie, accents
+  préservés, rotation à trois, concurrence, base d'origine intacte
+
+### 🔤 AUDIT ENCODAGE — CE QUI CASSAIT VRAIMENT
+- ✅ **Téléchargement RDP corrompu par un accent.** L'en-tête HTTP était
+  construit à la main, or un en-tête ne transporte que de l'ASCII : une machine
+  nommée « Bureau-Réception » produisait un fichier « Bureau-R?ception.rdp ».
+  L'en-tête suit maintenant la **RFC 6266** — repli ASCII plus version UTF-8
+  percent-encodée, que les navigateurs préfèrent
+- ✅ **Fichiers lus sans encodage explicite** : métadonnées de mise à jour,
+  configuration du collecteur graphique, clé secrète. Sur un Windows français,
+  `open()` utilise cp1252 et échoue sur tout contenu accentué — c'est le même
+  défaut que celui corrigé dans le collecteur en 2.6.37
+- ✅ **`netsh` du lanceur** décodait sa sortie avec l'encodage local, alors qu'un
+  Windows français renvoie des messages accentués
+- ✅ **Logiciels installés** stockés en base avec les accents échappés,
+  contrairement au reste des données JSON de l'application
+
+### ✅ CE QUE L'AUDIT A VALIDÉ
+- **Synchronisation** : les 35 tables suivies correspondent exactement au schéma.
+  Les trois seules tables non synchronisées sont celles de la machinerie de
+  synchronisation elle-même — les inclure créerait une boucle
+- **Écritures SQL** : aucune colonne écrite n'est absente du schéma
+- **Requêtes dynamiques** : toutes construites à partir de listes blanches, avec
+  les valeurs passées en paramètres. L'annulation d'une modification, qui bâtit
+  une clause `SET` à la volée, filtre bien ses colonnes contre une liste figée
+- **Rendus** : le test de parité fiche ↔ PDF passe toujours
+
+### 📝 À NOTER
+`journal_synchronisation` est créée à deux endroits (`app.py` et `database.py`)
+avec des définitions aujourd'hui **identiques**. Rien n'est cassé, mais les deux
+peuvent diverger : à unifier lors d'un prochain passage sur la synchronisation.
+
+---
+
 ## [2.6.41] - 2026-08-09 📄
 
 ### 📄 MISE EN PAGE DU RAPPORT PDF
