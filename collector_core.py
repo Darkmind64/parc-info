@@ -1261,6 +1261,43 @@ def _win_hardware_detail():
     return info
 
 
+def _diagonal_inch(largeur_cm, hauteur_cm):
+    """Diagonale d'un écran en pouces à partir de ses dimensions EDID (en cm).
+
+    L'EDID donne les dimensions de la dalle ; la diagonale commerciale s'en
+    déduit directement et parle davantage qu'un couple de centimètres.
+    """
+    try:
+        l = float(largeur_cm)
+        h = float(hauteur_cm)
+    except (TypeError, ValueError):
+        return None
+    if l <= 0 or h <= 0:
+        return None
+    return round(((l ** 2 + h ** 2) ** 0.5) / 2.54, 1)
+
+
+def hardware_age_years(bios_date):
+    """Âge approximatif du matériel, déduit de la date du BIOS.
+
+    Ce n'est pas la date d'achat, mais sur un parc c'est le seul repère
+    disponible sans interroger les API constructeur : un BIOS de 2016 signale
+    une machine à renouveler.
+    """
+    texte = _clean(bios_date)
+    if not texte:
+        return None
+    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})', texte)
+    if not m:
+        return None
+    try:
+        annee, mois, jour = (int(x) for x in m.groups())
+        delta = datetime.utcnow() - datetime(annee, mois, jour)
+        return round(delta.days / 365.25, 1)
+    except (ValueError, OverflowError):
+        return None
+
+
 def _win_inventory():
     """Écrans, imprimantes, fiabilité des disques, ports en écoute."""
     info = {}
@@ -1272,7 +1309,11 @@ def _win_inventory():
         "Manufacturer = (($_.ManufacturerName | Where-Object { $_ -gt 0 }) | ForEach-Object { [char]$_ }) -join ''; "
         "Model = (($_.UserFriendlyName | Where-Object { $_ -gt 0 }) | ForEach-Object { [char]$_ }) -join ''; "
         "Serial = (($_.SerialNumberID | Where-Object { $_ -gt 0 }) | ForEach-Object { [char]$_ }) -join ''; "
-        "Year = $_.YearOfManufacture } }) } catch {}; "
+        "Year = $_.YearOfManufacture; Instance = $_.InstanceName } }) } catch {}; "
+        # Dimensions physiques (en cm) : permettent de calculer la diagonale
+        "$dim = @(); try { $dim = @(Get-CimInstance -Namespace root\\wmi "
+        "-ClassName WmiMonitorBasicDisplayParams -ErrorAction SilentlyContinue "
+        "| Select-Object InstanceName,MaxHorizontalImageSize,MaxVerticalImageSize) } catch {}; "
         "$printers = @(); try { $printers = @(Get-CimInstance Win32_Printer -ErrorAction SilentlyContinue "
         "| Select-Object Name,DriverName,PortName,Network,Default,Shared) } catch {}; "
         # Fiabilité disque : heures de fonctionnement / usure SSD / température
@@ -1287,7 +1328,7 @@ def _win_inventory():
         "| Group-Object LocalPort | ForEach-Object { $g = $_.Group | Select-Object -First 1; "
         "[PSCustomObject]@{ Port=[int]$_.Name; Process=$pmap[[string]$g.OwningProcess] } } "
         "| Sort-Object Port) } catch {}; "
-        "[PSCustomObject]@{ Monitors=$mon; Printers=$printers; Reliability=$rel; Ports=$ports } "
+        "[PSCustomObject]@{ Monitors=$mon; MonitorDims=$dim; Printers=$printers; Reliability=$rel; Ports=$ports } "
         "| ConvertTo-Json -Compress -Depth 4",
         timeout=40
     )
@@ -1295,6 +1336,14 @@ def _win_inventory():
         return info
 
     # ── Écrans ─────────────────────────────────────────────────────────────
+    # Dimensions physiques indexées par instance, pour calculer la diagonale
+    dimensions = {}
+    for d in _as_list(data.get('MonitorDims')):
+        instance = _clean(d.get('InstanceName'))
+        if instance:
+            dimensions[instance] = (d.get('MaxHorizontalImageSize'),
+                                    d.get('MaxVerticalImageSize'))
+
     monitors = []
     for m in _as_list(data.get('Monitors')):
         model = _clean(m.get('Model'))
@@ -1306,11 +1355,13 @@ def _win_inventory():
         serial = _clean(m.get('Serial'))
         if serial and not serial.strip('0'):
             serial = ''
+        largeur, hauteur = dimensions.get(_clean(m.get('Instance')), (None, None))
         monitors.append({
             'manufacturer': manufacturer,
             'model': model,
             'serial_number': serial,
             'year': m.get('Year') or '',
+            'diagonal_inch': _diagonal_inch(largeur, hauteur),
         })
     if monitors:
         info['monitors'] = monitors
@@ -1566,7 +1617,9 @@ def _win_users():
     users_data = _win_powershell_json(
         "$users = @(Get-LocalUser -ErrorAction SilentlyContinue "
         "| Select-Object Name,Enabled,Description,"
-        "@{N='Source';E={[string]$_.PrincipalSource}},@{N='SID';E={$_.SID.Value}}); "
+        "@{N='Source';E={[string]$_.PrincipalSource}},@{N='SID';E={$_.SID.Value}},"
+        "@{N='NeverExpires';E={$null -eq $_.PasswordExpires}},"
+        "@{N='LastLogon';E={ if ($_.LastLogon) { $_.LastLogon.ToString('yyyy-MM-dd') } else { '' } }}); "
         "$admins = @(); try { "
         "$grp = (Get-LocalGroup -ErrorAction SilentlyContinue "
         "| Where-Object { $_.SID.Value -eq 'S-1-5-32-544' }).Name; "
@@ -1608,6 +1661,10 @@ def _win_users():
             'role': 'Administrateur' if est_admin else 'Utilisateur standard',
             'account_type': _ACCOUNT_SOURCES.get(source, source.capitalize() or 'Local'),
             'description': _clean(u.get('Description')),
+            # Hygiène : un compte actif dont le mot de passe n'expire jamais, ou
+            # qui n'a jamais servi, mérite d'être revu.
+            'password_never_expires': bool(u.get('NeverExpires')),
+            'last_logon': _clean(u.get('LastLogon')),
         })
         # Forme textuelle conservée : le résumé et les rapports s'en servent
         libelle = statut + (', Administrateur' if est_admin else '')
@@ -1748,12 +1805,164 @@ def _win_extras():
     return info
 
 
+# Paires (fournisseur, identifiants) réellement significatives dans le journal
+# Système. Un identifiant d'événement n'a de sens que rapporté à son
+# fournisseur : l'ID 7 vaut « bloc défectueux » chez `disk` et tout autre chose
+# chez Hyper-V. Filtrer sur l'ID seul ramène surtout du bruit.
+_EVENT_SPECS = [
+    ('EventLog', [6008], 'Arrêt inattendu', 'danger'),
+    ('Microsoft-Windows-Kernel-Power', [41], 'Arrêt inattendu', 'danger'),
+    ('Microsoft-Windows-WER-SystemErrorReporting', [1001], 'Écran bleu', 'danger'),
+    ('disk', [7, 11, 51, 52], 'Erreur disque', 'danger'),
+    ('Ntfs', [55], 'Corruption de système de fichiers', 'danger'),
+    ('volmgr', [46], 'Erreur de volume', 'warn'),
+]
+
+EVENT_WINDOW_DAYS = 30
+
+
+def _win_diagnostics():
+    """Signaux de diagnostic : incidents, correctifs en attente, démarrage.
+
+    Ces informations ne décrivent pas la configuration de la machine mais son
+    comportement : c'est ce qui permet de répondre à « le poste rame » ou
+    « il redémarre tout seul » sans se déplacer.
+    """
+    info = {}
+
+    specs_ps = '; '.join(
+        "@{P='%s';I=@(%s)}" % (prov, ','.join(str(i) for i in ids))
+        for prov, ids, _lib, _lvl in _EVENT_SPECS
+    )
+    data = _win_powershell_json(
+        "$since=(Get-Date).AddDays(-%d); $out=@(); "
+        "$specs=@(%s); "
+        "foreach($s in $specs){ try { $out += @(Get-WinEvent -FilterHashtable @{LogName='System'; "
+        "ProviderName=$s.P; ID=$s.I; StartTime=$since} -MaxEvents 60 -ErrorAction SilentlyContinue "
+        "| Select-Object Id,ProviderName,"
+        "@{N='When';E={$_.TimeCreated.ToString('yyyy-MM-dd HH:mm')}},"
+        "@{N='Msg';E={($_.Message -split [char]10)[0].Trim()}}) } catch {} }; "
+        "$out | ConvertTo-Json -Compress -Depth 3" % (EVENT_WINDOW_DAYS, specs_ps),
+        timeout=90,
+    )
+
+    libelles = {(p, i): (lib, lvl) for p, ids, lib, lvl in _EVENT_SPECS for i in ids}
+    groupes = {}
+    for e in _as_list(data):
+        cle = (_clean(e.get('ProviderName')), e.get('Id'), _clean(e.get('Msg')))
+        lib, niveau = libelles.get((cle[0], cle[1]), ('Incident système', 'warn'))
+        entree = groupes.setdefault(cle, {
+            'category': lib, 'level': niveau, 'provider': cle[0], 'event_id': cle[1],
+            'message': cle[2], 'count': 0, 'last_seen': '',
+        })
+        entree['count'] += 1
+        quand = _clean(e.get('When'))
+        # Les incidents répétitifs (un bloc défectueux relu six fois) sont
+        # regroupés : c'est le nombre et la dernière occurrence qui informent.
+        if quand > entree['last_seen']:
+            entree['last_seen'] = quand
+
+    if groupes:
+        incidents = sorted(groupes.values(), key=lambda g: g['last_seen'], reverse=True)
+        info['system_incidents'] = incidents
+        info['unexpected_shutdowns'] = sum(
+            g['count'] for g in incidents if g['category'] == 'Arrêt inattendu')
+        info['disk_error_events'] = sum(
+            g['count'] for g in incidents
+            if g['category'] in ('Erreur disque', 'Corruption de système de fichiers'))
+
+    # ── Mises à jour en attente ────────────────────────────────────────────
+    # Recherche dans le cache local (Online=$false) : une recherche en ligne
+    # dépend du réseau et du serveur WSUS, et peut dépasser la minute.
+    maj = _win_powershell_json(
+        "try { $s=New-Object -ComObject Microsoft.Update.Session; "
+        "$sr=$s.CreateUpdateSearcher(); $sr.Online=$false; "
+        "$r=$sr.Search('IsInstalled=0 and IsHidden=0'); "
+        "@($r.Updates | Select-Object -First 50 | ForEach-Object { [PSCustomObject]@{ "
+        "Title=$_.Title; Severity=$_.MsrcSeverity; "
+        "Security=[bool]($_.Categories | Where-Object { $_.Name -match 'Security|Sécurité' }) } }) "
+        "| ConvertTo-Json -Compress -Depth 3 } catch {}",
+        timeout=120,
+    )
+    attente = []
+    for u in _as_list(maj):
+        titre = _clean(u.get('Title'))
+        if titre:
+            attente.append({
+                'title': titre,
+                'severity': _clean(u.get('Severity')),
+                'security': bool(u.get('Security')),
+            })
+    info['pending_updates'] = attente
+    info['pending_updates_security'] = sum(
+        1 for u in attente if u['security'] or u['severity'] in ('Critical', 'Important'))
+
+    # ── Démarrage et services ──────────────────────────────────────────────
+    demarrage = _win_powershell_json(
+        "$startup=@(); try { $startup=@(Get-CimInstance Win32_StartupCommand -ErrorAction SilentlyContinue "
+        "| Select-Object Name,Command,Location,User) } catch {}; "
+        "$svc=@(); try { $svc=@(Get-CimInstance Win32_Service -ErrorAction SilentlyContinue "
+        "| Where-Object { $_.StartMode -eq 'Auto' -and $_.State -ne 'Running' } "
+        "| Select-Object Name,DisplayName,State,StartMode) } catch {}; "
+        "$shares=@(); try { $shares=@(Get-SmbShare -ErrorAction SilentlyContinue "
+        "| Select-Object Name,Path,Description,@{N='Special';E={$_.Special}}) } catch {}; "
+        "[PSCustomObject]@{ Startup=$startup; Services=$svc; Shares=$shares } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=60,
+    )
+    if demarrage:
+        progs = []
+        for s in _as_list(demarrage.get('Startup')):
+            nom = _clean(s.get('Name'))
+            if nom:
+                progs.append({
+                    'name': nom,
+                    'command': _clean(s.get('Command')),
+                    'location': _clean(s.get('Location')),
+                    'user': _clean(s.get('User')),
+                })
+        if progs:
+            info['startup_programs'] = sorted(progs, key=lambda p: p['name'].lower())
+
+        services = []
+        for s in _as_list(demarrage.get('Services')):
+            nom = _clean(s.get('Name'))
+            if nom:
+                services.append({
+                    'name': nom,
+                    'display_name': _clean(s.get('DisplayName')) or nom,
+                    'state': _clean(s.get('State')),
+                })
+        if services:
+            info['stopped_auto_services'] = sorted(
+                services, key=lambda s: s['display_name'].lower())
+
+        partages = []
+        for s in _as_list(demarrage.get('Shares')):
+            nom = _clean(s.get('Name'))
+            if not nom:
+                continue
+            # Les partages d'administration (C$, ADMIN$, IPC$) existent partout
+            # et n'apprennent rien ; ce sont les partages créés à la main qui
+            # méritent d'être vus.
+            partages.append({
+                'name': nom,
+                'path': _clean(s.get('Path')),
+                'description': _clean(s.get('Description')),
+                'administrative': bool(s.get('Special')) or nom.endswith('$'),
+            })
+        if partages:
+            info['smb_shares'] = partages
+
+    return info
+
+
 def get_system_info_windows():
     """Collecte Windows complète (ctypes/winreg/PowerShell, sans dépendance externe)."""
     info = {}
     for collector in (_win_base_hardware, _win_core, _win_hardware_detail,
                       _win_inventory, _win_licensing, _win_security,
-                      _win_users, _win_extras):
+                      _win_users, _win_extras, _win_diagnostics):
         try:
             info.update(collector() or {})
         except Exception:
@@ -3018,6 +3227,45 @@ def build_alerts(info):
     uptime = _num(info.get('uptime_hours'))
     if uptime and uptime > 24 * 30:
         add('info', f'Machine non redémarrée depuis {round(uptime / 24)} jours')
+
+    # ── Signaux de comportement, pas de configuration ──────────────────────
+    arrets = info.get('unexpected_shutdowns') or 0
+    if arrets:
+        add('danger', '%d arrêt(s) inattendu(s) sur %d jours' % (arrets, EVENT_WINDOW_DAYS),
+            'Coupure secteur, surchauffe ou plantage — à corréler avec les écrans bleus')
+
+    erreurs_disque = info.get('disk_error_events') or 0
+    if erreurs_disque:
+        detail = next((i['message'] for i in info.get('system_incidents', [])
+                       if i.get('category') == 'Erreur disque'), '')
+        add('danger', '%d erreur(s) disque signalée(s) par Windows' % erreurs_disque,
+            detail[:110])
+
+    maj_secu = info.get('pending_updates_security') or 0
+    if maj_secu:
+        add('warn', '%d mise(s) à jour de sécurité en attente' % maj_secu)
+    elif info.get('pending_updates'):
+        add('info', '%d mise(s) à jour en attente' % len(info['pending_updates']))
+
+    age = hardware_age_years(info.get('bios_release_date'))
+    if age is not None and age >= 6:
+        add('info', 'Matériel ancien — BIOS daté de %g an(s)' % age,
+            "Repère de renouvellement, pas une date d'achat")
+
+    # Un compte administrateur dont le mot de passe n'expire jamais est le
+    # défaut d'hygiène qui compte vraiment ; le signaler compte par compte
+    # noierait la liste.
+    admins_sans_expiration = [u['name'] for u in info.get('users_details', [])
+                              if u.get('admin') and u.get('enabled')
+                              and u.get('password_never_expires')]
+    if admins_sans_expiration:
+        add('warn', '%d compte(s) administrateur à mot de passe sans expiration'
+            % len(admins_sans_expiration), ' · '.join(admins_sans_expiration[:5]))
+
+    partages = [s['name'] for s in info.get('smb_shares', []) if not s.get('administrative')]
+    if partages:
+        add('info', '%d partage(s) réseau exposé(s)' % len(partages),
+            ' · '.join(partages[:6]))
 
     return alerts
 

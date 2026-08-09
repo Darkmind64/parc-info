@@ -4050,6 +4050,7 @@ def fiche_systeme_appareil(id):
     # Analyse et mise en forme reprises de collector_core : la page porte ainsi
     # le même jugement que le rapport PDF sur une machine donnée.
     alertes, kpis, disques, ports_cartes, ports_masques = [], [], [], [], 0
+    age_materiel = None
     if rapport:
         try:
             from collector_core import (
@@ -4058,6 +4059,8 @@ def fiche_systeme_appareil(id):
             alertes = build_alerts(rapport)
             kpis = _fiche_systeme_kpis(rapport)
             disques = _fiche_systeme_disques(rapport)
+            from collector_core import hardware_age_years
+            age_materiel = hardware_age_years(rapport.get('bios_release_date'))
             ports = [describe_listening_port(p)
                      for p in (rapport.get('listening_ports') or [])
                      if isinstance(p, dict)]
@@ -4072,7 +4075,7 @@ def fiche_systeme_appareil(id):
                            logiciels=logiciels, client=client, clients=get_clients(),
                            client_actif_id=cid, alertes=alertes, kpis=kpis,
                            disques=disques, ports_cartes=ports_cartes,
-                           ports_masques=ports_masques)
+                           ports_masques=ports_masques, age_materiel=age_materiel)
 
 
 @app.route('/appareil/<int:id>/documents')
