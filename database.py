@@ -454,6 +454,76 @@ def get_sync_state() -> dict:
     return dict(_sync_state)
 
 
+def creer_journal_maj(conn) -> None:
+    """Crée la table du journal des mises à jour si elle manque.
+
+    Doublon volontaire de la définition d'init_db : le journal est écrit par le
+    suivi des mises à jour, qui peut tourner avant qu'init_db n'ait été appelé
+    sur une base neuve. Les deux définitions doivent rester identiques — d'où
+    la même chaîne SQL, appelée depuis les deux endroits.
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS journal_maj ("
+        "cle TEXT PRIMARY KEY, horodatage TEXT NOT NULL, machine TEXT DEFAULT '', "
+        "mode TEXT DEFAULT '', version_avant TEXT DEFAULT '', "
+        "version_apres TEXT DEFAULT '', statut TEXT DEFAULT 'succes', "
+        "detail TEXT DEFAULT '', date_maj TEXT DEFAULT '')"
+    )
+
+
+def log_maj_event(machine: str, version_avant: str, version_apres: str,
+                  mode: str = '', statut: str = 'succes', detail: str = '') -> None:
+    """Consigne une mise à jour de l'application, visible depuis toutes les instances.
+
+    La table est synchronisée (voir _TRACKED_JOURNAL dans app.py) : un poste
+    voit ainsi ce qui a été installé sur les autres, sans avoir à s'y connecter.
+    """
+    try:
+        import socket as _socket
+        from datetime import datetime as _dt
+        machine = machine or _socket.gethostname()
+        horodatage = _dt.utcnow().isoformat(timespec='seconds')
+        # La clé mêle machine et version : rejouer le même démarrage ne crée pas
+        # de doublon, et deux machines mises à jour en même temps ne se
+        # chevauchent pas — ce qu'un identifiant auto-incrémenté ne garantit pas
+        # quand chaque instance numérote dans sa propre base.
+        cle = '%s|%s|%s' % (machine, version_apres, horodatage[:10])
+
+        conn = _local_db()
+        creer_journal_maj(conn)
+        conn.execute(
+            "INSERT OR REPLACE INTO journal_maj "
+            "(cle, horodatage, machine, mode, version_avant, version_apres, "
+            " statut, detail, date_maj) VALUES (?,?,?,?,?,?,?,?,?)",
+            (cle, horodatage, machine, mode, version_avant or '', version_apres or '',
+             statut, detail, horodatage)
+        )
+        conn.execute(
+            "DELETE FROM journal_maj WHERE cle NOT IN "
+            "(SELECT cle FROM journal_maj ORDER BY horodatage DESC LIMIT 300)"
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        import logging as _logging
+        _logging.getLogger('parcinfo').exception(
+            "log_maj_event a échoué (sans conséquence sur la mise à jour)")
+
+
+def creer_journal_synchronisation(conn) -> None:
+    """Crée la table du journal de synchronisation si elle manque.
+
+    Point unique de définition : elle était auparavant écrite à l'identique ici
+    et dans app.py, deux copies libres de diverger sans que rien ne le signale.
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS journal_synchronisation ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, horodatage TEXT NOT NULL, "
+        "type TEXT NOT NULL, statut TEXT NOT NULL, resume TEXT DEFAULT '', "
+        "details TEXT DEFAULT '')"
+    )
+
+
 def log_sync_event(event_type: str, statut: str, resume: str, details: dict = None) -> None:
     """Enregistre un événement dans le journal de synchronisation (visible dans l'UI).
 
@@ -464,12 +534,7 @@ def log_sync_event(event_type: str, statut: str, resume: str, details: dict = No
     try:
         from datetime import datetime as _dt
         conn = _local_db()
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS journal_synchronisation ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, horodatage TEXT NOT NULL, "
-            "type TEXT NOT NULL, statut TEXT NOT NULL, resume TEXT DEFAULT '', "
-            "details TEXT DEFAULT '')"
-        )
+        creer_journal_synchronisation(conn)
         details_json = _json.dumps(details, ensure_ascii=False) if details else ''
         conn.execute(
             "INSERT INTO journal_synchronisation (horodatage, type, statut, resume, details) VALUES (?,?,?,?,?)",

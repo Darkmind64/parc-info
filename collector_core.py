@@ -30,7 +30,7 @@ from urllib.request import Request, urlopen
 
 __all__ = [
     'IS_WINDOWS', 'IS_MAC', 'IS_LINUX',
-    'collect_system_info', 'build_summary_lines',
+    'collect_system_info', 'build_summary_lines', 'build_summary_sections',
     'generate_pdf_report', 'generate_html_report',
     'get_api_payload', 'send_to_parcinfo', 'upload_report_to_parcinfo',
     'fetch_clients', 'is_elevated',
@@ -2453,10 +2453,27 @@ def _mesurer_debit(url):
         return None
 
 
-def get_system_info_windows(progress=None):
+def _publier(on_data, info):
+    """Livre l'état partiel de la collecte, sans jamais l'interrompre.
+
+    Comme `_report`, ce rappel vient de l'interface : une erreur d'affichage ne
+    doit pas faire échouer une collecte d'une minute.
+    """
+    if not on_data:
+        return
+    try:
+        on_data(dict(info))
+    except Exception:
+        pass
+
+
+def get_system_info_windows(progress=None, on_data=None):
     """Collecte Windows complète (ctypes/winreg/PowerShell, sans dépendance externe).
 
     `progress` est appelé avec (fraction, libellé) avant chaque étape.
+    `on_data` reçoit l'état partiel après chaque étape, ce qui permet à
+    l'interface d'afficher les données au fur et à mesure plutôt que de laisser
+    l'utilisateur devant un écran vide une minute durant.
     """
     info = {}
     total = len(_WIN_STEPS)
@@ -2467,6 +2484,7 @@ def get_system_info_windows(progress=None):
         except Exception:
             # Un bloc en échec ne doit jamais empêcher les autres de remonter
             pass
+        _publier(on_data, info)
     return info
 
 
@@ -3179,12 +3197,16 @@ def console_progress(largeur=32, flux=None):
     return rappel
 
 
-def collect_system_info(progress=None, test_debit=False, url_debit=None):
+def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data=None):
     """Collecte toutes les infos système.
 
     `progress` est un rappel optionnel appelé avec (fraction entre 0 et 1,
     libellé de l'étape en cours). Il permet aux deux collecteurs d'afficher la
     même progression sans dupliquer la liste des étapes.
+
+    `on_data` reçoit une copie de l'état partiel après chaque étape : l'interface
+    graphique remplit ainsi ses onglets au fil de l'eau au lieu de tout afficher
+    à la fin.
     """
     _report(progress, 0.02, 'Identification de la machine')
     info = {
@@ -3196,15 +3218,18 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None):
         'dns_name': get_fqdn(),
         'ip_addresses': get_ip_addresses(),
     }
+    _publier(on_data, info)
 
     # OS
     _report(progress, 0.06, "Système d'exploitation")
     info.update(get_os_info())
+    _publier(on_data, info)
 
     # Infos spécifiques par OS
     try:
         if IS_WINDOWS:
-            info.update(get_system_info_windows(progress))
+            info.update(get_system_info_windows(progress, on_data=lambda partiel: (
+                _publier(on_data, dict(info, **partiel)))))
         elif IS_MAC:
             _report(progress, 0.30, 'Collecte macOS')
             info.update(get_system_info_mac())
@@ -3213,10 +3238,12 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None):
             info.update(get_system_info_linux())
     except Exception:
         pass
+    _publier(on_data, info)
 
     # Logiciels
     _report(progress, 0.82, 'Inventaire logiciel')
     info['installed_software'] = get_installed_software()
+    _publier(on_data, info)
 
     # Périphériques USB connectés. Isolé de la collecte système : une erreur ici
     # (droits, commande absente) ne doit pas priver le rapport du reste.
@@ -3225,6 +3252,7 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None):
         info.update(measure_network(info, test_debit=test_debit, url_debit=url_debit))
     except Exception:
         pass
+    _publier(on_data, info)
 
     _report(progress, 0.93, 'Périphériques USB')
     try:
@@ -3236,6 +3264,7 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None):
     info['device_type'] = guess_device_type(info)
 
     _report(progress, 1.0, 'Collecte terminée')
+    _publier(on_data, info)
     return info
 
 
@@ -3324,228 +3353,518 @@ def format_printer(pr):
     return line
 
 
-def build_summary_lines(info):
-    """Construit le résumé textuel partagé par la sortie CLI et l'aperçu GUI."""
-    lines = []
+def _sec(cle, titre, icone):
+    """Squelette d'une rubrique du résumé."""
+    return {'cle': cle, 'titre': titre, 'icone': icone, 'champs': [], 'listes': [],
+            'notes': []}
 
-    def section(title):
-        lines.append(f"┌─ {title}")
 
-    def field(label, value):
-        lines.append(f"│ {label:<22}: {value}")
+def _usb_ligne(d):
+    """Une ligne lisible pour un périphérique USB."""
+    parts = [d.get('name') or 'Périphérique']
+    if d.get('manufacturer'):
+        parts.append(d['manufacturer'])
+    if d.get('model') and d.get('model') != d.get('name'):
+        parts.append(d['model'])
+    detail = ' — '.join(parts)
+    suffixes = []
+    if d.get('categorie'):
+        suffixes.append(d['categorie'])
+    if d.get('vid'):
+        suffixes.append('%s:%s' % (d['vid'], d['pid']))
+    if d.get('serial'):
+        suffixes.append('S/N %s' % d['serial'])
+    if d.get('install_date'):
+        suffixes.append('vu le %s' % d['install_date'])
+    if suffixes:
+        detail += '  [' + ' · '.join(suffixes) + ']'
+    return detail
 
-    def item(value):
-        lines.append(f"│   - {value}")
 
-    def close():
-        lines.append("└")
-        lines.append("")
+def build_summary_sections(info):
+    """Découpe les données collectées en rubriques affichables.
+
+    Source unique du résumé : la sortie texte du collecteur CLI en découle
+    (build_summary_lines), et l'interface graphique en fait ses onglets. Deux
+    constructions séparées auraient dérivé l'une de l'autre au fil des ajouts.
+
+    Retourne une liste de rubriques :
+        {'cle', 'titre', 'icone', 'champs': [(libellé, valeur)],
+         'listes': [{'titre', 'elements': [...]}], 'notes': [...]}
+    Les rubriques sans aucune donnée sont omises.
+    """
+    sections = []
+
+    # ── Alertes ────────────────────────────────────────────────────────────
+    try:
+        alertes = build_alerts(info) or []
+    except Exception:
+        alertes = []
+    if alertes:
+        s = _sec('alertes', 'Points de vigilance', '⚠')
+        s['listes'].append({'titre': '', 'elements': [
+            ('%s%s' % (a.get('titre', ''), ' — %s' % a['detail'] if a.get('detail') else ''))
+            if isinstance(a, dict) else str(a)
+            for a in alertes]})
+        sections.append(s)
 
     # ── Identification ─────────────────────────────────────────────────────
-    section("IDENTIFICATION")
-    field("Hostname", info.get('hostname', 'N/A'))
-    if info.get('dns_name'):
-        field("Nom DNS", info['dns_name'])
-    field("Adresse MAC", info.get('mac_address', 'N/A'))
-    field("Adresse(s) IP", ', '.join(info.get('ip_addresses', [])) or 'N/A')
-    field("Type d'appareil", info.get('device_type', 'N/A'))
-    field("Marque", info.get('brand') or 'N/A')
-    field("Modèle", info.get('model') or 'N/A')
-    field("Numéro de série", info.get('serial_number') or 'N/A')
-    if info.get('asset_tag'):
-        field("Asset tag", info['asset_tag'])
-    if info.get('chassis_type'):
-        field("Châssis", info['chassis_type'])
-    close()
+    s = _sec('identification', 'Identification', '🖥')
+    s['champs'] += [
+        ('Hostname', info.get('hostname')),
+        ('Nom DNS', info.get('dns_name')),
+        ('Adresse MAC', info.get('mac_address')),
+        ("Adresse(s) IP", ', '.join(info.get('ip_addresses') or []) or None),
+        ("Type d'appareil", info.get('device_type')),
+        ('Marque', info.get('brand')),
+        ('Modèle', info.get('model')),
+        ('Numéro de série', info.get('serial_number')),
+        ('Asset tag', info.get('asset_tag')),
+        ('Châssis', info.get('chassis_type')),
+    ]
+    age = hardware_age_years(info.get('bios_release_date'))
+    if age is not None:
+        s['champs'].append(('Âge du matériel', '%s an(s)' % age))
+    sections.append(s)
 
     # ── Système ────────────────────────────────────────────────────────────
-    section("SYSTÈME D'EXPLOITATION")
-    field("OS", info.get('os_name', 'N/A'))
-    field("Version", info.get('os_version', 'N/A'))
-    if info.get('os_build'):
-        field("Build", info['os_build'])
-    if info.get('architecture'):
-        field("Architecture", info['architecture'])
-    if info.get('os_install_date'):
-        field("Installé le", info['os_install_date'])
-    field("Domaine/Groupe", info.get('domain') or info.get('workgroup') or 'N/A')
-    if info.get('logged_on_user'):
-        field("Session ouverte", info['logged_on_user'])
+    s = _sec('systeme', "Système d'exploitation", '⚙')
+    bios = info.get('bios_version') or ''
+    if bios and info.get('bios_release_date'):
+        bios += ' (%s)' % info['bios_release_date']
     uptime = info.get('uptime_hours')
-    if uptime is not None:
-        field("Uptime", f"{round(uptime / 24, 1)} jour(s)")
-    if info.get('bios_version'):
-        bios = info['bios_version']
-        if info.get('bios_release_date'):
-            bios += f" ({info['bios_release_date']})"
-        field("BIOS", bios)
-    if info.get('hypervisor_present'):
-        field("Virtualisation", "Machine virtuelle / hyperviseur détecté")
-    close()
+    s['champs'] += [
+        ('OS', info.get('os_name')),
+        ('Version', info.get('os_version')),
+        ('Build', info.get('os_build')),
+        ('Architecture', info.get('architecture')),
+        ('Installé le', info.get('os_install_date')),
+        ('Domaine / Groupe', info.get('domain') or info.get('workgroup')),
+        ('Session ouverte', info.get('logged_on_user')),
+        ('Propriétaire déclaré', info.get('registered_owner')),
+        ('Uptime', ('%s jour(s)' % round(uptime / 24, 1)) if uptime is not None else None),
+        ('BIOS', bios or None),
+        ('Fuseau horaire', info.get('timezone')),
+        ('Virtualisation', 'Machine virtuelle / hyperviseur détecté'
+         if info.get('hypervisor_present') else None),
+    ]
+    sections.append(s)
 
     # ── Matériel ───────────────────────────────────────────────────────────
-    section("MATÉRIEL")
-    field("CPU", info.get('cpu', 'N/A'))
+    s = _sec('materiel', 'Matériel', '🔧')
     cores = []
     if info.get('cpu_physical_cores'):
-        cores.append(f"{info['cpu_physical_cores']} cœurs physiques")
+        cores.append('%s cœurs physiques' % info['cpu_physical_cores'])
     if info.get('cpu_logical_cores'):
-        cores.append(f"{info['cpu_logical_cores']} logiques")
+        cores.append('%s logiques' % info['cpu_logical_cores'])
     if not cores and info.get('cpu_cores'):
-        cores.append(f"{info['cpu_cores']} cœurs")
-    if cores:
-        field("Cœurs", ', '.join(cores))
-    if info.get('cpu_max_clock_mhz'):
-        field("Fréquence max", f"{info['cpu_max_clock_mhz']} MHz")
-    if info.get('motherboard'):
-        mb = info['motherboard']
-        field("Carte mère", f"{mb.get('manufacturer', '')} {mb.get('model', '')}".strip() or 'N/A')
-    field("RAM", f"{info.get('ram_gb', 'N/A')} GB")
+        cores.append('%s cœurs' % info['cpu_cores'])
+    mb = info.get('motherboard') or {}
+    slots = None
     if info.get('memory_slots_total'):
-        field("Slots mémoire", f"{info.get('memory_slots_used', 0)}/{info['memory_slots_total']} occupés"
-                               + (f" (max {info['memory_max_gb']} GB)" if info.get('memory_max_gb') else ''))
+        slots = '%s/%s occupés' % (info.get('memory_slots_used', 0), info['memory_slots_total'])
+        if info.get('memory_max_gb'):
+            slots += ' (max %s GB)' % info['memory_max_gb']
+    s['champs'] += [
+        ('CPU', info.get('cpu')),
+        ('Cœurs', ', '.join(cores) or None),
+        ('Fréquence max', ('%s MHz' % info['cpu_max_clock_mhz'])
+         if info.get('cpu_max_clock_mhz') else None),
+        ('Socket', info.get('cpu_socket')),
+        ('Virtualisation CPU', info.get('cpu_virtualization')),
+        ('Carte mère', ('%s %s' % (mb.get('manufacturer', ''), mb.get('model', ''))).strip() or None),
+        ('RAM', ('%s GB' % info['ram_gb']) if info.get('ram_gb') else None),
+        ('RAM libre', ('%s GB' % info['ram_free_gb']) if info.get('ram_free_gb') else None),
+        ('Slots mémoire', slots),
+    ]
     if info.get('memory_modules'):
-        field("Barrettes", '')
-        for module in info['memory_modules']:
-            item(format_memory_module(module))
+        s['listes'].append({'titre': 'Barrettes installées',
+                            'elements': [format_memory_module(m) for m in info['memory_modules']]})
     if info.get('gpu_details'):
-        field("Carte(s) graphique(s)", '')
+        elements = []
         for gpu in info['gpu_details']:
-            detail = gpu['name']
+            detail = gpu.get('name', '')
             if gpu.get('vram_gb'):
-                detail += f" — {gpu['vram_gb']} GB VRAM"
+                detail += ' — %s GB VRAM' % gpu['vram_gb']
             if gpu.get('resolution'):
-                detail += f" — {gpu['resolution']}"
+                detail += ' — %s' % gpu['resolution']
             if gpu.get('driver_version'):
-                detail += f" — pilote {gpu['driver_version']}"
-            item(detail)
+                detail += ' — pilote %s' % gpu['driver_version']
+            elements.append(detail)
+        s['listes'].append({'titre': 'Carte(s) graphique(s)', 'elements': elements})
     elif info.get('gpu'):
-        field("Carte graphique", info['gpu'])
-    close()
+        s['champs'].append(('Carte graphique', info['gpu']))
+    sections.append(s)
 
     # ── Stockage ───────────────────────────────────────────────────────────
-    section("STOCKAGE")
-    disk_total = info.get('disk_total_gb', 'N/A')
-    if info.get('disk_used_gb') is not None and info.get('disk_free_gb') is not None:
-        field("Total", f"{disk_total} GB ({info['disk_used_gb']} GB utilisés, {info['disk_free_gb']} GB libres)")
-    else:
-        field("Total", f"{disk_total} GB")
-    for drive in info.get('disk_drives', []):
-        item(drive)
-    for drive in info.get('physical_disks', []):
-        item(drive)
-    for entry in info.get('disk_reliability', []):
-        item(format_reliability(entry))
-    close()
+    s = _sec('stockage', 'Stockage', '💾')
+    if info.get('disk_total_gb') is not None:
+        total = '%s GB' % info['disk_total_gb']
+        if info.get('disk_used_gb') is not None and info.get('disk_free_gb') is not None:
+            total += ' (%s GB utilisés, %s GB libres)' % (info['disk_used_gb'], info['disk_free_gb'])
+        s['champs'].append(('Total', total))
+    if info.get('disk_drives'):
+        s['listes'].append({'titre': 'Volumes', 'elements': list(info['disk_drives'])})
+    if info.get('physical_disks'):
+        s['listes'].append({'titre': 'Disques physiques', 'elements': list(info['physical_disks'])})
+    if info.get('disk_reliability'):
+        s['listes'].append({'titre': 'Santé (SMART)',
+                            'elements': [format_reliability(e) for e in info['disk_reliability']]})
+    if info.get('disk_error_events'):
+        s['champs'].append(('Erreurs disque (30 j)', info['disk_error_events']))
+    sections.append(s)
 
-    # ── Écrans / imprimantes ───────────────────────────────────────────────
-    if info.get('monitors') or info.get('printers'):
-        section("PÉRIPHÉRIQUES")
-        for mon in info.get('monitors', []):
-            item(f"Écran : {format_monitor(mon)}")
-        for pr in info.get('printers', []):
-            item(f"Imprimante : {format_printer(pr)}")
-        close()
+    # ── Écrans et imprimantes ──────────────────────────────────────────────
+    s = _sec('peripheriques', 'Écrans et imprimantes', '🖨')
+    if info.get('monitors'):
+        s['listes'].append({'titre': 'Écrans',
+                            'elements': [format_monitor(m) for m in info['monitors']]})
+    if info.get('printers'):
+        s['listes'].append({'titre': 'Imprimantes',
+                            'elements': [format_printer(p) for p in info['printers']]})
+    sections.append(s)
+
+    # ── USB ────────────────────────────────────────────────────────────────
+    s = _sec('usb', 'Périphériques USB', '🔌')
+    usb = info.get('usb_devices') or []
+    if usb:
+        inventories = [d for d in usb if d.get('inventoriable')]
+        internes = [d for d in usb if not d.get('inventoriable')]
+        s['champs'].append(('Détectés', '%d, dont %d repris dans l\'inventaire'
+                            % (len(usb), len(inventories))))
+        if inventories:
+            s['listes'].append({'titre': 'Repris dans l\'inventaire',
+                                'elements': [_usb_ligne(d) for d in inventories]})
+        if internes:
+            s['listes'].append({'titre': 'Contrôleurs et concentrateurs internes',
+                                'elements': [_usb_ligne(d) for d in internes]})
+    sections.append(s)
 
     # ── Réseau ─────────────────────────────────────────────────────────────
-    if info.get('network_adapters') or info.get('listening_ports'):
-        section("RÉSEAU")
-        for adapter in info.get('network_adapters', []):
-            item(adapter)
-        ports = info.get('listening_ports', [])
-        if ports:
-            field("Ports en écoute", f"{len(ports)} port(s) TCP")
-            preview = ', '.join(
-                f"{p['port']}" + (f" ({p['process']})" if p.get('process') else '')
-                for p in ports[:15]
-            )
-            item(preview + (' …' if len(ports) > 15 else ''))
-        close()
-
-    # ── Batterie ───────────────────────────────────────────────────────────
-    if info.get('battery') or info.get('battery_health_percent') is not None:
-        section("BATTERIE")
-        if info.get('battery'):
-            field("Charge", info['battery'])
-        if info.get('battery_health_percent') is not None:
-            field("Santé", f"{info['battery_health_percent']}% "
-                           f"(usure {info.get('battery_wear_percent', '?')}%)")
-        if info.get('battery_cycles'):
-            field("Cycles", info['battery_cycles'])
-        if info.get('battery_health_status'):
-            field("État", info['battery_health_status'])
-        close()
+    s = _sec('reseau', 'Réseau', '🌐')
+    passerelles = ', '.join(
+        '%s (%s)' % (g.get('address', '?'), g.get('interface', '?')) if isinstance(g, dict) else str(g)
+        for g in (info.get('gateways') or [])) or info.get('default_gateway')
+    dns = []
+    for entree in (info.get('dns_servers') or []):
+        if isinstance(entree, dict):
+            serveurs = ', '.join(entree.get('servers') or [])
+            if serveurs:
+                dns.append('%s : %s%s' % (entree.get('interface', '?'), serveurs,
+                                          ' (DHCP)' if entree.get('dhcp') else ''))
+        else:
+            dns.append(str(entree))
+    proxy = info.get('proxy')
+    if isinstance(proxy, dict):
+        proxy = ('%s%s' % (proxy.get('server') or 'configuration automatique',
+                           '' if proxy.get('enabled') else ' — inactif')) or None
+    s['champs'] += [
+        ('Passerelle', passerelles),
+        ('Suffixes DNS', ', '.join(info.get('dns_suffixes') or []) or None),
+        ('Proxy', proxy),
+    ]
+    if dns:
+        s['listes'].append({'titre': 'Serveurs DNS', 'elements': dns})
+    # La latence est mesurée vers plusieurs cibles (passerelle, Internet) :
+    # chacune a son intérêt — une passerelle lente n'a pas la même cause qu'un
+    # Internet lent.
+    for mesure in (info.get('latency') or []):
+        if not isinstance(mesure, dict):
+            continue
+        s['champs'].append((
+            'Latence %s' % (mesure.get('role') or mesure.get('target', '?')),
+            '%s ms (max %s ms, perte %s %%) — %s'
+            % (mesure.get('avg_ms', '?'), mesure.get('max_ms', '?'),
+               mesure.get('loss_pct', '?'), mesure.get('target', '?'))))
+    bp = info.get('bandwidth') or {}
+    if bp:
+        s['champs'].append(('Débit descendant', '%s Mb/s (%s Mo en %s s)'
+                            % (bp.get('mbps', '?'), bp.get('downloaded_mb', '?'),
+                               bp.get('seconds', '?'))))
+    elif info.get('latency') is not None:
+        # « Non mesuré » n'a de sens qu'une fois l'étape réseau passée : l'écrire
+        # avant ferait apparaître une rubrique Réseau dès la première seconde,
+        # avec cette seule ligne pour tout contenu.
+        s['champs'].append(('Débit descendant', 'Non mesuré'))
+    if info.get('wifi'):
+        s['champs'].append(('Wi-Fi', info['wifi'] if isinstance(info['wifi'], str)
+                            else json.dumps(info['wifi'], ensure_ascii=False)))
+    cartes = []
+    for a in (info.get('network_adapter_details') or []):
+        if not isinstance(a, dict):
+            cartes.append(str(a))
+            continue
+        libelle = a.get('name') or a.get('description') or '?'
+        details = []
+        # Chaque adresse porte son masque : l'IP seule ne dit pas dans quelle
+        # plage la carte se trouve, information utile en diagnostic.
+        adresses = ['%s/%s' % (ip.get('address', '?'), ip.get('prefix'))
+                    if isinstance(ip, dict) else str(ip)
+                    for ip in (a.get('ip_addresses') or [])]
+        if adresses:
+            details.append(', '.join(adresses))
+        if a.get('mac_address'):
+            details.append(a['mac_address'])
+        if a.get('link_speed'):
+            details.append(str(a['link_speed']))
+        details.append('physique' if a.get('physical') else 'virtuelle')
+        cartes.append('%s  [%s]' % (libelle, ' · '.join(details)))
+    if not cartes and info.get('network_adapters'):
+        cartes = list(info['network_adapters'])
+    if cartes:
+        s['listes'].append({'titre': 'Cartes réseau', 'elements': cartes})
+    if info.get('network_profiles'):
+        s['listes'].append({'titre': 'Profils réseau', 'elements': [
+            '%s — %s (%s, %s)' % (p.get('name', '?'), p.get('interface', '?'),
+                                  p.get('category', '?'), p.get('connectivity', '?'))
+            if isinstance(p, dict) else str(p)
+            for p in info['network_profiles']]})
+    ports = info.get('listening_ports') or []
+    if ports:
+        s['listes'].append({'titre': 'Ports TCP en écoute (%d)' % len(ports),
+                            'elements': ['%s%s' % (p.get('port'),
+                                                   ' — %s' % p['process'] if p.get('process') else '')
+                                         for p in ports]})
+    sections.append(s)
 
     # ── Sécurité ───────────────────────────────────────────────────────────
-    has_security = any(info.get(k) is not None for k in ('antivirus', 'tpm_present', 'secure_boot')) \
-        or info.get('firewall') or info.get('bitlocker')
-    if has_security:
-        section("SÉCURITÉ & CONFORMITÉ")
-        if info.get('antivirus'):
-            field("Antivirus", info['antivirus'])
-        for profile in info.get('firewall', []):
-            item(f"Pare-feu {profile}")
-        for vol in info.get('bitlocker', []):
-            item(f"Chiffrement {vol}")
-        if info.get('tpm_present') is not None:
-            field("TPM", 'Présent et activé' if info.get('tpm_enabled')
-                  else ('Présent mais désactivé' if info['tpm_present'] else 'Absent'))
-        if info.get('secure_boot') is not None:
-            field("Secure Boot", 'Activé' if info['secure_boot'] else 'Désactivé')
-        close()
+    s = _sec('securite', 'Sécurité', '🛡')
+    s['champs'] += [
+        ('Antivirus', info.get('antivirus')),
+        ('TPM', ('Présent et activé' if info.get('tpm_enabled')
+                 else ('Présent mais désactivé' if info.get('tpm_present') else 'Absent'))
+         if info.get('tpm_present') is not None else None),
+        ('Secure Boot', ('Activé' if info['secure_boot'] else 'Désactivé')
+         if info.get('secure_boot') is not None else None),
+    ]
+    if info.get('antivirus_products'):
+        s['listes'].append({'titre': 'Antivirus détectés', 'elements': [
+            '%s — %s%s' % (a.get('name', '?'),
+                           a.get('status') or ('actif' if a.get('enabled') else 'inactif'),
+                           '' if a.get('up_to_date') else ', signatures à jour : non')
+            if isinstance(a, dict) else str(a)
+            for a in info['antivirus_products']]})
+    if info.get('firewall_profiles'):
+        s['listes'].append({'titre': 'Pare-feu',
+                            'elements': ['%s : %s' % (p.get('name', '?'),
+                                                      'activé' if p.get('enabled') else 'désactivé')
+                                         if isinstance(p, dict) else str(p)
+                                         for p in info['firewall_profiles']]})
+    elif info.get('firewall'):
+        s['listes'].append({'titre': 'Pare-feu', 'elements': list(info['firewall'])})
+    if info.get('bitlocker'):
+        s['listes'].append({'titre': 'Chiffrement', 'elements': list(info['bitlocker'])})
+    sections.append(s)
 
     # ── Licences ───────────────────────────────────────────────────────────
-    if info.get('licenses') or info.get('oem_product_key'):
-        section("LICENCES & ACTIVATION")
-        if info.get('windows_activated') is not None:
-            field("Windows", 'Activé' if info['windows_activated'] else 'NON ACTIVÉ')
-        for lic in info.get('licenses', []):
-            item(format_license(lic))
-        if info.get('oem_product_key'):
-            field("Clé OEM (firmware)", info['oem_product_key'])
-        close()
+    s = _sec('licences', 'Licences et activation', '🔑')
+    if info.get('windows_activated') is not None:
+        s['champs'].append(('Windows', 'Activé' if info['windows_activated'] else 'NON ACTIVÉ'))
+    s['champs'] += [
+        ('Canal de licence', info.get('windows_license_channel')),
+        ('Clé OEM (firmware)', info.get('oem_product_key')),
+    ]
+    if info.get('licenses'):
+        s['listes'].append({'titre': 'Produits',
+                            'elements': [format_license(l) for l in info['licenses']]})
+    sections.append(s)
 
     # ── Mises à jour ───────────────────────────────────────────────────────
-    hotfixes = info.get('hotfixes', [])
+    s = _sec('maj', 'Mises à jour', '📦')
+    hotfixes = info.get('hotfixes') or []
     if hotfixes:
-        section("MISES À JOUR")
-        field("Correctifs installés", len(hotfixes))
-        if info.get('last_windows_update'):
-            field("Dernier correctif", info['last_windows_update'])
-        for hf in hotfixes[:5]:
-            item(f"{hf['id']} — {hf.get('installed_on') or 'date inconnue'}")
-        if len(hotfixes) > 5:
-            item(f"… et {len(hotfixes) - 5} autre(s)")
-        close()
+        s['champs'].append(('Correctifs installés', len(hotfixes)))
+    s['champs'].append(('Dernier correctif', info.get('last_windows_update')))
+    pending = info.get('pending_updates') or []
+    if pending:
+        libelle = '%d disponible(s)' % len(pending)
+        if info.get('pending_updates_security'):
+            libelle += ', dont %s de sécurité' % info['pending_updates_security']
+        if info.get('pending_updates_source'):
+            libelle += ' — recherche %s' % info['pending_updates_source']
+        s['champs'].append(('Non installées', libelle))
+        s['listes'].append({'titre': 'Mises à jour disponibles', 'elements': [
+            '%s%s%s' % (u.get('title', '?'),
+                        ' [%s]' % u['kb'] if u.get('kb') else '',
+                        ' — %s Mo' % u['size_mb'] if u.get('size_mb') else '')
+            if isinstance(u, dict) else str(u)
+            for u in pending]})
+    if hotfixes:
+        s['listes'].append({'titre': 'Correctifs',
+                            'elements': ['%s — %s%s' % (hf.get('id', '?'),
+                                                        hf.get('installed_on') or 'date inconnue',
+                                                        ' (%s)' % hf['description']
+                                                        if hf.get('description') else '')
+                                         for hf in hotfixes]})
+    sections.append(s)
 
     # ── Comptes ────────────────────────────────────────────────────────────
-    users = info.get('users', [])
-    if users:
-        section("COMPTES UTILISATEURS LOCAUX")
-        field("Total", f"{len(users)} compte(s)")
-        for u in users:
-            item(u)
-        close()
+    s = _sec('comptes', 'Comptes utilisateurs', '👤')
+    details = info.get('users_details') or []
+    if details:
+        s['champs'].append(('Total', '%d compte(s)' % len(details)))
+        elements = []
+        for u in details:
+            libelle = u.get('name', '?')
+            marques = []
+            if u.get('role'):
+                marques.append(u['role'])
+            elif u.get('admin'):
+                marques.append('Administrateur')
+            if u.get('account_type'):
+                marques.append('compte %s' % u['account_type'])
+            marques.append(u.get('status') or ('actif' if u.get('enabled') else 'désactivé'))
+            if u.get('password_never_expires'):
+                marques.append('mot de passe sans expiration')
+            if u.get('last_logon'):
+                marques.append('dernière ouverture %s' % u['last_logon'])
+            if marques:
+                libelle += '  [' + ' · '.join(marques) + ']'
+            elements.append(libelle)
+        s['listes'].append({'titre': 'Comptes locaux', 'elements': elements})
+    elif info.get('users'):
+        s['champs'].append(('Total', '%d compte(s)' % len(info['users'])))
+        s['listes'].append({'titre': 'Comptes locaux', 'elements': list(info['users'])})
+    sections.append(s)
+
+    # ── Diagnostic ─────────────────────────────────────────────────────────
+    s = _sec('diagnostic', 'Diagnostic', '🩺')
+    if info.get('unexpected_shutdowns') is not None:
+        s['champs'].append(('Arrêts inattendus (30 j)', info['unexpected_shutdowns']))
+    if info.get('system_incidents'):
+        s['listes'].append({'titre': 'Incidents système (30 derniers jours)', 'elements': [
+            '%s ×%s%s%s' % (i.get('category', '?'), i.get('count', 1),
+                            ' — dernier %s' % i['last_seen'] if i.get('last_seen') else '',
+                            ' — %s' % i['disk'] if i.get('disk') else '')
+            if isinstance(i, dict) else str(i)
+            for i in info['system_incidents']]})
+    if info.get('stopped_auto_services'):
+        s['listes'].append({'titre': "Services automatiques à l'arrêt", 'elements': [
+            x.get('display_name') or x.get('name', '?') if isinstance(x, dict) else str(x)
+            for x in info['stopped_auto_services']]})
+    if info.get('startup_programs'):
+        s['listes'].append({'titre': 'Programmes au démarrage', 'elements': [
+            '%s%s%s' % (x.get('name', '?'),
+                        ' — %s' % x['command'] if x.get('command') else '',
+                        ' (%s)' % x['user'] if x.get('user') else '')
+            if isinstance(x, dict) else str(x)
+            for x in info['startup_programs']]})
+    if info.get('scheduled_tasks'):
+        s['listes'].append({'titre': 'Tâches planifiées (hors Microsoft)', 'elements': [
+            '%s%s — %s%s%s' % (x.get('path', ''), x.get('name', '?'), x.get('state', '?'),
+                               ' — dernière exécution %s' % x['last_run'] if x.get('last_run') else '',
+                               '  ⚠ en échec' if x.get('failed') else '')
+            if isinstance(x, dict) else str(x)
+            for x in info['scheduled_tasks']]})
+    if info.get('smb_shares'):
+        s['listes'].append({'titre': 'Partages réseau', 'elements': [
+            '%s → %s%s' % (x.get('name', '?'), x.get('path', '?'),
+                           ' (administratif)' if x.get('administrative') else '')
+            if isinstance(x, dict) else str(x)
+            for x in info['smb_shares']]})
+    sections.append(s)
+
+    # ── Environnement ──────────────────────────────────────────────────────
+    s = _sec('environnement', 'Environnement', '🏢')
+    s['champs'] += [
+        ('Domaine', info.get('domain_name') or info.get('domain')),
+        ('Contrôleur de domaine', info.get('domain_controller')),
+        ('Intégré au domaine', ('oui' if info['domain_joined'] else 'non')
+         if info.get('domain_joined') is not None else None),
+        ('Serveur WSUS', info.get('wsus_server')),
+        ('Groupe WSUS', info.get('wsus_group')),
+        ('Source de temps', info.get('time_source')),
+        ('Écart d\'horloge', info.get('time_offset')),
+        ('Rôle serveur', ('oui' if info['is_server'] else 'non')
+         if info.get('is_server') is not None else None),
+    ]
+    sections.append(s)
+
+    # ── Hygiène ────────────────────────────────────────────────────────────
+    s = _sec('hygiene', 'Hygiène système', '🧹')
+    s['champs'] += [
+        ('UAC', ('activé' if info['uac_enabled'] else 'désactivé')
+         if info.get('uac_enabled') is not None else None),
+        ('Bureau à distance', ('activé%s' % (' (NLA)' if info.get('rdp_nla') else ' — sans NLA')
+                               if info['rdp_enabled'] else 'désactivé')
+         if info.get('rdp_enabled') is not None else None),
+        ('Points de restauration',
+         (len(info['restore_points']) or 'aucun') if isinstance(info.get('restore_points'), list)
+         else info.get('restore_points')),
+        ('Fichiers temporaires', ('%s Mo' % info['temp_files_mb'])
+         if info.get('temp_files_mb') is not None else None),
+    ]
+    sections.append(s)
+
+    # ── Batterie ───────────────────────────────────────────────────────────
+    s = _sec('batterie', 'Batterie', '🔋')
+    s['champs'] += [
+        ('Charge', info.get('battery')),
+        ('Santé', ('%s %% (usure %s %%)' % (info['battery_health_percent'],
+                                            info.get('battery_wear_percent', '?')))
+         if info.get('battery_health_percent') is not None else None),
+        ('Cycles', info.get('battery_cycles')),
+        ('État', info.get('battery_health_status')),
+    ]
+    sections.append(s)
 
     # ── Logiciels ──────────────────────────────────────────────────────────
-    software = info.get('installed_software', [])
+    s = _sec('logiciels', 'Logiciels installés', '📚')
+    software = info.get('installed_software') or []
     if software:
-        section("LOGICIELS INSTALLÉS")
-        field("Total", f"{len(software)} logiciel(s)")
-        for soft in software[:10]:
-            label = soft.get('name', '') if isinstance(soft, dict) else str(soft)
-            if isinstance(soft, dict) and soft.get('version'):
-                label += f" (v{soft['version']})"
-            item(label)
-        if len(software) > 10:
-            item(f"… et {len(software) - 10} autre(s)")
-        close()
+        s['champs'].append(('Total', '%d logiciel(s)' % len(software)))
+        elements = []
+        for soft in software:
+            if isinstance(soft, dict):
+                libelle = soft.get('name', '')
+                if soft.get('version'):
+                    libelle += ' (v%s)' % soft['version']
+                extras = [x for x in (soft.get('publisher'), soft.get('install_date')) if x]
+                if extras:
+                    libelle += '  [' + ' · '.join(str(e) for e in extras) + ']'
+            else:
+                libelle = str(soft)
+            elements.append(libelle)
+        s['listes'].append({'titre': 'Inventaire', 'elements': elements})
+    sections.append(s)
+
+    # Rubriques vides écartées : un onglet sans contenu ne se distingue pas
+    # d'un onglet dont la collecte a échoué.
+    sections = [s for s in sections
+                if [c for c in s['champs'] if c[1] not in (None, '', [])] or s['listes']]
+    for s in sections:
+        s['champs'] = [(lib, val) for lib, val in s['champs'] if val not in (None, '', [])]
 
     if not info.get('elevated'):
-        lines.append("⚠ Collecte sans privilèges administrateur : SMART détaillé, TPM,")
-        lines.append("  BitLocker et clé OEM peuvent être absents de ce rapport.")
-        lines.append("")
+        for s in sections:
+            if s['cle'] == 'identification':
+                s['notes'].append(
+                    "Collecte sans privilèges administrateur : SMART détaillé, TPM, "
+                    "BitLocker et clé OEM peuvent manquer.")
+    return sections
 
+
+def build_summary_lines(info):
+    """Résumé textuel du collecteur CLI, dérivé des mêmes rubriques que l'aperçu graphique."""
+    lines = []
+    for section in build_summary_sections(info):
+        lines.append("┌─ %s" % section['titre'].upper())
+        for libelle, valeur in section['champs']:
+            lines.append("│ %-22s: %s" % (libelle, valeur))
+        for bloc in section['listes']:
+            if bloc['titre']:
+                lines.append("│ %-22s:" % bloc['titre'])
+            # Le texte de la console reste un résumé : les listes complètes
+            # sont dans le PDF et dans les onglets de l'interface graphique.
+            for element in bloc['elements'][:15]:
+                lines.append("│   - %s" % element)
+            reste = len(bloc['elements']) - 15
+            if reste > 0:
+                lines.append("│   … et %d autre(s)" % reste)
+        for note in section['notes']:
+            lines.append("│ ⚠ %s" % note)
+        lines.append("└")
+        lines.append("")
     return lines
 
 

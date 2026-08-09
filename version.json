@@ -1,27 +1,28 @@
 {
-  "version": "2.6.43",
-  "release_date": "2026-08-09T17:30:00.000000",
+  "version": "2.6.44",
+  "release_date": "2026-08-09T19:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.43",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.44/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.44/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.44",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.44/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.44/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.44/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Mecanisme de mise a jour reconstruit : annonce dans l'interface, installation sur clic, verification d'empreinte",
+    "new_features": "Journal des mises a jour partage entre postes, et apercu du collecteur en onglets alimente au fil de la collecte",
     "improvements": [
-      "FIXED: La banniere annoncant une nouvelle version ne pouvait jamais s'afficher. Le script se terminait par une garde 'document.readyState !== loading', alors qu'il est charge en fin de body - a cet instant le document est toujours en cours d'analyse. La classe etait chargee, l'instance jamais creee.",
-      "FIXED: Meme corrigee, l'annonce serait arrivee avec un mois de retard : la verification etait bridee a 30 jours. Ramenee a 6 heures.",
-      "FIXED: La mise a jour macOS ne pouvait pas aboutir. La version publiee est une archive ZIP, le code tentait un hdiutil attach reserve aux images DMG. Le montage echouait a chaque fois. L'archive est desormais decompressee et le bundle remplace, avec retrait de la quarantaine Gatekeeper.",
-      "FIXED: Aucune verification d'integrite n'avait jamais lieu. Le code interrogeait la cle 'windows_installer' alors que le fichier contient 'windows_installer_sha256' : la cle ne correspondait pas et le controle etait saute en silence. Le binaire etait telecharge puis execute sans aucun controle.",
-      "NEW: Chaque version publie desormais un fichier SHA256SUMS.txt. Sans empreinte verifiable, l'installation est refusee et le telechargement manuel propose.",
-      "CHANGED: Windows n'installe plus une mise a jour au demarrage sans rien dire. La version disponible est annoncee dans l'interface, l'installation se declenche sur clic (administrateurs), avec barre de progression puis confirmation au redemarrage.",
-      "NEW: Mode Docker reconnu - un conteneur ne pouvant pas se remplacer lui-meme, la banniere affiche la commande a lancer sur l'hote, avec bouton de copie. Un service Watchtower commente dans docker-compose.yml permet de l'automatiser.",
-      "NEW: Ecarter une annonce la masque jusqu'a la version suivante, et le choix survit au redemarrage.",
-      "NEW: Au premier demarrage suivant une mise a jour reussie, l'application confirme la version desormais installee."
+      "NEW: Journal des mises a jour, avec le nom de l'appareil, la version d'origine, celle installee et le resultat. La table est synchronisee : chaque poste voit ce qui a ete installe sur les autres. Cle textuelle et non un identifiant auto-incremente - deux machines mises a jour le meme jour auraient produit le meme numero, et la synchronisation aurait ecrase l'une par l'autre.",
+      "NEW: Les echecs de mise a jour y figurent aussi, avec leur motif : c'est la seule trace consultable depuis un autre poste.",
+      "NEW: L'apercu du collecteur passe en onglets, une rubrique par onglet, avec libelles et valeurs mis en forme au lieu d'un bloc de texte brut.",
+      "NEW: Les onglets se remplissent au fur et a mesure de la collecte au lieu d'attendre la fin : la collecte dure une minute, et un panneau vide pendant tout ce temps donne l'impression que rien ne se passe.",
+      "NEW: L'apercu couvre desormais tout ce que le rapport contient - USB detailles, diagnostic, taches planifiees, configuration reseau, environnement, hygiene, mises a jour disponibles, points de vigilance.",
+      "NEW: Bouton d'ouverture du rapport PDF, qui reutilise le rapport deja produit lors de l'envoi plutot que d'en generer un second identique.",
+      "FIXED: Les onglets sont ranges verticalement : une quinzaine de rubriques sur une barre horizontale se retrouvaient rognees en 'Points c', 'Ident', 'Se'.",
+      "FIXED: Les boutons du bas etaient rejetes hors de la fenetre. Un conteneur extensible pose en premier prend toute la place restante et repousse ce qui vient apres.",
+      "FIXED: La definition de journal_synchronisation etait ecrite a l'identique dans app.py et database.py, deux copies libres de diverger sans que rien ne le signale. Point unique desormais.",
+      "FIXED: En-tete de version perime dans docker-compose.synology.yml (v2.5.0) - le numero est retire, ce fichier ne changeant pas d'une version a l'autre."
     ]
   },
   "checksums": {
@@ -32,5 +33,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.43"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.44"
 }
