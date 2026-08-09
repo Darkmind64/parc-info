@@ -1,24 +1,27 @@
 {
-  "version": "2.6.42",
-  "release_date": "2026-08-09T16:00:00.000000",
+  "version": "2.6.43",
+  "release_date": "2026-08-09T17:30:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.42",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.43",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Sauvegarde automatique de la base avec rotation sur les trois dernieres, et correctifs issus d'un audit du code",
+    "new_features": "Mecanisme de mise a jour reconstruit : annonce dans l'interface, installation sur clic, verification d'empreinte",
     "improvements": [
-      "NEW: Sauvegarde automatique quotidienne de la base, ne conservant que les trois dernieres. La copie passe par l'API backup de SQLite et non par un copier-coller de fichier : la base est en mode WAL, une copie brute pendant une ecriture donnerait une sauvegarde tronquee, inutilisable au moment precis ou elle servirait.",
-      "NEW: Route /api/db/sauvegarde - liste les sauvegardes, ou en declenche une (reserve aux administrateurs). Desactivable par la variable d'environnement PARCINFO_BACKUP.",
-      "FIXED: Le telechargement du fichier RDP corrompait le nom de fichier des que la machine portait un accent. L'en-tete HTTP etait construit a la main alors qu'un en-tete ne transporte que de l'ASCII : Bureau-Reception devenait Bureau-R?ception. L'en-tete suit desormais la RFC 6266, avec repli ASCII et version UTF-8 percent-encodee.",
-      "FIXED: Plusieurs fichiers etaient lus et ecrits sans encodage explicite - metadonnees de mise a jour, configuration du collecteur graphique, cle secrete. Sur un Windows francais, open() utilise cp1252 : tout contenu accentue y echouait.",
-      "FIXED: L'appel netsh du lanceur decodait sa sortie avec l'encodage local, alors qu'un Windows francais renvoie des messages accentues.",
-      "FIXED: La liste des logiciels installes etait stockee en base avec ses accents echappes, contrairement au reste des donnees JSON.",
-      "Audit verifie par ailleurs : les 35 tables synchronisees correspondent exactement au schema (seules les trois tables internes a la synchronisation en sont exclues, a raison), aucune colonne ecrite n'est absente du schema, et les requetes construites dynamiquement le sont toutes a partir de listes blanches avec valeurs parametrees."
+      "FIXED: La banniere annoncant une nouvelle version ne pouvait jamais s'afficher. Le script se terminait par une garde 'document.readyState !== loading', alors qu'il est charge en fin de body - a cet instant le document est toujours en cours d'analyse. La classe etait chargee, l'instance jamais creee.",
+      "FIXED: Meme corrigee, l'annonce serait arrivee avec un mois de retard : la verification etait bridee a 30 jours. Ramenee a 6 heures.",
+      "FIXED: La mise a jour macOS ne pouvait pas aboutir. La version publiee est une archive ZIP, le code tentait un hdiutil attach reserve aux images DMG. Le montage echouait a chaque fois. L'archive est desormais decompressee et le bundle remplace, avec retrait de la quarantaine Gatekeeper.",
+      "FIXED: Aucune verification d'integrite n'avait jamais lieu. Le code interrogeait la cle 'windows_installer' alors que le fichier contient 'windows_installer_sha256' : la cle ne correspondait pas et le controle etait saute en silence. Le binaire etait telecharge puis execute sans aucun controle.",
+      "NEW: Chaque version publie desormais un fichier SHA256SUMS.txt. Sans empreinte verifiable, l'installation est refusee et le telechargement manuel propose.",
+      "CHANGED: Windows n'installe plus une mise a jour au demarrage sans rien dire. La version disponible est annoncee dans l'interface, l'installation se declenche sur clic (administrateurs), avec barre de progression puis confirmation au redemarrage.",
+      "NEW: Mode Docker reconnu - un conteneur ne pouvant pas se remplacer lui-meme, la banniere affiche la commande a lancer sur l'hote, avec bouton de copie. Un service Watchtower commente dans docker-compose.yml permet de l'automatiser.",
+      "NEW: Ecarter une annonce la masque jusqu'a la version suivante, et le choix survit au redemarrage.",
+      "NEW: Au premier demarrage suivant une mise a jour reussie, l'application confirme la version desormais installee."
     ]
   },
   "checksums": {
@@ -29,5 +32,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.42"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.43"
 }

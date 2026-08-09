@@ -1,269 +1,248 @@
 """
-Update Notification Manager for ParcInfo Web Interface
+État des mises à jour tel que l'interface web le voit.
 
-Manages update notifications displayed to users in the Flask app.
-- Periodic background checks
-- In-app alert notifications
-- Update status tracking
+Un seul objet partagé par l'application : il détecte les versions en tâche de
+fond, conserve l'avancement d'une installation en cours, et se souvient de la
+version que l'utilisateur a écartée — écarter 2.6.42 ne doit pas faire taire
+l'annonce de 2.6.43.
 
-Usage:
-    from update_notifier import UpdateNotifier
-    notifier = UpdateNotifier()
-    notifier.start()
-
-    # In Flask routes:
-    notifier.get_notification()  # Returns current notification or None
+Usage :
+    from update_notifier import get_notifier
+    get_notifier().etat
 """
 
+import json
 import logging
+import os
 import threading
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict
 
-from update_checker import UpdateChecker
+from update_checker import (UpdateChecker, UpdateCheckError, runtime_mode,
+                            can_self_install, docker_pull_commands)
 
 logger = logging.getLogger("parcinfo.notifier")
 
 
-class UpdateNotification:
-    """Notification object for update status."""
-
-    def __init__(self, notification_type: str, message: str, version: str = None,
-                 action_url: str = None):
-        """
-        Initialize notification.
-
-        Args:
-            notification_type: 'update_available' | 'installing' | 'update_complete'
-            message: Message to display to user
-            version: Version number
-            action_url: URL for action button (e.g., to install)
-        """
-        self.type = notification_type
-        self.message = message
-        self.version = version
-        self.action_url = action_url
-        self.created_at = datetime.now()
-        self.dismissed = False
-
-    def to_dict(self) -> Dict:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "type": self.type,
-            "message": self.message,
-            "version": self.version,
-            "action_url": self.action_url,
-            "created_at": self.created_at.isoformat(),
-            "dismissed": self.dismissed,
-        }
-
-    def is_expired(self, max_age_seconds: int = 3600) -> bool:
-        """Check if notification is older than max age."""
-        return (datetime.now() - self.created_at).total_seconds() > max_age_seconds
-
-
 class UpdateNotifier:
-    """
-    Manages update notifications for web interface.
+    """Suit la disponibilité d'une mise à jour et son installation."""
 
-    Features:
-    - Periodic background update checks
-    - In-app notification tracking
-    - User dismissal support
-    """
-
-    CHECK_INTERVAL_SECONDS = 3600  # Check every hour
+    # Vérification de fond. La borne réelle est celle d'UpdateChecker
+    # (CHECK_INTERVAL_HOURS) : ce réveil ne fait que la solliciter.
+    INTERVALLE_SECONDES = 3600
 
     def __init__(self, config_dir: Optional[str] = None):
-        """
-        Initialize notifier.
-
-        Args:
-            config_dir: Configuration directory for UpdateChecker
-        """
         self.checker = UpdateChecker(config_dir=config_dir)
-        self.current_notification: Optional[UpdateNotification] = None
-        self.update_available = False
-        self.update_version = None
-        self.is_checking = False
-        self.thread = None
-        self._stop_event = threading.Event()
+        self.mode = runtime_mode()
+        self.installable = can_self_install()
+
+        self.phase = 'inactif'      # inactif | verification | telechargement
+                                    # | installation | pret | erreur
+        self.progression = 0
+        self.message = None
+        self.erreur = None
+        self.derniere_verification = None
+
+        self._etat_file = Path(self.checker.config_dir) / 'update_state.json'
+        enregistre = self._charger_etat()
+        self.version_ecartee = enregistre.get('version_ecartee')
+
+        # Une version différente de celle vue au démarrage précédent signifie
+        # qu'une mise à jour a bien été appliquée. Sans cette trace, le
+        # remplacement se faisait dans le dos de l'utilisateur : l'application
+        # redémarrait et rien n'indiquait ce qui avait changé.
+        vue = enregistre.get('version_vue')
+        self.version_installee = None
+        if vue and vue != self.checker.current_version and \
+                self.checker._is_newer_version(self.checker.current_version, vue):
+            self.version_installee = self.checker.current_version
+            logger.info("Démarrage sur la version %s (précédente : %s)",
+                        self.checker.current_version, vue)
+        if vue != self.checker.current_version:
+            self._enregistrer_etat()
+
+        self._lock = threading.Lock()
+        self._thread = None
+        self._stop = threading.Event()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Cycle de vie
+    # ─────────────────────────────────────────────────────────────────────────
 
     def start(self) -> None:
-        """Start background update check thread."""
-        if self.thread and self.thread.is_alive():
-            logger.debug("Update notifier already running")
+        """Démarre la vérification périodique en tâche de fond."""
+        if self._thread and self._thread.is_alive():
             return
-
-        self.thread = threading.Thread(target=self._background_check, daemon=True)
-        self.thread.start()
-        logger.info("Update notifier started")
+        self._thread = threading.Thread(target=self._boucle, daemon=True,
+                                        name='VerificationMaj')
+        self._thread.start()
+        logger.info("Vérification des mises à jour démarrée (mode %s)", self.mode)
 
     def stop(self) -> None:
-        """Stop background update check thread."""
-        self._stop_event.set()
-        if self.thread:
-            self.thread.join(timeout=5)
-        logger.info("Update notifier stopped")
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=5)
 
-    def check_now(self) -> bool:
-        """
-        Check for updates immediately.
-
-        Returns:
-            True if update available
-        """
-        logger.info("Checking for updates (on-demand)...")
-        self.is_checking = True
-
-        try:
-            if self.checker.check_for_updates(force=True):
-                self.update_available = True
-                self.update_version = self.checker.latest_version
-                self.current_notification = UpdateNotification(
-                    notification_type="update_available",
-                    message=f"ParcInfo {self.checker.latest_version} is available",
-                    version=self.checker.latest_version,
-                    action_url="/api/check-updates"
-                )
-                logger.info(f"✓ Update available: {self.update_version}")
-                return True
-            else:
-                self.update_available = False
-                logger.info("✓ Already on latest version")
-                return False
-        except Exception as e:
-            logger.warning(f"On-demand check failed: {e}")
-            return False
-        finally:
-            self.is_checking = False
-
-    def install_update(self) -> bool:
-        """
-        Install update immediately.
-
-        Returns:
-            True if installation started
-        """
-        if not self.update_available:
-            logger.warning("No update available to install")
-            return False
-
-        logger.info(f"Starting update to {self.update_version}...")
-        self.current_notification = UpdateNotification(
-            notification_type="installing",
-            message="Updating ParcInfo... Application will restart.",
-            version=self.update_version
-        )
-
-        def install_in_background():
+    def _boucle(self) -> None:
+        # Première vérification tout de suite : au lancement, l'utilisateur doit
+        # savoir dès la première page qu'une version l'attend.
+        while not self._stop.is_set():
             try:
-                if self.checker.check_and_install_updates(force=True, silent=True):
-                    logger.info("✓ Update installed")
-                    self.current_notification = UpdateNotification(
-                        notification_type="update_complete",
-                        message="Update complete! Application will restart.",
-                        version=self.update_version
-                    )
+                self.verifier(force=False)
+            except Exception:
+                logger.debug("Vérification de fond en échec", exc_info=True)
+            if self._stop.wait(timeout=self.INTERVALLE_SECONDES):
+                break
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Actions
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def verifier(self, force: bool = True) -> bool:
+        """Interroge le dépôt. Retourne True si une mise à jour est disponible."""
+        if self.phase in ('telechargement', 'installation'):
+            return self.checker.available_update
+
+        self.phase = 'verification'
+        try:
+            disponible = self.checker.check_for_updates(force=force)
+            self.derniere_verification = datetime.now().isoformat()
+            self.erreur = None
+            self.phase = 'inactif'
+            return disponible
+        except Exception as e:
+            self.erreur = str(e)
+            self.phase = 'erreur'
+            logger.warning("Vérification impossible : %s", e)
+            return False
+
+    def installer(self) -> bool:
+        """
+        Lance téléchargement puis remplacement, en tâche de fond.
+        Retourne True si l'opération a bien démarré.
+        """
+        if not self.checker.available_update:
+            self.erreur = "Aucune mise à jour disponible"
+            return False
+        if not self.installable:
+            self.erreur = ("L'installation automatique n'est pas possible dans ce "
+                           "mode d'exécution (%s)" % self.mode)
+            return False
+
+        with self._lock:
+            if self.phase in ('telechargement', 'installation'):
+                return True
+            self.phase = 'telechargement'
+            self.progression = 0
+            self.erreur = None
+            self.message = "Téléchargement de la version %s" % self.checker.latest_version
+
+        def travail():
+            try:
+                fichier = self.checker.download_update(
+                    progress=lambda p: setattr(self, 'progression', p))
+                if not fichier:
+                    raise UpdateCheckError("Téléchargement sans résultat")
+
+                self.phase = 'installation'
+                self.progression = 100
+                self.message = "Installation de la version %s" % self.checker.latest_version
+
+                if self.checker.install_update(fichier):
+                    self.phase = 'pret'
+                    self.message = ("Version %s installée — l'application redémarre"
+                                    % self.checker.latest_version)
+                    logger.info("Mise à jour appliquée : %s", self.checker.latest_version)
                 else:
-                    logger.error("Update installation failed")
-                    self.current_notification = UpdateNotification(
-                        notification_type="update_available",
-                        message="Update failed. Please try again.",
-                        version=self.update_version
-                    )
+                    raise UpdateCheckError("Le remplacement de l'application a échoué")
             except Exception as e:
-                logger.error(f"Installation error: {e}")
-                self.current_notification = UpdateNotification(
-                    notification_type="update_available",
-                    message=f"Update failed: {e}",
-                    version=self.update_version
-                )
+                self.phase = 'erreur'
+                self.erreur = str(e)
+                self.message = None
+                logger.error("Mise à jour interrompue : %s", e)
 
-        # Run installation in background thread
-        install_thread = threading.Thread(target=install_in_background, daemon=True)
-        install_thread.start()
-
+        threading.Thread(target=travail, daemon=True, name='InstallationMaj').start()
         return True
 
-    def get_notification(self) -> Optional[Dict]:
-        """
-        Get current notification for web interface.
+    def ecarter(self) -> None:
+        """Masque l'annonce en cours : disponibilité, ou confirmation d'installation."""
+        if self.version_installee:
+            self.version_installee = None
+            return
+        if self.checker.latest_version:
+            self.version_ecartee = self.checker.latest_version
+            self._enregistrer_etat()
 
-        Returns:
-            Notification dict or None if none available
-        """
-        if self.current_notification:
-            # Remove expired notifications
-            if self.current_notification.is_expired(max_age_seconds=86400):  # 24 hours
-                self.current_notification = None
-                return None
-
-            # Don't return dismissed notifications
-            if self.current_notification.dismissed:
-                return None
-
-            return self.current_notification.to_dict()
-
-        return None
-
-    def dismiss_notification(self) -> None:
-        """Dismiss current notification."""
-        if self.current_notification:
-            self.current_notification.dismissed = True
-            logger.debug("Notification dismissed by user")
-
-    def _background_check(self) -> None:
-        """Background update check loop."""
-        logger.info(f"Background update check started (interval: {self.CHECK_INTERVAL_SECONDS}s)")
-
-        while not self._stop_event.is_set():
-            try:
-                # Check every hour
-                if self._stop_event.wait(timeout=self.CHECK_INTERVAL_SECONDS):
-                    break  # Stop event was set
-
-                logger.debug("Running periodic update check...")
-
-                if self.checker.check_for_updates(force=False):
-                    self.update_available = True
-                    self.update_version = self.checker.latest_version
-
-                    # Only notify if we don't already have a notification
-                    if not self.current_notification or self.current_notification.dismissed:
-                        self.current_notification = UpdateNotification(
-                            notification_type="update_available",
-                            message=f"ParcInfo {self.checker.latest_version} is available",
-                            version=self.checker.latest_version
-                        )
-                        logger.info(f"✓ Update available: {self.update_version}")
-
-            except Exception as e:
-                logger.debug(f"Background check error: {e}")
+    # ─────────────────────────────────────────────────────────────────────────
+    # État exposé à l'interface
+    # ─────────────────────────────────────────────────────────────────────────
 
     @property
-    def status(self) -> Dict:
-        """Get current update status."""
-        return {
-            "checking": self.is_checking,
-            "update_available": self.update_available,
-            "version": self.update_version,
-            "current_version": self.checker.current_version,
-            "notification": self.get_notification(),
+    def etat(self) -> Dict:
+        maj = self.checker.available_update
+        version = self.checker.latest_version
+        # Une version écartée reste masquée tant qu'aucune plus récente n'arrive.
+        masquee = bool(maj and version and version == self.version_ecartee
+                       and self.phase == 'inactif')
+
+        etat = {
+            'version_actuelle': self.checker.current_version,
+            'version_disponible': version if maj else None,
+            'mise_a_jour_disponible': bool(maj),
+            'masquee': masquee,
+            'mode': self.mode,
+            'installable': self.installable,
+            'phase': self.phase,
+            'progression': self.progression,
+            'message': self.message,
+            'erreur': self.erreur,
+            'derniere_verification': self.derniere_verification,
+            'notes': (self.checker.release_notes or [])[:6],
+            'url_notes': self.checker.release_url,
+            # Renseigné au premier démarrage suivant une mise à jour réussie.
+            'version_installee': self.version_installee,
         }
+        if self.mode == 'docker':
+            etat['commandes'] = docker_pull_commands(version)
+        return etat
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Persistance
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _charger_etat(self) -> Dict:
+        try:
+            if self._etat_file.exists():
+                with open(self._etat_file, 'r', encoding='utf-8') as f:
+                    return json.load(f) or {}
+        except Exception:
+            pass
+        return {}
+
+    def _enregistrer_etat(self) -> None:
+        try:
+            with open(self._etat_file, 'w', encoding='utf-8') as f:
+                json.dump({'version_ecartee': self.version_ecartee,
+                           'version_vue': self.checker.current_version},
+                          f, ensure_ascii=False)
+        except Exception as e:
+            logger.debug("État de mise à jour non enregistré : %s", e)
 
 
-# Global notifier instance
-_notifier_instance: Optional[UpdateNotifier] = None
+_instance: Optional[UpdateNotifier] = None
+_instance_lock = threading.Lock()
 
 
 def get_notifier(config_dir: Optional[str] = None) -> UpdateNotifier:
-    """Get or create global notifier instance."""
-    global _notifier_instance
-
-    if _notifier_instance is None:
-        _notifier_instance = UpdateNotifier(config_dir=config_dir)
-        _notifier_instance.start()
-
-    return _notifier_instance
+    """Instance partagée, créée et démarrée au premier appel."""
+    global _instance
+    if _instance is None:
+        with _instance_lock:
+            if _instance is None:
+                if config_dir is None:
+                    config_dir = os.environ.get('DATA_DIR') or None
+                notifier = UpdateNotifier(config_dir=config_dir)
+                notifier.start()
+                _instance = notifier
+    return _instance

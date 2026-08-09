@@ -6,14 +6,20 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.6.42 ⭐ **Clés de licence vérifiées et reportées dans la fiche appareil**  
-**Dernière mise à jour** : 2026-08-08
+**Version** : 2.6.43 ⭐ **Mécanisme de mise à jour reconstruit**  
+**Dernière mise à jour** : 2026-08-09
 
 ---
 
 ## ✨ Fonctionnalités Principales
 
-### 🎉 v2.6.42 : Rapports graphiques + inventaire USB automatique
+### 🎉 v2.6.43 : Mises à jour annoncées et vérifiées
+
+La bannière de mise à jour ne pouvait jamais s'afficher, macOS ne pouvait pas
+se mettre à jour, et le binaire téléchargé n'était jamais vérifié. Voir
+**[Mises à jour](#-mises-à-jour)**.
+
+### Rapports graphiques + inventaire USB automatique
 
 **Deux versions du collecteur (exécutables autonomes) :**
 
@@ -70,9 +76,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/system-info-collector-gui.exe)
-- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/ParcInfo-Windows.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/ParcInfo-Windows.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -118,6 +124,31 @@ system-info-collector.exe --client-id 5  # Windows
 
 ---
 
+## 🔄 Mises à Jour
+
+ParcInfo vérifie les versions publiées toutes les 6 heures et affiche une
+bannière dans l'interface dès qu'une version plus récente existe. Rien n'est
+installé sans clic.
+
+| Mode d'exécution | Ce que fait ParcInfo |
+|------------------|----------------------|
+| **Windows / macOS** (exécutable) | Bannière + bouton **Installer** (administrateurs). Téléchargement avec barre de progression, remplacement, redémarrage, puis confirmation de la version installée. |
+| **Docker** | Bannière + commande à lancer sur l'hôte. Un conteneur ne peut pas se remplacer lui-même. Pour l'automatiser, décommentez le service `watchtower` de `docker-compose.yml`. |
+| **Sources** | Information seule — `git pull`. |
+
+**Contrôle d'intégrité.** Le binaire téléchargé est confronté au fichier
+`SHA256SUMS.txt` publié avec la version. Sans empreinte vérifiable,
+l'installation est **refusée** et la bannière propose le téléchargement manuel :
+exécuter un binaire non vérifié offrirait à quiconque détourne la connexion un
+chemin direct vers la machine.
+
+> ⚠️ Les versions **antérieures à 2.6.43** embarquent un mécanisme de mise à
+> jour défaillant (bannière jamais affichée, macOS inopérant). Le passage à
+> 2.6.43 doit se faire **manuellement, une fois** ; les suivantes se feront
+> depuis l'interface.
+
+---
+
 ## 🚀 Démarrage Rapide
 
 ### Option 1 : Développement Local
@@ -147,22 +178,22 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.6.42
+## 📥 Téléchargements v2.6.43
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger |
 |-----------|----------|
-| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/ParcInfo-Windows.exe) |
-| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/ParcInfo-macOS-ARM.zip) |
-| **Docker** | `docker pull darkmind64/parcinfo:v2.6.42` |
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/ParcInfo-macOS-ARM.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.6.43` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Usage |
 |------|-----------|----------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/system-info-collector-gui.exe) | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.6.42/system-info-collector.exe) | Automatisation/scripts |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.6.43/system-info-collector.exe) | Automatisation/scripts |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -181,7 +212,7 @@ python system-info-collector-gui.py
 python system-info-collector.py --client-id 5
 ```
 
-👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.6.42)
+👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.6.43)
 
 ---
 

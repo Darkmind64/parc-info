@@ -1,15 +1,27 @@
 """
-ParcInfo Auto-Update Checker
+Détection et installation des mises à jour de ParcInfo.
 
-Checks for new versions periodically and notifies user of available updates.
-Downloads and installs updates in background.
+Trois modes d'exécution, trois comportements :
 
-Usage:
+  - exécutable Windows / macOS : téléchargement puis remplacement sur place,
+    déclenché par l'utilisateur depuis l'interface ;
+  - conteneur Docker : aucune installation possible — un conteneur ne peut pas
+    se remplacer lui-même. On signale la version et la commande à lancer ;
+  - sources (développement) : détection seule.
+
+Le binaire téléchargé n'est jamais exécuté sans que son empreinte SHA-256 ait
+été confrontée au fichier SHA256SUMS.txt publié avec la version. Sans empreinte
+vérifiable, l'installation est refusée : télécharger un exécutable et le lancer
+sans contrôle offre à quiconque détourne la connexion un chemin direct vers la
+machine.
+
+Usage :
     from update_checker import UpdateChecker
     checker = UpdateChecker()
     checker.check_for_updates()
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -17,49 +29,75 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Callable
 from urllib.request import urlopen
 from urllib.error import URLError
 
-from __version__ import __version__, __version_tuple__, GITHUB_API_RELEASES, GITHUB_RAW_CONTENT
+from __version__ import __version__, GITHUB_REPO, GITHUB_RAW_CONTENT
 
 logger = logging.getLogger("parcinfo.updater")
 
+# Fichier d'empreintes publié avec chaque version par le workflow de release.
+SHA256SUMS_URL = ("https://github.com/%s/releases/download/v{version}/SHA256SUMS.txt"
+                  % GITHUB_REPO)
+
 
 class UpdateCheckError(Exception):
-    """Error during update check."""
+    """Échec d'une étape de mise à jour."""
     pass
+
+
+def running_in_docker() -> bool:
+    """Vrai si l'application tourne dans un conteneur."""
+    if str(os.environ.get('RUNNING_IN_DOCKER', '')).lower() in ('1', 'true', 'yes'):
+        return True
+    # Repli : le fichier existe dans tout conteneur Docker classique.
+    return os.path.exists('/.dockerenv')
+
+
+def is_frozen() -> bool:
+    """Vrai si l'on tourne depuis un exécutable packagé (PyInstaller)."""
+    return bool(getattr(sys, 'frozen', False))
+
+
+def runtime_mode() -> str:
+    """'docker' | 'windows' | 'macos' | 'linux' | 'source'."""
+    if running_in_docker():
+        return 'docker'
+    if not is_frozen():
+        return 'source'
+    system = platform.system()
+    return {'Windows': 'windows', 'Darwin': 'macos'}.get(system, 'linux')
+
+
+def can_self_install() -> bool:
+    """Vrai si ce mode d'exécution sait se remplacer lui-même."""
+    return runtime_mode() in ('windows', 'macos')
 
 
 class UpdateChecker:
     """
-    Monitors for application updates.
-
-    Features:
-    - Monthly version check
-    - SHA256 checksum validation
-    - Background download
-    - Silent installation
-    - Rollback on failure
+    Surveille les versions publiées et applique la mise à jour sur demande.
     """
 
-    # Check every 30 days
-    CHECK_INTERVAL_DAYS = 30
+    # Fréquence de vérification. Une version publiée doit être visible le jour
+    # même : à 30 jours, l'information arrivait après coup et ne servait plus.
+    CHECK_INTERVAL_HOURS = 6
 
     def __init__(self, config_dir: Optional[Path] = None,
                  version_json_url: Optional[str] = None,
                  callback: Optional[Callable] = None):
         """
-        Initialize UpdateChecker.
-
         Args:
-            config_dir: Directory to store update metadata (default: app data dir)
-            version_json_url: URL to version.json (default: GitHub releases)
-            callback: Callback function for notifications (update_available(version))
+            config_dir: dossier des métadonnées (défaut : ~/.parcinfo)
+            version_json_url: URL de version.json (défaut : branche master)
+            callback: appelé avec la nouvelle version quand il y en a une
         """
         self.config_dir = Path(config_dir) if config_dir else Path.home() / ".parcinfo"
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -71,400 +109,384 @@ class UpdateChecker:
         self.current_version = __version__
         self.latest_version = None
         self.available_update = False
+        self.release_notes = None
+        self.release_url = None
+        # Progression du téléchargement en cours, 0-100 (None hors téléchargement)
+        self.download_progress = None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Détection
+    # ─────────────────────────────────────────────────────────────────────────
 
     def check_for_updates(self, force: bool = False) -> bool:
-        """
-        Check if new version available.
-
-        Args:
-            force: Ignore last check timestamp
-
-        Returns:
-            True if update available, False otherwise
-        """
-        # Check if enough time has passed since last check
+        """Interroge le dépôt. Retourne True si une version plus récente existe."""
         if not force and not self._should_check():
-            logger.debug(f"Update check skipped (last checked within {self.CHECK_INTERVAL_DAYS} days)")
-            return False
+            logger.debug("Vérification ignorée (moins de %sh depuis la dernière)",
+                         self.CHECK_INTERVAL_HOURS)
+            return self.available_update
 
-        logger.info("Checking for updates...")
+        logger.info("Recherche d'une mise à jour...")
 
         try:
             metadata = self._fetch_version_metadata()
             latest_version = metadata.get("version")
 
             if not latest_version:
-                logger.warning("No version info in metadata")
+                logger.warning("Aucune version dans les métadonnées distantes")
                 return False
 
             self.latest_version = latest_version
+            self.release_url = metadata.get("release_notes_url")
+            self.release_notes = (metadata.get("notes") or {}).get("improvements") or []
             self._save_metadata(metadata)
 
-            # Compare versions
             if self._is_newer_version(latest_version, self.current_version):
-                logger.info(f"New version available: {latest_version}")
+                logger.info("Nouvelle version disponible : %s", latest_version)
                 self.available_update = True
-
                 if self.callback:
                     self.callback(latest_version)
-
                 return True
-            else:
-                logger.info(f"Already on latest version: {self.current_version}")
-                self.available_update = False
-                return False
+
+            logger.info("Déjà à jour (%s)", self.current_version)
+            self.available_update = False
+            return False
 
         except Exception as e:
-            logger.warning(f"Update check failed: {e}")
+            logger.warning("Échec de la vérification : %s", e)
             return False
         finally:
             self._update_last_check_time()
 
-    def check_and_install_updates(self, force: bool = False, silent: bool = False) -> bool:
+    # ─────────────────────────────────────────────────────────────────────────
+    # Téléchargement et installation
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def download_update(self, version: Optional[str] = None,
+                        progress: Optional[Callable] = None) -> Optional[Path]:
         """
-        Check for updates and install automatically if available.
+        Télécharge le binaire de la version puis vérifie son empreinte.
 
         Args:
-            force: Ignore last check timestamp
-            silent: Don't show notifications (automatic startup)
+            version: version à télécharger (défaut : la dernière détectée)
+            progress: appelé avec un pourcentage entier pendant le téléchargement
 
-        Returns:
-            True if update was installed, False otherwise
+        Retourne le chemin du fichier vérifié.
         """
-        logger.info("Checking for updates (with auto-install)...")
-
-        if not self.check_for_updates(force=force):
-            return False
-
-        if not self.available_update:
-            return False
-
-        try:
-            logger.info(f"Update available: {self.latest_version}")
-            logger.info("Downloading and installing update...")
-
-            # Download
-            installer_path = self.download_update(self.latest_version)
-            if not installer_path:
-                return False
-
-            # Install
-            logger.info("Installing update...")
-            if not self.install_update(installer_path, silent=True):
-                logger.error("Installation failed")
-                return False
-
-            logger.info("✓ Update installed successfully")
-            return True
-
-        except Exception as e:
-            logger.error(f"Auto-install failed: {e}")
-            return False
-
-    def download_update(self, version: Optional[str] = None) -> Optional[Path]:
-        """
-        Download installer for given version.
-
-        Args:
-            version: Version to download (default: latest)
-
-        Returns:
-            Path to downloaded installer, or None if failed
-        """
+        version = version or self.latest_version
         if not version:
-            version = self.latest_version
-        if not version:
-            raise UpdateCheckError("No version specified")
+            raise UpdateCheckError("Aucune version à télécharger")
 
-        logger.info(f"Downloading update {version}...")
+        metadata = self._load_metadata() or self._fetch_version_metadata()
+        downloads = metadata.get("downloads", {})
 
+        platform_key = self._get_platform_key()
+        if platform_key not in downloads:
+            raise UpdateCheckError("Aucun téléchargement pour %s" % platform_key)
+
+        download_url = downloads[platform_key]
+        nom_fichier = download_url.rsplit('/', 1)[-1]
+
+        # L'empreinte est réclamée AVANT de télécharger : inutile de tirer
+        # 30 Mo pour découvrir ensuite qu'on ne pourra pas les valider.
+        attendue = self._expected_sha256(version, nom_fichier, metadata, platform_key)
+        if not attendue:
+            raise UpdateCheckError(
+                "Empreinte SHA-256 introuvable pour %s : installation refusée. "
+                "Téléchargez la version manuellement depuis la page des versions."
+                % nom_fichier)
+
+        destination = self.config_dir / nom_fichier
+        logger.info("Téléchargement de %s (%s)...", nom_fichier, version)
+        self.download_progress = 0
         try:
-            metadata = self._load_metadata()
-            if not metadata:
-                metadata = self._fetch_version_metadata()
+            self._download_file(download_url, destination, progress=progress)
 
-            downloads = metadata.get("downloads", {})
-            checksums = metadata.get("checksums", {})
+            obtenue = self._calculate_checksum(destination)
+            if obtenue.lower() != attendue.lower():
+                destination.unlink(missing_ok=True)
+                raise UpdateCheckError(
+                    "Empreinte incorrecte : le fichier téléchargé ne correspond pas "
+                    "à la version publiée. Téléchargement abandonné.")
 
-            # Detect current platform
-            platform_key = self._get_platform_key()
-            if platform_key not in downloads:
-                raise UpdateCheckError(f"No download available for {platform_key}")
+            logger.info("Téléchargement vérifié : %s", destination)
+            return destination
+        finally:
+            self.download_progress = None
 
-            download_url = downloads[platform_key]
-            expected_checksum = checksums.get(platform_key)
-
-            # Download file
-            installer_path = self.config_dir / Path(download_url).name
-            self._download_file(download_url, installer_path)
-
-            # Validate checksum
-            if expected_checksum:
-                logger.info("Validating download...")
-                actual_checksum = self._calculate_checksum(installer_path)
-                if not actual_checksum.endswith(expected_checksum.split(":")[-1]):
-                    raise UpdateCheckError("Checksum mismatch")
-
-            logger.info(f"✓ Downloaded: {installer_path}")
-            return installer_path
-
-        except Exception as e:
-            logger.error(f"Download failed: {e}")
-            raise UpdateCheckError(f"Failed to download: {e}") from e
-
-    def install_update(self, installer_path: Path, silent: bool = True) -> bool:
-        """
-        Install downloaded update.
-
-        Args:
-            installer_path: Path to installer executable
-            silent: Run installer in silent mode
-
-        Returns:
-            True if installation succeeded
-        """
+    def install_update(self, installer_path: Path) -> bool:
+        """Remplace l'application par le fichier téléchargé. Retourne True si engagé."""
+        installer_path = Path(installer_path)
         if not installer_path.exists():
-            logger.error(f"Installer not found: {installer_path}")
+            logger.error("Fichier de mise à jour introuvable : %s", installer_path)
             return False
 
-        logger.info(f"Installing update from {installer_path}...")
+        mode = runtime_mode()
+        if mode == 'windows':
+            return self._install_windows(installer_path)
+        if mode == 'macos':
+            return self._install_macos(installer_path)
 
-        try:
-            system = platform.system()
+        logger.warning("Installation automatique indisponible dans le mode « %s »", mode)
+        return False
 
-            if system == "Windows":
-                # ParcInfo est distribué en exécutable PORTABLE unique (pas d'installeur
-                # NSIS) : "installer_path" est en réalité le nouveau ParcInfo-Windows.exe
-                # téléchargé. Windows verrouille l'exe en cours d'exécution, donc on ne
-                # peut pas l'écraser directement depuis ce process - on délègue le
-                # remplacement à un script .bat détaché qui attend la fin de ce process
-                # (déclenchée par l'appelant juste après ce retour), remplace l'exécutable
-                # puis relance l'application.
-                if not getattr(sys, 'frozen', False):
-                    logger.warning("Mise à jour ignorée : non exécuté en tant qu'exécutable packagé (mode développement)")
-                    return False
+    def _install_windows(self, installer_path: Path) -> bool:
+        """
+        ParcInfo est un exécutable portable unique : le fichier téléchargé EST la
+        nouvelle application. Windows verrouille l'exe en cours d'exécution, donc
+        le remplacement est délégué à un script détaché qui attend la fin de ce
+        processus, échange les fichiers puis relance l'application.
+        """
+        current_exe = Path(sys.executable)
+        sauvegarde = current_exe.with_suffix('.exe.old')
+        bat_path = self.config_dir / "_apply_update.bat"
 
-                current_exe = Path(sys.executable)
-                bat_path = self.config_dir / "_apply_update.bat"
-                # 4s de marge : le processus appelant (launcher.py) ne fait time.sleep(2)
-                # qu'APRÈS avoir programmé ce script, donc son sys.exit() arrive après
-                # ces 2s - laisser une marge évite que "move" se heurte au fichier
-                # encore verrouillé si le process met un peu plus longtemps à quitter.
-                bat_content = (
-                    "@echo off\r\n"
-                    "timeout /t 4 /nobreak > NUL\r\n"
-                    f'move /y "{installer_path}" "{current_exe}" > NUL\r\n'
-                    f'start "" "{current_exe}"\r\n'
-                    'del "%~f0"\r\n'
-                )
-                bat_path.write_text(bat_content, encoding='utf-8')
+        # L'ancien exécutable est conservé le temps du remplacement : si la copie
+        # échoue à mi-chemin, on remet la version qui fonctionnait plutôt que de
+        # laisser l'utilisateur avec un fichier tronqué et aucune application.
+        bat_content = (
+            "@echo off\r\n"
+            "timeout /t 4 /nobreak > NUL\r\n"
+            f'if exist "{sauvegarde}" del /q "{sauvegarde}"\r\n'
+            f'move /y "{current_exe}" "{sauvegarde}" > NUL\r\n'
+            f'move /y "{installer_path}" "{current_exe}" > NUL\r\n'
+            "if errorlevel 1 (\r\n"
+            f'  move /y "{sauvegarde}" "{current_exe}" > NUL\r\n'
+            ")\r\n"
+            f'start "" "{current_exe}"\r\n'
+            'del "%~f0"\r\n'
+        )
+        bat_path.write_text(bat_content, encoding='utf-8')
 
-                creationflags = 0
-                if hasattr(subprocess, 'CREATE_NO_WINDOW') and hasattr(subprocess, 'DETACHED_PROCESS'):
-                    creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
-                subprocess.Popen(['cmd', '/c', str(bat_path)], creationflags=creationflags, close_fds=True)
+        creationflags = 0
+        if hasattr(subprocess, 'CREATE_NO_WINDOW') and hasattr(subprocess, 'DETACHED_PROCESS'):
+            creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
+        subprocess.Popen(['cmd', '/c', str(bat_path)],
+                         creationflags=creationflags, close_fds=True)
 
-                logger.info("✓ Script de mise à jour programmé - l'application va redémarrer")
-                return True
+        logger.info("Remplacement programmé — l'application va redémarrer")
+        return True
 
-            elif system == "Darwin":
-                # Mount DMG and copy app
-                mount_point = "/tmp/ParcInfo-Update"
-                cmd = f"hdiutil attach '{installer_path}' -mountpoint {mount_point}"
-                os.system(cmd)
+    def _install_macos(self, archive_path: Path) -> bool:
+        """
+        La version macOS est publiée en archive ZIP contenant ParcInfo.app.
+        (Le code précédent tentait un `hdiutil attach`, réservé aux images DMG :
+        le montage échouait à chaque fois et aucune mise à jour n'aboutissait.)
+        """
+        app_actuelle = self._macos_app_path()
+        if not app_actuelle:
+            logger.error("Impossible de localiser ParcInfo.app à remplacer")
+            return False
 
-                app_src = f"{mount_point}/ParcInfo.app"
-                app_dst = "/Applications/ParcInfo.app"
-
-                if os.path.exists(app_src):
-                    # Backup old app
-                    backup_path = f"/Applications/ParcInfo.app.backup"
-                    if os.path.exists(app_dst):
-                        shutil.move(app_dst, backup_path)
-
-                    # Copy new app
-                    shutil.copytree(app_src, app_dst)
-                    logger.info("✓ macOS app updated")
-
-                    # Unmount
-                    os.system(f"hdiutil eject {mount_point}")
-                    return True
-
-            elif system == "Linux":
-                logger.info("Manual installation required for Linux")
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                with zipfile.ZipFile(archive_path) as zf:
+                    zf.extractall(tmp)
+            except zipfile.BadZipFile:
+                logger.error("Archive macOS illisible : %s", archive_path)
                 return False
 
-        except Exception as e:
-            logger.error(f"Installation failed: {e}")
-            return False
+            source = None
+            for racine, dossiers, _ in os.walk(tmp):
+                for d in dossiers:
+                    if d.endswith('.app'):
+                        source = Path(racine) / d
+                        break
+                if source:
+                    break
 
-    def check_for_updates_background(self, callback: Optional[Callable] = None) -> threading.Thread:
-        """
-        Start background thread for periodic update checks.
+            if not source:
+                logger.error("Aucun bundle .app dans l'archive")
+                return False
 
-        Returns:
-            Thread object (daemon)
-        """
-        def background_check():
-            while True:
-                try:
-                    self.check_for_updates()
-                    time.sleep(self.CHECK_INTERVAL_DAYS * 24 * 3600)
-                except Exception as e:
-                    logger.debug(f"Background check error: {e}")
-                    time.sleep(3600)  # Retry after 1 hour
+            sauvegarde = Path(str(app_actuelle) + '.old')
+            if sauvegarde.exists():
+                shutil.rmtree(sauvegarde, ignore_errors=True)
+            try:
+                if app_actuelle.exists():
+                    shutil.move(str(app_actuelle), str(sauvegarde))
+                shutil.copytree(str(source), str(app_actuelle), symlinks=True)
+            except Exception as e:
+                logger.error("Remplacement du bundle impossible : %s", e)
+                if sauvegarde.exists() and not app_actuelle.exists():
+                    shutil.move(str(sauvegarde), str(app_actuelle))
+                return False
 
-        thread = threading.Thread(target=background_check, daemon=True)
-        thread.start()
-        return thread
+        # L'archive téléchargée est dépourvue d'attribut de quarantaine tant
+        # qu'elle vient de nous, mais macOS en pose un dès le téléchargement :
+        # sans ce nettoyage, Gatekeeper refuse d'ouvrir l'application.
+        subprocess.run(['xattr', '-cr', str(app_actuelle)], check=False)
+        shutil.rmtree(sauvegarde, ignore_errors=True)
+
+        # Relance différée : le processus courant doit d'abord rendre la main.
+        subprocess.Popen(['/bin/sh', '-c',
+                          'sleep 3; open "%s"' % app_actuelle],
+                         start_new_session=True)
+        logger.info("Application macOS remplacée — redémarrage en cours")
+        return True
+
+    def _macos_app_path(self) -> Optional[Path]:
+        """Chemin du bundle .app en cours d'exécution, sinon /Applications."""
+        for parent in Path(sys.executable).parents:
+            if parent.suffix == '.app':
+                return parent
+        defaut = Path('/Applications/ParcInfo.app')
+        return defaut if defaut.exists() else None
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Private Methods
+    # Empreintes
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _expected_sha256(self, version: str, nom_fichier: str,
+                         metadata: Dict, platform_key: str) -> Optional[str]:
+        """
+        Empreinte attendue, cherchée d'abord dans SHA256SUMS.txt publié avec la
+        version, puis dans version.json en repli.
+        """
+        url = SHA256SUMS_URL.format(version=version.lstrip('v'))
+        try:
+            with urlopen(url, timeout=30) as reponse:
+                contenu = reponse.read().decode('utf-8', errors='replace')
+            for ligne in contenu.splitlines():
+                parts = ligne.split()
+                if len(parts) >= 2 and parts[-1].lstrip('*') == nom_fichier:
+                    return parts[0]
+            logger.warning("%s absent de SHA256SUMS.txt", nom_fichier)
+        except Exception as e:
+            logger.warning("SHA256SUMS.txt indisponible (%s) : %s", url, e)
+
+        # Repli : version.json. Les clés y sont suffixées « _sha256 » — le code
+        # précédent interrogeait la clé nue, ne trouvait rien, et sautait la
+        # vérification en silence.
+        checksums = metadata.get("checksums") or {}
+        for cle in ('%s_sha256' % platform_key, platform_key):
+            valeur = checksums.get(cle)
+            if valeur and valeur != 'PENDING_BUILD':
+                return valeur.split(':')[-1]
+        return None
+
+    def _calculate_checksum(self, file_path: Path) -> str:
+        sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Interne
     # ─────────────────────────────────────────────────────────────────────────
 
     def _should_check(self) -> bool:
-        """Check if enough time has passed since last check."""
         if not self.metadata_file.exists():
             return True
-
         try:
             metadata = self._load_metadata()
             last_check = metadata.get("last_check")
             if last_check:
-                last_check_time = datetime.fromisoformat(last_check)
-                if datetime.now() - last_check_time < timedelta(days=self.CHECK_INTERVAL_DAYS):
+                ecoule = datetime.now() - datetime.fromisoformat(last_check)
+                if ecoule < timedelta(hours=self.CHECK_INTERVAL_HOURS):
                     return False
         except Exception:
             pass
-
         return True
 
     def _update_last_check_time(self) -> None:
-        """Update timestamp of last check."""
         metadata = self._load_metadata() or {}
         metadata["last_check"] = datetime.now().isoformat()
         self._save_metadata(metadata)
 
     def _fetch_version_metadata(self) -> Dict:
-        """Fetch version.json from GitHub."""
         try:
-            logger.debug(f"Fetching metadata from {self.version_json_url}")
+            logger.debug("Lecture des métadonnées : %s", self.version_json_url)
             with urlopen(self.version_json_url, timeout=10) as response:
-                data = response.read().decode("utf-8")
-                return json.loads(data)
+                return json.loads(response.read().decode("utf-8"))
         except URLError as e:
-            raise UpdateCheckError(f"Network error: {e}") from e
+            raise UpdateCheckError("Erreur réseau : %s" % e) from e
         except json.JSONDecodeError as e:
-            raise UpdateCheckError(f"Invalid metadata: {e}") from e
+            raise UpdateCheckError("Métadonnées illisibles : %s" % e) from e
 
     def _load_metadata(self) -> Optional[Dict]:
-        """Load cached metadata."""
         if not self.metadata_file.exists():
             return None
-
         try:
             with open(self.metadata_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.debug(f"Failed to load metadata: {e}")
+            logger.debug("Métadonnées locales illisibles : %s", e)
             return None
 
     def _save_metadata(self, metadata: Dict) -> None:
-        """Save metadata to cache."""
         try:
             with open(self.metadata_file, "w", encoding="utf-8") as f:
-                json.dump(metadata, f)
+                json.dump(metadata, f, ensure_ascii=False)
         except Exception as e:
-            logger.debug(f"Failed to save metadata: {e}")
+            logger.debug("Écriture des métadonnées impossible : %s", e)
 
     def _is_newer_version(self, new: str, old: str) -> bool:
-        """Compare semantic versions."""
+        """Compare deux versions sémantiques."""
         try:
-            new_parts = [int(x) for x in new.split(".")]
-            old_parts = [int(x) for x in old.split(".")]
-
-            # Pad with zeros
+            new_parts = [int(x) for x in str(new).lstrip('v').split(".")]
+            old_parts = [int(x) for x in str(old).lstrip('v').split(".")]
             while len(new_parts) < len(old_parts):
                 new_parts.append(0)
             while len(old_parts) < len(new_parts):
                 old_parts.append(0)
-
             return tuple(new_parts) > tuple(old_parts)
         except (ValueError, AttributeError):
             return False
 
     def _get_platform_key(self) -> str:
-        """Get platform-specific download key (doit correspondre aux clés de version.json 'downloads')."""
-        system = platform.system()
+        """Clé de la section « downloads » de version.json."""
+        mode = runtime_mode()
+        cles = {'windows': 'windows_installer', 'macos': 'macos_app', 'docker': 'docker'}
+        if mode in cles:
+            return cles[mode]
+        raise UpdateCheckError("Mise à jour automatique non prise en charge (%s)" % mode)
 
-        if system == "Windows":
-            return "windows_installer"
-        elif system == "Darwin":
-            return "macos_app"
-        elif system == "Linux":
-            return "linux"
-        else:
-            raise UpdateCheckError(f"Unsupported platform: {system}")
-
-    def _download_file(self, url: str, destination: Path) -> None:
-        """Download file from URL."""
-        logger.debug(f"Downloading {url}...")
+    def _download_file(self, url: str, destination: Path,
+                       progress: Optional[Callable] = None) -> None:
+        logger.debug("Téléchargement de %s", url)
+        temporaire = destination.with_suffix(destination.suffix + '.part')
         try:
             with urlopen(url, timeout=300) as response:
-                with open(destination, "wb") as f:
+                total = int(response.headers.get('Content-Length') or 0)
+                recu = 0
+                with open(temporaire, "wb") as f:
                     while True:
-                        chunk = response.read(1024 * 1024)  # 1MB chunks
+                        chunk = response.read(1024 * 256)
                         if not chunk:
                             break
                         f.write(chunk)
+                        recu += len(chunk)
+                        if total:
+                            pct = int(recu * 100 / total)
+                            self.download_progress = pct
+                            if progress:
+                                progress(pct)
+            # Le fichier n'apparaît sous son nom définitif qu'une fois complet :
+            # un téléchargement interrompu ne doit pas ressembler à un binaire prêt.
+            temporaire.replace(destination)
         except Exception as e:
-            raise UpdateCheckError(f"Download failed: {e}") from e
-
-    def _calculate_checksum(self, file_path: Path) -> str:
-        """Calculate SHA256 checksum."""
-        import hashlib
-        sha256 = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha256.update(chunk)
-        return f"sha256:{sha256.hexdigest()}"
+            temporaire.unlink(missing_ok=True)
+            raise UpdateCheckError("Téléchargement échoué : %s" % e) from e
 
 
-def setup_update_notifications():
-    """Setup UI notifications for updates (platform-specific)."""
-    def show_update_notification(version: str):
-        """Show notification that update is available."""
-        system = platform.system()
-
-        if system == "Windows":
-            try:
-                from win10toast import ToastNotifier
-                notifier = ToastNotifier()
-                notifier.show_toast(
-                    "ParcInfo Update Available",
-                    f"Version {version} is available. Update now?",
-                    duration=10,
-                    threaded=True
-                )
-            except ImportError:
-                logger.info(f"Update available: {version}")
-
-        elif system == "Darwin":
-            try:
-                import os
-                script = f'display notification "Version {version} available" with title "ParcInfo Update"'
-                os.system(f"osascript -e '{script}'")
-            except Exception:
-                logger.info(f"Update available: {version}")
-
-    return show_update_notification
+def docker_pull_commands(version: Optional[str] = None) -> Dict[str, str]:
+    """
+    Commandes de mise à jour d'un conteneur, selon la façon dont il a été lancé.
+    Un conteneur ne peut pas se remplacer lui-même : c'est à l'hôte d'agir.
+    """
+    tag = ('v%s' % str(version).lstrip('v')) if version else 'latest'
+    return {
+        'compose': "docker compose pull && docker compose up -d",
+        'run': "docker pull darkmind64/parcinfo:%s" % tag,
+    }
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-
     checker = UpdateChecker()
+    print("Mode d'exécution :", runtime_mode())
     if checker.check_for_updates(force=True):
-        print(f"✓ Update available: {checker.latest_version}")
+        print("Mise à jour disponible :", checker.latest_version)
     else:
-        print(f"✓ Already on latest version: {checker.current_version}")
+        print("Déjà à jour :", checker.current_version)

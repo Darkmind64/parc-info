@@ -180,23 +180,18 @@ def main():
     except Exception as e:
         logger.warning(f"Cron scheduler failed to start (non-critical): {e}")
 
-    # Auto-update au démarrage (bloquant, très rapide si pas d'update)
-    logger.info("Checking for updates...")
+    # Recherche d'une mise à jour, sans rien installer : l'utilisateur décide
+    # depuis la bannière de l'interface. L'ancienne version téléchargeait et
+    # remplaçait l'exécutable au démarrage sans le moindre message — d'où des
+    # redémarrages inexpliqués, et aucune trace quand ça échouait.
     try:
-        from update_checker import UpdateChecker
-        checker = UpdateChecker(config_dir=data())
-
-        # Check and install if update available
-        if checker.check_and_install_updates(force=True, silent=True):
-            # Update was installed, app will be restarted by installer
-            logger.info("Update installed, restarting...")
-            time.sleep(2)  # Give installer time to close our process
-            sys.exit(0)
-        else:
-            logger.info("No update needed")
+        from update_notifier import get_notifier
+        # La vérification part dans son propre fil : le démarrage n'attend pas
+        # le réseau, et le résultat remonte dans la bannière dès qu'il arrive.
+        get_notifier(config_dir=str(data()))
+        logger.info("Recherche de mise à jour lancée en arrière-plan")
     except Exception as e:
-        logger.warning(f"Update check failed (non-critical): {e}")
-        # Continue anyway, update failure shouldn't block app startup
+        logger.warning("Recherche de mise à jour impossible (sans conséquence) : %s", e)
 
     # Démarrer Flask (0.0.0.0 : accessible depuis le réseau local, pas seulement en local)
     flask_app.app.run(host='0.0.0.0', port=port,

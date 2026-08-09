@@ -1,95 +1,64 @@
 """
-Update Notification Routes for ParcInfo Flask App
+Routes de mise à jour pour l'interface web de ParcInfo.
 
-Add these routes to app.py to enable update notifications in the web interface.
-
-Usage (in app.py):
     from app_update_routes import register_update_routes
     register_update_routes(app)
+
+Routes :
+    GET  /api/updates/status   état courant (version, phase, progression)
+    POST /api/updates/check    vérification immédiate
+    POST /api/updates/install  téléchargement + remplacement (administrateurs)
+    POST /api/updates/dismiss  masquer l'annonce de cette version
 """
 
 from flask import jsonify
-from auth_utils import login_required
+
+from auth_utils import login_required, get_auth_user
 from update_notifier import get_notifier
 
 
 def register_update_routes(app):
-    """
-    Register update notification routes to Flask app.
-
-    Routes:
-    - GET /api/updates/status — Get current update status
-    - POST /api/updates/check — Check for updates now
-    - POST /api/updates/install — Install update now
-    - POST /api/updates/dismiss — Dismiss notification
-    """
+    """Déclare les routes de mise à jour sur l'application Flask."""
 
     @app.route('/api/updates/status', methods=['GET'])
     @login_required
     def get_update_status():
-        """Get current update status and notification."""
-        notifier = get_notifier()
-        return jsonify(notifier.status)
+        return jsonify(get_notifier().etat)
 
     @app.route('/api/updates/check', methods=['POST'])
     @login_required
     def check_updates():
-        """Check for updates immediately."""
         notifier = get_notifier()
-
-        if notifier.is_checking:
-            return jsonify({
-                "status": "already_checking",
-                "message": "Update check already in progress"
-            }), 202
-
-        has_update = notifier.check_now()
-
-        return jsonify({
-            "status": "check_complete",
-            "update_available": has_update,
-            "version": notifier.update_version,
-            "notification": notifier.get_notification()
-        })
+        if notifier.phase == 'verification':
+            return jsonify(notifier.etat), 202
+        notifier.verifier(force=True)
+        return jsonify(notifier.etat)
 
     @app.route('/api/updates/install', methods=['POST'])
     @login_required
     def install_update():
-        """Install update now."""
+        # Remplacer l'exécutable dépasse ce qu'un compte de consultation doit
+        # pouvoir déclencher : l'opération redémarre l'application pour tous.
+        user = get_auth_user()
+        if not user or user.get('role') != 'admin':
+            return jsonify({'erreur': "Réservé aux administrateurs"}), 403
+
         notifier = get_notifier()
-
-        if not notifier.update_available:
-            return jsonify({
-                "status": "error",
-                "message": "No update available"
-            }), 400
-
-        if notifier.install_update():
-            return jsonify({
-                "status": "installing",
-                "message": "Update installation started",
-                "version": notifier.update_version,
-                "notification": notifier.get_notification()
-            }), 202
-        else:
-            return jsonify({
-                "status": "error",
-                "message": "Failed to start installation"
-            }), 500
+        if not notifier.installer():
+            return jsonify({'erreur': notifier.erreur or "Installation impossible",
+                            'etat': notifier.etat}), 400
+        return jsonify(notifier.etat), 202
 
     @app.route('/api/updates/dismiss', methods=['POST'])
     @login_required
     def dismiss_notification():
-        """Dismiss update notification."""
         notifier = get_notifier()
-        notifier.dismiss_notification()
+        notifier.ecarter()
+        return jsonify(notifier.etat)
 
-        return jsonify({
-            "status": "dismissed",
-            "notification": None
-        })
-
-    # Initialize notifier on first request
+    # Le suivi démarre à la première page servie plutôt qu'à l'import : les
+    # scripts qui importent app.py (tests, outils) n'ont pas à lancer de thread
+    # ni à interroger GitHub.
     @app.before_request
-    def init_notifier():
+    def _demarrer_suivi_maj():
         get_notifier()

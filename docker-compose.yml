@@ -28,3 +28,34 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # Repère lu par Watchtower ci-dessous. Sans lui, Watchtower surveillerait
+    # tous les conteneurs de la machine, y compris ceux qui ne vous appartiennent pas.
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # ── Mise à jour automatique du conteneur (facultatif) ───────────────────────
+  # ParcInfo signale les nouvelles versions dans son interface, mais un conteneur
+  # ne peut pas se remplacer lui-même : il faut un service extérieur pour tirer
+  # l'image et relancer. Décommentez ce bloc pour que ce soit automatique.
+  #
+  # À savoir avant de l'activer : le conteneur redémarre dès qu'une version
+  # paraît, sans prévenir et sans égard pour qui est en train de l'utiliser.
+  # Le créneau ci-dessous (04:00) limite la casse ; la base est de toute façon
+  # sauvegardée quotidiennement et survit au remplacement du conteneur.
+  #
+  # watchtower:
+  #   image: containrrr/watchtower:latest
+  #   container_name: parcinfo-watchtower
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   environment:
+  #     - TZ=Europe/Paris
+  #     # Ne toucher qu'aux conteneurs portant le label déclaré plus haut
+  #     - WATCHTOWER_LABEL_ENABLE=true
+  #     # Retirer l'ancienne image après remplacement
+  #     - WATCHTOWER_CLEANUP=true
+  #     # Tous les jours à 04:00
+  #     - WATCHTOWER_SCHEDULE=0 0 4 * * *
+  #     # Mettre à true pour ne journaliser que ce qui serait fait, sans agir
+  #     - WATCHTOWER_MONITOR_ONLY=false
