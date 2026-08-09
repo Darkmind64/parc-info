@@ -252,6 +252,15 @@ class CollectorGUI:
                                 command=self.root.quit)
         cancel_btn.pack(side=tk.LEFT, padx=5)
 
+        # Test de débit : décoché par défaut. Il consomme de la bande passante
+        # sur le poste de l'utilisateur et sollicite un service tiers, ce qui
+        # doit rester un choix explicite et non un comportement systématique.
+        self.test_debit_var = tk.BooleanVar(value=False)
+        debit_check = ttk.Checkbutton(
+            self.root, variable=self.test_debit_var,
+            text="Mesurer aussi le débit descendant (télécharge ~10 Mo)")
+        debit_check.pack(anchor=tk.W, padx=12, pady=2)
+
         # Status bar + progression : la collecte dure une bonne minute, une
         # interface figée sans indication passe pour un plantage.
         self.progress_var = tk.DoubleVar(value=0.0)
@@ -384,7 +393,8 @@ class CollectorGUI:
 
         def collect():
             try:
-                self.system_info = collect_system_info(progress=avancement)
+                self.system_info = collect_system_info(
+                    progress=avancement, test_debit=self.test_debit_var.get())
                 self._update_summary()
                 self.root.after(0, lambda: self.progress_var.set(100.0))
                 self.status_var.set("Informations collectées ✓")
