@@ -6,14 +6,14 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.7.1 ⭐ **La mise à jour Windows aboutit enfin**  
+**Version** : 2.8.0 ⭐ **Collecteur enrichi : sécurité, démarrage, BitLocker**  
 **Dernière mise à jour** : 2026-08-09
 
 ---
 
 ## ✨ Fonctionnalités Principales
 
-### 🎉 v2.7.1 : La mise à jour Windows aboutit enfin
+### 🎉 v2.8.0 : Collecteur enrichi — sécurité, démarrage, BitLocker
 
 La bannière de mise à jour ne pouvait jamais s'afficher, macOS ne pouvait pas
 se mettre à jour, et le binaire téléchargé n'était jamais vérifié. Voir
@@ -76,9 +76,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/system-info-collector-gui.exe)
-- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/ParcInfo-Windows.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/ParcInfo-Windows.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -147,9 +147,9 @@ l'installation est **refusée** et la bannière propose le téléchargement manu
 exécuter un binaire non vérifié offrirait à quiconque détourne la connexion un
 chemin direct vers la machine.
 
-> ⚠️ Les versions **antérieures à 2.7.1** embarquent un mécanisme de mise à
+> ⚠️ Les versions **antérieures à 2.8.0** embarquent un mécanisme de mise à
 > jour défaillant (bannière jamais affichée, macOS inopérant). Le passage à
-> 2.7.1 doit se faire **manuellement, une fois** ; les suivantes se feront
+> 2.8.0 doit se faire **manuellement, une fois** ; les suivantes se feront
 > depuis l'interface.
 
 ---
@@ -183,22 +183,22 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.7.1
+## 📥 Téléchargements v2.8.0
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger |
 |-----------|----------|
-| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/ParcInfo-Windows.exe) |
-| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/ParcInfo-macOS-ARM.zip) |
-| **Docker** | `docker pull darkmind64/parcinfo:v2.7.1` |
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/ParcInfo-macOS-ARM.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.8.0` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Usage |
 |------|-----------|----------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/system-info-collector-gui.exe) | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/system-info-collector.exe) | Automatisation/scripts |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/system-info-collector.exe) | Automatisation/scripts |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -217,7 +217,7 @@ python system-info-collector-gui.py
 python system-info-collector.py --client-id 5
 ```
 
-👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.7.1)
+👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.8.0)
 
 ---
 

@@ -1,10 +1,10 @@
-PARCINFO_VERSION=2.7.1
+PARCINFO_VERSION=2.8.0
 RELEASE_DATE=2026-08-08
-BUILD_NUMBER=2026080911
+BUILD_NUMBER=2026080912
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.7.1 - La mise a jour Windows aboutit
+# Version 2.8.0 - Collecteur enrichi
 # Balayage de toutes les sources de clé produit, appairage sur les 5
 # derniers caractères, report automatique dans la fiche appareil
 # Date: 8 août 2026

@@ -262,7 +262,15 @@
       "Bash(cd \"E:/Claude *)",
       "Bash(cp test_maj.py /tmp/test_maj.bak)",
       "Bash(rm -f static/_tmp_refus.html)",
-      "Bash(rm -f _ci.sh)"
+      "Bash(rm -f _ci.sh)",
+      "Bash(curl -sL \"https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/SHA256SUMS.txt\")",
+      "Bash(grep -c \"Cert:\\\\\\\\\\\\\\\\\\\\|certificat\" collector_core.py)",
+      "Bash(timeout 200 python -c ' *)",
+      "Bash(timeout 180 python -c ' *)",
+      "Bash(python -m py_compile collector_core.py)",
+      "Bash(python -m py_compile app.py collector_core.py)",
+      "Bash(timeout 400 python -c ' *)",
+      "Bash(timeout 300 python -c ' *)"
     ]
   }
 }

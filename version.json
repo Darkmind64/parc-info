@@ -1,22 +1,26 @@
 {
-  "version": "2.7.1",
-  "release_date": "2026-08-09T23:30:00.000000",
+  "version": "2.8.0",
+  "release_date": "2026-08-10T01:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.7.1",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.1/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.8.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correction de la mise a jour Windows, qui ne se terminait jamais, et affichage des refus de l'API",
+    "new_features": "Le collecteur remonte le temps de demarrage, le journal de securite, les certificats expirants, l'occupation disque et les cles BitLocker",
     "improvements": [
-      "FIXED: La mise a jour Windows ne se terminait jamais. Le script de remplacement etait bien programme, mais rien n'arretait l'application : Windows garde un verrou sur l'executable en cours, le deplacement echouait, et l'ancienne version continuait de tourner. Regression introduite en 2.6.43, quand l'installation est passee du lanceur a l'interface sans que la sortie du processus suive.",
-      "FIXED: Le script de remplacement attendait une duree fixe puis abandonnait en silence. Il reessaie desormais pendant une trentaine de secondes, remet l'ancienne version si la copie echoue, relance l'application dans tous les cas et ecrit un journal (_apply_update.log) pour qu'un echec soit diagnosticable.",
-      "FIXED: Un refus du serveur restait invisible. Droits insuffisants ou mise a jour indisponible renvoyaient bien un message, mais l'interface l'ignorait : le bouton restait sur 'Demarrage...' indefiniment. Le motif s'affiche maintenant dans la banniere.",
-      "FIXED: Le script de remplacement etait ecrit en UTF-8 alors que cmd.exe ne le lit pas ainsi : un chemin accentue le rendait illisible."
+      "NEW: Temps de demarrage mesure par Windows lui-meme (journal de diagnostic). 'Le poste est long a demarrer' devient une donnee, a rapprocher des programmes lances au demarrage deja collectes.",
+      "NEW: Journal de securite - echecs d'ouverture de session et verrouillages de compte sur 30 jours, avec le compte et l'origine. Un compte verrouille en boucle trahit le plus souvent un service reste sur un ancien mot de passe.",
+      "NEW: Certificats machine expirant sous 90 jours. Un certificat expire fait tomber VPN, bureau a distance ou 802.1X sans qu'aucune modification n'ait eu lieu la veille.",
+      "NEW: Occupation disque - taille declaree de chaque logiciel (lue dans le registre, sans aucun parcours de fichiers) et taille des profils utilisateurs. Complete la tendance de saturation : savoir qu'un disque se remplit sans savoir de quoi n'aide qu'a moitie.",
+      "NEW: Fin de support de la version de Windows, deduite du build. La table des echeances doit etre tenue a jour ; un build inconnu ne produit aucune conclusion plutot qu'une date inventee.",
+      "NEW: Cles de recuperation BitLocker, chiffrees au repos comme les mots de passe des identifiants et affichees a la demande dans la fiche appareil. Elles sont retirees du rapport avant stockage : le rapport est repris tel quel dans le PDF joint, un secret n'a rien a y faire. Chaque consultation est inscrite a l'historique.",
+      "FIXED: L'extraction des champs nommes d'un evenement Windows etait fausse ($d.Champ ne renvoie rien, il faut filtrer sur le nom). La mesure du temps de demarrage serait restee invisible en permanence - trouve en comparant les deux ecritures sur un evenement reel.",
+      "A SAVOIR: la collecte passe d'environ 60 a 90 secondes, la mesure des profils imposant de parcourir l'arborescence. Elle est bornee dans le temps et une mesure interrompue est signalee comme telle - c'est alors un minimum, pas un total."
     ]
   },
   "checksums": {
@@ -27,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.7.1"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.8.0"
 }

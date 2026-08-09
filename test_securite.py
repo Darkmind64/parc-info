@@ -173,5 +173,63 @@ verifier(integrite == 'ok', 'base restaurée intègre', integrite)
 verifier(accentue == 'Société Générale & Cie', 'accents intacts après restauration',
          accentue)
 
+print('\n=== 7. Clés de récupération BitLocker ===')
+CLE = '123456-234567-345678-456789-567890-678901-789012-890123'
+charge_bl = {
+    'mac_address': 'AA:BB:CC:00:11:22', 'hostname': 'POSTE-Réception', 'client_id': 1,
+    'ip_addresses': ['192.168.1.50'],
+    'system_report': {
+        'os_build': '26100', 'hostname': 'POSTE-Réception',
+        'bitlocker_keys': [{'volume': 'C:', 'identifiant': 'abc-123', 'protection': 'On',
+                            'chiffrement': 'XtsAes128', 'cle': CLE}],
+    },
+}
+reponse = client.post('/api/device-info', json=charge_bl)
+verifier(reponse.status_code == 200, 'collecte acceptée', str(reponse.status_code))
+appareil_id = (reponse.get_json() or {}).get('device_id')
+
+conn = A.get_db()
+rapport = conn.execute('SELECT rapport_systeme_json FROM appareils WHERE id=?',
+                       (appareil_id,)).fetchone()[0] or ''
+stockee = conn.execute('SELECT valeur FROM cles_recuperation WHERE appareil_id=? AND volume=?',
+                       (appareil_id, 'C:')).fetchone()
+conn.close()
+
+# Le rapport est repris tel quel dans le PDF joint à l'appareil : une clé de
+# déverrouillage de disque n'a rien à y faire.
+verifier('bitlocker_keys' not in rapport, 'les clés sont retirées du rapport stocké')
+verifier(CLE not in rapport, 'aucune clé en clair dans le rapport')
+verifier(bool(stockee), 'clé enregistrée dans sa table dédiée')
+verifier(bool(stockee) and CLE not in (stockee[0] or ''), 'clé chiffrée au repos')
+
+connecter(1)
+reponse = client.get('/api/appareil/%d/cle-bitlocker?volume=C:' % appareil_id)
+verifier(reponse.status_code == 200 and (reponse.get_json() or {}).get('cle') == CLE,
+         'clé restituée en clair à la demande')
+verifier(client.get('/api/appareil/%d/cle-bitlocker?volume=Z:' % appareil_id).status_code == 404,
+         'volume inconnu refusé')
+
+# Cloisonnement multi-client. Un identifiant de client inexistant ne prouverait
+# rien : get_client_id() le rejette et retombe sur un client accessible. Il faut
+# donc un second client bien réel pour éprouver l'isolement.
+conn = A.get_db()
+conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (2, 'Autre client')")
+conn.commit()
+conn.close()
+with client.session_transaction() as session:
+    session['client_id'] = 2
+verifier(client.get('/api/appareil/%d/cle-bitlocker?volume=C:' % appareil_id).status_code == 404,
+         "clé invisible depuis un autre client")
+with client.session_transaction() as session:
+    session['client_id'] = 1
+verifier(client.get('/api/appareil/%d/cle-bitlocker?volume=C:' % appareil_id).status_code == 200,
+         'clé de nouveau visible depuis son client')
+
+conn = A.get_db()
+consultations = conn.execute(
+    "SELECT COUNT(*) FROM historique WHERE action LIKE '%Consultation%BitLocker%'").fetchone()[0]
+conn.close()
+verifier(consultations >= 1, 'chaque consultation est tracée', '%d' % consultations)
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)
