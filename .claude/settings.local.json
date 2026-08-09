@@ -258,7 +258,11 @@
       "Bash(python test_securite.py)",
       "Bash(awk '/def fiche_systeme_appareil/,/return render_template/' app.py)",
       "Bash(python test_historique_collectes.py)",
-      "Bash(python -m py_compile app.py collector_core.py system-info-collector-gui.py system-info-collector.py database.py config_helpers.py)"
+      "Bash(python -m py_compile app.py collector_core.py system-info-collector-gui.py system-info-collector.py database.py config_helpers.py)",
+      "Bash(cd \"E:/Claude *)",
+      "Bash(cp test_maj.py /tmp/test_maj.bak)",
+      "Bash(rm -f static/_tmp_refus.html)",
+      "Bash(rm -f _ci.sh)"
     ]
   }
 }

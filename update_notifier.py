@@ -16,6 +16,7 @@ import logging
 import os
 import socket
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
@@ -168,6 +169,11 @@ class UpdateNotifier:
                     self.message = ("Version %s installée — l'application redémarre"
                                     % self.checker.latest_version)
                     logger.info("Mise à jour appliquée : %s", self.checker.latest_version)
+                    # Sans cette sortie, rien n'aboutit : Windows verrouille
+                    # l'exécutable en cours, le script de remplacement échoue à
+                    # déplacer le fichier, et l'application continue de tourner
+                    # sur l'ancienne version comme si de rien n'était.
+                    self._arreter_pour_redemarrage()
                 else:
                     raise UpdateCheckError("Le remplacement de l'application a échoué")
             except Exception as e:
@@ -188,6 +194,26 @@ class UpdateNotifier:
 
         threading.Thread(target=travail, daemon=True, name='InstallationMaj').start()
         return True
+
+    #: Délai avant l'arrêt, une fois le remplacement programmé. Laisse à la
+    #: bannière le temps d'afficher la confirmation et au navigateur celui de
+    #: recevoir la dernière réponse. Le script de remplacement, lui, attend plus
+    #: longtemps que ce délai avant de toucher au fichier.
+    DELAI_ARRET_SECONDES = 2
+
+    def _arreter_pour_redemarrage(self) -> None:
+        """Rend la main sur l'exécutable pour que le remplacement puisse avoir lieu.
+
+        os._exit et non sys.exit : cette méthode tourne dans un fil, où sys.exit
+        ne terminerait que ce fil et laisserait l'application — donc le verrou
+        sur le fichier — bien vivante.
+        """
+        def arret():
+            time.sleep(self.DELAI_ARRET_SECONDES)
+            logger.info("Arrêt pour laisser le remplacement s'effectuer")
+            os._exit(0)
+
+        threading.Thread(target=arret, daemon=True, name='ArretMaj').start()
 
     def ecarter(self) -> None:
         """Masque l'annonce en cours : disponibilité, ou confirmation d'installation."""

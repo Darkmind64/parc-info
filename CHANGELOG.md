@@ -1,5 +1,48 @@
 # CHANGELOG - ParcInfo
 
+## [2.7.1] - 2026-08-09 🔧
+
+### 🐛 LA MISE À JOUR WINDOWS N'ABOUTISSAIT JAMAIS
+Le bouton « Installer maintenant » téléchargeait bien la nouvelle version, mais
+rien ne changeait ensuite.
+
+- **Cause** : le script de remplacement était programmé, puis **rien n'arrêtait
+  l'application**. Windows garde un verrou sur l'exécutable en cours ; le
+  déplacement échouait, et l'ancienne version continuait de tourner comme si de
+  rien n'était. Régression que j'ai introduite en **2.6.43**, en déplaçant
+  l'installation du lanceur vers l'interface sans reporter la sortie du
+  processus que le lanceur faisait juste après
+- ✅ L'application rend maintenant la main deux secondes après avoir programmé
+  le remplacement, le temps que la bannière affiche la confirmation
+- ✅ Elle ne s'arrête **que si le remplacement a été programmé** : en cas
+  d'échec, il serait absurde de fermer l'application sans rien pour la remplacer
+
+### 🔁 UN SCRIPT DE REMPLACEMENT QUI PARDONNE
+- ✅ Il **réessaie une trentaine de secondes** au lieu d'attendre une durée fixe
+  puis d'abandonner en silence — un arrêt un peu lent suffisait à perdre la
+  mise à jour
+- ✅ Il remet l'ancienne version si la copie échoue, et **relance l'application
+  dans tous les cas**
+- ✅ Il écrit **`_apply_update.log`** : un échec laisse désormais une trace
+  lisible au lieu de disparaître
+- ✅ Écrit dans l'encodage attendu par `cmd.exe` : un chemin accentué le rendait
+  illisible
+
+### 👁 LES REFUS DU SERVEUR S'AFFICHENT
+- ✅ Droits insuffisants ou mise à jour indisponible renvoyaient bien un motif,
+  mais l'interface l'ignorait : le bouton restait sur « Démarrage… »
+  indéfiniment. **Sans message, un refus ressemblait exactement à la panne
+  ci-dessus** — la bannière affiche maintenant la raison
+
+### 🧪 COUVERTURE
+- ✅ `test_maj.py` vérifie que l'arrêt est demandé après un remplacement réussi,
+  qu'il ne l'est **pas** après un échec, et que le script réessaie, relance et
+  journalise. Vérifié en retirant le correctif : le test échoue bien sans lui
+- ⚠️ Au passage, le test contenait un arrêt du serveur local resté d'une version
+  précédente, qui coupait les sections ajoutées ensuite
+
+---
+
 ## [2.7.0] - 2026-08-09 📈
 
 ### 🧪 LES TESTS TOURNENT ENFIN TOUT SEULS
