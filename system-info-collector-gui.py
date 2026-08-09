@@ -228,9 +228,20 @@ class CollectorGUI:
         self.client_combo.pack(padx=10, pady=10)
         self.client_combo.bind('<<ComboboxSelected>>', lambda e: self._on_client_selected())
 
-        client_help = tk.Label(client_frame, text="⚠️ IMPORTANT : Sélectionner le client correct pour éviter le mélange de données",
-                               font=("Arial", 9), fg="#c0392b")
-        client_help.pack(padx=10, pady=5)
+        # Bandeau de reconnaissance : quand le serveur identifie la machine par
+        # son adresse MAC, l'utilisateur doit le voir sans avoir à lire la barre
+        # d'état, sinon il refait la sélection à la main.
+        self.reconnaissance_var = tk.StringVar(value="")
+        self.reconnaissance_label = tk.Label(
+            client_frame, textvariable=self.reconnaissance_var,
+            font=("Arial", 9, "bold"), fg="#1e8449", bg="#eafaf1",
+            anchor=tk.W, padx=8, pady=4)
+        # Masqué tant qu'il n'y a rien à annoncer
+        self.client_help = tk.Label(
+            client_frame,
+            text="⚠️ IMPORTANT : Sélectionner le client correct pour éviter le mélange de données",
+            font=("Arial", 9), fg="#c0392b")
+        self.client_help.pack(padx=10, pady=5)
 
         # Section 2 : Résumé des infos collectées
         summary_frame = ttk.LabelFrame(main_frame, text="2. Informations Collectées")
@@ -396,11 +407,15 @@ class CollectorGUI:
             # renvoyée vers la boucle Tk, seule autorisée à y toucher.
             self.root.after(0, lambda: self._afficher_avancement(fraction, libelle))
 
+        # La valeur de la case est lue ici, dans la boucle Tk : une variable
+        # Tkinter ne se lit pas depuis un autre thread.
+        test_debit = self.test_debit_var.get()
+
         def collect():
             try:
                 self.system_info = collect_system_info(
-                    progress=avancement, test_debit=self.test_debit_var.get())
-                self._update_summary()
+                    progress=avancement, test_debit=test_debit)
+                self.root.after(0, self._update_summary)
                 self.root.after(0, lambda: self.progress_var.set(100.0))
                 self.status_var.set("Informations collectées ✓")
             except Exception as e:
@@ -421,6 +436,9 @@ class CollectorGUI:
         self.root.update()
 
         def fetch():
+            # Ce thread ne fait que du réseau : Tkinter n'est pas sûr en
+            # multithread, toute écriture dans un widget est renvoyée à la
+            # boucle principale via after().
             try:
                 logger.debug(f"Fetching clients from server: {self.server_url}")
                 # L'adresse MAC permet au serveur de reconnaître une machine
@@ -429,40 +447,57 @@ class CollectorGUI:
                 # collecte complète dure une minute et tourne en parallèle,
                 # alors que cette lecture est immédiate.
                 mac = get_mac_address()
-                self.clients, suggestion = fetch_clients(self.server_url, mac_address=mac)
-                logger.debug(f"Got {len(self.clients)} clients, suggestion={suggestion}")
-
-                if not self.clients:
-                    logger.warning("No clients returned - showing default message")
-                    self.client_combo['values'] = ["Aucun client trouvé"]
-                    self.status_var.set("Erreur: Aucun client disponible")
-                    return
-
-                client_names = [f"{c.get('id', 'N/A')} - {c.get('nom', 'Inconnu')}" for c in self.clients]
-                self.client_combo['values'] = client_names
-
-                index = 0
-                message = "Prêt à envoyer ✓"
-                if suggestion:
-                    # Présélectionner le client auquel cette machine est déjà
-                    # rattachée, sans l'imposer : la liste reste modifiable.
-                    for i, c in enumerate(self.clients):
-                        if c.get('id') == suggestion.get('id'):
-                            index = i
-                            message = ("Client reconnu d'après l'adresse MAC : %s ✓"
-                                       % suggestion.get('nom', ''))
-                            break
-
-                if client_names:
-                    self.client_combo.current(index)
-                    self._on_client_selected()
-                self.status_var.set(message)
+                clients, suggestion = fetch_clients(self.server_url, mac_address=mac)
+                logger.debug(f"Got {len(clients)} clients, suggestion={suggestion}")
+                self.root.after(0, self._appliquer_clients, clients, suggestion)
             except Exception as e:
                 logger.exception(f"ERROR in _fetch_clients: {type(e).__name__}: {str(e)}")
-                self.status_var.set("Erreur lors de la récupération des clients")
+                self.root.after(
+                    0, lambda: self.status_var.set("Erreur lors de la récupération des clients"))
 
         thread = threading.Thread(target=fetch, daemon=True)
         thread.start()
+
+    def _appliquer_clients(self, clients, suggestion):
+        """Renseigne la liste des clients — exécuté dans la boucle Tk."""
+        self.clients = clients
+        if not clients:
+            logger.warning("No clients returned - showing default message")
+            self.client_combo['values'] = ["Aucun client trouvé"]
+            self.status_var.set("Erreur: Aucun client disponible")
+            return
+
+        noms = [f"{c.get('id', 'N/A')} - {c.get('nom', 'Inconnu')}" for c in clients]
+        self.client_combo['values'] = noms
+
+        index = 0
+        message = "Prêt à envoyer ✓"
+        if suggestion:
+            # Présélectionner le client auquel cette machine est déjà rattachée,
+            # sans l'imposer : la liste reste modifiable.
+            for i, c in enumerate(clients):
+                if c.get('id') == suggestion.get('id'):
+                    index = i
+                    message = ("Client reconnu d'après l'adresse MAC : %s ✓"
+                               % suggestion.get('nom', ''))
+                    self._afficher_reconnaissance(suggestion.get('nom', ''))
+                    break
+
+        self.client_combo.current(index)
+        self._on_client_selected()
+        self.status_var.set(message)
+
+    def _afficher_reconnaissance(self, nom_client):
+        """Annonce visuellement que le client a été déduit de l'adresse MAC.
+
+        Le bandeau remplace l'avertissement générique : quand la machine est
+        déjà inventoriée, le risque de mélange de données ne se pose plus.
+        """
+        self.reconnaissance_var.set(
+            "✓ Machine déjà connue : client « %s » présélectionné d'après son "
+            "adresse MAC. Modifiable ci-dessus si nécessaire." % nom_client)
+        self.reconnaissance_label.pack(fill=tk.X, padx=10, pady=(0, 6))
+        self.client_help.pack_forget()
 
     def _on_client_selected(self):
         """Appelé quand un client est sélectionné."""

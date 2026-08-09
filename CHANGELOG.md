@@ -1,5 +1,41 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.41] - 2026-08-09 📄
+
+### 📄 MISE EN PAGE DU RAPPORT PDF
+- ✅ **Plus aucune rubrique coupée en deux** : un saut conditionnel réserve la
+  hauteur du titre et des premières lignes ; si la place manque, la rubrique
+  entière commence à la page suivante. Vérifié sur le rapport de référence :
+  **zéro titre orphelin sur 42 pages**
+- ✅ La correction se fait **en un seul point**, juste avant le rendu : le récit
+  est parcouru une fois et chaque titre reçoit son saut conditionnel. Aucun des
+  vingt-sept endroits qui produisent un titre n'a eu à être modifié
+- ✅ **Sommaire paginé** en tête de rapport — quarante pages sans index, cela se
+  parcourt au jugé
+- ✅ **Pied de page sur chaque page** : machine, client et numéro de page. Une
+  page imprimée isolée reste identifiable
+- ✅ **Correction** : « Virtualisation matérielle : False » — un booléen Python
+  arrivait tel quel dans le rapport, au lieu d'« Activée » / « Désactivée »
+
+### 🔎 RECONNAISSANCE SIGNALÉE DANS LE COLLECTEUR
+- ✅ Quand la machine est reconnue d'après son adresse MAC, le collecteur
+  graphique affiche un **bandeau vert** : « Machine déjà connue : client X
+  présélectionné, modifiable si nécessaire ». L'avertissement générique sur le
+  risque de mélange de données s'efface, puisqu'il ne s'applique plus
+- ✅ L'information n'était jusqu'ici que dans la barre d'état, en bas de
+  fenêtre : l'utilisateur ne la voyait pas et refaisait la sélection à la main
+
+### 🔧 CORRECTION DE FOND DANS LE COLLECTEUR GRAPHIQUE
+- ✅ Les threads de travail écrivaient **directement dans les widgets Tkinter**,
+  ce qui n'est pas autorisé — y compris la lecture de la case de test de débit
+  depuis le thread de collecte. Toutes les écritures passent désormais par la
+  boucle principale via `after()`
+- ✅ Le défaut était latent depuis l'origine et ne se manifestait pas
+  systématiquement ; il a été révélé en écrivant un test automatisé de
+  l'interface
+
+---
+
 ## [2.6.40] - 2026-08-09 ⚖️
 
 ### ⚖️ PARITÉ FICHE SYSTÈME ↔ RAPPORT PDF
