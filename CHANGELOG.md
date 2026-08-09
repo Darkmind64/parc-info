@@ -1,5 +1,63 @@
 # CHANGELOG - ParcInfo
 
+## [2.8.0] - 2026-08-10 🔎
+
+### 🔎 CE QUE LE COLLECTEUR VOIT EN PLUS
+
+**Temps de démarrage.** Windows chronomètre lui-même chaque démarrage : autant
+lire sa mesure plutôt que de deviner. « Le poste est long à démarrer » devient
+une donnée, à rapprocher des programmes lancés au démarrage déjà collectés.
+
+**Journal de sécurité.** Échecs d'ouverture de session et verrouillages de
+compte sur 30 jours, avec le compte concerné et l'origine. Un compte verrouillé
+en boucle trahit le plus souvent un service resté sur un ancien mot de passe ;
+une rafale d'échecs depuis une même source, autre chose. Les comptes machine
+sont écartés — ils font un bruit permanent sans rapport avec une personne.
+
+**Certificats machine expirant sous 90 jours.** Panne silencieuse typique : VPN,
+bureau à distance ou 802.1X tombent un matin sans qu'aucune modification n'ait
+eu lieu la veille.
+
+**De quoi le disque se remplit.** Taille déclarée de chaque logiciel — lue dans
+le registre, sans aucun parcours de fichiers — et taille des profils
+utilisateurs. C'est le complément direct de la tendance de saturation ajoutée en
+2.7.0 : savoir qu'un disque se remplit sans savoir de quoi n'aide qu'à moitié.
+
+**Fin de support de Windows**, déduite du build. La table des échéances doit
+être tenue à jour — c'est son coût, et il est réel. Un build inconnu ne produit
+aucune conclusion plutôt qu'une date inventée.
+
+Tout cela alimente les points de vigilance, la fiche système et le PDF.
+
+### 🔐 CLÉS DE RÉCUPÉRATION BITLOCKER
+- ✅ Relevées par le collecteur, **chiffrées au repos** comme les mots de passe
+  des identifiants, et affichées à la demande dans la fiche appareil par un clic
+  sur l'icône — le même geste que pour un mot de passe
+- ✅ **Retirées du rapport avant tout stockage** : le rapport est conservé tel
+  quel en base et repris dans le PDF joint à l'appareil. Une clé qui déverrouille
+  un disque n'a rien à faire dans une pièce jointe
+- ✅ **Chaque consultation est inscrite à l'historique** : savoir qui a lu une
+  clé et quand ne coûte rien ici, l'historique existait déjà
+- ✅ Cloisonnement multi-client vérifié : la clé d'un appareil reste invisible
+  depuis un autre client
+
+### 🐛 UN DÉFAUT QUI SERAIT PASSÉ INAPERÇU
+L'extraction des champs nommés d'un événement Windows était fausse : `$d.Champ`
+ne renvoie rien, il faut filtrer sur le nom du champ. La mesure du temps de
+démarrage serait restée **invisible en permanence**, et j'aurais conclu « aucun
+événement sur cette machine ». Trouvé en comparant les deux écritures sur un
+événement réel plutôt qu'en relisant le code.
+
+### ⏱ À SAVOIR
+La collecte passe d'environ **60 à 90 secondes** : mesurer la taille d'un profil
+impose de parcourir son arborescence. L'opération est bornée dans le temps, et
+une mesure interrompue est **signalée comme telle** — c'est alors un minimum,
+jamais un total. Deux écritures naturelles ont dû être écartées : `foreach` sur
+`Get-ChildItem -Recurse` matérialise toute l'arborescence avant la première
+itération, et `break` dans un `ForEach-Object` interrompt le script entier.
+
+---
+
 ## [2.7.1] - 2026-08-09 🔧
 
 ### 🐛 LA MISE À JOUR WINDOWS N'ABOUTISSAIT JAMAIS

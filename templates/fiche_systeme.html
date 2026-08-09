@@ -325,6 +325,19 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {{ row("Système", rapport.os_name or appareil.os) }}
             {{ row("Version", rapport.os_version or appareil.version_os) }}
             {{ row("Build", rapport.os_build) }}
+            {% if rapport.windows_support %}
+            <div class="fs-row"><span class="fs-label">Fin de support</span>
+                <span class="fs-value">
+                    <span class="fs-pill {{ 'fs-bad' if rapport.windows_support.termine
+                                        else 'fs-warn' if rapport.windows_support.jours_restants < 180
+                                        else 'fs-ok' }}">
+                        {{ rapport.windows_support.fin_de_support }}</span>
+                    {{ rapport.windows_support.version }} —
+                    {% if rapport.windows_support.termine %}dépassée depuis
+                        {{ -rapport.windows_support.jours_restants }} jours
+                    {% else %}dans {{ rapport.windows_support.jours_restants }} jours{% endif %}
+                </span></div>
+            {% endif %}
             {{ row("Architecture", rapport.architecture) }}
             {{ row("Installé le", rapport.os_install_date) }}
             {{ row("Propriétaire enregistré", rapport.registered_owner) }}
@@ -1177,6 +1190,110 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 {% endif %}
 
 <!-- ── TÂCHES PLANIFIÉES ────────────────────────────────────────────────── -->
+{% if rapport.boot_times %}
+<div class="fs-section">
+    <h3>■ Temps de démarrage</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Mesuré par Windows lui-même. Dernier démarrage
+        <strong>{{ rapport.boot_last_seconds }} s</strong>, moyenne
+        {{ rapport.boot_average_seconds }} s sur les {{ rapport.boot_times|length }} derniers.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Démarrage</th><th>Durée totale</th><th>Noyau</th><th>Ouverture de session</th></tr>
+        {% for b in rapport.boot_times %}
+        <tr>
+            <td class="fs-mono">{{ b.when }}</td>
+            <td><span class="fs-pill {{ 'fs-bad' if b.secondes >= 120
+                                    else 'fs-warn' if b.secondes >= 60 else 'fs-ok' }}">
+                {{ b.secondes }} s</span></td>
+            <td class="fs-mono">{{ b.noyau_s }} s</td>
+            <td class="fs-mono">{{ b.bureau_s }} s</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+{% if rapport.security_events %}
+<div class="fs-section">
+    <h3>■ Journal de sécurité ({{ rapport.security_events|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        {{ rapport.failed_logons or 0 }} échec(s) d'ouverture de session et
+        {{ rapport.account_lockouts or 0 }} verrouillage(s) de compte sur 30 jours.
+        Un compte verrouillé en boucle trahit souvent un service resté sur un ancien
+        mot de passe. Les comptes machine sont écartés.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Compte</th><th>Type</th><th>Occurrences</th><th>Origine</th><th>Dernier</th></tr>
+        {% for e in rapport.security_events %}
+        <tr>
+            <td><strong>{{ e.compte }}</strong></td>
+            <td><span class="fs-pill {{ 'fs-bad' if e.event_id == 4740 else 'fs-warn' }}">
+                {{ e.type }}</span></td>
+            <td class="fs-mono">{{ e.count }}</td>
+            <td class="fs-mono">{{ e.sources | join(', ') if e.sources else '—' }}</td>
+            <td class="fs-mono">{{ e.last_seen or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+{% if rapport.certificates_expiring %}
+<div class="fs-section">
+    <h3>■ Certificats à renouveler ({{ rapport.certificates_expiring|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Certificats machine expirant dans moins de 90 jours. Un certificat expiré fait
+        tomber VPN, bureau à distance ou 802.1X sans qu'aucune modification n'ait eu lieu.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Sujet</th><th>Émetteur</th><th>Expiration</th><th>Reste</th></tr>
+        {% for c in rapport.certificates_expiring %}
+        <tr>
+            <td><strong>{{ c.sujet }}</strong></td>
+            <td style="font-size:.72rem;color:var(--text-secondary);">{{ c.emetteur }}</td>
+            <td class="fs-mono">{{ c.expire_le }}</td>
+            <td><span class="fs-pill {{ 'fs-bad' if c.expire else 'fs-warn' }}">
+                {% if c.expire %}expiré depuis {{ -c.jours_restants }} j
+                {% else %}{{ c.jours_restants }} j{% endif %}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+{% if rapport.user_profiles %}
+<div class="fs-section">
+    <h3>■ Profils utilisateurs ({{ rapport.user_profiles|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Occupation disque par profil. Mesurer une taille impose de parcourir
+        l'arborescence : l'opération est bornée dans le temps, et une mesure
+        interrompue est signalée comme telle — c'est alors un minimum, pas un total.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Profil</th><th>Taille</th><th>Dernière utilisation</th><th>Mesure</th></tr>
+        {% for p in rapport.user_profiles %}
+        <tr>
+            <td><strong>{{ p.nom }}</strong>
+                <div class="fs-mono" style="font-size:.66rem;color:var(--text-secondary);">{{ p.chemin }}</div></td>
+            <td class="fs-mono">{{ p.taille_go }} Go</td>
+            <td class="fs-mono">{{ p.derniere_utilisation or '—' }}</td>
+            <td><span class="fs-pill {{ 'fs-ok' if p.mesure_complete else 'fs-muted' }}">
+                {{ 'complète' if p.mesure_complete else 'interrompue' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
 {% if rapport.problem_devices %}
 <div class="fs-section">
     <h3>■ Périphériques en erreur ({{ rapport.problem_devices|length }})</h3>

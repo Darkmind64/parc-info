@@ -682,6 +682,80 @@ async function loadHistorique() {
     </div>
 </form>
 
+    {% if action == 'Modifier' and cles_bitlocker %}
+    <div class="form-section" id="section-bitlocker" style="margin-top:1.5rem;">
+        <div class="form-section-title">&#9632; Clés de récupération BitLocker
+            <span style="font-size:.7rem;font-weight:400;color:var(--text-muted);margin-left:.5rem;">
+                {{ cles_bitlocker|length }} volume{{ 's' if cles_bitlocker|length != 1 else '' }}
+            </span>
+        </div>
+        <div style="font-size:.72rem;color:var(--text-secondary);margin-bottom:.6rem;">
+            Relevées par le collecteur et conservées chiffrées, comme les mots de passe
+            des identifiants. Elles ne figurent pas dans le rapport PDF joint à l'appareil.
+            Chaque affichage est inscrit à l'historique.
+        </div>
+        <div class="fs-wide" style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+            <tr style="text-align:left;color:var(--text-muted);font-size:.68rem;text-transform:uppercase;letter-spacing:1px;">
+                <th style="padding:.35rem .5rem;">Volume</th>
+                <th style="padding:.35rem .5rem;">Protection</th>
+                <th style="padding:.35rem .5rem;">Clé de récupération</th>
+                <th style="padding:.35rem .5rem;">Relevée le</th>
+            </tr>
+            {% for k in cles_bitlocker %}
+            <tr style="border-top:1px solid var(--border);">
+                <td style="padding:.45rem .5rem;font-family:'Share Tech Mono',monospace;">
+                    <strong>{{ k.volume or '—' }}</strong>
+                    {% if k.chiffrement %}
+                    <div style="font-size:.66rem;color:var(--text-secondary);">{{ k.chiffrement }}</div>
+                    {% endif %}
+                </td>
+                <td style="padding:.45rem .5rem;">
+                    <span style="font-size:.68rem;padding:.1rem .45rem;border-radius:3px;border:1px solid var(--border);
+                        color:{{ 'var(--accent-green)' if k.protection == 'On' else 'var(--text-secondary)' }};">
+                        {{ 'Activée' if k.protection == 'On' else (k.protection or '—') }}</span>
+                </td>
+                <td style="padding:.45rem .5rem;">
+                    <span id="blk-{{ loop.index }}" class="pwd-hidden"
+                          style="font-family:'Share Tech Mono',monospace;">••••••-••••••-••••••-••••••-••••••-••••••-••••••-••••••</span>
+                    <button type="button" class="btn btn-sm" style="font-size:.68rem;margin-left:.5rem;"
+                            onclick="afficherCleBitlocker('{{ k.volume }}', {{ loop.index }}, this)">👁 Afficher</button>
+                </td>
+                <td style="padding:.45rem .5rem;font-family:'Share Tech Mono',monospace;color:var(--text-secondary);">
+                    {{ (k.date_maj or '')[:10] }}
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+        </div>
+    </div>
+    <script>
+    async function afficherCleBitlocker(volume, index, bouton) {
+        const zone = document.getElementById('blk-' + index);
+        if (zone.dataset.visible === '1') {
+            zone.textContent = '••••••-••••••-••••••-••••••-••••••-••••••-••••••-••••••';
+            zone.dataset.visible = '0';
+            bouton.textContent = '👁 Afficher';
+            return;
+        }
+        bouton.disabled = true;
+        try {
+            const reponse = await fetch('/api/appareil/{{ appareil.id }}/cle-bitlocker?volume='
+                                        + encodeURIComponent(volume));
+            if (!reponse.ok) { throw new Error('refus ' + reponse.status); }
+            const donnees = await reponse.json();
+            zone.textContent = donnees.cle || '(vide)';
+            zone.dataset.visible = '1';
+            bouton.textContent = '🙈 Masquer';
+        } catch (e) {
+            zone.textContent = 'Lecture impossible';
+        } finally {
+            bouton.disabled = false;
+        }
+    }
+    </script>
+    {% endif %}
+
     {% if action == 'Modifier' and appareil and appareil.id %}
     <div class="form-section" id="section-documents" style="margin-top:1.5rem;">
         <div class="form-section-title">&#9632; Documents joints

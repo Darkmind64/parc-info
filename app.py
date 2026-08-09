@@ -870,6 +870,23 @@ def init_db():
         valeur TEXT DEFAULT '',
         date_maj TEXT DEFAULT '')''')
 
+    # CLÉS DE RÉCUPÉRATION BITLOCKER — chiffrées, comme les mots de passe des
+    # identifiants. Table dédiée plutôt qu'une colonne du rapport : le rapport
+    # est repris tel quel dans le PDF joint à l'appareil, et un secret n'a rien
+    # à faire dans une pièce jointe.
+    c.execute('''CREATE TABLE IF NOT EXISTS cles_recuperation (
+        cle           TEXT PRIMARY KEY,
+        appareil_id   INTEGER NOT NULL,
+        client_id     INTEGER NOT NULL,
+        volume        TEXT DEFAULT '',
+        identifiant   TEXT DEFAULT '',
+        protection    TEXT DEFAULT '',
+        chiffrement   TEXT DEFAULT '',
+        valeur        TEXT DEFAULT '',
+        date_maj      TEXT DEFAULT '')''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_cles_recuperation_appareil '
+              'ON cles_recuperation(appareil_id)')
+
     # HISTORIQUE DES COLLECTES — un relevé par passage du collecteur.
     # Chaque collecte écrasait la précédente : on avait une photo, jamais une
     # trajectoire. Seules les grandeurs qui servent à comparer sont conservées,
@@ -1526,6 +1543,7 @@ def init_db():
         'interventions_peripheriques': 'id', 'maintenance_notifications': 'id',
         # Tables à clé texte (pas de colonne 'id')
         'config': 'cle', 'journal_maj': 'cle', 'collectes': 'cle',
+        'cles_recuperation': 'cle',
     }
     # DROP + CREATE (pas IF NOT EXISTS) : garantit que la définition du trigger
     # correspond toujours au code, même après une mise à jour de cette liste sur
@@ -3552,7 +3570,16 @@ def editer_appareil(id):
         sw_sel = []
     lm_set = set(lm_list)
     sw_custom_sel = [sw for sw in sw_sel if sw not in SW_COURANTS_ALL and sw not in lm_set]
+    # Clés de récupération BitLocker : seuls les métadonnées voyagent jusqu'à la
+    # page. La valeur reste chiffrée en base et ne part qu'à la demande, comme
+    # pour les mots de passe des identifiants.
+    cles_bitlocker = [row_to_dict(r) for r in conn.execute(
+        'SELECT volume, identifiant, protection, chiffrement, date_maj '
+        'FROM cles_recuperation WHERE appareil_id=? AND client_id=? ORDER BY volume',
+        (id, cid)).fetchall()]
+
     return render_template('form_appareil.html', appareil=a, documents=docs, action='Modifier',
+                           cles_bitlocker=cles_bitlocker,
                            types_appareils=get_liste_cached('types_appareils'),
                            marques_av=get_liste('marques_antivirus'),
                            noms_av=get_liste('noms_antivirus'),
@@ -4277,6 +4304,45 @@ def supprimer_identifiant(id):
     conn.commit(); conn.close()
     flash('Identifiant supprimé', 'info')
     return redirect(url_for('liste_identifiants'))
+
+@app.route('/api/appareil/<int:id>/cle-bitlocker')
+@login_required
+def api_cle_bitlocker(id):
+    """Déchiffre une clé de récupération BitLocker, à la demande.
+
+    Chaque consultation est inscrite à l'historique : une clé qui déverrouille
+    un disque mérite qu'on sache qui l'a lue et quand, ce qui n'a pas de coût
+    ici puisque l'historique existe déjà.
+    """
+    cid = get_client_id()
+    volume = (request.args.get('volume') or '').strip()
+
+    conn = get_db()
+    try:
+        ligne = conn.execute(
+            'SELECT valeur, volume FROM cles_recuperation '
+            'WHERE appareil_id=? AND client_id=? AND volume=?',
+            (id, cid, volume)).fetchone()
+        if not ligne:
+            return jsonify({'error': 'not found'}), 404
+
+        crypto = _get_crypto_shared()
+        claire = crypto.decrypt(ligne[0]) if ligne[0] else ''
+
+        user = get_auth_user()
+        appareil = conn.execute(
+            'SELECT nom_machine FROM appareils WHERE id=? AND client_id=?',
+            (id, cid)).fetchone()
+        log_history(conn, cid, 'appareil', id,
+                    appareil[0] if appareil else str(id),
+                    'Consultation d\'une clé de récupération BitLocker',
+                    {'volume': ligne[1], 'par': (user or {}).get('login')})
+        conn.commit()
+    finally:
+        conn.close()
+
+    return jsonify({'cle': claire, 'volume': ligne[1]})
+
 
 @app.route('/api/identifiant/<int:id>/mdp')
 @login_required
@@ -6058,6 +6124,39 @@ def _enregistrer_collecte(conn, client_id, appareil_id, data):
         return False
 
 
+def _enregistrer_cles_bitlocker(conn, client_id, appareil_id, cles):
+    """Stocke les clés de récupération, chiffrées comme les mots de passe.
+
+    La clé de la table mêle appareil et volume : une nouvelle collecte remplace
+    la clé du même volume au lieu d'empiler des doublons, et deux instances
+    n'entrent pas en collision comme le ferait un identifiant auto-incrémenté.
+    """
+    if not cles:
+        return 0
+    crypto = _get_crypto_shared()
+    horodatage = datetime.utcnow().isoformat(timespec='seconds')
+    enregistrees = 0
+    for entree in cles:
+        if not isinstance(entree, dict):
+            continue
+        valeur = (entree.get('cle') or '').strip()
+        if not valeur:
+            continue
+        volume = (entree.get('volume') or '').strip()
+        identifiant = (entree.get('identifiant') or '').strip()
+        conn.execute(
+            '''INSERT OR REPLACE INTO cles_recuperation
+               (cle, appareil_id, client_id, volume, identifiant, protection,
+                chiffrement, valeur, date_maj) VALUES (?,?,?,?,?,?,?,?,?)''',
+            ('%s|%s|%s' % (appareil_id, volume, identifiant),
+             appareil_id, client_id, volume, identifiant,
+             (entree.get('protection') or '').strip(),
+             (entree.get('chiffrement') or '').strip(),
+             crypto.encrypt(valeur), horodatage))
+        enregistrees += 1
+    return enregistrees
+
+
 def _tendance_disque(releves):
     """Projette la date de saturation à partir des relevés d'espace disque.
 
@@ -6341,6 +6440,14 @@ def api_device_info():
         # Snapshot complet du collecteur (mémoire par slot, licences, SMART, écrans…)
         # Plafonné à 1 Mo : au-delà, c'est un payload aberrant, pas un inventaire
         system_report = data.get('system_report') or {}
+        # Les clés de récupération BitLocker déverrouillent les disques : elles
+        # sont extraites du rapport avant tout stockage. Le rapport, lui, est
+        # conservé tel quel en base et repris dans le PDF joint à l'appareil —
+        # un secret n'a rien à y faire.
+        cles_bitlocker = []
+        if isinstance(system_report, dict) and system_report.get('bitlocker_keys'):
+            cles_bitlocker = system_report.pop('bitlocker_keys') or []
+
         system_report_json = ''
         if system_report:
             try:
@@ -6512,6 +6619,21 @@ def api_device_info():
         # aux suivantes, une fois celle-ci écrasée dans la fiche appareil.
         if _enregistrer_collecte(conn, cid, app_id, data):
             conn.commit()
+
+        # Clés de récupération BitLocker, chiffrées et hors du rapport.
+        cles_enregistrees = 0
+        if cles_bitlocker:
+            try:
+                cles_enregistrees = _enregistrer_cles_bitlocker(
+                    conn, cid, app_id, cles_bitlocker)
+                conn.commit()
+                if cles_enregistrees:
+                    log_history(conn, cid, 'appareil', app_id, device_name,
+                                'Clés de récupération BitLocker relevées',
+                                {'volumes': cles_enregistrees})
+                    conn.commit()
+            except Exception:
+                logger.exception('Clés BitLocker non enregistrées (appareil %s)', app_id)
 
         # Licences dont la clé complète a été récupérée
         lic_ajoutees = 0

@@ -2094,6 +2094,11 @@ _WIN_STEPS = [
     ('Environnement (WSUS, domaine, temps)', lambda: _win_enterprise()),
     ('Hygiène système', lambda: _win_hygiene()),
     ('Périphériques en erreur', lambda: _win_problem_devices()),
+    ('Temps de démarrage', lambda: _win_boot_performance()),
+    ('Journal de sécurité', lambda: _win_security_events()),
+    ('Certificats', lambda: _win_certificates()),
+    ('Clés de récupération BitLocker', lambda: _win_bitlocker_keys()),
+    ('Profils utilisateurs', lambda: _win_user_profiles()),
 ]
 
 
@@ -2314,6 +2319,301 @@ _CODES_PERIPHERIQUE = {
     45: "Actuellement déconnecté",
     52: "Signature du pilote non vérifiable",
 }
+
+
+def _win_security_events():
+    """Échecs d'ouverture de session et verrouillages de comptes.
+
+    Le journal Sécurité est un canal distinct de « System » et n'est lisible
+    qu'avec des droits administrateur : sans élévation, la requête ne renvoie
+    rien plutôt que d'échouer.
+
+    Un compte verrouillé en boucle trahit le plus souvent un service qui tourne
+    encore avec un mot de passe changé ; une rafale d'échecs sur un compte
+    depuis une même source, une tentative d'intrusion.
+    """
+    data = _win_powershell_json(
+        "$since=(Get-Date).AddDays(-%d); "
+        "$e=@(); try { $e=@(Get-WinEvent -FilterHashtable @{LogName='Security'; "
+        "ID=@(4625,4740); StartTime=$since} -MaxEvents 400 -ErrorAction SilentlyContinue) } catch {}; "
+        "$e | ForEach-Object { $x=[xml]$_.ToXml(); "
+        "$n=($x.Event.EventData.Data | Where-Object {$_.Name -eq 'TargetUserName'}).'#text'; "
+        "$src=($x.Event.EventData.Data | Where-Object {$_.Name -in @('IpAddress','WorkstationName')} "
+        "| Where-Object {$_.'#text' -and $_.'#text' -ne '-'} | Select-Object -First 1).'#text'; "
+        "[PSCustomObject]@{ Id=$_.Id; Compte=$n; Source=$src; "
+        "When=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm') } } "
+        "| ConvertTo-Json -Compress -Depth 3" % EVENT_WINDOW_DAYS,
+        timeout=90,
+    )
+
+    groupes = {}
+    for e in _as_list(data):
+        try:
+            identifiant = int(e.get('Id') or 0)
+        except (TypeError, ValueError):
+            continue
+        compte = _clean(e.get('Compte'))
+        # Les comptes machine (suffixés $) génèrent un bruit permanent sans
+        # rapport avec une personne : ils n'apprennent rien ici.
+        if not compte or compte.endswith('$'):
+            continue
+        cle = (identifiant, compte)
+        entree = groupes.setdefault(cle, {
+            'type': 'Verrouillage de compte' if identifiant == 4740
+                    else "Échec d'ouverture de session",
+            'event_id': identifiant, 'compte': compte,
+            'count': 0, 'last_seen': '', 'sources': set(),
+        })
+        entree['count'] += 1
+        quand = _clean(e.get('When'))
+        if quand > entree['last_seen']:
+            entree['last_seen'] = quand
+        source = _clean(e.get('Source'))
+        if source:
+            entree['sources'].add(source)
+
+    evenements = []
+    for entree in sorted(groupes.values(), key=lambda g: (-g['count'], g['compte'])):
+        entree['sources'] = sorted(entree['sources'])[:5]
+        evenements.append(entree)
+
+    resultat = {'security_events': evenements}
+    if evenements:
+        resultat['failed_logons'] = sum(e['count'] for e in evenements if e['event_id'] == 4625)
+        resultat['account_lockouts'] = sum(e['count'] for e in evenements if e['event_id'] == 4740)
+    return resultat
+
+
+def _win_boot_performance():
+    """Durée des derniers démarrages, telle que Windows la mesure lui-même.
+
+    « Le poste est long à démarrer » est la plainte la plus courante et la plus
+    difficile à objectiver. Windows chronomètre chaque démarrage dans son
+    journal de diagnostic : autant lire sa mesure plutôt que de deviner.
+    """
+    data = _win_powershell_json(
+        "$e=@(); try { $e=@(Get-WinEvent -FilterHashtable @{"
+        "LogName='Microsoft-Windows-Diagnostics-Performance/Operational'; ID=100} "
+        "-MaxEvents 10 -ErrorAction SilentlyContinue) } catch {}; "
+        # Les champs sont des <Data Name="…">valeur</Data> : $d.BootTime ne
+        # renvoie rien, il faut filtrer sur le nom. Vérifié sur un événement
+        # réel — l'accès direct rendait la mesure invisible en permanence.
+        "$e | ForEach-Object { $x=[xml]$_.ToXml(); $d=$x.Event.EventData.Data; "
+        "$val={ param($n) ($d | Where-Object {$_.Name -eq $n}).'#text' }; "
+        "[PSCustomObject]@{ "
+        "When=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm'); "
+        "Total=(& $val 'BootTime'); Noyau=(& $val 'MainPathBootTime'); "
+        "Bureau=(& $val 'BootPostBootTime'); "
+        "Degradation=(& $val 'BootDegradationTime') } } "
+        "| ConvertTo-Json -Compress -Depth 3",
+        timeout=60,
+    )
+
+    demarrages = []
+    for e in _as_list(data):
+        def _ms(valeur):
+            try:
+                return int(valeur)
+            except (TypeError, ValueError):
+                return None
+        total = _ms(e.get('Total'))
+        if not total:
+            continue
+        demarrages.append({
+            'when': _clean(e.get('When')),
+            'secondes': round(total / 1000.0, 1),
+            'noyau_s': round((_ms(e.get('Noyau')) or 0) / 1000.0, 1),
+            'bureau_s': round((_ms(e.get('Bureau')) or 0) / 1000.0, 1),
+        })
+
+    if not demarrages:
+        return {}
+    durees = [d['secondes'] for d in demarrages]
+    return {
+        'boot_times': demarrages[:5],
+        'boot_last_seconds': durees[0],
+        'boot_average_seconds': round(sum(durees) / len(durees), 1),
+    }
+
+
+def _win_certificates(jours_alerte=90):
+    """Certificats machine proches de l'expiration.
+
+    Un certificat expiré est une panne qui tombe un matin sans prévenir : VPN,
+    bureau à distance ou 802.1X cessent de fonctionner sans qu'aucune
+    modification n'ait été faite la veille.
+    """
+    data = _win_powershell_json(
+        "Get-ChildItem Cert:\\LocalMachine\\My -ErrorAction SilentlyContinue "
+        "| Select-Object @{N='Sujet';E={$_.Subject}}, @{N='Emetteur';E={$_.Issuer}}, "
+        "@{N='Expire';E={$_.NotAfter.ToString('yyyy-MM-dd')}}, "
+        "@{N='Jours';E={[int]($_.NotAfter - (Get-Date)).TotalDays}}, "
+        "@{N='Empreinte';E={$_.Thumbprint}} "
+        "| ConvertTo-Json -Compress -Depth 3",
+        timeout=45,
+    )
+
+    certificats = []
+    for c in _as_list(data):
+        try:
+            jours = int(c.get('Jours'))
+        except (TypeError, ValueError):
+            continue
+        if jours > jours_alerte:
+            continue
+        sujet = _clean(c.get('Sujet'))
+        certificats.append({
+            'sujet': sujet.replace('CN=', '', 1) if sujet.startswith('CN=') else sujet,
+            'emetteur': _clean(c.get('Emetteur')),
+            'expire_le': _clean(c.get('Expire')),
+            'jours_restants': jours,
+            'expire': jours < 0,
+        })
+    certificats.sort(key=lambda c: c['jours_restants'])
+    return {'certificates_expiring': certificats} if certificats else {}
+
+
+def _win_bitlocker_keys():
+    """Clés de récupération BitLocker des volumes chiffrés.
+
+    Nécessite des droits administrateur. Ces clés déverrouillent les disques :
+    ParcInfo les stocke chiffrées, comme les mots de passe des identifiants, et
+    ne les affiche qu'à la demande.
+    """
+    data = _win_powershell_json(
+        "$v=@(); try { $v=@(Get-BitLockerVolume -ErrorAction SilentlyContinue) } catch {}; "
+        "$v | ForEach-Object { $vol=$_; "
+        "$vol.KeyProtector | Where-Object { $_.KeyProtectorType -eq 'RecoveryPassword' } "
+        "| ForEach-Object { [PSCustomObject]@{ Volume=$vol.MountPoint; "
+        "Etat=[string]$vol.ProtectionStatus; Chiffrement=[string]$vol.EncryptionMethod; "
+        "Identifiant=$_.KeyProtectorId; Cle=$_.RecoveryPassword } } } "
+        "| ConvertTo-Json -Compress -Depth 3",
+        timeout=60,
+    )
+
+    cles = []
+    for k in _as_list(data):
+        valeur = _clean(k.get('Cle'))
+        if not valeur:
+            continue
+        identifiant = _clean(k.get('Identifiant')).strip('{}')
+        cles.append({
+            'volume': _clean(k.get('Volume')),
+            'protection': _clean(k.get('Etat')),
+            'chiffrement': _clean(k.get('Chiffrement')),
+            'identifiant': identifiant,
+            'cle': valeur,
+        })
+    return {'bitlocker_keys': cles} if cles else {}
+
+
+#: Fin de support par build de Windows. À TENIR À JOUR : une date périmée ici
+#: raconterait une histoire fausse, ce qui est pire que de ne rien dire. Un
+#: build absent de la table ne produit aucune conclusion.
+_FIN_DE_SUPPORT = {
+    '19044': ('Windows 10 21H2', '2024-06-11'),
+    '19045': ('Windows 10 22H2', '2025-10-14'),
+    '22000': ('Windows 11 21H2', '2023-10-10'),
+    '22621': ('Windows 11 22H2', '2024-10-08'),
+    '22631': ('Windows 11 23H2', '2025-11-11'),
+    '26100': ('Windows 11 24H2', '2026-10-13'),
+    '14393': ('Windows Server 2016', '2027-01-12'),
+    '17763': ('Windows Server 2019', '2029-01-09'),
+    '20348': ('Windows Server 2022', '2031-10-14'),
+}
+
+
+def support_windows(build, aujourdhui=None):
+    """Échéance de support de la version de Windows installée.
+
+    Retourne None quand le build n'est pas connu de la table : mieux vaut ne
+    rien annoncer qu'annoncer une date inventée.
+    """
+    if not build:
+        return None
+    numero = str(build).split('.')[0].strip()
+    entree = _FIN_DE_SUPPORT.get(numero)
+    if not entree:
+        return None
+    libelle, fin = entree
+    try:
+        echeance = datetime.strptime(fin, '%Y-%m-%d')
+    except ValueError:
+        return None
+    reference = aujourdhui or datetime.utcnow()
+    jours = (echeance - reference).days
+    return {
+        'version': libelle,
+        'fin_de_support': fin,
+        'jours_restants': jours,
+        'termine': jours < 0,
+    }
+
+
+def _win_user_profiles(budget_secondes=30):
+    """Taille des profils utilisateurs locaux.
+
+    Savoir qu'un disque se remplit sans savoir de quoi n'aide qu'à moitié, et
+    les profils sont le premier suspect. Mesurer une taille impose de parcourir
+    l'arborescence : l'opération est donc bornée dans le temps, et préfère ne
+    rien renvoyer plutôt qu'un total partiel qui passerait pour exact.
+    """
+    # Le parcours doit rester interruptible, ce qui exclut deux écritures
+    # naturelles : `foreach (… in Get-ChildItem -Recurse)` matérialise toute
+    # l'arborescence avant la première itération — impossible d'arrêter à
+    # temps —, et `break` dans un ForEach-Object sans boucle englobante
+    # interrompt le script entier au lieu du seul parcours. D'où le pipeline
+    # enveloppé dans une boucle étiquetée.
+    data = _win_powershell_json(
+        "$limite=(Get-Date).AddSeconds(%d); $res=@(); "
+        "$profils=@(Get-CimInstance Win32_UserProfile -ErrorAction SilentlyContinue "
+        "| Where-Object { -not $_.Special -and $_.LocalPath }); "
+        "foreach($p in $profils){ "
+        "  if((Get-Date) -gt $limite){ break } "
+        "  $somme=[long]0; $complet=$true; "
+        "  :mesure while($true) { "
+        "    Get-ChildItem $p.LocalPath -Recurse -Force -File -ErrorAction SilentlyContinue "
+        "    | ForEach-Object { $somme += $_.Length; "
+        "        if((Get-Date) -gt $limite){ $complet=$false; break mesure } }; "
+        "    break mesure } "
+        "  $res += [PSCustomObject]@{ Chemin=$p.LocalPath; Octets=$somme; Complet=$complet; "
+        "    Derniere=$(if($p.LastUseTime){$p.LastUseTime.ToString('yyyy-MM-dd')}else{''}) } }; "
+        "[PSCustomObject]@{ Profils=@($res); Tous=($res.Count -eq $profils.Count) } "
+        "| ConvertTo-Json -Compress -Depth 4" % budget_secondes,
+        timeout=budget_secondes + 30,
+    )
+    if not data:
+        return {}
+
+    profils = []
+    for p in _as_list(data.get('Profils')):
+        try:
+            octets = int(p.get('Octets') or 0)
+        except (TypeError, ValueError):
+            continue
+        if not octets:
+            continue
+        chemin = _clean(p.get('Chemin'))
+        profils.append({
+            'chemin': chemin,
+            'nom': chemin.rsplit('\\', 1)[-1] if chemin else '',
+            'taille_go': round(octets / (1024 ** 3), 2),
+            # Faux quand la mesure a été interrompue : la taille est alors un
+            # minimum, jamais le total. Le marquer par profil et non une seule
+            # fois pour l'ensemble évite de présenter un chiffre partiel comme
+            # exact.
+            'mesure_complete': bool(p.get('Complet')),
+            'derniere_utilisation': _clean(p.get('Derniere')),
+        })
+    if not profils:
+        return {}
+    profils.sort(key=lambda p: p['taille_go'], reverse=True)
+    return {
+        'user_profiles': profils,
+        # « tous vus » et non « tous mesurés » : un profil peut avoir été
+        # parcouru sans que sa mesure ait pu aller au bout.
+        'user_profiles_tous_vus': bool(data.get('Tous')),
+    }
 
 
 def _win_problem_devices():
@@ -3096,11 +3396,22 @@ def get_installed_software():
                                     else:
                                         install_date = install_date_raw
 
+                                    # Taille déclarée par l'installeur, en Ko :
+                                    # elle est déjà dans cette clé de registre et
+                                    # répond à « qu'est-ce qui remplit le disque »
+                                    # sans aucun parcours de fichiers.
+                                    taille_ko = _read('EstimatedSize')
+                                    try:
+                                        taille_mo = round(int(taille_ko) / 1024) if taille_ko else None
+                                    except (TypeError, ValueError):
+                                        taille_mo = None
+
                                     software[name] = {
                                         'name': name,
                                         'version': version,
                                         'publisher': publisher,
                                         'install_date': install_date,
+                                        'size_mb': taille_mo,
                                     }
                             except Exception:
                                 pass
@@ -3327,6 +3638,11 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data
     # Type d'appareil déduit
     info['device_type'] = guess_device_type(info)
 
+    # Échéance de support, déduite du build : aucune commande à lancer.
+    echeance = support_windows(info.get('os_build'))
+    if echeance:
+        info['windows_support'] = echeance
+
     _report(progress, 1.0, 'Collecte terminée')
     _publier(on_data, info)
     return info
@@ -3501,6 +3817,12 @@ def build_summary_sections(info):
         ('OS', info.get('os_name')),
         ('Version', info.get('os_version')),
         ('Build', info.get('os_build')),
+        ('Fin de support', ('%s — %s (%s)' % (
+            (info.get('windows_support') or {}).get('fin_de_support'),
+            (info.get('windows_support') or {}).get('version'),
+            'dépassée' if (info.get('windows_support') or {}).get('termine')
+            else 'dans %d jours' % (info.get('windows_support') or {}).get('jours_restants', 0)))
+         if info.get('windows_support') else None),
         ('Architecture', info.get('architecture')),
         ('Installé le', info.get('os_install_date')),
         ('Domaine / Groupe', info.get('domain') or info.get('workgroup')),
@@ -3820,6 +4142,41 @@ def build_summary_sections(info):
                                '  ⚠ en échec' if x.get('failed') else '')
             if isinstance(x, dict) else str(x)
             for x in info['scheduled_tasks']]})
+    if info.get('boot_last_seconds') is not None:
+        s['champs'].append(('Dernier démarrage', '%s s (moyenne %s s)'
+                            % (info['boot_last_seconds'],
+                               info.get('boot_average_seconds', '?'))))
+    if info.get('failed_logons'):
+        s['champs'].append(("Échecs d'ouverture de session (%d j)" % EVENT_WINDOW_DAYS,
+                            info['failed_logons']))
+    if info.get('account_lockouts'):
+        s['champs'].append(('Verrouillages de compte (%d j)' % EVENT_WINDOW_DAYS,
+                            info['account_lockouts']))
+    if info.get('security_events'):
+        s['listes'].append({'titre': 'Journal de sécurité', 'elements': [
+            '%s — %s ×%s%s%s' % (e.get('compte', '?'), e.get('type', '?'), e.get('count', 1),
+                                 ' — depuis %s' % ', '.join(e['sources']) if e.get('sources') else '',
+                                 ' — dernier %s' % e['last_seen'] if e.get('last_seen') else '')
+            if isinstance(e, dict) else str(e)
+            for e in info['security_events']]})
+    if info.get('certificates_expiring'):
+        s['listes'].append({'titre': 'Certificats à renouveler', 'elements': [
+            '%s — %s le %s (%s)' % (c.get('sujet', '?'),
+                                    'expiré' if c.get('expire') else 'expire',
+                                    c.get('expire_le', '?'),
+                                    'il y a %d j' % abs(c.get('jours_restants', 0))
+                                    if c.get('expire') else
+                                    'dans %d j' % c.get('jours_restants', 0))
+            if isinstance(c, dict) else str(c)
+            for c in info['certificates_expiring']]})
+    if info.get('user_profiles'):
+        s['listes'].append({'titre': 'Profils utilisateurs', 'elements': [
+            '%s — %s Go%s%s' % (p.get('nom', '?'), p.get('taille_go', '?'),
+                                '' if p.get('mesure_complete') else ' (au moins — mesure interrompue)',
+                                ' — dernière utilisation %s' % p['derniere_utilisation']
+                                if p.get('derniere_utilisation') else '')
+            if isinstance(p, dict) else str(p)
+            for p in info['user_profiles']]})
     if info.get('problem_devices'):
         s['listes'].append({'titre': 'Périphériques en erreur', 'elements': [
             '%s — %s%s' % (p.get('name', '?'), p.get('libelle', '?'),
@@ -4171,6 +4528,46 @@ def build_alerts(info):
     if arrets:
         add('danger', '%d arrêt(s) inattendu(s) sur %d jours' % (arrets, EVENT_WINDOW_DAYS),
             'Coupure secteur, surchauffe ou plantage — à corréler avec les écrans bleus')
+
+    support = info.get('windows_support') or {}
+    if support.get('termine'):
+        add('danger', 'Version de Windows sans support depuis le %s'
+            % support.get('fin_de_support'),
+            '%s ne reçoit plus de correctifs de sécurité' % support.get('version', ''))
+    elif support.get('jours_restants') is not None and support['jours_restants'] < 180:
+        add('warn', 'Fin de support de Windows le %s' % support.get('fin_de_support'),
+            '%s — %d jours pour planifier la montée de version'
+            % (support.get('version', ''), support['jours_restants']))
+
+    for certificat in (info.get('certificates_expiring') or [])[:3]:
+        if certificat.get('expire'):
+            add('danger', 'Certificat expiré : %s' % certificat.get('sujet', '?'),
+                'Depuis le %s — VPN, bureau à distance ou 802.1X peuvent être hors service'
+                % certificat.get('expire_le', '?'))
+        elif certificat.get('jours_restants', 999) <= 30:
+            add('warn', 'Certificat à renouveler : %s' % certificat.get('sujet', '?'),
+                'Expire le %s, dans %d jours'
+                % (certificat.get('expire_le', '?'), certificat.get('jours_restants', 0)))
+
+    verrouillages = info.get('account_lockouts') or 0
+    if verrouillages:
+        comptes = ', '.join(sorted({e.get('compte', '?') for e in info.get('security_events') or []
+                                    if e.get('event_id') == 4740}))
+        add('warn', '%d verrouillage(s) de compte sur %d jours'
+            % (verrouillages, EVENT_WINDOW_DAYS),
+            'Souvent un service resté sur un ancien mot de passe — %s' % comptes[:100])
+
+    echecs = info.get('failed_logons') or 0
+    if echecs >= 20:
+        add('warn', "%d échecs d'ouverture de session sur %d jours"
+            % (echecs, EVENT_WINDOW_DAYS),
+            'À rapprocher des sources listées dans le journal de sécurité')
+
+    lent = info.get('boot_last_seconds')
+    if lent and lent >= 120:
+        add('warn', 'Démarrage long : %s secondes' % lent,
+            'Moyenne %s s — voir les programmes lancés au démarrage'
+            % info.get('boot_average_seconds', '?'))
 
     # Un pilote manquant ou un matériel arrêté ne se voit nulle part ailleurs :
     # le reste du rapport décrit ce qui est présent, pas ce qui fonctionne mal.
@@ -5675,6 +6072,60 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(_pdf_data_table(
                 tk, ['Tâche', 'État', 'Dernière exécution', 'Résultat', 'Exécutable'],
                 rows, width, [0.26, 0.12, 0.18, 0.12, 0.32]))
+
+        demarrages = info.get('boot_times') or []
+        if demarrages:
+            rows = [[Paragraph(_pdf_escape(b.get('when')), S['mono']),
+                     Paragraph('%s s' % b.get('secondes'), S['body']),
+                     Paragraph('%s s' % b.get('noyau_s'), S['mono']),
+                     Paragraph('%s s' % b.get('bureau_s'), S['mono'])] for b in demarrages]
+            story.append(Paragraph(
+                'Temps de démarrage — dernier %s s, moyenne %s s'
+                % (info.get('boot_last_seconds', '?'),
+                   info.get('boot_average_seconds', '?')), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Démarrage', 'Total', 'Noyau', 'Ouverture de session'],
+                rows, width, [0.34, 0.22, 0.22, 0.22]))
+
+        journal = info.get('security_events') or []
+        if journal:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(e.get('compte')), S['body']),
+                     Paragraph(_pdf_escape(e.get('type')), S['body']),
+                     Paragraph(str(e.get('count', '')), S['mono']),
+                     Paragraph(_pdf_escape(', '.join(e.get('sources') or [])), S['small']),
+                     Paragraph(_pdf_escape(e.get('last_seen')), S['mono'])] for e in journal]
+            story.append(Paragraph(
+                "Journal de sécurité — %s échec(s) d'ouverture, %s verrouillage(s)"
+                % (info.get('failed_logons', 0), info.get('account_lockouts', 0)), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Compte', 'Type', 'Nb', 'Origine', 'Dernier'],
+                rows, width, [0.22, 0.24, 0.08, 0.26, 0.20]))
+
+        certificats = info.get('certificates_expiring') or []
+        if certificats:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(c.get('sujet')), S['body']),
+                     Paragraph(_pdf_escape(c.get('emetteur')), S['small']),
+                     Paragraph(_pdf_escape(c.get('expire_le')), S['mono']),
+                     Paragraph(('expiré depuis %d j' % -c.get('jours_restants', 0))
+                               if c.get('expire') else ('%d j' % c.get('jours_restants', 0)),
+                               S['body'])] for c in certificats]
+            story.append(Paragraph('Certificats à renouveler (%d)' % len(certificats), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Sujet', 'Émetteur', 'Expiration', 'Reste'],
+                rows, width, [0.30, 0.34, 0.18, 0.18]))
+
+        profils = info.get('user_profiles') or []
+        if profils:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(p.get('nom')), S['body']),
+                     Paragraph(_pdf_escape(p.get('chemin')), S['small']),
+                     Paragraph('%s Go' % p.get('taille_go'), S['mono']),
+                     Paragraph(_pdf_escape(p.get('derniere_utilisation')), S['mono']),
+                     Paragraph('complète' if p.get('mesure_complete') else 'interrompue',
+                               S['small'])] for p in profils]
+            story.append(Paragraph('Profils utilisateurs (%d)' % len(profils), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Profil', 'Emplacement', 'Taille', 'Dernière utilisation', 'Mesure'],
+                rows, width, [0.18, 0.34, 0.14, 0.20, 0.14]))
 
         en_erreur = info.get('problem_devices') or []
         if en_erreur:
