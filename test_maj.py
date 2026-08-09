@@ -28,6 +28,15 @@ import threading
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Le suivi des mises à jour journalise dans la base. Sans chemin explicite,
+# database.py se rabat sur le dossier des sources — souvent en lecture seule,
+# ce qui noyait la sortie du test sous des traces sans rapport.
+import database as _db  # noqa: E402
+
+_dossier_donnees = tempfile.mkdtemp(prefix='maj_data_')
+_db.init_paths(os.path.join(_dossier_donnees, 'parc_info.db'),
+               os.path.join(_dossier_donnees, 'uploads'))
+
 import update_checker as UC  # noqa: E402
 
 echecs = []
@@ -151,9 +160,14 @@ cmds = UC.docker_pull_commands('2.6.43')
 verifier('compose pull' in cmds['compose'] and '2.6.43' in cmds['run'],
          'commandes Docker proposées')
 os.environ.pop('RUNNING_IN_DOCKER')
-verifier(UC.runtime_mode() == 'source', 'exécution depuis les sources reconnue',
+# Sans la variable, la détection retombe sur /.dockerenv : dans un vrai
+# conteneur, « docker » reste la bonne réponse. Ce test tourne aussi bien sur
+# un poste que dans l'image de la CI.
+attendu = 'docker' if os.path.exists('/.dockerenv') else 'source'
+verifier(UC.runtime_mode() == attendu,
+         'mode déduit sans la variable d\'environnement : %s' % attendu,
          UC.runtime_mode())
-verifier(UC.can_self_install() is False, 'pas d\'auto-installation depuis les sources')
+verifier(UC.can_self_install() is False, 'pas d\'auto-installation hors exécutable')
 
 print('\n=== 6. État exposé à l\'interface ===')
 import update_notifier as UN  # noqa: E402

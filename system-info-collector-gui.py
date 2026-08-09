@@ -143,6 +143,7 @@ class CollectorGUI:
         self.config_file = Path.home() / '.parcinfo-collector-config.json'
         self.attente_label = None
         self.dernier_rapport = None
+        self.token = ''
 
         self.root.title(f"ParcInfo System Information Collector v{COLLECTOR_VERSION}")
         self.root.geometry("980x900")
@@ -173,6 +174,7 @@ class CollectorGUI:
                     if saved_url:
                         self.server_url = saved_url
                         logger.debug(f"Loaded server URL from config: {saved_url}")
+                    self.token = config.get('token', '') or ''
         except Exception as e:
             logger.debug(f"Could not load config: {e}")
 
@@ -180,7 +182,8 @@ class CollectorGUI:
         """Sauvegarde la configuration."""
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
-                json.dump({'server_url': self.server_url}, f)
+                json.dump({'server_url': self.server_url, 'token': self.token}, f,
+                          ensure_ascii=False)
                 logger.debug(f"Saved server URL to config: {self.server_url}")
         except Exception as e:
             logger.warning(f"Could not save config: {e}")
@@ -219,6 +222,18 @@ class CollectorGUI:
 
         scan_btn = ttk.Button(server_input_frame, text="🔍 Scan Réseau", command=self._scan_network)
         scan_btn.pack(side=tk.LEFT, padx=3)
+
+        # Jeton : à ne renseigner que si le serveur en exige un. Il est
+        # conservé dans la configuration locale pour ne pas le ressaisir à
+        # chaque collecte.
+        jeton_frame = tk.Frame(server_frame)
+        jeton_frame.pack(fill=tk.X, padx=10, pady=(0, 6))
+        tk.Label(jeton_frame, text="Jeton (facultatif) :").pack(side=tk.LEFT, padx=5)
+        self.token_var = tk.StringVar(value=self.token or '')
+        tk.Entry(jeton_frame, textvariable=self.token_var, width=28,
+                 show='•').pack(side=tk.LEFT, padx=5)
+        tk.Label(jeton_frame, text="requis seulement si le serveur en impose un",
+                 font=("Arial", 8), fg="#666").pack(side=tk.LEFT, padx=5)
 
         server_help = tk.Label(server_frame, text="Exemples: http://localhost:3456, http://192.168.1.100:3456, http://parcinfo.local:3456",
                                font=("Arial", 8), fg="#666")
@@ -398,6 +413,7 @@ class CollectorGUI:
     def _test_connection(self):
         """Teste la connexion au serveur."""
         new_url = self.server_url_var.get().strip()
+        self._lire_jeton()
         if not new_url:
             messagebox.showerror("Erreur", "L'URL du serveur ne peut pas être vide")
             return
@@ -475,8 +491,17 @@ class CollectorGUI:
         self.progress_var.set(round(fraction * 100, 1))
         self.status_var.set("%s… (%d %%)" % (libelle, round(fraction * 100)))
 
+    def _lire_jeton(self):
+        """Relit le jeton saisi — à appeler depuis la boucle Tk uniquement."""
+        try:
+            self.token = (self.token_var.get() or '').strip()
+        except Exception:
+            pass
+        return self.token
+
     def _fetch_clients(self):
         """Récupère la liste des clients."""
+        self._lire_jeton()
         self.status_var.set("Récupération de la liste des clients...")
         self.root.update()
 
@@ -492,7 +517,8 @@ class CollectorGUI:
                 # collecte complète dure une minute et tourne en parallèle,
                 # alors que cette lecture est immédiate.
                 mac = get_mac_address()
-                clients, suggestion = fetch_clients(self.server_url, mac_address=mac)
+                clients, suggestion = fetch_clients(self.server_url, mac_address=mac,
+                                                    token=self.token)
                 logger.debug(f"Got {len(clients)} clients, suggestion={suggestion}")
                 self.root.after(0, self._appliquer_clients, clients, suggestion)
             except Exception as e:
@@ -692,6 +718,8 @@ class CollectorGUI:
             messagebox.showerror("Erreur", "Veuillez sélectionner un client")
             return
 
+        self._lire_jeton()
+        self._save_config()
         client_id = self.selected_client.get('id')
         client_name = self.selected_client.get('nom', 'Inconnu')
 
@@ -716,7 +744,7 @@ class CollectorGUI:
                     logger.warning("PDF report generation returned no content")
 
                 success, result = send_to_parcinfo(
-                    self.system_info, self.server_url,
+                    self.system_info, self.server_url, self.token or None,
                     client_id=client_id, client_name=client_name
                 )
 
@@ -744,7 +772,8 @@ class CollectorGUI:
                 # Uploader le rapport PDF
                 if pdf_content and device_id and client_id:
                     success_report, result_report = upload_report_to_parcinfo(
-                        pdf_content, report_file, self.server_url, device_id, client_id
+                        pdf_content, report_file, self.server_url, device_id, client_id,
+                        token=self.token or None
                     )
                     if success_report:
                         logger.debug(f"Report uploaded: {result_report}")

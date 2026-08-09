@@ -127,6 +127,113 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     <a href="/appareil/{{ appareil.id }}/documents" class="btn btn-sm">📎 Documents</a>
 </div>
 
+{# ── ÉVOLUTION ENTRE COLLECTES ─────────────────────────────────────────── #}
+{% if historique and historique.nombre > 1 %}
+<div class="fs-section">
+    <h3>■ Évolution ({{ historique.nombre }} collectes depuis le
+        {{ historique.depuis[:10] }})</h3>
+
+    {% if historique.tendance and historique.tendance.saturation %}
+    <div class="fs-alert lv-warn">
+        <div>
+            <strong>Disque saturé vers le {{ historique.tendance.saturation }}</strong>
+            <div class="fs-alert-detail">
+                {{ historique.tendance.go_par_jour|abs }} Go consommés par jour en moyenne —
+                environ {{ historique.tendance.jours_restants }} jours restants au rythme actuel.
+                Projection linéaire sur les relevés ci-dessous, pas une garantie.
+            </div>
+        </div>
+    </div>
+    {% elif historique.tendance %}
+    <div class="fs-row"><span class="fs-label">Tendance du disque</span>
+        <span class="fs-value">Stable ou en hausse — aucune saturation prévisible</span></div>
+    {% endif %}
+
+    {# Barres d'espace libre : la forme se lit d'un coup d'œil, mieux qu'une
+       colonne de nombres. #}
+    {% set maxi = historique.releves | map(attribute='disque_total_go') | select | list %}
+    {% if maxi %}
+    {% set total = maxi | max %}
+    <div class="fs-wide" style="margin-top:.6rem;">
+    <table class="fs-table">
+        <tr><th>Collecte</th><th>Espace libre</th><th style="width:45%;"></th>
+            <th>Logiciels</th></tr>
+        {% for r in historique.releves[:12] %}
+        <tr>
+            <td class="fs-mono">{{ r.horodatage[:16]|replace('T', ' ') }}</td>
+            <td class="fs-mono">{{ r.disque_libre_go or '—' }}{{ ' Go' if r.disque_libre_go }}</td>
+            <td>
+                {% if r.disque_libre_go and total %}
+                {% set part = (r.disque_libre_go / total * 100) | round(1) %}
+                <div style="background:var(--bg-secondary);border-radius:3px;height:8px;overflow:hidden;">
+                    <div style="height:100%;width:{{ part }}%;background:{{
+                        'var(--accent-red)' if part < 10 else
+                        'var(--accent-orange)' if part < 20 else 'var(--accent-green)' }};"></div>
+                </div>
+                {% endif %}
+            </td>
+            <td class="fs-mono">{{ r.nb_logiciels or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+    {% endif %}
+
+    {% if historique.comparaison %}
+    {% set cmp = historique.comparaison %}
+    <div class="fs-label" style="font-size:.75rem;margin:.8rem 0 .4rem;">
+        Depuis la collecte du {{ historique.compare_a[:16]|replace('T', ' ') }} :
+    </div>
+    {% if cmp.materiel %}
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Changement matériel</th><th>Avant</th><th>Après</th></tr>
+        {% for c in cmp.materiel %}
+        <tr><td><strong>{{ c.champ }}</strong></td>
+            <td class="fs-mono">{{ c.avant }}</td>
+            <td class="fs-mono">{{ c.apres }}</td></tr>
+        {% endfor %}
+    </table>
+    </div>
+    {% endif %}
+    {% if cmp.ajoutes or cmp.retires %}
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:.5rem;">
+        <div style="flex:1 1 260px;">
+            <div class="fs-label">Logiciels ajoutés ({{ cmp.ajoutes|length }})</div>
+            {% for nom in cmp.ajoutes[:15] %}
+            <div style="font-size:.78rem;color:var(--accent-green);">+ {{ nom }}</div>
+            {% else %}
+            <div style="font-size:.78rem;color:var(--text-muted);">aucun</div>
+            {% endfor %}
+            {% if cmp.ajoutes|length > 15 %}
+            <div style="font-size:.72rem;color:var(--text-muted);">… et {{ cmp.ajoutes|length - 15 }} autre(s)</div>
+            {% endif %}
+        </div>
+        <div style="flex:1 1 260px;">
+            <div class="fs-label">Logiciels retirés ({{ cmp.retires|length }})</div>
+            {% for nom in cmp.retires[:15] %}
+            <div style="font-size:.78rem;color:var(--accent-red);">− {{ nom }}</div>
+            {% else %}
+            <div style="font-size:.78rem;color:var(--text-muted);">aucun</div>
+            {% endfor %}
+            {% if cmp.retires|length > 15 %}
+            <div style="font-size:.72rem;color:var(--text-muted);">… et {{ cmp.retires|length - 15 }} autre(s)</div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+{% elif historique %}
+<div class="fs-section">
+    <h3>■ Évolution</h3>
+    <div class="fs-empty" style="padding:1rem;">
+        Une seule collecte enregistrée pour l'instant. Les comparaisons et la
+        projection de saturation du disque apparaîtront dès la deuxième.
+    </div>
+</div>
+{% endif %}
+
 {% if not rapport and not logiciels %}
 <div class="fs-section">
     <div class="fs-empty">
@@ -1070,6 +1177,34 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 {% endif %}
 
 <!-- ── TÂCHES PLANIFIÉES ────────────────────────────────────────────────── -->
+{% if rapport.problem_devices %}
+<div class="fs-section">
+    <h3>■ Périphériques en erreur ({{ rapport.problem_devices|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Signalés par le Gestionnaire de périphériques. Le reste de la fiche
+        décrit ce qui est présent ; cette rubrique, ce qui ne fonctionne pas.
+        Les états « désactivé » et « déconnecté » sont le plus souvent voulus et
+        ne comptent pas comme pannes.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Périphérique</th><th>Classe</th><th>Fabricant</th><th>Diagnostic</th></tr>
+        {% for p in rapport.problem_devices %}
+        <tr>
+            <td><strong>{{ p.name }}</strong></td>
+            <td>{{ p.classe or '—' }}</td>
+            <td>{{ p.fabricant or '—' }}</td>
+            <td><span class="fs-pill {{ 'fs-muted' if p.code in [22, 45] else 'fs-bad' }}">
+                {{ p.libelle }}</span>
+                <div class="fs-mono" style="font-size:.66rem;color:var(--text-secondary);">
+                    code {{ p.code }}</div></td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
 {% if rapport.scheduled_tasks %}
 {% set taches_ko = rapport.scheduled_tasks | selectattr('failed') | list %}
 <div class="fs-section">

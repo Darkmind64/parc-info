@@ -123,7 +123,8 @@ def main():
     # dans « Découverte réseau » alors que l'appareil est déjà inventorié.
     client_id = args.client_id
     if not client_id and not args.client_name:
-        _clients, suggestion = fetch_clients(args.server, mac_address=info.get('mac_address'))
+        _clients, suggestion = fetch_clients(args.server, mac_address=info.get('mac_address'),
+                                            token=args.token)
         if suggestion:
             client_id = suggestion.get('id')
             if not args.quiet:
@@ -157,7 +158,8 @@ def main():
             print("\n[*] Envoi du rapport vers les documents de l'appareil...")
 
         success_report, result_report = upload_report_to_parcinfo(
-            pdf_content, report_file, args.server, device_id, client_id
+            pdf_content, report_file, args.server, device_id, client_id,
+            token=args.token
         )
 
         if not args.quiet:

@@ -6,7 +6,49 @@ on:
       - 'v*.*.*'
 
 jobs:
+  # Rien n'est construit ni publié tant que les suites ne passent pas. Elles
+  # existaient déjà mais n'étaient lancées qu'à la main : une version pouvait
+  # être publiée sans qu'aucune ne s'exécute.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Python
+        uses: actions/setup-python@v7
+        with:
+          # La même version que l'image Docker : c'est elle qui a révélé une
+          # rupture de syntaxe qu'aucun test local n'avait vue.
+          python-version: '3.11'
+
+      - name: Dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install reportlab
+
+      - name: Compilation de tous les modules
+        run: python -m compileall -q .
+
+      - name: Concordance des cinq sources de version
+        run: python verifier_version.py
+
+      - name: Suites de tests
+        run: |
+          set -e
+          python test_maj.py
+          python test_journal_maj.py
+          python test_securite.py
+          python test_historique_collectes.py
+          python test_sauvegarde.py
+          python test_parite_rapports.py
+          # Sans serveur graphique, ce test s'arrête proprement après avoir
+          # éprouvé la construction des rubriques.
+          python test_collecteur_ui.py
+
   build:
+    needs: tests
     strategy:
       matrix:
         include:
@@ -77,6 +119,7 @@ jobs:
           path: dist/${{ matrix.asset_name }}
 
   docker:
+    needs: tests
     runs-on: ubuntu-latest
 
     steps:

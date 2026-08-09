@@ -1,23 +1,29 @@
 {
-  "version": "2.6.45",
-  "release_date": "2026-08-09T20:30:00.000000",
+  "version": "2.7.0",
+  "release_date": "2026-08-09T22:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.45/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.45/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.45",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.45/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.45/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.45/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.0/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.7.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.0/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.7.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Recherche et installation d'une mise a jour depuis le numero de version, et banniere degagee de la barre laterale",
+    "new_features": "Historique des collectes avec projection de saturation du disque, suites de tests executees par la CI, depots de fichiers et API collecteur durcis",
     "improvements": [
-      "FIXED: Avec la navigation en colonne, la banniere de mise a jour commencait sous la barre laterale, qui est en position fixe : son debut restait invisible. Mesure avant correction : la banniere demarrait a 36 px, la barre s'arretant a 220.",
-      "NEW: Le numero de version dans la barre de navigation declenche la recherche d'une mise a jour. S'il y en a une, la banniere s'affiche avec son bouton d'installation ; sinon le numero confirme brievement 'a jour'.",
-      "NEW: Une pastille orange sur le numero signale une version en attente, y compris apres avoir ecarte la banniere - sans quoi 'Plus tard' effacait toute trace de la mise a jour disponible.",
-      "NEW: Route /api/updates/undismiss - un clic sur la version redemande a voir une annonce ecartee, et ce choix survit au redemarrage.",
-      "CHANGED: Le numero de version est un bouton et non plus un fragment du lien d'accueil : imbrique dans celui-ci, un clic aurait ramene a l'accueil au lieu d'agir."
+      "NEW: Historique des collectes. Chaque passage du collecteur laisse un releve : evolution de l'espace disque avec date de saturation prevue, logiciels ajoutes et retires, changements de materiel. Jusqu'ici chaque collecte ecrasait la precedente - on avait une photo, jamais une trajectoire.",
+      "NEW: Les suites de tests s'executent desormais dans la CI avant toute construction. Elles existaient mais n'etaient lancees qu'a la main : une version pouvait etre publiee sans qu'aucune ne tourne.",
+      "NEW: verifier_version.py controle la concordance des cinq sources de version et la correspondance du tag - le controle qui manquait le jour ou v2.6.33 a ete pose sur du code en 2.6.32.",
+      "NEW: Trois suites ajoutees : journal des mises a jour, durcissement (depots, jeton, restauration), historique des collectes.",
+      "SECURITE: Les depots de fichiers etaient sans limite. Toute extension etait acceptee, sans controle de taille. Liste blanche par usage, verification de la signature du fichier contre son extension, et 64 Mo maximum par requete.",
+      "SECURITE: L'API du collecteur n'etait pas authentifiee - un POST suffisait a creer ou modifier des appareils et deposer des fichiers. Un jeton partage, configurable dans l'interface, devient obligatoire des qu'il est renseigne ; sans lui le comportement reste inchange pour les collecteurs deja deployes.",
+      "FIXED: La comparaison du jeton echouait sur un jeton accentue et repondait 500 au lieu de 401 : la fonction censee proteger l'API la cassait.",
+      "NEW: Restauration d'une sauvegarde depuis l'interface, avec sauvegarde de securite prise juste avant et double confirmation. Seul le nom d'une sauvegarde existante est accepte.",
+      "FIXED: Deux sauvegardes prises dans la meme seconde portaient le meme nom et la seconde ecrasait la premiere. C'etait grave au moment de restaurer : le filet de securite remplacait la sauvegarde qu'on s'appretait a recharger.",
+      "NEW: Peripheriques en erreur remontes par le collecteur (codes du Gestionnaire de peripheriques), dans la fiche, le PDF et les points de vigilance. Le reste de l'inventaire decrit ce qui est present, pas ce qui fonctionne mal.",
+      "FIXED: Huit fichiers .pyc etaient versionnes alors que .gitignore les exclut."
     ]
   },
   "checksums": {
@@ -28,5 +34,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.45"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.7.0"
 }

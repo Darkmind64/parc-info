@@ -39,6 +39,8 @@ TOLERANCES = {
     'unexpected_shutdowns': "rendu via le bandeau de points d'attention",
     'disk_error_events': "rendu via le bandeau de points d'attention",
     'pending_updates_security': "rendu via le bandeau de points d'attention",
+    'problem_devices_count': "rendu via le bandeau de points d'attention ; "
+                             "la fiche compte elle-même les périphériques listés",
     'uptime_hours': 'consommé par les vignettes chiffrées',
 }
 

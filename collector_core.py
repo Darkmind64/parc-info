@@ -2093,6 +2093,7 @@ _WIN_STEPS = [
     ('Configuration réseau', lambda: _win_network()),
     ('Environnement (WSUS, domaine, temps)', lambda: _win_enterprise()),
     ('Hygiène système', lambda: _win_hygiene()),
+    ('Périphériques en erreur', lambda: _win_problem_devices()),
 ]
 
 
@@ -2287,6 +2288,69 @@ def _win_enterprise():
         info['time_offset'] = offset
 
     return info
+
+
+#: Codes d'erreur du Gestionnaire de périphériques (ConfigManagerErrorCode).
+#: Seuls ceux qu'on rencontre en dépannage sont nommés ; les autres sont
+#: rapportés avec leur numéro plutôt que passés sous silence.
+_CODES_PERIPHERIQUE = {
+    1:  "Périphérique mal configuré",
+    3:  "Pilote endommagé ou mémoire insuffisante",
+    10: "Impossible de démarrer le périphérique",
+    12: "Ressources insuffisantes (conflit)",
+    14: "Redémarrage nécessaire",
+    16: "Ressources non toutes identifiées",
+    18: "Réinstallation des pilotes nécessaire",
+    19: "Informations de registre incomplètes ou endommagées",
+    21: "Suppression en cours",
+    22: "Périphérique désactivé",
+    24: "Absent, mal installé ou déconnecté",
+    28: "Pilotes non installés",
+    31: "Ne fonctionne pas correctement (pilote défaillant)",
+    32: "Pilote de démarrage désactivé",
+    37: "Échec d'initialisation du pilote",
+    39: "Pilote endommagé ou manquant",
+    43: "Arrêté à la suite d'un incident signalé par le matériel",
+    45: "Actuellement déconnecté",
+    52: "Signature du pilote non vérifiable",
+}
+
+
+def _win_problem_devices():
+    """Périphériques signalés en erreur par le Gestionnaire de périphériques.
+
+    Un pilote manquant ou un matériel arrêté se voit ici, et nulle part ailleurs
+    dans l'inventaire : le reste de la collecte décrit ce qui est présent, pas
+    ce qui fonctionne mal.
+    """
+    data = _win_powershell_json(
+        "Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue "
+        "| Where-Object { $_.ConfigManagerErrorCode -ne 0 -and $_.ConfigManagerErrorCode -ne $null } "
+        "| Select-Object Name, PNPClass, ConfigManagerErrorCode, DeviceID, Manufacturer "
+        "| ConvertTo-Json -Compress -Depth 3",
+        timeout=60,
+    )
+    peripheriques = []
+    for d in _as_list(data):
+        try:
+            code = int(d.get('ConfigManagerErrorCode') or 0)
+        except (TypeError, ValueError):
+            continue
+        if not code:
+            continue
+        peripheriques.append({
+            'name': _clean(d.get('Name')) or 'Périphérique inconnu',
+            'classe': _clean(d.get('PNPClass')),
+            'fabricant': _clean(d.get('Manufacturer')),
+            'code': code,
+            'libelle': _CODES_PERIPHERIQUE.get(code, "Code d'erreur %d" % code),
+            'instance': _clean(d.get('DeviceID')),
+        })
+    # Les codes 22 (désactivé) et 45 (déconnecté) décrivent des états voulus la
+    # plupart du temps : ils restent listés, mais ne comptent pas comme pannes.
+    en_panne = [p for p in peripheriques if p['code'] not in (22, 45)]
+    return {'problem_devices': sorted(peripheriques, key=lambda p: (-p['code'], p['name'])),
+            'problem_devices_count': len(en_panne)}
 
 
 def _win_hygiene():
@@ -3756,6 +3820,12 @@ def build_summary_sections(info):
                                '  ⚠ en échec' if x.get('failed') else '')
             if isinstance(x, dict) else str(x)
             for x in info['scheduled_tasks']]})
+    if info.get('problem_devices'):
+        s['listes'].append({'titre': 'Périphériques en erreur', 'elements': [
+            '%s — %s%s' % (p.get('name', '?'), p.get('libelle', '?'),
+                           ' (%s)' % p['classe'] if p.get('classe') else '')
+            if isinstance(p, dict) else str(p)
+            for p in info['problem_devices']]})
     if info.get('smb_shares'):
         s['listes'].append({'titre': 'Partages réseau', 'elements': [
             '%s → %s%s' % (x.get('name', '?'), x.get('path', '?'),
@@ -4101,6 +4171,15 @@ def build_alerts(info):
     if arrets:
         add('danger', '%d arrêt(s) inattendu(s) sur %d jours' % (arrets, EVENT_WINDOW_DAYS),
             'Coupure secteur, surchauffe ou plantage — à corréler avec les écrans bleus')
+
+    # Un pilote manquant ou un matériel arrêté ne se voit nulle part ailleurs :
+    # le reste du rapport décrit ce qui est présent, pas ce qui fonctionne mal.
+    en_panne = info.get('problem_devices_count') or 0
+    if en_panne:
+        exemples = ' · '.join(
+            p.get('name', '?') for p in (info.get('problem_devices') or [])
+            if isinstance(p, dict) and p.get('code') not in (22, 45))
+        add('warn', '%d périphérique(s) en erreur' % en_panne, exemples[:140])
 
     erreurs_disque = info.get('disk_error_events') or 0
     if erreurs_disque:
@@ -5597,6 +5676,18 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 tk, ['Tâche', 'État', 'Dernière exécution', 'Résultat', 'Exécutable'],
                 rows, width, [0.26, 0.12, 0.18, 0.12, 0.32]))
 
+        en_erreur = info.get('problem_devices') or []
+        if en_erreur:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(p.get('name')), S['body']),
+                     Paragraph(_pdf_escape(p.get('classe')), S['body']),
+                     Paragraph(_pdf_escape(p.get('fabricant')), S['body']),
+                     Paragraph('%s (code %s)' % (_pdf_escape(p.get('libelle')), p.get('code')),
+                               S['small'])] for p in en_erreur]
+            story.append(Paragraph('Périphériques en erreur (%d)' % len(en_erreur), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Périphérique', 'Classe', 'Fabricant', 'Diagnostic'],
+                rows, width, [0.32, 0.14, 0.18, 0.36]))
+
         demarrage = info.get('startup_programs') or []
         if demarrage:
             rows = [[Paragraph(_pdf_escape(p['name']), S['body']),
@@ -5773,7 +5864,8 @@ def send_to_parcinfo(info, server_url, token=None, client_id=None, client_name=N
         return False, str(e)
 
 
-def upload_report_to_parcinfo(report_content, report_file, server_url, device_id, client_id):
+def upload_report_to_parcinfo(report_content, report_file, server_url, device_id,
+                              client_id, token=None):
     """Envoie le rapport (PDF ou HTML) à ParcInfo en tant que document joint.
 
     Args:
@@ -5782,6 +5874,7 @@ def upload_report_to_parcinfo(report_content, report_file, server_url, device_id
         server_url: URL du serveur ParcInfo
         device_id: ID de l'appareil créé/mis à jour
         client_id: ID du client
+        token: jeton du collecteur, si le serveur en exige un
     """
     try:
         if report_file and report_file.endswith('.pdf'):
@@ -5813,10 +5906,14 @@ def upload_report_to_parcinfo(report_content, report_file, server_url, device_id
 
         body.write(f'--{boundary}--\r\n'.encode())
 
+        headers = {'Content-Type': f'multipart/form-data; boundary={boundary}'}
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+
         request = Request(
             f"{server_url.rstrip('/')}/api/device-info/upload-report",
             data=body.getvalue(),
-            headers={'Content-Type': f'multipart/form-data; boundary={boundary}'},
+            headers=headers,
             method='POST'
         )
 
@@ -5826,8 +5923,8 @@ def upload_report_to_parcinfo(report_content, report_file, server_url, device_id
         return False, str(e)
 
 
-def fetch_clients(server_url, mac_address=None):
-    """Récupère la liste des clients depuis ParcInfo (endpoint public, sans auth).
+def fetch_clients(server_url, mac_address=None, token=None):
+    """Récupère la liste des clients depuis ParcInfo.
 
     Quand une adresse MAC est fournie et que le serveur connaît déjà cette
     machine, il renvoie en plus le client auquel elle est rattachée : le
@@ -5840,7 +5937,8 @@ def fetch_clients(server_url, mac_address=None):
         url = "%s/api/clients-public" % server_url.rstrip('/')
         if mac_address:
             url += '?mac=' + quote(mac_address)
-        with urlopen(url, timeout=10) as response:
+        entete = {'Authorization': 'Bearer %s' % token} if token else {}
+        with urlopen(Request(url, headers=entete), timeout=10) as response:
             data = json.loads(response.read().decode('utf-8'))
         # Le serveur répond une liste simple, ou un objet quand il a une
         # suggestion ; les deux formes doivent être acceptées.

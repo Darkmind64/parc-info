@@ -165,10 +165,98 @@ scheduler.daemon = True  # Arrête avec l'application
 
 # UPLOAD_FOLDER défini plus haut (support PyInstaller)
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_EXTENSIONS = None  # Tous types acceptés
 
-def allowed_file(filename):
-    return bool(filename and filename.strip())  # Tous types acceptés
+# ─── VALIDATION DES FICHIERS DÉPOSÉS ─────────────────────────────────────────
+# Auparavant tout était accepté, sans limite de taille : n'importe qui atteignant
+# l'application pouvait déposer un fichier de n'importe quel type et de
+# n'importe quelle taille dans le volume de données.
+
+#: Documents joints aux appareils, contrats, périphériques, interventions.
+ALLOWED_EXTENSIONS = {
+    'pdf', 'txt', 'csv', 'rtf', 'md', 'log',
+    'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp',
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'heic',
+    'zip', '7z', 'rar', 'gz', 'tar',
+    'eml', 'msg', 'json', 'xml', 'html', 'htm',
+}
+#: Images seules — logos, avatars, photos de baie.
+ALLOWED_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'}
+
+#: Taille maximale d'une requête, pièces jointes comprises.
+MAX_UPLOAD_MB = int(os.environ.get('PARCINFO_MAX_UPLOAD_MB', '64'))
+app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_MB * 1024 * 1024
+
+#: Premiers octets attendus, par extension. Le type déclaré par le navigateur
+#: vient du client et ne prouve rien ; la signature du fichier, si.
+_SIGNATURES = {
+    'pdf':  [b'%PDF-'],
+    'png':  [b'\x89PNG\r\n\x1a\n'],
+    'gif':  [b'GIF87a', b'GIF89a'],
+    'jpg':  [b'\xff\xd8\xff'],
+    'jpeg': [b'\xff\xd8\xff'],
+    'bmp':  [b'BM'],
+    'zip':  [b'PK\x03\x04', b'PK\x05\x06'],   # aussi docx, xlsx, pptx, odt…
+    'docx': [b'PK\x03\x04'], 'xlsx': [b'PK\x03\x04'], 'pptx': [b'PK\x03\x04'],
+    'odt':  [b'PK\x03\x04'], 'ods':  [b'PK\x03\x04'], 'odp':  [b'PK\x03\x04'],
+    '7z':   [b'7z\xbc\xaf\x27\x1c'],
+    'gz':   [b'\x1f\x8b'],
+    'rar':  [b'Rar!\x1a\x07'],
+}
+
+
+def extension_de(filename):
+    """Extension en minuscules, sans le point ('' si absente)."""
+    if not filename or '.' not in filename:
+        return ''
+    return filename.rsplit('.', 1)[1].strip().lower()
+
+
+def allowed_file(filename, extensions=None):
+    """Vrai si le nom porte une extension autorisée."""
+    if not filename or not filename.strip():
+        return False
+    return extension_de(filename) in (extensions or ALLOWED_EXTENSIONS)
+
+
+def signature_coherente(fichier, extension):
+    """Vrai si le contenu correspond à l'extension annoncée.
+
+    Ne juge que les formats dont la signature est connue : le reste passe, faute
+    de quoi on refuserait des documents parfaitement légitimes.
+    """
+    attendues = _SIGNATURES.get(extension)
+    if not attendues:
+        return True
+    try:
+        position = fichier.stream.tell()
+        debut = fichier.stream.read(16)
+        fichier.stream.seek(position)
+    except Exception:
+        return True
+    return any(debut.startswith(s) for s in attendues)
+
+
+def verifier_fichier(fichier, extensions=None):
+    """Contrôle nom, extension et signature. Retourne (ok, message)."""
+    if not fichier or not fichier.filename:
+        return False, "Aucun fichier sélectionné"
+    extension = extension_de(fichier.filename)
+    if not allowed_file(fichier.filename, extensions):
+        return False, ("Extension « %s » non autorisée" % (extension or '?'))
+    if not signature_coherente(fichier, extension):
+        return False, ("Le contenu du fichier ne correspond pas à un %s"
+                       % extension.upper())
+    return True, None
+
+
+@app.errorhandler(413)
+def _fichier_trop_volumineux(_e):
+    """Message explicite : par défaut Flask renvoie une page d'erreur muette."""
+    message = "Fichier trop volumineux (maximum %d Mo)" % MAX_UPLOAD_MB
+    if request.path.startswith('/api/'):
+        return jsonify({'status': 'error', 'message': message}), 413
+    flash(message, 'danger')
+    return redirect(request.referrer or url_for('index')), 302
 
 
 # ─── CACHING OPTIMISÉ ─────────────────────────────────────────────────────────
@@ -781,6 +869,32 @@ def init_db():
         cle TEXT PRIMARY KEY,
         valeur TEXT DEFAULT '',
         date_maj TEXT DEFAULT '')''')
+
+    # HISTORIQUE DES COLLECTES — un relevé par passage du collecteur.
+    # Chaque collecte écrasait la précédente : on avait une photo, jamais une
+    # trajectoire. Seules les grandeurs qui servent à comparer sont conservées,
+    # pas le rapport entier — l'historique reste léger et synchronisable.
+    # Clé TEXTE pour la même raison que journal_maj : chaque instance numérote
+    # dans sa propre base, un identifiant auto-incrémenté entrerait en collision.
+    c.execute('''CREATE TABLE IF NOT EXISTS collectes (
+        cle               TEXT PRIMARY KEY,
+        appareil_id       INTEGER NOT NULL,
+        client_id         INTEGER NOT NULL,
+        horodatage        TEXT NOT NULL,
+        disque_total_go   REAL,
+        disque_utilise_go REAL,
+        disque_libre_go   REAL,
+        ram_go            REAL,
+        nb_logiciels      INTEGER,
+        logiciels         TEXT DEFAULT '',
+        os_version        TEXT DEFAULT '',
+        cpu               TEXT DEFAULT '',
+        numero_serie      TEXT DEFAULT '',
+        nb_maj_attente    INTEGER,
+        nb_peripheriques_erreur INTEGER,
+        date_maj          TEXT DEFAULT '')''')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_collectes_appareil '
+              'ON collectes(appareil_id, horodatage DESC)')
 
     # JOURNAL DES MISES À JOUR DE L'APPLICATION — synchronisé entre instances,
     # pour qu'un poste voie ce qui a été installé sur les autres.
@@ -1410,7 +1524,8 @@ def init_db():
         'config_listes': 'id', 'user_preferences': 'id',
         'documents_interventions': 'id', 'interventions_appareils': 'id',
         'interventions_peripheriques': 'id', 'maintenance_notifications': 'id',
-        'config': 'cle', 'journal_maj': 'cle',   # tables à clé texte (pas de colonne 'id')
+        # Tables à clé texte (pas de colonne 'id')
+        'config': 'cle', 'journal_maj': 'cle', 'collectes': 'cle',
     }
     # DROP + CREATE (pas IF NOT EXISTS) : garantit que la définition du trigger
     # correspond toujours au code, même après une mise à jour de cette liste sur
@@ -1592,6 +1707,14 @@ def creer_sauvegarde(raison='automatique'):
         os.makedirs(BACKUP_DIR, exist_ok=True)
         horodatage = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
         destination = os.path.join(BACKUP_DIR, f'parc_info_{horodatage}.db')
+        # L'horodatage est à la seconde : deux sauvegardes rapprochées portaient
+        # le même nom et la seconde écrasait la première. C'était grave au moment
+        # de restaurer — le filet de sécurité pris juste avant remplaçait la
+        # sauvegarde qu'on s'apprêtait à recharger.
+        suffixe = 1
+        while os.path.exists(destination):
+            destination = os.path.join(BACKUP_DIR, f'parc_info_{horodatage}_{suffixe}.db')
+            suffixe += 1
 
         source = sqlite3.connect(DATABASE)
         try:
@@ -1876,6 +1999,64 @@ def api_db_sauvegarde():
         return jsonify({'ok': False, 'error': erreur}), 500
     return jsonify({'ok': True, 'fichier': os.path.basename(chemin),
                     'taille': human_size(os.path.getsize(chemin))})
+
+
+@app.route('/api/db/sauvegarde/restaurer', methods=['POST'])
+@login_required
+def api_db_restaurer():
+    """Remet la base dans l'état d'une sauvegarde (administrateur).
+
+    Restaurer efface les données actuelles : une sauvegarde de sécurité est
+    prise d'abord, sans quoi une erreur de choix serait sans retour.
+    """
+    user = get_auth_user()
+    if not user or user.get('role') != 'admin':
+        return jsonify({'ok': False, 'error': 'Réservé aux administrateurs'}), 403
+
+    demande = (request.json or {}).get('fichier') or request.form.get('fichier') or ''
+    # Seul le nom de fichier est accepté, et il doit désigner une sauvegarde
+    # existante : sans ce filtre, un chemin relatif permettrait de charger
+    # n'importe quel fichier de la machine à la place de la base.
+    nom = os.path.basename(demande)
+    source = os.path.join(BACKUP_DIR, nom)
+    if not nom or source not in _backup_files():
+        return jsonify({'ok': False, 'error': 'Sauvegarde introuvable'}), 404
+
+    filet, erreur_filet = creer_sauvegarde('avant restauration')
+    if erreur_filet:
+        return jsonify({'ok': False,
+                        'error': "Restauration annulée : la sauvegarde de "
+                                 "sécurité a échoué (%s)" % erreur_filet}), 500
+
+    try:
+        # L'API backup de SQLite écrit dans la base en place, verrou compris :
+        # remplacer le fichier pendant que l'application tourne laisserait les
+        # connexions ouvertes sur l'ancien inode, et la base en mode WAL.
+        origine = sqlite3.connect(source)
+        try:
+            cible = sqlite3.connect(DATABASE)
+            try:
+                origine.backup(cible)
+            finally:
+                cible.close()
+        finally:
+            origine.close()
+    except Exception as exc:
+        logger.exception('Restauration impossible depuis %s', nom)
+        return jsonify({'ok': False, 'error': str(exc)}), 500
+
+    cfg_invalidate()
+    logger.warning('Base restaurée depuis %s par %s', nom, user.get('login'))
+    try:
+        from database import log_sync_event
+        log_sync_event('restauration', 'ok', 'Base restaurée depuis %s' % nom,
+                       {'filet': os.path.basename(filet) if filet else None,
+                        'par': user.get('login')})
+    except Exception:
+        pass
+
+    return jsonify({'ok': True, 'fichier': nom,
+                    'filet': os.path.basename(filet) if filet else None})
 
 
 @app.route('/api/db/sync', methods=['GET', 'POST'])
@@ -4249,11 +4430,24 @@ def fiche_systeme_appareil(id):
             # fiche : les données brutes restent affichées.
             logger.exception("Analyse de la fiche système")
 
+    # Historique des collectes : la fiche ne montre que le dernier relevé, mais
+    # c'est la comparaison avec les précédents qui révèle un disque qui se
+    # remplit, un logiciel apparu ou une pièce remplacée.
+    conn = get_db()
+    try:
+        historique = historique_appareil(conn, cid, id)
+    except Exception:
+        logger.exception("Historique des collectes de l'appareil %s", id)
+        historique = None
+    finally:
+        conn.close()
+
     return render_template('fiche_systeme.html', appareil=a, rapport=rapport,
                            logiciels=logiciels, client=client, clients=get_clients(),
                            client_actif_id=cid, alertes=alertes, kpis=kpis,
                            disques=disques, ports_cartes=ports_cartes,
-                           ports_masques=ports_masques, age_materiel=age_materiel)
+                           ports_masques=ports_masques, age_materiel=age_materiel,
+                           historique=historique)
 
 
 @app.route('/appareil/<int:id>/documents')
@@ -4286,8 +4480,9 @@ def upload_document(id):
         flash('Aucun fichier sélectionné', 'danger')
         return redirect(url_for('documents_appareil', id=id))
     f = request.files['fichier']
-    if not f.filename or not allowed_file(f.filename):
-        flash('Type de fichier non autorisé', 'danger')
+    ok, motif = verifier_fichier(f)
+    if not ok:
+        flash(motif, 'danger')
         return redirect(url_for('documents_appareil', id=id))
     safe = secure_filename(f.filename)
     if not safe:
@@ -4483,8 +4678,9 @@ def upload_doc_peripherique(id):
         flash('Aucun fichier sélectionné', 'danger')
         return redirect(url_for('editer_peripherique', id=id))
     f = request.files['fichier']
-    if not f.filename or not allowed_file(f.filename):
-        flash('Type de fichier non autorisé', 'danger')
+    ok, motif = verifier_fichier(f)
+    if not ok:
+        flash(motif, 'danger')
         return redirect(url_for('editer_peripherique', id=id))
     safe = secure_filename(f.filename)
     if not safe:
@@ -4717,8 +4913,10 @@ def upload_photo_baie():
     if 'fichier' not in request.files:
         return redirect(url_for('baie_brassage'))
     f = request.files['fichier']
-    if not f.filename or not allowed_file(f.filename):
-        flash('Type de fichier non autorisé', 'danger')
+    # Une photo de baie est une image : rien d'autre n'a de sens ici.
+    ok, motif = verifier_fichier(f, ALLOWED_IMAGE_EXTENSIONS)
+    if not ok:
+        flash(motif, 'danger')
         return redirect(url_for('baie_brassage'))
     safe = secure_filename(f.filename)
     unique = f"baie{cid}_{int(time.time())}_{safe}"
@@ -5802,6 +6000,193 @@ def _sync_collector_peripherals(conn, cid, appareil_id, monitors, printers, usb_
     return created
 
 
+# Nombre de relevés conservés par appareil. Au-delà, les plus anciens partent :
+# la tendance se lit sur les dernières semaines, pas sur l'historique complet.
+COLLECTES_CONSERVEES = 60
+
+
+def _enregistrer_collecte(conn, client_id, appareil_id, data):
+    """Ajoute un relevé à l'historique de l'appareil.
+
+    Ne conserve que ce qui se compare d'une collecte à l'autre. La liste des
+    logiciels est réduite à « nom|version » : de quoi calculer les ajouts et
+    retraits sans stocker l'inventaire complet à chaque passage.
+    """
+    try:
+        logiciels = data.get('installed_software') or []
+        empreintes = []
+        for logiciel in logiciels:
+            if isinstance(logiciel, dict):
+                empreintes.append('%s|%s' % (logiciel.get('name', ''),
+                                             logiciel.get('version', '')))
+            else:
+                empreintes.append('%s|' % logiciel)
+
+        maintenant = datetime.utcnow()
+        horodatage = maintenant.isoformat(timespec='seconds')
+        # La clé descend à la microseconde alors que l'horodatage affiché reste
+        # à la seconde : deux collectes rapprochées auraient porté la même clé,
+        # et la seconde aurait remplacé la première sans que rien ne le dise.
+        cle = '%s|%s' % (appareil_id, maintenant.isoformat(timespec='microseconds'))
+
+        conn.execute(
+            '''INSERT OR REPLACE INTO collectes
+               (cle, appareil_id, client_id, horodatage, disque_total_go,
+                disque_utilise_go, disque_libre_go, ram_go, nb_logiciels,
+                logiciels, os_version, cpu, numero_serie, nb_maj_attente,
+                nb_peripheriques_erreur, date_maj)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (cle, appareil_id, client_id, horodatage,
+             data.get('disk_total_gb'), data.get('disk_used_gb'), data.get('disk_free_gb'),
+             data.get('ram_gb'), len(logiciels),
+             json.dumps(empreintes, ensure_ascii=False),
+             data.get('os_version') or '', data.get('cpu') or '',
+             data.get('serial_number') or '',
+             len(data.get('pending_updates') or []) or None,
+             data.get('problem_devices_count'), horodatage))
+
+        conn.execute(
+            '''DELETE FROM collectes WHERE appareil_id=? AND cle NOT IN
+               (SELECT cle FROM collectes WHERE appareil_id=?
+                ORDER BY horodatage DESC LIMIT ?)''',
+            (appareil_id, appareil_id, COLLECTES_CONSERVEES))
+        return True
+    except Exception:
+        # L'historique est un confort : son échec ne doit pas faire perdre la
+        # collecte elle-même, qui vient d'aboutir.
+        logger.exception('Relevé non enregistré pour l\'appareil %s', appareil_id)
+        return False
+
+
+def _tendance_disque(releves):
+    """Projette la date de saturation à partir des relevés d'espace disque.
+
+    Régression linéaire simple sur (jours, espace libre). Ne conclut qu'à partir
+    de trois relevés couvrant au moins une semaine : sur deux points rapprochés,
+    la moindre variation donnerait une date absurde.
+    """
+    points = []
+    for r in releves:
+        libre = r.get('disque_libre_go')
+        if libre is None:
+            continue
+        try:
+            quand = datetime.fromisoformat(r['horodatage'])
+        except (ValueError, TypeError, KeyError):
+            continue
+        points.append((quand, float(libre)))
+
+    if len(points) < 3:
+        return None
+    points.sort(key=lambda p: p[0])
+    etendue_jours = (points[-1][0] - points[0][0]).total_seconds() / 86400
+    if etendue_jours < 7:
+        return None
+
+    origine = points[0][0]
+    xs = [(q - origine).total_seconds() / 86400 for q, _ in points]
+    ys = [v for _, v in points]
+    n = len(points)
+    moy_x, moy_y = sum(xs) / n, sum(ys) / n
+    denominateur = sum((x - moy_x) ** 2 for x in xs)
+    if denominateur == 0:
+        return None
+    pente = sum((x - moy_x) * (y - moy_y) for x, y in zip(xs, ys)) / denominateur
+
+    # Pente positive : l'espace libre augmente, il n'y a rien à annoncer.
+    if pente >= -0.01:
+        return {'go_par_jour': round(pente, 2), 'saturation': None}
+
+    libre_actuel = ys[-1]
+    jours_restants = libre_actuel / abs(pente)
+    if jours_restants > 3650:
+        return {'go_par_jour': round(pente, 2), 'saturation': None}
+    return {
+        'go_par_jour': round(pente, 2),
+        'jours_restants': int(jours_restants),
+        'saturation': (points[-1][0] + timedelta(days=jours_restants)).date().isoformat(),
+    }
+
+
+def _comparer_collectes(recent, precedent):
+    """Différences entre deux relevés : logiciels et matériel."""
+    def _charger(releve):
+        try:
+            return set(json.loads(releve.get('logiciels') or '[]'))
+        except (ValueError, TypeError):
+            return set()
+
+    logiciels_recents, logiciels_avant = _charger(recent), _charger(precedent)
+
+    def _nom(empreinte):
+        nom, _, version = empreinte.partition('|')
+        return '%s %s' % (nom, version) if version else nom
+
+    changements = []
+    for champ, libelle in (('os_version', "Version du système"),
+                           ('cpu', 'Processeur'),
+                           ('numero_serie', 'Numéro de série'),
+                           ('ram_go', 'Mémoire (Go)')):
+        avant, apres = precedent.get(champ), recent.get(champ)
+        if avant and apres and str(avant) != str(apres):
+            changements.append({'champ': libelle, 'avant': avant, 'apres': apres})
+
+    return {
+        'ajoutes': sorted(_nom(e) for e in (logiciels_recents - logiciels_avant)),
+        'retires': sorted(_nom(e) for e in (logiciels_avant - logiciels_recents)),
+        'materiel': changements,
+    }
+
+
+def historique_appareil(conn, client_id, appareil_id):
+    """Relevés d'un appareil, avec tendance et comparaison des deux derniers."""
+    releves = [row_to_dict(r) for r in conn.execute(
+        'SELECT * FROM collectes WHERE appareil_id=? AND client_id=? '
+        'ORDER BY horodatage DESC LIMIT ?',
+        (appareil_id, client_id, COLLECTES_CONSERVEES)).fetchall()]
+    if not releves:
+        return None
+
+    resultat = {
+        'releves': releves,
+        'nombre': len(releves),
+        'depuis': releves[-1]['horodatage'],
+        'tendance': _tendance_disque(releves),
+        'comparaison': None,
+    }
+    if len(releves) >= 2:
+        resultat['comparaison'] = _comparer_collectes(releves[0], releves[1])
+        resultat['compare_a'] = releves[1]['horodatage']
+    return resultat
+
+
+def jeton_collecteur_valide():
+    """Vrai si la requête du collecteur est autorisée.
+
+    Tant qu'aucun jeton n'est configuré, tout passe : c'était le comportement
+    depuis toujours, et le durcir sans prévenir couperait les collecteurs déjà
+    déployés. Dès qu'un jeton est renseigné dans la configuration, il devient
+    obligatoire — sans lui, n'importe qui atteignant le serveur peut créer ou
+    modifier des appareils et déposer des fichiers.
+    """
+    attendu = (cfg_get('collecteur_token', '') or '').strip()
+    if not attendu:
+        return True
+    recu = (request.headers.get('X-Collector-Token')
+            or request.headers.get('Authorization', '')).strip()
+    if recu.lower().startswith('bearer '):
+        recu = recu[7:].strip()
+    # Comparaison sur les octets : compare_digest refuse les chaînes contenant
+    # des caractères non-ASCII, et un jeton accentué faisait répondre 500 au
+    # lieu de 401 — la fonction censée protéger l'API la cassait.
+    if not recu or not secrets.compare_digest(recu.encode('utf-8'),
+                                              attendu.encode('utf-8')):
+        logger.warning('Collecteur refusé : jeton absent ou invalide (ip=%s, chemin=%s)',
+                       request.remote_addr, request.path)
+        return False
+    return True
+
+
 @app.route('/api/device-info', methods=['POST'])
 def api_device_info():
     """
@@ -5831,6 +6216,8 @@ def api_device_info():
     2. IP (première de ip_addresses)
     3. Crée si aucun match
     """
+    if not jeton_collecteur_valide():
+        return jsonify({"status": "error", "message": "Jeton collecteur requis"}), 401
     try:
         data = request.json or {}
 
@@ -6121,6 +6508,11 @@ def api_device_info():
             message = f"Nouvel appareil créé (ID: {app_id})"
             action = 'created'
 
+        # Relevé horodaté : c'est lui qui permettra de comparer cette collecte
+        # aux suivantes, une fois celle-ci écrasée dans la fiche appareil.
+        if _enregistrer_collecte(conn, cid, app_id, data):
+            conn.commit()
+
         # Licences dont la clé complète a été récupérée
         lic_ajoutees = 0
         if collected_licenses:
@@ -6174,6 +6566,11 @@ def api_clients_public():
       ...
     ]
     """
+    # Sans jeton configuré, la liste reste ouverte comme auparavant. Dès qu'un
+    # jeton existe, elle est protégée : les noms de vos clients n'ont pas à être
+    # lisibles par quiconque atteint le serveur.
+    if not jeton_collecteur_valide():
+        return jsonify({"status": "error", "message": "Jeton collecteur requis"}), 401
     try:
         conn = get_db()
         clients = [
@@ -6233,6 +6630,8 @@ def api_device_info_upload_report():
     - client_id: ID du client (obligatoire)
     - report: fichier HTML (obligatoire)
     """
+    if not jeton_collecteur_valide():
+        return jsonify({"status": "error", "message": "Jeton collecteur requis"}), 401
     try:
         device_id = request.form.get('device_id')
         client_id = request.form.get('client_id')
@@ -6240,6 +6639,12 @@ def api_device_info_upload_report():
 
         if not device_id or not client_id or not report_file:
             return jsonify({"status": "error", "message": "Missing parameters: device_id, client_id, report"}), 400
+
+        # Ce point d'entrée est ouvert aux collecteurs : il ne doit accepter que
+        # ce que ceux-ci produisent, un rapport PDF ou son repli HTML.
+        ok_rapport, motif_rapport = verifier_fichier(report_file, {'pdf', 'html', 'htm'})
+        if not ok_rapport:
+            return jsonify({"status": "error", "message": motif_rapport}), 400
 
         try:
             device_id = int(device_id)
@@ -6853,8 +7258,9 @@ def upload_doc_contrat(id):
     if 'fichier' not in request.files:
         return redirect(url_for('detail_contrat', id=id))
     f = request.files['fichier']
-    if not f.filename or not allowed_file(f.filename):
-        flash('Type non autorisé', 'danger')
+    ok, motif = verifier_fichier(f)
+    if not ok:
+        flash(motif, 'danger')
         return redirect(url_for('detail_contrat', id=id))
     safe = secure_filename(f.filename)
     if not safe:
@@ -7602,8 +8008,9 @@ def upload_doc_intervention(id):
         return redirect(url_for('detail_intervention', id=id))
 
     f = request.files['fichier']
-    if not f.filename or not allowed_file(f.filename):
-        flash('Type non autorisé', 'danger')
+    ok, motif = verifier_fichier(f)
+    if not ok:
+        flash(motif, 'danger')
         return redirect(url_for('detail_intervention', id=id))
 
     unique = f"intv{id}_{int(time.time())}_{secure_filename(f.filename)}"
@@ -10066,7 +10473,13 @@ def page_profil():
         logo_fichier = u.get('logo_fichier','')
         if 'logo' in request.files and request.files['logo'].filename:
             logo = request.files['logo']
-            ext  = logo.filename.rsplit('.',1)[-1].lower() if '.' in logo.filename else 'png'
+            # L'extension venait telle quelle du nom fourni : n'importe quel
+            # type de fichier atterrissait dans le dossier des pièces jointes.
+            ok_logo, motif_logo = verifier_fichier(logo, ALLOWED_IMAGE_EXTENSIONS)
+            if not ok_logo:
+                flash(motif_logo, 'danger')
+                return redirect(request.referrer or url_for('admin_users'))
+            ext  = extension_de(logo.filename)
             fname = f"logo_user{u['id']}_{int(time.time())}.{ext}"
             logo.save(os.path.join(UPLOAD_FOLDER, fname))
             logo_fichier = fname
