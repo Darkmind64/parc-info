@@ -257,6 +257,72 @@ try:
 finally:
     UC.__version__ = version_reelle
 
+print("\n=== 9. Après remplacement, l'application doit rendre la main ===")
+# Windows verrouille l'exécutable en cours : tant que le processus vit, le
+# script de remplacement ne peut pas déplacer le fichier. Sans arrêt explicite,
+# l'installation aboutissait « en apparence » et rien ne changeait.
+cfg_arret = tempfile.mkdtemp(prefix='maj_arret_')
+notifieur = UN.UpdateNotifier(config_dir=cfg_arret)
+notifieur.checker.version_json_url = BASE + '/version.json'
+notifieur.checker.current_version = '2.0.0'
+notifieur.installable = True          # simule l'exécutable packagé
+notifieur.verifier(force=True)
+
+arrets = []
+notifieur._arreter_pour_redemarrage = lambda: arrets.append(True)
+notifieur.checker.download_update = lambda progress=None: 'faux_binaire.exe'
+notifieur.checker.install_update = lambda chemin: True
+
+verifier(notifieur.installer() is True, 'installation engagée')
+for _ in range(50):
+    if notifieur.phase in ('pret', 'erreur'):
+        break
+    time.sleep(0.05)
+verifier(notifieur.phase == 'pret', 'installation menée à son terme', notifieur.phase)
+verifier(arrets == [True], "l'arrêt du processus est demandé", str(arrets))
+
+# Et si le remplacement échoue, surtout ne pas arrêter l'application : elle
+# resterait fermée sans qu'aucune nouvelle version ne la remplace.
+rate = UN.UpdateNotifier(config_dir=tempfile.mkdtemp(prefix='maj_rate_'))
+rate.checker.version_json_url = BASE + '/version.json'
+rate.checker.current_version = '2.0.0'
+rate.installable = True
+rate.verifier(force=True)
+arrets_rate = []
+rate._arreter_pour_redemarrage = lambda: arrets_rate.append(True)
+rate.checker.download_update = lambda progress=None: 'faux_binaire.exe'
+rate.checker.install_update = lambda chemin: False
+rate.installer()
+for _ in range(50):
+    if rate.phase in ('pret', 'erreur'):
+        break
+    time.sleep(0.05)
+verifier(rate.phase == 'erreur', 'échec du remplacement signalé', rate.phase)
+verifier(arrets_rate == [], "aucun arrêt quand le remplacement a échoué",
+         str(arrets_rate))
+
+print("\n=== 10. Le script de remplacement Windows ===")
+import pathlib  # noqa: E402
+
+faux = UC.UpdateChecker(config_dir=tempfile.mkdtemp(prefix='maj_bat_'))
+binaire = pathlib.Path(faux.config_dir) / 'ParcInfo-Windows.exe'
+binaire.write_bytes(b'nouveau binaire')
+lance = {}
+UC.subprocess.Popen = lambda *a, **kw: lance.setdefault('cmd', a[0])
+try:
+    resultat = faux._install_windows(binaire)
+finally:
+    import subprocess as _sp
+    UC.subprocess.Popen = _sp.Popen
+
+verifier(resultat is True, 'remplacement programmé')
+script = pathlib.Path(faux.config_dir) / '_apply_update.bat'
+verifier(script.exists(), 'script écrit')
+contenu = script.read_text(encoding='cp1252', errors='replace') if script.exists() else ''
+verifier('goto essai' in contenu, "le script réessaie tant que le fichier est verrouillé")
+verifier(contenu.count('start ""') >= 1, "l'application est relancée dans tous les cas")
+verifier('_apply_update.log' in contenu, 'un journal est écrit pour diagnostiquer un échec')
+
 httpd.shutdown()
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

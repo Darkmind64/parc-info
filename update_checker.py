@@ -240,22 +240,48 @@ class UpdateChecker:
         sauvegarde = current_exe.with_suffix('.exe.old')
         bat_path = self.config_dir / "_apply_update.bat"
 
-        # L'ancien exécutable est conservé le temps du remplacement : si la copie
-        # échoue à mi-chemin, on remet la version qui fonctionnait plutôt que de
-        # laisser l'utilisateur avec un fichier tronqué et aucune application.
+        journal = self.config_dir / "_apply_update.log"
+
+        # Le script réessaie au lieu d'attendre une durée fixe : tant que
+        # l'application n'a pas rendu la main, Windows garde le verrou sur son
+        # exécutable et le déplacement échoue. Une attente figée ne pardonnait
+        # rien — un arrêt un peu lent et la mise à jour était perdue en silence.
+        # L'ancien exécutable est conservé le temps du remplacement, et remis en
+        # place si la copie échoue à mi-chemin : mieux vaut l'ancienne version
+        # qu'aucune application.
         bat_content = (
             "@echo off\r\n"
-            "timeout /t 4 /nobreak > NUL\r\n"
+            f'echo [%DATE% %TIME%] remplacement demande > "{journal}"\r\n'
+            "timeout /t 3 /nobreak > NUL\r\n"
             f'if exist "{sauvegarde}" del /q "{sauvegarde}"\r\n'
-            f'move /y "{current_exe}" "{sauvegarde}" > NUL\r\n'
-            f'move /y "{installer_path}" "{current_exe}" > NUL\r\n'
+            "set TENTATIVE=0\r\n"
+            ":essai\r\n"
+            "set /a TENTATIVE+=1\r\n"
+            f'move /y "{current_exe}" "{sauvegarde}" > NUL 2>&1\r\n'
+            "if not errorlevel 1 goto deplace\r\n"
+            "if %TENTATIVE% GEQ 15 goto abandon\r\n"
+            f'echo [%TIME%] fichier encore verrouille, tentative %TENTATIVE% >> "{journal}"\r\n'
+            "timeout /t 2 /nobreak > NUL\r\n"
+            "goto essai\r\n"
+            ":deplace\r\n"
+            f'move /y "{installer_path}" "{current_exe}" > NUL 2>&1\r\n'
             "if errorlevel 1 (\r\n"
-            f'  move /y "{sauvegarde}" "{current_exe}" > NUL\r\n'
+            f'  echo [%TIME%] copie impossible, retour a la version precedente >> "{journal}"\r\n'
+            f'  move /y "{sauvegarde}" "{current_exe}" > NUL 2>&1\r\n'
+            "  goto relance\r\n"
             ")\r\n"
+            f'echo [%TIME%] remplacement effectue >> "{journal}"\r\n'
+            f'del /q "{sauvegarde}" > NUL 2>&1\r\n'
+            "goto relance\r\n"
+            ":abandon\r\n"
+            f'echo [%TIME%] abandon : executable toujours verrouille >> "{journal}"\r\n'
+            ":relance\r\n"
             f'start "" "{current_exe}"\r\n'
             'del "%~f0"\r\n'
         )
-        bat_path.write_text(bat_content, encoding='utf-8')
+        # Encodage OEM : un .bat lu par cmd.exe n'est pas en UTF-8, et un chemin
+        # accentué (« C:\\Users\\Éric\\… ») y deviendrait illisible.
+        bat_path.write_text(bat_content, encoding='cp1252', errors='replace')
 
         creationflags = 0
         if hasattr(subprocess, 'CREATE_NO_WINDOW') and hasattr(subprocess, 'DETACHED_PROCESS'):

@@ -263,11 +263,38 @@
             .catch(function () { planifier(INTERVALLE_NORMAL); });
     }
 
+    function afficherRefus(message) {
+        // Un refus du serveur — droits insuffisants, mise à jour indisponible —
+        // restait invisible : le bouton gardait « Démarrage… » indéfiniment et
+        // l'utilisateur n'avait aucun moyen de savoir ce qui bloquait.
+        var etat = {}, source = etatCourant || {};
+        for (var cle in source) {
+            if (Object.prototype.hasOwnProperty.call(source, cle)) { etat[cle] = source[cle]; }
+        }
+        etat.phase = 'erreur';
+        etat.erreur = message || "Le serveur a refusé l'opération";
+        etat.progression = 0;
+        appliquer(etat);
+    }
+
     function envoyer(url) {
+        var statut = 0;
         fetch(url, { method: 'POST', credentials: 'same-origin' })
-            .then(function (r) { return r.json(); })
-            .then(function (etat) { if (etat && etat.phase) { appliquer(etat); } })
-            .catch(function () { /* la prochaine interrogation rattrapera */ });
+            .then(function (r) {
+                statut = r.status;
+                return r.json().catch(function () { return {}; });
+            })
+            .then(function (corps) {
+                if (statut >= 400) {
+                    afficherRefus(corps.erreur || corps.message
+                        || ('Erreur ' + statut));
+                    return;
+                }
+                if (corps && corps.phase) { appliquer(corps); }
+            })
+            .catch(function () {
+                afficherRefus("Serveur injoignable");
+            });
     }
 
     function planifier(delai) {
