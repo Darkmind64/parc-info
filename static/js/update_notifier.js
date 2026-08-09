@@ -20,6 +20,8 @@
     var conteneur = null;
     var minuteur = null;
     var etatCourant = null;
+    var pastilleVersion = null;   // bouton du numéro de version dans la barre
+    var versionInitiale = '';
 
     function elt(id) { return document.getElementById(id); }
 
@@ -191,8 +193,61 @@
 
     // ── Réseau ──────────────────────────────────────────────────────────────
 
+    // ── Numéro de version cliquable ─────────────────────────────────────────
+
+    function majPastille(etat) {
+        if (!pastilleVersion) { return; }
+        var pastille = pastilleVersion.querySelector('.nav-version-pastille');
+        var dispo = !!etat.mise_a_jour_disponible;
+        // Le point reste affiché même quand la bannière a été écartée : sinon
+        // « Plus tard » reviendrait à effacer toute trace de la version en attente.
+        if (pastille) { pastille.hidden = !dispo; }
+        pastilleVersion.classList.toggle('maj-dispo', dispo);
+        pastilleVersion.title = dispo
+            ? 'Version ' + etat.version_disponible + ' disponible — cliquer pour l\'installer'
+            : 'Version ' + etat.version_actuelle + ' — cliquer pour rechercher une mise à jour';
+    }
+
+    function texteVersion(valeur) {
+        var num = pastilleVersion && pastilleVersion.querySelector('.nav-version-num');
+        if (num) { num.textContent = valeur; }
+    }
+
+    function verifierDepuisVersion() {
+        if (!pastilleVersion) { return; }
+        // Une mise à jour déjà détectée : inutile de réinterroger le dépôt,
+        // on remonte à la bannière qui porte le bouton d'installation.
+        if (etatCourant && etatCourant.mise_a_jour_disponible) {
+            if (etatCourant.masquee) { envoyer('/api/updates/undismiss'); }
+            else { rendre(etatCourant); }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+        }
+
+        pastilleVersion.disabled = true;
+        texteVersion('recherche…');
+        fetch('/api/updates/check', { method: 'POST', credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (etat) {
+                pastilleVersion.disabled = false;
+                appliquer(etat);
+                if (etat.mise_a_jour_disponible) {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                } else {
+                    texteVersion('à jour ✓');
+                    setTimeout(function () { texteVersion(versionInitiale); }, 2500);
+                }
+            })
+            .catch(function () {
+                pastilleVersion.disabled = false;
+                texteVersion('hors ligne');
+                setTimeout(function () { texteVersion(versionInitiale); }, 2500);
+            });
+    }
+
     function appliquer(etat) {
         etatCourant = etat;
+        majPastille(etat);
         rendre(etat);
         // Pendant une installation, on suit de près ; sinon on se fait oublier.
         var actif = etat.phase === 'telechargement' || etat.phase === 'installation';
@@ -224,6 +279,12 @@
 
     function demarrer() {
         conteneur = elt('update-notification-container');
+        pastilleVersion = elt('maj-version');
+        if (pastilleVersion) {
+            var num = pastilleVersion.querySelector('.nav-version-num');
+            versionInitiale = num ? num.textContent : '';
+            pastilleVersion.addEventListener('click', verifierDepuisVersion);
+        }
         if (!conteneur) { return; }   // page sans bannière (connexion, erreurs)
         interroger();
     }

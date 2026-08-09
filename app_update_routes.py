@@ -56,6 +56,14 @@ def register_update_routes(app):
         notifier.ecarter()
         return jsonify(notifier.etat)
 
+    @app.route('/api/updates/undismiss', methods=['POST'])
+    @login_required
+    def restore_notification():
+        """Réaffiche une annonce écartée — déclenché par le clic sur la version."""
+        notifier = get_notifier()
+        notifier.reafficher()
+        return jsonify(notifier.etat)
+
     # Le suivi démarre à la première page servie plutôt qu'à l'import : les
     # scripts qui importent app.py (tests, outils) n'ont pas à lancer de thread
     # ni à interroger GitHub.
