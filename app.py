@@ -6016,6 +6016,28 @@ def api_clients_public():
             conn.close()
             clients = [{"id": new_id, "nom": "Client par défaut"}]
 
+        # Suggestion : si l'adresse MAC fournie correspond à un appareil déjà
+        # enregistré, le collecteur peut présélectionner son client au lieu de
+        # laisser l'utilisateur deviner. On ne divulgue que l'identifiant et le
+        # nom du client — déjà publics sur cet endpoint — et rien n'est révélé
+        # quand la machine est inconnue.
+        mac = (request.args.get('mac') or '').strip().upper()
+        suggestion = None
+        if mac:
+            conn = get_db()
+            row = conn.execute(
+                'SELECT c.id, c.nom FROM appareils a JOIN clients c ON c.id = a.client_id'
+                ' WHERE UPPER(a.adresse_mac) = ? ORDER BY a.date_maj DESC LIMIT 1',
+                (mac,)).fetchone()
+            conn.close()
+            if row:
+                suggestion = {'id': row[0], 'nom': row[1]}
+
+        if suggestion is not None:
+            # Réponse enrichie : les collecteurs antérieurs continuent de lire
+            # une liste, les nouveaux lisent l'objet.
+            return jsonify({'clients': clients, 'suggested_client': suggestion}), 200
+
         return jsonify(clients), 200
 
     except Exception as e:

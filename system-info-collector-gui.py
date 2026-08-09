@@ -27,6 +27,7 @@ from urllib.request import urlopen
 
 from collector_core import (
     COLLECTOR_VERSION,
+    get_mac_address,
     build_summary_lines,
     collect_system_info,
     fetch_clients,
@@ -151,6 +152,10 @@ class CollectorGUI:
         self._load_config()
 
         self._create_widgets()
+        # La collecte alimente self.system_info, dont l'adresse MAC sert à
+        # reconnaître le client : elle doit donc démarrer en premier. Les deux
+        # opérations restent asynchrones, la reconnaissance échoue simplement
+        # si la MAC n'est pas encore connue.
         self._collect_info()
         self._fetch_clients()
 
@@ -418,8 +423,14 @@ class CollectorGUI:
         def fetch():
             try:
                 logger.debug(f"Fetching clients from server: {self.server_url}")
-                self.clients = fetch_clients(self.server_url)
-                logger.debug(f"Got {len(self.clients)} clients")
+                # L'adresse MAC permet au serveur de reconnaître une machine
+                # déjà inventoriée et de désigner son client. Elle est lue
+                # directement plutôt que prise dans self.system_info : la
+                # collecte complète dure une minute et tourne en parallèle,
+                # alors que cette lecture est immédiate.
+                mac = get_mac_address()
+                self.clients, suggestion = fetch_clients(self.server_url, mac_address=mac)
+                logger.debug(f"Got {len(self.clients)} clients, suggestion={suggestion}")
 
                 if not self.clients:
                     logger.warning("No clients returned - showing default message")
@@ -429,10 +440,23 @@ class CollectorGUI:
 
                 client_names = [f"{c.get('id', 'N/A')} - {c.get('nom', 'Inconnu')}" for c in self.clients]
                 self.client_combo['values'] = client_names
+
+                index = 0
+                message = "Prêt à envoyer ✓"
+                if suggestion:
+                    # Présélectionner le client auquel cette machine est déjà
+                    # rattachée, sans l'imposer : la liste reste modifiable.
+                    for i, c in enumerate(self.clients):
+                        if c.get('id') == suggestion.get('id'):
+                            index = i
+                            message = ("Client reconnu d'après l'adresse MAC : %s ✓"
+                                       % suggestion.get('nom', ''))
+                            break
+
                 if client_names:
-                    self.client_combo.current(0)
+                    self.client_combo.current(index)
                     self._on_client_selected()
-                self.status_var.set("Prêt à envoyer ✓")
+                self.status_var.set(message)
             except Exception as e:
                 logger.exception(f"ERROR in _fetch_clients: {type(e).__name__}: {str(e)}")
                 self.status_var.set("Erreur lors de la récupération des clients")

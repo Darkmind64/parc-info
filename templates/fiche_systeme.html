@@ -231,6 +231,9 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {{ row("Virtualisation", "Machine virtuelle / hyperviseur détecté") }}
             {% endif %}
             {{ row("BIOS", (rapport.bios_version ~ (' (' ~ rapport.bios_release_date ~ ')' if rapport.bios_release_date else '')) if rapport.bios_version else '') }}
+            {{ row("Détail plateforme", rapport.platform) }}
+            {{ row("Dernière mise à jour Windows", rapport.last_windows_update) }}
+            {{ row("Horodatage de collecte", rapport.timestamp) }}
             {% if age_materiel is not none %}
             <div class="fs-row">
                 <span class="fs-label">Âge du matériel</span>
@@ -817,18 +820,26 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     </table>
     {% endif %}
 
-    {% if rapport.bandwidth %}
+    {# La mesure de débit est facultative : sans cette ligne, son absence se
+       confondrait avec un bug plutôt qu'avec une option non activée. #}
     <div class="fs-row" style="margin-top:.7rem;">
         <span class="fs-label">Débit descendant</span>
         <span class="fs-value">
+            {% if rapport.bandwidth %}
             <strong>{{ rapport.bandwidth.mbps }} Mb/s</strong>
             <span style="color:var(--text-secondary);font-size:.72rem;">
                 — {{ rapport.bandwidth.downloaded_mb }} Mo en
                 {{ rapport.bandwidth.seconds }} s
             </span>
+            {% else %}
+            <span class="fs-pill fs-muted">Non mesuré</span>
+            <span style="color:var(--text-secondary);font-size:.72rem;margin-left:.35rem;">
+                relancer le collecteur avec <span class="fs-mono">--test-debit</span>,
+                ou cocher « Mesurer aussi le débit descendant » dans le collecteur graphique
+            </span>
+            {% endif %}
         </span>
     </div>
-    {% endif %}
 </div>
 {% endif %}
 
