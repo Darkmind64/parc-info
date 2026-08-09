@@ -231,6 +231,19 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {{ row("Virtualisation", "Machine virtuelle / hyperviseur détecté") }}
             {% endif %}
             {{ row("BIOS", (rapport.bios_version ~ (' (' ~ rapport.bios_release_date ~ ')' if rapport.bios_release_date else '')) if rapport.bios_version else '') }}
+            {% if age_materiel is not none %}
+            <div class="fs-row">
+                <span class="fs-label">Âge du matériel</span>
+                <span class="fs-value">
+                    {{ age_materiel }} an(s)
+                    <span class="fs-pill {{ 'fs-warn' if age_materiel >= 6 else 'fs-ok' }}"
+                          style="margin-left:.35rem;">
+                        {{ 'À renouveler' if age_materiel >= 6 else 'Dans la durée de vie' }}</span>
+                    <div style="font-size:.68rem;color:var(--text-secondary);">
+                        estimé depuis la date du BIOS, ce n'est pas une date d'achat</div>
+                </span>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -399,11 +412,12 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 
     {% if rapport.monitors %}
     <table class="fs-table" style="margin-bottom:.9rem;">
-        <tr><th>Écran</th><th>Fabricant</th><th>N° série</th><th>Année</th></tr>
+        <tr><th>Écran</th><th>Fabricant</th><th>Taille</th><th>N° série</th><th>Année</th></tr>
         {% for m in rapport.monitors %}
         <tr>
             <td>{{ m.model or '—' }}</td>
             <td>{{ m.manufacturer or '—' }}</td>
+            <td>{% if m.diagonal_inch %}{{ m.diagonal_inch }}"{% else %}—{% endif %}</td>
             <td class="fs-mono">{{ m.serial_number or '—' }}</td>
             <td>{{ m.year or '—' }}</td>
         </tr>
@@ -718,7 +732,8 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     <h3>■ Comptes utilisateurs locaux ({{ rapport.users|length }})</h3>
     {% if rapport.users_details %}
     <table class="fs-table">
-        <tr><th>Compte</th><th>État</th><th>Type d'utilisateur</th><th>Type de compte</th></tr>
+        <tr><th>Compte</th><th>État</th><th>Type d'utilisateur</th><th>Type de compte</th>
+            <th>Mot de passe</th><th>Dernière connexion</th></tr>
         {% for u in rapport.users_details %}
         <tr>
             <td>
@@ -731,6 +746,11 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             <td><span class="fs-pill {{ 'fs-warn' if u.admin else 'fs-info' }}">{{ u.role }}</span></td>
             <td><span class="fs-pill {{ 'fs-muted' if u.account_type == 'Local' else 'fs-info' }}">
                 {{ u.account_type }}</span></td>
+            <td>{% if u.password_never_expires %}
+                <span class="fs-pill {{ 'fs-warn' if u.admin and u.enabled else 'fs-muted' }}">
+                    N'expire jamais</span>
+                {% else %}<span class="fs-pill fs-ok">Expire</span>{% endif %}</td>
+            <td class="fs-mono">{{ u.last_logon or 'jamais' }}</td>
         </tr>
         {% endfor %}
     </table>
@@ -738,6 +758,111 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     {# Collectes antérieures : uniquement la forme textuelle #}
     <div class="fs-grid">
         {% for u in rapport.users %}<div class="fs-value">• {{ u }}</div>{% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── INCIDENTS SYSTÈME ────────────────────────────────────────────────── -->
+{% if rapport.system_incidents %}
+<div class="fs-section">
+    <h3>■ Incidents système ({{ rapport.system_incidents|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Journal Système des 30 derniers jours — arrêts inattendus, écrans bleus et
+        erreurs disque. Les occurrences répétées d'un même incident sont regroupées.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Type</th><th>Occurrences</th><th>Dernière</th><th>Message</th><th>Source</th></tr>
+        {% for i in rapport.system_incidents %}
+        <tr>
+            <td><span class="fs-pill {{ 'fs-bad' if i.level == 'danger' else 'fs-warn' }}">
+                {{ i.category }}</span></td>
+            <td><strong>{{ i.count }}</strong></td>
+            <td class="fs-mono">{{ i.last_seen }}</td>
+            <td>{{ i.message }}</td>
+            <td class="fs-mono">{{ i.provider }}/{{ i.event_id }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── MISES À JOUR EN ATTENTE ──────────────────────────────────────────── -->
+{% if rapport.pending_updates %}
+<div class="fs-section">
+    <h3>■ Mises à jour en attente ({{ rapport.pending_updates|length }})</h3>
+    <table class="fs-table">
+        <tr><th>Mise à jour</th><th>Nature</th></tr>
+        {% for u in rapport.pending_updates %}
+        <tr>
+            <td>{{ u.title }}</td>
+            <td>{% if u.security %}<span class="fs-pill fs-bad">Sécurité</span>
+                {% elif u.severity %}<span class="fs-pill fs-warn">{{ u.severity }}</span>
+                {% else %}<span class="fs-pill fs-update">Mise à jour</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
+
+<!-- ── DÉMARRAGE, SERVICES ET PARTAGES ──────────────────────────────────── -->
+{% if rapport.startup_programs or rapport.stopped_auto_services or rapport.smb_shares %}
+<div class="fs-section">
+    <h3>■ Démarrage, services &amp; partages</h3>
+
+    {% if rapport.stopped_auto_services %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Services en démarrage automatique mais arrêtés ({{ rapport.stopped_auto_services|length }})
+        — un service métier absent de la liste des services actifs se voit ici
+    </div>
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Service</th><th>Nom interne</th><th>État</th></tr>
+        {% for sv in rapport.stopped_auto_services %}
+        <tr>
+            <td>{{ sv.display_name }}</td>
+            <td class="fs-mono">{{ sv.name }}</td>
+            <td><span class="fs-pill fs-warn">{{ sv.state }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.smb_shares %}
+    {% set exposes = rapport.smb_shares | rejectattr('administrative') | list %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Partages réseau — {{ exposes|length }} exposé(s) sur {{ rapport.smb_shares|length }} ;
+        les partages d'administration (C$, ADMIN$…) existent sur toute machine Windows
+    </div>
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Partage</th><th>Chemin</th><th>Nature</th></tr>
+        {% for sh in rapport.smb_shares | sort(attribute='administrative') %}
+        <tr>
+            <td><strong>{{ sh.name }}</strong></td>
+            <td class="fs-mono">{{ sh.path or '—' }}</td>
+            <td><span class="fs-pill {{ 'fs-muted' if sh.administrative else 'fs-warn' }}">
+                {{ 'Administration' if sh.administrative else 'Exposé' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.startup_programs %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Programmes lancés au démarrage ({{ rapport.startup_programs|length }})
+    </div>
+    <div class="fs-scroll">
+        <table class="fs-table">
+            <tr><th>Programme</th><th>Commande</th><th>Emplacement</th></tr>
+            {% for st in rapport.startup_programs %}
+            <tr>
+                <td>{{ st.name }}</td>
+                <td class="fs-mono" style="word-break:break-all;">{{ st.command or '—' }}</td>
+                <td class="fs-mono">{{ st.location or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </table>
     </div>
     {% endif %}
 </div>

@@ -1,23 +1,23 @@
 {
-  "version": "2.6.35",
-  "release_date": "2026-08-08T23:15:00.000000",
+  "version": "2.6.36",
+  "release_date": "2026-08-09T00:30:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.35/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.35/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.35",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.35/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.35/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.36/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.36/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.36",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.36/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.36/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Imprimantes physiques/virtuelles et USB/réseau, périphériques USB détaillés, état réel de l'antivirus",
+    "new_features": "La fiche passe de l'inventaire au diagnostic : incidents système, mises à jour en attente, démarrage, hygiène des comptes",
     "improvements": [
-      "NEW: Les imprimantes distinguent physique / virtuelle et USB / réseau / local. Le raccordement est déduit du nom du port : Win32_Printer.Network rapporte « non-réseau » même pour une imprimante WSD parfaitement réseau.",
-      "NEW: Les périphériques USB remontent marque, modèle, date de première connexion, version et date du pilote. Le modèle vient du nom que le périphérique déclare lui-même (BusReportedDeviceDesc), bien plus parlant que le libellé du pilote : « DCP-195C » au lieu de « Dispositif de stockage de masse USB ».",
-      "NEW: Ce même nom déclaré sert aussi à classer le matériel — une souris Logitech qui remontait en « Autre » est désormais correctement rangée en « Souris ».",
-      "NEW: L'antivirus affiche son état réel (Actif, Inactif, signatures obsolètes) par décodage du productState du Centre de sécurité Windows. Un antivirus installé mais désactivé s'affichait jusqu'ici comme un antivirus opérationnel.",
-      "Le badge de service des ports TCP passe à droite du numéro, et les mises à jour Windows ordinaires prennent un jaune sourd qui ne concurrence plus le rouge des correctifs de sécurité.",
-      "Les tableaux larges défilent dans leur propre conteneur au lieu de pousser la page en débordement horizontal."
+      "NEW: Incidents système des 30 derniers jours — arrêts inattendus, écrans bleus, erreurs disque et corruptions NTFS, regroupés par occurrence. Sur la machine de test : 35 signalements de bloc défectueux sur un disque, invisibles jusqu'ici.",
+      "NEW: Mises à jour Windows en attente, avec distinction des mises à jour de sécurité. Recherche dans le cache local pour ne pas dépendre du réseau ni d'un serveur WSUS.",
+      "NEW: Programmes lancés au démarrage, services en démarrage automatique mais arrêtés, et partages réseau en distinguant les partages d'administration des partages créés à la main.",
+      "NEW: Hygiène des comptes — mot de passe sans expiration et date de dernière connexion, avec alerte ciblée sur les comptes administrateurs concernés.",
+      "NEW: Âge du matériel estimé depuis la date du BIOS, et diagonale des écrans calculée depuis les dimensions physiques de l'EDID.",
+      "Ces signaux alimentent le bandeau « Points d'attention » : arrêts inattendus, erreurs disque, correctifs de sécurité en attente, matériel de plus de six ans, partages exposés."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.35"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.36"
 }

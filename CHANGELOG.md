@@ -1,5 +1,55 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.36] - 2026-08-09 🩺
+
+### 🩺 DE L'INVENTAIRE AU DIAGNOSTIC
+La fiche décrivait la configuration d'une machine. Elle décrit maintenant aussi
+son **comportement** — ce qui permet de répondre à « ça rame » ou « ça redémarre
+tout seul » sans se déplacer.
+
+#### Incidents système (30 jours)
+- ✅ Arrêts inattendus, écrans bleus, erreurs disque et corruptions NTFS, relevés
+  dans le journal Système et **regroupés par occurrence**
+- ✅ Le filtrage se fait sur les paires (fournisseur, identifiant) et non sur
+  l'identifiant seul : l'ID 7 vaut « bloc défectueux » chez `disk` et tout autre
+  chose chez Hyper-V. Un filtre sur l'ID seul ramenait 200 événements dont
+  l'écrasante majorité n'était que du bruit
+- ✅ Sur la machine de test : **35 signalements de bloc défectueux** sur un
+  disque et un arrêt inattendu, tous deux invisibles jusqu'ici
+
+#### Mises à jour en attente
+- ✅ Liste des correctifs non installés, **mises à jour de sécurité distinguées**
+- ✅ Recherche dans le cache local (`Online=$false`) : une recherche en ligne
+  dépend du réseau et du serveur WSUS et peut dépasser la minute
+
+#### Démarrage, services et partages
+- ✅ Programmes lancés au démarrage — la réponse à « le poste est lent »
+- ✅ Services en démarrage automatique mais **arrêtés** — la réponse à « le
+  service métier ne se lance plus »
+- ✅ Partages réseau, en distinguant les partages d'administration (`C$`,
+  `ADMIN$`, présents partout) des partages créés à la main
+
+#### Hygiène des comptes
+- ✅ Mot de passe sans expiration et date de dernière connexion, en badges
+- ✅ L'alerte ne se déclenche que sur les **comptes administrateurs actifs**
+  concernés : la signaler compte par compte noierait la liste
+
+#### Matériel
+- ✅ **Âge estimé depuis la date du BIOS** — repère de renouvellement, pas une
+  date d'achat. Ne demande aucune collecte supplémentaire
+- ✅ **Diagonale des écrans en pouces**, calculée depuis les dimensions physiques
+  de l'EDID déjà relevées
+
+### 📌 POINTS D'ATTENTION ENRICHIS
+Le bandeau intègre désormais : arrêts inattendus, erreurs disque, correctifs de
+sécurité en attente, comptes administrateurs à mot de passe sans expiration,
+partages exposés et matériel de plus de six ans.
+
+Coût mesuré de l'ensemble : ~4 s pour les diagnostics, chaque bloc isolé de
+sorte qu'un échec (droits, service absent) n'empêche pas les autres de remonter.
+
+---
+
 ## [2.6.35] - 2026-08-08 🖨️
 
 ### 🖨️ IMPRIMANTES TYPÉES
