@@ -1,5 +1,17 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.39] - 2026-08-09 🔧
+
+### 🔧 CORRECTION D'UNE ANNONCE ERRONÉE
+- ✅ La case **« Mesurer aussi le débit descendant »** du collecteur graphique
+  était annoncée dans les notes de la 2.6.38, mais le correctif avait échoué
+  silencieusement avant d'atteindre ce fichier : la case n'existait pas. Elle
+  est bien présente ici
+- ℹ️ L'option `--test-debit` du collecteur en ligne de commande, elle,
+  fonctionnait déjà en 2.6.38 — seule l'interface graphique était concernée
+
+---
+
 ## [2.6.38] - 2026-08-09 🌐
 
 ### 🌐 CONFIGURATION ET QUALITÉ RÉSEAU
