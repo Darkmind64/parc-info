@@ -75,7 +75,8 @@ def ensure_firewall_rule(port, logger):
     try:
         check = subprocess.run(
             ['netsh', 'advfirewall', 'firewall', 'show', 'rule', f'name={rule_name}'],
-            capture_output=True, text=True, timeout=5, creationflags=no_window
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            timeout=5, creationflags=no_window
         )
         if check.returncode == 0 and 'No rules match' not in check.stdout:
             logger.debug(f"Firewall rule already present for port {port}")

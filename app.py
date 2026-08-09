@@ -145,11 +145,11 @@ def inject_auth_context():
 # Clé secrète persistée (générée une fois, stockée à côté de la DB)
 _secret_key_file = os.path.join(_data_base, 'secret.key')
 if os.path.exists(_secret_key_file):
-    with open(_secret_key_file, 'r') as _f:
+    with open(_secret_key_file, 'r', encoding='utf-8') as _f:
         app.config['SECRET_KEY'] = _f.read().strip()
 else:
     _generated_key = secrets.token_hex(32)
-    with open(_secret_key_file, 'w') as _f:
+    with open(_secret_key_file, 'w', encoding='utf-8') as _f:
         _f.write(_generated_key)
     app.config['SECRET_KEY'] = _generated_key
 # ── Configuration de sécurité des sessions ───────────────────────────────────
@@ -1535,6 +1535,116 @@ if not _called_from_launcher:
     init_db()
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# SAUVEGARDE AUTOMATIQUE DE LA BASE
+# ════════════════════════════════════════════════════════════════════════════
+
+BACKUP_DIR = os.path.join(_data_base, 'backups')
+# Nombre de sauvegardes conservées. Au-delà, les plus anciennes sont supprimées.
+BACKUP_KEEP = 3
+# Intervalle entre deux sauvegardes automatiques.
+BACKUP_INTERVAL_HOURS = 24
+_backup_lock = threading.Lock()
+
+
+def _backup_files():
+    """Sauvegardes existantes, de la plus récente à la plus ancienne."""
+    try:
+        fichiers = [
+            os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR)
+            if f.startswith('parc_info_') and f.endswith('.db')
+        ]
+    except OSError:
+        return []
+    return sorted(fichiers, key=lambda f: os.path.getmtime(f), reverse=True)
+
+
+def creer_sauvegarde(raison='automatique'):
+    """Copie cohérente de la base, puis rotation des anciennes.
+
+    La copie passe par l'API `backup` de SQLite et non par un copier-coller de
+    fichier : la base est en mode WAL et une copie brute pendant une écriture
+    donnerait une sauvegarde tronquée, inutilisable au moment où elle servirait.
+
+    Retourne (chemin, erreur) — l'un des deux vaut None.
+    """
+    # Une seule sauvegarde à la fois : le déclencheur périodique et une demande
+    # manuelle peuvent se présenter en même temps.
+    if not _backup_lock.acquire(blocking=False):
+        return (None, 'une sauvegarde est déjà en cours')
+    try:
+        os.makedirs(BACKUP_DIR, exist_ok=True)
+        horodatage = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        destination = os.path.join(BACKUP_DIR, f'parc_info_{horodatage}.db')
+
+        source = sqlite3.connect(DATABASE)
+        try:
+            cible = sqlite3.connect(destination)
+            try:
+                source.backup(cible)
+            finally:
+                cible.close()
+        finally:
+            source.close()
+
+        taille = os.path.getsize(destination)
+        # Rotation : ne garder que les BACKUP_KEEP plus récentes.
+        supprimees = []
+        for ancienne in _backup_files()[BACKUP_KEEP:]:
+            try:
+                os.remove(ancienne)
+                supprimees.append(os.path.basename(ancienne))
+            except OSError:
+                logger.warning('Sauvegarde non supprimée : %s', ancienne)
+
+        logger.info('Sauvegarde %s : %s (%s)%s', raison, os.path.basename(destination),
+                    human_size(taille),
+                    ' — supprimé %s' % ', '.join(supprimees) if supprimees else '')
+        try:
+            from database import log_sync_event
+            log_sync_event('sauvegarde', 'ok',
+                           'Sauvegarde %s : %s' % (raison, human_size(taille)),
+                           {'fichier': os.path.basename(destination),
+                            'supprimees': supprimees})
+        except Exception:
+            # Le journal est un confort : son absence ne doit pas faire échouer
+            # une sauvegarde qui, elle, a réussi.
+            pass
+        return (destination, None)
+    except Exception as exc:
+        logger.exception('Échec de la sauvegarde automatique')
+        return (None, str(exc))
+    finally:
+        _backup_lock.release()
+
+
+def _boucle_sauvegarde():
+    """Déclenche une sauvegarde au démarrage puis à intervalle régulier."""
+    # Au démarrage : une sauvegarde n'est faite que si la dernière date de plus
+    # d'un intervalle, pour ne pas en créer une à chaque redémarrage et faire
+    # tourner la rotation jusqu'à perdre les sauvegardes utiles.
+    while True:
+        try:
+            recentes = _backup_files()
+            derniere = os.path.getmtime(recentes[0]) if recentes else 0
+            age_heures = (time.time() - derniere) / 3600
+            if age_heures >= BACKUP_INTERVAL_HOURS:
+                creer_sauvegarde('automatique')
+        except Exception:
+            logger.exception('Boucle de sauvegarde')
+        time.sleep(3600)
+
+
+def demarrer_sauvegardes():
+    """Lance le thread de sauvegarde, sauf si la fonction est désactivée."""
+    if str(os.environ.get('PARCINFO_BACKUP', '1')).lower() in ('0', 'false', 'no'):
+        logger.info('Sauvegarde automatique désactivée (PARCINFO_BACKUP)')
+        return
+    fil = threading.Thread(target=_boucle_sauvegarde, daemon=True,
+                           name='SauvegardeBase')
+    fil.start()
+
+
 # ─── CONFIGURATION GLOBALE ───────────────────────────────────────────────────
 
 _TYPE_CSS_DEFAULTS = {
@@ -1718,6 +1828,38 @@ def api_db_transfer():
     except Exception as e:
         local_conn.close()
         return jsonify({'ok': False, 'error': str(e)})
+
+
+@app.route('/api/db/sauvegarde', methods=['GET', 'POST'])
+@login_required
+def api_db_sauvegarde():
+    """Liste les sauvegardes (GET) ou en déclenche une (POST, administrateur)."""
+    user = get_auth_user()
+    if request.method == 'GET':
+        sauvegardes = []
+        for chemin in _backup_files():
+            try:
+                sauvegardes.append({
+                    'fichier': os.path.basename(chemin),
+                    'taille': human_size(os.path.getsize(chemin)),
+                    'date': datetime.utcfromtimestamp(
+                        os.path.getmtime(chemin)).isoformat(timespec='seconds'),
+                })
+            except OSError:
+                continue
+        return jsonify({'sauvegardes': sauvegardes, 'conservees': BACKUP_KEEP,
+                        'intervalle_heures': BACKUP_INTERVAL_HOURS})
+
+    # Une sauvegarde copie l'intégralité des données de tous les clients :
+    # la déclencher reste une opération d'administration.
+    if not user or user.get('role') != 'admin':
+        return jsonify({'ok': False, 'error': 'Réservé aux administrateurs'}), 403
+
+    chemin, erreur = creer_sauvegarde('manuelle')
+    if erreur:
+        return jsonify({'ok': False, 'error': erreur}), 500
+    return jsonify({'ok': True, 'fichier': os.path.basename(chemin),
+                    'taille': human_size(os.path.getsize(chemin))})
 
 
 @app.route('/api/db/sync', methods=['GET', 'POST'])
@@ -3281,7 +3423,19 @@ def telecharger_rdp(id):
 
     response = make_response(rdp_content)
     response.headers['Content-Type'] = 'application/x-rdp'
-    response.headers['Content-Disposition'] = f'attachment; filename="{nom}_{ip}.rdp"'
+    # RFC 6266 : un en-tête HTTP ne transporte que de l'ASCII. Un nom de machine
+    # accentué (« Bureau-Réception ») produisait un nom de fichier corrompu, car
+    # Werkzeug encode l'en-tête en latin-1. On fournit donc une version ASCII de
+    # repli et la version UTF-8 percent-encodée que lisent les navigateurs.
+    import unicodedata as _ud
+    from urllib.parse import quote as _quote
+    _nom_fichier = f'{nom}_{ip}.rdp'
+    _ascii = _ud.normalize('NFKD', _nom_fichier).encode('ascii', 'ignore').decode() or 'connexion.rdp'
+    _ascii = _ascii.replace('"', '')
+    response.headers['Content-Disposition'] = (
+        "attachment; filename=\"%s\"; filename*=UTF-8''%s"
+        % (_ascii, _quote(_nom_fichier, safe=''))
+    )
 
     return response
 
@@ -5760,7 +5914,7 @@ def api_device_info():
 
         # Logiciels (liste complète - garde-fou à 2000 entrées contre un payload aberrant)
         software_list = data.get('installed_software', [])
-        software_json = json.dumps(software_list[:2000]) if software_list else ''
+        software_json = json.dumps(software_list[:2000], ensure_ascii=False) if software_list else ''
 
         # Périphériques USB (même garde-fou contre un payload aberrant)
         usb_devices = data.get('usb_devices') or []
@@ -10651,6 +10805,8 @@ if __name__ == '__main__':
     threading.Thread(target=_oui_load_full, daemon=True).start()
     # Lancer la synchronisation des uploads (local ↔ Turso)
     start_sync_thread(interval=60)
+    # Sauvegarde périodique de la base, avec rotation sur les 3 dernières
+    demarrer_sauvegardes()
     print("="*50)
     print("  ParcInfo Multi-Clients")
     print(f"  OS      : {platform.system()}")

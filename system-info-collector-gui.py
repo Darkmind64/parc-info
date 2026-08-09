@@ -163,7 +163,7 @@ class CollectorGUI:
         """Charge la configuration sauvegardée."""
         try:
             if self.config_file.exists():
-                with open(self.config_file) as f:
+                with open(self.config_file, encoding="utf-8") as f:
                     config = json.load(f)
                     saved_url = config.get('server_url')
                     if saved_url:
@@ -175,7 +175,7 @@ class CollectorGUI:
     def _save_config(self):
         """Sauvegarde la configuration."""
         try:
-            with open(self.config_file, 'w') as f:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump({'server_url': self.server_url}, f)
                 logger.debug(f"Saved server URL to config: {self.server_url}")
         except Exception as e:
