@@ -25,11 +25,28 @@ from collector_core import (
     COLLECTOR_VERSION,
     build_summary_lines,
     collect_system_info,
+    console_progress,
     generate_pdf_report,
     is_elevated,
     send_to_parcinfo,
     upload_report_to_parcinfo,
 )
+
+
+def _forcer_sortie_utf8():
+    """Rend la console capable d'afficher les caractères non-ASCII.
+
+    Une console Windows utilise cp1252 : le premier « ⚠ » ou « ✓ » affiché y
+    lève un UnicodeEncodeError qui interrompt le collecteur avant même la
+    collecte. Reconfigurer la sortie en UTF-8 avec repli évite d'avoir à
+    appauvrir tous les messages.
+    """
+    for flux in (sys.stdout, sys.stderr):
+        try:
+            flux.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError):
+            # Python < 3.7 ou flux déjà encapsulé : sans objet, on continue
+            pass
 
 
 def main():
@@ -50,6 +67,7 @@ def main():
                         help='Mode silencieux (pas d\'affichage)')
 
     args = parser.parse_args()
+    _forcer_sortie_utf8()
 
     if not args.quiet:
         print("=" * 78)
@@ -60,7 +78,9 @@ def main():
             print("  BitLocker et clé OEM risquent d'être absents du rapport.")
         print("\n[*] Collecte des informations système...")
 
-    info = collect_system_info()
+    # Barre de progression : la collecte dure une bonne minute et resterait
+    # sinon indiscernable d'un blocage. En mode --quiet, aucun rappel.
+    info = collect_system_info(progress=None if args.quiet else console_progress())
 
     if not args.quiet:
         print()

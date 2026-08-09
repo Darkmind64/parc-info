@@ -1821,6 +1821,60 @@ _EVENT_SPECS = [
 EVENT_WINDOW_DAYS = 30
 
 
+def _disk_map():
+    """Associe chaque numéro de disque physique à son modèle et ses lettres.
+
+    Le journal Système désigne les disques par `\\Device\\HarddiskN\\DRxx`, ce qui
+    ne dit rien à personne. N est le numéro de disque physique, qui permet de
+    remonter au modèle et aux lettres de lecteur.
+    """
+    data = _win_powershell_json(
+        "@(Get-Disk -ErrorAction SilentlyContinue | ForEach-Object { "
+        "$d=$_; $letters=@(); try { $letters=@(Get-Partition -DiskNumber $d.Number "
+        "-ErrorAction SilentlyContinue | Where-Object { $_.DriveLetter } "
+        "| ForEach-Object { [string]$_.DriveLetter }) } catch {}; "
+        "[PSCustomObject]@{ Number=$d.Number; Model=$d.FriendlyName; "
+        "Bus=$d.BusType; Letters=$letters } }) | ConvertTo-Json -Compress -Depth 3",
+        timeout=45,
+    )
+    carte = {}
+    for d in _as_list(data):
+        numero = d.get('Number')
+        if numero is None:
+            continue
+        lettres = [str(l).rstrip(':') for l in _as_list(d.get('Letters')) if l]
+        carte[int(numero)] = {
+            'model': _clean(d.get('Model')),
+            'bus': _clean(d.get('Bus')),
+            'letters': lettres,
+        }
+    return carte
+
+
+def describe_disk_device(chemin, carte):
+    """Traduit `\\Device\\Harddisk7\\DR22` en disque identifiable.
+
+    Un disque amovible débranché depuis l'incident ne figure plus dans la carte :
+    le dire explicitement vaut mieux que de laisser un chemin brut, et mieux que
+    de l'attribuer au hasard à un disque encore présent.
+    """
+    m = re.search(r'Harddisk(\d+)', chemin or '', re.IGNORECASE)
+    if not m:
+        return ''
+    numero = int(m.group(1))
+    disque = carte.get(numero)
+    if not disque:
+        return 'disque n°%d (absent — support amovible débranché depuis ?)' % numero
+    parties = []
+    if disque['letters']:
+        parties.append(', '.join('%s:' % l for l in disque['letters']))
+    if disque['model']:
+        parties.append(disque['model'])
+    if disque['bus']:
+        parties.append(disque['bus'])
+    return ' — '.join(parties) or 'disque n°%d' % numero
+
+
 def _win_diagnostics():
     """Signaux de diagnostic : incidents, correctifs en attente, démarrage.
 
@@ -1863,6 +1917,13 @@ def _win_diagnostics():
             entree['last_seen'] = quand
 
     if groupes:
+        # Rapprocher les chemins de périphérique des disques réels : la carte
+        # n'est construite que si un incident disque a effectivement été relevé.
+        carte = _disk_map() if any(g['category'].startswith(('Erreur disque', 'Corruption'))
+                                   for g in groupes.values()) else {}
+        for g in groupes.values():
+            g['disk'] = describe_disk_device(g['message'], carte) if carte else ''
+
         incidents = sorted(groupes.values(), key=lambda g: g['last_seen'], reverse=True)
         info['system_incidents'] = incidents
         info['unexpected_shutdowns'] = sum(
@@ -1954,15 +2015,84 @@ def _win_diagnostics():
         if partages:
             info['smb_shares'] = partages
 
+    # ── Tâches planifiées non-Microsoft ────────────────────────────────────
+    # Les tâches du dossier \Microsoft\ sont celles de Windows lui-même : des
+    # centaines d'entrées sans valeur d'inventaire. Ce qui informe, ce sont les
+    # tâches ajoutées par des logiciels tiers ou à la main.
+    taches = _win_powershell_json(
+        "@(Get-ScheduledTask -ErrorAction SilentlyContinue "
+        "| Where-Object { $_.TaskPath -notlike '\\Microsoft\\*' } | ForEach-Object { "
+        "$t=$_; $i=$null; try { $i=Get-ScheduledTaskInfo -TaskName $t.TaskName "
+        "-TaskPath $t.TaskPath -ErrorAction SilentlyContinue } catch {}; "
+        "[PSCustomObject]@{ Name=$t.TaskName; Path=$t.TaskPath; State=[string]$t.State; "
+        "Author=$t.Author; "
+        "Action=($t.Actions | ForEach-Object { $_.Execute } | Select-Object -First 1); "
+        "LastRun=$(if($i.LastRunTime){$i.LastRunTime.ToString('yyyy-MM-dd HH:mm')}else{''}); "
+        "LastResult=$i.LastTaskResult } }) | ConvertTo-Json -Compress -Depth 3",
+        timeout=90,
+    )
+    planifiees = []
+    for t in _as_list(taches):
+        nom = _clean(t.get('Name'))
+        if not nom:
+            continue
+        resultat = t.get('LastResult')
+        planifiees.append({
+            'name': nom,
+            'path': _clean(t.get('Path')),
+            'state': _clean(t.get('State')),
+            'author': _clean(t.get('Author')),
+            'action': _clean(t.get('Action')),
+            'last_run': _clean(t.get('LastRun')),
+            # 0 = succès, 267011 = jamais exécutée ; tout le reste est un échec
+            'last_result': resultat,
+            'failed': resultat not in (None, 0, 267011),
+        })
+    if planifiees:
+        info['scheduled_tasks'] = sorted(planifiees, key=lambda t: t['name'].lower())
+
     return info
 
 
-def get_system_info_windows():
-    """Collecte Windows complète (ctypes/winreg/PowerShell, sans dépendance externe)."""
+# Étapes de la collecte Windows, avec le libellé montré à l'utilisateur. La
+# collecte dure une bonne minute : sans retour, elle est indiscernable d'un
+# blocage.
+_WIN_STEPS = [
+    ('Matériel de base', lambda: _win_base_hardware()),
+    ('Processeur et mémoire', lambda: _win_core()),
+    ('Détail matériel', lambda: _win_hardware_detail()),
+    ('Écrans, imprimantes et disques', lambda: _win_inventory()),
+    ('Licences et correctifs', lambda: _win_licensing()),
+    ('Sécurité', lambda: _win_security()),
+    ('Comptes utilisateurs', lambda: _win_users()),
+    ('Batterie et réseau', lambda: _win_extras()),
+    ('Diagnostic (incidents, services, tâches)', lambda: _win_diagnostics()),
+]
+
+
+def _report(progress, fraction, libelle):
+    """Notifie l'avancement, sans jamais faire échouer la collecte.
+
+    Le rappel vient de l'interface appelante (barre texte ou widget) : une
+    erreur d'affichage ne doit pas interrompre une collecte d'une minute.
+    """
+    if not progress:
+        return
+    try:
+        progress(max(0.0, min(1.0, float(fraction))), libelle)
+    except Exception:
+        pass
+
+
+def get_system_info_windows(progress=None):
+    """Collecte Windows complète (ctypes/winreg/PowerShell, sans dépendance externe).
+
+    `progress` est appelé avec (fraction, libellé) avant chaque étape.
+    """
     info = {}
-    for collector in (_win_base_hardware, _win_core, _win_hardware_detail,
-                      _win_inventory, _win_licensing, _win_security,
-                      _win_users, _win_extras, _win_diagnostics):
+    total = len(_WIN_STEPS)
+    for index, (libelle, collector) in enumerate(_WIN_STEPS):
+        _report(progress, 0.10 + 0.70 * index / total, libelle)
         try:
             info.update(collector() or {})
         except Exception:
@@ -2648,8 +2778,46 @@ def guess_device_type(info):
 # COLLECTE GLOBALE
 # ════════════════════════════════════════════════════════════════════════════
 
-def collect_system_info():
-    """Collecte toutes les infos système."""
+def console_progress(largeur=32, flux=None):
+    """Fabrique un rappel de progression qui dessine une barre en console.
+
+    La barre est réécrite sur la même ligne tant que le flux est un terminal ;
+    redirigé vers un fichier ou un journal, on retombe sur une ligne par étape
+    pour ne pas produire un fichier illisible de retours chariot.
+    """
+    flux = flux or sys.stdout
+    interactif = hasattr(flux, 'isatty') and flux.isatty()
+    etat = {'dernier': None}
+
+    def rappel(fraction, libelle):
+        if not interactif:
+            if libelle != etat['dernier']:
+                etat['dernier'] = libelle
+                flux.write('  [%3d%%] %s\n' % (round(fraction * 100), libelle))
+                flux.flush()
+            return
+        remplies = int(round(largeur * fraction))
+        barre = '#' * remplies + '-' * (largeur - remplies)
+        ligne = '  [%s] %3d%%  %s' % (barre, round(fraction * 100), libelle)
+        # Compléter par des espaces : un libellé plus court laisserait sinon la
+        # fin du précédent à l'écran.
+        flux.write('\r' + ligne.ljust(78)[:78])
+        flux.flush()
+        if fraction >= 1.0:
+            flux.write('\n')
+            flux.flush()
+
+    return rappel
+
+
+def collect_system_info(progress=None):
+    """Collecte toutes les infos système.
+
+    `progress` est un rappel optionnel appelé avec (fraction entre 0 et 1,
+    libellé de l'étape en cours). Il permet aux deux collecteurs d'afficher la
+    même progression sans dupliquer la liste des étapes.
+    """
+    _report(progress, 0.02, 'Identification de la machine')
     info = {
         'collector_version': COLLECTOR_VERSION,
         'timestamp': datetime.utcnow().isoformat(),
@@ -2661,24 +2829,29 @@ def collect_system_info():
     }
 
     # OS
+    _report(progress, 0.06, "Système d'exploitation")
     info.update(get_os_info())
 
     # Infos spécifiques par OS
     try:
         if IS_WINDOWS:
-            info.update(get_system_info_windows())
+            info.update(get_system_info_windows(progress))
         elif IS_MAC:
+            _report(progress, 0.30, 'Collecte macOS')
             info.update(get_system_info_mac())
         elif IS_LINUX:
+            _report(progress, 0.30, 'Collecte Linux')
             info.update(get_system_info_linux())
     except Exception:
         pass
 
     # Logiciels
+    _report(progress, 0.82, 'Inventaire logiciel')
     info['installed_software'] = get_installed_software()
 
     # Périphériques USB connectés. Isolé de la collecte système : une erreur ici
     # (droits, commande absente) ne doit pas priver le rapport du reste.
+    _report(progress, 0.90, 'Périphériques USB')
     try:
         info['usb_devices'] = collect_usb_devices()
     except Exception:
@@ -2687,6 +2860,7 @@ def collect_system_info():
     # Type d'appareil déduit
     info['device_type'] = guess_device_type(info)
 
+    _report(progress, 1.0, 'Collecte terminée')
     return info
 
 
@@ -3261,6 +3435,11 @@ def build_alerts(info):
     if admins_sans_expiration:
         add('warn', '%d compte(s) administrateur à mot de passe sans expiration'
             % len(admins_sans_expiration), ' · '.join(admins_sans_expiration[:5]))
+
+    taches_ko = [t['name'] for t in info.get('scheduled_tasks', []) if t.get('failed')]
+    if taches_ko:
+        add('warn', '%d tâche(s) planifiée(s) en échec' % len(taches_ko),
+            ' · '.join(taches_ko[:4]))
 
     partages = [s['name'] for s in info.get('smb_shares', []) if not s.get('administrative')]
     if partages:

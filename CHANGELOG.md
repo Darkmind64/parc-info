@@ -1,5 +1,47 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.37] - 2026-08-09 🔗
+
+### 🔗 INCIDENTS DISQUE RAPPROCHÉS DU MATÉRIEL
+- ✅ Le journal Système désigne les disques par `\Device\Harddisk6\DR6`, ce qui
+  ne dit rien à personne. Le numéro est désormais rapproché du disque physique :
+  **« Brother DCP-195C — USB »**, ou **« C: — KINGSTON SNV2S1000G — NVMe »**
+- ✅ Un support amovible **débranché depuis l'incident** ne figure plus dans la
+  table des disques : il est signalé comme absent plutôt qu'attribué au hasard à
+  un disque encore présent. Sur la machine de test, les 35 blocs défectueux
+  visaient un `Harddisk7` qui n'est plus connecté — l'information reste juste
+- ✅ La table des disques n'est construite que si un incident disque a
+  effectivement été relevé
+
+### 🗓️ TÂCHES PLANIFIÉES
+- ✅ Tâches hors dossier `\Microsoft\` — celles de Windows se comptent par
+  centaines et n'apprennent rien. État, dernière exécution, résultat et
+  exécutable
+- ✅ Les tâches **en échec** remontent en tête et alimentent les points
+  d'attention. Sur la machine de test : 13 échecs sur 29 tâches
+- ✅ Le code retour 267011 (« jamais exécutée ») n'est pas compté comme un échec
+
+### ⏳ PROGRESSION DU COLLECTEUR
+- ✅ Étape en cours et barre de progression, pilotées par un rappel unique
+  partagé : les deux collecteurs affichent les mêmes étapes sans dupliquer la
+  liste
+- ✅ En console interactive la barre se réécrit sur une seule ligne ; redirigée
+  vers un fichier ou un journal, elle retombe sur une ligne par étape plutôt que
+  de produire un fichier illisible de retours chariot
+- ✅ Le collecteur GUI dispose d'une barre équivalente, alimentée depuis le
+  thread de collecte via `after()` — seule la boucle Tk touche aux widgets
+- ✅ Un rappel qui échoue n'interrompt jamais une collecte d'une minute
+
+### 🔧 CORRECTION
+- ✅ **Le collecteur CLI plantait immédiatement sur une console Windows
+  française.** Le premier caractère non-ASCII affiché — le « ⚠ » de
+  l'avertissement sur les privilèges, ou le « ✓ » de confirmation — levait un
+  `UnicodeEncodeError` en cp1252 et interrompait le programme **avant même le
+  début de la collecte**. Les deux collecteurs forcent maintenant leur sortie en
+  UTF-8 avec repli
+
+---
+
 ## [2.6.36] - 2026-08-09 🩺
 
 ### 🩺 DE L'INVENTAIRE AU DIAGNOSTIC
