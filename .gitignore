@@ -4,6 +4,8 @@ parc_info.db-shm
 parc_info.db-wal
 secret.key
 uploads/
+# Copies produites par la sauvegarde automatique (introduite en 2.6.42)
+backups/
 
 # Environnement Python
 __pycache__/

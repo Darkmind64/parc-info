@@ -1,10 +1,10 @@
-PARCINFO_VERSION=2.6.42
+PARCINFO_VERSION=2.6.43
 RELEASE_DATE=2026-08-08
-BUILD_NUMBER=2026080906
+BUILD_NUMBER=2026080907
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.6.42 - Audit encodage, sauvegarde automatique de la base
+# Version 2.6.43 - Mecanisme de mise a jour reconstruit
 # Balayage de toutes les sources de clé produit, appairage sur les 5
 # derniers caractères, report automatique dans la fiche appareil
 # Date: 8 août 2026

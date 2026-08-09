@@ -1,270 +1,245 @@
 /**
- * ParcInfo Update Notifier
+ * Annonce des mises à jour de ParcInfo.
  *
- * Displays update notifications in the web interface
- * - Shows banner when update available
- * - Handles install and dismiss actions
- * - Auto-checks for updates periodically
+ * Interroge /api/updates/status, affiche une bannière quand une version plus
+ * récente existe, et suit l'installation jusqu'au redémarrage.
+ *
+ * Trois présentations selon le mode d'exécution renvoyé par le serveur :
+ *   - windows / macos : bouton « Installer »
+ *   - docker          : commande à lancer sur l'hôte, un conteneur ne pouvant
+ *                       pas se remplacer lui-même
+ *   - source          : information seule
  */
 
-class UpdateNotifier {
-    constructor(options = {}) {
-        this.checkInterval = options.checkInterval || 3600000; // 1 hour
-        this.containerId = options.containerId || 'update-notification-container';
-        this.autoCheck = options.autoCheck !== false;
-        this.notificationTemplate = options.notificationTemplate || this.defaultTemplate;
+(function () {
+    'use strict';
 
-        this.currentNotification = null;
-        this.checkTimeout = null;
+    var INTERVALLE_NORMAL = 15 * 60 * 1000;   // 15 min au repos
+    var INTERVALLE_TRAVAIL = 2 * 1000;        // 2 s pendant une installation
 
-        if (this.autoCheck) {
-            this.startAutoCheck();
+    var conteneur = null;
+    var minuteur = null;
+    var etatCourant = null;
+
+    function elt(id) { return document.getElementById(id); }
+
+    function echapper(s) {
+        var d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
+    // ── Rendu ───────────────────────────────────────────────────────────────
+
+    function styleBandeau(couleur) {
+        return 'display:flex;align-items:center;gap:1rem;flex-wrap:wrap;'
+             + 'background:var(--bg-card);border:1px solid ' + couleur + ';'
+             + 'border-left:4px solid ' + couleur + ';border-radius:6px;'
+             + 'padding:.75rem 1rem;margin:.75rem 1rem 0;'
+             + 'font-size:.9rem;color:var(--text-primary);';
+    }
+
+    function bouton(action, libelle, principal) {
+        var base = 'padding:.45rem .9rem;border-radius:4px;cursor:pointer;'
+                 + 'font-family:inherit;font-size:.85rem;white-space:nowrap;';
+        if (principal) {
+            base += 'background:var(--accent);color:#001018;border:none;font-weight:700;';
+        } else {
+            base += 'background:transparent;color:var(--text-secondary);'
+                  + 'border:1px solid var(--border);';
         }
+        return '<button data-action="' + action + '" style="' + base + '">'
+             + echapper(libelle) + '</button>';
     }
 
-    /**
-     * Start periodic update checks
-     */
-    startAutoCheck() {
-        // Check immediately
-        this.checkForUpdates();
-
-        // Then check periodically
-        this.checkTimeout = setInterval(() => {
-            this.checkForUpdates();
-        }, this.checkInterval);
+    function barreProgression(pct) {
+        return '<div style="flex:1 1 180px;height:6px;background:var(--bg-secondary);'
+             + 'border-radius:3px;overflow:hidden;min-width:120px;">'
+             + '<div style="height:100%;width:' + Math.max(0, Math.min(100, pct)) + '%;'
+             + 'background:var(--accent);transition:width .4s ease;"></div></div>';
     }
 
-    /**
-     * Stop periodic checks
-     */
-    stopAutoCheck() {
-        if (this.checkTimeout) {
-            clearInterval(this.checkTimeout);
-            this.checkTimeout = null;
-        }
-    }
+    function rendre(etat) {
+        if (!conteneur) { return; }
 
-    /**
-     * Check for updates
-     */
-    async checkForUpdates() {
-        try {
-            const response = await fetch('/api/updates/status');
-            const data = await response.json();
-
-            if (data.notification) {
-                this.showNotification(data.notification);
-            } else {
-                this.hideNotification();
-            }
-        } catch (error) {
-            console.error('Failed to check for updates:', error);
-        }
-    }
-
-    /**
-     * Show update notification
-     */
-    showNotification(notification) {
-        this.currentNotification = notification;
-        const container = document.getElementById(this.containerId);
-
-        if (!container) {
-            console.warn(`Container #${this.containerId} not found`);
+        // Rien à annoncer : pas de bannière du tout.
+        var enCours = etat.phase === 'telechargement' || etat.phase === 'installation'
+                   || etat.phase === 'pret';
+        if (!enCours && !etat.version_installee
+            && (!etat.mise_a_jour_disponible || etat.masquee)) {
+            conteneur.innerHTML = '';
             return;
         }
 
-        const html = this.notificationTemplate(notification);
-        container.innerHTML = html;
+        var html;
 
-        // Setup event handlers
-        const installBtn = container.querySelector('[data-action="install"]');
-        const dismissBtn = container.querySelector('[data-action="dismiss"]');
+        if (etat.version_installee && !enCours) {
+            // Premier démarrage après une mise à jour : dire ce qui a changé.
+            html = '<div style="' + styleBandeau('var(--accent-green)') + '">'
+                 + '<div style="flex:1 1 320px;">'
+                 + '<strong>✓ ParcInfo a été mis à jour en version '
+                 + echapper(etat.version_installee) + '</strong></div>'
+                 + (etat.url_notes
+                    ? '<a href="' + echapper(etat.url_notes) + '" target="_blank" rel="noopener" '
+                      + 'style="color:var(--accent);font-size:.85rem;">Nouveautés</a>'
+                    : '')
+                 + bouton('dismiss', 'Fermer', false)
+                 + '</div>';
+        } else if (etat.phase === 'telechargement') {
+            html = '<div style="' + styleBandeau('var(--accent)') + '">'
+                 + '<strong>⬇ Téléchargement de la version ' + echapper(etat.version_disponible) + '</strong>'
+                 + barreProgression(etat.progression || 0)
+                 + '<span style="color:var(--text-secondary);">' + (etat.progression || 0) + '&nbsp;%</span>'
+                 + '</div>';
+        } else if (etat.phase === 'installation') {
+            html = '<div style="' + styleBandeau('var(--accent)') + '">'
+                 + '<strong>⚙ Installation de la version ' + echapper(etat.version_disponible) + '…</strong>'
+                 + '<span style="color:var(--text-secondary);">L\'application va redémarrer.</span>'
+                 + '</div>';
+        } else if (etat.phase === 'pret') {
+            html = '<div style="' + styleBandeau('var(--accent-green)') + '">'
+                 + '<strong>✓ Version ' + echapper(etat.version_disponible) + ' installée</strong>'
+                 + '<span style="color:var(--text-secondary);">'
+                 + 'ParcInfo redémarre — rechargez la page dans quelques secondes.</span>'
+                 + '</div>';
+        } else if (etat.phase === 'erreur' && etat.erreur) {
+            html = '<div style="' + styleBandeau('var(--accent-red)') + '">'
+                 + '<div style="flex:1 1 320px;"><strong>Mise à jour interrompue</strong><br>'
+                 + '<span style="color:var(--text-secondary);">' + echapper(etat.erreur) + '</span></div>'
+                 + (etat.url_notes
+                    ? '<a href="' + echapper(etat.url_notes) + '" target="_blank" rel="noopener" '
+                      + 'style="color:var(--accent);">Télécharger manuellement</a>'
+                    : '')
+                 + bouton('dismiss', 'Fermer', false)
+                 + '</div>';
+        } else if (etat.mode === 'docker') {
+            var cmd = (etat.commandes && etat.commandes.compose) || '';
+            html = '<div style="' + styleBandeau('var(--accent)') + '">'
+                 + '<div style="flex:1 1 260px;">'
+                 + '<strong>📦 ParcInfo ' + echapper(etat.version_disponible) + ' est disponible</strong>'
+                 + '<div style="color:var(--text-secondary);font-size:.82rem;margin-top:.15rem;">'
+                 + 'Version installée ' + echapper(etat.version_actuelle)
+                 + ' — à mettre à jour depuis l\'hôte Docker</div></div>'
+                 + '<code style="flex:1 1 300px;background:var(--bg-secondary);padding:.4rem .6rem;'
+                 + 'border-radius:4px;font-size:.8rem;color:var(--accent);user-select:all;">'
+                 + echapper(cmd) + '</code>'
+                 + bouton('copy', 'Copier', true)
+                 + (etat.url_notes
+                    ? '<a href="' + echapper(etat.url_notes) + '" target="_blank" rel="noopener" '
+                      + 'style="color:var(--accent);font-size:.85rem;">Notes</a>'
+                    : '')
+                 + bouton('dismiss', 'Plus tard', false)
+                 + '</div>';
+        } else {
+            html = '<div style="' + styleBandeau('var(--accent)') + '">'
+                 + '<div style="flex:1 1 300px;">'
+                 + '<strong>📦 ParcInfo ' + echapper(etat.version_disponible) + ' est disponible</strong>'
+                 + '<div style="color:var(--text-secondary);font-size:.82rem;margin-top:.15rem;">'
+                 + 'Version installée ' + echapper(etat.version_actuelle)
+                 + (etat.installable ? '' : ' — installation manuelle') + '</div></div>'
+                 + (etat.url_notes
+                    ? '<a href="' + echapper(etat.url_notes) + '" target="_blank" rel="noopener" '
+                      + 'style="color:var(--accent);font-size:.85rem;">Notes de version</a>'
+                    : '')
+                 + (etat.installable ? bouton('install', 'Installer maintenant', true) : '')
+                 + bouton('dismiss', 'Plus tard', false)
+                 + '</div>';
+        }
 
-        if (installBtn) {
-            installBtn.addEventListener('click', () => this.installUpdate());
-        }
-        if (dismissBtn) {
-            dismissBtn.addEventListener('click', () => this.dismissNotification());
-        }
+        conteneur.innerHTML = html;
+        brancherActions(etat);
     }
 
-    /**
-     * Hide notification
-     */
-    hideNotification() {
-        this.currentNotification = null;
-        const container = document.getElementById(this.containerId);
-        if (container) {
-            container.innerHTML = '';
+    function brancherActions(etat) {
+        var installer = conteneur.querySelector('[data-action="install"]');
+        var ecarter = conteneur.querySelector('[data-action="dismiss"]');
+        var copier = conteneur.querySelector('[data-action="copy"]');
+
+        if (installer) {
+            installer.addEventListener('click', function () {
+                installer.disabled = true;
+                installer.textContent = 'Démarrage…';
+                envoyer('/api/updates/install');
+            });
         }
-    }
-
-    /**
-     * Install update
-     */
-    async installUpdate() {
-        const installBtn = document.querySelector('[data-action="install"]');
-        if (installBtn) {
-            installBtn.disabled = true;
-            installBtn.textContent = 'Installing...';
+        if (ecarter) {
+            ecarter.addEventListener('click', function () {
+                conteneur.innerHTML = '';
+                envoyer('/api/updates/dismiss');
+            });
         }
-
-        try {
-            const response = await fetch('/api/updates/install', { method: 'POST' });
-            const data = await response.json();
-
-            if (data.status === 'installing') {
-                // Update UI to show installation in progress
-                const notification = data.notification;
-                if (notification) {
-                    this.showNotification(notification);
+        if (copier) {
+            copier.addEventListener('click', function () {
+                var cmd = (etat.commandes && etat.commandes.compose) || '';
+                var fini = function () {
+                    copier.textContent = 'Copié ✓';
+                    setTimeout(function () { copier.textContent = 'Copier'; }, 2000);
+                };
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(cmd).then(fini, function () {});
+                } else {
+                    var champ = document.createElement('textarea');
+                    champ.value = cmd;
+                    document.body.appendChild(champ);
+                    champ.select();
+                    try { document.execCommand('copy'); fini(); } catch (e) { /* ignoré */ }
+                    document.body.removeChild(champ);
                 }
-
-                // Show success message
-                alert('Update installation started. Application will restart shortly.');
-
-                // Start monitoring for completion
-                this.monitorInstallation();
-            } else {
-                alert('Failed to start update installation');
-                if (installBtn) {
-                    installBtn.disabled = false;
-                    installBtn.textContent = 'Install Update';
-                }
-            }
-        } catch (error) {
-            console.error('Failed to install update:', error);
-            alert('Error installing update: ' + error.message);
-            if (installBtn) {
-                installBtn.disabled = false;
-                installBtn.textContent = 'Install Update';
-            }
+            });
         }
     }
 
-    /**
-     * Dismiss notification
-     */
-    async dismissNotification() {
-        try {
-            await fetch('/api/updates/dismiss', { method: 'POST' });
-            this.hideNotification();
-        } catch (error) {
-            console.error('Failed to dismiss notification:', error);
-        }
+    // ── Réseau ──────────────────────────────────────────────────────────────
+
+    function appliquer(etat) {
+        etatCourant = etat;
+        rendre(etat);
+        // Pendant une installation, on suit de près ; sinon on se fait oublier.
+        var actif = etat.phase === 'telechargement' || etat.phase === 'installation';
+        planifier(actif ? INTERVALLE_TRAVAIL : INTERVALLE_NORMAL);
     }
 
-    /**
-     * Monitor installation progress
-     */
-    monitorInstallation() {
-        let checkCount = 0;
-        const maxChecks = 60; // 60 checks * 5 sec = 5 minutes
-
-        const monitor = setInterval(async () => {
-            checkCount++;
-
-            try {
-                const response = await fetch('/api/updates/status');
-                const data = await response.json();
-
-                if (data.notification && data.notification.type === 'update_complete') {
-                    clearInterval(monitor);
-                    alert('Update installed! Application will restart.');
-                    // App should restart soon
-                } else if (checkCount >= maxChecks) {
-                    clearInterval(monitor);
-                }
-            } catch (error) {
-                console.error('Monitoring error:', error);
-                if (checkCount >= maxChecks) {
-                    clearInterval(monitor);
-                }
-            }
-        }, 5000); // Check every 5 seconds
+    function interroger() {
+        fetch('/api/updates/status', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (etat) {
+                if (etat) { appliquer(etat); } else { planifier(INTERVALLE_NORMAL); }
+            })
+            .catch(function () { planifier(INTERVALLE_NORMAL); });
     }
 
-    /**
-     * Default notification template
-     */
-    defaultTemplate(notification) {
-        let icon = '⚠️';
-        let bgColor = '#fff3cd';
-        let borderColor = '#ffc107';
-        let buttonText = 'Install Update';
-
-        if (notification.type === 'update_available') {
-            icon = '📦';
-            bgColor = '#d1ecf1';
-            borderColor = '#17a2b8';
-        } else if (notification.type === 'installing') {
-            icon = '⏳';
-            bgColor = '#d1e7dd';
-            borderColor = '#198754';
-            buttonText = 'Installing...';
-        } else if (notification.type === 'update_complete') {
-            icon = '✅';
-            bgColor = '#d1e7dd';
-            borderColor = '#198754';
-            buttonText = 'Restarting...';
-        }
-
-        return `
-            <div style="
-                background-color: ${bgColor};
-                border-left: 4px solid ${borderColor};
-                padding: 16px;
-                margin-bottom: 16px;
-                border-radius: 4px;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-            ">
-                <div style="flex: 1;">
-                    <div style="font-weight: bold; margin-bottom: 4px;">
-                        ${icon} ${notification.message}
-                    </div>
-                    ${notification.version ? `
-                        <div style="font-size: 0.9em; color: #666;">
-                            Version ${notification.version}
-                        </div>
-                    ` : ''}
-                </div>
-                <div style="display: flex; gap: 8px; margin-left: 16px;">
-                    ${notification.type === 'update_available' ? `
-                        <button
-                            data-action="install"
-                            style="
-                                background-color: #17a2b8;
-                                color: white;
-                                border: none;
-                                padding: 8px 16px;
-                                border-radius: 4px;
-                                cursor: pointer;
-                                font-weight: bold;
-                            "
-                        >${buttonText}</button>
-                    ` : ''}
-                    <button
-                        data-action="dismiss"
-                        style="
-                            background-color: transparent;
-                            color: #666;
-                            border: 1px solid #ddd;
-                            padding: 8px 16px;
-                            border-radius: 4px;
-                            cursor: pointer;
-                        "
-                    >Dismiss</button>
-                </div>
-            </div>
-        `;
+    function envoyer(url) {
+        fetch(url, { method: 'POST', credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (etat) { if (etat && etat.phase) { appliquer(etat); } })
+            .catch(function () { /* la prochaine interrogation rattrapera */ });
     }
-}
 
-// Auto-initialize if in browser
-if (typeof document !== 'undefined' && document.readyState !== 'loading') {
-    window.updateNotifier = new UpdateNotifier();
-}
+    function planifier(delai) {
+        if (minuteur) { clearTimeout(minuteur); }
+        minuteur = setTimeout(interroger, delai);
+    }
+
+    // ── Démarrage ───────────────────────────────────────────────────────────
+
+    function demarrer() {
+        conteneur = elt('update-notification-container');
+        if (!conteneur) { return; }   // page sans bannière (connexion, erreurs)
+        interroger();
+    }
+
+    // Ce script est chargé en fin de <body> : à cet instant le document est
+    // encore en cours d'analyse (readyState « loading »). La version précédente
+    // ne s'initialisait QUE si readyState valait autre chose — la bannière ne
+    // pouvait donc jamais apparaître.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', demarrer);
+    } else {
+        demarrer();
+    }
+
+    window.ParcInfoMaj = {
+        verifier: function () { envoyer('/api/updates/check'); },
+        etat: function () { return etatCourant; }
+    };
+})();

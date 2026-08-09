@@ -1,5 +1,72 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.43] - 2026-08-09 🔄
+
+### 🔄 MÉCANISME DE MISE À JOUR RECONSTRUIT
+
+Trois défauts se cumulaient : rien ne s'affichait, macOS ne pouvait pas aboutir,
+et le binaire téléchargé n'était jamais vérifié.
+
+#### La bannière ne pouvait jamais apparaître
+- `update_notifier.js` se terminait par une garde
+  `document.readyState !== 'loading'`, alors que le script est chargé en fin de
+  `<body>` : à cet instant le document est **toujours** en cours d'analyse. La
+  classe était chargée, l'instance jamais créée — reproduit dans le navigateur
+- ✅ Initialisation sur `DOMContentLoaded`, avec repli immédiat
+- ✅ Vérification ramenée de **30 jours à 6 heures**. Même réparée, l'ancienne
+  cadence aurait annoncé les versions après coup
+
+#### macOS ne pouvait pas se mettre à jour
+- La version publiée est une **archive ZIP**, le code tentait un
+  `hdiutil attach` — réservé aux images DMG. Le montage échouait à chaque fois
+- ✅ Archive décompressée, bundle remplacé, quarantaine Gatekeeper retirée,
+  ancienne version conservée le temps de l'échange et remise en place en cas
+  d'échec
+
+#### Aucun contrôle d'intégrité n'avait jamais lieu
+- Le code lisait la clé `windows_installer`, le fichier contient
+  `windows_installer_sha256` : la clé ne correspondait pas et la vérification
+  était **sautée en silence**. Les valeurs valaient de toute façon
+  `PENDING_BUILD`, et rien ne les calculait
+- ✅ Chaque version publie un **`SHA256SUMS.txt`**, produit par le workflow
+- ✅ L'empreinte est réclamée **avant** le téléchargement : inutile de tirer
+  30 Mo pour découvrir ensuite qu'on ne pourra pas les valider
+- ✅ Sans empreinte vérifiable, l'installation est **refusée** et le
+  téléchargement manuel proposé. Exécuter un binaire non vérifié offrirait à
+  quiconque détourne la connexion un chemin direct vers la machine
+- ✅ Un téléchargement interrompu ne prend son nom définitif qu'une fois complet
+
+#### Windows n'installe plus rien sans le dire
+- Le lanceur téléchargeait et remplaçait l'exécutable **à chaque démarrage**,
+  sans message avant, pendant, ni après — d'où des redémarrages inexpliqués et
+  aucune trace en cas d'échec
+- ✅ La version disponible est annoncée dans l'interface ; l'installation part
+  sur clic, **réservée aux administrateurs** — le remplacement redémarre
+  l'application pour tout le monde
+- ✅ Barre de progression pendant le téléchargement, puis **confirmation de la
+  version installée** au redémarrage suivant
+
+#### Docker
+- ✅ Mode conteneur reconnu : la bannière affiche la **commande à lancer sur
+  l'hôte**, avec bouton de copie. Un conteneur ne peut pas se remplacer lui-même
+- ✅ Service **Watchtower** commenté dans `docker-compose.yml` pour ceux qui
+  veulent l'automatiser. Il ne surveille que les conteneurs portant le label
+  déclaré — sans quoi il toucherait à tout ce qui tourne sur la machine
+
+#### Confort
+- ✅ Écarter une annonce la masque **jusqu'à la version suivante**, et le choix
+  survit au redémarrage
+- ✅ `test_maj.py` : détection, refus d'un binaire altéré, refus sans empreinte,
+  aucun fichier laissé derrière, persistance du choix, confirmation après
+  installation, non-répétition, retour arrière non annoncé
+
+### ⚠️ MISE À NIVEAU
+Les versions **antérieures à 2.6.43** embarquent le mécanisme défaillant : le
+passage à 2.6.43 doit se faire **manuellement, une fois**. Les suivantes se
+feront depuis l'interface.
+
+---
+
 ## [2.6.42] - 2026-08-09 🗄️
 
 ### 🗄️ SAUVEGARDE AUTOMATIQUE DE LA BASE

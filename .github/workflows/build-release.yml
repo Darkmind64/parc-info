@@ -139,6 +139,16 @@ jobs:
           name: system-info-collector-gui.exe
           path: ./
 
+      # Le programme de mise à jour refuse d'installer un binaire dont il ne peut
+      # pas vérifier l'empreinte : sans ce fichier, aucune mise à jour ne passe.
+      - name: Empreintes SHA256 des binaires
+        run: |
+          set -e
+          sha256sum ParcInfo-Windows.exe ParcInfo-macOS-ARM.zip \
+                    system-info-collector.exe system-info-collector-gui.exe \
+                    > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
@@ -178,3 +188,4 @@ jobs:
             ./ParcInfo-macOS-ARM.zip
             ./system-info-collector.exe
             ./system-info-collector-gui.exe
+            ./SHA256SUMS.txt
