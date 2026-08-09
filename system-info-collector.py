@@ -66,6 +66,12 @@ def main():
     parser.add_argument('--quiet', action='store_true',
                         help='Mode silencieux (pas d\'affichage)')
 
+    # Désactivé par défaut : le test consomme de la bande passante sur un poste
+    # de production et sollicite un service tiers. La latence, elle, est
+    # toujours mesurée et suffit à diagnostiquer une lenteur réseau.
+    parser.add_argument('--test-debit', action='store_true',
+                        help='Mesurer aussi le débit descendant (télécharge ~10 Mo)')
+
     args = parser.parse_args()
     _forcer_sortie_utf8()
 
@@ -80,7 +86,8 @@ def main():
 
     # Barre de progression : la collecte dure une bonne minute et resterait
     # sinon indiscernable d'un blocage. En mode --quiet, aucun rappel.
-    info = collect_system_info(progress=None if args.quiet else console_progress())
+    info = collect_system_info(progress=None if args.quiet else console_progress(),
+                               test_debit=args.test_debit)
 
     if not args.quiet:
         print()

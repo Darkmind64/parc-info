@@ -726,6 +726,185 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
+<!-- ── CONFIGURATION RÉSEAU ─────────────────────────────────────────────── -->
+{% if rapport.default_gateway or rapport.dns_servers or rapport.network_profiles
+      or rapport.proxy or rapport.wifi or rapport.latency %}
+<div class="fs-section">
+    <h3>■ Configuration &amp; qualité réseau</h3>
+    <div class="fs-grid">
+        <div>
+            {{ row("Passerelle par défaut", rapport.default_gateway) }}
+            {{ row("Suffixes DNS", rapport.dns_suffixes) }}
+            {% if rapport.wifi %}
+            {{ row("Réseau Wi-Fi", rapport.wifi.ssid) }}
+            {{ row("Signal", rapport.wifi.signal) }}
+            {{ row("Bande / canal", (rapport.wifi.band ~ ' ' ~ rapport.wifi.channel)|trim) }}
+            {% endif %}
+        </div>
+        <div>
+            {% if rapport.proxy %}
+            <div class="fs-row">
+                <span class="fs-label">Proxy</span>
+                <span class="fs-value">
+                    {{ rapport.proxy.server or rapport.proxy.auto_config_url }}
+                    <span class="fs-pill {{ 'fs-warn' if rapport.proxy.enabled else 'fs-muted' }}"
+                          style="margin-left:.35rem;">
+                        {{ 'Actif' if rapport.proxy.enabled else 'Configuré mais inactif' }}</span>
+                </span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if rapport.network_profiles %}
+    <div class="fs-label" style="font-size:.75rem;margin:.7rem 0 .35rem;">
+        Environnement réseau détecté — la catégorie détermine quel profil de
+        pare-feu s'applique
+    </div>
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Réseau</th><th>Interface</th><th>Catégorie</th><th>Connectivité</th></tr>
+        {% for pr in rapport.network_profiles %}
+        <tr>
+            <td><strong>{{ pr.name }}</strong></td>
+            <td>{{ pr.interface or '—' }}</td>
+            <td><span class="fs-pill {{ 'fs-bad' if pr.category == 'Public'
+                                   else 'fs-info' if pr.category == 'Domaine'
+                                   else 'fs-ok' }}">{{ pr.category }}</span></td>
+            <td><span class="fs-pill {{ 'fs-ok' if pr.connectivity == 'Internet' else 'fs-warn' }}">
+                {{ pr.connectivity }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.dns_servers %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">Serveurs DNS</div>
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Interface</th><th>Serveurs</th><th>Attribution</th></tr>
+        {% for d in rapport.dns_servers %}
+        <tr>
+            <td>{{ d.interface }}</td>
+            <td class="fs-mono">{{ d.servers | join(', ') }}</td>
+            <td><span class="fs-pill {{ 'fs-info' if d.dhcp else 'fs-muted' }}">
+                {{ 'DHCP' if d.dhcp else 'Manuelle' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.latency %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Qualité du lien — une passerelle locale répond en 1 à 2 ms ; au-delà, le
+        problème est sur le lien local et non sur la connexion Internet
+    </div>
+    <table class="fs-table">
+        <tr><th>Cible</th><th>Adresse</th><th>Latence moyenne</th><th>Pic</th><th>Perte</th></tr>
+        {% for l in rapport.latency %}
+        <tr>
+            <td><strong>{{ l.role }}</strong></td>
+            <td class="fs-mono">{{ l.target }}</td>
+            <td>{% if l.avg_ms is not none %}
+                <span class="fs-pill {{ 'fs-bad' if l.avg_ms > 100
+                                   else 'fs-warn' if l.avg_ms > 20 and l.role == 'Passerelle'
+                                   else 'fs-ok' }}">{{ l.avg_ms }} ms</span>
+                {% else %}<span class="fs-pill fs-bad">injoignable</span>{% endif %}</td>
+            <td>{{ (l.max_ms ~ ' ms') if l.max_ms is not none else '—' }}</td>
+            <td><span class="fs-pill {{ 'fs-bad' if l.loss_pct >= 50
+                                   else 'fs-warn' if l.loss_pct else 'fs-ok' }}">
+                {{ l.loss_pct }} %</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.bandwidth %}
+    <div class="fs-row" style="margin-top:.7rem;">
+        <span class="fs-label">Débit descendant</span>
+        <span class="fs-value">
+            <strong>{{ rapport.bandwidth.mbps }} Mb/s</strong>
+            <span style="color:var(--text-secondary);font-size:.72rem;">
+                — {{ rapport.bandwidth.downloaded_mb }} Mo en
+                {{ rapport.bandwidth.seconds }} s
+            </span>
+        </span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── ENVIRONNEMENT & HYGIÈNE ──────────────────────────────────────────── -->
+{% if rapport.domain_joined is defined or rapport.wsus_server
+      or rapport.uac_enabled is defined or rapport.restore_points is defined %}
+<div class="fs-section">
+    <h3>■ Environnement &amp; hygiène système</h3>
+    <div class="fs-grid">
+        <div>
+            {% if rapport.domain_joined is defined %}
+            <div class="fs-row">
+                <span class="fs-label">Rattachement</span>
+                <span class="fs-value">
+                    {{ rapport.domain_name or '—' }}
+                    <span class="fs-pill {{ 'fs-info' if rapport.domain_joined else 'fs-muted' }}"
+                          style="margin-left:.35rem;">
+                        {{ 'Domaine' if rapport.domain_joined else 'Groupe de travail' }}</span>
+                </span>
+            </div>
+            {% endif %}
+            {{ row("Contrôleur de domaine", rapport.domain_controller) }}
+            {{ row("Source de temps", rapport.time_source) }}
+            {{ row("Décalage d'horloge", rapport.time_offset) }}
+            {% if rapport.wsus_server %}
+            {{ row("Serveur WSUS", rapport.wsus_server) }}
+            {{ row("Groupe WSUS", rapport.wsus_group) }}
+            {% endif %}
+        </div>
+        <div>
+            {% if rapport.uac_enabled is defined %}
+            <div class="fs-row">
+                <span class="fs-label">UAC</span>
+                <span class="fs-value"><span class="fs-pill {{ 'fs-ok' if rapport.uac_enabled else 'fs-bad' }}">
+                    {{ 'Activé' if rapport.uac_enabled else 'Désactivé' }}</span></span>
+            </div>
+            {% endif %}
+            {% if rapport.rdp_enabled is defined %}
+            <div class="fs-row">
+                <span class="fs-label">Bureau à distance</span>
+                <span class="fs-value">
+                    <span class="fs-pill {{ 'fs-warn' if rapport.rdp_enabled else 'fs-muted' }}">
+                        {{ 'Activé' if rapport.rdp_enabled else 'Désactivé' }}</span>
+                    {% if rapport.rdp_enabled and rapport.rdp_nla is defined %}
+                    <span class="fs-pill {{ 'fs-ok' if rapport.rdp_nla else 'fs-bad' }}">
+                        NLA {{ 'actif' if rapport.rdp_nla else 'inactif' }}</span>
+                    {% endif %}
+                </span>
+            </div>
+            {% endif %}
+            {% if rapport.temp_files_mb %}
+            {{ row("Fichiers temporaires", (rapport.temp_files_mb ~ ' Mo récupérables')) }}
+            {% endif %}
+        </div>
+    </div>
+
+    {% if rapport.restore_points is defined %}
+    <div class="fs-label" style="font-size:.75rem;margin:.7rem 0 .35rem;">
+        Points de restauration
+        {% if not rapport.restore_points %}
+        — <span style="color:var(--accent-orange);">aucun : impossible de revenir
+        en arrière après une mise à jour ratée</span>
+        {% endif %}
+    </div>
+    {% if rapport.restore_points %}
+    <table class="fs-table">
+        <tr><th>Point</th><th>Créé le</th></tr>
+        {% for rp in rapport.restore_points %}
+        <tr><td>{{ rp.description or '—' }}</td><td class="fs-mono">{{ rp.when }}</td></tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+    {% endif %}
+</div>
+{% endif %}
+
 <!-- ── COMPTES ──────────────────────────────────────────────────────────── -->
 {% if rapport.users %}
 <div class="fs-section">
@@ -794,12 +973,21 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 <!-- ── MISES À JOUR EN ATTENTE ──────────────────────────────────────────── -->
 {% if rapport.pending_updates %}
 <div class="fs-section">
-    <h3>■ Mises à jour en attente ({{ rapport.pending_updates|length }})</h3>
+    <h3>■ Mises à jour disponibles ({{ rapport.pending_updates|length }})</h3>
+    {% if rapport.pending_updates_source %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Recherche {{ rapport.pending_updates_source }}
+        {%- if rapport.pending_updates_source == 'cache local' %} — la recherche en
+        ligne n'a pas abouti, cette liste peut être incomplète{% endif %}
+    </div>
+    {% endif %}
     <table class="fs-table">
-        <tr><th>Mise à jour</th><th>Nature</th></tr>
+        <tr><th>Mise à jour</th><th>KB</th><th>Taille</th><th>Nature</th></tr>
         {% for u in rapport.pending_updates %}
         <tr>
             <td>{{ u.title }}</td>
+            <td class="fs-mono">{{ ('KB' ~ u.kb) if u.kb else '—' }}</td>
+            <td>{{ (u.size_mb ~ ' Mo') if u.size_mb else '—' }}</td>
             <td>{% if u.security %}<span class="fs-pill fs-bad">Sécurité</span>
                 {% elif u.severity %}<span class="fs-pill fs-warn">{{ u.severity }}</span>
                 {% else %}<span class="fs-pill fs-update">Mise à jour</span>{% endif %}</td>

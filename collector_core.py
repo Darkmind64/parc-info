@@ -1932,29 +1932,51 @@ def _win_diagnostics():
             g['count'] for g in incidents
             if g['category'] in ('Erreur disque', 'Corruption de système de fichiers'))
 
-    # ── Mises à jour en attente ────────────────────────────────────────────
-    # Recherche dans le cache local (Online=$false) : une recherche en ligne
-    # dépend du réseau et du serveur WSUS, et peut dépasser la minute.
+    # ── Mises à jour disponibles ───────────────────────────────────────────
+    # La recherche en ligne interroge Microsoft Update (ou le WSUS configuré) et
+    # voit donc les correctifs *applicables*, pas seulement ceux que Windows a
+    # déjà décidé d'installer. La différence est réelle : sur la machine de
+    # référence le cache local annonçait zéro alors qu'une mise à jour de 1,5 Go
+    # était disponible. Repli sur le cache si la recherche échoue ou expire.
+    requete = ("$r=$sr.Search('IsInstalled=0 and IsHidden=0'); "
+               "@($r.Updates | Select-Object -First 60 | ForEach-Object { [PSCustomObject]@{ "
+               "Title=$_.Title; Severity=$_.MsrcSeverity; KB=($_.KBArticleIDs -join ','); "
+               "SizeMB=[math]::Round($_.MaxDownloadSize/1MB,1); "
+               "Security=[bool]($_.Categories | Where-Object { $_.Name -match 'Security|Sécurité' }) } }) "
+               "| ConvertTo-Json -Compress -Depth 3")
+
+    source = 'en ligne'
     maj = _win_powershell_json(
         "try { $s=New-Object -ComObject Microsoft.Update.Session; "
-        "$sr=$s.CreateUpdateSearcher(); $sr.Online=$false; "
-        "$r=$sr.Search('IsInstalled=0 and IsHidden=0'); "
-        "@($r.Updates | Select-Object -First 50 | ForEach-Object { [PSCustomObject]@{ "
-        "Title=$_.Title; Severity=$_.MsrcSeverity; "
-        "Security=[bool]($_.Categories | Where-Object { $_.Name -match 'Security|Sécurité' }) } }) "
-        "| ConvertTo-Json -Compress -Depth 3 } catch {}",
-        timeout=120,
+        "$sr=$s.CreateUpdateSearcher(); $sr.Online=$true; " + requete + " } catch {}",
+        timeout=240,
     )
+    if maj is None:
+        source = 'cache local'
+        maj = _win_powershell_json(
+            "try { $s=New-Object -ComObject Microsoft.Update.Session; "
+            "$sr=$s.CreateUpdateSearcher(); $sr.Online=$false; " + requete + " } catch {}",
+            timeout=60,
+        )
+
     attente = []
     for u in _as_list(maj):
         titre = _clean(u.get('Title'))
-        if titre:
-            attente.append({
-                'title': titre,
-                'severity': _clean(u.get('Severity')),
-                'security': bool(u.get('Security')),
-            })
+        if not titre:
+            continue
+        try:
+            taille = float(u.get('SizeMB') or 0)
+        except (TypeError, ValueError):
+            taille = 0
+        attente.append({
+            'title': titre,
+            'severity': _clean(u.get('Severity')),
+            'kb': _clean(u.get('KB')),
+            'size_mb': round(taille) if taille else None,
+            'security': bool(u.get('Security')),
+        })
     info['pending_updates'] = attente
+    info['pending_updates_source'] = source if maj is not None else 'indisponible'
     info['pending_updates_security'] = sum(
         1 for u in attente if u['security'] or u['severity'] in ('Critical', 'Important'))
 
@@ -2067,6 +2089,9 @@ _WIN_STEPS = [
     ('Comptes utilisateurs', lambda: _win_users()),
     ('Batterie et réseau', lambda: _win_extras()),
     ('Diagnostic (incidents, services, tâches)', lambda: _win_diagnostics()),
+    ('Configuration réseau', lambda: _win_network()),
+    ('Environnement (WSUS, domaine, temps)', lambda: _win_enterprise()),
+    ('Hygiène système', lambda: _win_hygiene()),
 ]
 
 
@@ -2082,6 +2107,349 @@ def _report(progress, fraction, libelle):
         progress(max(0.0, min(1.0, float(fraction))), libelle)
     except Exception:
         pass
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# RÉSEAU, ENVIRONNEMENT ET HYGIÈNE
+# ════════════════════════════════════════════════════════════════════════════
+
+# Catégories de réseau Windows : elles déterminent quel profil de pare-feu
+# s'applique, ce qui explique bien des « ça marche chez moi, pas chez lui ».
+_NETWORK_CATEGORIES = {0: 'Public', 1: 'Privé', 2: 'Domaine'}
+# Connectivité IPv4 constatée par Windows lui-même.
+_IPV4_CONNECTIVITY = {0: 'Aucune', 1: 'Locale', 2: 'Locale (sous-réseau)',
+                      3: 'Locale (site)', 4: 'Internet'}
+
+
+def _win_network():
+    """Paramétrage réseau effectif : DNS, passerelle, DHCP, profil, proxy, Wi-Fi.
+
+    Ce sont les réglages qui répondent à « il n'a plus Internet » : un DNS
+    injoignable, une passerelle absente ou un proxy résiduel produisent tous le
+    même symptôme et ne se distinguent qu'ici.
+    """
+    info = {}
+    data = _win_powershell_json(
+        "$gw=@(); try { $gw=@(Get-NetRoute -DestinationPrefix '0.0.0.0/0' "
+        "-ErrorAction SilentlyContinue | Select-Object NextHop,InterfaceAlias,RouteMetric) } catch {}; "
+        "$dns=@(); try { $dns=@(Get-DnsClientServerAddress -AddressFamily IPv4 "
+        "-ErrorAction SilentlyContinue | Where-Object { $_.ServerAddresses } "
+        "| Select-Object InterfaceAlias,ServerAddresses) } catch {}; "
+        "$prof=@(); try { $prof=@(Get-NetConnectionProfile -ErrorAction SilentlyContinue "
+        "| Select-Object Name,InterfaceAlias,NetworkCategory,IPv4Connectivity) } catch {}; "
+        "$dhcp=@(); try { $dhcp=@(Get-NetIPInterface -AddressFamily IPv4 "
+        "-ErrorAction SilentlyContinue | Where-Object { $_.ConnectionState -eq 'Connected' } "
+        "| Select-Object InterfaceAlias,Dhcp) } catch {}; "
+        "$px=$null; try { $px=Get-ItemProperty "
+        "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings' "
+        "-ErrorAction SilentlyContinue | Select-Object ProxyEnable,ProxyServer,AutoConfigURL } catch {}; "
+        "$suffix=''; try { $suffix=(Get-DnsClientGlobalSetting -ErrorAction SilentlyContinue).SuffixSearchList -join ', ' } catch {}; "
+        "[PSCustomObject]@{ Gateways=$gw; Dns=$dns; Profiles=$prof; Dhcp=$dhcp; "
+        "Proxy=$px; Suffix=$suffix } | ConvertTo-Json -Compress -Depth 4",
+        timeout=60,
+    )
+    if not data:
+        return info
+
+    dhcp_par_carte = {_clean(d.get('InterfaceAlias')): d.get('Dhcp')
+                      for d in _as_list(data.get('Dhcp'))}
+
+    passerelles = []
+    for g in _as_list(data.get('Gateways')):
+        adresse = _clean(g.get('NextHop'))
+        if adresse and adresse != '0.0.0.0':
+            passerelles.append({
+                'address': adresse,
+                'interface': _clean(g.get('InterfaceAlias')),
+                'metric': g.get('RouteMetric'),
+            })
+    if passerelles:
+        # La passerelle de plus faible métrique est celle réellement empruntée.
+        passerelles.sort(key=lambda p: p['metric'] if p['metric'] is not None else 9999)
+        info['gateways'] = passerelles
+        info['default_gateway'] = passerelles[0]['address']
+
+    serveurs_dns = []
+    for d in _as_list(data.get('Dns')):
+        adresses = [_clean(a) for a in _as_list(d.get('ServerAddresses')) if _clean(a)]
+        if adresses:
+            carte = _clean(d.get('InterfaceAlias'))
+            serveurs_dns.append({
+                'interface': carte,
+                'servers': adresses,
+                # 1 = DHCP, 2 = adressage manuel
+                'dhcp': dhcp_par_carte.get(carte) == 1,
+            })
+    if serveurs_dns:
+        info['dns_servers'] = serveurs_dns
+
+    profils = []
+    for p in _as_list(data.get('Profiles')):
+        nom = _clean(p.get('Name'))
+        if not nom:
+            continue
+        profils.append({
+            'name': nom,
+            'interface': _clean(p.get('InterfaceAlias')),
+            'category': _NETWORK_CATEGORIES.get(p.get('NetworkCategory'), 'Inconnue'),
+            'connectivity': _IPV4_CONNECTIVITY.get(p.get('IPv4Connectivity'), 'Inconnue'),
+        })
+    if profils:
+        info['network_profiles'] = profils
+
+    proxy = data.get('Proxy') or {}
+    serveur_proxy = _clean(proxy.get('ProxyServer'))
+    auto_config = _clean(proxy.get('AutoConfigURL'))
+    if serveur_proxy or auto_config:
+        info['proxy'] = {
+            'enabled': bool(proxy.get('ProxyEnable')),
+            'server': serveur_proxy,
+            'auto_config_url': auto_config,
+        }
+
+    suffixe = _clean(data.get('Suffix'))
+    if suffixe:
+        info['dns_suffixes'] = suffixe
+
+    # ── Wi-Fi ──────────────────────────────────────────────────────────────
+    sortie = _run(['netsh', 'wlan', 'show', 'interfaces'], timeout=20)
+    if sortie and 'SSID' in sortie:
+        champs = {}
+        for ligne in sortie.splitlines():
+            if ':' in ligne:
+                cle, _, valeur = ligne.partition(':')
+                champs[_strip_accents(cle).strip().lower()] = valeur.strip()
+        ssid = champs.get('ssid', '')
+        if ssid:
+            info['wifi'] = {
+                'ssid': ssid,
+                'signal': champs.get('signal', ''),
+                'radio': champs.get('type de radio') or champs.get('radio type', ''),
+                'band': champs.get('bande') or champs.get('band', ''),
+                'channel': champs.get('canal') or champs.get('channel', ''),
+            }
+
+    return info
+
+
+def _win_enterprise():
+    """Rattachement à une infrastructure : WSUS, domaine, temps.
+
+    Sur un parc géré, ces trois réglages expliquent la majorité des écarts entre
+    un poste et ses voisins — un WSUS injoignable bloque les mises à jour, un
+    décalage d'horloge casse l'authentification Kerberos.
+    """
+    info = {}
+    data = _win_powershell_json(
+        "$wu=$null; try { $wu=Get-ItemProperty "
+        "'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate' "
+        "-ErrorAction SilentlyContinue | Select-Object WUServer,TargetGroup } catch {}; "
+        "$cs=$null; try { $cs=Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue "
+        "| Select-Object PartOfDomain,Domain,Workgroup } catch {}; "
+        "$dc=''; try { $dc=(nltest /dsgetdc:) 2>$null | Select-String 'DC:' "
+        "| ForEach-Object { $_.ToString().Trim() } | Select-Object -First 1 } catch {}; "
+        "$ntp=''; try { $ntp=(w32tm /query /source) 2>$null | Select-Object -First 1 } catch {}; "
+        "$offset=''; try { $offset=((w32tm /query /status) 2>$null | Select-String 'Phase Offset|Décalage de phase' "
+        "| Select-Object -First 1).ToString().Trim() } catch {}; "
+        "[PSCustomObject]@{ WU=$wu; Cs=$cs; Dc=$dc; Ntp=$ntp; Offset=$offset } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=60,
+    )
+    if not data:
+        return info
+
+    wu = data.get('WU') or {}
+    serveur = _clean(wu.get('WUServer'))
+    if serveur:
+        info['wsus_server'] = serveur
+        groupe = _clean(wu.get('TargetGroup'))
+        if groupe:
+            info['wsus_group'] = groupe
+
+    cs = data.get('Cs') or {}
+    if cs:
+        info['domain_joined'] = bool(cs.get('PartOfDomain'))
+        info['domain_name'] = _clean(cs.get('Domain')) or _clean(cs.get('Workgroup'))
+
+    # Hors domaine, nltest ne renvoie rien et PowerShell sérialise un objet
+    # vide : « {} » ne doit pas se retrouver affiché comme un nom de serveur.
+    dc = _clean(data.get('Dc'))
+    if dc and dc not in ('{}', '[]', 'None') and any(ch.isalnum() for ch in dc):
+        info['domain_controller'] = dc
+
+    ntp = _clean(data.get('Ntp'))
+    if (ntp and ntp not in ('{}', '[]', 'None')
+            and 'erreur' not in ntp.lower() and 'error' not in ntp.lower()):
+        info['time_source'] = ntp
+    offset = _clean(data.get('Offset'))
+    if offset:
+        info['time_offset'] = offset
+
+    return info
+
+
+def _win_hygiene():
+    """Réglages de sécurité et espace récupérable.
+
+    Regroupe ce qui se vérifie en dépannage sans être de l'inventaire : peut-on
+    revenir en arrière, l'UAC est-il actif, deux antivirus se gênent-ils, et
+    combien d'espace un simple nettoyage rendrait-il.
+    """
+    info = {}
+    data = _win_powershell_json(
+        "$uac=$null; try { $uac=(Get-ItemProperty "
+        "'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' "
+        "-ErrorAction SilentlyContinue).EnableLUA } catch {}; "
+        "$rdp=$null; try { $rdp=(Get-ItemProperty "
+        "'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' "
+        "-ErrorAction SilentlyContinue).fDenyTSConnections } catch {}; "
+        "$nla=$null; try { $nla=(Get-ItemProperty "
+        "'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' "
+        "-ErrorAction SilentlyContinue).UserAuthentication } catch {}; "
+        "$rp=@(); try { $rp=@(Get-ComputerRestorePoint -ErrorAction SilentlyContinue "
+        "| Select-Object -Last 3 -Property Description,"
+        "@{N='When';E={$_.ConvertToDateTime($_.CreationTime).ToString('yyyy-MM-dd HH:mm')}}) } catch {}; "
+        "$temp=0; try { $temp=[math]::Round((Get-ChildItem $env:TEMP -Recurse -Force "
+        "-ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1MB,0) } catch {}; "
+        "[PSCustomObject]@{ Uac=$uac; Rdp=$rdp; Nla=$nla; Restore=$rp; TempMB=$temp } "
+        "| ConvertTo-Json -Compress -Depth 4",
+        timeout=90,
+    )
+    if not data:
+        return info
+
+    if data.get('Uac') is not None:
+        info['uac_enabled'] = bool(data.get('Uac'))
+    if data.get('Rdp') is not None:
+        # fDenyTSConnections = 1 signifie que RDP est refusé
+        info['rdp_enabled'] = not bool(data.get('Rdp'))
+        if info['rdp_enabled'] and data.get('Nla') is not None:
+            info['rdp_nla'] = bool(data.get('Nla'))
+
+    points = []
+    for r in _as_list(data.get('Restore')):
+        quand = _clean(r.get('When'))
+        if quand:
+            points.append({'description': _clean(r.get('Description')), 'when': quand})
+    info['restore_points'] = points
+
+    try:
+        temp_mb = float(data.get('TempMB') or 0)
+        if temp_mb > 0:
+            info['temp_files_mb'] = round(temp_mb)
+    except (TypeError, ValueError):
+        pass
+
+    return info
+
+
+# Cible publique par défaut pour la mesure Internet. Un simple ping : aucune
+# donnée n'est transmise, et la cible est modifiable.
+INTERNET_PROBE = '1.1.1.1'
+# Point de mesure de débit — sollicité uniquement sur demande explicite.
+SPEEDTEST_URL = 'https://speed.cloudflare.com/__down?bytes=10000000'
+
+
+def _ping_stats(cible, essais=4, timeout=6):
+    """Latence moyenne et perte de paquets vers une cible.
+
+    Utilise Test-Connection, dont la sortie est structurée, plutôt que d'analyser
+    le texte localisé de `ping`.
+    """
+    if not cible:
+        return None
+    data = _win_powershell_json(
+        "try { $r=@(Test-Connection -ComputerName '%s' -Count %d -ErrorAction SilentlyContinue "
+        "| Select-Object -ExpandProperty ResponseTime); "
+        "[PSCustomObject]@{ Sent=%d; Received=$r.Count; "
+        "Avg=$(if($r.Count){[math]::Round(($r | Measure-Object -Average).Average,1)}else{$null}); "
+        "Max=$(if($r.Count){($r | Measure-Object -Maximum).Maximum}else{$null}) } "
+        "| ConvertTo-Json -Compress } catch {}" % (cible, essais, essais),
+        timeout=timeout + essais * 2,
+    )
+    if not data:
+        return {'target': cible, 'sent': essais, 'received': 0,
+                'loss_pct': 100, 'avg_ms': None, 'max_ms': None}
+    recus = data.get('Received') or 0
+    return {
+        'target': cible,
+        'sent': essais,
+        'received': recus,
+        'loss_pct': round((essais - recus) / essais * 100) if essais else 0,
+        'avg_ms': data.get('Avg'),
+        'max_ms': data.get('Max'),
+    }
+
+
+def measure_network(info, test_debit=False, url_debit=None):
+    """Latence vers la passerelle, le DNS et Internet ; débit si demandé.
+
+    La latence distingue ce que le débit seul ne montre pas : un poste à
+    500 Mb/s avec 200 ms vers sa propre passerelle a un problème de lien local,
+    pas de connexion Internet. Le test de débit reste facultatif — il consomme
+    de la bande passante sur un poste de production et sollicite un tiers.
+    """
+    if not IS_WINDOWS:
+        return {}
+
+    mesures = []
+    passerelle = info.get('default_gateway')
+    if passerelle:
+        stat = _ping_stats(passerelle)
+        if stat:
+            stat['role'] = 'Passerelle'
+            mesures.append(stat)
+
+    serveurs = info.get('dns_servers') or []
+    premier_dns = serveurs[0]['servers'][0] if serveurs and serveurs[0].get('servers') else None
+    if premier_dns and premier_dns != passerelle:
+        stat = _ping_stats(premier_dns)
+        if stat:
+            stat['role'] = 'Serveur DNS'
+            mesures.append(stat)
+
+    stat = _ping_stats(INTERNET_PROBE)
+    if stat:
+        stat['role'] = 'Internet'
+        mesures.append(stat)
+
+    resultat = {'latency': mesures} if mesures else {}
+
+    if test_debit:
+        debit = _mesurer_debit(url_debit or SPEEDTEST_URL)
+        if debit:
+            resultat['bandwidth'] = debit
+
+    return resultat
+
+
+def _mesurer_debit(url):
+    """Débit descendant approximatif, mesuré sur un téléchargement unique."""
+    import time as _time
+    try:
+        debut = _time.time()
+        octets = 0
+        requete = Request(url, headers={'User-Agent': 'ParcInfo-Collector'})
+        with urlopen(requete, timeout=30) as reponse:
+            while True:
+                bloc = reponse.read(65536)
+                if not bloc:
+                    break
+                octets += len(bloc)
+                # Garde-fou : ni plus de 15 s, ni plus de 50 Mo téléchargés
+                if _time.time() - debut > 15 or octets > 50 * 1024 * 1024:
+                    break
+        duree = max(_time.time() - debut, 0.001)
+        if octets < 100 * 1024:
+            return None
+        return {
+            'downloaded_mb': round(octets / (1024 * 1024), 1),
+            'seconds': round(duree, 1),
+            'mbps': round(octets * 8 / duree / 1_000_000, 1),
+            'source': url,
+        }
+    except Exception:
+        return None
 
 
 def get_system_info_windows(progress=None):
@@ -2810,7 +3178,7 @@ def console_progress(largeur=32, flux=None):
     return rappel
 
 
-def collect_system_info(progress=None):
+def collect_system_info(progress=None, test_debit=False, url_debit=None):
     """Collecte toutes les infos système.
 
     `progress` est un rappel optionnel appelé avec (fraction entre 0 et 1,
@@ -2851,7 +3219,13 @@ def collect_system_info(progress=None):
 
     # Périphériques USB connectés. Isolé de la collecte système : une erreur ici
     # (droits, commande absente) ne doit pas priver le rapport du reste.
-    _report(progress, 0.90, 'Périphériques USB')
+    _report(progress, 0.88, 'Mesures réseau')
+    try:
+        info.update(measure_network(info, test_debit=test_debit, url_debit=url_debit))
+    except Exception:
+        pass
+
+    _report(progress, 0.93, 'Périphériques USB')
     try:
         info['usb_devices'] = collect_usb_devices()
     except Exception:
@@ -3435,6 +3809,38 @@ def build_alerts(info):
     if admins_sans_expiration:
         add('warn', '%d compte(s) administrateur à mot de passe sans expiration'
             % len(admins_sans_expiration), ' · '.join(admins_sans_expiration[:5]))
+
+    # ── Réseau et hygiène ──────────────────────────────────────────────────
+    for mesure in info.get('latency', []):
+        if mesure.get('loss_pct', 0) >= 50:
+            add('danger', 'Perte de paquets vers %s' % mesure['role'].lower(),
+                '%d %% de perte vers %s' % (mesure['loss_pct'], mesure['target']))
+        elif mesure['role'] == 'Passerelle' and (mesure.get('avg_ms') or 0) > 20:
+            # Une passerelle locale répond en 1 à 2 ms ; au-delà, le lien est en
+            # cause (Wi-Fi faible, câble abîmé, switch saturé) et non la
+            # connexion Internet.
+            add('warn', 'Latence anormale vers la passerelle',
+                '%g ms de moyenne — lien local dégradé' % mesure['avg_ms'])
+
+    proxy = info.get('proxy') or {}
+    if proxy.get('server') and not proxy.get('enabled'):
+        add('info', 'Proxy configuré mais désactivé', proxy['server'])
+
+    if info.get('rdp_enabled') and info.get('rdp_nla') is False:
+        add('warn', 'Bureau à distance activé sans NLA',
+            'Sans authentification au niveau réseau, le service est exposé '
+            'avant toute authentification')
+
+    if info.get('uac_enabled') is False:
+        add('warn', "Contrôle de compte d'utilisateur (UAC) désactivé")
+
+    if 'restore_points' in info and not info['restore_points']:
+        add('info', 'Aucun point de restauration',
+            'Impossible de revenir en arrière après une mise à jour ratée')
+
+    temp_mb = _num(info.get('temp_files_mb'))
+    if temp_mb and temp_mb >= 1024:
+        add('info', 'Fichiers temporaires — %.1f Go récupérables' % (temp_mb / 1024))
 
     taches_ko = [t['name'] for t in info.get('scheduled_tasks', []) if t.get('failed')]
     if taches_ko:
