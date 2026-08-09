@@ -26,6 +26,7 @@ from collector_core import (
     build_summary_lines,
     collect_system_info,
     console_progress,
+    fetch_clients,
     generate_pdf_report,
     is_elevated,
     send_to_parcinfo,
@@ -117,8 +118,20 @@ def main():
         else:
             print("    ⚠️ Aucun client spécifié - le serveur utilisera le client par défaut")
 
+    # Reconnaissance automatique : sans client explicite, demander au serveur
+    # s'il connaît déjà cette machine par son adresse MAC. Évite d'atterrir
+    # dans « Découverte réseau » alors que l'appareil est déjà inventorié.
+    client_id = args.client_id
+    if not client_id and not args.client_name:
+        _clients, suggestion = fetch_clients(args.server, mac_address=info.get('mac_address'))
+        if suggestion:
+            client_id = suggestion.get('id')
+            if not args.quiet:
+                print(f"    Client reconnu d'après l'adresse MAC : "
+                      f"{suggestion.get('nom')} (ID {client_id})")
+
     success, result = send_to_parcinfo(info, args.server, args.token,
-                                       client_id=args.client_id,
+                                       client_id=client_id,
                                        client_name=args.client_name)
 
     if not success:
@@ -138,7 +151,7 @@ def main():
 
     # Envoyer le rapport PDF en tant que document joint
     device_id = result.get('device_id')
-    client_id = args.client_id or result.get('client_id')
+    client_id = client_id or result.get('client_id')
     if report_file and device_id and client_id:
         if not args.quiet:
             print("\n[*] Envoi du rapport vers les documents de l'appareil...")

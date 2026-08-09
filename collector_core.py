@@ -25,6 +25,7 @@ import sys
 import uuid
 from datetime import datetime
 from urllib.error import URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 __all__ = [
@@ -4745,6 +4746,7 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         for titre, rows in (
             ('Identification', [
                 ('Nom de machine', info.get('hostname')),
+                ('Nom DNS', info.get('dns_name')),
                 ('Adresse MAC', info.get('mac_address')),
                 ('Adresse(s) IP', ', '.join(info.get('ip_addresses', []))),
                 ('Marque', info.get('brand')),
@@ -4770,9 +4772,16 @@ def generate_pdf_report(info, client_id=None, client_name=None):
 
         # ── Sécurité ─────────────────────────────────────────────────────────
         sec_rows = []
-        antivirus = (info.get('antivirus') or '').strip()
-        sec_rows.append(('Antivirus', antivirus or 'Aucun détecté',
-                         'ok' if antivirus and antivirus.lower() not in ('n/a', 'aucun') else 'danger'))
+        if info.get('antivirus_products'):
+            for av in info['antivirus_products']:
+                niveau = ('ok' if av.get('enabled')
+                          else 'danger' if av.get('enabled') is False else 'info')
+                sec_rows.append(('Antivirus',
+                                 '%s — %s' % (av['name'], av.get('status', '')), niveau))
+        else:
+            antivirus = (info.get('antivirus') or '').strip()
+            sec_rows.append(('Antivirus', antivirus or 'Aucun détecté',
+                             'ok' if antivirus and antivirus.lower() not in ('n/a', 'aucun') else 'danger'))
         if info.get('tpm_present') is not None:
             if info.get('tpm_enabled'):
                 sec_rows.append(('TPM', 'Présent et activé', 'ok'))
@@ -4783,14 +4792,23 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         if info.get('secure_boot') is not None:
             sec_rows.append(('Secure Boot', 'Activé' if info.get('secure_boot') else 'Désactivé',
                              'ok' if info.get('secure_boot') else 'warn'))
-        for profile in info.get('firewall', []):
-            sec_rows.append(('Pare-feu', profile,
-                             'danger' if re.search(r'(désactiv|disabled|off)', profile, re.I) else 'ok'))
+        if info.get('firewall_profiles'):
+            for prof in info['firewall_profiles']:
+                sec_rows.append(('Pare-feu',
+                                 '%s : %s' % (prof['name'],
+                                              'Activé' if prof['enabled'] else 'Désactivé'),
+                                 'ok' if prof['enabled'] else 'danger'))
+        else:
+            for profile in info.get('firewall', []):
+                sec_rows.append(('Pare-feu', profile,
+                                 'danger' if re.search(r'(désactiv|disabled|off)', profile, re.I) else 'ok'))
         for vol in info.get('bitlocker', []):
             sec_rows.append(('BitLocker', vol,
                              'warn' if re.search(r'(non chiffr|not encrypted|off)', vol, re.I) else 'ok'))
         if info.get('last_windows_update'):
             sec_rows.append(('Dernière mise à jour', info['last_windows_update'], 'info'))
+        if info.get('oem_product_key'):
+            sec_rows.append(('Clé OEM (firmware)', info['oem_product_key'], 'info'))
 
         if sec_rows:
             story.append(Paragraph('Sécurité & conformité', S['h2']))
@@ -4936,6 +4954,284 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 story.append(Paragraph(f'{titre} ({len(items)})', S['h2']))
                 for item in items:
                     story.append(Paragraph(f'• {_pdf_escape(item)}', S['body']))
+
+        # ── Détail matériel ──────────────────────────────────────────────────
+        table = _pdf_kv_table(tk, [
+            ('Carte mère', info.get('motherboard')),
+            ('Châssis', info.get('chassis_type')),
+            ('Asset tag', info.get('asset_tag')),
+            ('Cœurs physiques / logiques',
+             '%s / %s' % (info.get('cpu_physical_cores'), info.get('cpu_logical_cores'))
+             if info.get('cpu_physical_cores') else None),
+            ('Fréquence maximale',
+             '%s MHz' % info['cpu_max_clock_mhz'] if info.get('cpu_max_clock_mhz') else None),
+            ('Architecture', info.get('architecture')),
+            ('Socket', info.get('cpu_socket')),
+            ('Nombre de sockets', info.get('cpu_sockets')),
+            ('Cache L3',
+             '%s Ko' % info['cpu_l3_cache_kb'] if info.get('cpu_l3_cache_kb') else None),
+            ('Virtualisation matérielle', info.get('cpu_virtualization')),
+            ('Hyperviseur détecté', 'Oui' if info.get('hypervisor_present') else None),
+            ('Emplacements mémoire',
+             '%s occupés sur %s (max %s Go)' % (info.get('memory_slots_used'),
+                                                info.get('memory_slots_total'),
+                                                info.get('memory_max_gb'))
+             if info.get('memory_slots_total') else None),
+            ("Date d'installation de Windows", info.get('os_install_date')),
+            ('Build', info.get('os_build')),
+            ('Fuseau horaire', info.get('timezone')),
+            ('Propriétaire enregistré', info.get('registered_owner')),
+            ('Session ouverte', info.get('logged_on_user')),
+            ('Âge du matériel',
+             '%g an(s) (depuis la date du BIOS)' % hardware_age_years(info.get('bios_release_date'))
+             if hardware_age_years(info.get('bios_release_date')) is not None else None),
+        ], width)
+        if table:
+            story.append(Paragraph('Détail matériel & système', S['h2']))
+            story.append(table)
+
+        # ── Batterie ─────────────────────────────────────────────────────────
+        table = _pdf_kv_table(tk, [
+            ('Charge actuelle', info.get('battery')),
+            ('Santé',
+             '%s %% de la capacité d\'origine' % info['battery_health_percent']
+             if info.get('battery_health_percent') is not None else None),
+            ('Usure',
+             '%s %%' % info['battery_wear_percent']
+             if info.get('battery_wear_percent') is not None else None),
+            ('Cycles de charge', info.get('battery_cycles')),
+            ("Capacité d'origine",
+             '%s mWh' % info['battery_designed_capacity_mwh']
+             if info.get('battery_designed_capacity_mwh') else None),
+            ('Capacité réelle',
+             '%s mWh' % info['battery_full_capacity_mwh']
+             if info.get('battery_full_capacity_mwh') else None),
+            ('État', info.get('battery_health_status')),
+        ], width)
+        if table:
+            story.append(Paragraph('Batterie', S['h2']))
+            story.append(table)
+
+        # ── Configuration réseau ─────────────────────────────────────────────
+        proxy = info.get('proxy') or {}
+        wifi = info.get('wifi') or {}
+        table = _pdf_kv_table(tk, [
+            ('Passerelle par défaut', info.get('default_gateway')),
+            ('Suffixes DNS', info.get('dns_suffixes')),
+            ('Proxy', ('%s (%s)' % (proxy.get('server') or proxy.get('auto_config_url'),
+                                    'actif' if proxy.get('enabled') else 'configuré mais inactif'))
+             if proxy.get('server') or proxy.get('auto_config_url') else None),
+            ('Réseau Wi-Fi', wifi.get('ssid')),
+            ('Signal Wi-Fi', wifi.get('signal')),
+        ], width)
+        if table:
+            story.append(Paragraph('Configuration réseau', S['h2']))
+            story.append(table)
+
+        profils = info.get('network_profiles') or []
+        if profils:
+            rows = [[Paragraph(_pdf_escape(p['name']), S['body']),
+                     Paragraph(_pdf_escape(p.get('interface')), S['body']),
+                     Paragraph(_pdf_escape(p.get('category')), S['body']),
+                     Paragraph(_pdf_escape(p.get('connectivity')), S['body'])] for p in profils]
+            story.append(Paragraph('Environnement réseau détecté', S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Réseau', 'Interface', 'Catégorie', 'Connectivité'], rows, width,
+                [0.28, 0.30, 0.20, 0.22]))
+
+        dns = info.get('dns_servers') or []
+        if dns:
+            rows = [[Paragraph(_pdf_escape(d['interface']), S['body']),
+                     Paragraph(_pdf_escape(', '.join(d['servers'])), S['mono']),
+                     Paragraph('DHCP' if d.get('dhcp') else 'Manuelle', S['body'])] for d in dns]
+            story.append(Paragraph('Serveurs DNS', S['h2']))
+            story.append(_pdf_data_table(tk, ['Interface', 'Serveurs', 'Attribution'],
+                                         rows, width, [0.42, 0.38, 0.20]))
+
+        adaptateurs = info.get('network_adapter_details') or []
+        if adaptateurs:
+            rows = []
+            for a in adaptateurs:
+                ips = ' · '.join('%s/%s' % (i['address'], i['prefix'])
+                                 for i in a.get('ip_addresses') or []) or '—'
+                rows.append([
+                    Paragraph('<b>%s</b>' % _pdf_escape(a['name']), S['body']),
+                    Paragraph('Physique' if a.get('physical') else 'Virtuelle', S['body']),
+                    Paragraph(_pdf_escape(ips), S['mono']),
+                    Paragraph(_pdf_escape(a.get('link_speed')), S['body']),
+                    Paragraph(_pdf_escape(a.get('mac_address')), S['mono']),
+                ])
+            story.append(Paragraph('Adaptateurs réseau', S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Interface', 'Nature', 'Adresse IP / plage', 'Débit', 'MAC'],
+                rows, width, [0.26, 0.13, 0.27, 0.14, 0.20]))
+
+        # ── Qualité du lien ──────────────────────────────────────────────────
+        latence = info.get('latency') or []
+        if latence:
+            rows = []
+            for l in latence:
+                moyenne = ('%s ms' % l['avg_ms']) if l.get('avg_ms') is not None else 'injoignable'
+                rows.append([
+                    Paragraph('<b>%s</b>' % _pdf_escape(l['role']), S['body']),
+                    Paragraph(_pdf_escape(l['target']), S['mono']),
+                    Paragraph(moyenne, S['body']),
+                    Paragraph(('%s ms' % l['max_ms']) if l.get('max_ms') is not None else '—', S['body']),
+                    Paragraph('%s %%' % l.get('loss_pct', 0), S['body']),
+                ])
+            story.append(Paragraph('Qualité du lien réseau', S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Cible', 'Adresse', 'Latence moyenne', 'Pic', 'Perte'],
+                rows, width, [0.22, 0.24, 0.20, 0.14, 0.20]))
+
+        debit = info.get('bandwidth')
+        if debit:
+            story.append(Paragraph(
+                '<b>Débit descendant :</b> %s Mb/s — %s Mo en %s s'
+                % (debit['mbps'], debit['downloaded_mb'], debit['seconds']), S['body']))
+        else:
+            story.append(Paragraph(
+                'Débit descendant : non mesuré — relancer avec --test-debit '
+                '(ou cocher la case dans le collecteur graphique).', S['small']))
+
+        # ── Environnement & hygiène ──────────────────────────────────────────
+        rdp = None
+        if info.get('rdp_enabled') is not None:
+            rdp = 'Activé' if info['rdp_enabled'] else 'Désactivé'
+            if info.get('rdp_enabled') and info.get('rdp_nla') is not None:
+                rdp += ', NLA %s' % ('actif' if info['rdp_nla'] else 'INACTIF')
+        table = _pdf_kv_table(tk, [
+            ('Rattachement',
+             '%s (%s)' % (info.get('domain_name') or '—',
+                          'domaine' if info.get('domain_joined') else 'groupe de travail')
+             if info.get('domain_joined') is not None else None),
+            ('Contrôleur de domaine', info.get('domain_controller')),
+            ('Serveur WSUS', info.get('wsus_server')),
+            ('Groupe WSUS', info.get('wsus_group')),
+            ('Source de temps', info.get('time_source')),
+            ("Décalage d'horloge", info.get('time_offset')),
+            ('UAC', ('Activé' if info.get('uac_enabled') else 'Désactivé')
+             if info.get('uac_enabled') is not None else None),
+            ('Bureau à distance', rdp),
+            ('Fichiers temporaires',
+             '%s Mo récupérables' % info['temp_files_mb'] if info.get('temp_files_mb') else None),
+            ('Points de restauration',
+             ('%d disponible(s), dernier le %s' % (len(info['restore_points']),
+                                                   info['restore_points'][-1]['when']))
+             if info.get('restore_points') else
+             ('Aucun — retour arrière impossible' if 'restore_points' in info else None)),
+        ], width)
+        if table:
+            story.append(Paragraph('Environnement & hygiène système', S['h2']))
+            story.append(table)
+
+        # ── Cartes graphiques ────────────────────────────────────────────────
+        gpus = info.get('gpu_details') or []
+        if gpus:
+            rows = [[Paragraph(_pdf_escape(g.get('name')), S['body']),
+                     Paragraph(('%s GB' % g['vram_gb']) if g.get('vram_gb') else '—', S['body']),
+                     Paragraph(_pdf_escape(g.get('resolution')), S['body']),
+                     Paragraph(_pdf_escape(g.get('driver_version')), S['mono'])] for g in gpus]
+            story.append(Paragraph('Cartes graphiques', S['h2']))
+            story.append(_pdf_data_table(tk, ['Carte', 'VRAM', 'Résolution', 'Pilote'],
+                                         rows, width, [0.42, 0.12, 0.20, 0.26]))
+
+        # ── Correctifs installés ─────────────────────────────────────────────
+        correctifs = info.get('hotfixes') or []
+        if correctifs:
+            rows = [[Paragraph(_pdf_escape(h.get('id')), S['mono']),
+                     Paragraph(_pdf_escape(h.get('installed_on')), S['body']),
+                     Paragraph(_pdf_escape(h.get('description')), S['body'])] for h in correctifs]
+            story.append(Paragraph('Correctifs Windows installés (%d)' % len(correctifs), S['h2']))
+            story.append(_pdf_data_table(tk, ['Correctif', 'Installé le', 'Type'],
+                                         rows, width, [0.30, 0.30, 0.40]))
+
+        # ── Incidents système ────────────────────────────────────────────────
+        incidents = info.get('system_incidents') or []
+        if incidents:
+            rows = []
+            for i in incidents:
+                rows.append([
+                    Paragraph('<b>%s</b>' % _pdf_escape(i['category']), S['body']),
+                    Paragraph(str(i['count']), S['body']),
+                    Paragraph(_pdf_escape(i['last_seen']), S['mono']),
+                    Paragraph(_pdf_escape(i.get('disk')), S['small']),
+                    Paragraph(_pdf_escape(i['message']), S['small']),
+                ])
+            story.append(Paragraph('Incidents système (%d jours)' % EVENT_WINDOW_DAYS, S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Type', 'Occurrences', 'Dernière', 'Disque', 'Message'],
+                rows, width, [0.17, 0.10, 0.15, 0.22, 0.36]))
+
+        # ── Mises à jour disponibles ─────────────────────────────────────────
+        maj = info.get('pending_updates') or []
+        if maj:
+            rows = [[Paragraph(_pdf_escape(u['title']), S['body']),
+                     Paragraph(('KB%s' % u['kb']) if u.get('kb') else '—', S['mono']),
+                     Paragraph(('%s Mo' % u['size_mb']) if u.get('size_mb') else '—', S['body']),
+                     Paragraph('Sécurité' if u.get('security') else (u.get('severity') or '—'),
+                               S['body'])] for u in maj]
+            story.append(Paragraph('Mises à jour disponibles (%d) — recherche %s'
+                                   % (len(maj), info.get('pending_updates_source', '')), S['h2']))
+            story.append(_pdf_data_table(tk, ['Mise à jour', 'KB', 'Taille', 'Nature'],
+                                         rows, width, [0.54, 0.14, 0.12, 0.20]))
+
+        # ── Comptes utilisateurs ─────────────────────────────────────────────
+        comptes = info.get('users_details') or []
+        if comptes:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(u['name']), S['body']),
+                     Paragraph(_pdf_escape(u['status']), S['body']),
+                     Paragraph(_pdf_escape(u['role']), S['body']),
+                     Paragraph(_pdf_escape(u['account_type']), S['body']),
+                     Paragraph("N'expire jamais" if u.get('password_never_expires') else 'Expire',
+                               S['body']),
+                     Paragraph(_pdf_escape(u.get('last_logon') or 'jamais'), S['mono'])]
+                    for u in comptes]
+            story.append(Paragraph('Comptes utilisateurs locaux (%d)' % len(comptes), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Compte', 'État', 'Type', 'Compte', 'Mot de passe', 'Connexion'],
+                rows, width, [0.22, 0.13, 0.19, 0.12, 0.18, 0.16]))
+
+        # ── Démarrage, services, partages, tâches ────────────────────────────
+        services = info.get('stopped_auto_services') or []
+        if services:
+            rows = [[Paragraph(_pdf_escape(s['display_name']), S['body']),
+                     Paragraph(_pdf_escape(s['name']), S['mono']),
+                     Paragraph(_pdf_escape(s['state']), S['body'])] for s in services]
+            story.append(Paragraph('Services automatiques arrêtés (%d)' % len(services), S['h2']))
+            story.append(_pdf_data_table(tk, ['Service', 'Nom interne', 'État'],
+                                         rows, width, [0.46, 0.36, 0.18]))
+
+        partages = info.get('smb_shares') or []
+        if partages:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(s['name']), S['body']),
+                     Paragraph(_pdf_escape(s.get('path')), S['mono']),
+                     Paragraph('Administration' if s.get('administrative') else 'Exposé',
+                               S['body'])] for s in partages]
+            story.append(Paragraph('Partages réseau (%d)' % len(partages), S['h2']))
+            story.append(_pdf_data_table(tk, ['Partage', 'Chemin', 'Nature'],
+                                         rows, width, [0.32, 0.46, 0.22]))
+
+        taches = info.get('scheduled_tasks') or []
+        if taches:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(t['name']), S['body']),
+                     Paragraph(_pdf_escape(t.get('state')), S['body']),
+                     Paragraph(_pdf_escape(t.get('last_run') or 'jamais'), S['mono']),
+                     Paragraph('Échec' if t.get('failed') else 'OK', S['body']),
+                     Paragraph(_pdf_escape(t.get('action')), S['small'])] for t in taches]
+            story.append(Paragraph('Tâches planifiées (%d)' % len(taches), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Tâche', 'État', 'Dernière exécution', 'Résultat', 'Exécutable'],
+                rows, width, [0.26, 0.12, 0.18, 0.12, 0.32]))
+
+        demarrage = info.get('startup_programs') or []
+        if demarrage:
+            rows = [[Paragraph(_pdf_escape(p['name']), S['body']),
+                     Paragraph(_pdf_escape(p.get('command')), S['small']),
+                     Paragraph(_pdf_escape(p.get('location')), S['mono'])] for p in demarrage]
+            story.append(Paragraph('Programmes au démarrage (%d)' % len(demarrage), S['h2']))
+            story.append(_pdf_data_table(tk, ['Programme', 'Commande', 'Emplacement'],
+                                         rows, width, [0.24, 0.50, 0.26]))
 
         # ── Logiciels ────────────────────────────────────────────────────────
         software = info.get('installed_software', [])
@@ -5141,12 +5437,27 @@ def upload_report_to_parcinfo(report_content, report_file, server_url, device_id
         return False, str(e)
 
 
-def fetch_clients(server_url):
-    """Récupère la liste des clients depuis ParcInfo (endpoint public, sans auth)."""
+def fetch_clients(server_url, mac_address=None):
+    """Récupère la liste des clients depuis ParcInfo (endpoint public, sans auth).
+
+    Quand une adresse MAC est fournie et que le serveur connaît déjà cette
+    machine, il renvoie en plus le client auquel elle est rattachée : le
+    collecteur peut alors le présélectionner au lieu de demander à l'utilisateur
+    de le retrouver dans une liste qui compte parfois des dizaines d'entrées.
+
+    Retourne (clients, client_suggéré_ou_None).
+    """
     try:
-        url = f"{server_url.rstrip('/')}/api/clients-public"
+        url = "%s/api/clients-public" % server_url.rstrip('/')
+        if mac_address:
+            url += '?mac=' + quote(mac_address)
         with urlopen(url, timeout=10) as response:
             data = json.loads(response.read().decode('utf-8'))
-            return data if isinstance(data, list) else []
+        # Le serveur répond une liste simple, ou un objet quand il a une
+        # suggestion ; les deux formes doivent être acceptées.
+        if isinstance(data, dict):
+            clients = data.get('clients') or []
+            return (clients if isinstance(clients, list) else [], data.get('suggested_client'))
+        return (data if isinstance(data, list) else [], None)
     except Exception:
-        return []
+        return ([], None)

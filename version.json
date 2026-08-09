@@ -1,18 +1,22 @@
 {
-  "version": "2.6.39",
-  "release_date": "2026-08-09T11:45:00.000000",
+  "version": "2.6.40",
+  "release_date": "2026-08-09T13:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.39/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.39/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.39",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.39/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.39/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.40/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.40/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.40",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.40/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.40/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Case de test de débit dans le collecteur graphique, annoncée à tort en 2.6.38",
+    "new_features": "Parité complète entre la fiche système et le rapport PDF, reconnaissance automatique du client par adresse MAC",
     "improvements": [
-      "FIXED: La case « Mesurer aussi le débit descendant » du collecteur graphique était annoncée dans les notes de la 2.6.38 mais n'avait pas été appliquée — le correctif avait échoué silencieusement avant d'atteindre ce fichier. Elle est bien présente ici. L'option --test-debit du collecteur en ligne de commande, elle, fonctionnait déjà en 2.6.38."
+      "FIXED: Le rapport PDF avait pris un retard considérable sur la fiche système — 60 données étaient affichées dans la fiche et absentes du PDF (réseau, incidents, tâches planifiées, hygiène, comptes détaillés, mises à jour, batterie, détail matériel…). Les deux rendus couvrent désormais les mêmes données.",
+      "NEW: Un test de parité (test_parite_rapports.py) compare les clés consommées par chaque rendu et échoue dès qu'une donnée n'est affichée que d'un seul côté. Les divergences volontaires sont inscrites avec leur raison. C'est ce qui empêchera la dérive de recommencer.",
+      "FIXED: Le débit descendant n'apparaissait nulle part quand la mesure n'avait pas été demandée — son absence se confondait avec un défaut. La ligne est désormais toujours présente et indique « Non mesuré » avec la manière de l'activer.",
+      "NEW: Le collecteur reconnaît automatiquement le client à partir de l'adresse MAC de la machine. Si l'appareil est déjà inventorié, le collecteur graphique présélectionne son client et le collecteur en ligne de commande l'utilise en l'absence de --client-id. Évite qu'une machine connue reparte dans « Découverte réseau ».",
+      "L'endpoint public /api/clients-public accepte un paramètre mac facultatif. Il ne renvoie que l'identifiant et le nom du client — déjà publics sur cet endpoint — et ne révèle rien lorsque la machine est inconnue. La réponse reste une liste simple sans suggestion, de sorte que les collecteurs antérieurs continuent de fonctionner."
     ]
   },
   "checksums": {
@@ -23,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.39"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.40"
 }

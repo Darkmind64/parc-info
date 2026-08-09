@@ -1,5 +1,46 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.40] - 2026-08-09 ⚖️
+
+### ⚖️ PARITÉ FICHE SYSTÈME ↔ RAPPORT PDF
+- ✅ **Le PDF avait pris un retard considérable** : 60 données étaient affichées
+  dans la fiche et absentes du rapport — configuration et qualité réseau,
+  incidents système, tâches planifiées, hygiène, comptes détaillés, mises à
+  jour, batterie, détail matériel, cartes graphiques, correctifs installés. Le
+  générateur PDF n'avait pas suivi les ajouts successifs
+- ✅ Les deux rendus couvrent désormais **les mêmes données** : 41 pages sur la
+  machine de test, contre 5 auparavant
+- ✅ **Un test de parité empêche la dérive de recommencer**
+  (`test_parite_rapports.py`) : il compare les clés consommées par chaque rendu
+  et échoue dès qu'une donnée n'est affichée que d'un seul côté. Les
+  divergences volontaires y sont inscrites **avec leur raison**, pas
+  silencieusement ignorées
+
+### 📶 DÉBIT : ABSENCE RENDUE EXPLICITE
+- ✅ Quand la mesure n'a pas été demandée, la ligne affichait… rien. L'absence
+  se confondait avec un défaut d'affichage
+- ✅ La ligne est maintenant toujours présente, avec **« Non mesuré »** et la
+  manière de l'activer (`--test-debit`, ou la case du collecteur graphique)
+
+### 🔎 RECONNAISSANCE DU CLIENT PAR ADRESSE MAC
+- ✅ Le collecteur demande au serveur s'il connaît déjà la machine. Si oui, le
+  collecteur graphique **présélectionne son client** et l'annonce ; le
+  collecteur en ligne de commande l'**utilise automatiquement** en l'absence de
+  `--client-id`
+- ✅ Évite qu'une machine déjà inventoriée reparte dans « Découverte réseau »
+  parce que l'utilisateur s'est trompé de client dans une liste qui en compte
+  parfois des dizaines
+- ✅ L'adresse MAC est lue directement, pas prise dans la collecte : celle-ci
+  dure une minute et tourne en parallèle, la reconnaissance serait arrivée trop
+  tard
+- ⚠️ `/api/clients-public` accepte un paramètre `mac` facultatif. Il ne renvoie
+  que l'identifiant et le nom du client — **déjà publics sur cet endpoint** — et
+  ne révèle rien lorsque la machine est inconnue. Sans suggestion la réponse
+  reste une liste simple, de sorte que les collecteurs des versions
+  précédentes continuent de fonctionner
+
+---
+
 ## [2.6.39] - 2026-08-09 🔧
 
 ### 🔧 CORRECTION D'UNE ANNONCE ERRONÉE
