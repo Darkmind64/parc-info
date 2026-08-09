@@ -117,6 +117,9 @@ LISTE_DEFAULTS = {
 
 CFG_DEFAULTS = {
     'theme': 'dark-blue',
+    # Vide : les collecteurs déjà déployés continuent de fonctionner. Une fois
+    # renseigné, il devient obligatoire pour écrire via l'API.
+    'collecteur_token': '',
     'accent_color': '#00c9ff',
     'accent_green': '#00ff88',
     'accent_red': '#ff3355',

@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Vérifie le durcissement des dépôts de fichiers, de l'API collecteur et de la restauration.
+
+Ce que le test contrôle :
+  - seules les extensions de la liste blanche sont acceptées
+  - un fichier dont le contenu dément son extension est refusé
+  - la taille des requêtes est bornée
+  - sans jeton configuré, les collecteurs déjà déployés continuent de passer
+  - avec un jeton, l'API refuse qui ne le présente pas
+  - la restauration ne charge que des sauvegardes existantes, prend un filet
+    de sécurité, et remet réellement les données d'avant
+
+Usage :
+    python test_securite.py
+"""
+
+import io
+import os
+import sys
+import tempfile
+import time
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+os.environ['DATA_DIR'] = tempfile.mkdtemp(prefix='securite_')
+os.environ['RUNNING_IN_DOCKER'] = '1'
+os.environ['PARCINFO_BACKUP'] = '0'
+
+import app as A                       # noqa: E402
+from config_helpers import cfg_set    # noqa: E402
+
+echecs = []
+
+
+def verifier(condition, libelle, detail=''):
+    print('  %s %s%s' % ('OK   ' if condition else 'ÉCHEC', libelle,
+                         (' — ' + detail) if detail else ''))
+    if not condition:
+        echecs.append(libelle)
+
+
+A.init_db()
+conn = A.get_db()
+conn.execute("INSERT OR IGNORE INTO auth_users (id, login, role, actif) VALUES (1,'admin','admin',1)")
+conn.execute("INSERT OR IGNORE INTO auth_users (id, login, role, actif) VALUES (2,'lecteur','user',1)")
+conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (1, 'Société Générale & Cie')")
+conn.commit()
+conn.close()
+
+client = A.app.test_client()
+
+
+def connecter(user_id):
+    with client.session_transaction() as session:
+        session['auth_user_id'] = user_id
+        session['client_id'] = 1
+
+
+PDF = b'%PDF-1.4\n%\xe2\xe3\xcf\xd3\ntrailer<</Root 1 0 R>>'
+PNG = b'\x89PNG\r\n\x1a\n' + b'\x00' * 64
+
+print('=== 1. Extensions ===')
+verifier(A.allowed_file('rapport.pdf'), 'pdf accepté')
+verifier(A.allowed_file('photo.JPG'), 'extension en majuscules acceptée')
+verifier(not A.allowed_file('charge.exe'), 'exe refusé')
+verifier(not A.allowed_file('script.bat'), 'bat refusé')
+verifier(not A.allowed_file('backdoor.php'), 'php refusé')
+verifier(not A.allowed_file('sans_extension'), 'fichier sans extension refusé')
+verifier(not A.allowed_file('rapport.pdf', A.ALLOWED_IMAGE_EXTENSIONS),
+         'pdf refusé là où une image est attendue')
+
+print('\n=== 2. Le contenu doit correspondre à l\'extension ===')
+
+
+class FauxFichier:
+    """Imite le minimum de werkzeug.FileStorage utilisé par la validation."""
+
+    def __init__(self, nom, contenu):
+        self.filename = nom
+        self.stream = io.BytesIO(contenu)
+
+
+ok, motif = A.verifier_fichier(FauxFichier('rapport.pdf', PDF))
+verifier(ok, 'vrai PDF accepté', motif or '')
+ok, motif = A.verifier_fichier(FauxFichier('rapport.pdf', b'MZ\x90\x00 en-tete d\'executable'))
+verifier(not ok, 'exécutable renommé en .pdf refusé', motif or '')
+ok, _ = A.verifier_fichier(FauxFichier('logo.png', PNG), A.ALLOWED_IMAGE_EXTENSIONS)
+verifier(ok, 'vraie image acceptée')
+ok, motif = A.verifier_fichier(FauxFichier('logo.png', PDF), A.ALLOWED_IMAGE_EXTENSIONS)
+verifier(not ok, 'PDF renommé en .png refusé', motif or '')
+ok, _ = A.verifier_fichier(FauxFichier('notes.txt', b'du texte quelconque'))
+verifier(ok, 'format sans signature connue laissé passer')
+
+print('\n=== 3. Taille des requêtes bornée ===')
+verifier(A.app.config.get('MAX_CONTENT_LENGTH') == A.MAX_UPLOAD_MB * 1024 * 1024,
+         'limite appliquée', '%d Mo' % A.MAX_UPLOAD_MB)
+
+print('\n=== 4. API collecteur sans jeton configuré ===')
+cfg_set('collecteur_token', '')
+charge = {'mac_address': 'AA:BB:CC:DD:EE:01', 'hostname': 'POSTE-Éric',
+          'client_id': 1, 'ip_addresses': ['192.168.1.10']}
+reponse = client.post('/api/device-info', json=charge)
+verifier(reponse.status_code == 200, 'collecteur accepté sans jeton',
+         str(reponse.status_code))
+verifier(client.get('/api/clients-public').status_code == 200,
+         'liste des clients ouverte sans jeton')
+
+print('\n=== 5. API collecteur avec jeton ===')
+cfg_set('collecteur_token', 'jeton-Sécurisé-42')
+reponse = client.post('/api/device-info', json=charge)
+verifier(reponse.status_code == 401, 'refusé sans en-tête', str(reponse.status_code))
+reponse = client.post('/api/device-info', json=charge,
+                      headers={'Authorization': 'Bearer mauvais'})
+verifier(reponse.status_code == 401, 'refusé avec un jeton faux', str(reponse.status_code))
+reponse = client.post('/api/device-info', json=charge,
+                      headers={'Authorization': 'Bearer jeton-Sécurisé-42'})
+verifier(reponse.status_code == 200, 'accepté avec le bon jeton', str(reponse.status_code))
+reponse = client.post('/api/device-info', json=charge,
+                      headers={'X-Collector-Token': 'jeton-Sécurisé-42'})
+verifier(reponse.status_code == 200, 'en-tête X-Collector-Token accepté aussi',
+         str(reponse.status_code))
+verifier(client.get('/api/clients-public').status_code == 401,
+         'liste des clients protégée')
+verifier(client.get('/api/clients-public',
+                    headers={'Authorization': 'Bearer jeton-Sécurisé-42'}).status_code == 200,
+         'liste des clients accessible avec le jeton')
+cfg_set('collecteur_token', '')
+
+print('\n=== 6. Restauration ===')
+connecter(1)
+depart = client.post('/api/db/sauvegarde')
+verifier(depart.status_code == 200, 'sauvegarde de départ créée', str(depart.status_code))
+fichier_depart = depart.get_json().get('fichier')
+
+# Une donnée qui n'existe QUE après la sauvegarde : si la restauration marche,
+# elle doit disparaître.
+conn = A.get_db()
+conn.execute("INSERT INTO clients (id, nom) VALUES (77, 'Client ajouté après coup')")
+conn.commit()
+conn.close()
+conn = A.get_db()
+present = conn.execute("SELECT COUNT(*) FROM clients WHERE id=77").fetchone()[0]
+conn.close()
+verifier(present == 1, 'donnée ajoutée après la sauvegarde')
+
+connecter(2)
+verifier(client.post('/api/db/sauvegarde/restaurer',
+                     json={'fichier': fichier_depart}).status_code == 403,
+         'restauration refusée à un compte non administrateur')
+
+connecter(1)
+for tentative in ('../../parc_info.db', 'inexistant.db', ''):
+    code = client.post('/api/db/sauvegarde/restaurer', json={'fichier': tentative}).status_code
+    verifier(code == 404, 'chemin refusé : %r' % tentative, str(code))
+
+avant = len(A._backup_files())
+reponse = client.post('/api/db/sauvegarde/restaurer', json={'fichier': fichier_depart})
+donnees = reponse.get_json()
+verifier(reponse.status_code == 200 and donnees.get('ok'), 'restauration effectuée',
+         str(donnees))
+verifier(bool(donnees.get('filet')), 'sauvegarde de sécurité prise avant',
+         str(donnees.get('filet')))
+
+conn = A.get_db()
+restant = conn.execute("SELECT COUNT(*) FROM clients WHERE id=77").fetchone()[0]
+integrite = conn.execute("PRAGMA integrity_check").fetchone()[0]
+accentue = conn.execute("SELECT nom FROM clients WHERE id=1").fetchone()[0]
+conn.close()
+verifier(restant == 0, "la donnée ajoutée après la sauvegarde a bien disparu")
+verifier(integrite == 'ok', 'base restaurée intègre', integrite)
+verifier(accentue == 'Société Générale & Cie', 'accents intacts après restauration',
+         accentue)
+
+print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
+sys.exit(1 if echecs else 0)

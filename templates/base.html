@@ -3028,6 +3028,29 @@ function rendreConfig() {
     <div id="db-transfer-msg" style="font-size:.72rem;color:var(--text-secondary);padding:.2rem 0;"></div>
 </div>
 
+<!-- ══ 6b. COLLECTEUR & SAUVEGARDES ══ -->
+<div class="cfg-section" id="cfg-collecteur-section">
+    <div class="cfg-section-title">🛡 Collecteur & sauvegardes</div>
+
+    <div class="cfg-row">
+        <label class="cfg-label">Jeton collecteur</label>
+        <input type="password" data-cfg="collecteur_token" value="${g('collecteur_token')}"
+               placeholder="vide = aucun contrôle" class="cfg-input">
+    </div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:0 0 .5rem;">
+        Tant qu'il est vide, n'importe quel collecteur atteignant le serveur peut
+        créer des appareils et déposer des fichiers. Une fois renseigné, le même
+        jeton doit être saisi dans les collecteurs (champ « Jeton » ou
+        <code>--token</code>).
+    </div>
+
+    <div class="cfg-row" style="margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--border);">
+        <label class="cfg-label">Sauvegardes</label>
+        <button class="btn btn-sm" onclick="creerSauvegarde()" style="font-size:.73rem;">💾 Sauvegarder maintenant</button>
+    </div>
+    <div id="liste-sauvegardes" style="font-size:.72rem;color:var(--text-secondary);padding:.2rem 0;">Chargement…</div>
+</div>
+
 <!-- ══ 7. LISTES PERSONNALISABLES ══ -->
 <div class="cfg-section" id="cfg-listes-section">
     <div class="cfg-section-title">📋 Listes personnalisables</div>
@@ -3040,6 +3063,7 @@ function rendreConfig() {
     // Rendre la grille des types et charger les autres listes
     setTimeout(_renderTypesGrid, 10);
     setTimeout(chargerListes, 80);
+    setTimeout(chargerSauvegardes, 120);
     // Initialize dashboard widget configuration UI
     setTimeout(initDashboardWidgetConfig, 50);
 }
@@ -3081,6 +3105,66 @@ function setDbType(type) {
         if (type === 'sync') { refreshSyncStatus(); _startTopbarPoll(); }
         else                 { _stopTopbarPoll(); }
     }
+}
+
+// ── Sauvegardes de la base ──────────────────────────────────────────────────
+
+function chargerSauvegardes() {
+    const zone = document.getElementById('liste-sauvegardes');
+    if (!zone) return;
+    fetch('/api/db/sauvegarde').then(r => r.json()).then(d => {
+        const liste = d.sauvegardes || [];
+        if (!liste.length) {
+            zone.innerHTML = 'Aucune sauvegarde pour l’instant. La première est prise '
+                + 'automatiquement, puis une toutes les ' + (d.intervalle_heures || 24) + ' h.';
+            return;
+        }
+        zone.innerHTML = '<div style="margin:.3rem 0 .2rem;">Les ' + (d.conservees || 3)
+            + ' dernières sont conservées, les plus anciennes supprimées.</div>'
+            + liste.map(s =>
+                '<div style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;'
+              + 'border-bottom:1px solid var(--border);">'
+              + '<span style="flex:1;font-family:\'Share Tech Mono\',monospace;">'
+              + s.date.replace('T', ' ') + '</span>'
+              + '<span style="color:var(--text-muted);">' + s.taille + '</span>'
+              + '<button class="btn btn-sm" style="font-size:.68rem;padding:.15rem .45rem;" '
+              + 'onclick="restaurerSauvegarde(\'' + s.fichier + '\', \'' + s.date.replace('T', ' ') + '\')">'
+              + '↺ Restaurer</button></div>').join('');
+    }).catch(() => { zone.textContent = 'Liste indisponible.'; });
+}
+
+function creerSauvegarde() {
+    const zone = document.getElementById('liste-sauvegardes');
+    if (zone) zone.textContent = 'Sauvegarde en cours…';
+    fetch('/api/db/sauvegarde', {
+        method: 'POST',
+        headers: {'X-CSRFToken': '{{ csrf_token }}'}
+    }).then(r => r.json()).then(d => {
+        if (!d.ok && zone) { zone.textContent = '✗ ' + (d.error || 'Échec'); return; }
+        chargerSauvegardes();
+    }).catch(() => { if (zone) zone.textContent = '✗ Erreur réseau'; });
+}
+
+function restaurerSauvegarde(fichier, quand) {
+    // Deux confirmations : l'opération remplace toutes les données en cours,
+    // et le bouton se trouve à côté d'un simple "Sauvegarder maintenant".
+    if (!confirm('Restaurer la sauvegarde du ' + quand + ' ?\n\n'
+        + 'Toutes les données actuelles seront remplacées par celles de cette date.\n'
+        + 'Une sauvegarde de sécurité est prise juste avant.')) return;
+    if (!confirm('Dernière confirmation : remplacer les données actuelles ?')) return;
+    const zone = document.getElementById('liste-sauvegardes');
+    if (zone) zone.textContent = 'Restauration en cours…';
+    fetch('/api/db/sauvegarde/restaurer', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+        body: JSON.stringify({fichier: fichier})
+    }).then(r => r.json()).then(d => {
+        if (!d.ok) { if (zone) zone.textContent = '✗ ' + (d.error || 'Échec'); return; }
+        alert('Base restaurée depuis ' + d.fichier + '.\n'
+            + 'Sauvegarde de sécurité conservée : ' + (d.filet || 'aucune') + '.\n\n'
+            + 'La page va être rechargée.');
+        location.reload();
+    }).catch(() => { if (zone) zone.textContent = '✗ Erreur réseau'; });
 }
 
 function testTursoConn() {

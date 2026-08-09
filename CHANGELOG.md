@@ -1,5 +1,74 @@
 # CHANGELOG - ParcInfo
 
+## [2.7.0] - 2026-08-09 📈
+
+### 🧪 LES TESTS TOURNENT ENFIN TOUT SEULS
+- ✅ Un job **exécute les sept suites avant toute construction**. Elles
+  existaient déjà mais n'étaient lancées qu'à la main : rien n'empêchait de
+  publier une version sans qu'aucune ne tourne
+- ✅ **`verifier_version.py`** contrôle la concordance des cinq sources de
+  version, le tuple, les numéros cités dans le README, et **la correspondance
+  du tag** — le contrôle qui manquait le jour où `v2.6.33` s'est retrouvé posé
+  sur du code en 2.6.32
+- ✅ Trois suites ajoutées : journal des mises à jour, durcissement, historique
+- ✅ La CI a été éprouvée dans un conteneur Python 3.11 propre avant d'être
+  poussée. Elle y a immédiatement révélé un test faux : la détection du mode
+  d'exécution supposait qu'aucun conteneur n'était en jeu
+
+### 📈 HISTORIQUE DES COLLECTES
+Chaque collecte écrasait la précédente : on avait une photo, jamais une
+trajectoire.
+- ✅ Un **relevé horodaté par passage du collecteur** — espace disque, mémoire,
+  système, numéro de série, empreinte des logiciels
+- ✅ **Date de saturation du disque** projetée par régression linéaire. Elle ne
+  conclut qu'à partir de trois relevés couvrant une semaine : sur deux points
+  rapprochés, la moindre variation donnerait une date absurde
+- ✅ **Logiciels ajoutés et retirés** entre les deux dernières collectes, et
+  **changements matériels** — une barrette, un numéro de série ou un processeur
+  qui change se voit alors tout seul
+- ✅ Seules les grandeurs comparables sont conservées, pas le rapport entier :
+  l'historique reste léger et se synchronise entre postes. 60 relevés par
+  appareil, les plus anciens partent
+
+### 🔒 DÉPÔTS DE FICHIERS ET API COLLECTEUR
+- ✅ **Les dépôts acceptaient tout**, sans limite de taille. Désormais : liste
+  blanche par usage (documents / images), **vérification de la signature du
+  fichier contre son extension** — un exécutable renommé en `.pdf` est refusé —
+  et 64 Mo maximum par requête
+- ✅ **L'API du collecteur n'était pas authentifiée** : un POST suffisait à
+  créer ou modifier des appareils et à déposer des fichiers. Un **jeton
+  partagé**, configurable dans l'interface et saisi une fois dans les
+  collecteurs, devient obligatoire dès qu'il est renseigné. Tant qu'il reste
+  vide, rien ne change pour les collecteurs déjà déployés
+- ✅ La liste des clients est protégée par le même jeton : les noms de vos
+  clients n'ont pas à être lisibles par quiconque atteint le serveur
+- 🐛 **La comparaison du jeton échouait sur un jeton accentué** et répondait 500
+  au lieu de 401 — la fonction censée protéger l'API la cassait. Trouvé par le
+  test, pas par la relecture
+
+### 💾 RESTAURATION D'UNE SAUVEGARDE
+- ✅ Restauration **depuis l'interface**, avec sauvegarde de sécurité prise
+  juste avant et double confirmation. Seul le nom d'une sauvegarde existante est
+  accepté — un chemin relatif ne peut pas désigner autre chose
+- ✅ La copie passe par l'API `backup` de SQLite plutôt que par un remplacement
+  de fichier : les connexions ouvertes resteraient sinon sur l'ancien fichier
+- 🐛 **Deux sauvegardes prises dans la même seconde portaient le même nom**, et
+  la seconde écrasait la première. C'était grave au moment de restaurer : le
+  filet de sécurité remplaçait la sauvegarde qu'on s'apprêtait à recharger. Le
+  test l'a montré du premier coup
+
+### 🔌 PÉRIPHÉRIQUES EN ERREUR
+- ✅ Les codes du Gestionnaire de périphériques sont remontés, traduits, et
+  affichés dans la fiche, le PDF et les points de vigilance. Le reste de
+  l'inventaire décrit ce qui est présent ; cette rubrique, ce qui ne marche pas
+- ✅ « Désactivé » et « déconnecté » sont listés mais ne comptent pas comme
+  pannes : ce sont des états voulus la plupart du temps
+
+### 🧹 DIVERS
+- ✅ Huit fichiers `.pyc` étaient versionnés alors que `.gitignore` les exclut
+
+---
+
 ## [2.6.45] - 2026-08-09 🔢
 
 ### 🐛 BANNIÈRE MASQUÉE PAR LA BARRE LATÉRALE
