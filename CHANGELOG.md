@@ -1,5 +1,55 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.38] - 2026-08-09 🌐
+
+### 🌐 CONFIGURATION ET QUALITÉ RÉSEAU
+- ✅ **Serveurs DNS et passerelle par carte**, DHCP ou adressage manuel,
+  **suffixes DNS**, et **proxy configuré** — les quatre réglages qui produisent
+  tous le même symptôme (« il n'a plus Internet ») et ne se distinguent qu'ici
+- ✅ **Environnement réseau détecté** : catégorie Windows (Domaine / Privé /
+  Public), qui détermine quel profil de pare-feu s'applique, et connectivité
+  IPv4 réellement constatée par Windows
+- ✅ **Wi-Fi** : SSID, signal, bande et canal quand une interface existe
+- ✅ **Qualité du lien mesurée à chaque collecte** : latence moyenne, pic et
+  perte de paquets vers la passerelle, le serveur DNS et Internet. C'est ce qui
+  distingue un problème de lien local d'un problème de connexion — un poste à
+  500 Mb/s avec 200 ms vers sa **propre passerelle** a un souci de câble ou de
+  Wi-Fi que le débit seul ne montre pas
+- ✅ **Test de débit descendant, désactivé par défaut** : `--test-debit` en ligne
+  de commande, case à cocher dans l'interface. Il consomme de la bande passante
+  sur un poste de production et sollicite un service tiers — il reste un choix
+  explicite, pas un comportement imposé à chaque collecte
+
+### 🏢 ENVIRONNEMENT D'ENTREPRISE
+- ✅ Serveur **WSUS** configuré et groupe cible — explique « pourquoi ce poste
+  n'a pas les mises à jour »
+- ✅ Rattachement au domaine, contrôleur utilisé, source de temps et **décalage
+  d'horloge** (un décalage casse l'authentification Kerberos)
+
+### 🧹 HYGIÈNE SYSTÈME
+- ✅ **Points de restauration** — présence et date. Aucun point signifie qu'un
+  retour arrière après une mise à jour ratée est impossible
+- ✅ État de l'**UAC**, **Bureau à distance et NLA**. Sur la machine de test, RDP
+  est actif **sans NLA** : le service est exposé avant toute authentification
+- ✅ Espace récupérable en fichiers temporaires — 2,6 Go sur la machine de test,
+  ce qui complète les barres d'occupation par volume
+
+### 🔄 MISES À JOUR : RECHERCHE EN LIGNE
+- ✅ La recherche interroge désormais **Microsoft Update ou le WSUS configuré**,
+  et non plus le seul cache local. Elle voit donc les correctifs *applicables*,
+  pas seulement ceux que Windows a déjà décidé d'installer
+- ✅ La différence n'est pas théorique : sur la machine de référence le cache
+  annonçait **zéro** alors qu'une mise à jour de **1,5 Go** était disponible
+- ✅ Numéro de KB et taille de téléchargement affichés ; repli automatique sur le
+  cache si la recherche échoue, **avec mention explicite de la source** pour
+  qu'une liste incomplète ne passe pas pour exhaustive
+
+### 📌 NOUVEAUX POINTS D'ATTENTION
+Perte de paquets, latence anormale vers la passerelle, proxy résiduel, RDP sans
+NLA, UAC désactivé, absence de point de restauration, temporaires volumineux.
+
+---
+
 ## [2.6.37] - 2026-08-09 🔗
 
 ### 🔗 INCIDENTS DISQUE RAPPROCHÉS DU MATÉRIEL

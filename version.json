@@ -1,21 +1,23 @@
 {
-  "version": "2.6.37",
-  "release_date": "2026-08-09T09:30:00.000000",
+  "version": "2.6.38",
+  "release_date": "2026-08-09T11:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.37/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.37/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.6.37",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.37/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.37/system-info-collector.exe"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.38/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.38/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.6.38",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.38/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.6.38/system-info-collector.exe"
   },
   "notes": {
-    "new_features": "Incidents disque rapprochés du matériel réel, tâches planifiées, barre de progression du collecteur",
+    "new_features": "Configuration et qualité réseau, environnement d'entreprise, hygiène système, et recherche en ligne des mises à jour",
     "improvements": [
-      "NEW: Les incidents disque du journal Système sont rapprochés du matériel : « \\Device\\Harddisk6\\DR6 » devient « Brother DCP-195C — USB ». Un support amovible débranché depuis l'incident est signalé comme tel plutôt qu'attribué au hasard à un disque encore présent.",
-      "NEW: Tâches planifiées hors dossier \\Microsoft\\, avec leur état, leur dernière exécution et leur résultat. Les tâches en échec remontent en tête et alimentent les points d'attention.",
-      "NEW: Le collecteur affiche sa progression — étape en cours et barre. En console interactive la barre se réécrit sur une ligne ; redirigée vers un fichier, elle retombe sur une ligne par étape. Le collecteur GUI dispose d'une barre équivalente.",
-      "FIXED: Le collecteur CLI plantait immédiatement sur une console Windows française : le premier caractère non-ASCII affiché (« ⚠ », « ✓ ») levait un UnicodeEncodeError avant même le début de la collecte. Les deux collecteurs forcent désormais leur sortie en UTF-8."
+      "NEW: Configuration réseau complète — serveurs DNS et passerelle par carte, DHCP ou adressage manuel, catégorie de réseau Windows (Domaine / Privé / Public, qui détermine le profil de pare-feu appliqué), connectivité réellement constatée, proxy configuré, et Wi-Fi (SSID, signal, bande) quand il y en a un.",
+      "NEW: Qualité du lien mesurée à chaque collecte — latence, pic et perte de paquets vers la passerelle, le serveur DNS et Internet. C'est ce qui distingue un problème de lien local d'un problème de connexion : un poste à 500 Mb/s avec 200 ms vers sa propre passerelle a un souci de câble ou de Wi-Fi que le débit seul ne montre pas.",
+      "NEW: Test de débit descendant, désactivé par défaut (--test-debit en ligne de commande, case à cocher dans l'interface). Il consomme de la bande passante sur un poste de production et sollicite un service tiers : il reste un choix explicite.",
+      "NEW: Environnement d'entreprise — serveur WSUS configuré, rattachement au domaine, contrôleur utilisé, source de temps et décalage d'horloge.",
+      "NEW: Hygiène système — points de restauration, état de l'UAC, Bureau à distance et NLA, espace récupérable en fichiers temporaires.",
+      "CHANGED: La recherche des mises à jour se fait désormais en ligne et non plus dans le seul cache local. La différence est réelle : sur la machine de référence le cache annonçait zéro alors qu'une mise à jour de 1,5 Go était disponible. Repli automatique sur le cache si la recherche échoue, avec mention explicite de la source."
     ]
   },
   "checksums": {
@@ -26,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.37"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.6.38"
 }
