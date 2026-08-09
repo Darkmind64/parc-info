@@ -4406,9 +4406,10 @@ def _build_pdf_toolkit():
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.units import mm
         from reportlab.platypus import (
-            Flowable, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate,
-            Spacer, Table, TableStyle,
+            CondPageBreak, Flowable, KeepTogether, PageBreak, Paragraph,
+            SimpleDocTemplate, Spacer, Table, TableStyle,
         )
+        from reportlab.platypus.tableofcontents import TableOfContents
     except ImportError:
         return None
 
@@ -4462,12 +4463,52 @@ def _build_pdf_toolkit():
                               fontSize=9.5, textColor=colors.white, leading=13),
         'alert': ParagraphStyle('A', parent=styles['Normal'], fontSize=8.5, leading=11),
     }
+    class DocumentRapport(SimpleDocTemplate):
+        """Document qui alimente son sommaire au fil de la mise en page.
+
+        Sur un rapport de plusieurs dizaines de pages, un sommaire paginé évite
+        de faire défiler au jugé. reportlab ne peut le remplir qu'en deux
+        passes : la première mesure les positions, la seconde les écrit.
+        """
+
+        def afterFlowable(self, flowable):
+            niveau = getattr(flowable, '_niveau_sommaire', None)
+            if niveau is not None:
+                self.notify('TOCEntry', (niveau, flowable.getPlainText(), self.page))
+
+    S['toc1'] = ParagraphStyle('TOC1', parent=styles['Normal'], fontSize=9,
+                               leading=15, leftIndent=8,
+                               textColor=colors.HexColor('#1e3a5f'))
+
     return {
         'colors': colors, 'A4': A4, 'mm': mm, 'Paragraph': Paragraph,
-        'SimpleDocTemplate': SimpleDocTemplate, 'Spacer': Spacer, 'Table': Table,
-        'TableStyle': TableStyle, 'KeepTogether': KeepTogether, 'PageBreak': PageBreak,
+        'SimpleDocTemplate': SimpleDocTemplate, 'DocumentRapport': DocumentRapport,
+        'Spacer': Spacer, 'Table': Table, 'TableStyle': TableStyle,
+        'KeepTogether': KeepTogether, 'PageBreak': PageBreak,
+        'CondPageBreak': CondPageBreak, 'TableOfContents': TableOfContents,
         'ProgressBar': ProgressBar, 'S': S,
     }
+
+
+def _preparer_mise_en_page(tk, story):
+    """Empêche les titres de rubrique de rester orphelins en bas de page.
+
+    Plutôt que d'altérer les vingt-sept endroits qui produisent un titre, le
+    récit complet est parcouru une fois juste avant le rendu : chaque titre de
+    rubrique est précédé d'un saut conditionnel qui réserve sa hauteur et celle
+    des premières lignes qui suivent, et se voit marqué pour le sommaire.
+    """
+    prepare = []
+    for element in story:
+        est_titre = (getattr(getattr(element, 'style', None), 'name', '') == 'H2'
+                     and not getattr(element, '_sans_sommaire', False))
+        if est_titre:
+            # Si moins de 70 points restent sur la page, la rubrique commence
+            # sur la suivante au lieu de laisser son intitulé seul en pied.
+            prepare.append(tk['CondPageBreak'](70))
+            element._niveau_sommaire = 0
+        prepare.append(element)
+    return prepare
 
 
 def _pdf_kv_table(tk, rows, width):
@@ -4695,10 +4736,10 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         Paragraph, Spacer, Table, TableStyle = (
             tk['Paragraph'], tk['Spacer'], tk['Table'], tk['TableStyle'])
 
-        doc = tk['SimpleDocTemplate'](
+        doc = tk['DocumentRapport'](
             filename, pagesize=tk['A4'],
             leftMargin=15 * tk['mm'], rightMargin=15 * tk['mm'],
-            topMargin=13 * tk['mm'], bottomMargin=13 * tk['mm'],
+            topMargin=13 * tk['mm'], bottomMargin=16 * tk['mm'],
             title=f"Fiche système — {info.get('hostname', '')}",
         )
         width = doc.width
@@ -4726,6 +4767,16 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         ]))
         story.append(hero)
         story.append(Spacer(1, 11))
+
+        # Sommaire : le rapport dépasse la quarantaine de pages.
+        sommaire = tk['TableOfContents']()
+        sommaire.levelStyles = [S['toc1']]
+        titre_sommaire = Paragraph('Sommaire', S['h2'])
+        # Ce titre-ci ne doit pas figurer dans le sommaire qu'il introduit.
+        titre_sommaire._sans_sommaire = True
+        story.append(titre_sommaire)
+        story.append(sommaire)
+        story.append(Spacer(1, 10))
 
         # ── Points d'attention ───────────────────────────────────────────────
         story.append(Paragraph("Points d'attention", S['h2']))
@@ -4970,7 +5021,10 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             ('Nombre de sockets', info.get('cpu_sockets')),
             ('Cache L3',
              '%s Ko' % info['cpu_l3_cache_kb'] if info.get('cpu_l3_cache_kb') else None),
-            ('Virtualisation matérielle', info.get('cpu_virtualization')),
+            ('Virtualisation matérielle',
+             ('Activée' if info['cpu_virtualization'] else 'Désactivée')
+             if isinstance(info.get('cpu_virtualization'), bool)
+             else info.get('cpu_virtualization')),
             ('Hyperviseur détecté', 'Oui' if info.get('hypervisor_present') else None),
             ('Emplacements mémoire',
              '%s occupés sur %s (max %s Go)' % (info.get('memory_slots_used'),
@@ -5263,7 +5317,23 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             f"{_pdf_escape(info.get('timestamp') or 'N/A')} · {len(software)} logiciel(s), "
             f"{len(usb)} périphérique(s) USB, {len(ports)} port(s) en écoute.", S['small']))
 
-        doc.build(story)
+        def _pied_de_page(canvas, document):
+            """Repère de navigation : une page isolée reste identifiable."""
+            canvas.saveState()
+            canvas.setFont('Helvetica', 7)
+            canvas.setFillColor(colors.HexColor('#9ca3af'))
+            gauche = '%s — %s' % (info.get('hostname', ''), cible)
+            canvas.drawString(doc.leftMargin, 8 * tk['mm'], gauche[:90])
+            canvas.drawRightString(doc.leftMargin + doc.width, 8 * tk['mm'],
+                                   'page %d' % document.page)
+            canvas.setStrokeColor(colors.HexColor('#e5e7eb'))
+            canvas.line(doc.leftMargin, 11 * tk['mm'],
+                        doc.leftMargin + doc.width, 11 * tk['mm'])
+            canvas.restoreState()
+
+        # multiBuild : deux passes, indispensables pour paginer le sommaire.
+        doc.multiBuild(_preparer_mise_en_page(tk, story),
+                       onFirstPage=_pied_de_page, onLaterPages=_pied_de_page)
         with open(filename, 'rb') as f:
             return f.read(), filename
 

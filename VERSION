@@ -1,10 +1,10 @@
-PARCINFO_VERSION=2.6.40
+PARCINFO_VERSION=2.6.41
 RELEASE_DATE=2026-08-08
-BUILD_NUMBER=2026080904
+BUILD_NUMBER=2026080905
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.6.40 - Parite fiche/PDF, debit visible, client par MAC
+# Version 2.6.41 - Mise en page du PDF, bandeau de reconnaissance
 # Balayage de toutes les sources de clé produit, appairage sur les 5
 # derniers caractères, report automatique dans la fiche appareil
 # Date: 8 août 2026
