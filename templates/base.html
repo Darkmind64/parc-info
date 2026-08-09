@@ -161,7 +161,7 @@
         }
         .nav-brand {
             font-family: 'Share Tech Mono', monospace; font-size: 1rem; color: var(--accent);
-            letter-spacing: 2px; margin-right: 1.5rem; text-decoration: none;
+            letter-spacing: 2px; text-decoration: none;
             display: flex; align-items: center; gap: 0.5rem;
         }
         .nav-brand::before {
@@ -169,11 +169,28 @@
             background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px var(--accent);
             animation: blink 2s infinite;
         }
-        .nav-brand-version {
+        /* Le numéro de version déclenche la recherche de mise à jour. C'est un
+           bouton et non un fragment du lien d'accueil : imbriqué dans celui-ci,
+           un clic aurait ramené à l'accueil au lieu d'agir. */
+        .nav-version {
             font-size: .6rem; font-family: 'Share Tech Mono', monospace;
-            color: var(--text-muted); letter-spacing: 1px;
-            opacity: .7; margin-left: -.2rem;
+            color: var(--text-muted); letter-spacing: 1px; opacity: .7;
+            background: none; border: 1px solid transparent; cursor: pointer;
+            padding: .2rem .4rem; border-radius: 3px; margin-right: 1.5rem;
+            display: flex; align-items: center; gap: .35rem; align-self: center;
+            white-space: nowrap; transition: all .2s;
         }
+        .nav-version:hover, .nav-version:focus-visible {
+            opacity: 1; color: var(--accent); border-color: var(--border);
+            background: rgba(0, 201, 255, .07);
+        }
+        .nav-version-pastille {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: var(--accent-orange); box-shadow: 0 0 6px var(--accent-orange);
+        }
+        /* Une mise à jour écartée ne doit pas disparaître complètement :
+           la pastille reste le rappel discret qu'une version attend. */
+        .nav-version.maj-dispo { opacity: 1; color: var(--accent-orange); }
         @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
         nav a {
             color: var(--text-secondary); text-decoration: none; padding: 0 0.9rem; height: 50px;
@@ -293,14 +310,26 @@
         body.nav-left main {
             margin-left: 220px;
         }
+        /* La barre latérale est en position fixe : sans ce décalage, la bannière
+           de mise à jour commence sous elle et son début reste invisible. */
+        body.nav-left #update-notification-container {
+            margin-left: 220px;
+        }
         body.nav-left #cfg-drawer { /* le drawer reste à droite, inchangé */ }
 
         /* Brand */
         body.nav-left nav .nav-brand {
-            padding: .9rem 1.1rem; font-size: 1rem;
-            border-bottom: 1px solid var(--border);
+            padding: .9rem 1.1rem .5rem; font-size: 1rem;
             flex-shrink: 0; letter-spacing: 3px;
             display: flex; align-items: center; gap: .5rem;
+        }
+        /* En colonne, la version prend sa propre ligne sous la marque et ferme
+           le bloc d'en-tête. */
+        body.nav-left .nav-version {
+            margin: 0 0 .3rem; padding: .15rem 1.15rem .55rem;
+            width: 100%; box-sizing: border-box; justify-content: flex-start;
+            border-bottom: 1px solid var(--border); border-radius: 0;
+            flex-shrink: 0;
         }
         /* Liens simples */
         body.nav-left nav > a:not(.nav-brand) {
@@ -740,7 +769,14 @@
 {% set contrats_active = ep in ['liste_contrats','nouveau_contrat','editer_contrat','detail_contrat'] %}
 {% set secu_active = ep in ['liste_identifiants','nouvel_identifiant','editer_identifiant','liste_utilisateurs','nouvel_utilisateur','editer_utilisateur','droits_utilisateur'] %}
 <nav>
-    <a href="/" class="nav-brand">PARCINFO{% if app_version %}<span class="nav-brand-version">v{{ app_version }}</span>{% endif %}</a>
+    <a href="/" class="nav-brand">PARCINFO</a>
+    {% if app_version %}
+    <button type="button" class="nav-version" id="maj-version"
+            title="Version {{ app_version }} — cliquer pour rechercher une mise à jour">
+        <span class="nav-version-num">v{{ app_version }}</span>
+        <span class="nav-version-pastille" hidden></span>
+    </button>
+    {% endif %}
 
     <!-- SEARCH BAR -->
     <div style="display:flex;align-items:center;margin-left:1rem;margin-right:1rem;flex:0 0 auto;">

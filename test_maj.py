@@ -188,6 +188,27 @@ n2.verifier(force=True)
 verifier(n2.etat['masquee'] is False, 'la version suivante réapparaît',
          str(n2.etat['version_disponible']))
 
+# Le clic sur le numéro de version redemande à voir une annonce écartée.
+# Dossier de configuration neuf : réutiliser le précédent ferait croire à une
+# mise à jour venant d'être installée (la version enregistrée y est plus
+# ancienne), et « écarter » refermerait cette confirmation au lieu de l'annonce.
+cfg_ecart = tempfile.mkdtemp(prefix='maj_ecart_')
+n4 = UN.UpdateNotifier(config_dir=cfg_ecart)
+n4.checker.version_json_url = BASE + '/version.json'
+n4.checker.current_version = '2.0.0'
+n4.verifier(force=True)
+verifier(n4.etat['masquee'] is False, 'annonce visible au départ')
+n4.ecarter()
+verifier(n4.etat['masquee'] is True, 'écartée')
+n4.reafficher()
+verifier(n4.etat['masquee'] is False, 'réaffichée sur demande')
+
+n5 = UN.UpdateNotifier(config_dir=cfg_ecart)
+n5.checker.version_json_url = BASE + '/version.json'
+n5.checker.current_version = '2.0.0'
+n5.verifier(force=True)
+verifier(n5.etat['masquee'] is False, 'le réaffichage survit au redémarrage')
+
 print('\n=== 7. Installation impossible hors exécutable ===')
 verifier(n2.installer() is False, 'installation refusée proprement')
 verifier(bool(n2.erreur), 'raison expliquée', str(n2.erreur)[:70])

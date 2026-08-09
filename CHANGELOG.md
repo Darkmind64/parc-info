@@ -1,5 +1,30 @@
 # CHANGELOG - ParcInfo
 
+## [2.6.45] - 2026-08-09 🔢
+
+### 🐛 BANNIÈRE MASQUÉE PAR LA BARRE LATÉRALE
+- ✅ Avec la navigation en colonne, la bannière de mise à jour commençait
+  **sous** la barre latérale — celle-ci est en position fixe, et seuls la barre
+  client et le contenu principal étaient décalés de ses 220 px
+- Mesuré avant correction : la bannière démarrait à **36 px**, la barre
+  s'arrêtant à **220**. Après : **256 px**, entièrement visible
+
+### 🔢 METTRE À JOUR DEPUIS LE NUMÉRO DE VERSION
+- ✅ **Un clic sur le numéro de version** lance la recherche d'une mise à jour.
+  S'il y en a une, la bannière s'affiche avec son bouton d'installation ; sinon
+  le numéro confirme brièvement « à jour ✓ », puis reprend sa place
+- ✅ **Pastille orange** sur le numéro dès qu'une version attend — y compris
+  après avoir écarté la bannière. Sans elle, « Plus tard » effaçait toute trace
+  de la mise à jour disponible
+- ✅ Si l'annonce a été écartée, le clic **la redemande** (route
+  `/api/updates/undismiss`), et ce choix survit au redémarrage
+- ✅ Le numéro est désormais un **bouton**, plus un fragment du lien d'accueil :
+  imbriqué dans celui-ci, un clic aurait ramené à l'accueil au lieu d'agir
+- ✅ Placé à droite de la marque en navigation horizontale, sur sa propre ligne
+  sous la marque en navigation verticale — vérifié dans les deux dispositions
+
+---
+
 ## [2.6.44] - 2026-08-09 📓
 
 ### 📓 JOURNAL DES MISES À JOUR — PARTAGÉ ENTRE TOUS LES POSTES

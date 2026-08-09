@@ -198,6 +198,12 @@ class UpdateNotifier:
             self.version_ecartee = self.checker.latest_version
             self._enregistrer_etat()
 
+    def reafficher(self) -> None:
+        """Annule l'écartement : l'utilisateur redemande à voir l'annonce."""
+        if self.version_ecartee:
+            self.version_ecartee = None
+            self._enregistrer_etat()
+
     # ─────────────────────────────────────────────────────────────────────────
     # État exposé à l'interface
     # ─────────────────────────────────────────────────────────────────────────
