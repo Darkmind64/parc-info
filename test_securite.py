@@ -43,8 +43,10 @@ def verifier(condition, libelle, detail=''):
 
 A.init_db()
 conn = A.get_db()
-conn.execute("INSERT OR IGNORE INTO auth_users (id, login, role, actif) VALUES (1,'admin','admin',1)")
-conn.execute("INSERT OR IGNORE INTO auth_users (id, login, role, actif) VALUES (2,'lecteur','user',1)")
+conn.execute("INSERT OR REPLACE INTO auth_users (id, login, password_hash, nom, role, actif) "
+             "VALUES (1, 'admin', 'x', 'Administrateur', 'admin', 1)")
+conn.execute("INSERT OR REPLACE INTO auth_users (id, login, password_hash, nom, role, actif) "
+             "VALUES (2, 'lecteur', 'x', 'Lecteur Éprouvé', 'user', 1)")
 conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (1, 'Société Générale & Cie')")
 conn.commit()
 conn.close()
@@ -230,6 +232,38 @@ consultations = conn.execute(
     "SELECT COUNT(*) FROM historique WHERE action LIKE '%Consultation%BitLocker%'").fetchone()[0]
 conn.close()
 verifier(consultations >= 1, 'chaque consultation est tracée', '%d' % consultations)
+
+print("\n=== 8. La fiche appareil s'affiche ===")
+# Régression de la 2.8.0 : la requête des clés BitLocker avait été placée après
+# la fermeture de la connexion, et toute édition d'appareil répondait 500.
+connecter(1)
+conn = A.get_db()
+conn.execute("INSERT INTO appareils (id, client_id, nom_machine) "
+             "VALUES (55, 1, 'POSTE-Sans-Chiffrement')")
+conn.commit()
+conn.close()
+reponse = client.get('/appareil/55/editer')
+verifier(reponse.status_code == 200, 'édition sans clé BitLocker', str(reponse.status_code))
+
+reponse = client.get('/appareil/%d/editer' % appareil_id)
+page = reponse.get_data(as_text=True)
+verifier(reponse.status_code == 200, 'édition avec clé BitLocker', str(reponse.status_code))
+verifier('Clés de récupération BitLocker' in page, 'le bloc BitLocker est affiché')
+verifier(CLE not in page, "la clé n'est jamais dans le HTML de la page")
+
+print('\n=== 9. Qui peut lancer une mise à jour ===')
+# Ouvert à tout compte connecté : sur un poste de travail, celui qui utilise
+# l'application est rarement celui qui porte le rôle d'administrateur.
+connecter(2)
+reponse = client.post('/api/updates/install')
+verifier(reponse.status_code != 403,
+         "un compte non administrateur n'est plus refusé",
+         '%s — %s' % (reponse.status_code, (reponse.get_json() or {}).get('erreur')))
+verifier(client.post('/api/updates/check').status_code in (200, 202),
+         'un compte non administrateur peut vérifier')
+
+reponse = client.get('/api/updates/status')
+verifier(reponse.status_code == 200, "l'état reste lisible par tous")
 
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

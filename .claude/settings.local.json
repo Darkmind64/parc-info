@@ -270,7 +270,10 @@
       "Bash(python -m py_compile collector_core.py)",
       "Bash(python -m py_compile app.py collector_core.py)",
       "Bash(timeout 400 python -c ' *)",
-      "Bash(timeout 300 python -c ' *)"
+      "Bash(timeout 300 python -c ' *)",
+      "Bash(cp README.md /tmp/r.bak)",
+      "Bash(echo \"code retour avec un lien périmé : $? \\(1 attendu\\)\")",
+      "Bash(cp /tmp/r.bak README.md)"
     ]
   }
 }

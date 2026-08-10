@@ -46,9 +46,15 @@ def main():
                              lire('__version__.py'), '__version__.py')
     tuple_attendu = ', '.join(versions['__version__.py'].split('.'))
 
-    # README : tous les numéros cités doivent être celui de la version courante,
-    # sans quoi les liens de téléchargement pointent vers une version disparue.
-    dans_readme = sorted(set(re.findall(r'2\.\d+\.\d+', lire('README.md'))))
+    # README : seuls les liens de téléchargement et la version déclarée sont
+    # contrôlés. Exiger que TOUS les numéros cités soient le courant refusait
+    # les rappels historiques légitimes (« avant 2.7.1, la mise à jour… »),
+    # alors que le risque réel est un lien pointant vers une version disparue.
+    readme = lire('README.md')
+    dans_readme = sorted(set(
+        re.findall(r'releases/download/v(\d+\.\d+\.\d+)/', readme)
+        + re.findall(r'\*\*Version\*\*\s*:\s*(\d+\.\d+\.\d+)', readme)
+        + re.findall(r'docker pull darkmind64/parcinfo:v?(\d+\.\d+\.\d+)', readme)))
 
     print("Versions déclarées :")
     for source, valeur in versions.items():

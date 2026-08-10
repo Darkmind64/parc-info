@@ -1,5 +1,45 @@
 # CHANGELOG - ParcInfo
 
+## [2.8.1] - 2026-08-10 🩹
+
+### 🐛 ÉDITER UN APPAREIL RENVOYAIT UNE ERREUR 500
+Régression introduite en 2.8.0 : la requête des clés BitLocker avait été placée
+**après la fermeture de la connexion** à la base. Toute édition d'appareil
+échouait, avec ou sans volume chiffré. La requête est remontée avant la
+fermeture.
+
+### 🔓 LA MISE À JOUR N'EST PLUS RÉSERVÉE AUX ADMINISTRATEURS
+- ✅ Tout compte connecté peut lancer une mise à jour. Sur un poste de travail,
+  celui qui utilise l'application est rarement celui qui porte le rôle
+  d'administrateur dans ParcInfo, et la réserve empêchait purement et
+  simplement les mises à jour
+- ✅ L'auteur de la demande est inscrit au journal : l'opération redémarre
+  l'application pour tout le monde, autant savoir qui l'a déclenchée
+
+### 🧪 DES TESTS QUI PASSAIENT POUR LA MAUVAISE RAISON
+- ✅ Trois suites créaient leurs comptes avec `INSERT OR IGNORE` **sans les
+  colonnes obligatoires** : la contrainte était avalée en silence, le compte
+  n'existait pas, et les assertions décrivaient en réalité une session sans
+  utilisateur. Les comptes sont désormais créés explicitement
+- ✅ Deux tests de non-régression couvrent exactement les symptômes signalés :
+  l'affichage de la fiche appareil avec et sans clé BitLocker, et le lancement
+  d'une mise à jour par un compte non administrateur
+
+### 🔎 LE CONTRÔLE DE VERSION, RESSERRÉ
+`verifier_version.py` exigeait que **tous** les numéros cités dans le README
+soient la version courante. Il refusait donc les rappels historiques légitimes
+(« avant 2.7.1, la mise à jour… ») alors que le risque réel est ailleurs : un
+lien de téléchargement pointant vers une version disparue. Le contrôle ne porte
+plus que sur les liens, la version déclarée et la commande Docker — vérifié en
+introduisant un lien périmé, qu'il rejette toujours.
+
+### 📝 README
+Mentions périmées corrigées : le bouton d'installation n'est plus décrit comme
+réservé aux administrateurs, et l'avertissement sur le mécanisme de mise à jour
+vise désormais les versions antérieures à 2.7.1, pas la version courante.
+
+---
+
 ## [2.8.0] - 2026-08-10 🔎
 
 ### 🔎 CE QUE LE COLLECTEUR VOIT EN PLUS

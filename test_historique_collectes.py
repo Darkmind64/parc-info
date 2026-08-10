@@ -44,7 +44,8 @@ def verifier(condition, libelle, detail=''):
 
 A.init_db()
 conn = A.get_db()
-conn.execute("INSERT OR IGNORE INTO auth_users (id, login, role, actif) VALUES (1,'admin','admin',1)")
+conn.execute("INSERT OR REPLACE INTO auth_users (id, login, password_hash, nom, role, actif) "
+             "VALUES (1, 'admin', 'x', 'Administrateur', 'admin', 1)")
 conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (1, 'Client Éprouvé')")
 conn.execute("INSERT INTO appareils (id, client_id, nom_machine) VALUES (1, 1, 'POSTE-Réception')")
 conn.commit()
