@@ -403,7 +403,8 @@ faux = UC.UpdateChecker(config_dir=tempfile.mkdtemp(prefix='maj_bat_'))
 binaire = pathlib.Path(faux.config_dir) / 'ParcInfo-Windows.exe'
 binaire.write_bytes(b'nouveau binaire')
 lance = {}
-UC.subprocess.Popen = lambda *a, **kw: lance.setdefault('cmd', a[0])
+UC.subprocess.Popen = lambda *a, **kw: (lance.setdefault('cmd', a[0]),
+                                        lance.update(kw))
 try:
     resultat = faux._install_windows(binaire)
 finally:
@@ -411,6 +412,17 @@ finally:
     UC.subprocess.Popen = _sp.Popen
 
 verifier(resultat is True, 'remplacement programmé')
+
+# L'application relancée par le script héritait des repères du lanceur
+# PyInstaller et cherchait python3xx.dll dans le dossier temporaire du
+# processus précédent, supprimé à sa sortie : « Failed to load Python DLL ».
+env_transmis = lance.get('env') or {}
+verifier(bool(env_transmis), "un environnement explicite est transmis au script")
+verifier(not any(n in env_transmis for n in UC.VARIABLES_BOOTLOADER),
+         "l'environnement transmis est débarrassé des repères du lanceur",
+         str([n for n in UC.VARIABLES_BOOTLOADER if n in env_transmis]))
+verifier('PATH' in env_transmis or 'Path' in env_transmis,
+         "le reste de l'environnement est conservé")
 script = pathlib.Path(faux.config_dir) / '_apply_update.bat'
 verifier(script.exists(), 'script écrit')
 contenu = script.read_text(encoding='cp1252', errors='replace') if script.exists() else ''
