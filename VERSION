@@ -1,10 +1,10 @@
-PARCINFO_VERSION=2.8.1
+PARCINFO_VERSION=2.8.2
 RELEASE_DATE=2026-08-08
-BUILD_NUMBER=2026081001
+BUILD_NUMBER=2026081002
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.8.1 - Correctif edition d'appareil, mise a jour ouverte a tous
+# Version 2.8.2 - Section securite lisible, etat BitLocker explicite
 # Balayage de toutes les sources de clé produit, appairage sur les 5
 # derniers caractères, report automatique dans la fiche appareil
 # Date: 8 août 2026

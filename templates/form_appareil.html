@@ -682,13 +682,32 @@ async function loadHistorique() {
     </div>
 </form>
 
-    {% if action == 'Modifier' and cles_bitlocker %}
+    {% if action == 'Modifier' and appareil and appareil.id %}
     <div class="form-section" id="section-bitlocker" style="margin-top:1.5rem;">
         <div class="form-section-title">&#9632; Clés de récupération BitLocker
-            <span style="font-size:.7rem;font-weight:400;color:var(--text-muted);margin-left:.5rem;">
-                {{ cles_bitlocker|length }} volume{{ 's' if cles_bitlocker|length != 1 else '' }}
+            <span style="font-size:.7rem;font-weight:400;margin-left:.5rem;
+                         padding:.1rem .45rem;border-radius:3px;border:1px solid var(--border);
+                         color:{{ 'var(--accent-green)' if cles_bitlocker else 'var(--text-muted)' }};">
+                {{ 'Activé — %d volume%s' % (cles_bitlocker|length, 's' if cles_bitlocker|length != 1 else '')
+                   if cles_bitlocker else 'Aucune clé relevée' }}
             </span>
         </div>
+        {% if not cles_bitlocker %}
+        {# L'emplacement reste visible même vide : son absence laissait croire
+           que ParcInfo ne sait pas conserver ces clés. #}
+        <div style="font-size:.75rem;color:var(--text-secondary);padding:.4rem 0;">
+            Aucune clé de récupération n'a été remontée pour cet appareil. Trois
+            explications possibles :
+            <ul style="margin:.35rem 0 0 1.1rem;padding:0;">
+                <li>BitLocker n'est pas activé sur cette machine ;</li>
+                <li>le collecteur a été lancé <strong>sans privilèges administrateur</strong>
+                    — les clés ne sont alors pas lisibles ;</li>
+                <li>la collecte date d'avant la version 2.8.0, qui a introduit ce relevé.</li>
+            </ul>
+            Les clés apparaîtront ici après une collecte lancée en administrateur.
+            Elles sont conservées chiffrées et n'entrent jamais dans le rapport PDF joint.
+        </div>
+        {% else %}
         <div style="font-size:.72rem;color:var(--text-secondary);margin-bottom:.6rem;">
             Relevées par le collecteur et conservées chiffrées, comme les mots de passe
             des identifiants. Elles ne figurent pas dans le rapport PDF joint à l'appareil.
@@ -728,7 +747,9 @@ async function loadHistorique() {
             {% endfor %}
         </table>
         </div>
+        {% endif %}
     </div>
+    {% if cles_bitlocker %}
     <script>
     async function afficherCleBitlocker(volume, index, bouton) {
         const zone = document.getElementById('blk-' + index);
@@ -754,6 +775,7 @@ async function loadHistorique() {
         }
     }
     </script>
+    {% endif %}
     {% endif %}
 
     {% if action == 'Modifier' and appareil and appareil.id %}

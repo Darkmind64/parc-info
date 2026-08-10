@@ -13,6 +13,21 @@
     margin: 0 0 .8rem 0; padding-bottom: .5rem; border-bottom: 1px solid var(--border);
 }
 .fs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .35rem 1.5rem; }
+
+/* Sécurité : des blocs plutôt qu'une grille étiquette/valeur. Dans une colonne
+   de 170 px, le badge d'état passait à la ligne sous le nom de l'antivirus au
+   lieu de le suivre. */
+.fs-secu { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+           gap: 1rem 1.5rem; align-items: start; }
+.fs-secu-bloc { min-width: 0; }
+.fs-secu-titre { font-size: .68rem; text-transform: uppercase; letter-spacing: 1px;
+                 color: var(--text-muted); margin-bottom: .4rem;
+                 border-bottom: 1px solid var(--border); padding-bottom: .25rem; }
+.fs-secu-ligne { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap;
+                 font-size: .82rem; padding: .2rem 0; }
+.fs-secu-nom { color: var(--text-primary); }
+.fs-secu-sous { font-size: .7rem; color: var(--text-secondary); width: 100%; }
+.fs-secu .fs-pill { white-space: nowrap; }
 .fs-row { display: grid; grid-template-columns: 170px 1fr; gap: .6rem; font-size: .82rem; padding: .22rem 0; }
 .fs-label { color: var(--text-secondary); }
 .fs-value { color: var(--text-primary); word-break: break-word; }
@@ -616,71 +631,113 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 {% endif %}
 
 <!-- ── SÉCURITÉ ─────────────────────────────────────────────────────────── -->
-{% if rapport.antivirus or rapport.firewall or rapport.bitlocker or rapport.tpm_present is defined or rapport.secure_boot is defined %}
+{% if rapport.antivirus or rapport.firewall or rapport.bitlocker or rapport.bitlocker_volumes
+      or rapport.tpm_present is defined or rapport.secure_boot is defined %}
 <div class="fs-section">
     <h3>■ Sécurité &amp; conformité</h3>
-    <div class="fs-grid">
-        <div>
+    <div class="fs-secu">
+
+        <div class="fs-secu-bloc">
+            <div class="fs-secu-titre">Antivirus</div>
             {% if rapport.antivirus_products %}
             {% for av in rapport.antivirus_products %}
-            <div class="fs-row">
-                <span class="fs-label">Antivirus</span>
-                <span class="fs-value">
-                    {{ av.name }}
-                    {# Un antivirus installé mais désactivé s'affichait jusqu'ici
-                       exactement comme un antivirus opérationnel. #}
-                    <span class="fs-pill {{ 'fs-ok' if av.enabled
-                                       else 'fs-bad' if av.enabled is false
-                                       else 'fs-muted' }}" style="margin-left:.35rem;">
-                        {{ av.status }}</span>
-                </span>
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">{{ av.name }}</span>
+                {# Un antivirus installé mais désactivé s'affichait jusqu'ici
+                   exactement comme un antivirus opérationnel. #}
+                <span class="fs-pill {{ 'fs-ok' if av.enabled
+                                   else 'fs-bad' if av.enabled is false
+                                   else 'fs-muted' }}">{{ av.status }}</span>
+                {% if av.up_to_date is false %}
+                <span class="fs-secu-sous">Signatures non à jour</span>
+                {% endif %}
             </div>
             {% endfor %}
+            {% elif rapport.antivirus %}
+            <div class="fs-secu-ligne"><span class="fs-secu-nom">{{ rapport.antivirus }}</span></div>
             {% else %}
-            {{ row("Antivirus", rapport.antivirus) }}
+            <div class="fs-secu-ligne"><span class="fs-pill fs-bad">Aucun détecté</span></div>
             {% endif %}
-            {% if rapport.tpm_present is defined and rapport.tpm_present is not none %}
-            <div class="fs-row">
-                <span class="fs-label">TPM</span>
-                <span class="fs-value">
-                    {% if rapport.tpm_enabled %}<span class="fs-pill fs-ok">PRÉSENT ET ACTIVÉ</span>
-                    {% elif rapport.tpm_present %}<span class="fs-pill fs-warn">PRÉSENT, DÉSACTIVÉ</span>
-                    {% else %}<span class="fs-pill fs-bad">ABSENT</span>{% endif %}
+        </div>
+
+        <div class="fs-secu-bloc">
+            <div class="fs-secu-titre">Pare-feu</div>
+            {% if rapport.firewall_profiles %}
+            {% for f in rapport.firewall_profiles %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">{{ f.name }}</span>
+                <span class="fs-pill {{ 'fs-ok' if f.enabled else 'fs-bad' }}">
+                    {{ 'Activé' if f.enabled else 'Désactivé' }}</span>
+            </div>
+            {% endfor %}
+            {% elif rapport.firewall %}
+            {# Collectes antérieures : uniquement la forme textuelle #}
+            {% for f in rapport.firewall %}
+            <div class="fs-secu-ligne"><span class="fs-secu-nom">{{ f }}</span></div>
+            {% endfor %}
+            {% else %}
+            <div class="fs-secu-ligne"><span class="fs-secu-sous">Non renseigné</span></div>
+            {% endif %}
+        </div>
+
+        <div class="fs-secu-bloc">
+            <div class="fs-secu-titre">Chiffrement BitLocker</div>
+            {% if rapport.bitlocker_volumes %}
+            {% set actif = rapport.bitlocker_actif %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">État général</span>
+                <span class="fs-pill {{ 'fs-ok' if actif else 'fs-bad' }}">
+                    {{ 'Activé' if actif else 'Désactivé' }}</span>
+                {% if not actif %}
+                <span class="fs-secu-sous">Aucun volume protégé — les données du
+                    disque sont lisibles si la machine est volée</span>
+                {% endif %}
+            </div>
+            {% for v in rapport.bitlocker_volumes %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom fs-mono">{{ v.volume }}</span>
+                <span class="fs-pill {{ 'fs-ok' if v.protege else 'fs-muted' }}">
+                    {{ v.etat }}</span>
+                {% if v.methode and v.chiffre %}
+                <span class="fs-secu-sous">{{ v.methode }}</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% elif rapport.bitlocker %}
+            {# Collectes antérieures : lignes déjà mises en forme #}
+            {% for b in rapport.bitlocker %}
+            <div class="fs-secu-ligne"><span class="fs-secu-nom">{{ b }}</span></div>
+            {% endfor %}
+            {% else %}
+            <div class="fs-secu-ligne">
+                <span class="fs-pill fs-muted">Non renseigné</span>
+                <span class="fs-secu-sous">
+                    {% if rapport.elevated %}Aucun volume BitLocker sur cette machine
+                    {% else %}Collecte sans privilèges administrateur{% endif %}
                 </span>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="fs-secu-bloc">
+            <div class="fs-secu-titre">Plateforme</div>
+            {% if rapport.tpm_present is defined and rapport.tpm_present is not none %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">TPM</span>
+                {% if rapport.tpm_enabled %}<span class="fs-pill fs-ok">Présent et activé</span>
+                {% elif rapport.tpm_present %}<span class="fs-pill fs-warn">Présent, désactivé</span>
+                {% else %}<span class="fs-pill fs-bad">Absent</span>{% endif %}
             </div>
             {% endif %}
             {% if rapport.secure_boot is defined and rapport.secure_boot is not none %}
-            <div class="fs-row">
-                <span class="fs-label">Secure Boot</span>
-                <span class="fs-value">
-                    {% if rapport.secure_boot %}<span class="fs-pill fs-ok">ACTIVÉ</span>
-                    {% else %}<span class="fs-pill fs-bad">DÉSACTIVÉ</span>{% endif %}
-                </span>
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">Secure Boot</span>
+                {% if rapport.secure_boot %}<span class="fs-pill fs-ok">Activé</span>
+                {% else %}<span class="fs-pill fs-bad">Désactivé</span>{% endif %}
             </div>
             {% endif %}
         </div>
-        <div>
-            {% if rapport.firewall_profiles %}
-            <div class="fs-label" style="font-size:.75rem;">Pare-feu</div>
-            <div class="fs-badges">
-                {% for f in rapport.firewall_profiles %}
-                <span class="fs-badge-line">
-                    <span class="fs-badge-nom">{{ f.name }}</span>
-                    <span class="fs-pill {{ 'fs-ok' if f.enabled else 'fs-bad' }}">
-                        {{ 'Activé' if f.enabled else 'Désactivé' }}</span>
-                </span>
-                {% endfor %}
-            </div>
-            {% elif rapport.firewall %}
-            {# Collectes antérieures : uniquement la forme textuelle #}
-            <div class="fs-label" style="font-size:.75rem;">Pare-feu</div>
-            {% for f in rapport.firewall %}<div class="fs-value">• {{ f }}</div>{% endfor %}
-            {% endif %}
-            {% if rapport.bitlocker %}
-            <div class="fs-label" style="font-size:.75rem;margin-top:.5rem;">Chiffrement des volumes</div>
-            {% for b in rapport.bitlocker %}<div class="fs-value">• {{ b }}</div>{% endfor %}
-            {% endif %}
-        </div>
+
     </div>
 </div>
 {% endif %}

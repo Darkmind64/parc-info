@@ -1,22 +1,23 @@
 {
-  "version": "2.8.1",
-  "release_date": "2026-08-10T09:00:00.000000",
+  "version": "2.8.2",
+  "release_date": "2026-08-10T13:30:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.1/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.1/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.8.1",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.1/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.1/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.1/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.8.2",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif : l'edition d'un appareil renvoyait une erreur 500, et la mise a jour est desormais ouverte a tous les comptes",
+    "new_features": "Etat BitLocker explicite, section securite reorganisee en colonnes, emplacement des cles toujours visible",
     "improvements": [
-      "FIXED: Editer un appareil renvoyait une erreur 500 depuis la 2.8.0. La requete des cles BitLocker avait ete placee apres la fermeture de la connexion a la base : toute edition echouait, avec ou sans volume chiffre.",
-      "CHANGED: Lancer une mise a jour n'est plus reserve aux administrateurs. Sur un poste de travail, celui qui utilise l'application est rarement celui qui porte le role d'administrateur dans ParcInfo, et la reserve empechait purement et simplement les mises a jour. L'auteur de la demande est inscrit au journal.",
-      "FIXED: Plusieurs suites de tests creaient leurs comptes avec INSERT OR IGNORE sans les colonnes obligatoires : les comptes n'etaient jamais crees et certaines assertions passaient pour la mauvaise raison. Les comptes sont desormais crees explicitement.",
-      "NEW: Deux tests de non-regression couvrent exactement les deux symptomes signales : l'affichage de la fiche appareil, avec et sans cle BitLocker, et le lancement d'une mise a jour par un compte non administrateur."
+      "FIXED: Le chiffrement des volumes s'affichait en 'D:: 0 (Protection: 0)'. Windows renvoie deux enumerations que la serialisation JSON reduisait a des entiers ; elles sont desormais converties puis traduites. Les deux formes renvoyees par Windows - entiers sur les versions anciennes, libelles sur les recentes - sont reconnues.",
+      "NEW: Badge Active/Desactive pour BitLocker, avec l'etat de chaque volume et la methode de chiffrement.",
+      "CHANGED: La section Securite et conformite passe en blocs autonomes - Antivirus, Pare-feu, BitLocker, Plateforme - repartis sur quatre colonnes selon la largeur disponible. Le badge d'etat suit desormais le nom de l'antivirus au lieu de passer a la ligne : dans une colonne de 170 pixels, la valeur n'avait pas la place.",
+      "NEW: L'emplacement des cles de recuperation reste visible dans la fiche appareil meme sans cle, et explique les trois raisons possibles : BitLocker inactif, collecte sans privileges administrateur, ou collecte anterieure a la 2.8.0.",
+      "CHANGED: L'alerte sur les volumes non chiffres s'appuie sur l'etat structure au lieu de chercher 'non chiffre' dans une phrase - ce qui laissait passer les libelles renvoyes en anglais par Windows."
     ]
   },
   "checksums": {
@@ -27,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.8.1"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.8.2"
 }

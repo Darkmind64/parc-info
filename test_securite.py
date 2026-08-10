@@ -265,5 +265,33 @@ verifier(client.post('/api/updates/check').status_code in (200, 202),
 reponse = client.get('/api/updates/status')
 verifier(reponse.status_code == 200, "l'état reste lisible par tous")
 
+print("\n=== 10. Décodage de l'état BitLocker ===")
+import collector_core as CC  # noqa: E402
+
+# Windows renvoie des entiers sur les versions anciennes et des libellés sur les
+# récentes. Non décodés, ils s'affichaient en « D:: 0 (Protection: 0) ».
+for etat, protection, etat_attendu, protection_attendue, protege_attendu in (
+        ('0', '0', 'Non chiffré', 'Désactivée', False),
+        ('1', '1', 'Chiffré', 'Activée', True),
+        ('FullyEncrypted', 'On', 'Chiffré', 'Activée', True),
+        ('FullyDecrypted', 'Off', 'Non chiffré', 'Désactivée', False),
+        ('2', '2', 'Chiffrement en cours', 'Inconnue', False)):
+    lu_etat = CC._ETATS_VOLUME.get(etat, etat)
+    lu_protection = CC._PROTECTIONS_VOLUME.get(protection, protection)
+    protege = protection in ('1', 'On')
+    verifier(lu_etat == etat_attendu and lu_protection == protection_attendue
+             and protege == protege_attendu,
+             'état %r/%r décodé' % (etat, protection),
+             '%s / %s' % (lu_etat, lu_protection))
+
+# Un état inconnu ne doit pas être inventé : il ressort tel quel.
+verifier(CC._ETATS_VOLUME.get('42', '42') == '42', 'état inconnu laissé tel quel')
+
+eteint = {'bitlocker_actif': False, 'bitlocker_volumes': [
+    {'volume': 'C:', 'etat': 'Non chiffré', 'protection': 'Désactivée', 'protege': False}]}
+titres = [a['titre'] for a in CC.build_alerts(eteint)]
+verifier(any('Aucun volume' in t for t in titres),
+         'BitLocker désactivé remonte dans les points de vigilance', str(titres[:3]))
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

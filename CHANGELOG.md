@@ -1,5 +1,47 @@
 # CHANGELOG - ParcInfo
 
+## [2.8.2] - 2026-08-10 🔐
+
+### 🐛 « D:: 0 (Protection: 0) »
+Le chiffrement des volumes s'affichait ainsi, ce qui ne veut rien dire. Windows
+renvoie deux **énumérations** — état du volume et état de la protection — que la
+sérialisation JSON réduisait à des entiers bruts. Elles sont maintenant
+converties en chaînes côté PowerShell, puis traduites. Les **deux formes**
+renvoyées selon la version de Windows sont reconnues : entiers sur les
+anciennes, libellés (`FullyEncrypted`, `On`) sur les récentes.
+
+### 🔐 UN ÉTAT BITLOCKER QU'ON PEUT LIRE
+- ✅ Badge **Activé / Désactivé** en tête du bloc, puis l'état de chaque volume
+  et la méthode de chiffrement quand il y en a une
+- ✅ Quand aucun volume n'est protégé, la fiche le dit franchement : *les
+  données du disque sont lisibles si la machine est volée*
+- ✅ Sans donnée du tout, le bloc distingue « aucun volume BitLocker sur cette
+  machine » d'une **collecte sans privilèges administrateur** — deux situations
+  très différentes qui produisaient le même vide
+
+### 🧱 SECTION SÉCURITÉ RÉORGANISÉE
+- ✅ Quatre blocs autonomes — Antivirus, Pare-feu, BitLocker, Plateforme —
+  répartis en colonnes selon la largeur disponible (quatre sur un écran large)
+- ✅ Le badge d'état **suit le nom de l'antivirus** au lieu de passer à la
+  ligne. La cause : la grille étiquette/valeur réservait 170 px à l'étiquette,
+  et la valeur n'avait plus la place d'accueillir un badge à côté du nom
+
+### 🔑 L'EMPLACEMENT DES CLÉS, MÊME VIDE
+Le bloc des clés de récupération reste visible dans la fiche appareil quand il
+n'y en a aucune, et énonce les trois explications possibles : BitLocker inactif,
+collecte lancée sans privilèges administrateur, ou collecte antérieure à la
+2.8.0. Son absence pouvait laisser croire que ParcInfo ne sait pas conserver ces
+clés.
+
+### 🧪 AU PASSAGE
+L'alerte sur les volumes non chiffrés cherchait « non chiffré » **dans une
+phrase que nous produisons nous-mêmes** — et laissait donc passer les libellés
+renvoyés en anglais par Windows. Elle s'appuie désormais sur l'état structuré.
+Le décodage est couvert par un test sur les deux formes, y compris un état
+inconnu, qui doit ressortir tel quel plutôt qu'être inventé.
+
+---
+
 ## [2.8.1] - 2026-08-10 🩹
 
 ### 🐛 ÉDITER UN APPAREIL RENVOYAIT UNE ERREUR 500

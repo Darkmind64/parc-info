@@ -1539,7 +1539,12 @@ def _win_security():
         "$fw = @(); try { $fw = @(Get-NetFirewallProfile -ErrorAction SilentlyContinue "
         "| Select-Object Name,Enabled) } catch {}; "
         "$bl = @(); try { $bl = @(Get-BitLockerVolume -ErrorAction SilentlyContinue "
-        "| Select-Object MountPoint,VolumeStatus,ProtectionStatus) } catch {}; "
+        # Les deux états sont des énumérations : sans conversion en chaîne, la
+        # sérialisation JSON ne renvoie que des entiers, et la fiche affichait
+        # « D:: 0 (Protection: 0) ».
+        "| Select-Object MountPoint,@{N='VolumeStatus';E={[string]$_.VolumeStatus}},"
+        "@{N='ProtectionStatus';E={[string]$_.ProtectionStatus}},"
+        "@{N='EncryptionMethod';E={[string]$_.EncryptionMethod}}) } catch {}; "
         "$tpmObj = $null; try { $tpmObj = Get-Tpm -ErrorAction SilentlyContinue "
         "| Select-Object TpmPresent,TpmReady,TpmEnabled } catch {}; "
         "$secureBoot = $null; try { $secureBoot = Confirm-SecureBootUEFI -ErrorAction SilentlyContinue } catch {}; "
@@ -1577,13 +1582,31 @@ def _win_security():
             for f in _as_list(security_data.get('Firewall')) if f.get('Name')
         ]
 
-    bitlocker = [
-        f"{b.get('MountPoint')}: {b.get('VolumeStatus', 'Inconnu')} "
-        f"(Protection: {b.get('ProtectionStatus', 'Inconnu')})"
-        for b in _as_list(security_data.get('BitLocker')) if b.get('MountPoint')
-    ]
-    if bitlocker:
-        info['bitlocker'] = bitlocker
+    volumes = []
+    for b in _as_list(security_data.get('BitLocker')):
+        point = _clean(b.get('MountPoint'))
+        if not point:
+            continue
+        etat = _clean(b.get('VolumeStatus'))
+        protection = _clean(b.get('ProtectionStatus'))
+        volumes.append({
+            'volume': point,
+            'etat': _ETATS_VOLUME.get(etat, etat or 'Inconnu'),
+            'protection': _PROTECTIONS_VOLUME.get(protection, protection or 'Inconnu'),
+            # Les anciennes versions de Windows renvoient des nombres, les
+            # récentes des libellés : les deux formes sont reconnues.
+            'chiffre': etat in ('1', 'FullyEncrypted'),
+            'protege': protection in ('1', 'On'),
+            'methode': _clean(b.get('EncryptionMethod')),
+        })
+
+    if volumes:
+        info['bitlocker_volumes'] = volumes
+        # Forme lisible conservée pour les rendus qui affichent une simple liste.
+        info['bitlocker'] = ['%s : %s (protection %s)'
+                             % (v['volume'], v['etat'], v['protection'].lower())
+                             for v in volumes]
+        info['bitlocker_actif'] = any(v['protege'] for v in volumes)
 
     tpm = security_data.get('Tpm')
     if tpm:
@@ -2318,6 +2341,23 @@ _CODES_PERIPHERIQUE = {
     43: "Arrêté à la suite d'un incident signalé par le matériel",
     45: "Actuellement déconnecté",
     52: "Signature du pilote non vérifiable",
+}
+
+
+#: États de chiffrement d'un volume. Windows renvoie un entier sur les versions
+#: anciennes et un libellé sur les récentes : les deux formes sont traduites.
+_ETATS_VOLUME = {
+    '0': 'Non chiffré', 'FullyDecrypted': 'Non chiffré',
+    '1': 'Chiffré', 'FullyEncrypted': 'Chiffré',
+    '2': 'Chiffrement en cours', 'EncryptionInProgress': 'Chiffrement en cours',
+    '3': 'Déchiffrement en cours', 'DecryptionInProgress': 'Déchiffrement en cours',
+    '4': 'Chiffrement suspendu', 'EncryptionSuspended': 'Chiffrement suspendu',
+    '5': 'Déchiffrement suspendu', 'DecryptionSuspended': 'Déchiffrement suspendu',
+}
+_PROTECTIONS_VOLUME = {
+    '0': 'Désactivée', 'Off': 'Désactivée',
+    '1': 'Activée', 'On': 'Activée',
+    '2': 'Inconnue', 'Unknown': 'Inconnue',
 }
 
 
@@ -4490,9 +4530,22 @@ def build_alerts(info):
     if firewall_off:
         add('danger', 'Pare-feu désactivé', ' · '.join(firewall_off[:3]))
 
-    bitlocker_off = [v for v in info.get('bitlocker', []) if re.search(r'(non chiffr|not encrypted|off|déciffr)', v, re.I)]
-    if bitlocker_off:
-        add('warn', 'Volume non chiffré', ' · '.join(bitlocker_off[:3]))
+    # L'état vient désormais de la forme structurée : chercher « non chiffré »
+    # dans une phrase revenait à interpréter un texte qu'on produit soi-même,
+    # et laissait passer les libellés renvoyés en anglais par Windows.
+    if info.get('bitlocker_volumes'):
+        non_proteges = [v['volume'] for v in info['bitlocker_volumes'] if not v.get('protege')]
+        if non_proteges and not info.get('bitlocker_actif'):
+            add('warn', 'Aucun volume chiffré',
+                'BitLocker désactivé sur %s — les données du disque sont lisibles '
+                'si la machine est volée' % ', '.join(non_proteges[:6]))
+        elif non_proteges:
+            add('warn', 'Volume non chiffré', ' · '.join(non_proteges[:6]))
+    else:
+        bitlocker_off = [v for v in info.get('bitlocker', [])
+                         if re.search(r'(non chiffr|not encrypted|off|déciffr)', v, re.I)]
+        if bitlocker_off:
+            add('warn', 'Volume non chiffré', ' · '.join(bitlocker_off[:3]))
 
     battery = _battery_pct(info)
     if battery is not None and battery <= BATTERY_DANGER_PCT:
@@ -4906,9 +4959,13 @@ def _security_html(info):
         level = 'danger' if re.search(r'(désactiv|disabled|off)', profile, re.I) else 'ok'
         items.append(('Pare-feu', profile, level))
 
-    for vol in info.get('bitlocker', []):
-        level = 'warn' if re.search(r'(non chiffr|not encrypted|off)', vol, re.I) else 'ok'
-        items.append(('BitLocker', vol, level))
+    if info.get('bitlocker_volumes'):
+        items.append(('BitLocker', 'Activé' if info.get('bitlocker_actif') else 'Désactivé',
+                      'ok' if info.get('bitlocker_actif') else 'warn'))
+    else:
+        for vol in (info.get('bitlocker') or []):
+            level = 'warn' if re.search(r'(non chiffr|not encrypted|off)', vol, re.I) else 'ok'
+            items.append(('BitLocker', vol, level))
 
     if info.get('last_windows_update'):
         items.append(('Dernière mise à jour', info['last_windows_update'], 'info'))
@@ -5648,9 +5705,19 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             for profile in info.get('firewall', []):
                 sec_rows.append(('Pare-feu', profile,
                                  'danger' if re.search(r'(désactiv|disabled|off)', profile, re.I) else 'ok'))
-        for vol in info.get('bitlocker', []):
-            sec_rows.append(('BitLocker', vol,
-                             'warn' if re.search(r'(non chiffr|not encrypted|off)', vol, re.I) else 'ok'))
+        if info.get('bitlocker_volumes'):
+            sec_rows.append(('BitLocker',
+                             'Activé' if info.get('bitlocker_actif') else 'Désactivé',
+                             'ok' if info.get('bitlocker_actif') else 'danger'))
+            for v in info['bitlocker_volumes']:
+                sec_rows.append(('Volume %s' % v.get('volume', '?'),
+                                 '%s — protection %s' % (v.get('etat', '?'),
+                                                         (v.get('protection') or '?').lower()),
+                                 'ok' if v.get('protege') else 'warn'))
+        else:
+            for vol in (info.get('bitlocker') or []):
+                sec_rows.append(('BitLocker', vol,
+                                 'warn' if re.search(r'(non chiffr|not encrypted|off)', vol, re.I) else 'ok'))
         if info.get('last_windows_update'):
             sec_rows.append(('Dernière mise à jour', info['last_windows_update'], 'info'))
         if info.get('oem_product_key'):
