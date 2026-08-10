@@ -3562,6 +3562,13 @@ def editer_appareil(id):
     licences = [row_to_dict(r) for r in conn.execute(
         'SELECT * FROM licences_appareils WHERE appareil_id=? ORDER BY id', (id,)).fetchall()]
     lm_list = _get_logiciels_metier_list(conn, cid)
+    # Clés de récupération BitLocker : seules les métadonnées voyagent jusqu'à
+    # la page. La valeur reste chiffrée en base et ne part qu'à la demande,
+    # comme pour les mots de passe des identifiants.
+    cles_bitlocker = [row_to_dict(r) for r in conn.execute(
+        'SELECT volume, identifiant, protection, chiffrement, date_maj '
+        'FROM cles_recuperation WHERE appareil_id=? AND client_id=? ORDER BY volume',
+        (id, cid)).fetchall()]
     conn.close()
     try:
         sw_sel = json.loads(a.get('logiciels') or '[]')
@@ -3570,13 +3577,6 @@ def editer_appareil(id):
         sw_sel = []
     lm_set = set(lm_list)
     sw_custom_sel = [sw for sw in sw_sel if sw not in SW_COURANTS_ALL and sw not in lm_set]
-    # Clés de récupération BitLocker : seuls les métadonnées voyagent jusqu'à la
-    # page. La valeur reste chiffrée en base et ne part qu'à la demande, comme
-    # pour les mots de passe des identifiants.
-    cles_bitlocker = [row_to_dict(r) for r in conn.execute(
-        'SELECT volume, identifiant, protection, chiffrement, date_maj '
-        'FROM cles_recuperation WHERE appareil_id=? AND client_id=? ORDER BY volume',
-        (id, cid)).fetchall()]
 
     return render_template('form_appareil.html', appareil=a, documents=docs, action='Modifier',
                            cles_bitlocker=cles_bitlocker,

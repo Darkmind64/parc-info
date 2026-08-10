@@ -11,10 +11,14 @@ Routes :
     POST /api/updates/dismiss  masquer l'annonce de cette version
 """
 
-from flask import jsonify
+import logging
+
+from flask import jsonify, request
 
 from auth_utils import login_required, get_auth_user
 from update_notifier import get_notifier
+
+logger = logging.getLogger('parcinfo')
 
 
 def register_update_routes(app):
@@ -37,11 +41,14 @@ def register_update_routes(app):
     @app.route('/api/updates/install', methods=['POST'])
     @login_required
     def install_update():
-        # Remplacer l'exécutable dépasse ce qu'un compte de consultation doit
-        # pouvoir déclencher : l'opération redémarre l'application pour tous.
+        # Ouvert à tout compte connecté, sur demande explicite : sur un poste
+        # de travail, celui qui utilise l'application est rarement celui qui
+        # porte le rôle d'administrateur dans ParcInfo, et la réserver aux
+        # administrateurs revenait à empêcher les mises à jour.
+        # L'auteur est tracé : l'opération redémarre l'application pour tous.
         user = get_auth_user()
-        if not user or user.get('role') != 'admin':
-            return jsonify({'erreur': "Réservé aux administrateurs"}), 403
+        logger.info('Mise à jour demandée par %s (ip=%s)',
+                    (user or {}).get('login', '?'), request.remote_addr)
 
         notifier = get_notifier()
         if not notifier.installer():
