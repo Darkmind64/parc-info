@@ -91,7 +91,13 @@
             html = '<div style="' + styleBandeau('var(--accent)') + '">'
                  + '<strong>⬇ Téléchargement de la version ' + echapper(etat.version_disponible) + '</strong>'
                  + barreProgression(etat.progression || 0)
-                 + '<span style="color:var(--text-secondary);">' + (etat.progression || 0) + '&nbsp;%</span>'
+                 + '<span style="color:var(--text-secondary);">' + (etat.progression || 0) + '&nbsp;%'
+                 + (etat.debit_ko_s
+                    ? ' · ' + (etat.debit_ko_s >= 1024
+                               ? (etat.debit_ko_s / 1024).toFixed(1) + ' Mo/s'
+                               : Math.round(etat.debit_ko_s) + ' Ko/s')
+                    : '')
+                 + '</span>'
                  + '</div>';
         } else if (etat.phase === 'installation') {
             html = '<div style="' + styleBandeau('var(--accent)') + '">'

@@ -1,5 +1,44 @@
 # CHANGELOG - ParcInfo
 
+## [2.8.3] - 2026-08-10 ⬇
+
+### ⬇ UN TÉLÉCHARGEMENT QUI SURVIT À UN RÉSEAU CAPRICIEUX
+- 🐛 Un téléchargement interrompu **repartait de zéro** : le fichier partiel
+  était effacé à chaque échec. Sur une liaison qui trébuche, la mise à jour ne
+  pouvait donc jamais aboutir
+- ✅ Le fichier partiel est **conservé**, et la reprise se fait par en-tête
+  `Range`. Repli propre si le serveur ne sait pas reprendre : on repart de zéro
+  plutôt que de coller la suite sur un début déjà là
+- ✅ **Quatre tentatives** au lieu d'une, chacune reprenant la précédente
+- ✅ **Détection des connexions qui traînent.** Le délai réseau ne se déclenche
+  que s'il n'arrive *plus rien* — jamais si les données arrivent trop lentement.
+  Sous 20 Ko/s pendant 45 secondes, la tentative est coupée et relancée sur une
+  connexion neuve, au lieu de ramper pendant des heures
+- ✅ Le **débit s'affiche** pendant le téléchargement, et
+  **`_telechargement.log`** conserve le détail de chaque tentative : proxy
+  détecté, octets reçus, durée, motif d'interruption
+
+### 🎨 FICHE SYSTÈME — ALIGNEMENTS ET COULEURS
+- 🐛 Les badges partaient **en escalier**, chacun démarrant à la fin de son
+  libellé. Mesuré : les badges du pare-feu commençaient à 402, 399 et 393 px ;
+  ils sont désormais tous à la même abscisse
+- 🐛 Les intitulés *Antivirus*, *Pare-feu*, *Chiffrement BitLocker* et
+  *Plateforme* utilisaient une couleur **plus terne** que le reste de la fiche.
+  Ils reprennent exactement la couleur des autres intitulés — vérifié en
+  comparant les valeurs calculées
+- ✅ Les mentions courtes restent sur la ligne du badge, les explications
+  longues passent à la ligne : mélangées, elles cassaient l'alignement
+
+### ⚠️ CE QUE JE N'AI PAS PU REPRODUIRE
+La lenteur signalée (5 % en 10 minutes) **ne se reproduit pas hors de
+l'application** : sur la même machine, `urllib` télécharge le même fichier à
+**21,9 Mo/s**, l'écriture atteint **33 Mo/s** dans le même dossier et sous le
+même nom, et aucun proxy n'est configuré. La cause reste donc inconnue. Les
+mesures et le journal ajoutés ici servent à l'identifier au prochain essai —
+et la reprise fait qu'entre-temps, la mise à jour aboutit malgré tout.
+
+---
+
 ## [2.8.2] - 2026-08-10 🔐
 
 ### 🐛 « D:: 0 (Protection: 0) »
