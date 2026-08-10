@@ -81,8 +81,38 @@ with open(os.path.join(RACINE, 'SHA256SUMS.txt'), 'w', encoding='utf-8') as f:
 
 
 class Serveur(http.server.SimpleHTTPRequestHandler):
+    """Sert les fichiers, en honorant l'en-tête Range.
+
+    SimpleHTTPRequestHandler l'ignore et renvoie toujours le fichier entier :
+    sans ce complément, un test de reprise éprouverait le repli « le serveur ne
+    sait pas reprendre » au lieu de la reprise elle-même.
+    """
+
+    #: Codes de réponse observés, pour vérifier qu'une reprise a bien eu lieu.
+    reponses = []
+
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=RACINE, **kw)
+
+    def do_GET(self):
+        plage = self.headers.get('Range')
+        chemin = self.translate_path(self.path)
+        if not plage or not os.path.isfile(chemin):
+            Serveur.reponses.append(200)
+            return super().do_GET()
+
+        debut = int(plage.split('=', 1)[1].split('-', 1)[0])
+        with open(chemin, 'rb') as f:
+            f.seek(debut)
+            contenu = f.read()
+        taille = os.path.getsize(chemin)
+        Serveur.reponses.append(206)
+        self.send_response(206)
+        self.send_header('Content-Type', 'application/octet-stream')
+        self.send_header('Content-Length', str(len(contenu)))
+        self.send_header('Content-Range', 'bytes %d-%d/%d' % (debut, taille - 1, taille))
+        self.end_headers()
+        self.wfile.write(contenu)
 
     def log_message(self, *a):
         pass
@@ -124,6 +154,35 @@ c._get_platform_key = lambda: 'windows_installer'
 fichier = c.download_update()
 verifier(fichier is not None and fichier.exists(), 'téléchargement abouti')
 verifier(c._calculate_checksum(fichier) == EMPREINTE, 'empreinte conforme')
+
+print('\n=== 2b. Un téléchargement interrompu reprend où il s\'était arrêté ===')
+# Le fichier partiel était effacé à chaque échec : sur un réseau capricieux, la
+# mise à jour repartait de zéro et n'aboutissait jamais.
+c = neuf('2.0.0')
+c.check_for_updates(force=True)
+c._get_platform_key = lambda: 'windows_installer'
+partiel = c.config_dir / 'ParcInfo-Windows.exe.part'
+partiel.write_bytes(BINAIRE[:40000])          # 40 Ko déjà acquis
+
+Serveur.reponses.clear()
+fichier = c.download_update()
+
+verifier(206 in Serveur.reponses, 'le serveur a servi une reprise (206)',
+         str(Serveur.reponses))
+verifier(fichier is not None and c._calculate_checksum(fichier) == EMPREINTE,
+         'le fichier recollé est identique à celui publié')
+
+# Un serveur qui ignore Range doit rester géré : on repart alors de zéro
+# plutôt que de coller la suite sur un début déjà présent.
+partiel.write_bytes(BINAIRE[:12345])
+_do_get = Serveur.do_GET
+Serveur.do_GET = lambda self: http.server.SimpleHTTPRequestHandler.do_GET(self)
+try:
+    fichier = c.download_update()
+finally:
+    Serveur.do_GET = _do_get
+verifier(fichier is not None and c._calculate_checksum(fichier) == EMPREINTE,
+         'serveur sans reprise : le fichier reste correct')
 
 print('\n=== 3. Un binaire altéré est rejeté ===')
 with open(os.path.join(RACINE, 'SHA256SUMS.txt'), 'w', encoding='utf-8') as f:

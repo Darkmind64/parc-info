@@ -251,6 +251,9 @@ class UpdateNotifier:
             'installable': self.installable,
             'phase': self.phase,
             'progression': self.progression,
+            # Débit du téléchargement en cours : une lenteur devient
+            # visible au lieu d'être seulement ressentie.
+            'debit_ko_s': self.checker.download_rate_kbs,
             'message': self.message,
             'erreur': self.erreur,
             'derniere_verification': self.derniere_verification,

@@ -32,11 +32,12 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.request
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Callable
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 from __version__ import __version__, GITHUB_REPO, GITHUB_RAW_CONTENT
@@ -113,6 +114,8 @@ class UpdateChecker:
         self.release_url = None
         # Progression du téléchargement en cours, 0-100 (None hors téléchargement)
         self.download_progress = None
+        # Débit observé, en Ko/s : sans lui, « c'est lent » reste invérifiable.
+        self.download_rate_kbs = None
 
     # ─────────────────────────────────────────────────────────────────────────
     # Détection
@@ -468,32 +471,113 @@ class UpdateChecker:
             return cles[mode]
         raise UpdateCheckError("Mise à jour automatique non prise en charge (%s)" % mode)
 
+    #: Nombre de tentatives. Chacune reprend là où la précédente s'est arrêtée.
+    TENTATIVES_TELECHARGEMENT = 4
+    #: En dessous de ce débit soutenu, la tentative est abandonnée et relancée
+    #: sur une connexion neuve. Sans ce garde-fou, une connexion qui traîne à
+    #: quelques kilo-octets par seconde bloque des heures : le délai réseau ne
+    #: se déclenche que s'il n'arrive PLUS RIEN, jamais si les données arrivent
+    #: trop lentement.
+    DEBIT_MINIMAL_KO_S = 20
+    #: Durée pendant laquelle le débit doit rester sous le seuil pour conclure.
+    FENETRE_STAGNATION_S = 45
+
     def _download_file(self, url: str, destination: Path,
                        progress: Optional[Callable] = None) -> None:
-        logger.debug("Téléchargement de %s", url)
         temporaire = destination.with_suffix(destination.suffix + '.part')
-        try:
-            with urlopen(url, timeout=300) as response:
-                total = int(response.headers.get('Content-Length') or 0)
-                recu = 0
-                with open(temporaire, "wb") as f:
-                    while True:
-                        chunk = response.read(1024 * 256)
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                        recu += len(chunk)
-                        if total:
-                            pct = int(recu * 100 / total)
-                            self.download_progress = pct
-                            if progress:
-                                progress(pct)
-            # Le fichier n'apparaît sous son nom définitif qu'une fois complet :
-            # un téléchargement interrompu ne doit pas ressembler à un binaire prêt.
-            temporaire.replace(destination)
-        except Exception as e:
-            temporaire.unlink(missing_ok=True)
-            raise UpdateCheckError("Téléchargement échoué : %s" % e) from e
+        journal = self.config_dir / '_telechargement.log'
+
+        def tracer(message):
+            """Trace le déroulé : sans elle, une lenteur ne laisse rien à examiner."""
+            ligne = '%s %s' % (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), message)
+            logger.info('Téléchargement : %s', message)
+            try:
+                with open(journal, 'a', encoding='utf-8') as f:
+                    f.write(ligne + '\n')
+            except OSError:
+                pass
+
+        proxys = urllib.request.getproxies()
+        tracer('début %s (proxy : %s)' % (url, proxys or 'aucun'))
+
+        derniere_erreur = None
+        for tentative in range(1, self.TENTATIVES_TELECHARGEMENT + 1):
+            # Reprise : le fichier partiel est conservé d'une tentative à
+            # l'autre. Il était effacé à chaque échec, ce qui repartait de zéro
+            # et rendait un réseau capricieux définitivement bloquant.
+            deja = temporaire.stat().st_size if temporaire.exists() else 0
+            entetes = {'User-Agent': 'ParcInfo/%s' % self.current_version}
+            if deja:
+                entetes['Range'] = 'bytes=%d-' % deja
+
+            try:
+                requete = Request(url, headers=entetes)
+                with urlopen(requete, timeout=60) as reponse:
+                    reprise = reponse.status == 206
+                    if deja and not reprise:
+                        # Le serveur ignore la reprise : on repart proprement.
+                        deja = 0
+                    restant = int(reponse.headers.get('Content-Length') or 0)
+                    total = deja + restant
+                    recu = deja
+                    debut = time.time()
+                    dernier_rapport = 0
+                    repere_temps, repere_octets = debut, recu
+
+                    with open(temporaire, 'ab' if deja else 'wb') as f:
+                        while True:
+                            bloc = reponse.read(256 * 1024)
+                            if not bloc:
+                                break
+                            f.write(bloc)
+                            recu += len(bloc)
+
+                            maintenant = time.time()
+                            if total and recu - dernier_rapport >= 512 * 1024:
+                                dernier_rapport = recu
+                                pct = int(recu * 100 / total)
+                                self.download_progress = pct
+                                ecoule = max(maintenant - debut, 0.001)
+                                self.download_rate_kbs = round(
+                                    (recu - deja) / 1024 / ecoule, 1)
+                                if progress:
+                                    progress(pct)
+
+                            # Débit soutenu trop faible : on coupe et on reprend.
+                            if maintenant - repere_temps >= self.FENETRE_STAGNATION_S:
+                                debit = ((recu - repere_octets) / 1024
+                                         / (maintenant - repere_temps))
+                                if debit < self.DEBIT_MINIMAL_KO_S:
+                                    raise UpdateCheckError(
+                                        'débit trop faible (%.1f Ko/s)' % debit)
+                                repere_temps, repere_octets = maintenant, recu
+
+                duree = max(time.time() - debut, 0.001)
+                tracer('tentative %d : %d octets reçus en %.0f s (%.0f Ko/s), total %d'
+                       % (tentative, recu - deja, duree, (recu - deja) / 1024 / duree, recu))
+
+                if total and temporaire.stat().st_size < total:
+                    raise UpdateCheckError('fichier incomplet (%d/%d octets)'
+                                           % (temporaire.stat().st_size, total))
+
+                # Le fichier ne prend son nom définitif qu'une fois complet : un
+                # téléchargement interrompu ne doit pas ressembler à un binaire prêt.
+                temporaire.replace(destination)
+                tracer('terminé : %s' % destination.name)
+                return
+
+            except Exception as e:
+                derniere_erreur = e
+                acquis = temporaire.stat().st_size if temporaire.exists() else 0
+                tracer('tentative %d interrompue à %d octets : %s' % (tentative, acquis, e))
+                if tentative < self.TENTATIVES_TELECHARGEMENT:
+                    time.sleep(3)
+
+        # Le fichier partiel est laissé en place : la prochaine demande de mise
+        # à jour reprendra là où celle-ci s'est arrêtée.
+        raise UpdateCheckError(
+            "Téléchargement échoué après %d tentatives : %s. Détail dans %s"
+            % (self.TENTATIVES_TELECHARGEMENT, derniere_erreur, journal))
 
 
 def docker_pull_commands(version: Optional[str] = None) -> Dict[str, str]:

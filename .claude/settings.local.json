@@ -273,7 +273,10 @@
       "Bash(timeout 300 python -c ' *)",
       "Bash(cp README.md /tmp/r.bak)",
       "Bash(echo \"code retour avec un lien périmé : $? \\(1 attendu\\)\")",
-      "Bash(cp /tmp/r.bak README.md)"
+      "Bash(cp /tmp/r.bak README.md)",
+      "Bash(python -m py_compile update_checker.py)",
+      "Bash(rm -f static/_tmp_secu.html)",
+      "Bash(python -m py_compile update_checker.py update_notifier.py)"
     ]
   }
 }

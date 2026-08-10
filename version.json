@@ -1,23 +1,25 @@
 {
-  "version": "2.8.2",
-  "release_date": "2026-08-10T13:30:00.000000",
+  "version": "2.8.3",
+  "release_date": "2026-08-10T19:30:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.8.2",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.2/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.8.3",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Etat BitLocker explicite, section securite reorganisee en colonnes, emplacement des cles toujours visible",
+    "new_features": "Telechargement reprenable et instrumente, alignements et couleurs de la fiche systeme",
     "improvements": [
-      "FIXED: Le chiffrement des volumes s'affichait en 'D:: 0 (Protection: 0)'. Windows renvoie deux enumerations que la serialisation JSON reduisait a des entiers ; elles sont desormais converties puis traduites. Les deux formes renvoyees par Windows - entiers sur les versions anciennes, libelles sur les recentes - sont reconnues.",
-      "NEW: Badge Active/Desactive pour BitLocker, avec l'etat de chaque volume et la methode de chiffrement.",
-      "CHANGED: La section Securite et conformite passe en blocs autonomes - Antivirus, Pare-feu, BitLocker, Plateforme - repartis sur quatre colonnes selon la largeur disponible. Le badge d'etat suit desormais le nom de l'antivirus au lieu de passer a la ligne : dans une colonne de 170 pixels, la valeur n'avait pas la place.",
-      "NEW: L'emplacement des cles de recuperation reste visible dans la fiche appareil meme sans cle, et explique les trois raisons possibles : BitLocker inactif, collecte sans privileges administrateur, ou collecte anterieure a la 2.8.0.",
-      "CHANGED: L'alerte sur les volumes non chiffres s'appuie sur l'etat structure au lieu de chercher 'non chiffre' dans une phrase - ce qui laissait passer les libelles renvoyes en anglais par Windows."
+      "FIXED: Un telechargement interrompu repartait de zero : le fichier partiel etait efface a chaque echec. Il est desormais conserve et la reprise se fait par en-tete Range, avec repli propre si le serveur ne sait pas reprendre.",
+      "NEW: Quatre tentatives au lieu d'une seule, avec reprise entre chacune.",
+      "NEW: Detection des connexions qui tramnent. Le delai reseau ne se declenche que s'il n'arrive plus rien, jamais si les donnees arrivent trop lentement : sous 20 Ko/s pendant 45 secondes, la tentative est coupee et relancee sur une connexion neuve.",
+      "NEW: Le debit s'affiche pendant le telechargement, et un journal _telechargement.log conserve le detail de chaque tentative - proxy detecte, octets recus, duree, motif d'interruption.",
+      "FIXED: Les badges de la section Securite partaient en escalier, chacun demarrant a la fin de son libelle. Mesure : les badges du pare-feu commencaient a 402, 399 et 393 pixels ; ils sont desormais alignes.",
+      "FIXED: Les intitules Antivirus, Pare-feu, Chiffrement BitLocker et Plateforme utilisaient une couleur plus terne que le reste de la fiche. Ils reprennent la couleur des autres intitules.",
+      "A SAVOIR: la lenteur signalee n'a pas pu etre reproduite hors de l'application - sur la meme machine, urllib telecharge a 21,9 Mo/s et l'ecriture du fichier atteint 33 Mo/s. Les mesures et le journal ajoutes ici visent a identifier la cause au prochain essai."
     ]
   },
   "checksums": {
@@ -28,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.8.2"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.8.3"
 }

@@ -17,16 +17,22 @@
 /* Sécurité : des blocs plutôt qu'une grille étiquette/valeur. Dans une colonne
    de 170 px, le badge d'état passait à la ligne sous le nom de l'antivirus au
    lieu de le suivre. */
-.fs-secu { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+.fs-secu { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
            gap: 1rem 1.5rem; align-items: start; }
 .fs-secu-bloc { min-width: 0; }
-.fs-secu-titre { font-size: .68rem; text-transform: uppercase; letter-spacing: 1px;
-                 color: var(--text-muted); margin-bottom: .4rem;
-                 border-bottom: 1px solid var(--border); padding-bottom: .25rem; }
-.fs-secu-ligne { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap;
-                 font-size: .82rem; padding: .2rem 0; }
-.fs-secu-nom { color: var(--text-primary); }
-.fs-secu-sous { font-size: .7rem; color: var(--text-secondary); width: 100%; }
+/* Même couleur et même taille que les autres intitulés de la fiche : en
+   --text-muted, ces titres paraissaient éteints à côté du reste. */
+.fs-secu-titre { font-size: .75rem; color: var(--text-secondary);
+                 margin-bottom: .45rem; padding-bottom: .3rem;
+                 border-bottom: 1px solid var(--border); }
+.fs-secu-ligne { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap;
+                 font-size: .82rem; padding: .22rem 0; }
+/* Largeur minimale sur le nom : sans elle, chaque badge démarrait à la fin de
+   son libellé et la colonne partait en escalier. */
+.fs-secu-nom { color: var(--text-primary); min-width: 92px; }
+.fs-secu-sous { font-size: .7rem; color: var(--text-secondary); }
+.fs-secu-note { font-size: .7rem; color: var(--text-secondary); width: 100%;
+                margin-top: .1rem; }
 .fs-secu .fs-pill { white-space: nowrap; }
 .fs-row { display: grid; grid-template-columns: 170px 1fr; gap: .6rem; font-size: .82rem; padding: .22rem 0; }
 .fs-label { color: var(--text-secondary); }
@@ -649,7 +655,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
                                    else 'fs-bad' if av.enabled is false
                                    else 'fs-muted' }}">{{ av.status }}</span>
                 {% if av.up_to_date is false %}
-                <span class="fs-secu-sous">Signatures non à jour</span>
+                <span class="fs-secu-note">Signatures non à jour</span>
                 {% endif %}
             </div>
             {% endfor %}
@@ -689,7 +695,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
                 <span class="fs-pill {{ 'fs-ok' if actif else 'fs-bad' }}">
                     {{ 'Activé' if actif else 'Désactivé' }}</span>
                 {% if not actif %}
-                <span class="fs-secu-sous">Aucun volume protégé — les données du
+                <span class="fs-secu-note">Aucun volume protégé — les données du
                     disque sont lisibles si la machine est volée</span>
                 {% endif %}
             </div>
@@ -711,7 +717,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {% else %}
             <div class="fs-secu-ligne">
                 <span class="fs-pill fs-muted">Non renseigné</span>
-                <span class="fs-secu-sous">
+                <span class="fs-secu-note">
                     {% if rapport.elevated %}Aucun volume BitLocker sur cette machine
                     {% else %}Collecte sans privilèges administrateur{% endif %}
                 </span>
