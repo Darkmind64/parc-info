@@ -198,7 +198,32 @@ class UpdateChecker:
                 "Téléchargez la version manuellement depuis la page des versions."
                 % nom_fichier)
 
-        destination = self.config_dir / nom_fichier
+        # Sous-dossier dédié, jamais à côté de l'exécutable. Le binaire publié
+        # s'appelle ParcInfo-Windows.exe, et c'est aussi le nom sous lequel il
+        # tourne quand on l'a pris sur la page des versions : écrire là revenait
+        # à tenter d'écraser l'exécutable en cours, que Windows verrouille
+        # (« WinError 5 : accès refusé »). Le remplacement est le travail du
+        # script différé, pas celui du téléchargement.
+        dossier = self.config_dir / 'maj'
+        dossier.mkdir(parents=True, exist_ok=True)
+        destination = dossier / nom_fichier
+
+        try:
+            if os.path.samefile(str(destination), sys.executable):
+                raise UpdateCheckError(
+                    "Le téléchargement viserait l'exécutable en cours (%s)" % destination)
+        except (OSError, ValueError):
+            # samefile lève si la cible n'existe pas encore : c'est le cas normal.
+            pass
+
+        # Reliquats des versions antérieures, qui téléchargeaient à côté de
+        # l'exécutable : jusqu'à 30 Mo abandonnés là après chaque échec.
+        for reste in self.config_dir.glob('*.part'):
+            try:
+                reste.unlink()
+                logger.info("Fichier de téléchargement abandonné supprimé : %s", reste.name)
+            except OSError:
+                pass
         logger.info("Téléchargement de %s (%s)...", nom_fichier, version)
         self.download_progress = 0
         try:

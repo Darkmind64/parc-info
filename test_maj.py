@@ -161,7 +161,10 @@ print('\n=== 2b. Un téléchargement interrompu reprend où il s\'était arrêt�
 c = neuf('2.0.0')
 c.check_for_updates(force=True)
 c._get_platform_key = lambda: 'windows_installer'
-partiel = c.config_dir / 'ParcInfo-Windows.exe.part'
+# Le téléchargement vit dans un sous-dossier dédié, jamais à côté de
+# l'exécutable : le fichier partiel s'y trouve donc aussi.
+(c.config_dir / 'maj').mkdir(parents=True, exist_ok=True)
+partiel = c.config_dir / 'maj' / 'ParcInfo-Windows.exe.part'
 partiel.write_bytes(BINAIRE[:40000])          # 40 Ko déjà acquis
 
 Serveur.reponses.clear()
@@ -183,6 +186,39 @@ finally:
     Serveur.do_GET = _do_get
 verifier(fichier is not None and c._calculate_checksum(fichier) == EMPREINTE,
          'serveur sans reprise : le fichier reste correct')
+
+print("\n=== 2c. Le téléchargement ne vise jamais l'exécutable en cours ===")
+# Cas réel signalé : l'exécutable téléchargé depuis la page des versions
+# s'appelle ParcInfo-Windows.exe, et le téléchargement visait ce même nom dans
+# le dossier de l'application. Le programme tentait donc d'écraser l'exécutable
+# en cours, que Windows verrouille — « WinError 5 : accès refusé », au moment
+# précis où le téléchargement venait d'aboutir.
+c = neuf('2.0.0')
+c.check_for_updates(force=True)
+c._get_platform_key = lambda: 'windows_installer'
+
+exe_simule = c.config_dir / 'ParcInfo-Windows.exe'
+exe_simule.write_bytes(b'executable en cours')
+_executable_reel = UC.sys.executable
+UC.sys.executable = str(exe_simule)
+try:
+    fichier = c.download_update()
+    verifier(fichier is not None and os.path.abspath(str(fichier)) != os.path.abspath(str(exe_simule)),
+             "le fichier téléchargé n'est pas l'exécutable en cours", str(fichier))
+    verifier(fichier is not None and fichier.parent.name == 'maj',
+             'le téléchargement va dans un sous-dossier dédié',
+             str(fichier.parent.name) if fichier else '')
+    verifier(exe_simule.read_bytes() == b'executable en cours',
+             "l'exécutable en cours n'a pas été touché")
+    verifier(c._calculate_checksum(fichier) == EMPREINTE, 'binaire téléchargé conforme')
+finally:
+    UC.sys.executable = _executable_reel
+
+# Les reliquats laissés par les versions antérieures sont nettoyés.
+reliquat = c.config_dir / 'ParcInfo-Windows.exe.part'
+reliquat.write_bytes(b'x' * 1024)
+c.download_update()
+verifier(not reliquat.exists(), 'reliquat des versions précédentes supprimé')
 
 print('\n=== 3. Un binaire altéré est rejeté ===')
 with open(os.path.join(RACINE, 'SHA256SUMS.txt'), 'w', encoding='utf-8') as f:

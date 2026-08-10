@@ -1,25 +1,22 @@
 {
-  "version": "2.8.3",
-  "release_date": "2026-08-10T19:30:00.000000",
+  "version": "2.8.4",
+  "release_date": "2026-08-10T21:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.8.3",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.3/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.4/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.4/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.8.4",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.4/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.4/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.8.4/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Telechargement reprenable et instrumente, alignements et couleurs de la fiche systeme",
+    "new_features": "La mise a jour Windows echouait a la derniere seconde : le telechargement visait l'executable en cours",
     "improvements": [
-      "FIXED: Un telechargement interrompu repartait de zero : le fichier partiel etait efface a chaque echec. Il est desormais conserve et la reprise se fait par en-tete Range, avec repli propre si le serveur ne sait pas reprendre.",
-      "NEW: Quatre tentatives au lieu d'une seule, avec reprise entre chacune.",
-      "NEW: Detection des connexions qui tramnent. Le delai reseau ne se declenche que s'il n'arrive plus rien, jamais si les donnees arrivent trop lentement : sous 20 Ko/s pendant 45 secondes, la tentative est coupee et relancee sur une connexion neuve.",
-      "NEW: Le debit s'affiche pendant le telechargement, et un journal _telechargement.log conserve le detail de chaque tentative - proxy detecte, octets recus, duree, motif d'interruption.",
-      "FIXED: Les badges de la section Securite partaient en escalier, chacun demarrant a la fin de son libelle. Mesure : les badges du pare-feu commencaient a 402, 399 et 393 pixels ; ils sont desormais alignes.",
-      "FIXED: Les intitules Antivirus, Pare-feu, Chiffrement BitLocker et Plateforme utilisaient une couleur plus terne que le reste de la fiche. Ils reprennent la couleur des autres intitules.",
-      "A SAVOIR: la lenteur signalee n'a pas pu etre reproduite hors de l'application - sur la meme machine, urllib telecharge a 21,9 Mo/s et l'ecriture du fichier atteint 33 Mo/s. Les mesures et le journal ajoutes ici visent a identifier la cause au prochain essai."
+      "FIXED: 'WinError 5 : Acces refuse' au moment de finaliser le telechargement. Le binaire publie s'appelle ParcInfo-Windows.exe, et c'est aussi le nom sous lequel l'application tourne quand on l'a prise sur la page des versions : le telechargement se terminait donc en tentant d'ecraser l'executable en cours d'execution, que Windows verrouille. Le remplacement est le travail du script differe, pas celui du telechargement.",
+      "FIXED: Le telechargement se fait desormais dans un sous-dossier dedie, jamais a cote de l'executable. Un garde-fou refuse en outre toute destination qui designerait l'executable en cours.",
+      "FIXED: Les fichiers .part abandonnes par les versions precedentes a cote de l'executable sont supprimes - jusqu'a 30 Mo laisses la apres chaque echec.",
+      "A SAVOIR: ce defaut touchait tout poste Windows ayant recupere le binaire depuis la page des versions, c'est-a-dire le cas normal. Il explique l'echec survenu apres un telechargement complet ; la lenteur signalee auparavant reste, elle, sans explication."
     ]
   },
   "checksums": {
@@ -30,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.8.3"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.8.4"
 }
