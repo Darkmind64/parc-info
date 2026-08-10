@@ -40,6 +40,7 @@ jobs:
           python test_maj.py
           python test_journal_maj.py
           python test_securite.py
+          python test_remplissage_fiche.py
           python test_historique_collectes.py
           python test_sauvegarde.py
           python test_parite_rapports.py
