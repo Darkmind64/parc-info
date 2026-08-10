@@ -1,5 +1,42 @@
 # CHANGELOG - ParcInfo
 
+## [2.8.4] - 2026-08-10 🎯
+
+### 🎯 « WinError 5 : Accès refusé » — la vraie cause
+Le téléchargement aboutissait, puis échouait à la dernière seconde en
+renommant le fichier.
+
+**Le binaire publié s'appelle `ParcInfo-Windows.exe`, et c'est aussi le nom
+sous lequel l'application tourne** quand on l'a prise sur la page des versions.
+Le téléchargement se terminait donc en tentant d'écraser **l'exécutable en
+cours d'exécution**, que Windows verrouille. Remplacer le binaire est le
+travail du script différé, qui attend l'arrêt de l'application — pas celui du
+téléchargement.
+
+- ✅ Le téléchargement se fait dans un **sous-dossier dédié**, jamais à côté de
+  l'exécutable
+- ✅ Un **garde-fou** refuse toute destination qui désignerait l'exécutable en
+  cours, quel que soit son nom
+- ✅ Les fichiers `.part` abandonnés par les versions précédentes à côté de
+  l'exécutable sont supprimés — jusqu'à 30 Mo laissés là après chaque échec
+
+Ce défaut touchait **tout poste Windows ayant récupéré le binaire depuis la
+page des versions**, c'est-à-dire le cas normal.
+
+### 🧪 COUVERTURE
+Le test reproduit la situation exacte : un exécutable en cours portant le nom
+du binaire publié. Vérifié en retirant le correctif — le téléchargement vise
+alors bien l'exécutable en cours, et le test échoue. Au passage, ce changement
+a invalidé un test antérieur qui plaçait le fichier partiel à l'ancien
+emplacement ; il a été corrigé plutôt que contourné.
+
+### ⚠️ CE QUI RESTE SANS EXPLICATION
+La **lenteur** signalée auparavant (5 % en dix minutes) est un phénomène
+distinct, toujours sans cause identifiée. Le journal `_telechargement.log`
+ajouté en 2.8.3 reste en place pour la documenter si elle se reproduit.
+
+---
+
 ## [2.8.3] - 2026-08-10 ⬇
 
 ### ⬇ UN TÉLÉCHARGEMENT QUI SURVIT À UN RÉSEAU CAPRICIEUX

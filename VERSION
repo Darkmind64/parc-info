@@ -1,10 +1,10 @@
-PARCINFO_VERSION=2.8.3
+PARCINFO_VERSION=2.8.4
 RELEASE_DATE=2026-08-08
-BUILD_NUMBER=2026081003
+BUILD_NUMBER=2026081004
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.8.3 - Telechargement reprenable, alignements de la fiche
+# Version 2.8.4 - Le telechargement ne vise plus l'executable en cours
 # Balayage de toutes les sources de clé produit, appairage sur les 5
 # derniers caractères, report automatique dans la fiche appareil
 # Date: 8 août 2026
