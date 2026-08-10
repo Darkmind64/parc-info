@@ -82,6 +82,32 @@ def can_self_install() -> bool:
     return runtime_mode() in ('windows', 'macos')
 
 
+#: Variables posées par le lanceur de PyInstaller pour désigner le dossier
+#: temporaire où l'application a été décompressée. Relevées dans le binaire du
+#: bootloader livré avec PyInstaller 6, pas de mémoire.
+VARIABLES_BOOTLOADER = (
+    '_MEIPASS', '_MEIPASS2',                    # PyInstaller 5 et antérieurs
+    '_PYI_APPLICATION_HOME_DIR', '_PYI_ARCHIVE_FILE',
+    '_PYI_PARENT_PROCESS_LEVEL', '_PYI_SPLASH_IPC',
+)
+
+
+def environnement_sans_bootloader() -> dict:
+    """Environnement débarrassé des repères du lanceur PyInstaller.
+
+    Un processus lancé depuis l'application packagée hérite de ces variables.
+    La nouvelle application, relancée par le script de remplacement, croyait
+    donc avoir déjà été décompressée et cherchait python3xx.dll dans le dossier
+    temporaire du processus précédent — supprimé à sa sortie. D'où l'échec
+    « Failed to load Python DLL ». L'application relancée depuis l'explorateur,
+    elle, démarrait normalement : son environnement est propre.
+    """
+    propre = dict(os.environ)
+    for nom in VARIABLES_BOOTLOADER:
+        propre.pop(nom, None)
+    return propre
+
+
 class UpdateChecker:
     """
     Surveille les versions publiées et applique la mise à jour sur demande.
@@ -277,8 +303,15 @@ class UpdateChecker:
         # L'ancien exécutable est conservé le temps du remplacement, et remis en
         # place si la copie échoue à mi-chemin : mieux vaut l'ancienne version
         # qu'aucune application.
+        # Le script efface lui aussi les repères du lanceur : Popen lui passe
+        # déjà un environnement propre, mais si ce script est relancé à la main
+        # depuis une console héritée, la nouvelle application repartirait
+        # chercher Python dans un dossier temporaire disparu.
+        oublier = ''.join('set "%s="\r\n' % nom for nom in VARIABLES_BOOTLOADER)
+
         bat_content = (
             "@echo off\r\n"
+            + oublier +
             f'echo [%DATE% %TIME%] remplacement demande > "{journal}"\r\n'
             "timeout /t 3 /nobreak > NUL\r\n"
             f'if exist "{sauvegarde}" del /q "{sauvegarde}"\r\n'
@@ -315,7 +348,8 @@ class UpdateChecker:
         if hasattr(subprocess, 'CREATE_NO_WINDOW') and hasattr(subprocess, 'DETACHED_PROCESS'):
             creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
         subprocess.Popen(['cmd', '/c', str(bat_path)],
-                         creationflags=creationflags, close_fds=True)
+                         creationflags=creationflags, close_fds=True,
+                         env=environnement_sans_bootloader())
 
         logger.info("Remplacement programmé — l'application va redémarrer")
         return True

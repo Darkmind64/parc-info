@@ -1,5 +1,36 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.1] - 2026-08-10 🔌
+
+### 🔌 « Failed to load Python DLL » au redémarrage
+
+**Votre installation n'est pas abîmée.** La mise à jour a bien eu lieu ; seul
+le redémarrage automatique échouait. Lancer l'application depuis l'explorateur
+fonctionne — c'est d'ailleurs ce qui a mis sur la piste.
+
+**La cause.** L'application packagée se décompresse dans un dossier temporaire,
+et le lanceur PyInstaller pose des variables d'environnement pour le désigner.
+Le script de remplacement, lancé *par* l'application, en héritait, puis relançait
+la nouvelle version qui en héritait à son tour. Celle-ci croyait donc avoir déjà
+été décompressée et allait chercher `python311.dll` dans le dossier temporaire
+du processus précédent — supprimé au moment où celui-ci s'est arrêté.
+
+- ✅ Un environnement **explicitement débarrassé** de ces variables est transmis
+  au script de remplacement
+- ✅ Le script les efface **à son tour**, au cas où il serait relancé depuis une
+  console elle-même héritée
+- ✅ Les noms ont été relevés **dans le binaire du bootloader** livré avec
+  PyInstaller 6, pas de mémoire : `_PYI_APPLICATION_HOME_DIR`,
+  `_PYI_ARCHIVE_FILE`, `_PYI_PARENT_PROCESS_LEVEL`, plus `_MEIPASS` et
+  `_MEIPASS2` des versions antérieures
+
+### 🧪 COUVERTURE
+Le test vérifie qu'un environnement explicite est transmis, qu'aucune de ces
+variables n'y figure, et que le reste de l'environnement est bien conservé —
+un environnement vidé empêcherait le script de trouver `cmd`.
+
+---
+
 ## [2.9.0] - 2026-08-10 ✍
 
 ### ✍ LA FICHE APPAREIL SE REMPLIT DEPUIS LA COLLECTE

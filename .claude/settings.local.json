@@ -278,7 +278,9 @@
       "Bash(rm -f static/_tmp_secu.html)",
       "Bash(python -m py_compile update_checker.py update_notifier.py)",
       "Bash(python test_remplissage_fiche.py)",
-      "Bash(cat)"
+      "Bash(cat)",
+      "Bash(python -c \"import PyInstaller, os; print\\('PyInstaller', PyInstaller.__version__\\); print\\(os.path.dirname\\(PyInstaller.__file__\\)\\)\")",
+      "Bash(cd \"C:/Users/Davy/AppData/Local/Programs/Python/Python313/Lib/site-packages/PyInstaller\" && grep -rn \"_PYI_APPLICATION_HOME_DIR\\\\|_MEIPASS2\\\\|_PYI_ARCHIVE_FILE\\\\|_PYI_PARENT_PROCESS_LEVEL\" --include=*.py --include=*.c --include=*.h . 2>/dev/null | head -12)"
     ]
   }
 }
