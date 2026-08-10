@@ -77,3 +77,10 @@ def register_update_routes(app):
     @app.before_request
     def _demarrer_suivi_maj():
         get_notifier()
+        # Rattrapage des fiches déjà collectées, une seule fois par base. Il vit
+        # ici parce qu'init_db() s'exécute avant que la fonction ne soit définie.
+        try:
+            from app import completer_fiches_existantes
+            completer_fiches_existantes()
+        except Exception:
+            pass

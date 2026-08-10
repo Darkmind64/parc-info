@@ -276,7 +276,9 @@
       "Bash(cp /tmp/r.bak README.md)",
       "Bash(python -m py_compile update_checker.py)",
       "Bash(rm -f static/_tmp_secu.html)",
-      "Bash(python -m py_compile update_checker.py update_notifier.py)"
+      "Bash(python -m py_compile update_checker.py update_notifier.py)",
+      "Bash(python test_remplissage_fiche.py)",
+      "Bash(cat)"
     ]
   }
 }

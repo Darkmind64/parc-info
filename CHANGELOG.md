@@ -1,5 +1,50 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.0] - 2026-08-10 ✍
+
+### ✍ LA FICHE APPAREIL SE REMPLIT DEPUIS LA COLLECTE
+
+**Pourquoi les champs Antivirus restaient vides.** Le collecteur écrivait
+l'antivirus détecté dans une colonne `antivirus` que le formulaire n'affiche
+pas : la fiche système annonçait « Windows Defender », mais les champs *Marque*
+et *Nom* de la fiche appareil restaient vides. La donnée était là, dans un
+champ invisible.
+
+Sont désormais renseignés à partir de la collecte :
+
+- **Utilisateur** — la session ouverte au moment de la collecte, domaine retiré
+  (`MONDOMAINE\Éric` donne `Éric`)
+- **Marque et nom d'antivirus** — rapprochés des listes de référence :
+  *Bitdefender Endpoint Security Tools* donne la marque **Bitdefender**,
+  *Windows Defender* donne *Windows Defender / Microsoft Defender*. Un produit
+  inconnu n'est **jamais** rapproché de force d'une entrée de la liste : la
+  valeur brute est conservée plutôt qu'une marque fausse
+- **Logiciels métier** — ceux de la liste du client effectivement installés
+
+### 🛡 UNE RÈGLE : NE JAMAIS ÉCRASER UNE SAISIE
+Seules les cases **restées vides** sont remplies. Une valeur corrigée par un
+technicien survit à toutes les collectes suivantes — même principe que pour le
+type d'appareil, déjà protégé. Un champ contenant seulement des espaces est
+traité comme vide, sans quoi un champ effacé serait resté bloqué à jamais.
+
+### 🔁 LES APPAREILS DÉJÀ COLLECTÉS SONT RATTRAPÉS
+Leur rapport est déjà en base : inutile de relancer le collecteur sur chaque
+poste. Le rattrapage lit les rapports existants, remplit les cases vides, et
+ne s'exécute **qu'une fois par base**.
+
+### 🧪 COUVERTURE
+`test_remplissage_fiche.py` : rapprochement avec les listes, refus de rapprocher
+un produit inconnu, saisie manuelle préservée sur plusieurs collectes, champ
+d'espaces traité comme vide, rendu effectif dans le formulaire, et rattrapage
+qui ne rejoue pas.
+
+### 📝 AU PASSAGE
+Un identifiant d'appareil à quatorze chiffres m'a paru anormal : il est
+délibéré. Un décalage aléatoire est appliqué aux compteurs pour éviter que deux
+instances ne produisent le même identifiant. Rien à corriger.
+
+---
+
 ## [2.8.4] - 2026-08-10 🎯
 
 ### 🎯 « WinError 5 : Accès refusé » — la vraie cause

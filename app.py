@@ -6259,6 +6259,138 @@ def historique_appareil(conn, client_id, appareil_id):
     return resultat
 
 
+def _normaliser_libelle(valeur):
+    """Minuscules sans accents ni ponctuation, pour comparer des libellés."""
+    import unicodedata
+    texte = unicodedata.normalize('NFKD', str(valeur or '')).encode('ascii', 'ignore').decode()
+    return re.sub(r'[^a-z0-9]+', ' ', texte.lower()).strip()
+
+
+def _rapprocher_liste(valeur, entrees):
+    """Entrée de la liste qui correspond le mieux à la valeur détectée.
+
+    Les listes sont curées (« Windows Defender / Microsoft Defender »), la
+    valeur détectée ne l'est pas (« Windows Defender ») : on compare sur les
+    mots, et l'entrée qui en partage le plus l'emporte.
+    """
+    cible = set(_normaliser_libelle(valeur).split())
+    if not cible:
+        return ''
+    meilleur, score_max = '', 0
+    for entree in entrees or []:
+        mots = set(_normaliser_libelle(entree).split())
+        score = len(cible & mots)
+        # Un seul mot commun ne suffit que s'il couvre l'entrée entière,
+        # sinon « Security » rapprocherait n'importe quoi de n'importe quoi.
+        if score > score_max and (score > 1 or mots <= cible or cible <= mots):
+            meilleur, score_max = entree, score
+    return meilleur
+
+
+def champs_deduits_du_collecteur(conn, client_id, rapport, existant=None):
+    """Champs de la fiche appareil que la collecte permet de renseigner.
+
+    Ne renvoie que ce qui manque : une valeur saisie par un technicien prime
+    toujours sur une valeur déduite, comme pour le type d'appareil.
+    """
+    existant = existant or {}
+    deduits = {}
+
+    def poser(colonne, valeur):
+        if valeur and not (existant.get(colonne) or '').strip():
+            deduits[colonne] = valeur
+
+    # Utilisateur : la session ouverte au moment de la collecte. Le domaine est
+    # retiré, la fiche attend un nom de personne, pas un identifiant complet.
+    session_ouverte = (rapport.get('logged_on_user') or '').strip()
+    if session_ouverte:
+        poser('utilisateur', session_ouverte.split('\\')[-1].split('@')[0])
+
+    # Antivirus : le collecteur écrivait dans la colonne `antivirus`, que le
+    # formulaire n'affiche pas — d'où des champs Marque et Nom restés vides
+    # alors que la fiche système annonçait « Windows Defender ».
+    produits = rapport.get('antivirus_products') or []
+    detecte = (produits[0].get('name') if produits else '') or rapport.get('antivirus') or ''
+    detecte = detecte.split(',')[0].strip()
+    if detecte:
+        poser('av_marque', _rapprocher_liste(detecte, get_liste('marques_antivirus')) or detecte)
+        poser('av_nom', _rapprocher_liste(detecte, get_liste('noms_antivirus')) or detecte)
+
+    # Logiciels métier : ceux de la liste du client effectivement installés.
+    try:
+        references = _get_logiciels_metier_list(conn, client_id) or []
+    except Exception:
+        references = []
+    if references:
+        installes = {_normaliser_libelle(l.get('name') if isinstance(l, dict) else l)
+                     for l in (rapport.get('installed_software') or [])}
+        trouves = [ref for ref in references
+                   if any(_normaliser_libelle(ref) and _normaliser_libelle(ref) in nom
+                          for nom in installes)]
+        if trouves:
+            poser('logiciels', json.dumps(trouves, ensure_ascii=False))
+
+    return deduits
+
+
+#: Marqueur de rattrapage, pour ne le faire qu'une fois par base.
+_CLE_RATTRAPAGE_FICHES = '_fiches_completees_v1'
+_rattrapage_fait = False
+
+
+def completer_fiches_existantes():
+    """Renseigne a posteriori les fiches déjà collectées.
+
+    Les appareils collectés avant cette version ont leur rapport en base mais
+    des champs restés vides : sans ce rattrapage, il faudrait relancer le
+    collecteur sur chaque poste pour une donnée déjà présente. Ne touche que
+    les cases vides, et ne s'exécute qu'une fois.
+    """
+    global _rattrapage_fait
+    if _rattrapage_fait:
+        return 0
+    _rattrapage_fait = True
+
+    conn = get_db()
+    try:
+        if (cfg_get(_CLE_RATTRAPAGE_FICHES, '') or '').strip():
+            return 0
+
+        completes = 0
+        lignes = conn.execute(
+            'SELECT * FROM appareils '
+            "WHERE rapport_systeme_json IS NOT NULL AND rapport_systeme_json != ''"
+        ).fetchall()
+        for ligne in lignes:
+            appareil = row_to_dict(ligne)
+            try:
+                rapport = json.loads(appareil.get('rapport_systeme_json') or '{}')
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(rapport, dict):
+                continue
+            deduits = champs_deduits_du_collecteur(
+                conn, appareil.get('client_id'), rapport, appareil)
+            if not deduits:
+                continue
+            conn.execute('UPDATE appareils SET %s WHERE id=?'
+                         % ', '.join('%s=?' % c for c in deduits),
+                         list(deduits.values()) + [appareil['id']])
+            completes += 1
+
+        conn.commit()
+        cfg_set(_CLE_RATTRAPAGE_FICHES, datetime.utcnow().isoformat(timespec='seconds'))
+        if completes:
+            logger.info('Fiches appareils complétées depuis les collectes déjà reçues : %d',
+                        completes)
+        return completes
+    except Exception:
+        logger.exception('Rattrapage des fiches appareils (sans conséquence)')
+        return 0
+    finally:
+        conn.close()
+
+
 def jeton_collecteur_valide():
     """Vrai si la requête du collecteur est autorisée.
 
@@ -6573,6 +6705,14 @@ def api_device_info():
                 updates.append('rapport_systeme_json=?')
                 params.append(system_report_json)
 
+            # Champs de la fiche que la collecte permet de renseigner : ils
+            # n'étaient jamais alimentés, alors que la donnée était sous les yeux
+            # dans la fiche système. Seules les cases encore vides sont remplies.
+            for colonne, valeur in champs_deduits_du_collecteur(
+                    conn, cid, system_report or data, old_data).items():
+                updates.append('%s=?' % colonne)
+                params.append(valeur)
+
             # Toujours mettre à jour la date de dernière synchronisation
             updates.append('derniere_synchro=?')
             params.append(now)
@@ -6605,6 +6745,15 @@ def api_device_info():
                  device_type or 'PC', 'actif', 0, 1, now, now, now)
             )
             app_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+
+            # Même remplissage qu'en mise à jour : sur un appareil neuf, toutes
+            # les cases concernées sont vides, donc toutes sont renseignées.
+            deduits = champs_deduits_du_collecteur(conn, cid, system_report or data)
+            if deduits:
+                conn.execute(
+                    'UPDATE appareils SET %s WHERE id=?'
+                    % ', '.join('%s=?' % c for c in deduits),
+                    list(deduits.values()) + [app_id])
 
             log_history(
                 conn, cid, 'appareil', app_id, device_name, 'Création (collecteur système)',
