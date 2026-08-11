@@ -4385,6 +4385,23 @@ def _fiche_systeme_disques(rapport):
     return volumes
 
 
+def _fiche_systeme_disques_physiques(rapport):
+    """Décompose les disques physiques pour un tableau aligné.
+
+    Le collecteur assemble ces lignes à partir de champs distincts ; les
+    afficher telles quelles obligeait à lire la phrase entière pour retrouver
+    la capacité ou l'état SMART. Comme pour les volumes logiques, une ligne au
+    format non reconnu est restituée brute.
+    """
+    from collector_core import parse_physical_disk
+
+    disques = []
+    for ligne in rapport.get('physical_disks') or []:
+        disques.append(parse_physical_disk(str(ligne))
+                       or {'nom': '', 'brut': str(ligne)})
+    return disques
+
+
 def _fiche_systeme_kpis(rapport):
     """Vignettes chiffrées de la fiche système : valeur, barre et criticité.
 
@@ -4475,6 +4492,7 @@ def fiche_systeme_appareil(id):
     # Analyse et mise en forme reprises de collector_core : la page porte ainsi
     # le même jugement que le rapport PDF sur une machine donnée.
     alertes, kpis, disques, ports_cartes, ports_masques = [], [], [], [], 0
+    disques_physiques = []
     age_materiel = None
     if rapport:
         try:
@@ -4484,6 +4502,7 @@ def fiche_systeme_appareil(id):
             alertes = build_alerts(rapport)
             kpis = _fiche_systeme_kpis(rapport)
             disques = _fiche_systeme_disques(rapport)
+            disques_physiques = _fiche_systeme_disques_physiques(rapport)
             from collector_core import hardware_age_years
             age_materiel = hardware_age_years(rapport.get('bios_release_date'))
             ports = [describe_listening_port(p)
@@ -4511,7 +4530,8 @@ def fiche_systeme_appareil(id):
     return render_template('fiche_systeme.html', appareil=a, rapport=rapport,
                            logiciels=logiciels, client=client, clients=get_clients(),
                            client_actif_id=cid, alertes=alertes, kpis=kpis,
-                           disques=disques, ports_cartes=ports_cartes,
+                           disques=disques, disques_physiques=disques_physiques,
+                           ports_cartes=ports_cartes,
                            ports_masques=ports_masques, age_materiel=age_materiel,
                            historique=historique)
 

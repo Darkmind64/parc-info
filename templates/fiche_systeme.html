@@ -6,13 +6,24 @@
 .fs-section {
     background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px;
     padding: 1rem 1.2rem; margin-bottom: 1rem;
+    /* Sur écran étroit, plusieurs tableaux dépassent leur conteneur et
+       poussaient la page entière en débordement horizontal — toute la fiche
+       se décalait pour une seule colonne trop large. Le débordement reste
+       désormais dans la rubrique concernée. */
+    overflow-x: auto;
 }
 .fs-section > h3 {
     font-family: 'Rajdhani', sans-serif; font-size: .75rem; font-weight: 700;
     letter-spacing: 2px; text-transform: uppercase; color: var(--accent);
     margin: 0 0 .8rem 0; padding-bottom: .5rem; border-bottom: 1px solid var(--border);
 }
-.fs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .35rem 1.5rem; }
+/* auto-fit, et non auto-fill : ces grilles n'ont que deux enfants, alors que
+   la largeur disponible permet trois pistes. auto-fill créait donc une
+   troisième piste vide — un tiers de la largeur perdu — pendant que les
+   valeurs, elles, se serraient dans 190 px et renvoyaient leurs badges à la
+   ligne. auto-fit réduit la piste vide à zéro et rend la place aux deux
+   autres. */
+.fs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .35rem 1.5rem; }
 
 /* Sécurité : des blocs plutôt qu'une grille étiquette/valeur. Dans une colonne
    de 170 px, le badge d'état passait à la ligne sous le nom de l'antivirus au
@@ -34,7 +45,16 @@
 .fs-secu-note { font-size: .7rem; color: var(--text-secondary); width: 100%;
                 margin-top: .1rem; }
 .fs-secu .fs-pill { white-space: nowrap; }
-.fs-row { display: grid; grid-template-columns: 170px 1fr; gap: .6rem; font-size: .82rem; padding: .22rem 0; }
+/* minmax(0,1fr) et non 1fr : une valeur longue et insécable, sinon, élargit sa
+   piste au-delà de la grille au lieu de se replier. */
+.fs-row { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: .6rem; font-size: .82rem; padding: .22rem 0; }
+/* Sous cette largeur, l'étiquette fixe accaparait plus de la moitié de la
+   colonne et il ne restait pas 140 px pour la valeur : les badges repassaient
+   à la ligne. L'étiquette prend alors sa propre ligne. */
+@media (max-width: 1000px) {
+    .fs-row { grid-template-columns: minmax(0, 1fr); gap: 0; padding: .3rem 0; }
+    .fs-label { font-size: .72rem; }
+}
 .fs-label { color: var(--text-secondary); }
 .fs-value { color: var(--text-primary); word-break: break-word; }
 .fs-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
@@ -47,7 +67,17 @@
 .fs-pill {
     display: inline-block; padding: .1rem .45rem; border-radius: 3px;
     font-size: .62rem; font-weight: 700; letter-spacing: .03em;
+    /* Un badge est plus petit que le texte qu'il accompagne : posé sur la
+       ligne de base, il paraissait s'enfoncer sous elle. */
+    vertical-align: middle;
+    /* Un libellé d'état coupé en deux ne se lit plus comme un badge. */
+    white-space: nowrap;
 }
+/* Deux badges qui se suivent : l'espace du source ne suffit pas à les séparer. */
+.fs-pill + .fs-pill { margin-left: .3rem; }
+/* Colonnes de chiffres : alignées à droite et en chasse fixe, seule façon de
+   comparer des capacités d'une ligne à l'autre sans les lire. */
+.fs-nombre { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fs-ok   { background: rgba(0,255,136,.12); color: var(--accent-green); border: 1px solid rgba(0,255,136,.3); }
 .fs-warn { background: rgba(255,140,0,.12); color: var(--accent-orange); border: 1px solid rgba(255,140,0,.3); }
 .fs-bad  { background: rgba(255,51,85,.12); color: var(--accent-red); border: 1px solid rgba(255,51,85,.3); }
@@ -460,7 +490,10 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 {% endif %}
 
 <!-- ── STOCKAGE ─────────────────────────────────────────────────────────── -->
-{% if rapport.disk_total_gb or rapport.disk_drives or rapport.disk_reliability %}
+{# `physical_disks` fait partie de la condition : sans lui, une machine ne
+   remontant que ses disques physiques n'affichait aucune rubrique Stockage. #}
+{% if rapport.disk_total_gb or rapport.disk_drives or rapport.disk_reliability
+      or rapport.physical_disks %}
 <div class="fs-section">
     <h3>■ Stockage</h3>
     {% if rapport.disk_total_gb %}
@@ -505,10 +538,39 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     </div>
     {% endif %}
 
-    {% if rapport.physical_disks %}
-    <div style="margin-top:.8rem;">
-        <div class="fs-label" style="font-size:.75rem;margin-bottom:.3rem;">Disques physiques</div>
-        {% for d in rapport.physical_disks %}<div class="fs-value fs-mono">• {{ d }}</div>{% endfor %}
+    {% if disques_physiques %}
+    <div style="margin-top:.9rem;">
+        <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+            Disques physiques ({{ disques_physiques|length }}) — l'état SMART est
+            celui rapporté par le disque lui-même
+        </div>
+        <table class="fs-table">
+            <tr>
+                <th>Disque</th><th>Type</th>
+                <th style="text-align:right;">Capacité</th>
+                <th>État SMART</th>
+            </tr>
+            {% for d in disques_physiques %}
+            {% if d.brut %}
+            {# Format non reconnu (macOS, Linux) : ligne restituée telle quelle #}
+            <tr><td colspan="4" class="fs-mono">{{ d.brut }}</td></tr>
+            {% else %}
+            <tr>
+                <td class="fs-mono">{{ d.nom }}</td>
+                <td><span class="fs-pill {{ 'fs-info' if d.type == 'SSD' else 'fs-muted' }}">{{ d.type }}</span></td>
+                {# Chiffres alignés à droite et en chasse fixe : c'est la seule
+                   façon de comparer des capacités d'un coup d'œil. #}
+                <td class="fs-mono fs-nombre">{{ d.taille_go }} GB</td>
+                <td>
+                    <span class="fs-pill {{ {'ok': 'fs-ok', 'warn': 'fs-warn',
+                                             'danger': 'fs-bad'}.get(d.sante_niveau, 'fs-muted') }}">
+                        {{ d.sante }}</span>
+                    {% if d.etat %}<span class="fs-pill fs-warn">{{ d.etat }}</span>{% endif %}
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </table>
     </div>
     {% endif %}
 

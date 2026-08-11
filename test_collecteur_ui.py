@@ -98,7 +98,37 @@ verifier('POSTE-Réception' in texte, 'accents intacts dans la sortie texte')
 verifier('IDENTIFICATION' in texte, 'rubriques titrées')
 verifier(len(lignes) > 15, 'résumé non vide', '%d lignes' % len(lignes))
 
-print("\n=== 3. Onglets de l'interface ===")
+print("\n=== 3. Les disques physiques se relisent pour la fiche système ===")
+# Le collecteur assemble une phrase à partir de champs distincts ; la fiche la
+# redécompose pour aligner les colonnes et sortir l'état SMART en badge. Les
+# deux doivent rester d'accord — d'où ce test sur le format réellement produit.
+CAS = [
+    ("Samsung SSD 850 PRO 1TB — SSD — 953.9 GB — Santé (SMART): Healthy",
+     dict(nom='Samsung SSD 850 PRO 1TB', type='SSD', taille_go=953.9,
+          sante='Sain', sante_niveau='ok', etat=None)),
+    ("ST1000LM024 HN-M101MBB — HDD — 931.5 GB — Santé (SMART): Warning (Degraded)",
+     dict(nom='ST1000LM024 HN-M101MBB', type='HDD', taille_go=931.5,
+          sante='À surveiller', sante_niveau='warn', etat='Degraded')),
+    ("X — HDD — 12.5 GB — Santé (SMART): Unhealthy",
+     dict(nom='X', type='HDD', taille_go=12.5,
+          sante='Défaillant', sante_niveau='danger', etat=None)),
+]
+for ligne, attendu in CAS:
+    obtenu = C.parse_physical_disk(ligne)
+    ecarts = [k for k, v in attendu.items() if not obtenu or obtenu.get(k) != v]
+    verifier(not ecarts, 'relecture de « %s… »' % ligne[:26],
+             str({k: (obtenu or {}).get(k) for k in ecarts}))
+
+# Un état inconnu doit rester affichable, sans être présenté comme sain.
+inconnu = C.parse_physical_disk("Y — SSD — 1.0 GB — Santé (SMART): Bizarre")
+verifier(inconnu and inconnu['sante_niveau'] == 'muted',
+         "un état SMART inattendu n'est pas annoncé comme sain",
+         str(inconnu))
+# Format d'un autre OS : la ligne doit être rendue telle quelle, pas inventée.
+verifier(C.parse_physical_disk('disque macOS 500 Go') is None,
+         'un format non reconnu est refusé plutôt que deviné')
+
+print("\n=== 4. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()

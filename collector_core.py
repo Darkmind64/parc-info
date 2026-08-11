@@ -4477,6 +4477,47 @@ def _parse_drive(text):
     return None
 
 
+#: État SMART renvoyé par Get-PhysicalDisk, et la criticité correspondante.
+#: « Warning » signale un disque qui fonctionne encore mais dont le firmware
+#: a relevé des secteurs douteux : c'est l'avertissement à ne pas manquer.
+_SANTE_DISQUE = {
+    'healthy': ('Sain', 'ok'),
+    'warning': ('À surveiller', 'warn'),
+    'unhealthy': ('Défaillant', 'danger'),
+    'unknown': ('Inconnu', 'muted'),
+}
+
+
+def parse_physical_disk(text):
+    """Décompose une ligne de disque physique produite par `_win_extras`.
+
+    Format attendu : « nom — type — 931.5 GB — Santé (SMART): Healthy », avec
+    un éventuel « (état opérationnel) » en fin. La ligne est reconstituée à
+    partir de champs distincts ; l'afficher telle quelle obligeait à la lire en
+    entier pour retrouver la capacité ou l'état.
+
+    Retourne None si le format n'est pas reconnu — l'appelant restitue alors la
+    ligne brute plutôt que d'inventer des valeurs.
+    """
+    m = re.match(
+        r'^(?P<nom>.+?)\s*—\s*(?P<type>[^—]+?)\s*—\s*(?P<taille>[\d.,]+)\s*GB\s*—\s*'
+        r'Sant[ée]\s*\(SMART\)\s*:\s*(?P<sante>[^(]+?)\s*(?:\((?P<etat>[^)]+)\))?\s*$',
+        (text or '').strip())
+    if not m:
+        return None
+    brut = m.group('sante').strip()
+    libelle, niveau = _SANTE_DISQUE.get(brut.lower(), (brut, 'muted'))
+    return {
+        'nom': m.group('nom').strip(),
+        'type': m.group('type').strip(),
+        'taille_go': _num(m.group('taille')),
+        'sante': libelle,
+        'sante_niveau': niveau,
+        'etat': (m.group('etat') or '').strip() or None,
+        'brut': None,
+    }
+
+
 def _battery_pct(info):
     """Niveau de charge. collector_core expose un champ numérique dédié ;
     l'ancien format texte « 42% (statut: …) » reste accepté en repli."""

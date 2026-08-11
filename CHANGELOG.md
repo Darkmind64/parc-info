@@ -1,5 +1,41 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.3] - 2026-08-11 💽
+
+### 💽 Fiche système : disques physiques et placement des badges
+
+**Disques physiques.** Ils s'affichaient en liste à puces, une longue phrase par
+disque — il fallait la lire en entier pour retrouver la capacité ou l'état. Ils
+sont désormais présentés en tableau : nom, type, capacité **alignée à droite en
+chasse fixe** (seule façon de comparer sept disques d'un coup d'œil) et **état
+SMART en badge** — Sain, À surveiller, Défaillant. Un état opérationnel dégradé
+s'ajoute en second badge. Un format non reconnu (macOS, Linux) reste affiché tel
+quel plutôt qu'interprété de travers.
+
+**Badges des autres rubriques.** Une cause commune expliquait leur placement :
+les grilles étiquette/valeur utilisaient `auto-fill`, qui créait **trois pistes
+alors que ces rubriques n'ont que deux colonnes**. La troisième restait vide —
+un tiers de la largeur perdu — pendant que les valeurs se serraient dans 190 px
+et renvoyaient leurs badges à la ligne, détachés de ce qu'ils qualifient.
+`auto-fit` réduit la piste vide à zéro : la colonne de valeur passe de **191 à
+449 px**, et plus aucun des 232 badges de la page ne se retrouve à la ligne.
+Vérifié par mesure dans le navigateur, pas à l'œil.
+
+Trois défauts corrigés au passage :
+
+- un badge posé sur la ligne de base paraissait s'enfoncer sous le texte
+  qu'il accompagne — il est maintenant centré verticalement ;
+- un libellé d'état pouvait être coupé en deux et ne se lisait plus comme un
+  badge ; deux badges consécutifs se touchaient ;
+- **sur écran étroit** (sous 1000 px), l'étiquette fixe accaparait plus de la
+  moitié de la colonne : elle prend désormais sa propre ligne. Les tableaux trop
+  larges défilent dans leur rubrique au lieu de décaler la fiche entière.
+
+Enfin, une machine ne remontant que ses disques physiques n'affichait **aucune**
+rubrique Stockage : elle manquait à la condition d'affichage.
+
+---
+
 ## [2.9.2] - 2026-08-11 🔁
 
 ### 🖥️ Nouvelle icône
