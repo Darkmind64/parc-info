@@ -6336,6 +6336,23 @@ def champs_deduits_du_collecteur(conn, client_id, rapport, existant=None):
         poser('av_marque', _rapprocher_liste(detecte, get_liste('marques_antivirus')) or detecte)
         poser('av_nom', _rapprocher_liste(detecte, get_liste('noms_antivirus')) or detecte)
 
+    # EDR et RMM : détectés parmi les services (au mieux — voir
+    # collector_core._AGENTS_EDR/_AGENTS_RMM), avec leur marque et leur nom
+    # déjà mis en forme, sans passage par _rapprocher_liste.
+    edr = (rapport.get('edr_agents') or [None])[0]
+    if edr:
+        poser('edr_marque', edr.get('marque'))
+        poser('edr_nom', edr.get('nom'))
+    rmm = (rapport.get('remote_support_agents') or [None])[0]
+    if rmm:
+        poser('rmm_marque', rmm.get('marque'))
+        poser('rmm_nom', rmm.get('nom'))
+
+    # AnyDesk : l'identifiant se lit directement sur le poste
+    # (anydesk.exe --get-id), sans dépendre d'une saisie a posteriori.
+    if rapport.get('anydesk_id'):
+        poser('anydesk_id', rapport['anydesk_id'])
+
     # Logiciels métier : ceux de la liste du client effectivement installés.
     try:
         references = _get_logiciels_metier_list(conn, client_id) or []
@@ -6353,8 +6370,11 @@ def champs_deduits_du_collecteur(conn, client_id, rapport, existant=None):
     return deduits
 
 
-#: Marqueur de rattrapage, pour ne le faire qu'une fois par base.
-_CLE_RATTRAPAGE_FICHES = '_fiches_completees_v1'
+#: Marqueur de rattrapage, pour ne le faire qu'une fois par base. Le suffixe
+#: de version augmente quand `champs_deduits_du_collecteur` apprend à en
+#: déduire davantage : sans cela, les collectes déjà en base — reçues avant
+#: l'ajout — ne profiteraient jamais du nouveau rattrapage.
+_CLE_RATTRAPAGE_FICHES = '_fiches_completees_v2'
 _rattrapage_fait = False
 
 

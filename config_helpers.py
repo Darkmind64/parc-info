@@ -100,6 +100,32 @@ LISTE_DEFAULTS = {
         'CrowdStrike Falcon', 'SentinelOne Singularity',
         'Webroot Business Endpoint Protection', 'F-Secure Elements', 'Autre',
     ],
+    # EDR/RMM : les dropdowns de la fiche appareil les affichaient déjà
+    # (get_liste('marques_edr') etc.), sans qu'aucune valeur par défaut
+    # n'existe — la liste était vide tant que personne ne l'avait
+    # personnalisée à la main.
+    'marques_edr': [
+        'CrowdStrike', 'SentinelOne', 'Microsoft Defender for Endpoint',
+        'Sophos', 'Bitdefender', 'Trend Micro', 'Cybereason', 'VMware Carbon Black',
+        'Palo Alto Networks', 'ESET', 'Kaspersky', 'Elastic', 'Autre',
+    ],
+    'noms_edr': [
+        'CrowdStrike Falcon', 'SentinelOne Singularity',
+        'Microsoft Defender for Endpoint', 'Sophos Intercept X',
+        'Bitdefender GravityZone', 'Trend Micro Apex One', 'Cybereason Defense Platform',
+        'VMware Carbon Black Cloud', 'Palo Alto Cortex XDR', 'ESET PROTECT',
+        'Kaspersky EDR', 'Elastic Security', 'Autre',
+    ],
+    'marques_rmm': [
+        'NinjaOne', 'ConnectWise', 'Datto', 'N-able', 'Atera', 'Kaseya',
+        'Syncro', 'TeamViewer', 'ScreenConnect', 'Pulseway', 'AnyDesk', 'Autre',
+    ],
+    'noms_rmm': [
+        'NinjaRMM', 'ConnectWise Automate', 'ConnectWise Control', 'Datto RMM',
+        'N-able N-central', 'N-able N-sight', 'Atera Agent', 'Kaseya VSA',
+        'Syncro', 'TeamViewer Remote Management', 'ScreenConnect', 'Pulseway',
+        'AnyDesk', 'Autre',
+    ],
     'types_interventions': [
         'Maintenance préventive', 'Maintenance corrective', 'Dépannage',
         'Installation', 'Upgrade', 'Support', 'Audit', 'Formation', 'Autre'

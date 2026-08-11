@@ -92,6 +92,28 @@ verifier('av_nom' in saisi, 'les champs restés vides sont tout de même remplis
 # bloqué à jamais sans jamais se remplir.
 espaces = A.champs_deduits_du_collecteur(conn, 1, RAPPORT, {'utilisateur': '   '})
 verifier('utilisateur' in espaces, 'un champ rempli d\'espaces est traité comme vide')
+
+# EDR, RMM et AnyDesk : ces champs existaient déjà sur la fiche appareil
+# (saisis à la main jusqu'ici) — la collecte doit maintenant les proposer.
+RAPPORT_AGENTS = dict(RAPPORT, **{
+    'edr_agents': [{'marque': 'CrowdStrike', 'nom': 'CrowdStrike Falcon',
+                    'service': 'CrowdStrike Falcon Sensor', 'actif': True}],
+    'remote_support_agents': [{'marque': 'AnyDesk', 'nom': 'AnyDesk',
+                               'service': 'AnyDesk Service', 'actif': True}],
+    'anydesk_id': '1418397731',
+})
+agents = A.champs_deduits_du_collecteur(conn, 1, RAPPORT_AGENTS, {})
+verifier(agents.get('edr_marque') == 'CrowdStrike' and agents.get('edr_nom') == 'CrowdStrike Falcon',
+         'EDR déduit sans passer par le rapprochement de liste', str(agents.get('edr_nom')))
+verifier(agents.get('rmm_marque') == 'AnyDesk' and agents.get('rmm_nom') == 'AnyDesk',
+         'agent de télémaintenance déduit', str(agents.get('rmm_nom')))
+verifier(agents.get('anydesk_id') == '1418397731', "identifiant AnyDesk déduit")
+
+agents_saisis = A.champs_deduits_du_collecteur(conn, 1, RAPPORT_AGENTS, {
+    'edr_nom': 'SentinelOne (confirmé sur site)', 'anydesk_id': '999 999 999'})
+verifier('edr_nom' not in agents_saisis, "un EDR saisi à la main n'est pas écrasé")
+verifier('anydesk_id' not in agents_saisis, "un identifiant AnyDesk saisi n'est pas écrasé")
+verifier('rmm_nom' in agents_saisis, 'le champ RMM resté vide, lui, se remplit')
 conn.close()
 
 print('\n=== 3. Bout en bout : collecte puis formulaire ===')

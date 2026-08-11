@@ -215,7 +215,88 @@ verifier('invite' not in contenu('diagnostic') and 'RDS' not in contenu('diagnos
 verifier('12.5' in contenu('comptes'), 'profils utilisateurs dans « Comptes »')
 verifier('12.5' not in contenu('diagnostic'), "profils utilisateurs absents de « Diagnostic »")
 
-print("\n=== 7. Onglets de l'interface ===")
+print("\n=== 7. Agents, mots de passe, maintenance et démarrage — bonne rubrique ===")
+DONNEES_AGENTS = dict(ETAPE_3, **{
+    'local_password_policy': {'min_length': 12, 'complexity': True, 'lockout_threshold': 5},
+    'rdp_allowed_users': ['Alice'],
+    'saved_rdp_credentials': ['ANCIEN-SERVEUR'],
+    'remote_support_agents': [{'marque': 'AnyDesk', 'nom': 'AnyDesk',
+                               'service': 'AnyDesk Service', 'actif': True}],
+    'edr_agents': [{'marque': 'CrowdStrike', 'nom': 'CrowdStrike Falcon',
+                    'service': 'CSFalconService', 'actif': True}],
+    'power_plan': 'Performances élevées', 'fast_startup': False,
+    'defender_last_quick_scan': '2026-08-11 10:12',
+    'dotnet_versions': ['.NET Framework 4.8.1'],
+    'boot_mode': 'UEFI',
+    'disk_partition_styles': [{'number': 0, 'style': 'GPT', 'boot': True}],
+    'rdp_logon_history': [{'user': 'Alice', 'ip': '82.1.2.3', 'when': '2026-08-10 09:00'}],
+})
+sections2 = {s['cle']: s for s in C.build_summary_sections(DONNEES_AGENTS)}
+
+
+def contenu2(cle):
+    s = sections2.get(cle)
+    if not s:
+        return ''
+    return ' | '.join([str(v) for _, v in s['champs']]
+                      + [str(e) for l in s['listes'] for e in l['elements']])
+
+
+verifier('12' in contenu2('securite') and 'ANYDESK' not in contenu2('securite').upper(),
+         'politique de mot de passe dans « Sécurité »', contenu2('securite')[:150])
+verifier('Alice' in contenu2('securite') and '82.1.2.3' in contenu2('securite'),
+         'historique des connexions RDP entrantes dans « Sécurité »')
+verifier('Alice' in contenu2('acces') and 'ANCIEN-SERVEUR' in contenu2('acces'),
+         'membres RDP et identifiants enregistrés dans « Accès distant »')
+verifier('AnyDesk' in contenu2('acces') and 'CrowdStrike' in contenu2('acces'),
+         'agents de télémaintenance et EDR dans « Accès distant »')
+verifier('lements' not in contenu2('acces'), 'pas de résidu de sérialisation dans « Accès distant »')
+verifier('lev' in contenu2('hygiene') and '4.8.1' in contenu2('hygiene'),
+         "plan d'alimentation et .NET dans « Hygiène système »")
+verifier('UEFI' in contenu2('stockage') and 'GPT' in contenu2('stockage'),
+         'mode de démarrage et style de partition dans « Stockage »')
+
+print("\n=== 8. Détection des agents par sous-chaîne du nom affiché ===")
+SERVICES_TEST = [
+    {'DisplayName': 'AnyDesk Service', 'State': 'Running'},
+    {'DisplayName': 'TeamViewer', 'State': 'Stopped'},
+    {'DisplayName': 'CrowdStrike Falcon Sensor Service', 'State': 'Running'},
+    {'DisplayName': 'Spouleur d\'impression', 'State': 'Running'},
+]
+rmm_trouves = C.chercher_agents(SERVICES_TEST, C._AGENTS_RMM)
+verifier(len(rmm_trouves) == 2, '2 agents RMM/télémaintenance trouvés', str(rmm_trouves))
+anydesk = next((a for a in rmm_trouves if a['nom'] == 'AnyDesk'), None)
+verifier(anydesk is not None and anydesk['actif'] is True,
+         'AnyDesk détecté et actif (service Running)')
+teamviewer = next((a for a in rmm_trouves if 'TeamViewer' in a['nom']), None)
+verifier(teamviewer is not None and teamviewer['actif'] is False,
+         'TeamViewer détecté et inactif (service Stopped)')
+edr_trouves = C.chercher_agents(SERVICES_TEST, C._AGENTS_EDR)
+verifier(len(edr_trouves) == 1 and edr_trouves[0]['marque'] == 'CrowdStrike',
+         'CrowdStrike détecté comme EDR, pas comme agent RMM', str(edr_trouves))
+tous = C.chercher_agents(SERVICES_TEST, C._AGENTS_RMM) + edr_trouves
+verifier(not any('Spouleur' in a['service'] for a in tous),
+         "le spouleur d'impression n'est pas pris pour un agent", str(tous))
+
+DOUBLON = [{'DisplayName': 'AnyDesk Service', 'State': 'Running'},
+          {'DisplayName': 'AnyDesk Client Service', 'State': 'Running'}]
+verifier(len(C.chercher_agents(DOUBLON, C._AGENTS_RMM)) == 1,
+         'un même produit détecté par deux services ne compte qu\'une fois',
+         str(C.chercher_agents(DOUBLON, C._AGENTS_RMM)))
+
+print("\n=== 9. Format d'un identifiant AnyDesk ===")
+for candidat, attendu in (('1418397731', True), ('141 839 773', True),
+                          ("Usage: anydesk [options]", False), ('', False), ('12', False)):
+    verifier(bool(C._RE_ANYDESK_ID.match(candidat)) == attendu,
+             'reconnaissance de « %s »' % (candidat or '(vide)'), 'attendu=%s' % attendu)
+
+print("\n=== 10. Version .NET Framework depuis le numéro de build ===")
+for build, attendu in ((533320, '4.8.1'), (528040, '4.8'), (461808, '4.7.2'),
+                       (378389, '4.5'), (100000, None), (0, None)):
+    obtenu = C._dotnet_version_from_release(build)
+    verifier(obtenu == attendu, 'build %d → %s' % (build, attendu), 'obtenu=%s' % obtenu)
+
+print("\n=== 11. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()

@@ -2108,6 +2108,7 @@ _WIN_STEPS = [
     ('Processeur et mémoire', lambda: _win_core()),
     ('Détail matériel', lambda: _win_hardware_detail()),
     ('Écrans, imprimantes et disques', lambda: _win_inventory()),
+    ('Style de partition et démarrage', lambda: _win_boot_disk()),
     ('Licences et correctifs', lambda: _win_licensing()),
     ('Sécurité', lambda: _win_security()),
     ('Comptes utilisateurs', lambda: _win_users()),
@@ -2116,12 +2117,16 @@ _WIN_STEPS = [
     ('Configuration réseau', lambda: _win_network()),
     ('Environnement (WSUS, domaine, temps)', lambda: _win_enterprise()),
     ('Hygiène système', lambda: _win_hygiene()),
+    ('Maintenance et performance', lambda: _win_maintenance()),
     ('Accès distant et exposition', lambda: _win_remote_access()),
+    ('Agents de télémaintenance', lambda: _win_managed_agents()),
+    ('Politique de mot de passe et accès', lambda: _win_access_policy()),
     ('Comptes de messagerie', lambda: _win_mail_accounts()),
     ('Applications par défaut et lecteurs réseau', lambda: _win_workstation_extras()),
     ('Périphériques en erreur', lambda: _win_problem_devices()),
     ('Temps de démarrage', lambda: _win_boot_performance()),
     ('Journal de sécurité', lambda: _win_security_events()),
+    ('Connexions Bureau à distance entrantes', lambda: _win_rdp_logon_history()),
     ('Certificats', lambda: _win_certificates()),
     ('Clés de récupération BitLocker', lambda: _win_bitlocker_keys()),
     ('Profils utilisateurs', lambda: _win_user_profiles()),
@@ -3256,6 +3261,352 @@ def _win_workstation_extras():
         info['reboot_reasons'] = raisons
 
     return info
+
+
+#: Agents de télémaintenance/RMM reconnus par sous-chaîne de leur nom affiché.
+#: Les noms de service internes varient trop d'une version à l'autre pour
+#: servir de clé fiable ; le nom affiché, lui, reste stable. Recherche au
+#: mieux : ni exhaustive, ni une preuve — elle vise à préremplir la fiche
+#: appareil, que le technicien corrige si besoin.
+_AGENTS_RMM = [
+    ('NinjaRMM', 'NinjaOne', 'NinjaRMM'),
+    ('ScreenConnect', 'ConnectWise', 'ScreenConnect'),
+    ('ConnectWise Automate', 'ConnectWise', 'ConnectWise Automate'),
+    ('LabTech', 'ConnectWise', 'ConnectWise Automate'),
+    ('CentraStage', 'Datto', 'Datto RMM'),
+    ('Datto RMM', 'Datto', 'Datto RMM'),
+    ('N-central', 'N-able', 'N-able N-central'),
+    ('Advanced Monitoring Agent', 'N-able', 'N-able N-sight'),
+    ('AteraAgent', 'Atera', 'Atera Agent'),
+    ('Atera Agent', 'Atera', 'Atera Agent'),
+    ('Kaseya', 'Kaseya', 'Kaseya VSA'),
+    ('Syncro', 'Syncro', 'Syncro'),
+    ('Pulseway', 'Pulseway', 'Pulseway'),
+    ('TeamViewer', 'TeamViewer', 'TeamViewer Remote Management'),
+    ('AnyDesk', 'AnyDesk', 'AnyDesk'),
+    ('Splashtop', 'Splashtop', 'Splashtop'),
+    ('LogMeIn', 'LogMeIn', 'LogMeIn'),
+]
+#: Agents EDR reconnus par sous-chaîne — distincts de `antivirus_products`
+#: (issu de SecurityCenter2), qui ne référence pas toujours les EDR.
+_AGENTS_EDR = [
+    ('CrowdStrike', 'CrowdStrike', 'CrowdStrike Falcon'),
+    ('SentinelOne', 'SentinelOne', 'SentinelOne Singularity'),
+    ('Sentinel Agent', 'SentinelOne', 'SentinelOne Singularity'),
+    ('Cortex XDR', 'Palo Alto Networks', 'Palo Alto Cortex XDR'),
+    ('Carbon Black', 'VMware Carbon Black', 'VMware Carbon Black Cloud'),
+    ('Cb Defense', 'VMware Carbon Black', 'VMware Carbon Black Cloud'),
+    ('Cybereason', 'Cybereason', 'Cybereason Defense Platform'),
+    ('Sophos Intercept X', 'Sophos', 'Sophos Intercept X'),
+    ('Elastic Endpoint', 'Elastic', 'Elastic Security'),
+    ('Defender Advanced Threat Protection', 'Microsoft', 'Microsoft Defender for Endpoint'),
+]
+#: Format d'un identifiant AnyDesk : une suite de chiffres, parfois groupée
+#: par trois avec des espaces. Toute autre sortie (aide affichée, erreur) est
+#: écartée plutôt que remontée telle quelle.
+_RE_ANYDESK_ID = re.compile(r'^\d[\d ]{5,}$')
+
+
+def chercher_agents(services, catalogue):
+    """Services correspondant au catalogue (RMM ou EDR), par sous-chaîne du
+    nom affiché — au mieux, pas une preuve. Fonction pure, testée à part de
+    la collecte PowerShell qui lui fournit ses données.
+    """
+    trouves, vus = [], set()
+    for s in services:
+        affiche = _clean(s.get('DisplayName'))
+        if not affiche:
+            continue
+        for motif, marque, produit in catalogue:
+            if produit in vus or motif.lower() not in affiche.lower():
+                continue
+            trouves.append({
+                'marque': marque, 'nom': produit, 'service': affiche,
+                'actif': (s.get('State') or '').lower() == 'running',
+            })
+            vus.add(produit)
+    return trouves
+
+
+def _win_managed_agents():
+    """Agents de télémaintenance, RMM et EDR détectés parmi les services.
+
+    Alimente le préremplissage de av_nom/edr_nom/rmm_nom/anydesk_id sur la
+    fiche appareil (ces champs existaient déjà, saisis à la main jusqu'ici).
+    L'identifiant AnyDesk se lit directement via `anydesk.exe --get-id`,
+    documenté par l'éditeur — pas de fichier de configuration à interpréter.
+    """
+    info = {}
+    data = _win_powershell_json(
+        "$svcs = @(Get-CimInstance Win32_Service -EA SilentlyContinue "
+        "| Select-Object Name,DisplayName,State); "
+        "$id=$null; try { "
+        "$exe = (Get-Command anydesk.exe -EA SilentlyContinue).Source; "
+        "if (-not $exe) { foreach ($c in @(\"${env:ProgramFiles(x86)}\\AnyDesk\\AnyDesk.exe\", "
+        "\"$env:ProgramFiles\\AnyDesk\\AnyDesk.exe\", \"$env:APPDATA\\AnyDesk\\AnyDesk.exe\")) { "
+        "if (Test-Path $c) { $exe = $c; break } } }; "
+        "if ($exe) { $id = (& $exe --get-id 2>$null | Select-Object -First 1); $id = ($id -as [string]).Trim() } "
+        "} catch {}; "
+        "[PSCustomObject]@{ Services=$svcs; AnyDeskId=$id } | ConvertTo-Json -Compress -Depth 3",
+        timeout=30,
+    )
+    if not data:
+        return info
+
+    services = _as_list(data.get('Services'))
+    rmm = chercher_agents(services, _AGENTS_RMM)
+    if rmm:
+        info['remote_support_agents'] = rmm
+    edr = chercher_agents(services, _AGENTS_EDR)
+    if edr:
+        info['edr_agents'] = edr
+
+    anydesk_id = _clean(data.get('AnyDeskId'))
+    if anydesk_id and _RE_ANYDESK_ID.match(anydesk_id):
+        info['anydesk_id'] = anydesk_id.replace(' ', '')
+
+    return info
+
+
+def _win_access_policy():
+    """Politique de mot de passe local, accès Bureau à distance, identifiants
+    Windows enregistrés pour une session distante.
+
+    La politique de mot de passe se lit par `secedit /export`, dont les clés
+    (MinimumPasswordLength, etc.) restent en anglais quelle que soit la langue
+    de Windows — contrairement à `net accounts`, dont la sortie est localisée
+    et aurait rendu l'analyse fragile sur un Windows francophone. Le groupe
+    Bureau à distance est résolu par son SID S-1-5-32-555, pour la même raison
+    qui a déjà servi pour le groupe Administrateurs : son nom change avec la
+    langue. Les identifiants enregistrés ne sont comptés que pour les cibles
+    « TERMSRV/… » — cette chaîne-là n'est, elle, jamais traduite.
+    """
+    info = {}
+    data = _win_powershell_json(
+        "$pol=@{}; try { "
+        "$tmp=[System.IO.Path]::GetTempFileName(); "
+        "secedit /export /cfg $tmp /areas SECURITYPOLICY | Out-Null; "
+        "$c = Get-Content $tmp -EA SilentlyContinue; "
+        "Remove-Item $tmp -EA SilentlyContinue; "
+        "foreach ($l in $c) { if ($l -match "
+        "'^(MinimumPasswordLength|PasswordComplexity|PasswordHistorySize|"
+        "MaximumPasswordAge|MinimumPasswordAge|LockoutBadCount|LockoutDuration|"
+        "ResetLockoutCount)\\s*=\\s*(.+)$') { $pol[$matches[1]] = $matches[2].Trim() } } "
+        "} catch {}; "
+        "$rdp=@(); try { "
+        "$grp=(Get-LocalGroup -EA SilentlyContinue | Where-Object { $_.SID.Value -eq 'S-1-5-32-555' }).Name; "
+        "if ($grp) { $rdp=@(Get-LocalGroupMember -Group $grp -EA SilentlyContinue "
+        "| Select-Object -ExpandProperty Name) } } catch {}; "
+        "$creds=@(); try { "
+        "$out = cmdkey /list 2>$null; "
+        "foreach ($l in $out) { if ($l -match 'TERMSRV[/\\\\]([^\\s]+)') { $creds += $matches[1] } } "
+        "} catch {}; "
+        "[PSCustomObject]@{ Pol=$pol; Rdp=$rdp; Creds=$creds } | ConvertTo-Json -Compress -Depth 3",
+        timeout=40,
+    )
+    if not data:
+        return info
+
+    pol = data.get('Pol') or {}
+
+    def entier(cle):
+        try:
+            return int(str(pol.get(cle)).strip())
+        except (TypeError, ValueError):
+            return None
+
+    politique = {}
+    lg = entier('MinimumPasswordLength')
+    if lg is not None:
+        politique['min_length'] = lg
+    hist = entier('PasswordHistorySize')
+    if hist is not None:
+        politique['history'] = hist
+    if str(pol.get('PasswordComplexity', '')).strip() in ('0', '1'):
+        politique['complexity'] = pol['PasswordComplexity'].strip() == '1'
+    age_max = entier('MaximumPasswordAge')
+    if age_max is not None:
+        politique['max_age_days'] = age_max
+    seuil = entier('LockoutBadCount')
+    if seuil is not None:
+        politique['lockout_threshold'] = seuil
+    duree = entier('LockoutDuration')
+    if duree is not None:
+        politique['lockout_duration_min'] = duree
+    if politique:
+        info['local_password_policy'] = politique
+
+    rdp_users = [_clean(u).split('\\')[-1] for u in _as_list(data.get('Rdp')) if _clean(u)]
+    if rdp_users:
+        info['rdp_allowed_users'] = sorted(set(rdp_users), key=str.lower)
+
+    creds = sorted(set(_clean(c) for c in _as_list(data.get('Creds')) if _clean(c)))
+    if creds:
+        info['saved_rdp_credentials'] = creds
+
+    return info
+
+
+#: Table des versions .NET Framework 4.x, par numéro de build (`Release`) —
+#: celui-ci identifie la version installée de façon plus fiable que le
+#: numéro affiché, lui-même parfois trompeur entre mises à jour mineures.
+#: Table publiée par Microsoft ; on retient le plus grand seuil atteint.
+_DOTNET_RELEASES = sorted([
+    (533320, '4.8.1'), (528040, '4.8'), (461808, '4.7.2'), (461308, '4.7.1'),
+    (460798, '4.7'), (394802, '4.6.2'), (394254, '4.6.1'), (393295, '4.6'),
+    (379893, '4.5.2'), (378675, '4.5.1'), (378389, '4.5'),
+], reverse=True)
+
+
+def _dotnet_version_from_release(release):
+    for seuil, version in _DOTNET_RELEASES:
+        if release >= seuil:
+            return version
+    return None
+
+
+def _win_maintenance():
+    """Plan d'alimentation, démarrage rapide, dernière analyse antivirus
+    complète, versions du framework .NET installées.
+
+    Le framework .NET 4.x s'identifie par le numéro de build de la clé
+    `Release`, pas par le numéro de version affiché (qui ne distingue pas
+    toujours deux mises à jour mineures) ; la table de correspondance est
+    celle publiée par Microsoft.
+    """
+    info = {}
+    data = _win_powershell_json(
+        "$plan=$null; try { $o = powercfg /getactivescheme 2>$null; "
+        "if ($o -match '\\(([^)]+)\\)') { $plan = $matches[1] } } catch {}; "
+        "$fast=$null; try { $fast = (Get-ItemProperty "
+        "'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Power' "
+        "-EA SilentlyContinue).HiberbootEnabled } catch {}; "
+        "$def=$null; try { $def = Get-MpComputerStatus -EA SilentlyContinue "
+        "| Select-Object AntivirusEnabled,"
+        # Converties en texte ici : un DateTime imbriqué dans un objet
+        # personnalisé ressort de ConvertTo-Json comme une structure
+        # {value=/Date(...)/; DateTime=...} plutôt qu'une chaîne simple.
+        "@{N='Full';E={ if ($_.FullScanEndTime) { $_.FullScanEndTime.ToString('yyyy-MM-dd HH:mm') } }},"
+        "@{N='Quick';E={ if ($_.QuickScanEndTime) { $_.QuickScanEndTime.ToString('yyyy-MM-dd HH:mm') } }} "
+        "} catch {}; "
+        "$rel=$null; try { $rel = (Get-ItemProperty "
+        "'HKLM:\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full' "
+        "-EA SilentlyContinue).Release } catch {}; "
+        "$v35=$false; try { $v35 = [bool](Get-ItemProperty "
+        "'HKLM:\\SOFTWARE\\Microsoft\\NET Framework Setup\\NDP\\v3.5' "
+        "-EA SilentlyContinue).Install } catch {}; "
+        "$core=@(); try { $dn = (Get-Command dotnet.exe -EA SilentlyContinue).Source; "
+        "if ($dn) { $core = @(& $dn --list-runtimes 2>$null) } } catch {}; "
+        "[PSCustomObject]@{ Plan=$plan; Fast=$fast; Defender=$def; "
+        "Release=$rel; V35=$v35; Core=$core } | ConvertTo-Json -Compress -Depth 3",
+        timeout=30,
+    )
+    if not data:
+        return info
+
+    if data.get('Plan'):
+        info['power_plan'] = _clean(data['Plan'])
+    if data.get('Fast') is not None:
+        info['fast_startup'] = bool(data.get('Fast'))
+
+    defender = data.get('Defender') or {}
+    if defender.get('Full'):
+        info['defender_last_full_scan'] = _clean(defender['Full'])
+    if defender.get('Quick'):
+        info['defender_last_quick_scan'] = _clean(defender['Quick'])
+
+    dotnet = []
+    if data.get('V35'):
+        dotnet.append('.NET Framework 3.5')
+    try:
+        release = int(data.get('Release') or 0)
+    except (TypeError, ValueError):
+        release = 0
+    if release:
+        version = _dotnet_version_from_release(release)
+        dotnet.append('.NET Framework %s' % (version or ('(build %d)' % release)))
+    for ligne in _as_list(data.get('Core')):
+        ligne = _clean(ligne)
+        if ligne:
+            dotnet.append(ligne)
+    if dotnet:
+        info['dotnet_versions'] = dotnet
+
+    return info
+
+
+def _win_boot_disk():
+    """Style de partition (GPT/MBR) et mode de démarrage (UEFI/Legacy).
+
+    Le mode de démarrage se lisait d'abord via `bcdedit /enum` — qui s'est
+    révélé exiger les droits administrateur pour la simple lecture, y compris
+    sur un magasin de démarrage sans rien d'inhabituel (constaté, pas supposé).
+    `Get-ComputerInfo -Property BiosFirmwareType` donne la même réponse sans
+    élévation.
+    """
+    info = {}
+    data = _win_powershell_json(
+        "$disks=@(); try { $disks = @(Get-Disk -EA SilentlyContinue "
+        "| Select-Object Number,PartitionStyle,@{N='Boot';E={[bool]$_.IsBoot}}) } catch {}; "
+        "$firmware=$null; try { $firmware = (Get-ComputerInfo -Property BiosFirmwareType "
+        "-EA SilentlyContinue).BiosFirmwareType } catch {}; "
+        "[PSCustomObject]@{ Disks=$disks; Firmware=[string]$firmware } "
+        "| ConvertTo-Json -Compress -Depth 3",
+        timeout=25,
+    )
+    if not data:
+        return info
+
+    disques = []
+    for d in _as_list(data.get('Disks')):
+        style = _clean(d.get('PartitionStyle'))
+        if style and style.upper() != 'RAW':
+            disques.append({'number': d.get('Number'), 'style': style, 'boot': bool(d.get('Boot'))})
+    if disques:
+        info['disk_partition_styles'] = disques
+        boot_style = next((d['style'] for d in disques if d['boot']), None)
+        if boot_style:
+            info['boot_disk_style'] = boot_style
+
+    firmware = _clean(data.get('Firmware'))
+    if firmware:
+        info['boot_mode'] = 'UEFI' if firmware.lower() == 'uefi' else 'Legacy (BIOS)'
+
+    return info
+
+
+def _win_rdp_logon_history(jours=EVENT_WINDOW_DAYS, limite=25):
+    """Connexions Bureau à distance entrantes récentes (qui, depuis où, quand).
+
+    Complète le journal de sécurité (échecs, verrouillages) par les
+    connexions qui ont, elles, réussi — utile pour confirmer qu'un accès
+    distant a bien eu lieu, ou en repérer un qui ne devrait pas.
+    """
+    data = _win_powershell_json(
+        "$since=(Get-Date).AddDays(-%d).ToUniversalTime().ToString('o'); "
+        "$xpath=\"*[System[(EventID=4624) and TimeCreated[@SystemTime&gt;='$since']] "
+        "and EventData[Data[@Name='LogonType']='10']]\"; "
+        "$e=@(); try { $e=@(Get-WinEvent -LogName Security -FilterXPath $xpath "
+        "-MaxEvents %d -EA SilentlyContinue) } catch {}; "
+        "$e | ForEach-Object { $x=[xml]$_.ToXml(); "
+        "$d=$x.Event.EventData.Data; "
+        "$u=($d | Where-Object {$_.Name -eq 'TargetUserName'}).'#text'; "
+        "$ip=($d | Where-Object {$_.Name -eq 'IpAddress'}).'#text'; "
+        "[PSCustomObject]@{ User=$u; Ip=$ip; When=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm') } } "
+        "| ConvertTo-Json -Compress -Depth 3" % (jours, limite),
+        timeout=60,
+    )
+    connexions = []
+    for e in _as_list(data):
+        utilisateur = _clean(e.get('User'))
+        if not utilisateur or utilisateur.endswith('$'):
+            continue
+        connexions.append({
+            'user': utilisateur,
+            'ip': _clean(e.get('Ip')) or None,
+            'when': _clean(e.get('When')),
+        })
+    return {'rdp_logon_history': connexions} if connexions else {}
 
 
 # Cible publique par défaut pour la mesure Internet. Un simple ping : aucune
@@ -4449,6 +4800,13 @@ def build_summary_sections(info):
                             'elements': [format_reliability(e) for e in info['disk_reliability']]})
     if info.get('disk_error_events'):
         s['champs'].append(('Erreurs disque (30 j)', info['disk_error_events']))
+    if info.get('boot_mode'):
+        s['champs'].append(('Mode de démarrage', info['boot_mode']))
+    if info.get('disk_partition_styles'):
+        s['listes'].append({'titre': 'Style de partition', 'elements': [
+            'Disque %s — %s%s' % (d.get('number'), d.get('style'),
+                                  ' (démarrage)' if d.get('boot') else '')
+            for d in info['disk_partition_styles']]})
     sections.append(s)
 
     # ── Écrans et imprimantes ──────────────────────────────────────────────
@@ -4577,6 +4935,7 @@ def build_summary_sections(info):
 
     # ── Sécurité ───────────────────────────────────────────────────────────
     s = _sec('securite', 'Sécurité', '🛡')
+    pol = info.get('local_password_policy') or {}
     s['champs'] += [
         ('Antivirus', info.get('antivirus')),
         ('TPM', ('Présent et activé' if info.get('tpm_enabled')
@@ -4584,6 +4943,14 @@ def build_summary_sections(info):
          if info.get('tpm_present') is not None else None),
         ('Secure Boot', ('Activé' if info['secure_boot'] else 'Désactivé')
          if info.get('secure_boot') is not None else None),
+        ('Mot de passe — longueur mini',
+         '%s caractère(s)' % pol['min_length'] if pol.get('min_length') is not None else None),
+        ('Mot de passe — complexité',
+         ('exigée' if pol['complexity'] else 'non exigée')
+         if pol.get('complexity') is not None else None),
+        ('Verrouillage de compte',
+         ('après %s essai(s)' % pol['lockout_threshold'] if pol['lockout_threshold'] else 'aucun')
+         if pol.get('lockout_threshold') is not None else None),
     ]
     if info.get('antivirus_products'):
         s['listes'].append({'titre': 'Antivirus détectés', 'elements': [
@@ -4625,6 +4992,10 @@ def build_summary_sections(info):
                                     'dans %d j' % c.get('jours_restants', 0))
             if isinstance(c, dict) else str(c)
             for c in info['certificates_expiring']]})
+    if info.get('rdp_logon_history'):
+        s['listes'].append({'titre': 'Connexions Bureau à distance entrantes', 'elements': [
+            '%s — depuis %s — %s' % (c.get('user', '?'), c.get('ip') or '?', c.get('when', '?'))
+            for c in info['rdp_logon_history']]})
     sections.append(s)
 
     # ── Licences ───────────────────────────────────────────────────────────
@@ -4782,7 +5153,17 @@ def build_summary_sections(info):
          ('oui — %s' % ', '.join(info.get('reboot_reasons') or []))
          if info.get('reboot_pending') else
          ('non' if info.get('reboot_pending') is not None else None)),
+        ("Plan d'alimentation", info.get('power_plan')),
+        ('Démarrage rapide', ('activé' if info.get('fast_startup') else 'désactivé')
+         if info.get('fast_startup') is not None else None),
+        ('Dernière analyse antivirus',
+         '%s (complète)' % info['defender_last_full_scan']
+         if info.get('defender_last_full_scan') else
+         ('%s (rapide)' % info['defender_last_quick_scan']
+          if info.get('defender_last_quick_scan') else None)),
     ]
+    if info.get('dotnet_versions'):
+        s['listes'].append({'titre': '.NET installé', 'elements': list(info['dotnet_versions'])})
     sections.append(s)
 
     # ── Accès distant ──────────────────────────────────────────────────────
@@ -4802,6 +5183,22 @@ def build_summary_sections(info):
                                 ' (mot de passe en clair)' if auto.get('password_stored') else '')))
         else:
             s['champs'].append(('Ouverture auto de session', 'désactivée'))
+    if info.get('rdp_allowed_users'):
+        s['listes'].append({'titre': 'Membres autorisés (Bureau à distance)',
+                            'elements': list(info['rdp_allowed_users'])})
+    if info.get('saved_rdp_credentials'):
+        s['listes'].append({'titre': 'Identifiants Bureau à distance enregistrés',
+                            'elements': list(info['saved_rdp_credentials'])})
+    if info.get('remote_support_agents'):
+        s['listes'].append({'titre': 'Agents de télémaintenance', 'elements': [
+            '%s (%s) — %s' % (a.get('nom', '?'), a.get('marque', '?'),
+                              'actif' if a.get('actif') else 'inactif')
+            for a in info['remote_support_agents']]})
+    if info.get('edr_agents'):
+        s['listes'].append({'titre': 'Agents EDR', 'elements': [
+            '%s (%s) — %s' % (a.get('nom', '?'), a.get('marque', '?'),
+                              'actif' if a.get('actif') else 'inactif')
+            for a in info['edr_agents']]})
     sections.append(s)
 
     # ── Messagerie ─────────────────────────────────────────────────────────
@@ -6407,6 +6804,21 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             for r in fiabilite:
                 story.append(Paragraph(f'• {_pdf_escape(format_reliability(r))}', S['body']))
 
+        styles_disque = info.get('disk_partition_styles') or []
+        if info.get('boot_mode') or styles_disque:
+            story.append(Paragraph(
+                'Démarrage — utile avant une réinstallation ou un remplacement de disque',
+                S['h2']))
+            if info.get('boot_mode'):
+                story.append(Paragraph('<b>Mode de démarrage :</b> %s'
+                                       % _pdf_escape(info['boot_mode']), S['body']))
+            if styles_disque:
+                rows = [[Paragraph('Disque %s' % d.get('number'), S['mono']),
+                         Paragraph(_pdf_escape(d.get('style')), S['body']),
+                         Paragraph('Oui' if d.get('boot') else '—', S['body'])] for d in styles_disque]
+                story.append(_pdf_data_table(tk, ['Disque', 'Style', 'Démarrage'],
+                                             rows, width, [0.34, 0.33, 0.33]))
+
         # ── Affichage & impression ────────────────────────────────────────────
         # GPU, écrans et imprimantes vivaient à trois endroits distincts du
         # rapport (l'un d'eux tout en bas, après Applications par défaut) :
@@ -6500,6 +6912,19 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             sec_rows.append(('Dernière mise à jour', info['last_windows_update'], 'info'))
         if info.get('oem_product_key'):
             sec_rows.append(('Clé OEM (firmware)', info['oem_product_key'], 'info'))
+        pol = info.get('local_password_policy') or {}
+        if pol.get('min_length') is not None:
+            sec_rows.append(('Mot de passe — longueur mini', '%s caractère(s)' % pol['min_length'],
+                             'danger' if pol['min_length'] == 0 else 'warn' if pol['min_length'] < 8 else 'ok'))
+        if pol.get('complexity') is not None:
+            sec_rows.append(('Mot de passe — complexité',
+                             'Exigée' if pol['complexity'] else 'Non exigée',
+                             'ok' if pol['complexity'] else 'warn'))
+        if pol.get('lockout_threshold') is not None:
+            sec_rows.append(('Verrouillage de compte',
+                             'après %s essai(s)' % pol['lockout_threshold'] if pol['lockout_threshold']
+                             else 'Aucun',
+                             'ok' if pol['lockout_threshold'] else 'danger'))
 
         if sec_rows:
             story.append(Paragraph('Sécurité & conformité', S['h2']))
@@ -6548,6 +6973,38 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 txt = 'Désactivée'
             story.append(Paragraph('<b>Ouverture automatique de session :</b> %s'
                                    % _pdf_escape(txt), S['body']))
+        rdp_users = info.get('rdp_allowed_users') or []
+        if rdp_users:
+            story.append(Paragraph('<b>Membres autorisés (Bureau à distance) :</b> %s'
+                                   % _pdf_escape(', '.join(rdp_users)), S['body']))
+        rdp_creds = info.get('saved_rdp_credentials') or []
+        if rdp_creds:
+            story.append(Paragraph(
+                '<b>Identifiants Bureau à distance enregistrés :</b> %s — un serveur qui '
+                "n'existe plus dans cette liste est une piste de nettoyage."
+                % _pdf_escape(', '.join(rdp_creds)), S['small']))
+
+        # ── Agents de télémaintenance & EDR ───────────────────────────────────
+        # Recherchés par sous-chaîne du nom affiché des services — au mieux, à
+        # corriger sur la fiche appareil si besoin.
+        rmm = info.get('remote_support_agents') or []
+        edr = info.get('edr_agents') or []
+        if rmm or edr:
+            story.append(Paragraph('Agents de télémaintenance & EDR', S['h2']))
+        if rmm:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(a.get('nom')), S['body']),
+                     Paragraph(_pdf_escape(a.get('marque')), S['body']),
+                     Paragraph(_pdf_escape(a.get('service')), S['small']),
+                     Paragraph('Actif' if a.get('actif') else 'Inactif', S['body'])] for a in rmm]
+            story.append(_pdf_data_table(tk, ['Agent', 'Marque', 'Service', 'État'],
+                                         rows, width, [0.28, 0.20, 0.36, 0.16]))
+        if edr:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(a.get('nom')), S['body']),
+                     Paragraph(_pdf_escape(a.get('marque')), S['body']),
+                     Paragraph(_pdf_escape(a.get('service')), S['small']),
+                     Paragraph('Actif' if a.get('actif') else 'Inactif', S['body'])] for a in edr]
+            story.append(_pdf_data_table(tk, ['EDR', 'Marque', 'Service', 'État'],
+                                         rows, width, [0.28, 0.20, 0.36, 0.16]))
 
         # ── Journal de sécurité ───────────────────────────────────────────────
         journal = info.get('security_events') or []
@@ -6563,6 +7020,16 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(_pdf_data_table(
                 tk, ['Compte', 'Type', 'Nb', 'Origine', 'Dernier'],
                 rows, width, [0.22, 0.24, 0.08, 0.26, 0.20]))
+        rdp_hist = info.get('rdp_logon_history') or []
+        if rdp_hist:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(c.get('user')), S['body']),
+                     Paragraph(_pdf_escape(c.get('ip')), S['mono']),
+                     Paragraph(_pdf_escape(c.get('when')), S['mono'])] for c in rdp_hist]
+            story.append(Paragraph(
+                'Connexions Bureau à distance entrantes (%d) — celles qui ont réussi'
+                % len(rdp_hist), S['h2']))
+            story.append(_pdf_data_table(tk, ['Compte', 'Depuis', 'Quand'],
+                                         rows, width, [0.34, 0.33, 0.33]))
 
         # ── Certificats à renouveler ──────────────────────────────────────────
         certificats = info.get('certificates_expiring') or []
@@ -6813,6 +7280,15 @@ def generate_pdf_report(info, client_id=None, client_name=None):
              ('Oui — %s' % ', '.join(info.get('reboot_reasons') or []))
              if info.get('reboot_pending') else
              ('Non' if info.get('reboot_pending') is not None else None)),
+            ("Plan d'alimentation", info.get('power_plan')),
+            ('Démarrage rapide', ('Activé' if info.get('fast_startup') else 'Désactivé')
+             if info.get('fast_startup') is not None else None),
+            ('Dernière analyse antivirus',
+             '%s (complète)' % info['defender_last_full_scan']
+             if info.get('defender_last_full_scan') else
+             ('%s (rapide)' % info['defender_last_quick_scan']
+              if info.get('defender_last_quick_scan') else None)),
+            ('Framework .NET installé', ', '.join(info.get('dotnet_versions') or []) or None),
         ], width)
         if table:
             story.append(Paragraph('Environnement & hygiène système', S['h2']))

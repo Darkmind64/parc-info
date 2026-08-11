@@ -495,7 +495,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 {# `physical_disks` fait partie de la condition : sans lui, une machine ne
    remontant que ses disques physiques n'affichait aucune rubrique Stockage. #}
 {% if rapport.disk_total_gb or rapport.disk_drives or rapport.disk_reliability
-      or rapport.physical_disks %}
+      or rapport.physical_disks or rapport.boot_mode or rapport.disk_partition_styles %}
 <div class="fs-section">
     <h3>■ Stockage</h3>
     {% if rapport.disk_total_gb %}
@@ -595,6 +595,32 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             </tr>
             {% endfor %}
         </table>
+    </div>
+    {% endif %}
+
+    {% if rapport.boot_mode or rapport.disk_partition_styles %}
+    <div style="margin-top:.9rem;">
+        <div class="fs-label" style="font-size:.75rem;margin-bottom:.3rem;">
+            Démarrage — utile avant une réinstallation ou un remplacement de disque
+        </div>
+        {% if rapport.boot_mode %}
+        <div class="fs-row" style="grid-template-columns:170px 1fr;">
+            <span class="fs-label">Mode de démarrage</span>
+            <span class="fs-value"><span class="fs-pill fs-info">{{ rapport.boot_mode }}</span></span>
+        </div>
+        {% endif %}
+        {% if rapport.disk_partition_styles %}
+        <table class="fs-table">
+            <tr><th>Disque</th><th>Style</th><th>Démarrage</th></tr>
+            {% for d in rapport.disk_partition_styles %}
+            <tr>
+                <td class="fs-mono">Disque {{ d.number }}</td>
+                <td><span class="fs-pill {{ 'fs-info' if d.style == 'GPT' else 'fs-muted' }}">{{ d.style }}</span></td>
+                <td>{% if d.boot %}<span class="fs-pill fs-ok">Oui</span>{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% endif %}
     </div>
     {% endif %}
 </div>
@@ -702,7 +728,8 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 
 <!-- ── SÉCURITÉ ─────────────────────────────────────────────────────────── -->
 {% if rapport.antivirus or rapport.firewall or rapport.bitlocker or rapport.bitlocker_volumes
-      or rapport.tpm_present is defined or rapport.secure_boot is defined %}
+      or rapport.tpm_present is defined or rapport.secure_boot is defined
+      or rapport.local_password_policy %}
 <div class="fs-section">
     <h3>■ Sécurité &amp; conformité</h3>
     <div class="fs-secu">
@@ -808,6 +835,47 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {% endif %}
         </div>
 
+        <div class="fs-secu-bloc">
+            <div class="fs-secu-titre">Mots de passe locaux</div>
+            {% if rapport.local_password_policy %}
+            {% set pol = rapport.local_password_policy %}
+            {% if pol.min_length is defined %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">Longueur mini</span>
+                <span class="fs-pill {{ 'fs-bad' if pol.min_length == 0 else 'fs-warn' if pol.min_length < 8 else 'fs-ok' }}">
+                    {{ pol.min_length }} caractère(s)</span>
+            </div>
+            {% endif %}
+            {% if pol.complexity is defined %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">Complexité</span>
+                <span class="fs-pill {{ 'fs-ok' if pol.complexity else 'fs-warn' }}">
+                    {{ 'Exigée' if pol.complexity else 'Non exigée' }}</span>
+            </div>
+            {% endif %}
+            {% if pol.lockout_threshold is defined %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">Verrouillage</span>
+                {% if pol.lockout_threshold %}
+                <span class="fs-pill fs-ok">après {{ pol.lockout_threshold }} essai(s)</span>
+                {% else %}<span class="fs-pill fs-bad">Aucun</span>{% endif %}
+            </div>
+            {% endif %}
+            {% if pol.max_age_days is defined %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">Expiration</span>
+                {% if pol.max_age_days %}<span class="fs-pill fs-muted">{{ pol.max_age_days }} jour(s)</span>
+                {% else %}<span class="fs-pill fs-muted">Jamais</span>{% endif %}
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="fs-secu-ligne">
+                <span class="fs-pill fs-muted">Non renseigné</span>
+                <span class="fs-secu-note">Collecte sans privilèges administrateur</span>
+            </div>
+            {% endif %}
+        </div>
+
     </div>
 </div>
 {% endif %}
@@ -852,13 +920,74 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         </span>
     </div>
     {% endif %}
+
+    {% if rapport.rdp_allowed_users %}
+    <div class="fs-row" style="margin-top:.7rem;">
+        <span class="fs-label">Membres autorisés (RDP)</span>
+        <span class="fs-value">
+            {% for u in rapport.rdp_allowed_users %}<span class="fs-pill fs-info">{{ u }}</span>{% endfor %}
+        </span>
+    </div>
+    {% endif %}
+
+    {% if rapport.saved_rdp_credentials %}
+    <div class="fs-row">
+        <span class="fs-label">Identifiants RDP enregistrés</span>
+        <span class="fs-value">
+            {% for c in rapport.saved_rdp_credentials %}<span class="fs-mono">{{ c }}</span>{% if not loop.last %}, {% endif %}{% endfor %}
+            <div style="font-size:.7rem;color:var(--text-secondary);margin-top:.2rem;">
+                Un serveur qui n'existe plus dans cette liste est une piste de nettoyage.
+            </div>
+        </span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── AGENTS DE TÉLÉMAINTENANCE ─────────────────────────────────────────── -->
+{% if rapport.remote_support_agents or rapport.edr_agents %}
+<div class="fs-section">
+    <h3>■ Agents de télémaintenance &amp; EDR</h3>
+    <div class="fs-label" style="font-size:.72rem;margin-bottom:.5rem;">
+        Recherchés par sous-chaîne du nom affiché des services — au mieux, à
+        corriger sur la fiche appareil si besoin.
+    </div>
+    {% if rapport.remote_support_agents %}
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Agent</th><th>Marque</th><th>Service</th><th>État</th></tr>
+        {% for a in rapport.remote_support_agents %}
+        <tr>
+            <td><strong>{{ a.nom }}</strong></td>
+            <td>{{ a.marque }}</td>
+            <td class="fs-mono" style="font-size:.72rem;">{{ a.service }}</td>
+            <td><span class="fs-pill {{ 'fs-ok' if a.actif else 'fs-muted' }}">
+                {{ 'Actif' if a.actif else 'Inactif' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+    {% if rapport.edr_agents %}
+    <table class="fs-table">
+        <tr><th>EDR</th><th>Marque</th><th>Service</th><th>État</th></tr>
+        {% for a in rapport.edr_agents %}
+        <tr>
+            <td><strong>{{ a.nom }}</strong></td>
+            <td>{{ a.marque }}</td>
+            <td class="fs-mono" style="font-size:.72rem;">{{ a.service }}</td>
+            <td><span class="fs-pill {{ 'fs-ok' if a.actif else 'fs-muted' }}">
+                {{ 'Actif' if a.actif else 'Inactif' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
 </div>
 {% endif %}
 
 <!-- ── JOURNAL DE SÉCURITÉ ───────────────────────────────────────────────── -->
-{% if rapport.security_events %}
+{% if rapport.security_events or rapport.rdp_logon_history %}
 <div class="fs-section">
-    <h3>■ Journal de sécurité ({{ rapport.security_events|length }})</h3>
+    <h3>■ Journal de sécurité</h3>
+    {% if rapport.security_events %}
     <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
         {{ rapport.failed_logons or 0 }} échec(s) d'ouverture de session et
         {{ rapport.account_lockouts or 0 }} verrouillage(s) de compte sur 30 jours.
@@ -880,6 +1009,26 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         {% endfor %}
     </table>
     </div>
+    {% endif %}
+
+    {% if rapport.rdp_logon_history %}
+    <div class="fs-label" style="font-size:.75rem;margin:.9rem 0 .45rem;">
+        Connexions Bureau à distance entrantes récentes ({{ rapport.rdp_logon_history|length }})
+        — celles qui ont réussi, à la différence du tableau ci-dessus.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Compte</th><th>Depuis</th><th>Quand</th></tr>
+        {% for c in rapport.rdp_logon_history %}
+        <tr>
+            <td><strong>{{ c.user }}</strong></td>
+            <td class="fs-mono">{{ c.ip or '—' }}</td>
+            <td class="fs-mono">{{ c.when }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+    {% endif %}
 </div>
 {% endif %}
 
@@ -1259,7 +1408,8 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 <!-- ── ENVIRONNEMENT & HYGIÈNE ──────────────────────────────────────────── -->
 {% if rapport.domain_joined is defined or rapport.wsus_server
       or rapport.uac_enabled is defined or rapport.restore_points is defined
-      or rapport.reboot_pending is defined %}
+      or rapport.reboot_pending is defined or rapport.power_plan
+      or rapport.dotnet_versions %}
 <div class="fs-section">
     <h3>■ Environnement &amp; hygiène système</h3>
     <div class="fs-grid">
@@ -1281,6 +1431,14 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {% if rapport.wsus_server %}
             {{ row("Serveur WSUS", rapport.wsus_server) }}
             {{ row("Groupe WSUS", rapport.wsus_group) }}
+            {% endif %}
+            {{ row("Plan d'alimentation", rapport.power_plan) }}
+            {% if rapport.fast_startup is defined %}
+            <div class="fs-row">
+                <span class="fs-label">Démarrage rapide</span>
+                <span class="fs-value"><span class="fs-pill {{ 'fs-warn' if rapport.fast_startup else 'fs-ok' }}">
+                    {{ 'Activé' if rapport.fast_startup else 'Désactivé' }}</span></span>
+            </div>
             {% endif %}
         </div>
         <div>
@@ -1329,6 +1487,26 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         {% endfor %}
     </table>
     {% endif %}
+    {% endif %}
+
+    {% if rapport.defender_last_full_scan or rapport.defender_last_quick_scan %}
+    <div class="fs-row" style="margin-top:.7rem;">
+        <span class="fs-label">Dernière analyse antivirus</span>
+        <span class="fs-value">
+            {% if rapport.defender_last_full_scan %}
+            <span class="fs-mono">{{ rapport.defender_last_full_scan }}</span> (complète)
+            {% elif rapport.defender_last_quick_scan %}
+            <span class="fs-mono">{{ rapport.defender_last_quick_scan }}</span> (rapide)
+            {% endif %}
+        </span>
+    </div>
+    {% endif %}
+
+    {% if rapport.dotnet_versions %}
+    <div class="fs-label" style="font-size:.75rem;margin:.7rem 0 .35rem;">Framework .NET installé</div>
+    <div class="fs-value">
+        {% for v in rapport.dotnet_versions %}<span class="fs-pill fs-muted">{{ v }}</span>{% endfor %}
+    </div>
     {% endif %}
 </div>
 {% endif %}

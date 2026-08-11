@@ -1,5 +1,56 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.7] - 2026-08-11 🕵️
+
+### 🕵️ Agents détectés, mots de passe, maintenance et démarrage
+
+Quatre familles d'informations en plus, réparties dans les rubriques déjà en
+place plutôt qu'ajoutées en vrac.
+
+**Agents détectés — remplissent des champs qui existaient déjà.** La fiche
+appareil a toujours eu `av_nom`, `edr_nom`, `rmm_nom` et l'identifiant AnyDesk,
+saisis à la main jusqu'ici. Le collecteur les propose désormais tout seul :
+l'ID AnyDesk se lit directement sur le poste (`anydesk.exe --get-id`,
+documenté par l'éditeur — aucun fichier de configuration à interpréter) ;
+EDR et agents de télémaintenance (CrowdStrike, SentinelOne, TeamViewer,
+ScreenConnect, NinjaOne, Datto, N-able…) sont recherchés parmi les services,
+par sous-chaîne de leur nom affiché — au mieux, pas une preuve, et sans jamais
+écraser une valeur déjà saisie. Les dropdowns EDR/RMM de la fiche appareil,
+jusqu'ici vides faute de valeurs par défaut, sont peuplés au passage.
+
+**Mots de passe & accès.** Politique de mot de passe local (longueur, complexité,
+verrouillage — lue via `secedit`, dont les clés restent en anglais quelle que
+soit la langue de Windows, contrairement à `net accounts`) ; membres réels du
+groupe Bureau à distance (résolu par SID, comme le groupe Administrateurs
+depuis la 2.9.5) ; identifiants Bureau à distance enregistrés dans le
+Gestionnaire d'identifiants Windows — un serveur qui n'existe plus dans cette
+liste est une piste de nettoyage.
+
+**Maintenance & hygiène.** Plan d'alimentation actif, démarrage rapide, date
+de la dernière analyse antivirus, versions du framework .NET installées
+(Framework 3.5/4.x et Core/5+).
+
+**Disque, démarrage & connexions distantes.** Style de partition (GPT/MBR) et
+mode de démarrage (UEFI/Legacy) — utile avant une réinstallation ou un
+remplacement de disque ; historique des connexions Bureau à distance entrantes
+récentes, qui complète le journal de sécurité existant par ce qui a réussi, à
+la différence des échecs déjà suivis.
+
+**Correction en cours de route.** Le mode de démarrage se lisait d'abord via
+`bcdedit /enum`, qui s'est révélé exiger les droits administrateur pour la
+simple lecture — y compris sur un poste sans rien d'inhabituel (constaté, pas
+supposé). `Get-ComputerInfo -Property BiosFirmwareType` donne la même réponse
+sans élévation.
+
+Chaque ajout suit le chemin déjà établi — collecteur, aperçu du collecteur,
+fiche système, rapport PDF, `champs_deduits_du_collecteur` — et atterrit dans
+la rubrique déjà en place qui lui correspond (Sécurité, Accès distant,
+Environnement & hygiène, Stockage), pas dans une nouvelle liste séparée.
+Vérifié sur une collecte réelle ; nouveaux tests sur la détection des agents,
+la reconnaissance d'un identifiant AnyDesk et le placement de chaque champ.
+
+---
+
 ## [2.9.6] - 2026-08-11 🗂️
 
 ### 🗂️ Fiche système et rapport PDF réorganisés par thème
