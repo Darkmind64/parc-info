@@ -518,15 +518,27 @@ verrou = atelier2 / 'ParcInfo-Windows.exe.old'
 verrou.write_bytes(b'reliquat de la mise a jour precedente')
 journal2 = atelier2 / '_maj.log'
 
-# Fichier maintenu ouvert : sous Windows sa suppression est refusée, comme sur
-# le poste concerné.
-poigne = open(verrou, 'r+b')
+# Le verrou lui-même ne se reproduit pas partout : sous POSIX, supprimer un
+# fichier ouvert est autorisé. On refuse donc la suppression de ce seul chemin,
+# ce qui place le code exactement dans la situation observée — quelle que soit
+# la plateforme sur laquelle la suite s'exécute.
+vrai_remove = applique_maj.os.remove
+
+
+def remove_refuse(chemin, _vrai=vrai_remove, _bloque=str(verrou)):
+    if str(chemin) == _bloque:
+        raise PermissionError(13, 'Accès refusé', str(chemin))
+    return _vrai(chemin)
+
+
+applique_maj.os.remove = remove_refuse
 applique_maj._relancer = lambda c, t: None
 applique_maj.sys.executable = str(source2)
 debut = time.monotonic()
 try:
     code = applique_maj.appliquer(['--cible', str(cible2), '--journal', str(journal2)])
 finally:
+    applique_maj.os.remove = vrai_remove
     applique_maj.sys.executable = vrai_executable
     applique_maj._relancer = vrai_relancer
 duree = time.monotonic() - debut
@@ -538,9 +550,15 @@ verifier(cible2.read_bytes() == source2.read_bytes(),
 trace2 = journal2.read_text(encoding='utf-8')
 verifier('reliquat verrouillé' in trace2,
          'le reliquat bloquant est signalé dans le journal', trace2[-160:])
-poigne.close()
+verifier(verrou.exists() and verrou.read_bytes().startswith(b'reliquat'),
+         "le reliquat récalcitrant est laissé intact, pas écrasé")
+# L'ancienne version est passée par un nom de repli, puis supprimée une fois
+# l'empreinte vérifiée : il ne doit rester que le reliquat récalcitrant.
+verifier(sorted(p.name for p in atelier2.glob('*.old*')) == ['ParcInfo-Windows.exe.old'],
+         "le nom de repli ne s'accumule pas après un remplacement vérifié",
+         str(sorted(p.name for p in atelier2.glob('*.old*'))))
 
-# Le reliquat part au démarrage suivant, avec le nom de repli utilisé.
+# Les reliquats partent au démarrage suivant, noms de repli compris.
 applique_maj.nettoyer_reliquats(str(source2_dir), executable=str(cible2))
 restants = sorted(p.name for p in atelier2.glob('*.old*'))
 verifier(not restants, 'les reliquats sont supprimés au démarrage suivant',

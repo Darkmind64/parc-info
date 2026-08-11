@@ -317,7 +317,10 @@
       "Bash(sed -i 's/__version__ = \"2\\\\.9\\\\.3\"/__version__ = \"2.9.4\"/; s/\\(2, 9, 3\\)/\\(2, 9, 4\\)/' __version__.py)",
       "Bash(sed -i 's/v2\\\\.9\\\\.3/v2.9.4/g' README.md)",
       "Bash(sed -i '9s/.*/**Version** : 2.9.4 ⭐ **Un reliquat verrouillé retardait la mise à jour**  /' README.md)",
-      "Bash(sed -i '16s#.*#### 🎉 v2.9.4 : Un reliquat verrouillé retardait la mise à jour#' README.md)"
+      "Bash(sed -i '16s#.*#### 🎉 v2.9.4 : Un reliquat verrouillé retardait la mise à jour#' README.md)",
+      "Bash(curl -s \"https://hub.docker.com/v2/repositories/darkmind64/parcinfo/tags/v2.9.4\")",
+      "Bash(MSYS_NO_PATHCONV=1 docker run --rm -v \"$\\(pwd\\):/src:ro\" -w //tmp python:3.11-slim sh -c 'mkdir -p /tmp/w && cp -r /src/. /tmp/w && cd /tmp/w && pip install -q -r requirements.txt 2>&1 | tail -1; python test_maj.py 2>&1 | tail -12')",
+      "Bash(MSYS_NO_PATHCONV=1 docker run --rm -v __CMDSUB_OUTPUT__:/src:ro -w //tmp python:3.11-slim sh -c 'mkdir -p /tmp/w && cp -r /src/. /tmp/w && cd /tmp/w && pip install -q -r requirements.txt reportlab 2>&1 | tail -1 *)"
     ]
   }
 }
