@@ -103,6 +103,14 @@ def ensure_firewall_rule(port, logger):
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
+    # L'exécutable neuf, téléchargé par la version précédente, est relancé avec
+    # ce drapeau pour se recopier sur elle. Ce cas se traite avant tout le
+    # reste : rien de l'application n'a à démarrer pour remplacer un fichier.
+    import applique_maj
+    arguments = applique_maj.mode_mise_a_jour()
+    if arguments is not None:
+        sys.exit(applique_maj.appliquer(arguments))
+
     port = get_port(preferred=3456)
     url  = f'http://127.0.0.1:{port}'
 

@@ -21,6 +21,7 @@ Usage :
     checker.check_for_updates()
 """
 
+import applique_maj
 import hashlib
 import json
 import logging
@@ -83,29 +84,14 @@ def can_self_install() -> bool:
 
 
 #: Variables posées par le lanceur de PyInstaller pour désigner le dossier
-#: temporaire où l'application a été décompressée. Relevées dans le binaire du
-#: bootloader livré avec PyInstaller 6, pas de mémoire.
-VARIABLES_BOOTLOADER = (
-    '_MEIPASS', '_MEIPASS2',                    # PyInstaller 5 et antérieurs
-    '_PYI_APPLICATION_HOME_DIR', '_PYI_ARCHIVE_FILE',
-    '_PYI_PARENT_PROCESS_LEVEL', '_PYI_SPLASH_IPC',
-)
+#: temporaire où l'application a été décompressée. Un processus lancé depuis
+#: l'application packagée en hérite ; on ne les transmet pas plus loin, par
+#: hygiène — les essais menés depuis n'ont pas montré qu'elles suffisaient à
+#: provoquer l'échec « Failed to load Python DLL » observé sur un poste.
+VARIABLES_BOOTLOADER = applique_maj._VARIABLES_LANCEUR
 
-
-def environnement_sans_bootloader() -> dict:
-    """Environnement débarrassé des repères du lanceur PyInstaller.
-
-    Un processus lancé depuis l'application packagée hérite de ces variables.
-    La nouvelle application, relancée par le script de remplacement, croyait
-    donc avoir déjà été décompressée et cherchait python3xx.dll dans le dossier
-    temporaire du processus précédent — supprimé à sa sortie. D'où l'échec
-    « Failed to load Python DLL ». L'application relancée depuis l'explorateur,
-    elle, démarrait normalement : son environnement est propre.
-    """
-    propre = dict(os.environ)
-    for nom in VARIABLES_BOOTLOADER:
-        propre.pop(nom, None)
-    return propre
+#: Conservé sous son ancien nom : le reste du code et les tests s'y réfèrent.
+environnement_sans_bootloader = applique_maj.environnement_propre
 
 
 class UpdateChecker:
@@ -286,72 +272,42 @@ class UpdateChecker:
     def _install_windows(self, installer_path: Path) -> bool:
         """
         ParcInfo est un exécutable portable unique : le fichier téléchargé EST la
-        nouvelle application. Windows verrouille l'exe en cours d'exécution, donc
-        le remplacement est délégué à un script détaché qui attend la fin de ce
-        processus, échange les fichiers puis relance l'application.
+        nouvelle application. Windows verrouille l'exe en cours d'exécution, le
+        remplacement revient donc à un autre processus.
+
+        C'est le binaire téléchargé lui-même qui s'en charge, relancé avec
+        « --appliquer-maj ». Il n'est pas verrouillé, son empreinte vient d'être
+        vérifiée, et il porte la version la plus récente du mécanisme : un
+        correctif s'applique dès la mise à jour qui l'installe, au lieu d'attendre
+        la suivante. Le script batch qui tenait ce rôle ne laissait par ailleurs
+        aucune trace exploitable quand il échouait.
         """
         current_exe = Path(sys.executable)
-        sauvegarde = current_exe.with_suffix('.exe.old')
-        bat_path = self.config_dir / "_apply_update.bat"
+        journal = self.config_dir / "_maj.log"
 
-        journal = self.config_dir / "_apply_update.log"
-
-        # Le script réessaie au lieu d'attendre une durée fixe : tant que
-        # l'application n'a pas rendu la main, Windows garde le verrou sur son
-        # exécutable et le déplacement échoue. Une attente figée ne pardonnait
-        # rien — un arrêt un peu lent et la mise à jour était perdue en silence.
-        # L'ancien exécutable est conservé le temps du remplacement, et remis en
-        # place si la copie échoue à mi-chemin : mieux vaut l'ancienne version
-        # qu'aucune application.
-        # Le script efface lui aussi les repères du lanceur : Popen lui passe
-        # déjà un environnement propre, mais si ce script est relancé à la main
-        # depuis une console héritée, la nouvelle application repartirait
-        # chercher Python dans un dossier temporaire disparu.
-        oublier = ''.join('set "%s="\r\n' % nom for nom in VARIABLES_BOOTLOADER)
-
-        bat_content = (
-            "@echo off\r\n"
-            + oublier +
-            f'echo [%DATE% %TIME%] remplacement demande > "{journal}"\r\n'
-            "timeout /t 3 /nobreak > NUL\r\n"
-            f'if exist "{sauvegarde}" del /q "{sauvegarde}"\r\n'
-            "set TENTATIVE=0\r\n"
-            ":essai\r\n"
-            "set /a TENTATIVE+=1\r\n"
-            f'move /y "{current_exe}" "{sauvegarde}" > NUL 2>&1\r\n'
-            "if not errorlevel 1 goto deplace\r\n"
-            "if %TENTATIVE% GEQ 15 goto abandon\r\n"
-            f'echo [%TIME%] fichier encore verrouille, tentative %TENTATIVE% >> "{journal}"\r\n'
-            "timeout /t 2 /nobreak > NUL\r\n"
-            "goto essai\r\n"
-            ":deplace\r\n"
-            f'move /y "{installer_path}" "{current_exe}" > NUL 2>&1\r\n'
-            "if errorlevel 1 (\r\n"
-            f'  echo [%TIME%] copie impossible, retour a la version precedente >> "{journal}"\r\n'
-            f'  move /y "{sauvegarde}" "{current_exe}" > NUL 2>&1\r\n'
-            "  goto relance\r\n"
-            ")\r\n"
-            f'echo [%TIME%] remplacement effectue >> "{journal}"\r\n'
-            f'del /q "{sauvegarde}" > NUL 2>&1\r\n'
-            "goto relance\r\n"
-            ":abandon\r\n"
-            f'echo [%TIME%] abandon : executable toujours verrouille >> "{journal}"\r\n'
-            ":relance\r\n"
-            f'start "" "{current_exe}"\r\n'
-            'del "%~f0"\r\n'
-        )
-        # Encodage OEM : un .bat lu par cmd.exe n'est pas en UTF-8, et un chemin
-        # accentué (« C:\\Users\\Éric\\… ») y deviendrait illisible.
-        bat_path.write_text(bat_content, encoding='cp1252', errors='replace')
+        commande = [
+            str(installer_path), applique_maj.INDICATEUR,
+            '--cible', str(current_exe),
+            '--pid', str(os.getpid()),
+            '--journal', str(journal),
+        ]
 
         creationflags = 0
         if hasattr(subprocess, 'CREATE_NO_WINDOW') and hasattr(subprocess, 'DETACHED_PROCESS'):
             creationflags = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
-        subprocess.Popen(['cmd', '/c', str(bat_path)],
-                         creationflags=creationflags, close_fds=True,
-                         env=environnement_sans_bootloader())
+        try:
+            subprocess.Popen(
+                commande, creationflags=creationflags, close_fds=True,
+                # Hors du dossier de l'application : un processus dont le
+                # répertoire courant est celui de l'exe y maintient une prise.
+                cwd=str(installer_path.parent),
+                env=applique_maj.environnement_propre())
+        except OSError as e:
+            logger.error("Lancement du programme de remplacement impossible : %s", e)
+            return False
 
-        logger.info("Remplacement programmé — l'application va redémarrer")
+        logger.info("Remplacement confié à %s — l'application va redémarrer",
+                    installer_path.name)
         return True
 
     def _install_macos(self, archive_path: Path) -> bool:

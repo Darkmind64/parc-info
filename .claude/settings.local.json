@@ -280,7 +280,16 @@
       "Bash(python test_remplissage_fiche.py)",
       "Bash(cat)",
       "Bash(python -c \"import PyInstaller, os; print\\('PyInstaller', PyInstaller.__version__\\); print\\(os.path.dirname\\(PyInstaller.__file__\\)\\)\")",
-      "Bash(cd \"C:/Users/Davy/AppData/Local/Programs/Python/Python313/Lib/site-packages/PyInstaller\" && grep -rn \"_PYI_APPLICATION_HOME_DIR\\\\|_MEIPASS2\\\\|_PYI_ARCHIVE_FILE\\\\|_PYI_PARENT_PROCESS_LEVEL\" --include=*.py --include=*.c --include=*.h . 2>/dev/null | head -12)"
+      "Bash(cd \"C:/Users/Davy/AppData/Local/Programs/Python/Python313/Lib/site-packages/PyInstaller\" && grep -rn \"_PYI_APPLICATION_HOME_DIR\\\\|_MEIPASS2\\\\|_PYI_ARCHIVE_FILE\\\\|_PYI_PARENT_PROCESS_LEVEL\" --include=*.py --include=*.c --include=*.h . 2>/dev/null | head -12)",
+      "Read(//c/Users/Davy/AppData/Local/Temp/essai_maj/dist/**)",
+      "Bash(rm -f *.txt)",
+      "Bash(./EssaiMaj.exe)",
+      "Bash(./EssaiMaj.exe --relancer herite)",
+      "Bash(sed 's/^/ /' env_herite.txt)",
+      "Bash(ls -la \"D:/Parcinfo/\" 2>&1 | head -25)",
+      "Read(//c/Users/Davy/AppData/Local/Temp/essai_maj2/**)",
+      "Bash(sed \"s/os.environ.get\\('ESSAI_VERSION', '?'\\)/'2 \\(NOUVELLE\\)'/\" appli.py)",
+      "Bash(python -m PyInstaller --onefile --noconsole --name AppV2 --distpath dist2 --workpath w2 --specpath s2 appli2.py)"
     ]
   }
 }

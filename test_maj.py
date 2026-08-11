@@ -396,11 +396,14 @@ verifier(rate.phase == 'erreur', 'échec du remplacement signalé', rate.phase)
 verifier(arrets_rate == [], "aucun arrêt quand le remplacement a échoué",
          str(arrets_rate))
 
-print("\n=== 10. Le script de remplacement Windows ===")
+print("\n=== 10. Le remplacement est confié au nouvel exécutable ===")
 import pathlib  # noqa: E402
+import applique_maj  # noqa: E402
 
-faux = UC.UpdateChecker(config_dir=tempfile.mkdtemp(prefix='maj_bat_'))
-binaire = pathlib.Path(faux.config_dir) / 'ParcInfo-Windows.exe'
+faux = UC.UpdateChecker(config_dir=tempfile.mkdtemp(prefix='maj_lancement_'))
+dossier_maj = pathlib.Path(faux.config_dir) / 'maj'
+dossier_maj.mkdir()
+binaire = dossier_maj / 'ParcInfo-Windows.exe'
 binaire.write_bytes(b'nouveau binaire')
 lance = {}
 UC.subprocess.Popen = lambda *a, **kw: (lance.setdefault('cmd', a[0]),
@@ -413,22 +416,88 @@ finally:
 
 verifier(resultat is True, 'remplacement programmé')
 
-# L'application relancée par le script héritait des repères du lanceur
-# PyInstaller et cherchait python3xx.dll dans le dossier temporaire du
-# processus précédent, supprimé à sa sortie : « Failed to load Python DLL ».
+commande = lance.get('cmd') or []
+verifier(commande and commande[0] == str(binaire),
+         "c'est le binaire téléchargé qui est lancé, pas cmd.exe", str(commande[:1]))
+verifier(applique_maj.INDICATEUR in commande,
+         "il est lancé en mode application de mise à jour", str(commande))
+verifier(str(sys.executable) in commande,
+         "l'exécutable à remplacer lui est désigné", str(commande))
+verifier(str(os.getpid()) in commande,
+         "le processus à attendre lui est désigné", str(commande))
+verifier(lance.get('cwd') == str(dossier_maj),
+         "il ne travaille pas depuis le dossier de l'application", str(lance.get('cwd')))
+
 env_transmis = lance.get('env') or {}
-verifier(bool(env_transmis), "un environnement explicite est transmis au script")
+verifier(bool(env_transmis), "un environnement explicite lui est transmis")
 verifier(not any(n in env_transmis for n in UC.VARIABLES_BOOTLOADER),
          "l'environnement transmis est débarrassé des repères du lanceur",
          str([n for n in UC.VARIABLES_BOOTLOADER if n in env_transmis]))
 verifier('PATH' in env_transmis or 'Path' in env_transmis,
          "le reste de l'environnement est conservé")
-script = pathlib.Path(faux.config_dir) / '_apply_update.bat'
-verifier(script.exists(), 'script écrit')
-contenu = script.read_text(encoding='cp1252', errors='replace') if script.exists() else ''
-verifier('goto essai' in contenu, "le script réessaie tant que le fichier est verrouillé")
-verifier(contenu.count('start ""') >= 1, "l'application est relancée dans tous les cas")
-verifier('_apply_update.log' in contenu, 'un journal est écrit pour diagnostiquer un échec')
+
+
+print("\n=== 11. Le remplacement lui-même ===")
+# Le déroulé complet sur de vrais fichiers : c'est l'étape qui a échoué en
+# production sans laisser de trace, elle doit être éprouvée pour de bon.
+atelier = pathlib.Path(tempfile.mkdtemp(prefix='maj_applique_'))
+cible = atelier / 'ParcInfo-Windows.exe'
+source_dir = atelier / 'maj'
+source_dir.mkdir()
+source = source_dir / 'ParcInfo-Windows.exe'
+cible.write_bytes(b'ancienne version')
+source.write_bytes(b'nouvelle version' * 1000)
+journal = atelier / '_maj.log'
+
+relances = []
+vrai_relancer = applique_maj._relancer
+applique_maj._relancer = lambda c, t: relances.append(c)
+vrai_executable = applique_maj.sys.executable
+applique_maj.sys.executable = str(source)
+try:
+    code = applique_maj.appliquer(['--cible', str(cible), '--journal', str(journal)])
+finally:
+    applique_maj.sys.executable = vrai_executable
+
+verifier(code == 0, 'le remplacement aboutit', 'code %s' % code)
+verifier(cible.read_bytes() == source.read_bytes(),
+         "l'exécutable en place est bien le nouveau")
+verifier(not (atelier / 'ParcInfo-Windows.exe.old').exists(),
+         "l'ancienne version est retirée une fois le contrôle passé")
+verifier(relances == [str(cible)], "l'application est relancée", str(relances))
+trace = journal.read_text(encoding='utf-8') if journal.exists() else ''
+verifier('empreinte identique' in trace,
+         "l'empreinte de la copie est confrontée à celle de la source", trace[-200:])
+
+# Une copie tronquée — antivirus, disque plein — donnerait un exécutable qui ne
+# démarre pas. L'ancienne version doit alors revenir.
+cible.write_bytes(b'ancienne version')
+relances.clear()
+applique_maj.sys.executable = str(source)
+vrai_copie = applique_maj.shutil.copy2
+applique_maj.shutil.copy2 = lambda s, d: pathlib.Path(d).write_bytes(
+    pathlib.Path(s).read_bytes()[:50])
+try:
+    code = applique_maj.appliquer(['--cible', str(cible), '--journal', str(journal)])
+finally:
+    applique_maj.shutil.copy2 = vrai_copie
+    applique_maj.sys.executable = vrai_executable
+    applique_maj._relancer = vrai_relancer
+
+verifier(code == 5, 'une copie infidèle est refusée', 'code %s' % code)
+verifier(cible.read_bytes() == b'ancienne version',
+         "l'ancienne version est remise en place", repr(cible.read_bytes()[:40]))
+verifier(relances == [str(cible)],
+         "l'application est relancée malgré tout", str(relances))
+
+# Les reliquats sont effacés par l'application relancée : le processus qui
+# vient d'appliquer la mise à jour s'exécutait depuis le dossier de
+# téléchargement, et l'ancien exécutable était encore tenu par Windows.
+reliquat = atelier / 'ParcInfo-Windows.exe.old'
+reliquat.write_bytes(b'ancienne version')
+applique_maj.nettoyer_reliquats(str(source_dir), executable=str(cible))
+verifier(not source_dir.exists(), 'le dossier de téléchargement est supprimé')
+verifier(not reliquat.exists(), 'la version précédente est supprimée')
 
 httpd.shutdown()
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))

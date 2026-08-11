@@ -11,6 +11,7 @@ Usage :
     get_notifier().etat
 """
 
+import applique_maj
 import json
 import logging
 import os
@@ -89,6 +90,13 @@ class UpdateNotifier:
         """Démarre la vérification périodique en tâche de fond."""
         if self._thread and self._thread.is_alive():
             return
+        # Le processus qui vient d'appliquer la mise à jour s'exécutait depuis
+        # le dossier de téléchargement, et Windows tenait encore l'image de
+        # l'ancien exécutable : ni l'un ni l'autre ne pouvait disparaître à ce
+        # moment-là. L'application qu'il a relancée, elle, le peut.
+        applique_maj.nettoyer_reliquats(
+            str(Path(self.checker.config_dir) / 'maj'),
+            tracer=lambda m: logger.info("%s", m))
         self._thread = threading.Thread(target=self._boucle, daemon=True,
                                         name='VerificationMaj')
         self._thread.start()

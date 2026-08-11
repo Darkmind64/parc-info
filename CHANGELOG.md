@@ -1,14 +1,71 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.2] - 2026-08-11 🔁
+
+### 🔁 Le nouvel exécutable applique lui-même la mise à jour
+
+**D'abord, une rectification.** Le correctif annoncé en 2.9.1 reposait sur une
+cause supposée — des variables d'environnement du lanceur PyInstaller héritées
+par l'application relancée. Reconstruction d'un cas réel à l'appui, cette
+explication **ne tient pas** : le redémarrage aboutit avec ou sans elles. La
+2.9.1 ne corrigeait donc rien de ce défaut.
+
+**Ce qui change ici.** Le remplacement de l'exécutable était confié à un script
+`.bat` écrit à la volée par l'application sortante. Trois défauts :
+
+- il ne laissait **aucune trace exploitable** : quand le redémarrage échouait,
+  il ne restait qu'une boîte de dialogue et rien à examiner ;
+- c'était **l'ancienne version** qui pilotait le remplacement, donc un
+  correctif du mécanisme ne s'appliquait jamais à la mise à jour qui
+  l'installait — il fallait attendre la suivante ;
+- un script batch impose ses propres contraintes (encodage, guillemets, codes
+  de retour) sur un enchaînement qui demande de la précision.
+
+Le travail revient désormais au **binaire téléchargé**, relancé avec
+`--appliquer-maj`. Il n'est pas verrouillé, son empreinte vient d'être
+vérifiée, et il porte la version la plus récente du mécanisme. Son déroulé :
+
+1. il attend la sortie du processus qu'on lui a désigné (interrogation du
+   système, pas une attente fixe : une machine chargée met plus longtemps) ;
+2. il met l'ancien exécutable de côté, en réessayant tant que Windows le tient ;
+3. il se recopie sur lui, puis **recalcule l'empreinte du fichier écrit** — une
+   copie tronquée ou amputée par un antivirus donnerait un exécutable qui ne
+   démarre pas, exactement le symptôme signalé ;
+4. au moindre écart, il **remet l'ancienne version en place** : mieux vaut la
+   version précédente qu'aucune application ;
+5. il relance, et consigne chaque étape dans **`_maj.log`**, à côté de
+   l'exécutable.
+
+Le dossier de téléchargement et l'ancien exécutable sont effacés au démarrage
+suivant : à l'instant du remplacement, le processus s'exécute depuis ce dossier
+et Windows tient encore l'ancienne image — la suppression y échoue.
+
+**Éprouvé pour de bon.** Le scénario complet a été rejoué avec de vrais
+exécutables PyInstaller *onefile* : remplacement effectué, empreinte conforme,
+et la nouvelle version démarre réellement. Les suites de tests couvrent le
+déroulé sur fichiers réels, y compris le retour à l'ancienne version après une
+copie infidèle.
+
+> **Une fois installée**, cette version applique elle-même les mises à jour
+> suivantes : un correctif du mécanisme prendra effet dès la mise à jour qui
+> l'apporte, au lieu de la suivante.
+
+---
+
 ## [2.9.1] - 2026-08-10 🔌
 
 ### 🔌 « Failed to load Python DLL » au redémarrage
+
+> ⚠️ **Rectification (2.9.2).** L'explication ci-dessous a été vérifiée après
+> coup sur de vrais exécutables PyInstaller : elle **ne tient pas**. Le
+> redémarrage aboutit que ces variables soient héritées ou non. Cette version
+> ne corrigeait donc pas le défaut annoncé. Voir 2.9.2.
 
 **Votre installation n'est pas abîmée.** La mise à jour a bien eu lieu ; seul
 le redémarrage automatique échouait. Lancer l'application depuis l'explorateur
 fonctionne — c'est d'ailleurs ce qui a mis sur la piste.
 
-**La cause.** L'application packagée se décompresse dans un dossier temporaire,
+**La cause supposée, démentie depuis.** L'application packagée se décompresse dans un dossier temporaire,
 et le lanceur PyInstaller pose des variables d'environnement pour le désigner.
 Le script de remplacement, lancé *par* l'application, en héritait, puis relançait
 la nouvelle version qui en héritait à son tour. Celle-ci croyait donc avoir déjà
