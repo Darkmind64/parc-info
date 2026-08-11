@@ -24,6 +24,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -498,6 +499,52 @@ reliquat.write_bytes(b'ancienne version')
 applique_maj.nettoyer_reliquats(str(source_dir), executable=str(cible))
 verifier(not source_dir.exists(), 'le dossier de téléchargement est supprimé')
 verifier(not reliquat.exists(), 'la version précédente est supprimée')
+
+
+print("\n=== 12. Un reliquat verrouillé ne doit pas retarder le remplacement ===")
+# Constaté en production : la mise à jour précédente avait laissé un « .old »
+# que Windows refusait de supprimer, plus de deux heures durant. Comme le
+# remplacement commençait par ce ménage, l'opération a piétiné 26 secondes
+# avant d'aboutir. Supprimer un reliquat ne concerne pas la mise à jour en
+# cours et ne doit donc rien bloquer.
+atelier2 = pathlib.Path(tempfile.mkdtemp(prefix='maj_reliquat_'))
+cible2 = atelier2 / 'ParcInfo-Windows.exe'
+source2_dir = atelier2 / 'maj'
+source2_dir.mkdir()
+source2 = source2_dir / 'ParcInfo-Windows.exe'
+cible2.write_bytes(b'ancienne version')
+source2.write_bytes(b'nouvelle version' * 500)
+verrou = atelier2 / 'ParcInfo-Windows.exe.old'
+verrou.write_bytes(b'reliquat de la mise a jour precedente')
+journal2 = atelier2 / '_maj.log'
+
+# Fichier maintenu ouvert : sous Windows sa suppression est refusée, comme sur
+# le poste concerné.
+poigne = open(verrou, 'r+b')
+applique_maj._relancer = lambda c, t: None
+applique_maj.sys.executable = str(source2)
+debut = time.monotonic()
+try:
+    code = applique_maj.appliquer(['--cible', str(cible2), '--journal', str(journal2)])
+finally:
+    applique_maj.sys.executable = vrai_executable
+    applique_maj._relancer = vrai_relancer
+duree = time.monotonic() - debut
+
+verifier(code == 0, 'le remplacement aboutit malgré le reliquat', 'code %s' % code)
+verifier(duree < 5, "il n'attend pas que le reliquat se libère", '%.1f s' % duree)
+verifier(cible2.read_bytes() == source2.read_bytes(),
+         "l'exécutable en place est bien le nouveau")
+trace2 = journal2.read_text(encoding='utf-8')
+verifier('reliquat verrouillé' in trace2,
+         'le reliquat bloquant est signalé dans le journal', trace2[-160:])
+poigne.close()
+
+# Le reliquat part au démarrage suivant, avec le nom de repli utilisé.
+applique_maj.nettoyer_reliquats(str(source2_dir), executable=str(cible2))
+restants = sorted(p.name for p in atelier2.glob('*.old*'))
+verifier(not restants, 'les reliquats sont supprimés au démarrage suivant',
+         str(restants))
 
 httpd.shutdown()
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))

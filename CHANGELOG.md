@@ -1,5 +1,36 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.4] - 2026-08-11 🧹
+
+### 🧹 Un reliquat verrouillé retardait la mise à jour de 26 secondes
+
+Le nouveau mécanisme a fonctionné pour son premier passage réel (2.9.2 → 2.9.3),
+mais son journal a révélé un défaut que lui seul rendait visible :
+
+```
+tentative 1 : fichier encore verrouillé ([WinError 5] Accès refusé:
+              'D:\Parcinfo\ParcInfo-Windows.exe.old')
+… treize fois, sur vingt-six secondes …
+remplacement vérifié, empreinte identique
+```
+
+**Ce qui se passait.** La mise à jour précédente, faite par l'ancien script
+`.bat`, n'avait pas réussi à supprimer sa copie de sauvegarde `.old` — et ne
+l'avait pas signalé. Le fichier est resté verrouillé plus de deux heures. Or le
+remplacement commençait par effacer cette copie : une opération de ménage, sans
+rapport avec la mise à jour en cours, bloquait donc toute l'opération.
+
+**Correction.** Le ménage n'a plus droit de blocage. Si l'ancienne sauvegarde
+résiste, un nom libre est pris immédiatement et le remplacement se poursuit ;
+le reliquat est signalé dans le journal et supprimé au démarrage suivant.
+L'attente reste réservée au seul cas qui la justifie : l'exécutable en cours
+que Windows n'a pas encore relâché.
+
+Le cas est reproduit dans les tests, avec un fichier réellement verrouillé :
+**0,0 s au lieu de 26 s**.
+
+---
+
 ## [2.9.3] - 2026-08-11 💽
 
 ### 💽 Fiche système : disques physiques et placement des badges

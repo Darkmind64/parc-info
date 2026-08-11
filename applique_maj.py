@@ -91,6 +91,27 @@ def _attendre_sortie(pid, tracer):
         return True
 
 
+def _emplacement_sauvegarde(cible, tracer):
+    """Choisit où mettre l'ancienne version de côté.
+
+    Le reliquat d'une mise à jour précédente peut rester verrouillé — observé
+    en production, plus de deux heures durant. Le supprimer relève du ménage et
+    n'a rien à voir avec la mise à jour en cours : il ne doit pas la retarder.
+    On tente donc une fois, et si le fichier résiste on prend un nom libre.
+    """
+    for i in range(10):
+        chemin = cible + '.old' + ('' if i == 0 else '.%d' % i)
+        if not os.path.exists(chemin):
+            return chemin
+        try:
+            os.remove(chemin)
+            return chemin
+        except OSError as e:
+            tracer('reliquat verrouillé, il sera supprimé au prochain démarrage '
+                   ': %s (%s)' % (os.path.basename(chemin), e))
+    return cible + '.remplace'
+
+
 def appliquer(arguments):
     """Applique la mise à jour. Retourne le code de sortie du processus."""
     valeurs = {}
@@ -125,17 +146,17 @@ def appliquer(arguments):
 
     _attendre_sortie(pid, tracer)
 
-    sauvegarde = cible + '.old'
     empreinte_source = _empreinte(source)
     tracer('empreinte de la source : %s' % empreinte_source)
+    sauvegarde = _emplacement_sauvegarde(cible, tracer)
 
     # Mise à l'écart de l'ancienne version. Windows garde le verrou un court
     # instant après la sortie du processus : on réessaie au lieu de renoncer.
+    # Seul ce déplacement-là mérite d'attendre — le ménage des reliquats a été
+    # fait plus haut, sans droit de blocage.
     deplace = False
     for tentative in range(1, TENTATIVES + 1):
         try:
-            if os.path.exists(sauvegarde):
-                os.remove(sauvegarde)
             if os.path.exists(cible):
                 os.replace(cible, sauvegarde)
             deplace = True
@@ -217,14 +238,21 @@ def nettoyer_reliquats(dossier_telechargement, executable=None, tracer=None):
     except Exception:
         pass
 
-    ancienne = (executable or sys.executable) + '.old'
-    try:
-        if os.path.isfile(ancienne):
-            os.remove(ancienne)
+    # `.old`, ses variantes numérotées et le nom de dernier recours : un
+    # reliquat encore verrouillé au moment du remplacement a fait prendre un
+    # autre nom, et lui aussi doit finir par disparaître.
+    base = executable or sys.executable
+    reliquats = [base + '.old'] + [base + '.old.%d' % i for i in range(1, 10)]
+    reliquats.append(base + '.remplace')
+    for chemin in reliquats:
+        try:
+            if os.path.isfile(chemin):
+                os.remove(chemin)
+                if tracer:
+                    tracer('version précédente supprimée : %s' % chemin)
+        except OSError as e:
             if tracer:
-                tracer('version précédente supprimée : %s' % ancienne)
-    except OSError:
-        pass
+                tracer('version précédente encore verrouillée : %s (%s)' % (chemin, e))
 
 
 def mode_mise_a_jour(argv=None):

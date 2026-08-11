@@ -311,7 +311,13 @@
       "Bash(sed -i 's/v2\\\\.9\\\\.2/v2.9.3/g; s/### 🎉 v2.9.3 :.*/### 🎉 v2.9.3 : Fiche système — disques physiques et badges alignés/' README.md)",
       "Bash(sed -i '9s/.*/**Version** : 2.9.3 ⭐ **Fiche système : disques physiques en tableau, badges alignés**  /' README.md)",
       "Bash(sed -i '10s/.*/**Dernière mise à jour** : 2026-08-11/' README.md)",
-      "Bash(sed -i '16s#.*#### 🎉 v2.9.3 : Fiche système — disques physiques et badges alignés#' README.md)"
+      "Bash(sed -i '16s#.*#### 🎉 v2.9.3 : Fiche système — disques physiques et badges alignés#' README.md)",
+      "Bash(rm -rf \"C:/Users/Davy/AppData/Local/Temp/verif_293\")",
+      "Bash(sed -i 's/2\\\\.9\\\\.3/2.9.4/g' version.json Dockerfile VERSION)",
+      "Bash(sed -i 's/__version__ = \"2\\\\.9\\\\.3\"/__version__ = \"2.9.4\"/; s/\\(2, 9, 3\\)/\\(2, 9, 4\\)/' __version__.py)",
+      "Bash(sed -i 's/v2\\\\.9\\\\.3/v2.9.4/g' README.md)",
+      "Bash(sed -i '9s/.*/**Version** : 2.9.4 ⭐ **Un reliquat verrouillé retardait la mise à jour**  /' README.md)",
+      "Bash(sed -i '16s#.*#### 🎉 v2.9.4 : Un reliquat verrouillé retardait la mise à jour#' README.md)"
     ]
   }
 }
