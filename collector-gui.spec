@@ -40,7 +40,7 @@ a = Analysis(
     ['system-info-collector-gui.py'],
     pathex=[str(Path(SPECPATH))],
     binaries=[],
-    datas=[],
+    datas=[('static/icon.ico', 'static')],   # icône de la fenêtre
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -73,7 +73,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon='static/icon.ico',             # La même que ParcInfo : même outillage
 )
 
 # macOS app bundle

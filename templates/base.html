@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token }}">
+    <link rel="icon" href="{{ url_for('static', filename='icon.ico') }}" sizes="any">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.png') }}">
     {%- macro pagination_nav(p, extra_params='') %}
     {%- if p and p.pages > 1 %}
     <div style="display:flex;align-items:center;justify-content:center;gap:.5rem;padding:1rem;border-top:1px solid var(--border);flex-wrap:wrap;">

@@ -43,11 +43,18 @@ def run_systray(url, logger):
     try:
         from pystray import Icon, MenuItem, Menu
         from PIL import Image, ImageDraw
-        img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
-        d = ImageDraw.Draw(img)
-        d.ellipse([2, 2, 62, 62], fill='#0a1628')
-        d.ellipse([6, 6, 58, 58], fill='#00c9ff')
-        d.text((14, 16), 'PI', fill='white')
+        try:
+            # Le .ico porte un dessin propre à chaque taille ; la barre système
+            # affiche petit, où un simple redimensionnement du 256 s'efface.
+            with Image.open(res('static/icon.ico')) as ico:
+                ico.size = (32, 32)
+                img = ico.convert('RGBA')
+        except Exception:
+            img = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+            d = ImageDraw.Draw(img)
+            d.ellipse([2, 2, 62, 62], fill='#0a1628')
+            d.ellipse([6, 6, 58, 58], fill='#00c9ff')
+            d.text((14, 16), 'PI', fill='white')
         Icon('ParcInfo', img, 'ParcInfo', menu=Menu(
             MenuItem('Ouvrir ParcInfo', lambda i, it: webbrowser.open(url), default=True),
             MenuItem('Quitter',         lambda i, it: (i.stop(), os._exit(0))),

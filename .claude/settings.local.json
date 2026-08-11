@@ -289,7 +289,20 @@
       "Bash(ls -la \"D:/Parcinfo/\" 2>&1 | head -25)",
       "Read(//c/Users/Davy/AppData/Local/Temp/essai_maj2/**)",
       "Bash(sed \"s/os.environ.get\\('ESSAI_VERSION', '?'\\)/'2 \\(NOUVELLE\\)'/\" appli.py)",
-      "Bash(python -m PyInstaller --onefile --noconsole --name AppV2 --distpath dist2 --workpath w2 --specpath s2 appli2.py)"
+      "Bash(python -m PyInstaller --onefile --noconsole --name AppV2 --distpath dist2 --workpath w2 --specpath s2 appli2.py)",
+      "Bash(rm -rf \"C:/Users/Davy/AppData/Local/Temp/essai_maj2\")",
+      "Bash(git commit -q -m ' *)",
+      "Bash(grep -n \"icon\" \"E:/Claude Code/parc_info - docker/.claude/worktrees/nifty-shaw-65bded/launcher.py\" | head; echo \"=== images récentes dans les dossiers Claude/temp ===\"; find \"C:/Users/Davy/AppData/Local/Temp/claude\" \"C:/Users/Davy/.claude\" -iname \"*.png\" -o -iname \"*.jpg\" -o -iname \"*.jpeg\" -o -iname \"*.webp\" 2>/dev/null | head -20)",
+      "Bash(convert -version)",
+      "Bash(convert -list format)",
+      "Bash(python dessine_icone.py)",
+      "Bash(sed -i \"s/print\\('contenu :', boite, '→', sortie.size\\)/print\\('contenu :', boite, 'vers', sortie.size\\)/\" dessine_icone.py)",
+      "Bash(mkdir -p out)",
+      "Bash(python icone_parcinfo.py out)",
+      "Bash(grep -n \"^    icon=None,$\" collector-cli.spec collector-gui.spec)",
+      "Bash(python -W error -)",
+      "Bash(python -W error -c ' *)",
+      "Bash(grep -v \"^$\")"
     ]
   }
 }

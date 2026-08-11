@@ -2,6 +2,24 @@
 
 ## [2.9.2] - 2026-08-11 🔁
 
+### 🖥️ Nouvelle icône
+
+Écran, engrenage, document et pastille de validation. Elle remplace l'ancienne
+icône partout : exécutable Windows, collecteurs (qui n'en avaient aucune),
+barre système — qui dessinait encore un rond bleu de substitution — et onglet
+du navigateur, où il n'y avait pas de favicon du tout.
+
+Elle est **dessinée par `generer_icone.py`**, et non redimensionnée depuis une
+image : sous 64 px, un trait mis à l'échelle passe sous le pixel et l'icône
+devient une tache grise. Chaque format du `.ico` a donc son propre rendu, avec
+un trait épaissi et moins de détail pour les plus petits — à 16 px, les lignes
+du document sont retirées et la pastille passe en aplat. Pour la retoucher,
+modifiez le script et relancez-le :
+
+```bash
+python generer_icone.py static
+```
+
 ### 🔁 Le nouvel exécutable applique lui-même la mise à jour
 
 **D'abord, une rectification.** Le correctif annoncé en 2.9.1 reposait sur une

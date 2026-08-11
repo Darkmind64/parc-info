@@ -148,6 +148,7 @@ class CollectorGUI:
         self.root.title(f"ParcInfo System Information Collector v{COLLECTOR_VERSION}")
         self.root.geometry("980x900")
         self.root.resizable(True, True)
+        self._appliquer_icone()
 
         # Couleurs
         self.bg_color = "#f0f0f0"
@@ -163,6 +164,21 @@ class CollectorGUI:
         # si la MAC n'est pas encore connue.
         self._collect_info()
         self._fetch_clients()
+
+    def _appliquer_icone(self):
+        """Pose l'icône ParcInfo sur la fenêtre, si elle est disponible.
+
+        Embarquée par PyInstaller sous `static/` ; en exécution depuis les
+        sources, elle est à la même place dans le dépôt. Sans elle, Tk laisse
+        sa plume par défaut — sans conséquence, d'où l'échec silencieux.
+        """
+        base = Path(getattr(sys, '_MEIPASS', Path(__file__).parent))
+        icone = base / 'static' / 'icon.ico'
+        try:
+            if icone.exists():
+                self.root.iconbitmap(str(icone))
+        except Exception:
+            pass
 
     def _load_config(self):
         """Charge la configuration sauvegardée."""
