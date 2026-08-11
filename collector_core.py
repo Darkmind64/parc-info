@@ -2116,6 +2116,9 @@ _WIN_STEPS = [
     ('Configuration réseau', lambda: _win_network()),
     ('Environnement (WSUS, domaine, temps)', lambda: _win_enterprise()),
     ('Hygiène système', lambda: _win_hygiene()),
+    ('Accès distant et exposition', lambda: _win_remote_access()),
+    ('Comptes de messagerie', lambda: _win_mail_accounts()),
+    ('Applications par défaut et lecteurs réseau', lambda: _win_workstation_extras()),
     ('Périphériques en erreur', lambda: _win_problem_devices()),
     ('Temps de démarrage', lambda: _win_boot_performance()),
     ('Journal de sécurité', lambda: _win_security_events()),
@@ -2705,18 +2708,14 @@ def _win_hygiene():
         "$uac=$null; try { $uac=(Get-ItemProperty "
         "'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System' "
         "-ErrorAction SilentlyContinue).EnableLUA } catch {}; "
-        "$rdp=$null; try { $rdp=(Get-ItemProperty "
-        "'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' "
-        "-ErrorAction SilentlyContinue).fDenyTSConnections } catch {}; "
-        "$nla=$null; try { $nla=(Get-ItemProperty "
-        "'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' "
-        "-ErrorAction SilentlyContinue).UserAuthentication } catch {}; "
+        # RDP et l'ouverture automatique de session sont désormais relevés par
+        # _win_remote_access, avec les autres voies d'accès distant.
         "$rp=@(); try { $rp=@(Get-ComputerRestorePoint -ErrorAction SilentlyContinue "
         "| Select-Object -Last 3 -Property Description,"
         "@{N='When';E={$_.ConvertToDateTime($_.CreationTime).ToString('yyyy-MM-dd HH:mm')}}) } catch {}; "
         "$temp=0; try { $temp=[math]::Round((Get-ChildItem $env:TEMP -Recurse -Force "
         "-ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1MB,0) } catch {}; "
-        "[PSCustomObject]@{ Uac=$uac; Rdp=$rdp; Nla=$nla; Restore=$rp; TempMB=$temp } "
+        "[PSCustomObject]@{ Uac=$uac; Restore=$rp; TempMB=$temp } "
         "| ConvertTo-Json -Compress -Depth 4",
         timeout=90,
     )
@@ -2725,11 +2724,6 @@ def _win_hygiene():
 
     if data.get('Uac') is not None:
         info['uac_enabled'] = bool(data.get('Uac'))
-    if data.get('Rdp') is not None:
-        # fDenyTSConnections = 1 signifie que RDP est refusé
-        info['rdp_enabled'] = not bool(data.get('Rdp'))
-        if info['rdp_enabled'] and data.get('Nla') is not None:
-            info['rdp_nla'] = bool(data.get('Nla'))
 
     points = []
     for r in _as_list(data.get('Restore')):
@@ -2744,6 +2738,522 @@ def _win_hygiene():
             info['temp_files_mb'] = round(temp_mb)
     except (TypeError, ValueError):
         pass
+
+    return info
+
+
+#: Mécanismes d'accès distant relevés, dans l'ordre d'affichage. Chacun devient
+#: une ligne de la section « Accès distant & exposition ».
+def _acces(cle, label, actif, detail='', securise=None, sensible=False):
+    """Une entrée d'accès distant, avec sa criticité.
+
+    `sensible` marque un accès à n'ouvrir qu'à bon escient (Telnet en clair,
+    ouverture automatique de session) : actif, il passe en rouge plutôt qu'en
+    simple information.
+    """
+    if actif is None:
+        niveau = 'muted'
+    elif not actif:
+        niveau = 'ok' if sensible else 'muted'
+    elif securise is False or sensible:
+        niveau = 'danger'
+    elif securise is True:
+        niveau = 'ok'
+    else:
+        niveau = 'warn'
+    return {'key': cle, 'label': label, 'enabled': actif,
+            'secure': securise, 'detail': detail, 'level': niveau}
+
+
+def _win_remote_access():
+    """Voies d'accès distant et d'administration, actives ou non.
+
+    Un port qui écoute ne dit pas si le service est *configuré* pour accepter
+    des connexions ; on lit donc l'état réel de chaque mécanisme (registre et
+    services), pas seulement la présence d'un port. L'ouverture automatique de
+    session est incluse : c'est un contournement d'authentification, et le mot
+    de passe traîne parfois en clair dans le registre — on en signale la
+    présence, jamais la valeur.
+    """
+    info = {}
+    data = _win_powershell_json(
+        "function svc($n){ $s=Get-Service -Name $n -ErrorAction SilentlyContinue; "
+        "if($s){ [PSCustomObject]@{Etat=[string]$s.Status; Demarrage=[string]$s.StartType} } else { $null } }; "
+        "$rdp=$null; try { $rdp=(Get-ItemProperty "
+        "'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -EA SilentlyContinue).fDenyTSConnections } catch {}; "
+        "$nla=$null; try { $nla=(Get-ItemProperty "
+        "'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server\\WinStations\\RDP-Tcp' -EA SilentlyContinue).UserAuthentication } catch {}; "
+        "$ra=$null; try { $ra=(Get-ItemProperty "
+        "'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Remote Assistance' -EA SilentlyContinue).fAllowToGetHelp } catch {}; "
+        "$telcli=Test-Path \"$env:SystemRoot\\System32\\telnet.exe\"; "
+        "$alo=$null; $alu=$null; $alp=$false; try { "
+        "$w=Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -EA SilentlyContinue; "
+        "$alo=$w.AutoAdminLogon; $alu=$w.DefaultUserName; $alp=[bool]$w.DefaultPassword } catch {}; "
+        "[PSCustomObject]@{ Rdp=$rdp; Nla=$nla; WinRM=(svc 'WinRM'); Sshd=(svc 'sshd'); "
+        "Telnet=(svc 'tlntsvr'); TelnetClient=$telcli; RemoteReg=(svc 'RemoteRegistry'); "
+        "RA=$ra; AutoLogon=$alo; AutoUser=$alu; AutoPwd=$alp } | ConvertTo-Json -Compress -Depth 4",
+        timeout=40,
+    )
+    if not data:
+        return info
+
+    def actif_service(bloc):
+        """Un service compte comme actif s'il tourne ou démarre automatiquement."""
+        if not isinstance(bloc, dict):
+            return None
+        etat = (bloc.get('Etat') or '').lower()
+        demarrage = (bloc.get('Demarrage') or '').lower()
+        if etat == 'running':
+            return True
+        if 'auto' in demarrage:
+            return True
+        return False
+
+    def detail_service(bloc):
+        if not isinstance(bloc, dict):
+            return 'service absent'
+        return 'service %s, démarrage %s' % (bloc.get('Etat') or '?',
+                                             bloc.get('Demarrage') or '?')
+
+    acces = []
+
+    # RDP : fDenyTSConnections = 1 signifie que les connexions sont refusées.
+    rdp_actif = None
+    if data.get('Rdp') is not None:
+        rdp_actif = not bool(data.get('Rdp'))
+        nla = bool(data['Nla']) if data.get('Nla') is not None else None
+        info['rdp_enabled'] = rdp_actif          # conservé pour les alertes et les vignettes
+        if rdp_actif and nla is not None:
+            info['rdp_nla'] = nla
+        detail = ('NLA actif' if nla else 'sans NLA — authentification faible') if rdp_actif else ''
+        acces.append(_acces('rdp', 'Bureau à distance (RDP)', rdp_actif, detail,
+                            securise=nla if rdp_actif else None))
+
+    winrm = data.get('WinRM')
+    acces.append(_acces('winrm', 'WinRM / PowerShell Remoting', actif_service(winrm),
+                        detail_service(winrm)))
+    sshd = data.get('Sshd')
+    acces.append(_acces('ssh', 'OpenSSH Server', actif_service(sshd), detail_service(sshd)))
+
+    telnet_srv = data.get('Telnet')
+    acces.append(_acces('telnet_server', 'Serveur Telnet', actif_service(telnet_srv),
+                        detail_service(telnet_srv), sensible=True))
+    acces.append(_acces('telnet_client', 'Client Telnet installé',
+                        bool(data.get('TelnetClient')),
+                        'commande telnet.exe présente' if data.get('TelnetClient') else '',
+                        sensible=False))
+
+    if data.get('RA') is not None:
+        ra_actif = bool(data.get('RA'))
+        acces.append(_acces('remote_assistance', 'Assistance à distance', ra_actif,
+                            'invitations autorisées' if ra_actif else '', sensible=ra_actif))
+
+    rreg = data.get('RemoteReg')
+    acces.append(_acces('remote_registry', 'Registre distant', actif_service(rreg),
+                        detail_service(rreg), sensible=actif_service(rreg)))
+
+    info['remote_access'] = acces
+
+    # Ouverture automatique de session : traitée à part, avec le compte concerné.
+    if str(data.get('AutoLogon') or '0') == '1':
+        info['autologon'] = {
+            'enabled': True,
+            'user': _clean(data.get('AutoUser')) or None,
+            'password_stored': bool(data.get('AutoPwd')),
+        }
+    else:
+        info['autologon'] = {'enabled': False, 'user': None, 'password_stored': False}
+
+    return info
+
+
+def _win_mail_accounts():
+    """Comptes de messagerie configurés — paramètres serveur, jamais les mots
+    de passe.
+
+    Les mots de passe d'Outlook (DPAPI) et de Thunderbird (NSS) sont
+    déchiffrables sous le compte de l'utilisateur ; les extraire ferait de ce
+    collecteur un outil de vol d'identifiants, et ces rapports se répliquent
+    d'une instance à l'autre. On se limite donc aux paramètres, et à un simple
+    drapeau « mot de passe enregistré ».
+    """
+    info = {}
+    comptes = []
+    comptes.extend(_mail_outlook_classique())
+    comptes.extend(_mail_thunderbird())
+
+    nouveau = _mail_new_outlook()
+    if comptes:
+        info['mail_accounts'] = comptes
+    if nouveau:
+        info['mail_new_outlook'] = nouveau
+    return info
+
+
+#: Reconnaît une adresse mail, pour récupérer celle des comptes Exchange dont
+#: seul le nom affiché porte l'adresse.
+_RE_EMAIL = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def _mail_decode(valeur):
+    """Décode une valeur de compte Outlook, souvent stockée en UTF-16."""
+    if isinstance(valeur, bytes):
+        try:
+            return valeur.decode('utf-16-le').rstrip('\x00').strip()
+        except Exception:
+            return ''
+    return _clean(valeur)
+
+
+def _mail_outlook_classique():
+    """Comptes Outlook « classique » lus dans le registre du profil.
+
+    Outlook range chaque compte sous un sous-profil ; les valeurs utiles
+    (adresse, serveurs, ports) sont mêlées à beaucoup de binaire. On ne retient
+    que ce qui se décode en texte, et on ignore le reste sans bruit.
+    """
+    if not IS_WINDOWS:
+        return []
+    try:
+        import winreg
+    except Exception:
+        return []
+
+    comptes = []
+    racine = r'Software\Microsoft\Office'
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, racine) as cle:
+            versions = []
+            i = 0
+            while True:
+                try:
+                    versions.append(winreg.EnumKey(cle, i)); i += 1
+                except OSError:
+                    break
+    except OSError:
+        return []
+
+    # 9375CFF0413111d3B88A00104B2A6676 est le conteneur des comptes de messagerie.
+    GUID = '9375CFF0413111d3B88A00104B2A6676'
+    for ver in versions:
+        base = r'%s\%s\Outlook\Profiles' % (racine, ver)
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, base) as cprof:
+                profils = []
+                i = 0
+                while True:
+                    try:
+                        profils.append(winreg.EnumKey(cprof, i)); i += 1
+                    except OSError:
+                        break
+        except OSError:
+            continue
+
+        for profil in profils:
+            chemin = r'%s\%s\%s' % (base, profil, GUID)
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, chemin) as ccpt:
+                    idx = 0
+                    while True:
+                        try:
+                            sous = winreg.EnumKey(ccpt, idx); idx += 1
+                        except OSError:
+                            break
+                        compte = _mail_lire_compte_outlook(
+                            winreg, r'%s\%s' % (chemin, sous), profil)
+                        if compte:
+                            comptes.append(compte)
+            except OSError:
+                continue
+    return comptes
+
+
+def _mail_lire_compte_outlook(winreg, chemin, profil):
+    """Extrait les paramètres lisibles d'un sous-compte Outlook."""
+    valeurs = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, chemin) as cle:
+            i = 0
+            while True:
+                try:
+                    nom, donnee, _ = winreg.EnumValue(cle, i); i += 1
+                except OSError:
+                    break
+                valeurs[nom] = donnee
+    except OSError:
+        return None
+
+    email = _mail_decode(valeurs.get('Email')) or _mail_decode(valeurs.get('SMTP Email Address'))
+    nom_affiche = _mail_decode(valeurs.get('Display Name')) or _mail_decode(valeurs.get('Account Name'))
+    imap = _mail_decode(valeurs.get('IMAP Server'))
+    pop = _mail_decode(valeurs.get('POP3 Server'))
+    smtp = _mail_decode(valeurs.get('SMTP Server'))
+    entrant = imap or pop
+
+    # Le profil contient aussi des entrées qui ne sont pas des comptes : carnet
+    # d'adresses, fichier de données PST. Elles n'ont ni adresse ni serveur.
+    if not email and _RE_EMAIL.match(nom_affiche or ''):
+        # Compte Exchange/Hotmail : l'adresse n'est que dans le nom affiché.
+        email = nom_affiche
+    if not (email or entrant or smtp):
+        return None
+
+    protocole = ('IMAP' if imap else 'POP3' if pop
+                 else 'Exchange/Autre' if email else '')
+
+    def port(nom):
+        v = valeurs.get(nom)
+        try:
+            return int(v) if v not in (None, '') else None
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        'client': 'Outlook',
+        'email': email,
+        'display_name': nom_affiche,
+        'protocol': protocole,
+        'incoming_server': entrant,
+        'incoming_port': port('IMAP Port') or port('POP3 Port'),
+        'outgoing_server': smtp,
+        'outgoing_port': port('SMTP Port'),
+        'password_stored': None,   # blob DPAPI présent ou non : non déterminé ici
+        'profile': _clean(profil),
+    }
+
+
+def _mail_thunderbird():
+    """Comptes Thunderbird, lus dans le prefs.js de chaque profil."""
+    base = os.path.join(os.environ.get('APPDATA', ''), 'Thunderbird', 'Profiles')
+    if not os.path.isdir(base):
+        return []
+
+    comptes = []
+    for profil in os.listdir(base):
+        prefs = os.path.join(base, profil, 'prefs.js')
+        if not os.path.isfile(prefs):
+            continue
+        try:
+            with open(prefs, 'r', encoding='utf-8', errors='replace') as f:
+                contenu = f.read()
+        except OSError:
+            continue
+        comptes.extend(_parse_thunderbird_prefs(contenu, profil))
+    return comptes
+
+
+def _parse_thunderbird_prefs(contenu, profil):
+    """Reconstruit les comptes à partir des `user_pref(...)` de Thunderbird.
+
+    Thunderbird éclate chaque compte entre un `mail.server.serverN` (réception),
+    un `mail.smtpserver.smtpM` (envoi) et une `mail.identity.idK` (adresse) ; on
+    rassemble ces morceaux par leurs identifiants.
+    """
+    prefs = {}
+    for m in re.finditer(r'user_pref\("([^"]+)",\s*(".*?"|true|false|-?\d+)\);', contenu):
+        cle, brut = m.group(1), m.group(2)
+        if brut.startswith('"'):
+            valeur = brut[1:-1]
+        elif brut in ('true', 'false'):
+            valeur = brut == 'true'
+        else:
+            valeur = int(brut)
+        prefs[cle] = valeur
+
+    def sous(prefixe):
+        ids = set()
+        for cle in prefs:
+            if cle.startswith(prefixe):
+                ids.add(cle[len(prefixe):].split('.', 1)[0])
+        return ids
+
+    identites = {}
+    for i in sous('mail.identity.'):
+        identites[i] = {
+            'email': prefs.get('mail.identity.%s.useremail' % i, ''),
+            'name': prefs.get('mail.identity.%s.fullName' % i, ''),
+            'smtp': prefs.get('mail.identity.%s.smtpServer' % i, ''),
+        }
+
+    smtps = {}
+    for s in sous('mail.smtpserver.'):
+        smtps[s] = {
+            'server': prefs.get('mail.smtpserver.%s.hostname' % s, ''),
+            'port': prefs.get('mail.smtpserver.%s.port' % s, None),
+        }
+
+    # Relie chaque serveur de réception à son identité via mail.account.*
+    id_par_serveur = {}
+    for a in sous('mail.account.'):
+        serveur = prefs.get('mail.account.%s.server' % a)
+        identity = prefs.get('mail.account.%s.identities' % a, '')
+        if serveur:
+            id_par_serveur[serveur] = (identity or '').split(',')[0].strip()
+
+    comptes = []
+    for s in sous('mail.server.'):
+        hote = prefs.get('mail.server.%s.hostname' % s)
+        if not hote:
+            continue
+        ident = identites.get(id_par_serveur.get(s, ''), {})
+        smtp = smtps.get((ident.get('smtp') or '').replace('smtp://', ''), {})
+        # L'identité peut désigner son smtp par clé (smtp1) ou par hôte.
+        if not smtp and ident.get('smtp'):
+            smtp = smtps.get(ident['smtp'], {})
+        comptes.append({
+            'client': 'Thunderbird',
+            'email': _clean(ident.get('email')),
+            'display_name': _clean(ident.get('name')),
+            'protocol': (prefs.get('mail.server.%s.type' % s, '') or '').upper(),
+            'incoming_server': _clean(hote),
+            'incoming_port': prefs.get('mail.server.%s.port' % s) or None,
+            'outgoing_server': _clean(smtp.get('server')),
+            'outgoing_port': smtp.get('port') or None,
+            # logins.json + key4.db : présence d'un secret enregistré, sans le lire
+            'password_stored': _thunderbird_a_un_secret(profil),
+            'profile': _clean(profil),
+        })
+    return comptes
+
+
+def _thunderbird_a_un_secret(profil):
+    """Vrai si le profil Thunderbird stocke des identifiants (sans les lire)."""
+    base = os.path.join(os.environ.get('APPDATA', ''), 'Thunderbird', 'Profiles', profil)
+    fichier = os.path.join(base, 'logins.json')
+    try:
+        if os.path.isfile(fichier) and os.path.getsize(fichier) > 2:
+            return True
+    except OSError:
+        pass
+    return None
+
+
+def _mail_new_outlook():
+    """Présence et comptes du « nouvel Outlook », dans la mesure du lisible.
+
+    Le nouvel Outlook range ses comptes dans le magasin de l'application
+    Courrier, hors du registre classique. On détecte sa présence et on tente d'y
+    lire les adresses ; ce qui n'est pas énumérable est signalé comme tel plutôt
+    que passé sous silence.
+    """
+    if not IS_WINDOWS:
+        return None
+    base = os.path.join(os.environ.get('LOCALAPPDATA', ''),
+                        'Packages')
+    if not os.path.isdir(base):
+        return None
+    paquet = None
+    try:
+        for nom in os.listdir(base):
+            if nom.lower().startswith('microsoft.outlookforwindows'):
+                paquet = nom
+                break
+    except OSError:
+        return None
+    if not paquet:
+        return None
+
+    adresses = []
+    # Les comptes du nouvel Outlook ne sont pas exposés de façon stable ; on
+    # remonte la seule présence, avec les adresses si un fichier lisible les
+    # contient. Ne pas inventer ce qu'on ne peut pas lire de façon fiable.
+    return {'installed': True, 'accounts': adresses,
+            'note': 'Comptes non énumérables de façon fiable — présence détectée'}
+
+
+#: ProgId de navigateur → nom lisible, pour l'association par défaut.
+_PROGID_NAVIGATEURS = {
+    'ChromeHTML': 'Google Chrome', 'FirefoxURL': 'Mozilla Firefox',
+    'MSEdgeHTM': 'Microsoft Edge', 'IE.HTTP': 'Internet Explorer',
+    'BraveHTML': 'Brave', 'OperaStable': 'Opera',
+    'AppXq0fevzme2pys62n3e0fbqa7peapykr8v': 'Microsoft Edge',
+}
+
+
+def _nom_client_mail(progid):
+    """Nom lisible d'un client mail à partir de son ProgId mailto."""
+    p = progid.lower()
+    if 'outlook' in p:
+        return 'Microsoft Outlook'
+    if 'thunderbird' in p:
+        return 'Mozilla Thunderbird'
+    if 'onenote' in p:
+        return 'OneNote'
+    return progid
+
+
+def _win_workstation_extras():
+    """Réglages du poste utiles au dépannage : applications par défaut,
+    navigateurs installés, lecteurs réseau, redémarrage en attente.
+    """
+    info = {}
+    data = _win_powershell_json(
+        # Association par défaut https et mailto (choix de l'utilisateur)
+        "$nav=$null; try { $nav=(Get-ItemProperty "
+        "'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice' "
+        "-EA SilentlyContinue).ProgId } catch {}; "
+        "$courriel=$null; try { $courriel=(Get-ItemProperty "
+        "'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\mailto\\UserChoice' "
+        "-EA SilentlyContinue).ProgId } catch {}; "
+        # Navigateurs installés : déclarés sous StartMenuInternet, avec leur exe
+        "$navs=@(); try { foreach ($ruche in @('HKLM:\\SOFTWARE\\Clients\\StartMenuInternet',"
+        "'HKCU:\\SOFTWARE\\Clients\\StartMenuInternet')) { "
+        "if (Test-Path $ruche) { foreach ($c in Get-ChildItem $ruche -EA SilentlyContinue) { "
+        "$exe=(Get-ItemProperty \"$($c.PSPath)\\shell\\open\\command\" -EA SilentlyContinue).'(default)'; "
+        "$exe=($exe -replace '\"','').Trim(); $ver=''; "
+        "if ($exe -and (Test-Path $exe)) { try { $ver=(Get-Item $exe).VersionInfo.ProductVersion } catch {} }; "
+        "$navs += [PSCustomObject]@{ Nom=(Get-ItemProperty $c.PSPath -EA SilentlyContinue).'(default)'; "
+        "Version=$ver; Exe=$exe } } } } } catch {}; "
+        # Lecteurs réseau mappés
+        "$lecteurs=@(); try { $lecteurs=@(Get-CimInstance Win32_MappedLogicalDisk -EA SilentlyContinue "
+        "| Select-Object DeviceID,ProviderName) } catch {}; "
+        # Redémarrage en attente : plusieurs indices possibles
+        "$rb=@(); "
+        "if (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending') { $rb+='Servicing (mise à jour de composants)' }; "
+        "if (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired') { $rb+='Windows Update' }; "
+        "try { if ((Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager' -EA SilentlyContinue).PendingFileRenameOperations) { $rb+='Fichiers en attente de renommage' } } catch {}; "
+        "[PSCustomObject]@{ Navigateur=$nav; Courriel=$courriel; Navigateurs=$navs; "
+        "Lecteurs=$lecteurs; Reboot=$rb } | ConvertTo-Json -Compress -Depth 4",
+        timeout=40,
+    )
+    if not data:
+        return info
+
+    prog_nav = _clean(data.get('Navigateur'))
+    if prog_nav:
+        info['default_browser'] = _PROGID_NAVIGATEURS.get(prog_nav, prog_nav)
+    prog_mail = _clean(data.get('Courriel'))
+    if prog_mail:
+        info['default_mail'] = _nom_client_mail(prog_mail)
+
+    navigateurs = []
+    for n in _as_list(data.get('Navigateurs')):
+        nom = _clean(n.get('Nom'))
+        if not nom:
+            continue
+        navigateurs.append({'name': nom, 'version': _clean(n.get('Version'))})
+    if navigateurs:
+        # Dédoublonnage : une même install peut figurer sous HKLM et HKCU.
+        vus, uniques = set(), []
+        for n in navigateurs:
+            if n['name'].lower() in vus:
+                continue
+            vus.add(n['name'].lower()); uniques.append(n)
+        info['installed_browsers'] = sorted(uniques, key=lambda n: n['name'].lower())
+
+    lecteurs = []
+    for d in _as_list(data.get('Lecteurs')):
+        lettre = _clean(d.get('DeviceID'))
+        chemin = _clean(d.get('ProviderName'))
+        if lettre or chemin:
+            lecteurs.append({'letter': lettre, 'path': chemin})
+    if lecteurs:
+        info['mapped_drives'] = sorted(lecteurs, key=lambda d: d['letter'])
+
+    raisons = [r for r in _as_list(data.get('Reboot')) if _clean(r)]
+    info['reboot_pending'] = bool(raisons)
+    if raisons:
+        info['reboot_reasons'] = raisons
 
     return info
 
@@ -4248,19 +4758,72 @@ def build_summary_sections(info):
     sections.append(s)
 
     # ── Hygiène ────────────────────────────────────────────────────────────
+    # Le bureau à distance et les autres voies d'accès sont dans « Accès
+    # distant » ci-dessous.
     s = _sec('hygiene', 'Hygiène système', '🧹')
     s['champs'] += [
         ('UAC', ('activé' if info['uac_enabled'] else 'désactivé')
          if info.get('uac_enabled') is not None else None),
-        ('Bureau à distance', ('activé%s' % (' (NLA)' if info.get('rdp_nla') else ' — sans NLA')
-                               if info['rdp_enabled'] else 'désactivé')
-         if info.get('rdp_enabled') is not None else None),
         ('Points de restauration',
          (len(info['restore_points']) or 'aucun') if isinstance(info.get('restore_points'), list)
          else info.get('restore_points')),
         ('Fichiers temporaires', ('%s Mo' % info['temp_files_mb'])
          if info.get('temp_files_mb') is not None else None),
     ]
+    sections.append(s)
+
+    # ── Accès distant ──────────────────────────────────────────────────────
+    s = _sec('acces', 'Accès distant', '🔓')
+    for a in info.get('remote_access') or []:
+        if a.get('enabled') is None:
+            etat = 'non installé'
+        else:
+            etat = 'ACTIF' if a['enabled'] else 'inactif'
+        detail = ' — %s' % a['detail'] if a.get('detail') else ''
+        s['champs'].append((a.get('label'), '%s%s' % (etat, detail)))
+    auto = info.get('autologon')
+    if auto is not None:
+        if auto.get('enabled'):
+            s['champs'].append(('Ouverture auto de session',
+                                'ACTIVÉE — %s%s' % (auto.get('user') or '?',
+                                ' (mot de passe en clair)' if auto.get('password_stored') else '')))
+        else:
+            s['champs'].append(('Ouverture auto de session', 'désactivée'))
+    sections.append(s)
+
+    # ── Messagerie ─────────────────────────────────────────────────────────
+    s = _sec('messagerie', 'Comptes de messagerie', '📧')
+    for m in info.get('mail_accounts') or []:
+        entrant = m.get('incoming_server') or ''
+        if entrant and m.get('incoming_port'):
+            entrant += ':%s' % m['incoming_port']
+        valeur = '%s%s%s' % (m.get('protocol') or 'compte',
+                             ' — %s' % entrant if entrant else '',
+                             ' (%s)' % m['client'])
+        s['champs'].append((m.get('email') or m.get('display_name') or '?', valeur))
+    nouveau = info.get('mail_new_outlook')
+    if nouveau and nouveau.get('installed'):
+        s['champs'].append(('Nouvel Outlook', 'installé — %s' % nouveau.get('note', '')))
+    if s['champs']:
+        s['notes'].append('Les mots de passe ne sont jamais collectés.')
+    sections.append(s)
+
+    # ── Applications par défaut & lecteurs réseau ──────────────────────────
+    s = _sec('poste', 'Applications par défaut & lecteurs', '🧭')
+    s['champs'] += [
+        ('Navigateur par défaut', info.get('default_browser')),
+        ('Client mail par défaut', info.get('default_mail')),
+        ('Redémarrage en attente',
+         ('oui — %s' % ', '.join(info.get('reboot_reasons') or []))
+         if info.get('reboot_pending') else
+         ('non' if info.get('reboot_pending') is not None else None)),
+    ]
+    if info.get('installed_browsers'):
+        s['listes'].append({'titre': 'Navigateurs installés', 'elements': [
+            '%s %s' % (b.get('name'), b.get('version') or '') for b in info['installed_browsers']]})
+    if info.get('mapped_drives'):
+        s['listes'].append({'titre': 'Lecteurs réseau mappés', 'elements': [
+            '%s → %s' % (d.get('letter'), d.get('path') or '?') for d in info['mapped_drives']]})
     sections.append(s)
 
     # ── Batterie ───────────────────────────────────────────────────────────
@@ -6052,11 +6615,8 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 '(ou cocher la case dans le collecteur graphique).', S['small']))
 
         # ── Environnement & hygiène ──────────────────────────────────────────
-        rdp = None
-        if info.get('rdp_enabled') is not None:
-            rdp = 'Activé' if info['rdp_enabled'] else 'Désactivé'
-            if info.get('rdp_enabled') and info.get('rdp_nla') is not None:
-                rdp += ', NLA %s' % ('actif' if info['rdp_nla'] else 'INACTIF')
+        # RDP est désormais dans « Accès distant & exposition », avec les autres
+        # voies d'accès.
         table = _pdf_kv_table(tk, [
             ('Rattachement',
              '%s (%s)' % (info.get('domain_name') or '—',
@@ -6069,7 +6629,6 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             ("Décalage d'horloge", info.get('time_offset')),
             ('UAC', ('Activé' if info.get('uac_enabled') else 'Désactivé')
              if info.get('uac_enabled') is not None else None),
-            ('Bureau à distance', rdp),
             ('Fichiers temporaires',
              '%s Mo récupérables' % info['temp_files_mb'] if info.get('temp_files_mb') else None),
             ('Points de restauration',
@@ -6081,6 +6640,83 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         if table:
             story.append(Paragraph('Environnement & hygiène système', S['h2']))
             story.append(table)
+
+        # ── Accès distant & exposition ───────────────────────────────────────
+        acces = info.get('remote_access') or []
+        if acces:
+            rows = []
+            for a in acces:
+                if a.get('enabled') is None:
+                    etat = 'Non installé'
+                else:
+                    etat = 'Actif' if a['enabled'] else 'Inactif'
+                rows.append([Paragraph(_pdf_escape(a.get('label')), S['body']),
+                             Paragraph(etat, S['body']),
+                             Paragraph(_pdf_escape(a.get('detail')), S['small'])])
+            story.append(Paragraph('Accès distant & exposition', S['h2']))
+            story.append(_pdf_data_table(tk, ['Voie d\'accès', 'État', 'Détail'],
+                                         rows, width, [0.34, 0.16, 0.50]))
+        autologon = info.get('autologon')
+        if autologon is not None:
+            if autologon.get('enabled'):
+                txt = 'ACTIVÉE — compte %s%s' % (
+                    autologon.get('user') or '?',
+                    ' (mot de passe en clair dans le registre)' if autologon.get('password_stored') else '')
+            else:
+                txt = 'Désactivée'
+            story.append(Paragraph('<b>Ouverture automatique de session :</b> %s'
+                                   % _pdf_escape(txt), S['body']))
+
+        # ── Comptes de messagerie ────────────────────────────────────────────
+        mails = info.get('mail_accounts') or []
+        if mails:
+            rows = []
+            for m in mails:
+                entrant = m.get('incoming_server') or ''
+                if entrant and m.get('incoming_port'):
+                    entrant += ':%s' % m['incoming_port']
+                sortant = m.get('outgoing_server') or ''
+                if sortant and m.get('outgoing_port'):
+                    sortant += ':%s' % m['outgoing_port']
+                mdp = ('enregistré' if m.get('password_stored')
+                       else 'non' if m.get('password_stored') is False else '—')
+                rows.append([Paragraph(_pdf_escape(m.get('client')), S['body']),
+                             Paragraph(_pdf_escape(m.get('email') or m.get('display_name')), S['mono']),
+                             Paragraph(_pdf_escape(m.get('protocol') or '—'), S['body']),
+                             Paragraph(_pdf_escape(entrant or '—'), S['mono']),
+                             Paragraph(_pdf_escape(sortant or '—'), S['mono']),
+                             Paragraph(mdp, S['small'])])
+            story.append(Paragraph('Comptes de messagerie (%d) — sans les mots de passe'
+                                   % len(mails), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Client', 'Adresse', 'Protocole', 'Entrant', 'Sortant', 'Mot de passe'],
+                rows, width, [0.12, 0.28, 0.12, 0.21, 0.21, 0.06]))
+        nouveau = info.get('mail_new_outlook')
+        if nouveau and nouveau.get('installed'):
+            story.append(Paragraph('Nouvel Outlook : installé — %s'
+                                   % _pdf_escape(nouveau.get('note')), S['small']))
+
+        # ── Applications par défaut & lecteurs réseau ────────────────────────
+        table = _pdf_kv_table(tk, [
+            ('Navigateur par défaut', info.get('default_browser')),
+            ('Client mail par défaut', info.get('default_mail')),
+            ('Navigateurs installés',
+             ', '.join('%s %s' % (b.get('name'), b.get('version') or '')
+                       for b in info['installed_browsers']).strip()
+             if info.get('installed_browsers') else None),
+            ('Redémarrage en attente',
+             ('Oui — %s' % ', '.join(info.get('reboot_reasons') or []))
+             if info.get('reboot_pending') else
+             ('Non' if info.get('reboot_pending') is not None else None)),
+        ], width)
+        if table:
+            story.append(Paragraph('Applications par défaut & lecteurs réseau', S['h2']))
+            story.append(table)
+        drives = info.get('mapped_drives') or []
+        if drives:
+            rows = [[Paragraph(_pdf_escape(d.get('letter')), S['mono']),
+                     Paragraph(_pdf_escape(d.get('path')), S['mono'])] for d in drives]
+            story.append(_pdf_data_table(tk, ['Lettre', 'Cible'], rows, width, [0.15, 0.85]))
 
         # ── Cartes graphiques ────────────────────────────────────────────────
         gpus = info.get('gpu_details') or []

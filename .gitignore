@@ -46,3 +46,6 @@ Thumbs.db
 
 # Docker local overrides
 docker-compose.override.yml
+
+# Rapports de test generes localement
+system-info-report_*.pdf

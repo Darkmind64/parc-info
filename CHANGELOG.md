@@ -1,5 +1,44 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.5] - 2026-08-11 🔎
+
+### 🔎 Trois nouvelles familles d'informations collectées
+
+Le collecteur remonte, et la fiche système comme le rapport PDF affichent :
+
+**Accès distant & exposition.** Une section dédiée réunit toutes les voies
+d'entrée, avec leur *état réel* (pas seulement un port qui écoute) : Bureau à
+distance (RDP, avec/sans NLA), WinRM / PowerShell Remoting, OpenSSH Server,
+serveur et client Telnet, Assistance à distance, Registre distant. Chacune est
+notée par criticité — un serveur Telnet actif ou un RDP sans NLA passent en
+rouge. S'y ajoute l'**ouverture automatique de session**, signalée comme un
+contournement d'authentification, avec un drapeau si le mot de passe traîne en
+clair dans le registre (jamais sa valeur). RDP, qui figurait sous « Hygiène »,
+rejoint cette section.
+
+**Comptes de messagerie — sans les mots de passe.** Outlook (classique) et
+Thunderbird sont lus complètement : adresse, protocole, serveurs entrant/sortant
+et ports ; le nouvel Outlook est détecté (ses comptes ne sont pas énumérables de
+façon fiable, c'est dit tel quel). Les pseudo-entrées d'Outlook (carnet
+d'adresses, fichier de données) sont écartées, et l'adresse des comptes Exchange
+est récupérée depuis le nom affiché.
+
+> **Les mots de passe ne sont pas collectés, et ce n'est pas une limite
+> technique.** Les blobs Outlook (DPAPI) et Thunderbird (NSS) sont déchiffrables
+> sous le compte de l'utilisateur ; les extraire ferait de l'outil un voleur
+> d'identifiants, et ces rapports se répliquent d'une instance à l'autre. Seule
+> la *présence* d'un mot de passe enregistré est notée.
+
+**Applications par défaut & lecteurs réseau.** Navigateur et client mail par
+défaut, navigateurs installés avec leurs versions, lecteurs réseau mappés, et un
+indicateur de redémarrage en attente (avec sa raison).
+
+Tout suit le même chemin que le reste : collecteur → aperçu du collecteur →
+fiche système → rapport PDF, sous garde du test de parité. Vérifié sur une
+collecte réelle (7 voies d'accès, 8 comptes mail, 5 lecteurs mappés).
+
+---
+
 ## [2.9.4] - 2026-08-11 🧹
 
 ### 🧹 Un reliquat verrouillé retardait la mise à jour de 26 secondes

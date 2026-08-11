@@ -31,6 +31,9 @@ TOLERANCES = {
     'disk_free_gb': 'affiché dans les barres par volume',
     'memory_slots_free': 'le PDF affiche occupés/total, qui le contient',
     'elevated': "l'avertissement d'élévation est rendu hors tableau",
+    'rdp_enabled': 'rendu dans « Accès distant » via remote_access ; la clé reste '
+                   "lue par build_alerts pour le point d'attention",
+    'rdp_nla': 'idem rdp_enabled — rendu via remote_access',
     'firewall': 'remplacé par firewall_profiles quand il est disponible',
     'bios_release_date': "utilisé pour calculer l'âge du matériel",
     'battery_charge_percent': 'consommé par les vignettes chiffrées',

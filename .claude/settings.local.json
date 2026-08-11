@@ -320,7 +320,18 @@
       "Bash(sed -i '16s#.*#### 🎉 v2.9.4 : Un reliquat verrouillé retardait la mise à jour#' README.md)",
       "Bash(curl -s \"https://hub.docker.com/v2/repositories/darkmind64/parcinfo/tags/v2.9.4\")",
       "Bash(MSYS_NO_PATHCONV=1 docker run --rm -v \"$\\(pwd\\):/src:ro\" -w //tmp python:3.11-slim sh -c 'mkdir -p /tmp/w && cp -r /src/. /tmp/w && cd /tmp/w && pip install -q -r requirements.txt 2>&1 | tail -1; python test_maj.py 2>&1 | tail -12')",
-      "Bash(MSYS_NO_PATHCONV=1 docker run --rm -v __CMDSUB_OUTPUT__:/src:ro -w //tmp python:3.11-slim sh -c 'mkdir -p /tmp/w && cp -r /src/. /tmp/w && cd /tmp/w && pip install -q -r requirements.txt reportlab 2>&1 | tail -1 *)"
+      "Bash(MSYS_NO_PATHCONV=1 docker run --rm -v __CMDSUB_OUTPUT__:/src:ro -w //tmp python:3.11-slim sh -c 'mkdir -p /tmp/w && cp -r /src/. /tmp/w && cd /tmp/w && pip install -q -r requirements.txt reportlab 2>&1 | tail -1 *)",
+      "Bash(python -c \"import collector_core\")",
+      "Bash(timeout 120 python -c ' *)",
+      "Bash(timeout 60 python -c ' *)",
+      "Bash(python -m compileall -q collector_core.py app.py)",
+      "Bash(awk -F: '$1>4314 && $1<4900')",
+      "Bash(awk 'NR>=4314 && NR<=4960 && \\(/_sec\\\\\\(/ || /rdp/ || /uac_enabled/ || /Bureau/ || /def build_summary_lines/ || /return sections/\\)' collector_core.py)",
+      "Bash(sed -i 's/2\\\\.9\\\\.4/2.9.5/g' version.json Dockerfile VERSION)",
+      "Bash(sed -i 's/__version__ = \"2\\\\.9\\\\.4\"/__version__ = \"2.9.5\"/; s/\\(2, 9, 4\\)/\\(2, 9, 5\\)/' __version__.py)",
+      "Bash(sed -i 's/v2\\\\.9\\\\.4/v2.9.5/g' README.md)",
+      "Bash(sed -i '9s/.*/**Version** : 2.9.5 ⭐ **Accès distant, comptes mail et applications par défaut collectés**  /' README.md)",
+      "Bash(sed -i '16s#.*#### 🎉 v2.9.5 : Accès distant, comptes mail, applications par défaut#' README.md)"
     ]
   }
 }

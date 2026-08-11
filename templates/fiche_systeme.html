@@ -1122,19 +1122,8 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
                     {{ 'Activé' if rapport.uac_enabled else 'Désactivé' }}</span></span>
             </div>
             {% endif %}
-            {% if rapport.rdp_enabled is defined %}
-            <div class="fs-row">
-                <span class="fs-label">Bureau à distance</span>
-                <span class="fs-value">
-                    <span class="fs-pill {{ 'fs-warn' if rapport.rdp_enabled else 'fs-muted' }}">
-                        {{ 'Activé' if rapport.rdp_enabled else 'Désactivé' }}</span>
-                    {% if rapport.rdp_enabled and rapport.rdp_nla is defined %}
-                    <span class="fs-pill {{ 'fs-ok' if rapport.rdp_nla else 'fs-bad' }}">
-                        NLA {{ 'actif' if rapport.rdp_nla else 'inactif' }}</span>
-                    {% endif %}
-                </span>
-            </div>
-            {% endif %}
+            {# Le bureau à distance et les autres voies d'accès sont rassemblés
+               dans la section « Accès distant & exposition » ci-dessous. #}
             {% if rapport.temp_files_mb %}
             {{ row("Fichiers temporaires", (rapport.temp_files_mb ~ ' Mo récupérables')) }}
             {% endif %}
@@ -1157,6 +1146,139 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         {% endfor %}
     </table>
     {% endif %}
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── ACCÈS DISTANT & EXPOSITION ───────────────────────────────────────── -->
+{% if rapport.remote_access or rapport.autologon is defined %}
+<div class="fs-section">
+    <h3>■ Accès distant &amp; exposition</h3>
+    {% if rapport.remote_access %}
+    <table class="fs-table">
+        <tr><th>Voie d'accès</th><th>État</th><th>Détail</th></tr>
+        {% for a in rapport.remote_access %}
+        <tr>
+            <td>{{ a.label }}</td>
+            <td>
+                {% if a.enabled is none %}
+                <span class="fs-pill fs-muted">Non installé</span>
+                {% else %}
+                <span class="fs-pill {{ {'ok':'fs-ok','warn':'fs-warn','danger':'fs-bad'}.get(a.level, 'fs-muted') }}">
+                    {{ 'Actif' if a.enabled else 'Inactif' }}</span>
+                {% endif %}
+            </td>
+            <td style="color:var(--text-secondary);font-size:.76rem;">{{ a.detail or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.autologon is defined %}
+    <div class="fs-row" style="margin-top:.7rem;">
+        <span class="fs-label">Ouverture auto de session</span>
+        <span class="fs-value">
+            {% if rapport.autologon.enabled %}
+            <span class="fs-pill fs-bad">Activée</span>
+            {% if rapport.autologon.user %}<span class="fs-mono">{{ rapport.autologon.user }}</span>{% endif %}
+            {% if rapport.autologon.password_stored %}
+            <span class="fs-pill fs-bad">mot de passe en clair dans le registre</span>
+            {% endif %}
+            {% else %}
+            <span class="fs-pill fs-ok">Désactivée</span>
+            {% endif %}
+        </span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── COMPTES DE MESSAGERIE ────────────────────────────────────────────── -->
+{% if rapport.mail_accounts or rapport.mail_new_outlook %}
+<div class="fs-section">
+    <h3>■ Comptes de messagerie{% if rapport.mail_accounts %} ({{ rapport.mail_accounts|length }}){% endif %}</h3>
+    {% if rapport.mail_accounts %}
+    <table class="fs-table">
+        <tr>
+            <th>Client</th><th>Adresse</th><th>Protocole</th>
+            <th>Serveur entrant</th><th>Serveur sortant</th><th>Mot de passe</th>
+        </tr>
+        {% for m in rapport.mail_accounts %}
+        <tr>
+            <td>{{ m.client }}</td>
+            <td class="fs-mono">{{ m.email or '—' }}{% if m.display_name and m.display_name != m.email %}
+                <span style="color:var(--text-secondary);">· {{ m.display_name }}</span>{% endif %}</td>
+            <td>{% if m.protocol %}<span class="fs-pill fs-muted">{{ m.protocol }}</span>{% else %}—{% endif %}</td>
+            <td class="fs-mono">{% if m.incoming_server %}{{ m.incoming_server }}{% if m.incoming_port %}:{{ m.incoming_port }}{% endif %}{% else %}—{% endif %}</td>
+            <td class="fs-mono">{% if m.outgoing_server %}{{ m.outgoing_server }}{% if m.outgoing_port %}:{{ m.outgoing_port }}{% endif %}{% else %}—{% endif %}</td>
+            <td>
+                {% if m.password_stored %}<span class="fs-pill fs-info">enregistré</span>
+                {% elif m.password_stored is sameas false %}<span class="fs-pill fs-muted">non</span>
+                {% else %}—{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    <div class="fs-label" style="font-size:.72rem;margin-top:.4rem;">
+        Les mots de passe ne sont jamais collectés — seule leur présence est notée.
+    </div>
+    {% endif %}
+    {% if rapport.mail_new_outlook and rapport.mail_new_outlook.installed %}
+    <div class="fs-row" style="margin-top:.6rem;">
+        <span class="fs-label">Nouvel Outlook</span>
+        <span class="fs-value">
+            <span class="fs-pill fs-info">Installé</span>
+            <span style="color:var(--text-secondary);font-size:.74rem;">{{ rapport.mail_new_outlook.note }}</span>
+        </span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── APPLICATIONS PAR DÉFAUT & LECTEURS RÉSEAU ────────────────────────── -->
+{% if rapport.default_browser or rapport.installed_browsers
+      or rapport.mapped_drives or rapport.reboot_pending is defined %}
+<div class="fs-section">
+    <h3>■ Applications par défaut &amp; lecteurs réseau</h3>
+    <div class="fs-grid">
+        <div>
+            {{ row("Navigateur par défaut", rapport.default_browser) }}
+            {{ row("Client mail par défaut", rapport.default_mail) }}
+            {% if rapport.reboot_pending is defined %}
+            <div class="fs-row">
+                <span class="fs-label">Redémarrage en attente</span>
+                <span class="fs-value">
+                    {% if rapport.reboot_pending %}
+                    <span class="fs-pill fs-warn">Oui</span>
+                    <span style="color:var(--text-secondary);font-size:.74rem;">{{ (rapport.reboot_reasons or [])|join(', ') }}</span>
+                    {% else %}
+                    <span class="fs-pill fs-ok">Non</span>
+                    {% endif %}
+                </span>
+            </div>
+            {% endif %}
+        </div>
+        <div>
+            {% if rapport.installed_browsers %}
+            <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">Navigateurs installés</div>
+            {% for b in rapport.installed_browsers %}
+            <div class="fs-row" style="grid-template-columns:1fr auto;">
+                <span class="fs-value">{{ b.name }}</span>
+                <span class="fs-mono" style="color:var(--text-secondary);">{{ b.version or '—' }}</span>
+            </div>
+            {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+
+    {% if rapport.mapped_drives %}
+    <div class="fs-label" style="font-size:.75rem;margin:.7rem 0 .35rem;">Lecteurs réseau mappés</div>
+    <table class="fs-table">
+        <tr><th>Lettre</th><th>Cible</th></tr>
+        {% for d in rapport.mapped_drives %}
+        <tr><td class="fs-mono">{{ d.letter }}</td><td class="fs-mono">{{ d.path or '—' }}</td></tr>
+        {% endfor %}
+    </table>
     {% endif %}
 </div>
 {% endif %}

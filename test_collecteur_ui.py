@@ -128,7 +128,44 @@ verifier(inconnu and inconnu['sante_niveau'] == 'muted',
 verifier(C.parse_physical_disk('disque macOS 500 Go') is None,
          'un format non reconnu est refusé plutôt que deviné')
 
-print("\n=== 4. Onglets de l'interface ===")
+print("\n=== 4. Criticité des voies d'accès distant ===")
+# Un accès sensible actif (Telnet, ouverture auto) doit passer en rouge ; RDP
+# sans NLA aussi ; un service arrêté reste neutre.
+rdp_nla_off = C._acces('rdp', 'RDP', True, '', securise=False)
+verifier(rdp_nla_off['level'] == 'danger', 'RDP sans NLA est signalé en rouge',
+         rdp_nla_off['level'])
+rdp_nla_on = C._acces('rdp', 'RDP', True, '', securise=True)
+verifier(rdp_nla_on['level'] == 'ok', 'RDP avec NLA est acceptable', rdp_nla_on['level'])
+telnet_on = C._acces('t', 'Telnet', True, '', sensible=True)
+verifier(telnet_on['level'] == 'danger', 'un serveur Telnet actif est en rouge')
+absent = C._acces('s', 'SSH', None, 'service absent')
+verifier(absent['level'] == 'muted', 'un service absent reste neutre')
+
+print("\n=== 5. Comptes Thunderbird reconstruits depuis prefs.js ===")
+PREFS = '\n'.join([
+    'user_pref("mail.account.account1.server", "server1");',
+    'user_pref("mail.account.account1.identities", "id1");',
+    'user_pref("mail.server.server1.hostname", "imap.exemple.fr");',
+    'user_pref("mail.server.server1.type", "imap");',
+    'user_pref("mail.server.server1.port", 993);',
+    'user_pref("mail.identity.id1.useremail", "jean@exemple.fr");',
+    'user_pref("mail.identity.id1.fullName", "Jean Exemple");',
+    'user_pref("mail.identity.id1.smtpServer", "smtp1");',
+    'user_pref("mail.smtpserver.smtp1.hostname", "smtp.exemple.fr");',
+    'user_pref("mail.smtpserver.smtp1.port", 587);',
+])
+comptes = C._parse_thunderbird_prefs(PREFS, 'profil.default')
+verifier(len(comptes) == 1, 'un compte reconstruit', '%d' % len(comptes))
+if comptes:
+    c0 = comptes[0]
+    verifier(c0['email'] == 'jean@exemple.fr', 'adresse reliée via identité', c0['email'])
+    verifier(c0['incoming_server'] == 'imap.exemple.fr' and c0['incoming_port'] == 993,
+             'serveur entrant + port', '%s:%s' % (c0['incoming_server'], c0['incoming_port']))
+    verifier(c0['outgoing_server'] == 'smtp.exemple.fr' and c0['outgoing_port'] == 587,
+             'serveur sortant relié par clé smtp', '%s:%s' % (c0['outgoing_server'], c0['outgoing_port']))
+    verifier(c0['protocol'] == 'IMAP', 'protocole', c0['protocol'])
+
+print("\n=== 6. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()
