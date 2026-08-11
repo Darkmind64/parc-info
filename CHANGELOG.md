@@ -1,5 +1,57 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.6] - 2026-08-11 🗂️
+
+### 🗂️ Fiche système et rapport PDF réorganisés par thème
+
+Les rubriques s'étaient accumulées dans l'ordre où elles ont été ajoutées, pas
+dans un ordre qui se lit facilement — le PDF en particulier avait fini par
+couper certains sujets en deux blocs distants de plusieurs pages. Revu dans la
+fiche système, le PDF et l'aperçu du collecteur, avec un objectif : une même
+information à un seul endroit, entourée de ce qui lui ressemble.
+
+**Sécurité et accès, un seul bloc.** Accès distant & exposition, Journal de
+sécurité et Certificats à renouveler rejoignent Sécurité & conformité — ils
+vivaient jusqu'ici après Environnement/Applications par défaut, ou dans un
+groupe « Diagnostic » sans rapport. Périphériques en erreur rejoint
+Périphériques USB.
+
+**Deux ressources réseau réunies.** Les partages exposés par la machine et les
+lecteurs mappés depuis d'autres machines vivaient respectivement dans
+« Démarrage » et « Applications par défaut » — aucun rapport avec l'un ni
+l'autre. Ils forment maintenant « Partages & lecteurs réseau », à côté de la
+configuration réseau. Le redémarrage en attente, qui n'avait rien à faire dans
+« Applications par défaut », a rejoint « Environnement & hygiène système ».
+
+**Cycle de vie regroupé.** Mises à jour disponibles et correctifs déjà
+installés — le même sujet — se suivent désormais, plutôt que d'être séparés
+par sept autres rubriques. Comptes utilisateurs et profils utilisateurs (leur
+occupation disque) sont adjacents.
+
+**Doublons supprimés.** Le rattachement au domaine s'affichait deux fois
+(une version sommaire, une plus complète avec le contrôleur de domaine) : la
+version sommaire disparaît. Dans le PDF spécifiquement — plus touché que la
+fiche, ayant accumulé une liste de rattrapage en fin de rapport — les comptes
+utilisateurs et les adaptateurs réseau apparaissaient chacun deux fois, sous
+deux formats différents ; ils ne sortent plus qu'une fois, sous leur forme la
+plus complète.
+
+**Le PDF rattrape aussi deux angles morts propres à lui.** L'identification et
+le détail matériel (processeur, carte mère, mémoire) étaient scindés en deux
+blocs séparés par Sécurité, Disques, Ports, USB et Licences — la même machine
+se décrivait à deux endroits distants du rapport ; ils sont fusionnés. La carte
+mère s'affichait comme une structure Python brute au lieu de son nom — un bug
+de longue date, invisible tant que personne n'avait ouvert un PDF avec cette
+page sous les yeux. Les disques physiques, passés en tableau avec badge SMART
+dans la fiche (2.9.3), restaient en phrase brute dans le PDF ; RAM totale et
+disponible n'y apparaissaient nulle part. Corrigés au passage.
+
+Vérifié sur une collecte réelle, fiche et PDF, plus un test qui fige
+l'emplacement de chaque donnée déplacée — pour qu'un futur ajout ne la
+laisse pas retomber dans « Diagnostic » ou « Applications par défaut ».
+
+---
+
 ## [2.9.5] - 2026-08-11 🔎
 
 ### 🔎 Trois nouvelles familles d'informations collectées

@@ -6,7 +6,7 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.9.5 ⭐ **Accès distant, comptes mail et applications par défaut collectés**  
+**Version** : 2.9.6 ⭐ **Fiche système et rapport PDF réorganisés par thème**  
 **Dernière mise à jour** : 2026-08-11
 
 ---
@@ -15,11 +15,12 @@ Application web **Python/Flask** pour la gestion d'inventaire informatique avec 
 
 
 
-La collecte gagne trois familles d'informations, visibles sur la fiche système
-et dans le rapport PDF : **accès distant & exposition** (RDP, WinRM, SSH, Telnet,
-Assistance à distance, ouverture auto de session), **comptes de messagerie**
-(Outlook, Thunderbird — paramètres serveur, jamais les mots de passe) et
-**applications par défaut & lecteurs réseau**. Voir le [CHANGELOG](CHANGELOG.md).
+La fiche système et le rapport PDF regroupent maintenant les mêmes informations
+par thème plutôt que par ordre d'ajout : sécurité, accès distant, journal de
+sécurité et certificats forment un seul bloc ; partages et lecteurs réseau sont
+réunis ; mises à jour et correctifs se suivent. Le PDF, qui avait accumulé un
+doublon (comptes utilisateurs listés deux fois) et un bug d'affichage (carte
+mère illisible), en profite aussi. Voir le [CHANGELOG](CHANGELOG.md).
 
 ### Rapports graphiques + inventaire USB automatique
 
@@ -78,9 +79,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.9.5/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.9.5/system-info-collector-gui.exe)
-- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.9.5/ParcInfo-Windows.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.9.6/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.9.6/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.9.6/ParcInfo-Windows.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -186,22 +187,22 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.9.5
+## 📥 Téléchargements v2.9.6
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger |
 |-----------|----------|
-| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.9.5/ParcInfo-Windows.exe) |
-| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.9.5/ParcInfo-macOS-ARM.zip) |
-| **Docker** | `docker pull darkmind64/parcinfo:v2.9.5` |
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.9.6/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.9.6/ParcInfo-macOS-ARM.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.9.6` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Usage |
 |------|-----------|----------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.9.5/system-info-collector-gui.exe) | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.9.5/system-info-collector.exe) | Automatisation/scripts |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.9.6/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.9.6/system-info-collector.exe) | Automatisation/scripts |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -220,7 +221,7 @@ python system-info-collector-gui.py
 python system-info-collector.py --client-id 5
 ```
 
-👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.9.5)
+👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.9.6)
 
 ---
 

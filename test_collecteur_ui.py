@@ -165,7 +165,57 @@ if comptes:
              'serveur sortant relié par clé smtp', '%s:%s' % (c0['outgoing_server'], c0['outgoing_port']))
     verifier(c0['protocol'] == 'IMAP', 'protocole', c0['protocol'])
 
-print("\n=== 6. Onglets de l'interface ===")
+print("\n=== 6. Chaque information sort dans la bonne rubrique, une seule fois ===")
+# Redémarrage en attente, lecteurs mappés, partages exposés, journal de
+# sécurité, certificats et profils utilisateurs vivaient tous dans des
+# rubriques sans rapport avec eux (Diagnostic, Applications par défaut) —
+# ou, pour le rattachement au domaine, en double avec Environnement. Ce test
+# fige leur nouvel emplacement pour que la fiche et le PDF, alignés dessus,
+# ne divergent pas à nouveau.
+DONNEES_REGROUPEMENT = dict(ETAPE_3, **{
+    'domain': 'ANCIEN-CHAMP', 'workgroup': 'ANCIEN-CHAMP',
+    'domain_name': 'exemple.local', 'domain_joined': True,
+    'default_browser': 'Firefox',
+    'reboot_pending': True, 'reboot_reasons': ['Windows Update'],
+    'mapped_drives': [{'letter': 'Z:', 'path': r'\\serveur\partage'}],
+    'smb_shares': [{'name': 'Public', 'path': r'C:\Public', 'administrative': False}],
+    'security_events': [{'compte': 'invite', 'type': 'Échec', 'count': 3}],
+    'certificates_expiring': [{'sujet': 'RDS', 'expire_le': '2026-09-01', 'jours_restants': 20}],
+    'user_profiles': [{'nom': 'Éric', 'taille_go': 12.5, 'mesure_complete': True}],
+})
+sections = {s['cle']: s for s in C.build_summary_sections(DONNEES_REGROUPEMENT)}
+
+
+def contenu(cle):
+    # Une rubrique sans aucun contenu est écartée par build_summary_sections
+    # (un onglet vide ne se distingue pas d'une collecte en échec) — absente,
+    # elle ne peut pas non plus contenir un doublon.
+    s = sections.get(cle)
+    if not s:
+        return ''
+    return ' | '.join([str(v) for _, v in s['champs']]
+                      + [str(e) for l in s['listes'] for e in l['elements']])
+
+
+verifier('domain' not in contenu('systeme') and 'ANCIEN-CHAMP' not in contenu('systeme'),
+         "le rattachement au domaine n'est plus doublé dans « Système »",
+         contenu('systeme')[:120])
+verifier('oui' in contenu('hygiene').lower() and 'Windows Update' in contenu('hygiene'),
+         'redémarrage en attente dans « Hygiène système »')
+verifier('reboot' not in contenu('poste').lower() and 'attente' not in contenu('poste').lower(),
+         "redémarrage en attente absent d'« Applications par défaut »")
+verifier(r'\\serveur\partage' in contenu('reseau') and 'Public' in contenu('reseau'),
+         'lecteurs mappés et partages exposés réunis dans « Réseau »')
+verifier(r'\\serveur\partage' not in contenu('poste'),
+         "lecteurs mappés absents d'« Applications par défaut »")
+verifier('invite' in contenu('securite') and 'RDS' in contenu('securite'),
+         'journal de sécurité et certificats dans « Sécurité »')
+verifier('invite' not in contenu('diagnostic') and 'RDS' not in contenu('diagnostic'),
+         "journal de sécurité et certificats absents de « Diagnostic »")
+verifier('12.5' in contenu('comptes'), 'profils utilisateurs dans « Comptes »')
+verifier('12.5' not in contenu('diagnostic'), "profils utilisateurs absents de « Diagnostic »")
+
+print("\n=== 7. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()

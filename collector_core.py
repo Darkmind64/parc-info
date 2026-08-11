@@ -4375,7 +4375,8 @@ def build_summary_sections(info):
          if info.get('windows_support') else None),
         ('Architecture', info.get('architecture')),
         ('Installé le', info.get('os_install_date')),
-        ('Domaine / Groupe', info.get('domain') or info.get('workgroup')),
+        # Le rattachement domaine/groupe de travail est repris, plus complet
+        # (avec contrôleur de domaine), dans la rubrique Environnement.
         ('Session ouverte', info.get('logged_on_user')),
         ('Propriétaire déclaré', info.get('registered_owner')),
         ('Uptime', ('%s jour(s)' % round(uptime / 24, 1)) if uptime is not None else None),
@@ -4561,6 +4562,17 @@ def build_summary_sections(info):
                             'elements': ['%s%s' % (p.get('port'),
                                                    ' — %s' % p['process'] if p.get('process') else '')
                                          for p in ports]})
+    # Deux faces de la même ressource : ce que la machine expose au réseau,
+    # et ce qu'elle y a mappé depuis d'autres machines.
+    if info.get('smb_shares'):
+        s['listes'].append({'titre': 'Partages réseau exposés', 'elements': [
+            '%s → %s%s' % (x.get('name', '?'), x.get('path', '?'),
+                           ' (administratif)' if x.get('administrative') else '')
+            if isinstance(x, dict) else str(x)
+            for x in info['smb_shares']]})
+    if info.get('mapped_drives'):
+        s['listes'].append({'titre': 'Lecteurs réseau mappés', 'elements': [
+            '%s → %s' % (d.get('letter'), d.get('path') or '?') for d in info['mapped_drives']]})
     sections.append(s)
 
     # ── Sécurité ───────────────────────────────────────────────────────────
@@ -4590,6 +4602,29 @@ def build_summary_sections(info):
         s['listes'].append({'titre': 'Pare-feu', 'elements': list(info['firewall'])})
     if info.get('bitlocker'):
         s['listes'].append({'titre': 'Chiffrement', 'elements': list(info['bitlocker'])})
+    if info.get('failed_logons'):
+        s['champs'].append(("Échecs d'ouverture de session (%d j)" % EVENT_WINDOW_DAYS,
+                            info['failed_logons']))
+    if info.get('account_lockouts'):
+        s['champs'].append(('Verrouillages de compte (%d j)' % EVENT_WINDOW_DAYS,
+                            info['account_lockouts']))
+    if info.get('security_events'):
+        s['listes'].append({'titre': 'Journal de sécurité', 'elements': [
+            '%s — %s ×%s%s%s' % (e.get('compte', '?'), e.get('type', '?'), e.get('count', 1),
+                                 ' — depuis %s' % ', '.join(e['sources']) if e.get('sources') else '',
+                                 ' — dernier %s' % e['last_seen'] if e.get('last_seen') else '')
+            if isinstance(e, dict) else str(e)
+            for e in info['security_events']]})
+    if info.get('certificates_expiring'):
+        s['listes'].append({'titre': 'Certificats à renouveler', 'elements': [
+            '%s — %s le %s (%s)' % (c.get('sujet', '?'),
+                                    'expiré' if c.get('expire') else 'expire',
+                                    c.get('expire_le', '?'),
+                                    'il y a %d j' % abs(c.get('jours_restants', 0))
+                                    if c.get('expire') else
+                                    'dans %d j' % c.get('jours_restants', 0))
+            if isinstance(c, dict) else str(c)
+            for c in info['certificates_expiring']]})
     sections.append(s)
 
     # ── Licences ───────────────────────────────────────────────────────────
@@ -4661,6 +4696,14 @@ def build_summary_sections(info):
     elif info.get('users'):
         s['champs'].append(('Total', '%d compte(s)' % len(info['users'])))
         s['listes'].append({'titre': 'Comptes locaux', 'elements': list(info['users'])})
+    if info.get('user_profiles'):
+        s['listes'].append({'titre': 'Occupation disque par profil', 'elements': [
+            '%s — %s Go%s%s' % (p.get('nom', '?'), p.get('taille_go', '?'),
+                                '' if p.get('mesure_complete') else ' (au moins — mesure interrompue)',
+                                ' — dernière utilisation %s' % p['derniere_utilisation']
+                                if p.get('derniere_utilisation') else '')
+            if isinstance(p, dict) else str(p)
+            for p in info['user_profiles']]})
     sections.append(s)
 
     # ── Diagnostic ─────────────────────────────────────────────────────────
@@ -4696,49 +4739,15 @@ def build_summary_sections(info):
         s['champs'].append(('Dernier démarrage', '%s s (moyenne %s s)'
                             % (info['boot_last_seconds'],
                                info.get('boot_average_seconds', '?'))))
-    if info.get('failed_logons'):
-        s['champs'].append(("Échecs d'ouverture de session (%d j)" % EVENT_WINDOW_DAYS,
-                            info['failed_logons']))
-    if info.get('account_lockouts'):
-        s['champs'].append(('Verrouillages de compte (%d j)' % EVENT_WINDOW_DAYS,
-                            info['account_lockouts']))
-    if info.get('security_events'):
-        s['listes'].append({'titre': 'Journal de sécurité', 'elements': [
-            '%s — %s ×%s%s%s' % (e.get('compte', '?'), e.get('type', '?'), e.get('count', 1),
-                                 ' — depuis %s' % ', '.join(e['sources']) if e.get('sources') else '',
-                                 ' — dernier %s' % e['last_seen'] if e.get('last_seen') else '')
-            if isinstance(e, dict) else str(e)
-            for e in info['security_events']]})
-    if info.get('certificates_expiring'):
-        s['listes'].append({'titre': 'Certificats à renouveler', 'elements': [
-            '%s — %s le %s (%s)' % (c.get('sujet', '?'),
-                                    'expiré' if c.get('expire') else 'expire',
-                                    c.get('expire_le', '?'),
-                                    'il y a %d j' % abs(c.get('jours_restants', 0))
-                                    if c.get('expire') else
-                                    'dans %d j' % c.get('jours_restants', 0))
-            if isinstance(c, dict) else str(c)
-            for c in info['certificates_expiring']]})
-    if info.get('user_profiles'):
-        s['listes'].append({'titre': 'Profils utilisateurs', 'elements': [
-            '%s — %s Go%s%s' % (p.get('nom', '?'), p.get('taille_go', '?'),
-                                '' if p.get('mesure_complete') else ' (au moins — mesure interrompue)',
-                                ' — dernière utilisation %s' % p['derniere_utilisation']
-                                if p.get('derniere_utilisation') else '')
-            if isinstance(p, dict) else str(p)
-            for p in info['user_profiles']]})
+    # Échecs d'ouverture de session, journal de sécurité et certificats sont
+    # dans la rubrique Sécurité ; profils utilisateurs dans Comptes ; partages
+    # réseau dans Réseau, à côté des lecteurs mappés.
     if info.get('problem_devices'):
         s['listes'].append({'titre': 'Périphériques en erreur', 'elements': [
             '%s — %s%s' % (p.get('name', '?'), p.get('libelle', '?'),
                            ' (%s)' % p['classe'] if p.get('classe') else '')
             if isinstance(p, dict) else str(p)
             for p in info['problem_devices']]})
-    if info.get('smb_shares'):
-        s['listes'].append({'titre': 'Partages réseau', 'elements': [
-            '%s → %s%s' % (x.get('name', '?'), x.get('path', '?'),
-                           ' (administratif)' if x.get('administrative') else '')
-            if isinstance(x, dict) else str(x)
-            for x in info['smb_shares']]})
     sections.append(s)
 
     # ── Environnement ──────────────────────────────────────────────────────
@@ -4769,6 +4778,10 @@ def build_summary_sections(info):
          else info.get('restore_points')),
         ('Fichiers temporaires', ('%s Mo' % info['temp_files_mb'])
          if info.get('temp_files_mb') is not None else None),
+        ('Redémarrage en attente',
+         ('oui — %s' % ', '.join(info.get('reboot_reasons') or []))
+         if info.get('reboot_pending') else
+         ('non' if info.get('reboot_pending') is not None else None)),
     ]
     sections.append(s)
 
@@ -4808,22 +4821,18 @@ def build_summary_sections(info):
         s['notes'].append('Les mots de passe ne sont jamais collectés.')
     sections.append(s)
 
-    # ── Applications par défaut & lecteurs réseau ──────────────────────────
-    s = _sec('poste', 'Applications par défaut & lecteurs', '🧭')
+    # ── Applications par défaut ──────────────────────────────────────────────
+    # Les lecteurs réseau mappés sont dans Réseau, avec les partages exposés ;
+    # le redémarrage en attente est dans Hygiène, avec les autres signaux de
+    # maintenance.
+    s = _sec('poste', 'Applications par défaut', '🧭')
     s['champs'] += [
         ('Navigateur par défaut', info.get('default_browser')),
         ('Client mail par défaut', info.get('default_mail')),
-        ('Redémarrage en attente',
-         ('oui — %s' % ', '.join(info.get('reboot_reasons') or []))
-         if info.get('reboot_pending') else
-         ('non' if info.get('reboot_pending') is not None else None)),
     ]
     if info.get('installed_browsers'):
         s['listes'].append({'titre': 'Navigateurs installés', 'elements': [
             '%s %s' % (b.get('name'), b.get('version') or '') for b in info['installed_browsers']]})
-    if info.get('mapped_drives'):
-        s['listes'].append({'titre': 'Lecteurs réseau mappés', 'elements': [
-            '%s → %s' % (d.get('letter'), d.get('path') or '?') for d in info['mapped_drives']]})
     sections.append(s)
 
     # ── Batterie ───────────────────────────────────────────────────────────
@@ -6244,40 +6253,205 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(Paragraph("Vue d'ensemble", S['h2']))
             story.append(kpis)
 
-        # ── Identification / Système ─────────────────────────────────────────
+        # ── Identification & système ─────────────────────────────────────────
+        # Regroupée en un seul bloc : elle était jusqu'ici coupée en deux,
+        # avec Sécurité / Disques / Ports / USB / Licences intercalés entre les
+        # deux moitiés — la même machine se décrivait à deux endroits distants
+        # du rapport.
         bios = info.get('bios_version', '')
         if bios and info.get('bios_release_date'):
             bios = f"{bios} ({info['bios_release_date']})"
         uptime = _num(info.get('uptime_hours'))
+        age_materiel = hardware_age_years(info.get('bios_release_date'))
 
-        for titre, rows in (
-            ('Identification', [
-                ('Nom de machine', info.get('hostname')),
-                ('Nom DNS', info.get('dns_name')),
-                ('Adresse MAC', info.get('mac_address')),
-                ('Adresse(s) IP', ', '.join(info.get('ip_addresses', []))),
-                ('Marque', info.get('brand')),
-                ('Modèle', info.get('model')),
-                ('Numéro de série', info.get('serial_number')),
-                ('Domaine / Groupe de travail', info.get('domain') or info.get('workgroup')),
-            ]),
-            ('Système & matériel', [
-                ("Système d'exploitation", info.get('os_name')),
-                ('Version', info.get('os_version')),
-                ('Détail plateforme', info.get('platform')),
-                ('BIOS', bios),
-                ('Processeur', info.get('cpu')),
-                ('Cœurs', info.get('cpu_cores')),
-                ('Carte graphique', info.get('gpu')),
-                ('Uptime', f'{uptime / 24:.1f} jour(s)' if uptime is not None else None),
-            ]),
-        ):
-            table = _pdf_kv_table(tk, rows, width)
-            if table:
-                story.append(Paragraph(titre, S['h2']))
-                story.append(table)
+        table = _pdf_kv_table(tk, [
+            ('Nom de machine', info.get('hostname')),
+            ('Nom DNS', info.get('dns_name')),
+            ("Type d'appareil", info.get('device_type')),
+            ('Châssis', info.get('chassis_type')),
+            ('Marque', info.get('brand')),
+            ('Modèle', info.get('model')),
+            ('Numéro de série', info.get('serial_number')),
+            ('Asset tag', info.get('asset_tag')),
+            ('Adresse MAC', info.get('mac_address')),
+            ('Adresse(s) IP', ', '.join(info.get('ip_addresses', []))),
+            # Le rattachement domaine/groupe de travail est repris, plus complet
+            # (avec contrôleur de domaine), dans « Environnement & hygiène ».
+            ("Système d'exploitation", info.get('os_name')),
+            ('Version', info.get('os_version')),
+            ('Build', info.get('os_build')),
+            ('Fin de support', ('%s — %s (%s)' % (
+                (info.get('windows_support') or {}).get('fin_de_support'),
+                (info.get('windows_support') or {}).get('version'),
+                'dépassée' if (info.get('windows_support') or {}).get('termine')
+                else 'dans %d jours' % (info.get('windows_support') or {}).get('jours_restants', 0)))
+             if info.get('windows_support') else None),
+            ('Architecture', info.get('architecture')),
+            ("Date d'installation de Windows", info.get('os_install_date')),
+            ('Propriétaire enregistré', info.get('registered_owner')),
+            ('Session ouverte', info.get('logged_on_user')),
+            ('Fuseau horaire', info.get('timezone')),
+            ('Uptime', f'{uptime / 24:.1f} jour(s)' if uptime is not None else None),
+            ('Hyperviseur détecté', 'Machine virtuelle / hyperviseur détecté'
+             if info.get('hypervisor_present') else None),
+            ('BIOS', bios or None),
+            ('Détail plateforme', info.get('platform')),
+            ('Dernière mise à jour Windows', info.get('last_windows_update')),
+            ('Horodatage de collecte', info.get('timestamp')),
+            ('Âge du matériel',
+             '%g an(s) (depuis la date du BIOS)' % age_materiel if age_materiel is not None else None),
+        ], width)
+        if table:
+            story.append(Paragraph('Identification & système', S['h2']))
+            story.append(table)
 
-        # ── Sécurité ─────────────────────────────────────────────────────────
+        # ── Processeur & carte mère ───────────────────────────────────────────
+        mb = info.get('motherboard') or {}
+        # `motherboard` est un dict ; le passer tel quel à une cellule
+        # produisait sa représentation Python brute dans le PDF.
+        carte_mere = ('%s %s' % (mb.get('manufacturer', ''), mb.get('model', ''))).strip() or None
+        table = _pdf_kv_table(tk, [
+            ('Processeur', info.get('cpu')),
+            ('Cœurs physiques / logiques',
+             '%s / %s' % (info.get('cpu_physical_cores'), info.get('cpu_logical_cores'))
+             if info.get('cpu_physical_cores') else None),
+            ('Cœurs', info.get('cpu_cores') if not info.get('cpu_physical_cores') else None),
+            ('Fréquence maximale',
+             '%s MHz' % info['cpu_max_clock_mhz'] if info.get('cpu_max_clock_mhz') else None),
+            ('Socket', info.get('cpu_socket')),
+            ('Nombre de sockets', info.get('cpu_sockets')),
+            ('Cache L3',
+             '%s Ko' % info['cpu_l3_cache_kb'] if info.get('cpu_l3_cache_kb') else None),
+            ('Virtualisation matérielle',
+             ('Activée' if info['cpu_virtualization'] else 'Désactivée')
+             if isinstance(info.get('cpu_virtualization'), bool)
+             else info.get('cpu_virtualization')),
+            ('Carte mère', carte_mere),
+            ('Version carte mère', mb.get('version')),
+            ('N° série carte mère', mb.get('serial_number')),
+        ], width)
+        if table:
+            story.append(Paragraph('Processeur & carte mère', S['h2']))
+            story.append(table)
+
+        # ── Mémoire ───────────────────────────────────────────────────────────
+        # N'existait pas comme rubrique propre : la RAM totale/disponible
+        # n'apparaissait nulle part, les emplacements étaient noyés dans
+        # « Détail matériel » et les barrettes dans une liste anonyme en fin
+        # de rapport.
+        table = _pdf_kv_table(tk, [
+            ('RAM totale', '%s GB' % info['ram_gb'] if info.get('ram_gb') else None),
+            ('RAM disponible', '%s GB' % info['ram_free_gb'] if info.get('ram_free_gb') else None),
+            ('Emplacements mémoire',
+             '%s occupés sur %s (max %s Go)' % (info.get('memory_slots_used'),
+                                                info.get('memory_slots_total'),
+                                                info.get('memory_max_gb'))
+             if info.get('memory_slots_total') else None),
+        ], width)
+        if table:
+            story.append(Paragraph('Mémoire', S['h2']))
+            story.append(table)
+        modules = info.get('memory_modules') or []
+        if modules:
+            for m in modules:
+                story.append(Paragraph(f'• {_pdf_escape(format_memory_module(m))}', S['body']))
+
+        # ── Stockage ─────────────────────────────────────────────────────────
+        drives = info.get('disk_drives', [])
+        if drives:
+            story.append(Paragraph('Disques logiques', S['h2']))
+            for raw in drives:
+                parsed = _parse_drive(raw)
+                if parsed and parsed[1] and parsed[2] is not None:
+                    label, total, used, _free = parsed
+                    pct = round(used / total * 100) if total else 0
+                    story.append(Paragraph(
+                        f'<b>{_pdf_escape(label)}</b> — {used:g} / {total:g} GB ({pct} %)',
+                        S['body']))
+                    story.append(tk['ProgressBar'](pct, _LEVEL_COLORS[_disk_level(pct)][0],
+                                                   width=width))
+                else:
+                    story.append(Paragraph(_pdf_escape(raw), S['body']))
+                story.append(Spacer(1, 5))
+
+        # Même lecture qu'à la fiche système : l'état SMART est reconstitué en
+        # badge plutôt que laissé en phrase brute — c'était le seul endroit où
+        # ce travail (2.9.3) n'avait pas été répercuté.
+        disques_physiques = [parse_physical_disk(str(d)) or {'nom': None, 'brut': str(d)}
+                             for d in (info.get('physical_disks') or [])]
+        if disques_physiques:
+            rows, extra = [], []
+            for i, d in enumerate(disques_physiques, start=1):
+                if d.get('brut'):
+                    rows.append([Paragraph(_pdf_escape(d['brut']), S['mono']), '', ''])
+                    continue
+                fg, bg = _LEVEL_COLORS.get(d.get('sante_niveau'), _LEVEL_COLORS['muted'])
+                etat = d.get('sante') or '—'
+                if d.get('etat'):
+                    etat += ' (%s)' % d['etat']
+                rows.append([
+                    Paragraph(f"<b>{_pdf_escape(d.get('nom'))}</b> "
+                              f"<font size='7' color='#6b7280'>{_pdf_escape(d.get('type'))}</font>",
+                              S['body']),
+                    Paragraph(f"{_pdf_escape(d.get('taille_go'))} GB", S['mono']),
+                    Paragraph(f'<font color="{fg}"><b>{_pdf_escape(etat)}</b></font>', S['body']),
+                ])
+                extra.append(('BACKGROUND', (2, i), (2, i), colors.HexColor(bg)))
+            story.append(Paragraph('Disques physiques (%d)' % len(disques_physiques), S['h2']))
+            story.append(_pdf_data_table(tk, ['Disque', 'Capacité', 'État SMART'],
+                                         rows, width, [0.52, 0.18, 0.30], extra))
+
+        fiabilite = info.get('disk_reliability') or []
+        if fiabilite:
+            story.append(Paragraph('Fiabilité des disques', S['h2']))
+            for r in fiabilite:
+                story.append(Paragraph(f'• {_pdf_escape(format_reliability(r))}', S['body']))
+
+        # ── Affichage & impression ────────────────────────────────────────────
+        # GPU, écrans et imprimantes vivaient à trois endroits distincts du
+        # rapport (l'un d'eux tout en bas, après Applications par défaut) :
+        # même sujet, un seul endroit désormais.
+        gpus = info.get('gpu_details') or []
+        if gpus:
+            rows = [[Paragraph(_pdf_escape(g.get('name')), S['body']),
+                     Paragraph(('%s GB' % g['vram_gb']) if g.get('vram_gb') else '—', S['body']),
+                     Paragraph(_pdf_escape(g.get('resolution')), S['body']),
+                     Paragraph(_pdf_escape(g.get('driver_version')), S['mono'])] for g in gpus]
+            story.append(Paragraph('Affichage & impression', S['h2']))
+            story.append(_pdf_data_table(tk, ['Carte graphique', 'VRAM', 'Résolution', 'Pilote'],
+                                         rows, width, [0.42, 0.12, 0.20, 0.26]))
+        ecrans = info.get('monitors') or []
+        if ecrans:
+            for m in ecrans:
+                story.append(Paragraph(f'• {_pdf_escape(format_monitor(m))}', S['body']))
+        imprimantes = info.get('printers') or []
+        if imprimantes:
+            for p in imprimantes:
+                story.append(Paragraph(f'• {_pdf_escape(format_printer(p))}', S['body']))
+
+        # ── Batterie ─────────────────────────────────────────────────────────
+        table = _pdf_kv_table(tk, [
+            ('Charge actuelle', info.get('battery')),
+            ('Santé',
+             '%s %% de la capacité d\'origine' % info['battery_health_percent']
+             if info.get('battery_health_percent') is not None else None),
+            ('Usure',
+             '%s %%' % info['battery_wear_percent']
+             if info.get('battery_wear_percent') is not None else None),
+            ('Cycles de charge', info.get('battery_cycles')),
+            ("Capacité d'origine",
+             '%s mWh' % info['battery_designed_capacity_mwh']
+             if info.get('battery_designed_capacity_mwh') else None),
+            ('Capacité réelle',
+             '%s mWh' % info['battery_full_capacity_mwh']
+             if info.get('battery_full_capacity_mwh') else None),
+            ('État', info.get('battery_health_status')),
+        ], width)
+        if table:
+            story.append(Paragraph('Batterie', S['h2']))
+            story.append(table)
+
+        # ── Sécurité & conformité ────────────────────────────────────────────
         sec_rows = []
         if info.get('antivirus_products'):
             for av in info['antivirus_products']:
@@ -6349,65 +6523,60 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             ] + extra))
             story.append(t)
 
-        # ── Disques logiques ─────────────────────────────────────────────────
-        drives = info.get('disk_drives', [])
-        if drives:
-            story.append(Paragraph('Disques logiques', S['h2']))
-            for raw in drives:
-                parsed = _parse_drive(raw)
-                if parsed and parsed[1] and parsed[2] is not None:
-                    label, total, used, _free = parsed
-                    pct = round(used / total * 100) if total else 0
-                    story.append(Paragraph(
-                        f'<b>{_pdf_escape(label)}</b> — {used:g} / {total:g} GB ({pct} %)',
-                        S['body']))
-                    story.append(tk['ProgressBar'](pct, _LEVEL_COLORS[_disk_level(pct)][0],
-                                                   width=width))
+        # ── Accès distant & exposition ───────────────────────────────────────
+        acces = info.get('remote_access') or []
+        if acces:
+            rows = []
+            for a in acces:
+                if a.get('enabled') is None:
+                    etat = 'Non installé'
                 else:
-                    story.append(Paragraph(_pdf_escape(raw), S['body']))
-                story.append(Spacer(1, 5))
+                    etat = 'Actif' if a['enabled'] else 'Inactif'
+                rows.append([Paragraph(_pdf_escape(a.get('label')), S['body']),
+                             Paragraph(etat, S['body']),
+                             Paragraph(_pdf_escape(a.get('detail')), S['small'])])
+            story.append(Paragraph('Accès distant & exposition', S['h2']))
+            story.append(_pdf_data_table(tk, ['Voie d\'accès', 'État', 'Détail'],
+                                         rows, width, [0.34, 0.16, 0.50]))
+        autologon = info.get('autologon')
+        if autologon is not None:
+            if autologon.get('enabled'):
+                txt = 'ACTIVÉE — compte %s%s' % (
+                    autologon.get('user') or '?',
+                    ' (mot de passe en clair dans le registre)' if autologon.get('password_stored') else '')
+            else:
+                txt = 'Désactivée'
+            story.append(Paragraph('<b>Ouverture automatique de session :</b> %s'
+                                   % _pdf_escape(txt), S['body']))
 
-        # ── Ports en écoute (cartes) ─────────────────────────────────────────
-        ports = info.get('listening_ports', [])
-        story.append(Paragraph(f'Ports en écoute ({len(ports)})', S['h2']))
-        story.extend(_pdf_port_cards(tk, ports, width))
-
-        # ── Périphériques USB ────────────────────────────────────────────────
-        usb = info.get('usb_devices', [])
-        story.append(Paragraph(f'Périphériques USB ({len(usb)})', S['h2']))
-        if usb:
-            inv = sum(1 for d in usb if d.get('inventoriable'))
+        # ── Journal de sécurité ───────────────────────────────────────────────
+        journal = info.get('security_events') or []
+        if journal:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(e.get('compte')), S['body']),
+                     Paragraph(_pdf_escape(e.get('type')), S['body']),
+                     Paragraph(str(e.get('count', '')), S['mono']),
+                     Paragraph(_pdf_escape(', '.join(e.get('sources') or [])), S['small']),
+                     Paragraph(_pdf_escape(e.get('last_seen')), S['mono'])] for e in journal]
             story.append(Paragraph(
-                f'{len(usb)} périphérique(s) détecté(s), dont {inv} repris dans '
-                "l'inventaire ParcInfo. Les éléments « Interne » (concentrateurs, "
-                'contrôleurs, nœuds composites) sont listés pour information.',
-                S['small']))
-            story.append(Spacer(1, 4))
-            rows, extra = [], []
-            for i, d in enumerate(usb, start=1):
-                meta = []
-                if d.get('serial'):
-                    meta.append(f'N° série {d["serial"]}')
-                if d.get('vid'):
-                    meta.append(f'{d["vid"]}:{d["pid"]}')
-                if d.get('manufacturer'):
-                    meta.append(d['manufacturer'])
-                etat, level = (('Inventorié', 'ok') if d.get('inventoriable')
-                               else ('Interne', 'muted'))
-                fg, bg = _LEVEL_COLORS[level]
-                rows.append([
-                    Paragraph(f'<b>{_pdf_escape(d["name"])}</b><br/>'
-                              f'<font size="6.8" color="#6b7280">'
-                              f'{_pdf_escape(" · ".join(meta) or "—")}</font>', S['body']),
-                    Paragraph(_pdf_escape(d['categorie']), S['body']),
-                    Paragraph(f'<font color="{fg}"><b>{etat}</b></font>', S['body']),
-                ])
-                extra.append(('BACKGROUND', (2, i), (2, i), colors.HexColor(bg)))
+                "Journal de sécurité — %s échec(s) d'ouverture, %s verrouillage(s)"
+                % (info.get('failed_logons', 0), info.get('account_lockouts', 0)), S['h2']))
             story.append(_pdf_data_table(
-                tk, ['Périphérique', 'Catégorie', 'Inventaire'], rows, width,
-                [0.55, 0.26, 0.19], extra))
-        else:
-            story.append(Paragraph('Aucun périphérique USB détecté.', S['small']))
+                tk, ['Compte', 'Type', 'Nb', 'Origine', 'Dernier'],
+                rows, width, [0.22, 0.24, 0.08, 0.26, 0.20]))
+
+        # ── Certificats à renouveler ──────────────────────────────────────────
+        certificats = info.get('certificates_expiring') or []
+        if certificats:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(c.get('sujet')), S['body']),
+                     Paragraph(_pdf_escape(c.get('emetteur')), S['small']),
+                     Paragraph(_pdf_escape(c.get('expire_le')), S['mono']),
+                     Paragraph(('expiré depuis %d j' % -c.get('jours_restants', 0))
+                               if c.get('expire') else ('%d j' % c.get('jours_restants', 0)),
+                               S['body'])] for c in certificats]
+            story.append(Paragraph('Certificats à renouveler (%d)' % len(certificats), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Sujet', 'Émetteur', 'Expiration', 'Reste'],
+                rows, width, [0.30, 0.34, 0.18, 0.18]))
 
         # ── Licences ─────────────────────────────────────────────────────────
         licences = info.get('licenses', [])
@@ -6455,82 +6624,86 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         else:
             story.append(Paragraph('Aucune licence détectée.', S['small']))
 
-        # ── Listes complémentaires ───────────────────────────────────────────
-        for titre, items in (
-            ('Barrettes mémoire',
-             [format_memory_module(m) for m in info.get('memory_modules', [])]),
-            ('Disques physiques', info.get('physical_disks', [])),
-            ('Fiabilité des disques',
-             [format_reliability(r) for r in info.get('disk_reliability', [])]),
-            ('Écrans', [format_monitor(m) for m in info.get('monitors', [])]),
-            ('Imprimantes', [format_printer(p) for p in info.get('printers', [])]),
-            ('Adaptateurs réseau', info.get('network_adapters', [])),
-            ('Comptes utilisateurs locaux', info.get('users', [])),
-        ):
-            if items:
-                story.append(Paragraph(f'{titre} ({len(items)})', S['h2']))
-                for item in items:
-                    story.append(Paragraph(f'• {_pdf_escape(item)}', S['body']))
+        # ── Périphériques USB ────────────────────────────────────────────────
+        usb = info.get('usb_devices', [])
+        story.append(Paragraph(f'Périphériques USB ({len(usb)})', S['h2']))
+        if usb:
+            inv = sum(1 for d in usb if d.get('inventoriable'))
+            story.append(Paragraph(
+                f'{len(usb)} périphérique(s) détecté(s), dont {inv} repris dans '
+                "l'inventaire ParcInfo. Les éléments « Interne » (concentrateurs, "
+                'contrôleurs, nœuds composites) sont listés pour information.',
+                S['small']))
+            story.append(Spacer(1, 4))
+            rows, extra = [], []
+            for i, d in enumerate(usb, start=1):
+                meta = []
+                if d.get('serial'):
+                    meta.append(f'N° série {d["serial"]}')
+                if d.get('vid'):
+                    meta.append(f'{d["vid"]}:{d["pid"]}')
+                if d.get('manufacturer'):
+                    meta.append(d['manufacturer'])
+                etat, level = (('Inventorié', 'ok') if d.get('inventoriable')
+                               else ('Interne', 'muted'))
+                fg, bg = _LEVEL_COLORS[level]
+                rows.append([
+                    Paragraph(f'<b>{_pdf_escape(d["name"])}</b><br/>'
+                              f'<font size="6.8" color="#6b7280">'
+                              f'{_pdf_escape(" · ".join(meta) or "—")}</font>', S['body']),
+                    Paragraph(_pdf_escape(d['categorie']), S['body']),
+                    Paragraph(f'<font color="{fg}"><b>{etat}</b></font>', S['body']),
+                ])
+                extra.append(('BACKGROUND', (2, i), (2, i), colors.HexColor(bg)))
+            story.append(_pdf_data_table(
+                tk, ['Périphérique', 'Catégorie', 'Inventaire'], rows, width,
+                [0.55, 0.26, 0.19], extra))
+        else:
+            story.append(Paragraph('Aucun périphérique USB détecté.', S['small']))
 
-        # ── Détail matériel ──────────────────────────────────────────────────
-        table = _pdf_kv_table(tk, [
-            ('Carte mère', info.get('motherboard')),
-            ('Châssis', info.get('chassis_type')),
-            ('Asset tag', info.get('asset_tag')),
-            ('Cœurs physiques / logiques',
-             '%s / %s' % (info.get('cpu_physical_cores'), info.get('cpu_logical_cores'))
-             if info.get('cpu_physical_cores') else None),
-            ('Fréquence maximale',
-             '%s MHz' % info['cpu_max_clock_mhz'] if info.get('cpu_max_clock_mhz') else None),
-            ('Architecture', info.get('architecture')),
-            ('Socket', info.get('cpu_socket')),
-            ('Nombre de sockets', info.get('cpu_sockets')),
-            ('Cache L3',
-             '%s Ko' % info['cpu_l3_cache_kb'] if info.get('cpu_l3_cache_kb') else None),
-            ('Virtualisation matérielle',
-             ('Activée' if info['cpu_virtualization'] else 'Désactivée')
-             if isinstance(info.get('cpu_virtualization'), bool)
-             else info.get('cpu_virtualization')),
-            ('Hyperviseur détecté', 'Oui' if info.get('hypervisor_present') else None),
-            ('Emplacements mémoire',
-             '%s occupés sur %s (max %s Go)' % (info.get('memory_slots_used'),
-                                                info.get('memory_slots_total'),
-                                                info.get('memory_max_gb'))
-             if info.get('memory_slots_total') else None),
-            ("Date d'installation de Windows", info.get('os_install_date')),
-            ('Build', info.get('os_build')),
-            ('Fuseau horaire', info.get('timezone')),
-            ('Propriétaire enregistré', info.get('registered_owner')),
-            ('Session ouverte', info.get('logged_on_user')),
-            ('Âge du matériel',
-             '%g an(s) (depuis la date du BIOS)' % hardware_age_years(info.get('bios_release_date'))
-             if hardware_age_years(info.get('bios_release_date')) is not None else None),
-        ], width)
-        if table:
-            story.append(Paragraph('Détail matériel & système', S['h2']))
-            story.append(table)
+        # ── Périphériques en erreur ───────────────────────────────────────────
+        en_erreur = info.get('problem_devices') or []
+        if en_erreur:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(p.get('name')), S['body']),
+                     Paragraph(_pdf_escape(p.get('classe')), S['body']),
+                     Paragraph(_pdf_escape(p.get('fabricant')), S['body']),
+                     Paragraph('%s (code %s)' % (_pdf_escape(p.get('libelle')), p.get('code')),
+                               S['small'])] for p in en_erreur]
+            story.append(Paragraph('Périphériques en erreur (%d)' % len(en_erreur), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Périphérique', 'Classe', 'Fabricant', 'Diagnostic'],
+                rows, width, [0.32, 0.14, 0.18, 0.36]))
 
-        # ── Batterie ─────────────────────────────────────────────────────────
-        table = _pdf_kv_table(tk, [
-            ('Charge actuelle', info.get('battery')),
-            ('Santé',
-             '%s %% de la capacité d\'origine' % info['battery_health_percent']
-             if info.get('battery_health_percent') is not None else None),
-            ('Usure',
-             '%s %%' % info['battery_wear_percent']
-             if info.get('battery_wear_percent') is not None else None),
-            ('Cycles de charge', info.get('battery_cycles')),
-            ("Capacité d'origine",
-             '%s mWh' % info['battery_designed_capacity_mwh']
-             if info.get('battery_designed_capacity_mwh') else None),
-            ('Capacité réelle',
-             '%s mWh' % info['battery_full_capacity_mwh']
-             if info.get('battery_full_capacity_mwh') else None),
-            ('État', info.get('battery_health_status')),
-        ], width)
-        if table:
-            story.append(Paragraph('Batterie', S['h2']))
-            story.append(table)
+        # ── Réseau ───────────────────────────────────────────────────────────
+        # Adaptateurs et ports en écoute vivaient à trois endroits séparés du
+        # rapport (dont un doublon : les mêmes cartes réseau ressortaient en
+        # liste brute plus loin) ; ils sont désormais ensemble.
+        adaptateurs = info.get('network_adapter_details') or []
+        if adaptateurs:
+            rows = []
+            for a in adaptateurs:
+                ips = ' · '.join('%s/%s' % (i['address'], i['prefix'])
+                                 for i in a.get('ip_addresses') or []) or '—'
+                rows.append([
+                    Paragraph('<b>%s</b>' % _pdf_escape(a['name']), S['body']),
+                    Paragraph('Physique' if a.get('physical') else 'Virtuelle', S['body']),
+                    Paragraph(_pdf_escape(ips), S['mono']),
+                    Paragraph(_pdf_escape(a.get('link_speed')), S['body']),
+                    Paragraph(_pdf_escape(a.get('mac_address')), S['mono']),
+                ])
+            story.append(Paragraph('Réseau', S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Interface', 'Nature', 'Adresse IP / plage', 'Débit', 'MAC'],
+                rows, width, [0.26, 0.13, 0.27, 0.14, 0.20]))
+        elif info.get('network_adapters'):
+            # Repli pour une collecte antérieure, sans détail structuré.
+            story.append(Paragraph('Réseau', S['h2']))
+            for a in info['network_adapters']:
+                story.append(Paragraph(f'• {_pdf_escape(a)}', S['body']))
+
+        ports = info.get('listening_ports', [])
+        story.append(Paragraph(f'Ports en écoute ({len(ports)})', S['h2']))
+        story.extend(_pdf_port_cards(tk, ports, width))
 
         # ── Configuration réseau ─────────────────────────────────────────────
         proxy = info.get('proxy') or {}
@@ -6548,12 +6721,12 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(Paragraph('Configuration réseau', S['h2']))
             story.append(table)
 
-        profils = info.get('network_profiles') or []
-        if profils:
+        profils_reseau = info.get('network_profiles') or []
+        if profils_reseau:
             rows = [[Paragraph(_pdf_escape(p['name']), S['body']),
                      Paragraph(_pdf_escape(p.get('interface')), S['body']),
                      Paragraph(_pdf_escape(p.get('category')), S['body']),
-                     Paragraph(_pdf_escape(p.get('connectivity')), S['body'])] for p in profils]
+                     Paragraph(_pdf_escape(p.get('connectivity')), S['body'])] for p in profils_reseau]
             story.append(Paragraph('Environnement réseau détecté', S['h2']))
             story.append(_pdf_data_table(
                 tk, ['Réseau', 'Interface', 'Catégorie', 'Connectivité'], rows, width,
@@ -6567,24 +6740,6 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(Paragraph('Serveurs DNS', S['h2']))
             story.append(_pdf_data_table(tk, ['Interface', 'Serveurs', 'Attribution'],
                                          rows, width, [0.42, 0.38, 0.20]))
-
-        adaptateurs = info.get('network_adapter_details') or []
-        if adaptateurs:
-            rows = []
-            for a in adaptateurs:
-                ips = ' · '.join('%s/%s' % (i['address'], i['prefix'])
-                                 for i in a.get('ip_addresses') or []) or '—'
-                rows.append([
-                    Paragraph('<b>%s</b>' % _pdf_escape(a['name']), S['body']),
-                    Paragraph('Physique' if a.get('physical') else 'Virtuelle', S['body']),
-                    Paragraph(_pdf_escape(ips), S['mono']),
-                    Paragraph(_pdf_escape(a.get('link_speed')), S['body']),
-                    Paragraph(_pdf_escape(a.get('mac_address')), S['mono']),
-                ])
-            story.append(Paragraph('Adaptateurs réseau', S['h2']))
-            story.append(_pdf_data_table(
-                tk, ['Interface', 'Nature', 'Adresse IP / plage', 'Débit', 'MAC'],
-                rows, width, [0.26, 0.13, 0.27, 0.14, 0.20]))
 
         # ── Qualité du lien ──────────────────────────────────────────────────
         latence = info.get('latency') or []
@@ -6614,9 +6769,27 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 'Débit descendant : non mesuré — relancer avec --test-debit '
                 '(ou cocher la case dans le collecteur graphique).', S['small']))
 
-        # ── Environnement & hygiène ──────────────────────────────────────────
-        # RDP est désormais dans « Accès distant & exposition », avec les autres
-        # voies d'accès.
+        # ── Partages & lecteurs réseau ────────────────────────────────────────
+        # Deux faces de la même ressource : ce que la machine expose au réseau,
+        # et ce qu'elle y a mappé depuis d'autres machines. Elles vivaient
+        # jusqu'ici dans « Démarrage » et « Applications par défaut ».
+        partages = info.get('smb_shares') or []
+        if partages:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(s['name']), S['body']),
+                     Paragraph(_pdf_escape(s.get('path')), S['mono']),
+                     Paragraph('Administration' if s.get('administrative') else 'Exposé',
+                               S['body'])] for s in partages]
+            story.append(Paragraph('Partages réseau exposés (%d)' % len(partages), S['h2']))
+            story.append(_pdf_data_table(tk, ['Partage', 'Chemin', 'Nature'],
+                                         rows, width, [0.32, 0.46, 0.22]))
+        lecteurs = info.get('mapped_drives') or []
+        if lecteurs:
+            rows = [[Paragraph(_pdf_escape(d.get('letter')), S['mono']),
+                     Paragraph(_pdf_escape(d.get('path')), S['mono'])] for d in lecteurs]
+            story.append(Paragraph('Lecteurs réseau mappés (%d)' % len(lecteurs), S['h2']))
+            story.append(_pdf_data_table(tk, ['Lettre', 'Cible'], rows, width, [0.15, 0.85]))
+
+        # ── Environnement & hygiène système ───────────────────────────────────
         table = _pdf_kv_table(tk, [
             ('Rattachement',
              '%s (%s)' % (info.get('domain_name') or '—',
@@ -6636,36 +6809,14 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                                                    info['restore_points'][-1]['when']))
              if info.get('restore_points') else
              ('Aucun — retour arrière impossible' if 'restore_points' in info else None)),
+            ('Redémarrage en attente',
+             ('Oui — %s' % ', '.join(info.get('reboot_reasons') or []))
+             if info.get('reboot_pending') else
+             ('Non' if info.get('reboot_pending') is not None else None)),
         ], width)
         if table:
             story.append(Paragraph('Environnement & hygiène système', S['h2']))
             story.append(table)
-
-        # ── Accès distant & exposition ───────────────────────────────────────
-        acces = info.get('remote_access') or []
-        if acces:
-            rows = []
-            for a in acces:
-                if a.get('enabled') is None:
-                    etat = 'Non installé'
-                else:
-                    etat = 'Actif' if a['enabled'] else 'Inactif'
-                rows.append([Paragraph(_pdf_escape(a.get('label')), S['body']),
-                             Paragraph(etat, S['body']),
-                             Paragraph(_pdf_escape(a.get('detail')), S['small'])])
-            story.append(Paragraph('Accès distant & exposition', S['h2']))
-            story.append(_pdf_data_table(tk, ['Voie d\'accès', 'État', 'Détail'],
-                                         rows, width, [0.34, 0.16, 0.50]))
-        autologon = info.get('autologon')
-        if autologon is not None:
-            if autologon.get('enabled'):
-                txt = 'ACTIVÉE — compte %s%s' % (
-                    autologon.get('user') or '?',
-                    ' (mot de passe en clair dans le registre)' if autologon.get('password_stored') else '')
-            else:
-                txt = 'Désactivée'
-            story.append(Paragraph('<b>Ouverture automatique de session :</b> %s'
-                                   % _pdf_escape(txt), S['body']))
 
         # ── Comptes de messagerie ────────────────────────────────────────────
         mails = info.get('mail_accounts') or []
@@ -6696,7 +6847,9 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(Paragraph('Nouvel Outlook : installé — %s'
                                    % _pdf_escape(nouveau.get('note')), S['small']))
 
-        # ── Applications par défaut & lecteurs réseau ────────────────────────
+        # ── Applications par défaut ───────────────────────────────────────────
+        # Lecteurs réseau mappés et redémarrage en attente ont rejoint,
+        # respectivement, Partages & lecteurs réseau et Environnement & hygiène.
         table = _pdf_kv_table(tk, [
             ('Navigateur par défaut', info.get('default_browser')),
             ('Client mail par défaut', info.get('default_mail')),
@@ -6704,40 +6857,47 @@ def generate_pdf_report(info, client_id=None, client_name=None):
              ', '.join('%s %s' % (b.get('name'), b.get('version') or '')
                        for b in info['installed_browsers']).strip()
              if info.get('installed_browsers') else None),
-            ('Redémarrage en attente',
-             ('Oui — %s' % ', '.join(info.get('reboot_reasons') or []))
-             if info.get('reboot_pending') else
-             ('Non' if info.get('reboot_pending') is not None else None)),
         ], width)
         if table:
-            story.append(Paragraph('Applications par défaut & lecteurs réseau', S['h2']))
+            story.append(Paragraph('Applications par défaut', S['h2']))
             story.append(table)
-        drives = info.get('mapped_drives') or []
-        if drives:
-            rows = [[Paragraph(_pdf_escape(d.get('letter')), S['mono']),
-                     Paragraph(_pdf_escape(d.get('path')), S['mono'])] for d in drives]
-            story.append(_pdf_data_table(tk, ['Lettre', 'Cible'], rows, width, [0.15, 0.85]))
 
-        # ── Cartes graphiques ────────────────────────────────────────────────
-        gpus = info.get('gpu_details') or []
-        if gpus:
-            rows = [[Paragraph(_pdf_escape(g.get('name')), S['body']),
-                     Paragraph(('%s GB' % g['vram_gb']) if g.get('vram_gb') else '—', S['body']),
-                     Paragraph(_pdf_escape(g.get('resolution')), S['body']),
-                     Paragraph(_pdf_escape(g.get('driver_version')), S['mono'])] for g in gpus]
-            story.append(Paragraph('Cartes graphiques', S['h2']))
-            story.append(_pdf_data_table(tk, ['Carte', 'VRAM', 'Résolution', 'Pilote'],
-                                         rows, width, [0.42, 0.12, 0.20, 0.26]))
+        # ── Comptes utilisateurs ─────────────────────────────────────────────
+        comptes = info.get('users_details') or []
+        if comptes:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(u['name']), S['body']),
+                     Paragraph(_pdf_escape(u['status']), S['body']),
+                     Paragraph(_pdf_escape(u['role']), S['body']),
+                     Paragraph(_pdf_escape(u['account_type']), S['body']),
+                     Paragraph("N'expire jamais" if u.get('password_never_expires') else 'Expire',
+                               S['body']),
+                     Paragraph(_pdf_escape(u.get('last_logon') or 'jamais'), S['mono'])]
+                    for u in comptes]
+            story.append(Paragraph('Comptes utilisateurs locaux (%d)' % len(comptes), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Compte', 'État', 'Type', 'Compte', 'Mot de passe', 'Connexion'],
+                rows, width, [0.22, 0.13, 0.19, 0.12, 0.18, 0.16]))
+        elif info.get('users'):
+            # Collecte antérieure : uniquement la forme textuelle. La table
+            # ci-dessus la couvre déjà quand `users_details` existe — l'écrire
+            # aussi ici doublonnerait les mêmes comptes.
+            story.append(Paragraph('Comptes utilisateurs locaux (%d)' % len(info['users']), S['h2']))
+            for u in info['users']:
+                story.append(Paragraph(f'• {_pdf_escape(u)}', S['body']))
 
-        # ── Correctifs installés ─────────────────────────────────────────────
-        correctifs = info.get('hotfixes') or []
-        if correctifs:
-            rows = [[Paragraph(_pdf_escape(h.get('id')), S['mono']),
-                     Paragraph(_pdf_escape(h.get('installed_on')), S['body']),
-                     Paragraph(_pdf_escape(h.get('description')), S['body'])] for h in correctifs]
-            story.append(Paragraph('Correctifs Windows installés (%d)' % len(correctifs), S['h2']))
-            story.append(_pdf_data_table(tk, ['Correctif', 'Installé le', 'Type'],
-                                         rows, width, [0.30, 0.30, 0.40]))
+        # ── Profils utilisateurs ──────────────────────────────────────────────
+        profils_utilisateurs = info.get('user_profiles') or []
+        if profils_utilisateurs:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(p.get('nom')), S['body']),
+                     Paragraph(_pdf_escape(p.get('chemin')), S['small']),
+                     Paragraph('%s Go' % p.get('taille_go'), S['mono']),
+                     Paragraph(_pdf_escape(p.get('derniere_utilisation')), S['mono']),
+                     Paragraph('complète' if p.get('mesure_complete') else 'interrompue',
+                               S['small'])] for p in profils_utilisateurs]
+            story.append(Paragraph('Profils utilisateurs (%d)' % len(profils_utilisateurs), S['h2']))
+            story.append(_pdf_data_table(
+                tk, ['Profil', 'Emplacement', 'Taille', 'Dernière utilisation', 'Mesure'],
+                rows, width, [0.18, 0.34, 0.14, 0.20, 0.14]))
 
         # ── Incidents système ────────────────────────────────────────────────
         incidents = info.get('system_incidents') or []
@@ -6769,23 +6929,19 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(_pdf_data_table(tk, ['Mise à jour', 'KB', 'Taille', 'Nature'],
                                          rows, width, [0.54, 0.14, 0.12, 0.20]))
 
-        # ── Comptes utilisateurs ─────────────────────────────────────────────
-        comptes = info.get('users_details') or []
-        if comptes:
-            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(u['name']), S['body']),
-                     Paragraph(_pdf_escape(u['status']), S['body']),
-                     Paragraph(_pdf_escape(u['role']), S['body']),
-                     Paragraph(_pdf_escape(u['account_type']), S['body']),
-                     Paragraph("N'expire jamais" if u.get('password_never_expires') else 'Expire',
-                               S['body']),
-                     Paragraph(_pdf_escape(u.get('last_logon') or 'jamais'), S['mono'])]
-                    for u in comptes]
-            story.append(Paragraph('Comptes utilisateurs locaux (%d)' % len(comptes), S['h2']))
-            story.append(_pdf_data_table(
-                tk, ['Compte', 'État', 'Type', 'Compte', 'Mot de passe', 'Connexion'],
-                rows, width, [0.22, 0.13, 0.19, 0.12, 0.18, 0.16]))
+        # ── Correctifs installés ─────────────────────────────────────────────
+        # À côté des mises à jour disponibles : même sujet (le cycle de
+        # correctifs Windows), plutôt que séparés par une dizaine de rubriques.
+        correctifs = info.get('hotfixes') or []
+        if correctifs:
+            rows = [[Paragraph(_pdf_escape(h.get('id')), S['mono']),
+                     Paragraph(_pdf_escape(h.get('installed_on')), S['body']),
+                     Paragraph(_pdf_escape(h.get('description')), S['body'])] for h in correctifs]
+            story.append(Paragraph('Correctifs Windows installés (%d)' % len(correctifs), S['h2']))
+            story.append(_pdf_data_table(tk, ['Correctif', 'Installé le', 'Type'],
+                                         rows, width, [0.30, 0.30, 0.40]))
 
-        # ── Démarrage, services, partages, tâches ────────────────────────────
+        # ── Démarrage & services ──────────────────────────────────────────────
         services = info.get('stopped_auto_services') or []
         if services:
             rows = [[Paragraph(_pdf_escape(s['display_name']), S['body']),
@@ -6795,27 +6951,14 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(_pdf_data_table(tk, ['Service', 'Nom interne', 'État'],
                                          rows, width, [0.46, 0.36, 0.18]))
 
-        partages = info.get('smb_shares') or []
-        if partages:
-            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(s['name']), S['body']),
-                     Paragraph(_pdf_escape(s.get('path')), S['mono']),
-                     Paragraph('Administration' if s.get('administrative') else 'Exposé',
-                               S['body'])] for s in partages]
-            story.append(Paragraph('Partages réseau (%d)' % len(partages), S['h2']))
-            story.append(_pdf_data_table(tk, ['Partage', 'Chemin', 'Nature'],
-                                         rows, width, [0.32, 0.46, 0.22]))
-
-        taches = info.get('scheduled_tasks') or []
-        if taches:
-            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(t['name']), S['body']),
-                     Paragraph(_pdf_escape(t.get('state')), S['body']),
-                     Paragraph(_pdf_escape(t.get('last_run') or 'jamais'), S['mono']),
-                     Paragraph('Échec' if t.get('failed') else 'OK', S['body']),
-                     Paragraph(_pdf_escape(t.get('action')), S['small'])] for t in taches]
-            story.append(Paragraph('Tâches planifiées (%d)' % len(taches), S['h2']))
-            story.append(_pdf_data_table(
-                tk, ['Tâche', 'État', 'Dernière exécution', 'Résultat', 'Exécutable'],
-                rows, width, [0.26, 0.12, 0.18, 0.12, 0.32]))
+        demarrage = info.get('startup_programs') or []
+        if demarrage:
+            rows = [[Paragraph(_pdf_escape(p['name']), S['body']),
+                     Paragraph(_pdf_escape(p.get('command')), S['small']),
+                     Paragraph(_pdf_escape(p.get('location')), S['mono'])] for p in demarrage]
+            story.append(Paragraph('Programmes au démarrage (%d)' % len(demarrage), S['h2']))
+            story.append(_pdf_data_table(tk, ['Programme', 'Commande', 'Emplacement'],
+                                         rows, width, [0.24, 0.50, 0.26]))
 
         demarrages = info.get('boot_times') or []
         if demarrages:
@@ -6831,66 +6974,17 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 tk, ['Démarrage', 'Total', 'Noyau', 'Ouverture de session'],
                 rows, width, [0.34, 0.22, 0.22, 0.22]))
 
-        journal = info.get('security_events') or []
-        if journal:
-            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(e.get('compte')), S['body']),
-                     Paragraph(_pdf_escape(e.get('type')), S['body']),
-                     Paragraph(str(e.get('count', '')), S['mono']),
-                     Paragraph(_pdf_escape(', '.join(e.get('sources') or [])), S['small']),
-                     Paragraph(_pdf_escape(e.get('last_seen')), S['mono'])] for e in journal]
-            story.append(Paragraph(
-                "Journal de sécurité — %s échec(s) d'ouverture, %s verrouillage(s)"
-                % (info.get('failed_logons', 0), info.get('account_lockouts', 0)), S['h2']))
+        taches = info.get('scheduled_tasks') or []
+        if taches:
+            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(t['name']), S['body']),
+                     Paragraph(_pdf_escape(t.get('state')), S['body']),
+                     Paragraph(_pdf_escape(t.get('last_run') or 'jamais'), S['mono']),
+                     Paragraph('Échec' if t.get('failed') else 'OK', S['body']),
+                     Paragraph(_pdf_escape(t.get('action')), S['small'])] for t in taches]
+            story.append(Paragraph('Tâches planifiées (%d)' % len(taches), S['h2']))
             story.append(_pdf_data_table(
-                tk, ['Compte', 'Type', 'Nb', 'Origine', 'Dernier'],
-                rows, width, [0.22, 0.24, 0.08, 0.26, 0.20]))
-
-        certificats = info.get('certificates_expiring') or []
-        if certificats:
-            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(c.get('sujet')), S['body']),
-                     Paragraph(_pdf_escape(c.get('emetteur')), S['small']),
-                     Paragraph(_pdf_escape(c.get('expire_le')), S['mono']),
-                     Paragraph(('expiré depuis %d j' % -c.get('jours_restants', 0))
-                               if c.get('expire') else ('%d j' % c.get('jours_restants', 0)),
-                               S['body'])] for c in certificats]
-            story.append(Paragraph('Certificats à renouveler (%d)' % len(certificats), S['h2']))
-            story.append(_pdf_data_table(
-                tk, ['Sujet', 'Émetteur', 'Expiration', 'Reste'],
-                rows, width, [0.30, 0.34, 0.18, 0.18]))
-
-        profils = info.get('user_profiles') or []
-        if profils:
-            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(p.get('nom')), S['body']),
-                     Paragraph(_pdf_escape(p.get('chemin')), S['small']),
-                     Paragraph('%s Go' % p.get('taille_go'), S['mono']),
-                     Paragraph(_pdf_escape(p.get('derniere_utilisation')), S['mono']),
-                     Paragraph('complète' if p.get('mesure_complete') else 'interrompue',
-                               S['small'])] for p in profils]
-            story.append(Paragraph('Profils utilisateurs (%d)' % len(profils), S['h2']))
-            story.append(_pdf_data_table(
-                tk, ['Profil', 'Emplacement', 'Taille', 'Dernière utilisation', 'Mesure'],
-                rows, width, [0.18, 0.34, 0.14, 0.20, 0.14]))
-
-        en_erreur = info.get('problem_devices') or []
-        if en_erreur:
-            rows = [[Paragraph('<b>%s</b>' % _pdf_escape(p.get('name')), S['body']),
-                     Paragraph(_pdf_escape(p.get('classe')), S['body']),
-                     Paragraph(_pdf_escape(p.get('fabricant')), S['body']),
-                     Paragraph('%s (code %s)' % (_pdf_escape(p.get('libelle')), p.get('code')),
-                               S['small'])] for p in en_erreur]
-            story.append(Paragraph('Périphériques en erreur (%d)' % len(en_erreur), S['h2']))
-            story.append(_pdf_data_table(
-                tk, ['Périphérique', 'Classe', 'Fabricant', 'Diagnostic'],
-                rows, width, [0.32, 0.14, 0.18, 0.36]))
-
-        demarrage = info.get('startup_programs') or []
-        if demarrage:
-            rows = [[Paragraph(_pdf_escape(p['name']), S['body']),
-                     Paragraph(_pdf_escape(p.get('command')), S['small']),
-                     Paragraph(_pdf_escape(p.get('location')), S['mono'])] for p in demarrage]
-            story.append(Paragraph('Programmes au démarrage (%d)' % len(demarrage), S['h2']))
-            story.append(_pdf_data_table(tk, ['Programme', 'Commande', 'Emplacement'],
-                                         rows, width, [0.24, 0.50, 0.26]))
+                tk, ['Tâche', 'État', 'Dernière exécution', 'Résultat', 'Exécutable'],
+                rows, width, [0.26, 0.12, 0.18, 0.12, 0.32]))
 
         # ── Logiciels ────────────────────────────────────────────────────────
         software = info.get('installed_software', [])

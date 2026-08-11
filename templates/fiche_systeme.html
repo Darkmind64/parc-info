@@ -392,7 +392,9 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {{ row("Architecture", rapport.architecture) }}
             {{ row("Installé le", rapport.os_install_date) }}
             {{ row("Propriétaire enregistré", rapport.registered_owner) }}
-            {{ row("Domaine / Groupe", rapport.domain or rapport.workgroup) }}
+            {# Le rattachement domaine/groupe de travail est présenté plus loin,
+               dans « Environnement & hygiène système », avec le contrôleur de
+               domaine — la même donnée n'a pas à apparaître aux deux endroits. #}
             {{ row("Session ouverte", rapport.logged_on_user) }}
             {{ row("Fuseau horaire", rapport.timezone) }}
             {% if rapport.uptime_hours is not none and rapport.uptime_hours is defined %}
@@ -810,6 +812,103 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
+<!-- ── ACCÈS DISTANT & EXPOSITION ───────────────────────────────────────── -->
+{% if rapport.remote_access or rapport.autologon is defined %}
+<div class="fs-section">
+    <h3>■ Accès distant &amp; exposition</h3>
+    {% if rapport.remote_access %}
+    <table class="fs-table">
+        <tr><th>Voie d'accès</th><th>État</th><th>Détail</th></tr>
+        {% for a in rapport.remote_access %}
+        <tr>
+            <td>{{ a.label }}</td>
+            <td>
+                {% if a.enabled is none %}
+                <span class="fs-pill fs-muted">Non installé</span>
+                {% else %}
+                <span class="fs-pill {{ {'ok':'fs-ok','warn':'fs-warn','danger':'fs-bad'}.get(a.level, 'fs-muted') }}">
+                    {{ 'Actif' if a.enabled else 'Inactif' }}</span>
+                {% endif %}
+            </td>
+            <td style="color:var(--text-secondary);font-size:.76rem;">{{ a.detail or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.autologon is defined %}
+    <div class="fs-row" style="margin-top:.7rem;">
+        <span class="fs-label">Ouverture auto de session</span>
+        <span class="fs-value">
+            {% if rapport.autologon.enabled %}
+            <span class="fs-pill fs-bad">Activée</span>
+            {% if rapport.autologon.user %}<span class="fs-mono">{{ rapport.autologon.user }}</span>{% endif %}
+            {% if rapport.autologon.password_stored %}
+            <span class="fs-pill fs-bad">mot de passe en clair dans le registre</span>
+            {% endif %}
+            {% else %}
+            <span class="fs-pill fs-ok">Désactivée</span>
+            {% endif %}
+        </span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- ── JOURNAL DE SÉCURITÉ ───────────────────────────────────────────────── -->
+{% if rapport.security_events %}
+<div class="fs-section">
+    <h3>■ Journal de sécurité ({{ rapport.security_events|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        {{ rapport.failed_logons or 0 }} échec(s) d'ouverture de session et
+        {{ rapport.account_lockouts or 0 }} verrouillage(s) de compte sur 30 jours.
+        Un compte verrouillé en boucle trahit souvent un service resté sur un ancien
+        mot de passe. Les comptes machine sont écartés.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Compte</th><th>Type</th><th>Occurrences</th><th>Origine</th><th>Dernier</th></tr>
+        {% for e in rapport.security_events %}
+        <tr>
+            <td><strong>{{ e.compte }}</strong></td>
+            <td><span class="fs-pill {{ 'fs-bad' if e.event_id == 4740 else 'fs-warn' }}">
+                {{ e.type }}</span></td>
+            <td class="fs-mono">{{ e.count }}</td>
+            <td class="fs-mono">{{ e.sources | join(', ') if e.sources else '—' }}</td>
+            <td class="fs-mono">{{ e.last_seen or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── CERTIFICATS ───────────────────────────────────────────────────────── -->
+{% if rapport.certificates_expiring %}
+<div class="fs-section">
+    <h3>■ Certificats à renouveler ({{ rapport.certificates_expiring|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Certificats machine expirant dans moins de 90 jours. Un certificat expiré fait
+        tomber VPN, bureau à distance ou 802.1X sans qu'aucune modification n'ait eu lieu.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Sujet</th><th>Émetteur</th><th>Expiration</th><th>Reste</th></tr>
+        {% for c in rapport.certificates_expiring %}
+        <tr>
+            <td><strong>{{ c.sujet }}</strong></td>
+            <td style="font-size:.72rem;color:var(--text-secondary);">{{ c.emetteur }}</td>
+            <td class="fs-mono">{{ c.expire_le }}</td>
+            <td><span class="fs-pill {{ 'fs-bad' if c.expire else 'fs-warn' }}">
+                {% if c.expire %}expiré depuis {{ -c.jours_restants }} j
+                {% else %}{{ c.jours_restants }} j{% endif %}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
 <!-- ── LICENCES ─────────────────────────────────────────────────────────── -->
 {% if rapport.licenses or rapport.oem_product_key %}
 <div class="fs-section">
@@ -891,6 +990,35 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             <td class="fs-mono">{{ d.install_date or '—' }}</td>
             <td><span class="fs-pill {{ 'fs-ok' if d.inventoriable else 'fs-muted' }}">
                 {{ 'Inventorié' if d.inventoriable else 'Interne' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── PÉRIPHÉRIQUES EN ERREUR ───────────────────────────────────────────── -->
+{% if rapport.problem_devices %}
+<div class="fs-section">
+    <h3>■ Périphériques en erreur ({{ rapport.problem_devices|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Signalés par le Gestionnaire de périphériques. Le reste de la fiche
+        décrit ce qui est présent ; cette rubrique, ce qui ne fonctionne pas.
+        Les états « désactivé » et « déconnecté » sont le plus souvent voulus et
+        ne comptent pas comme pannes.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Périphérique</th><th>Classe</th><th>Fabricant</th><th>Diagnostic</th></tr>
+        {% for p in rapport.problem_devices %}
+        <tr>
+            <td><strong>{{ p.name }}</strong></td>
+            <td>{{ p.classe or '—' }}</td>
+            <td>{{ p.fabricant or '—' }}</td>
+            <td><span class="fs-pill {{ 'fs-muted' if p.code in [22, 45] else 'fs-bad' }}">
+                {{ p.libelle }}</span>
+                <div class="fs-mono" style="font-size:.66rem;color:var(--text-secondary);">
+                    code {{ p.code }}</div></td>
         </tr>
         {% endfor %}
     </table>
@@ -1088,9 +1216,50 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
+<!-- ── PARTAGES & LECTEURS RÉSEAU ────────────────────────────────────────── -->
+{# Deux faces de la même ressource : ce que cette machine expose au réseau,
+   et ce qu'elle y a mappé depuis d'autres machines. Elles vivaient jusqu'ici
+   dans « Démarrage » et « Applications par défaut », sans rapport avec l'un
+   ni l'autre. #}
+{% if rapport.smb_shares or rapport.mapped_drives %}
+<div class="fs-section">
+    <h3>■ Partages &amp; lecteurs réseau</h3>
+
+    {% if rapport.smb_shares %}
+    {% set exposes = rapport.smb_shares | rejectattr('administrative') | list %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Partages exposés par cette machine — {{ exposes|length }} sur {{ rapport.smb_shares|length }} ;
+        les partages d'administration (C$, ADMIN$…) existent sur toute machine Windows
+    </div>
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Partage</th><th>Chemin</th><th>Nature</th></tr>
+        {% for sh in rapport.smb_shares | sort(attribute='administrative') %}
+        <tr>
+            <td><strong>{{ sh.name }}</strong></td>
+            <td class="fs-mono">{{ sh.path or '—' }}</td>
+            <td><span class="fs-pill {{ 'fs-muted' if sh.administrative else 'fs-warn' }}">
+                {{ 'Administration' if sh.administrative else 'Exposé' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.mapped_drives %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">Lecteurs mappés depuis d'autres machines</div>
+    <table class="fs-table">
+        <tr><th>Lettre</th><th>Cible</th></tr>
+        {% for d in rapport.mapped_drives %}
+        <tr><td class="fs-mono">{{ d.letter }}</td><td class="fs-mono">{{ d.path or '—' }}</td></tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+</div>
+{% endif %}
+
 <!-- ── ENVIRONNEMENT & HYGIÈNE ──────────────────────────────────────────── -->
 {% if rapport.domain_joined is defined or rapport.wsus_server
-      or rapport.uac_enabled is defined or rapport.restore_points is defined %}
+      or rapport.uac_enabled is defined or rapport.restore_points is defined
+      or rapport.reboot_pending is defined %}
 <div class="fs-section">
     <h3>■ Environnement &amp; hygiène système</h3>
     <div class="fs-grid">
@@ -1123,9 +1292,23 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             </div>
             {% endif %}
             {# Le bureau à distance et les autres voies d'accès sont rassemblés
-               dans la section « Accès distant & exposition » ci-dessous. #}
+               dans la section « Accès distant & exposition », juste après
+               « Sécurité & conformité ». #}
             {% if rapport.temp_files_mb %}
             {{ row("Fichiers temporaires", (rapport.temp_files_mb ~ ' Mo récupérables')) }}
+            {% endif %}
+            {% if rapport.reboot_pending is defined %}
+            <div class="fs-row">
+                <span class="fs-label">Redémarrage en attente</span>
+                <span class="fs-value">
+                    {% if rapport.reboot_pending %}
+                    <span class="fs-pill fs-warn">Oui</span>
+                    <span style="color:var(--text-secondary);font-size:.74rem;">{{ (rapport.reboot_reasons or [])|join(', ') }}</span>
+                    {% else %}
+                    <span class="fs-pill fs-ok">Non</span>
+                    {% endif %}
+                </span>
+            </div>
             {% endif %}
         </div>
     </div>
@@ -1146,49 +1329,6 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         {% endfor %}
     </table>
     {% endif %}
-    {% endif %}
-</div>
-{% endif %}
-
-<!-- ── ACCÈS DISTANT & EXPOSITION ───────────────────────────────────────── -->
-{% if rapport.remote_access or rapport.autologon is defined %}
-<div class="fs-section">
-    <h3>■ Accès distant &amp; exposition</h3>
-    {% if rapport.remote_access %}
-    <table class="fs-table">
-        <tr><th>Voie d'accès</th><th>État</th><th>Détail</th></tr>
-        {% for a in rapport.remote_access %}
-        <tr>
-            <td>{{ a.label }}</td>
-            <td>
-                {% if a.enabled is none %}
-                <span class="fs-pill fs-muted">Non installé</span>
-                {% else %}
-                <span class="fs-pill {{ {'ok':'fs-ok','warn':'fs-warn','danger':'fs-bad'}.get(a.level, 'fs-muted') }}">
-                    {{ 'Actif' if a.enabled else 'Inactif' }}</span>
-                {% endif %}
-            </td>
-            <td style="color:var(--text-secondary);font-size:.76rem;">{{ a.detail or '—' }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-    {% endif %}
-
-    {% if rapport.autologon is defined %}
-    <div class="fs-row" style="margin-top:.7rem;">
-        <span class="fs-label">Ouverture auto de session</span>
-        <span class="fs-value">
-            {% if rapport.autologon.enabled %}
-            <span class="fs-pill fs-bad">Activée</span>
-            {% if rapport.autologon.user %}<span class="fs-mono">{{ rapport.autologon.user }}</span>{% endif %}
-            {% if rapport.autologon.password_stored %}
-            <span class="fs-pill fs-bad">mot de passe en clair dans le registre</span>
-            {% endif %}
-            {% else %}
-            <span class="fs-pill fs-ok">Désactivée</span>
-            {% endif %}
-        </span>
-    </div>
     {% endif %}
 </div>
 {% endif %}
@@ -1235,28 +1375,18 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
-<!-- ── APPLICATIONS PAR DÉFAUT & LECTEURS RÉSEAU ────────────────────────── -->
-{% if rapport.default_browser or rapport.installed_browsers
-      or rapport.mapped_drives or rapport.reboot_pending is defined %}
+<!-- ── APPLICATIONS PAR DÉFAUT ───────────────────────────────────────────── -->
+{# Les lecteurs réseau mappés ont rejoint « Partages & lecteurs réseau », à
+   côté des partages exposés par cette machine — même sujet, même endroit.
+   Le redémarrage en attente est un signal d'hygiène, pas une application :
+   il est dans « Environnement & hygiène système ». #}
+{% if rapport.default_browser or rapport.default_mail or rapport.installed_browsers %}
 <div class="fs-section">
-    <h3>■ Applications par défaut &amp; lecteurs réseau</h3>
+    <h3>■ Applications par défaut</h3>
     <div class="fs-grid">
         <div>
             {{ row("Navigateur par défaut", rapport.default_browser) }}
             {{ row("Client mail par défaut", rapport.default_mail) }}
-            {% if rapport.reboot_pending is defined %}
-            <div class="fs-row">
-                <span class="fs-label">Redémarrage en attente</span>
-                <span class="fs-value">
-                    {% if rapport.reboot_pending %}
-                    <span class="fs-pill fs-warn">Oui</span>
-                    <span style="color:var(--text-secondary);font-size:.74rem;">{{ (rapport.reboot_reasons or [])|join(', ') }}</span>
-                    {% else %}
-                    <span class="fs-pill fs-ok">Non</span>
-                    {% endif %}
-                </span>
-            </div>
-            {% endif %}
         </div>
         <div>
             {% if rapport.installed_browsers %}
@@ -1270,16 +1400,6 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {% endif %}
         </div>
     </div>
-
-    {% if rapport.mapped_drives %}
-    <div class="fs-label" style="font-size:.75rem;margin:.7rem 0 .35rem;">Lecteurs réseau mappés</div>
-    <table class="fs-table">
-        <tr><th>Lettre</th><th>Cible</th></tr>
-        {% for d in rapport.mapped_drives %}
-        <tr><td class="fs-mono">{{ d.letter }}</td><td class="fs-mono">{{ d.path or '—' }}</td></tr>
-        {% endfor %}
-    </table>
-    {% endif %}
 </div>
 {% endif %}
 
@@ -1317,6 +1437,33 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         {% for u in rapport.users %}<div class="fs-value">• {{ u }}</div>{% endfor %}
     </div>
     {% endif %}
+</div>
+{% endif %}
+
+<!-- ── PROFILS UTILISATEURS ──────────────────────────────────────────────── -->
+{% if rapport.user_profiles %}
+<div class="fs-section">
+    <h3>■ Profils utilisateurs ({{ rapport.user_profiles|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Occupation disque par profil. Mesurer une taille impose de parcourir
+        l'arborescence : l'opération est bornée dans le temps, et une mesure
+        interrompue est signalée comme telle — c'est alors un minimum, pas un total.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Profil</th><th>Taille</th><th>Dernière utilisation</th><th>Mesure</th></tr>
+        {% for p in rapport.user_profiles %}
+        <tr>
+            <td><strong>{{ p.nom }}</strong>
+                <div class="fs-mono" style="font-size:.66rem;color:var(--text-secondary);">{{ p.chemin }}</div></td>
+            <td class="fs-mono">{{ p.taille_go }} Go</td>
+            <td class="fs-mono">{{ p.derniere_utilisation or '—' }}</td>
+            <td><span class="fs-pill {{ 'fs-ok' if p.mesure_complete else 'fs-muted' }}">
+                {{ 'complète' if p.mesure_complete else 'interrompue' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
 </div>
 {% endif %}
 
@@ -1375,10 +1522,41 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
-<!-- ── DÉMARRAGE, SERVICES ET PARTAGES ──────────────────────────────────── -->
-{% if rapport.startup_programs or rapport.stopped_auto_services or rapport.smb_shares %}
+<!-- ── CORRECTIFS ───────────────────────────────────────────────────────── -->
+{% if rapport.hotfixes %}
 <div class="fs-section">
-    <h3>■ Démarrage, services &amp; partages</h3>
+    <h3>■ Correctifs Windows installés ({{ rapport.hotfixes|length }})</h3>
+    <div class="fs-scroll">
+        <table class="fs-table">
+            <tr><th>Correctif</th><th>Installé le</th><th>Type</th></tr>
+            {% for h in rapport.hotfixes %}
+            {# Un correctif de sécurité ne se lit pas comme une mise à jour
+               ordinaire : la couleur permet de les repérer dans une liste
+               qui compte souvent plus de cent lignes. #}
+            {% set t = (h.description or '')|lower %}
+            {% set classe = 'fs-bad' if 'security' in t or 'sécurité' in t
+                       else 'fs-warn' if 'hotfix' in t or 'correctif' in t
+                       else 'fs-info' if 'service pack' in t
+                       else 'fs-update' %}
+            <tr>
+                <td class="fs-mono">{{ h.id }}</td>
+                <td>{{ h.installed_on or '—' }}</td>
+                <td>{% if h.description %}<span class="fs-pill {{ classe }}">{{ h.description }}</span>
+                    {% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── DÉMARRAGE & SERVICES ─────────────────────────────────────────────── -->
+{# Les partages réseau exposés par cette machine ont rejoint « Partages &
+   lecteurs réseau », à côté des lecteurs mappés depuis d'autres machines —
+   même sujet (ressources réseau), pas le démarrage de l'appareil. #}
+{% if rapport.startup_programs or rapport.stopped_auto_services %}
+<div class="fs-section">
+    <h3>■ Démarrage &amp; services</h3>
 
     {% if rapport.stopped_auto_services %}
     <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
@@ -1392,25 +1570,6 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             <td>{{ sv.display_name }}</td>
             <td class="fs-mono">{{ sv.name }}</td>
             <td><span class="fs-pill fs-warn">{{ sv.state }}</span></td>
-        </tr>
-        {% endfor %}
-    </table>
-    {% endif %}
-
-    {% if rapport.smb_shares %}
-    {% set exposes = rapport.smb_shares | rejectattr('administrative') | list %}
-    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
-        Partages réseau — {{ exposes|length }} exposé(s) sur {{ rapport.smb_shares|length }} ;
-        les partages d'administration (C$, ADMIN$…) existent sur toute machine Windows
-    </div>
-    <table class="fs-table" style="margin-bottom:.9rem;">
-        <tr><th>Partage</th><th>Chemin</th><th>Nature</th></tr>
-        {% for sh in rapport.smb_shares | sort(attribute='administrative') %}
-        <tr>
-            <td><strong>{{ sh.name }}</strong></td>
-            <td class="fs-mono">{{ sh.path or '—' }}</td>
-            <td><span class="fs-pill {{ 'fs-muted' if sh.administrative else 'fs-warn' }}">
-                {{ 'Administration' if sh.administrative else 'Exposé' }}</span></td>
         </tr>
         {% endfor %}
     </table>
@@ -1463,112 +1622,10 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
-{% if rapport.security_events %}
-<div class="fs-section">
-    <h3>■ Journal de sécurité ({{ rapport.security_events|length }})</h3>
-    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
-        {{ rapport.failed_logons or 0 }} échec(s) d'ouverture de session et
-        {{ rapport.account_lockouts or 0 }} verrouillage(s) de compte sur 30 jours.
-        Un compte verrouillé en boucle trahit souvent un service resté sur un ancien
-        mot de passe. Les comptes machine sont écartés.
-    </div>
-    <div class="fs-wide">
-    <table class="fs-table">
-        <tr><th>Compte</th><th>Type</th><th>Occurrences</th><th>Origine</th><th>Dernier</th></tr>
-        {% for e in rapport.security_events %}
-        <tr>
-            <td><strong>{{ e.compte }}</strong></td>
-            <td><span class="fs-pill {{ 'fs-bad' if e.event_id == 4740 else 'fs-warn' }}">
-                {{ e.type }}</span></td>
-            <td class="fs-mono">{{ e.count }}</td>
-            <td class="fs-mono">{{ e.sources | join(', ') if e.sources else '—' }}</td>
-            <td class="fs-mono">{{ e.last_seen or '—' }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-    </div>
-</div>
-{% endif %}
-
-{% if rapport.certificates_expiring %}
-<div class="fs-section">
-    <h3>■ Certificats à renouveler ({{ rapport.certificates_expiring|length }})</h3>
-    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
-        Certificats machine expirant dans moins de 90 jours. Un certificat expiré fait
-        tomber VPN, bureau à distance ou 802.1X sans qu'aucune modification n'ait eu lieu.
-    </div>
-    <div class="fs-wide">
-    <table class="fs-table">
-        <tr><th>Sujet</th><th>Émetteur</th><th>Expiration</th><th>Reste</th></tr>
-        {% for c in rapport.certificates_expiring %}
-        <tr>
-            <td><strong>{{ c.sujet }}</strong></td>
-            <td style="font-size:.72rem;color:var(--text-secondary);">{{ c.emetteur }}</td>
-            <td class="fs-mono">{{ c.expire_le }}</td>
-            <td><span class="fs-pill {{ 'fs-bad' if c.expire else 'fs-warn' }}">
-                {% if c.expire %}expiré depuis {{ -c.jours_restants }} j
-                {% else %}{{ c.jours_restants }} j{% endif %}</span></td>
-        </tr>
-        {% endfor %}
-    </table>
-    </div>
-</div>
-{% endif %}
-
-{% if rapport.user_profiles %}
-<div class="fs-section">
-    <h3>■ Profils utilisateurs ({{ rapport.user_profiles|length }})</h3>
-    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
-        Occupation disque par profil. Mesurer une taille impose de parcourir
-        l'arborescence : l'opération est bornée dans le temps, et une mesure
-        interrompue est signalée comme telle — c'est alors un minimum, pas un total.
-    </div>
-    <div class="fs-wide">
-    <table class="fs-table">
-        <tr><th>Profil</th><th>Taille</th><th>Dernière utilisation</th><th>Mesure</th></tr>
-        {% for p in rapport.user_profiles %}
-        <tr>
-            <td><strong>{{ p.nom }}</strong>
-                <div class="fs-mono" style="font-size:.66rem;color:var(--text-secondary);">{{ p.chemin }}</div></td>
-            <td class="fs-mono">{{ p.taille_go }} Go</td>
-            <td class="fs-mono">{{ p.derniere_utilisation or '—' }}</td>
-            <td><span class="fs-pill {{ 'fs-ok' if p.mesure_complete else 'fs-muted' }}">
-                {{ 'complète' if p.mesure_complete else 'interrompue' }}</span></td>
-        </tr>
-        {% endfor %}
-    </table>
-    </div>
-</div>
-{% endif %}
-
-{% if rapport.problem_devices %}
-<div class="fs-section">
-    <h3>■ Périphériques en erreur ({{ rapport.problem_devices|length }})</h3>
-    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
-        Signalés par le Gestionnaire de périphériques. Le reste de la fiche
-        décrit ce qui est présent ; cette rubrique, ce qui ne fonctionne pas.
-        Les états « désactivé » et « déconnecté » sont le plus souvent voulus et
-        ne comptent pas comme pannes.
-    </div>
-    <div class="fs-wide">
-    <table class="fs-table">
-        <tr><th>Périphérique</th><th>Classe</th><th>Fabricant</th><th>Diagnostic</th></tr>
-        {% for p in rapport.problem_devices %}
-        <tr>
-            <td><strong>{{ p.name }}</strong></td>
-            <td>{{ p.classe or '—' }}</td>
-            <td>{{ p.fabricant or '—' }}</td>
-            <td><span class="fs-pill {{ 'fs-muted' if p.code in [22, 45] else 'fs-bad' }}">
-                {{ p.libelle }}</span>
-                <div class="fs-mono" style="font-size:.66rem;color:var(--text-secondary);">
-                    code {{ p.code }}</div></td>
-        </tr>
-        {% endfor %}
-    </table>
-    </div>
-</div>
-{% endif %}
-
+{# Journal de sécurité et Certificats à renouveler sont désormais dans le
+   groupe Sécurité, juste après Accès distant & exposition. Profils
+   utilisateurs suit les Comptes utilisateurs locaux ; Périphériques en
+   erreur suit les Périphériques USB. #}
 {% if rapport.scheduled_tasks %}
 {% set taches_ko = rapport.scheduled_tasks | selectattr('failed') | list %}
 <div class="fs-section">
@@ -1600,34 +1657,6 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         </tr>
         {% endfor %}
     </table>
-    </div>
-</div>
-{% endif %}
-
-<!-- ── CORRECTIFS ───────────────────────────────────────────────────────── -->
-{% if rapport.hotfixes %}
-<div class="fs-section">
-    <h3>■ Correctifs Windows installés ({{ rapport.hotfixes|length }})</h3>
-    <div class="fs-scroll">
-        <table class="fs-table">
-            <tr><th>Correctif</th><th>Installé le</th><th>Type</th></tr>
-            {% for h in rapport.hotfixes %}
-            {# Un correctif de sécurité ne se lit pas comme une mise à jour
-               ordinaire : la couleur permet de les repérer dans une liste
-               qui compte souvent plus de cent lignes. #}
-            {% set t = (h.description or '')|lower %}
-            {% set classe = 'fs-bad' if 'security' in t or 'sécurité' in t
-                       else 'fs-warn' if 'hotfix' in t or 'correctif' in t
-                       else 'fs-info' if 'service pack' in t
-                       else 'fs-update' %}
-            <tr>
-                <td class="fs-mono">{{ h.id }}</td>
-                <td>{{ h.installed_on or '—' }}</td>
-                <td>{% if h.description %}<span class="fs-pill {{ classe }}">{{ h.description }}</span>
-                    {% else %}—{% endif %}</td>
-            </tr>
-            {% endfor %}
-        </table>
     </div>
 </div>
 {% endif %}
