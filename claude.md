@@ -1,6 +1,6 @@
 # ParcInfo — Guide de Développement Claude 🚀
 
-**Dernière mise à jour** : 2026-04-07
+**Dernière mise à jour** : 2026-08-12
 
 ## 📋 Aperçu Exécutif
 
@@ -31,12 +31,35 @@
 ╔════════════════════════════════════════════════════════════════╗
 ║ LAUNCHER PYTHON (launcher.py)                                  ║
 ║ • Point d'entrée PyInstaller                                   ║
+║ • En tout premier : mode_mise_a_jour() (applique_maj.py) — si  ║
+║   l'exe a été relancé pour se recopier sur l'ancien, s'arrête  ║
+║   là, sans importer Flask                                      ║
 ║ • Détection port libre + ouverture navigateur auto             ║
 ║ • Optionnel : tray icon (pystray + PIL)                        ║
 ╚════════════════════════════════════════════════════════════════╝
                               ↓
 ╔════════════════════════════════════════════════════════════════╗
-║ FLASK APP (app.py) — ~1000+ lignes                             ║
+║ MISE À JOUR (sous-système autonome, depuis 2.9.2)               ║
+├─ update_checker.py  : interroge version.json (GitHub), SHA256   ║
+├─ update_notifier.py : bannière UI, fil de fond, ne rien installer║
+│                       sans clic explicite                       ║
+└─ applique_maj.py    : le nouvel exe se recopie lui-même sur     ║
+   l'ancien après vérification d'empreinte, journalise dans       ║
+   _maj.log ; nettoie les reliquats au démarrage suivant          ║
+╚════════════════════════════════════════════════════════════════╝
+                              ↓
+╔════════════════════════════════════════════════════════════════╗
+║ COLLECTE SYSTÈME (exécutables séparés, pas ParcInfo lui-même)  ║
+├─ collector_core.py  : toute la logique — 26 étapes PowerShell   ║
+│  groupées sous Windows (_WIN_STEPS), équivalents macOS/Linux    ║
+├─ system-info-collector.py      : entrée CLI (argparse)         ║
+├─ system-info-collector-gui.py  : entrée GUI (Tkinter)          ║
+└─ Envoie à /api/device-info ; voir COLLECTOR_FIELD_MAPPING.md   ║
+   pour le détail champ par champ (>100 champs, par thème)       ║
+╚════════════════════════════════════════════════════════════════╝
+                              ↓
+╔════════════════════════════════════════════════════════════════╗
+║ FLASK APP (app.py) — ~11 600 lignes                            ║
 ║ • Routeurs @app.route() (login, CRUD appareils, scan, etc)    ║
 ║ • Middlewares : CSRF, auth, error handlers                    ║
 ║ • Filtres Jinja2 : formatage ports, périphériques, types      ║
@@ -117,17 +140,33 @@ parc_info/                           # Répertoire racine
 │     ├─ launch.json                 # Configuration serveurs Claude Code (dev)
 │     └─ settings.local.json         # Paramètres locaux Claude Code
 │
-├─ 🐍 Code Python
-│  ├─ app.py (1000+ lignes)          # Routeurs Flask, middlewares CSRF/auth
-│  ├─ launcher.py (96 lignes)        # Point entrée PyInstaller → port libre + browser
-│  ├─ database.py (300+ lignes)      # SQLite/Turso, row_to_dict(), init_db()
-│  ├─ auth_utils.py (200+ lignes)    # PBKDF2, CSRF, rate-limiting (10/5min)
-│  ├─ config_helpers.py (200+ lignes)# cfg_get/cfg_set, listes perso
-│  ├─ client_helpers.py (300+ lignes)# ACL, audit, pagination, formatage
-│  ├─ models.py (200+ lignes)        # SQLAlchemy ORM (optionnel)
+├─ 🐍 Code Python (application)
+│  ├─ app.py (7000+ lignes)          # Routeurs Flask, middlewares CSRF/auth
+│  ├─ launcher.py                    # Point entrée PyInstaller → port libre + browser
+│  ├─ database.py                    # SQLite/Turso, row_to_dict(), init_db()
+│  ├─ auth_utils.py                  # PBKDF2, CSRF, rate-limiting (10/5min)
+│  ├─ config_helpers.py              # cfg_get/cfg_set, listes perso (LISTE_DEFAULTS)
+│  ├─ client_helpers.py              # ACL, audit, pagination, formatage
+│  ├─ crypto_utils.py                # Chiffrement des identifiants stockés
+│  ├─ models.py                      # SQLAlchemy ORM (optionnel, coexiste)
+│  ├─ app_update_routes.py           # Routes API pour la bannière de mise à jour
+│  ├─ uploads_sync.py                # Synchronisation locale ↔ Turso des pièces jointes
 │  ├─ convert_discovered_devices.py  # Utilitaire import réseau
 │  ├─ download_oui.py                # Télécharge base IEEE OUI (fabricants)
+│  ├─ verifier_version.py            # Vérifie la cohérence des 5 sources de version
 │  └─ requirements.txt                # flask, werkzeug, flask-sqlalchemy
+│
+├─ 🔁 Mise à jour (sous-système autonome, depuis 2.9.2)
+│  ├─ update_checker.py              # Interroge version.json, vérifie SHA256
+│  ├─ update_notifier.py             # Bannière UI, fil de fond, nettoyage des reliquats
+│  └─ applique_maj.py                # Le nouvel exe se recopie lui-même, journalise _maj.log
+│
+├─ 🖥️ Collecte système (exécutables séparés — pas ParcInfo lui-même)
+│  ├─ collector_core.py              # Toute la logique, partagée CLI/GUI (>100 champs)
+│  ├─ system-info-collector.py       # Entrée CLI (argparse)
+│  ├─ system-info-collector-gui.py   # Entrée GUI (Tkinter)
+│  ├─ collector-cli.spec / collector-gui.spec  # Specs PyInstaller dédiées
+│  └─ COLLECTOR_FIELD_MAPPING.md     # Détail champ par champ, par thème
 │
 ├─ 📄 Configuration Build
 │  ├─ parcinfo.spec                  # PyInstaller spec (exe/app)
@@ -223,19 +262,36 @@ parc_info/                           # Répertoire racine
 
 | Fichier | Lignes | Responsabilité |
 |---------|--------|-----------------|
-| app.py | 1000+ | Routeurs Flask, middlewares, filtres Jinja2, init_db() |
-| launcher.py | 96 | Point entrée PyInstaller, port libre, browser auto |
+| app.py | ~11 600 | Routeurs Flask, middlewares, filtres Jinja2, init_db() |
+| collector_core.py | ~7 700 | Toute la logique de collecte (26 étapes Windows), rapports PDF/HTML |
+| launcher.py | ~215 | Point entrée PyInstaller, mode_mise_a_jour() en premier, port libre, browser auto |
+| applique_maj.py | ~260 | Le nouvel exe se recopie lui-même sur l'ancien, vérifie l'empreinte |
+| update_checker.py | ~615 | Interroge version.json, SHA256, téléchargement reprenable |
+| update_notifier.py | ~315 | Bannière UI, fil de fond, nettoyage des reliquats de mise à jour |
 | database.py | 300+ | Connexion SQLite/Turso, helpers SQL |
 | auth_utils.py | 200+ | Auth PBKDF2, CSRF, rate-limit, validation |
-| config_helpers.py | 200+ | Config persistée, listes perso |
+| config_helpers.py | 200+ | Config persistée, listes perso (LISTE_DEFAULTS) |
 | client_helpers.py | 300+ | ACL, audit, pagination, formatage |
 | models.py | 200+ | Modèles SQLAlchemy (optionnel) |
+
+> `app.py` et `collector_core.py` ont beaucoup grossi depuis la dernière
+> révision de ce document : ne pas se fier à une intuition de taille avant
+> d'y intervenir — `wc -l` d'abord.
 
 ---
 
 ## 🗄️ Schéma de Base de Données (SQLite)
 
 Créée automatiquement par `app.py:init_db()` au 1er lancement.
+
+> ⚠️ **Les `CREATE TABLE` ci-dessous sont illustratifs, pas exhaustifs.**
+> `appareils` en particulier a beaucoup grandi (identification détaillée,
+> `rapport_systeme_json`, `logiciels_installes_json`, et les colonnes
+> `av_marque`/`av_nom`/`edr_marque`/`edr_nom`/`rmm_marque`/`rmm_nom`/
+> `rmm_agent_id`/`anydesk_id`/`anydesk_password` ajoutées pour la collecte
+> automatique — voir COLLECTOR_FIELD_MAPPING.md). Avant de supposer qu'une
+> colonne existe ou non, vérifier `app.py:init_db()` ou
+> `PRAGMA table_info(appareils)` plutôt que ce résumé.
 
 ### Groupe 1 : Authentification & Multi-client
 
@@ -1467,32 +1523,40 @@ errors = validate_form([
 
 ## 📋 Fichiers Clés Quick Lookup
 
-| Besoin | Fichier | Ligne |
-|--------|---------|-------|
-| Ajouter route | app.py | ~500+ |
-| Ajouter DB field | app.py:init_db() | ~270+ |
-| Ajouter validation | auth_utils.py | ~130+ |
-| Ajouter config | config_helpers.py | ~60+ |
-| Ajouter ACL | client_helpers.py | ~40+ |
-| Ajouter template | templates/ | - |
-| Debug auth | auth_utils.py:get_auth_user() | ~36 |
-| Debug SQL | database.py | ~50+ |
+`app.py` et `collector_core.py` dépassent 7 000 lignes chacun : un numéro de
+ligne fixé ici serait faux dès le prochain ajout. Chercher par symbole plutôt
+que par position — `grep -n "^def nom_de_la_fonction"`.
+
+| Besoin | Fichier | Repère |
+|--------|---------|--------|
+| Ajouter route | app.py | `grep -n "@app.route"` |
+| Ajouter table/colonne DB | app.py | `def init_db` |
+| Ajouter validation | auth_utils.py | `def validate_form` |
+| Ajouter config | config_helpers.py | `LISTE_DEFAULTS` / `CFG_DEFAULTS` |
+| Ajouter ACL | client_helpers.py | `def can_write` / `def get_client_access` |
+| Ajouter template | templates/ | `fiche_systeme.html` regroupe par thème (§ workflow ci-dessous) |
+| Debug auth | auth_utils.py | `def get_auth_user` |
+| Debug SQL | database.py | `def get_db` / `def get_local_db` |
+| Ajouter un champ collecté | collector_core.py | `_WIN_STEPS`, voir COLLECTOR_FIELD_MAPPING.md |
+| Préremplir un champ de la fiche appareil depuis la collecte | app.py | `def champs_deduits_du_collecteur` |
+| Toucher au mécanisme de mise à jour | applique_maj.py / update_checker.py | `def appliquer` / `def _install_windows` |
 
 ---
 
 ## 🚀 Déploiement Production (Checklist)
 
-- [ ] `SECRET_KEY` unique + stocké sécurisé
+- [ ] `SECRET_KEY` unique + stocké sécurisé (généré automatiquement dans
+      `secret.key` au premier lancement — à vérifier selon le mode de déploiement)
 - [ ] HTTPS activé (reverse proxy nginx/apache)
-- [ ] Upload whitelist strict (extension + MIME)
-- [ ] Rate-limiting renforcé (DB-backed)
+- [x] Upload whitelist strict (extension + signature vérifiée, 64 Mo max/requête)
+- [ ] Rate-limiting renforcé (DB-backed) — actuellement en mémoire, 10/5min
 - [ ] Logs centralisés (syslog/ELK)
-- [ ] Backup automatique BD (cron daily)
+- [x] Backup automatique BD (24h, `app.py:BACKUP_INTERVAL_HOURS`, 3 conservées)
 - [ ] Monitoring (uptime, erreurs, performance)
 - [ ] Admin panel sécurisé (IP whitelist)
 
 ---
 
-**Dernier update** : 2026-04-07
+**Dernier update** : 2026-08-12 (v2.9.7)
 **Mainteneur** : ParcInfo Team
 **License** : Voir LICENSE.md

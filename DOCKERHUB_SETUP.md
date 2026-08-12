@@ -1,21 +1,29 @@
 # 🐳 Configuration DockerHub + GitHub Actions
 
-**Objectif** : Automatiser le build et push de l'image Docker vers DockerHub à chaque changement.
+**Objectif** : Automatiser le build et push de l'image Docker vers DockerHub à chaque nouvelle version.
 
 ---
 
 ## 📋 État Actuel
 
+✅ **Opérationnel** — chaque publication (`git tag vX.Y.Z` + `git push origin vX.Y.Z`)
+construit et publie automatiquement l'image Docker, en service depuis
+plusieurs dizaines de versions.
+
 | Composant | Status |
 |-----------|--------|
-| GitHub Code | ✅ À jour (v2.6.28) |
-| GitHub Actions Workflow | ✅ Créé |
-| DockerHub Secrets | ❌ À configurer |
-| Auto-build DockerHub | ⏳ En attente de secrets |
+| GitHub Actions Workflow (`.github/workflows/build-release.yml`) | ✅ Actif |
+| DockerHub Secrets | ✅ Configurés |
+| Auto-build DockerHub | ✅ Opérationnel |
+
+Le reste de ce document décrit **comment cette configuration a été mise en
+place** — utile si les secrets doivent être régénérés (un token DockerHub
+expire ou est révoqué), mais il n'y a rien à faire pour une utilisation
+normale.
 
 ---
 
-## 🔧 Configuration Requise
+## 🔧 Configuration Requise (si les secrets sont à régénérer)
 
 ### 1️⃣ Générer un Access Token DockerHub
 
@@ -48,16 +56,21 @@
 
 ## 🚀 Déclenchement du Build
 
-Le workflow se déclenche **automatiquement** quand on :
-1. Pousse vers `master` ET
-2. Change un de ces fichiers :
-   - `Dockerfile`
-   - `app.py`
-   - `requirements.txt`
-   - `version.json`
-   - `__version__.py`
+Le workflow (`build-release.yml`) se déclenche sur le **push d'un tag** de la
+forme `vX.Y.Z` — pas sur un simple push vers `master`. Le tag est ce qui
+distingue « du code committé » de « une version publiée » :
 
-**Durée du build** : ~5-10 minutes
+```bash
+git tag -a v2.9.7 -m "..."
+git push origin v2.9.7
+```
+
+Suites de tests → build des binaires (Windows/macOS) → build & push de
+l'image Docker → création de la release GitHub avec les binaires et
+`SHA256SUMS.txt` : tout dans le même run, rien n'est publié tant que les
+tests ne passent pas.
+
+**Durée du build** : ~10-15 minutes (tests + 4 binaires + image Docker)
 
 ---
 
@@ -86,27 +99,33 @@ docker pull darkmind64/parcinfo:latest
 docker run --rm darkmind64/parcinfo:latest python3 -c "from __version__ import __version__; print(f'Version: {__version__}')"
 
 # 3. Vérifiez le tag spécifique
-docker pull darkmind64/parcinfo:v2.6.28
+docker pull darkmind64/parcinfo:v2.9.7
 ```
 
 ---
 
-## 🔄 Workflow Automatique (Après Configuration)
+## 🔄 Workflow Automatique
 
 ```
-1. Developer pousse code vers master
+1. Version bumpée (VERSION, version.json, __version__.py, Dockerfile,
+   README) + CHANGELOG.md, vérifiés par verifier_version.py, committés
    ↓
-2. GitHub détecte changement dans Dockerfile/app.py/version.json
+2. git tag vX.Y.Z && git push origin vX.Y.Z
    ↓
-3. GitHub Actions se déclenche
+3. GitHub Actions se déclenche (build-release.yml)
    ↓
-4. Build l'image Docker
+4. Suites de tests (échec → rien n'est publié)
    ↓
-5. Pousse vers DockerHub avec tags :
+5. Build des binaires (Windows ParcInfo/collecteurs, macOS ARM)
+   ↓
+6. Build & push de l'image Docker, tags :
    - darkmind64/parcinfo:latest
-   - darkmind64/parcinfo:v2.6.28
+   - darkmind64/parcinfo:vX.Y.Z
    ↓
-6. Utilisateurs peuvent faire "docker pull darkmind64/parcinfo:latest"
+7. Release GitHub créée avec les binaires + SHA256SUMS.txt
+   ↓
+8. Utilisateurs : "docker pull darkmind64/parcinfo:latest", ou la bannière
+   de mise à jour dans l'app pour les exécutables Windows/macOS
 ```
 
 ---
@@ -127,17 +146,17 @@ docker pull darkmind64/parcinfo:v2.6.28
 
 ---
 
-## 📝 Checklist de Vérification
+## 📝 Checklist (en cas de reconfiguration)
 
 - [ ] Access Token DockerHub créé
 - [ ] Secret `DOCKER_USERNAME` ajouté dans GitHub
-- [ ] Secret `DOCKER_PASSWORD` ajouté dans GitHub  
-- [ ] Workflow `.github/workflows/docker-build-push.yml` existe
-- [ ] Push un changement mineur pour tester le workflow
-- [ ] Vérifiez que DockerHub a la nouvelle image en 5-10 min
+- [ ] Secret `DOCKER_PASSWORD` ajouté dans GitHub
+- [ ] Workflow `.github/workflows/build-release.yml` existe
+- [ ] Publier un tag `vX.Y.Z` pour tester le workflow
+- [ ] Vérifiez que DockerHub a la nouvelle image en 10-15 min
 
 ---
 
-**Status** : En attente de configuration des secrets GitHub Actions
-**Prochaine étape** : Suivre les étapes 1-2 du "Configuration Requise"
+**Status** : Opérationnel depuis plusieurs dizaines de versions.
+**Dernière mise à jour** : 2026-08-12 (v2.9.7)
 

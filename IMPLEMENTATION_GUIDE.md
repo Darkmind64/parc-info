@@ -1,4 +1,4 @@
-# Guide d'Implémentation : Auto-Remplissage Système (v2.6.24)
+# Guide d'Implémentation : Auto-Remplissage Système
 
 ## 📋 Vue d'ensemble
 
@@ -34,8 +34,8 @@ Script Python léger (`system-info-collector.py`) qui :
 
 | Version | OS | Télécharger | Taille |
 |---------|----|-----------:|--------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe) | 15.6 MB |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe) | 12.5 MB |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/latest/download/system-info-collector-gui.exe) | 15.6 MB |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/latest/download/system-info-collector.exe) | 12.5 MB |
 
 **Usage :**
 ```bash
@@ -214,8 +214,8 @@ Le système a été enregistré dans ParcInfo.
 | **Support OS** | Windows/macOS/Linux | Windows/macOS/Linux |
 
 **Recommandation :**
-- **Utilisateurs Windows individuels** → [system-info-collector-gui.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector-gui.exe) (double-clic)
-- **Déploiement masse Windows** → [system-info-collector.exe](https://github.com/darkmind64/parc-info/releases/download/v2.6.24/system-info-collector.exe) via GPO/MDM
+- **Utilisateurs Windows individuels** → [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/latest/download/system-info-collector-gui.exe) (double-clic)
+- **Déploiement masse Windows** → [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/latest/download/system-info-collector.exe) via GPO/MDM
 - **macOS/Linux** → Scripts Python (Python 3.8+ requis)
 
 ---
@@ -256,7 +256,7 @@ python system-info-collector.py --client-id 5  # (affichage complet par défaut)
 
 ---
 
-## 📄 Rapport HTML Généré (NEW v2.6.24)
+## 📄 Rapport HTML Généré
 
 Chaque collecte génère **deux artefacts** :
 
@@ -309,48 +309,21 @@ HTML formaté professionnel avec :
 
 ---
 
-## 🗺️ Correspondance des Champs (NEW v2.6.24)
+## 🗺️ Correspondance des Champs
 
 **Voir le document complet :** [COLLECTOR_FIELD_MAPPING.md](COLLECTOR_FIELD_MAPPING.md)
 
-### Résumé
-
-| Status | Count | Exemple |
-|--------|-------|---------|
-| ✅ Collectés + Stockés en BD | 12 | hostname, MAC, IP, OS, RAM, CPU, disk, antivirus, software |
-| ⚠️ Partiellement stockés | 2 | os_version, disk_drives (total only) |
-| ❌ Non collectés (impossible) | 14 | user, service, location, purchase_date, etc. |
-
 **Données sensibles JAMAIS collectées :**
-- ❌ Mots de passe utilisateur
+- ❌ Mots de passe (utilisateur, admin, comptes mail, identifiants réseau)
 - ❌ Clés administrateur
-- ❌ Credentials sensibles
+- ❌ Toute valeur d'un identifiant enregistré — seule sa présence l'est
 
-### Données Collectées
-
-#### ✅ Toujours Collectées
-
-| Champ | Source | Exemple |
-|-------|--------|---------|
-| MAC Address | UUID Python | `00:1A:2B:3C:4D:5E` |
-| Hostname | `socket.gethostname()` | `DESKTOP-ABC123` |
-| IP Addresses | Socket DNS | `192.168.1.100` |
-| OS | `platform.system()` | `Windows` |
-| OS Version | Registry/Release | `11 (22H2)` |
-| CPU | WMI / sysctl | `Intel Core i7-1185G7` |
-| CPU Cores | WMI / cpuinfo | `4` |
-| RAM | WMI / /proc/meminfo | `16` GB |
-| Disque | WMI / df | `512` GB |
-
-#### ⚠️ Selon la Plateforme
-
-| Champ | Windows | macOS | Linux | Source |
-|-------|---------|-------|-------|--------|
-| Marque | ✅ | ✅ | ✅ | WMI / system_profiler / dmidecode |
-| Modèle | ✅ | ✅ | ✅ | WMI / system_profiler / dmidecode |
-| Numéro S/N | ✅ | ✅ | ⚠️ | WMI / system_profiler / dmidecode (sudo) |
-| Antivirus | ✅ | ❌ | ❌ | WMI Win32_SecurityCenter1 |
-| Logiciels | ✅ (limité 50) | ✅ | ✅ | Registry / Applications / dpkg/rpm |
+Ce document ne redonne pas le détail champ par champ (Windows/macOS/Linux,
+admin requis ou non) : il a fini par diverger de la réalité au fil des
+ajouts. **[COLLECTOR_FIELD_MAPPING.md](COLLECTOR_FIELD_MAPPING.md)** est
+l'unique source à jour — plus d'une centaine de champs, classés par thème
+(identification, sécurité, accès distant, agents détectés, messagerie,
+réseau, diagnostic…), avec la couverture par système d'exploitation.
 
 ### Déploiement à Échelle
 
@@ -684,15 +657,15 @@ tail -f parc_info.log | grep "Device info received"
 
 ## 🚀 Améliorations Futures
 
-- [ ] Ajouter download automatique du collecteur depuis l'UI
+- [x] Ajouter download automatique du collecteur depuis l'UI — `/download/system-info-collector[-gui]`
 - [ ] Ajouter scheduling (tâche quotidienne automatique)
 - [ ] Ajouter détection antivirus sur Linux/macOS
-- [ ] Ajouter détection EDR/RMM
-- [ ] Ajouter détection des mises à jour Windows
-- [ ] Ajouter détection libre disque (pas juste taille totale)
-- [ ] Intégration RMM (si agent AnyDesk/TeamViewer/ConnectWise)
+- [x] Ajouter détection EDR/RMM — 2.9.7, voir [COLLECTOR_FIELD_MAPPING.md](COLLECTOR_FIELD_MAPPING.md#agents-de-télémaintenance--edr)
+- [x] Ajouter détection des mises à jour Windows — `pending_updates[]`, `hotfixes[]`
+- [x] Ajouter détection libre disque (pas juste taille totale) — `disk_free_gb`
+- [x] Intégration RMM (AnyDesk, TeamViewer, ConnectWise, NinjaOne, Datto, N-able…) — 2.9.7
 
 ---
 
-**Version:** 2.6.24  
-**Dernière mise à jour:** 2026-08-03
+**Version:** 2.9.7  
+**Dernière mise à jour:** 2026-08-12
