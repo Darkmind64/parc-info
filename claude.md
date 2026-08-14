@@ -50,7 +50,7 @@
                               ↓
 ╔════════════════════════════════════════════════════════════════╗
 ║ COLLECTE SYSTÈME (exécutables séparés, pas ParcInfo lui-même)  ║
-├─ collector_core.py  : toute la logique — 26 étapes PowerShell   ║
+├─ collector_core.py  : toute la logique — 30 étapes PowerShell   ║
 │  groupées sous Windows (_WIN_STEPS), équivalents macOS/Linux    ║
 ├─ system-info-collector.py      : entrée CLI (argparse)         ║
 ├─ system-info-collector-gui.py  : entrée GUI (Tkinter)          ║
@@ -263,7 +263,7 @@ parc_info/                           # Répertoire racine
 | Fichier | Lignes | Responsabilité |
 |---------|--------|-----------------|
 | app.py | ~11 600 | Routeurs Flask, middlewares, filtres Jinja2, init_db() |
-| collector_core.py | ~7 700 | Toute la logique de collecte (26 étapes Windows), rapports PDF/HTML |
+| collector_core.py | ~7 700 | Toute la logique de collecte (30 étapes Windows), rapports PDF/HTML |
 | launcher.py | ~215 | Point entrée PyInstaller, mode_mise_a_jour() en premier, port libre, browser auto |
 | applique_maj.py | ~260 | Le nouvel exe se recopie lui-même sur l'ancien, vérifie l'empreinte |
 | update_checker.py | ~615 | Interroge version.json, SHA256, téléchargement reprenable |

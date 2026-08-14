@@ -1,22 +1,23 @@
 {
-  "version": "2.9.7",
-  "release_date": "2026-08-10T23:30:00.000000",
+  "version": "2.9.8",
+  "release_date": "2026-08-14T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.7/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.7/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.9.7",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.7/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.7/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.7/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.8/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.8/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.9.8",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.8/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.8/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.8/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Le redemarrage apres mise a jour echouait sur 'Failed to load Python DLL'",
+    "new_features": "Historique des détections antivirus, des erreurs système/applicatives et des arrêts/redémarrages",
     "improvements": [
-      "FIXED: Apres le remplacement, l'application relancee affichait 'Failed to load Python DLL python311.dll'. Le script de remplacement, lance par l'application packagee, heritait des variables posees par le lanceur PyInstaller pour designer le dossier temporaire de decompression. La nouvelle application croyait donc avoir deja ete decompressee et cherchait Python dans le dossier du processus precedent, supprime a sa sortie.",
-      "FIXED: Un environnement explicitement debarrasse de ces variables est transmis au script, et le script les efface a son tour au cas ou il serait relance depuis une console heritee.",
-      "A SAVOIR: l'installation n'est pas abimee. La mise a jour a bien eu lieu ; seul le redemarrage automatique echouait. Lancer l'application depuis l'explorateur fonctionne, son environnement etant propre.",
-      "NOTE: les noms des variables ont ete releves dans le binaire du bootloader livre avec PyInstaller 6, pas de memoire : _PYI_APPLICATION_HOME_DIR, _PYI_ARCHIVE_FILE, _PYI_PARENT_PROCESS_LEVEL, plus _MEIPASS et _MEIPASS2 des versions anterieures."
+      "AJOUT: Détections Windows Defender sur 1 an (Get-MpThreatDetection/Get-MpThreat), avec menace, catégorie, fichier concerné et date, dans « Sécurité & conformité ».",
+      "AJOUT: Erreurs système (journal Système, 30 derniers jours) hors incidents déjà signalés ailleurs, pour ne rien compter deux fois.",
+      "AJOUT: Erreurs applicatives (plantages et blocages, journal Application) avec application, module et code d'exception quand disponibles.",
+      "AJOUT: Historique des arrêts et redémarrages (ID 1074) distinguant un événement planifié d'un arrêt inattendu.",
+      "FIXED: un plantage (ID 1000) et un blocage (ID 1002) du journal Application n'ont pas le même schéma de champs positionnels — lire les positions d'un 1000 sur un 1002 renvoyait un horodatage et un GUID pris pour un module et un code d'exception."
     ]
   },
   "checksums": {
@@ -27,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.9.7"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.9.8"
 }

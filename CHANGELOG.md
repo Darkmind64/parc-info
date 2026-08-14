@@ -1,5 +1,50 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.8] - 2026-08-14 🦠
+
+### 🦠 Détections antivirus, erreurs système/applicatives, arrêts & redémarrages
+
+Trois historiques en plus, demandés directement : les détections de virus et
+malwares, les erreurs système, et les erreurs logicielles — plus un quatrième
+proposé en cours de route et retenu, l'historique des arrêts/redémarrages.
+
+**Détections antivirus.** `Get-MpThreatDetection` + `Get-MpThreat` (Windows
+Defender), joints sur `ThreatID`, sur une fenêtre d'un an plutôt que les 30
+jours habituels — une détection reste pertinente longtemps après avoir été
+traitée. Catégorie et niveau de gravité dérivent du **préfixe** du nom de la
+menace (`Trojan:…`, `PUA:…`, `Ransom:…`), pas du `CategoryID` numérique dont
+seules deux valeurs étaient confirmées sur cette collecte — le préfixe est une
+convention Microsoft documentée et stable. Atterrit dans « Sécurité &
+conformité ».
+
+**Erreurs système.** Journal Système, niveaux Erreur/Critique, groupées par
+fournisseur+ID sur 30 jours — en excluant explicitement les couples déjà
+couverts par les incidents système existants, pour ne rien compter deux fois
+entre les deux rubriques.
+
+**Erreurs applicatives.** Plantages (ID 1000) et blocages/« ne répond plus »
+(ID 1002) du journal Application. Les deux partagent le même journal mais pas
+le même schéma de champs : un 1002 n'a pas d'équivalent aux positions
+module/exception/chemin d'un 1000, et les y lire renvoyait un horodatage et un
+GUID pris pour un nom de module et un code d'exception — repéré sur une
+collecte réelle (un blocage de « SD Card Formatter.exe »), corrigé en
+distinguant explicitement les deux schémas plutôt qu'en supposant qu'ils
+coïncident. Les codes NTSTATUS courants (`c0000005`, `c0000374`…) sont
+traduits en clair quand ils sont reconnus.
+
+**Arrêts & redémarrages.** ID 1074, seul de ce lot à avoir des champs XML
+nommés plutôt que positionnels — distingue un arrêt/redémarrage planifié
+(mise à jour, action utilisateur) d'un arrêt inattendu.
+
+Chaque ajout suit le chemin déjà établi — collecteur, aperçu du collecteur,
+fiche système, rapport PDF — et atterrit dans la rubrique déjà en place qui
+lui correspond (Sécurité & conformité pour les détections antivirus,
+Diagnostic pour le reste), pas dans une nouvelle liste séparée. Vérifié sur
+une collecte réelle ; nouveaux tests sur le nettoyage des chemins Defender, la
+catégorisation d'une menace et la non-confusion des schémas 1000/1002.
+
+---
+
 ## [2.9.7] - 2026-08-11 🕵️
 
 ### 🕵️ Agents détectés, mots de passe, maintenance et démarrage

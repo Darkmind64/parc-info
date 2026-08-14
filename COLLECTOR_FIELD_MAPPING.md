@@ -195,11 +195,23 @@ avg_ms, max_ms, loss_pct}` · `bandwidth{mbps, downloaded_mb, seconds}`
 lockout_threshold, lockout_duration_min}` · `security_events[]{compte, type,
 event_id, count, sources[], last_seen}` (échecs d'ouverture de session,
 verrouillages) · `failed_logons` · `account_lockouts` ·
-`certificates_expiring[]{sujet, emetteur, expire_le, jours_restants, expire}`
+`certificates_expiring[]{sujet, emetteur, expire_le, jours_restants, expire}` ·
+`malware_detections[]{threat, category, level, process, resource, when,
+cleaned}` · `malware_detections_total`
 
 > `local_password_policy` se lit via `secedit /export`, dont les clés
 > restent en anglais quelle que soit la langue de Windows — `net accounts`,
 > localisé, n'aurait pas été fiable sur un Windows francophone.
+
+> `malware_detections` vient de `Get-MpThreatDetection` (Windows Defender),
+> joint côté client à `Get-MpThreat` sur `ThreatID` pour retrouver le nom de
+> la menace. `category`/`level` dérivent du **préfixe** de `ThreatName`
+> (`Trojan:…`, `PUA:…`, `Ransom:…`) plutôt que du `CategoryID` numérique —
+> seules quelques valeurs de cet enum sont documentées de façon fiable, alors
+> que le préfixe du nom est une convention Microsoft stable. Fenêtre de 365
+> jours (les détections sont rares, contrairement aux 30 jours des autres
+> historiques) ; `resource` est nettoyé du jeton de session
+> (`file:_`/`webfile:_…|…`) via `_chemin_ressource_defender()`.
 
 ### Accès distant & exposition
 `remote_access[]{key, label, enabled, secure, detail, level}` (RDP, WinRM,
@@ -254,7 +266,28 @@ périphériques) · `stopped_auto_services[]{name, display_name, state}` ·
 (hors dossier `\Microsoft\`) · `boot_times[]{when, secondes, noyau_s,
 bureau_s}` · `boot_last_seconds` / `boot_average_seconds` ·
 `user_profiles[]{nom, chemin, taille_go, derniere_utilisation,
-mesure_complete}`
+mesure_complete}` · `system_errors[]{provider, event_id, message, count,
+last_seen}` · `application_errors[]{application, type, module, exception,
+path, count, last_seen}` · `shutdown_history[]{when, action, reason, planned,
+user}`
+
+> `system_errors` interroge le journal Système (niveaux Erreur/Critique) et
+> **exclut explicitement** les couples (fournisseur, ID) déjà couverts par
+> `system_incidents` ci-dessus, pour ne rien signaler deux fois — c'est un
+> filet plus large et moins curaté, pas un remplacement.
+>
+> `application_errors` couvre les IDs 1000 (plantage) et 1002 (ne répond
+> plus) du journal Application. Ces deux événements n'ont **pas** le même
+> schéma de champs positionnels : lire `module`/`exception`/`path` sur un
+> 1002 renvoie un horodatage et un GUID travestis en module/exception — ces
+> trois champs restent donc `None` hors des 1000 (`_champs_erreur_application()`,
+> couvert par un test de non-régression).
+>
+> `shutdown_history` lit l'ID 1074 (journal Système), seul événement de ce
+> lot dont les champs XML sont **nommés** (`param1`…`param7`) plutôt que
+> positionnels — pas de piège équivalent à celui des erreurs applicatives.
+> `planned` distingue un arrêt/redémarrage à l'initiative d'un utilisateur ou
+> planifié d'un arrêt inattendu.
 
 ### Licences & mises à jour
 `licenses[]{name, description, partial_key, status, activated, channel}` ·
@@ -316,6 +349,7 @@ avec un champ inaccessible.
 | Chiffrement | ✅ BitLocker | ✅ FileVault | — |
 | Pare-feu | ✅ | ✅ | — |
 | TPM / Secure Boot | ✅ | — | — |
+| Détections antivirus (Defender) | ✅ | — | — |
 | Ports en écoute | ✅ | — | ✅ (`ss`) |
 | Comptes locaux | ✅ | ✅ | ✅ |
 | Logiciels (nom+version+éditeur) | ✅ | ⚠️ nom seul | ✅ dpkg/rpm/pacman |
@@ -327,13 +361,13 @@ avec un champ inaccessible.
 | Plan d'alimentation / démarrage rapide | ✅ | — | — |
 | Versions .NET installées | ✅ | — | — |
 | Style de partition / mode de démarrage | ✅ | — | — |
-| Diagnostic (incidents, tâches, profils…) | ✅ | — | — |
+| Diagnostic (incidents, erreurs, arrêts, tâches, profils…) | ✅ | — | — |
 
 ---
 
 ## ⚙️ Performance
 
-La collecte Windows tient en **26 étapes groupées** (`_WIN_STEPS` dans
+La collecte Windows tient en **30 étapes groupées** (`_WIN_STEPS` dans
 `collector_core.py`, une poignée d'appels PowerShell chacune plutôt qu'un
 appel par donnée). Chaque bloc est protégé par son propre `try/catch` côté
 PowerShell **et** côté Python : une source indisponible (module absent,

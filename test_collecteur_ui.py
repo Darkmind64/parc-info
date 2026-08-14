@@ -230,6 +230,19 @@ DONNEES_AGENTS = dict(ETAPE_3, **{
     'boot_mode': 'UEFI',
     'disk_partition_styles': [{'number': 0, 'style': 'GPT', 'boot': True}],
     'rdp_logon_history': [{'user': 'Alice', 'ip': '82.1.2.3', 'when': '2026-08-10 09:00'}],
+    'malware_detections': [{'threat': 'Trojan:Win32/Wacatac.B!ml', 'category': 'Trojan',
+                             'level': 'danger', 'process': 'chrome.exe',
+                             'resource': r'C:\Users\Davy\Downloads\x.exe',
+                             'when': '2026-08-01 14:00', 'cleaned': True}],
+    'malware_detections_total': 1,
+    'system_errors': [{'provider': 'Disk', 'event_id': 7, 'message': 'Erreur E/S disque',
+                        'count': 3, 'last_seen': '2026-08-12 08:00'}],
+    'application_errors': [{'application': 'app.exe', 'type': 'Plantage', 'module': 'ucrtbase.dll',
+                             'exception': "Violation d'accès mémoire",
+                             'path': r'C:\Program Files\App\app.exe',
+                             'count': 2, 'last_seen': '2026-08-11 09:00'}],
+    'shutdown_history': [{'when': '2026-08-10 18:00', 'action': 'Redémarrage',
+                           'reason': "Mise à jour Windows (planifié)", 'planned': True, 'user': 'SYSTEM'}],
 })
 sections2 = {s['cle']: s for s in C.build_summary_sections(DONNEES_AGENTS)}
 
@@ -255,6 +268,13 @@ verifier('lev' in contenu2('hygiene') and '4.8.1' in contenu2('hygiene'),
          "plan d'alimentation et .NET dans « Hygiène système »")
 verifier('UEFI' in contenu2('stockage') and 'GPT' in contenu2('stockage'),
          'mode de démarrage et style de partition dans « Stockage »')
+verifier('Wacatac' in contenu2('securite') and 'Wacatac' not in contenu2('diagnostic'),
+         'détections antivirus dans « Sécurité », pas dans « Diagnostic »')
+verifier('Disk' in contenu2('diagnostic') and "Violation d'accès mémoire" in contenu2('diagnostic')
+         and 'Redémarrage' in contenu2('diagnostic'),
+         'erreurs système, erreurs applicatives et arrêts/redémarrages dans « Diagnostic »')
+verifier("Violation d'accès mémoire" not in contenu2('securite') and 'Redémarrage' not in contenu2('securite'),
+         'erreurs applicatives et arrêts/redémarrages absents de « Sécurité »')
 
 print("\n=== 8. Détection des agents par sous-chaîne du nom affiché ===")
 SERVICES_TEST = [
@@ -296,7 +316,48 @@ for build, attendu in ((533320, '4.8.1'), (528040, '4.8'), (461808, '4.7.2'),
     obtenu = C._dotnet_version_from_release(build)
     verifier(obtenu == attendu, 'build %d → %s' % (build, attendu), 'obtenu=%s' % obtenu)
 
-print("\n=== 11. Onglets de l'interface ===")
+print("\n=== 11. Ressource Defender ramenée à un chemin lisible ===")
+for brut, attendu in (
+    (r'file:_C:\Users\Davy\AppData\Local\Temp\x.exe', r'C:\Users\Davy\AppData\Local\Temp\x.exe'),
+    (r'webfile:_D:\Téléchargements\x.exe|https://exemple.fr/x.exe|pid:123,ProcessStart:456',
+     r'D:\Téléchargements\x.exe'),
+    ('', ''),
+):
+    obtenu = C._chemin_ressource_defender(brut)
+    verifier(obtenu == attendu, 'nettoyage de « %s… »' % brut[:30], 'obtenu=%r' % obtenu)
+
+print("\n=== 12. Catégorie d'une menace, depuis le préfixe de son nom ===")
+for nom, categorie_attendue, niveau_attendu in (
+    ('Trojan:Win32/Wacatac.B!ml', 'Trojan', 'danger'),
+    ('PUA:Win32/DownloadAdmin', 'PUA', 'warn'),
+    ('Ransom:Win32/Something', 'Ransom', 'danger'),
+    ('MenaceSansDeuxPoints', 'Autre', 'muted'),
+):
+    categorie, niveau = C._categoriser_menace(nom)
+    verifier(categorie == categorie_attendue and niveau == niveau_attendu,
+             'catégorie de « %s »' % nom, '%s/%s' % (categorie, niveau))
+
+print("\n=== 13. Plantage (1000) et blocage (1002) ne partagent pas le même schéma de champs ===")
+# Un 1002 (« ne répond plus ») a un schéma à 10 champs, sans équivalent aux
+# positions module/exception/chemin d'un 1000 — les y lire renvoyait un
+# horodatage ou un GUID travesti en « module ». Fige le comportement corrigé.
+type_1000, module, exception, chemin = C._champs_erreur_application(
+    1000, 'ucrtbase.dll', 'c0000005', r'C:\Program Files\App\app.exe')
+verifier(type_1000 == 'Plantage' and module == 'ucrtbase.dll'
+         and exception == "Violation d'accès mémoire" and chemin == r'C:\Program Files\App\app.exe',
+         'un 1000 conserve module, exception et chemin', str((type_1000, module, exception, chemin)))
+
+type_1002, module2, exception2, chemin2 = C._champs_erreur_application(
+    1002, '01dd1793f839d42d', '7ac407ac-ca53-4004-853f-e06dea69ce5b', None)
+verifier(type_1002 == 'Ne répond plus' and module2 is None and exception2 is None and chemin2 is None,
+         "un 1002 n'hérite pas des positions d'un 1000 (horodatage/GUID pris pour module/exception)",
+         str((type_1002, module2, exception2, chemin2)))
+
+code_inconnu = C._champs_erreur_application(1000, None, 'deadbeef', None)
+verifier(code_inconnu[2] == 'deadbeef',
+         'un code d\'exception non répertorié est affiché brut plutôt que masqué')
+
+print("\n=== 14. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()

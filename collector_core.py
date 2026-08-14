@@ -23,7 +23,7 @@ import string
 import subprocess
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -2111,9 +2111,12 @@ _WIN_STEPS = [
     ('Style de partition et démarrage', lambda: _win_boot_disk()),
     ('Licences et correctifs', lambda: _win_licensing()),
     ('Sécurité', lambda: _win_security()),
+    ('Détections antivirus (historique)', lambda: _win_malware_detections()),
     ('Comptes utilisateurs', lambda: _win_users()),
     ('Batterie et réseau', lambda: _win_extras()),
     ('Diagnostic (incidents, services, tâches)', lambda: _win_diagnostics()),
+    ('Erreurs système (historique)', lambda: _win_system_errors()),
+    ('Erreurs applicatives (historique)', lambda: _win_application_errors()),
     ('Configuration réseau', lambda: _win_network()),
     ('Environnement (WSUS, domaine, temps)', lambda: _win_enterprise()),
     ('Hygiène système', lambda: _win_hygiene()),
@@ -2125,6 +2128,7 @@ _WIN_STEPS = [
     ('Applications par défaut et lecteurs réseau', lambda: _win_workstation_extras()),
     ('Périphériques en erreur', lambda: _win_problem_devices()),
     ('Temps de démarrage', lambda: _win_boot_performance()),
+    ('Historique des arrêts et redémarrages', lambda: _win_shutdown_history()),
     ('Journal de sécurité', lambda: _win_security_events()),
     ('Connexions Bureau à distance entrantes', lambda: _win_rdp_logon_history()),
     ('Certificats', lambda: _win_certificates()),
@@ -2482,6 +2486,274 @@ def _win_boot_performance():
         'boot_last_seconds': durees[0],
         'boot_average_seconds': round(sum(durees) / len(durees), 1),
     }
+
+
+#: Sévérité Windows Defender (`MSFT_MpThreat.SeverityID`), table publiée par
+#: Microsoft — 3 n'existe pas dans l'énumération.
+_MP_SEVERITY = {0: 'Inconnue', 1: 'Faible', 2: 'Modérée', 4: 'Élevée', 5: 'Sévère'}
+_MP_SEVERITY_LEVEL = {0: 'muted', 1: 'muted', 2: 'warn', 4: 'warn', 5: 'danger'}
+#: `file:_C:\…`, `webfile:_D:\…|https://…|pid:1234,…` → chemin lisible seul.
+_RE_MP_RESSOURCE = re.compile(r'^\w+:_')
+
+
+def _chemin_ressource_defender(brut):
+    """Chemin lisible depuis une ressource Defender, sans le jeton de session."""
+    sans_prefixe = _RE_MP_RESSOURCE.sub('', brut or '', count=1)
+    return sans_prefixe.split('|', 1)[0].strip()
+
+
+def _categoriser_menace(nom_menace):
+    """Catégorie et criticité d'une menace, depuis le préfixe de son nom.
+
+    Le préfixe avant `:` (`Trojan:…`, `PUA:…`, `Ransom:…`) est la catégorie
+    Microsoft, documentée et stable — contrairement à l'énumération numérique
+    complète de `CategoryID`, dont seules quelques valeurs sont confirmées.
+    Une menace sans préfixe reconnu reste « Autre » plutôt que mal étiquetée.
+    """
+    categorie = nom_menace.split(':', 1)[0] if ':' in nom_menace else ''
+    niveau = 'danger' if categorie in ('Trojan', 'Virus', 'Ransom', 'Backdoor', 'Worm') else \
+             'warn' if categorie == 'PUA' else 'muted'
+    return categorie or 'Autre', niveau
+
+
+def _win_malware_detections(jours=365, limite=100):
+    """Historique des détections de menaces par Windows Defender.
+
+    `Get-MpThreatDetection` donne les événements (fichier, processus, date,
+    action) ; `Get-MpThreat` donne le catalogue des menaces elles-mêmes (nom,
+    sévérité) — les deux se joignent sur `ThreatID`, Defender ne les expose pas
+    déjà assemblés. La catégorie se lit dans le préfixe du nom (`Trojan:…`,
+    `PUA:…`) plutôt que dans `CategoryID` : ce préfixe est documenté et stable,
+    l'énumération numérique complète ne l'est pas.
+
+    Une fenêtre d'un an plutôt que les 30 jours habituels : une détection est
+    un événement rare, contrairement à un incident système — la borner à un
+    mois masquerait le plus souvent une machine parfaitement saine.
+
+    Ne couvre que Defender. Un antivirus tiers stocke sa quarantaine dans un
+    format propre à l'éditeur, illisible génériquement.
+    """
+    data = _win_powershell_json(
+        "$d=@(); try { $d=@(Get-MpThreatDetection -EA SilentlyContinue "
+        "| Select-Object ThreatID,ProcessName,Resources,"
+        "@{N='When';E={ if ($_.InitialDetectionTime) { "
+        # `else { '' }` explicite : sans lui, une propriété calculée sans
+        # branche de repli ressort de ConvertTo-Json comme `{}` plutôt que
+        # `null` — une chaîne truthy qui aurait fait passer l'entrée telle
+        # quelle. Constaté sur cette machine, pas supposé.
+        "$_.InitialDetectionTime.ToString('yyyy-MM-dd HH:mm') } else { '' } }},"
+        "ActionSuccess) } catch {}; "
+        "$t=@(); try { $t=@(Get-MpThreat -EA SilentlyContinue "
+        "| Select-Object ThreatID,ThreatName) } catch {}; "
+        "[PSCustomObject]@{ D=$d; T=$t } | ConvertTo-Json -Compress -Depth 4",
+        timeout=45,
+    )
+    if not data:
+        return {}
+
+    catalogue = {t.get('ThreatID'): _clean(t.get('ThreatName'))
+                for t in _as_list(data.get('T')) if t.get('ThreatID') is not None}
+    limite_date = (datetime.utcnow() - timedelta(days=jours)).strftime('%Y-%m-%d %H:%M')
+
+    detections = []
+    for d in _as_list(data.get('D')):
+        quand = _clean(d.get('When'))
+        # Une propriété calculée PowerShell sans branche de repli peut
+        # ressortir de ConvertTo-Json comme `{}` plutôt que `null` — une
+        # chaîne non vide qui échapperait au `not quand` seul.
+        if not re.match(r'^\d{4}-\d{2}-\d{2}', quand) or quand < limite_date:
+            continue
+        nom_menace = catalogue.get(d.get('ThreatID')) or 'Menace inconnue'
+        categorie, gravite = _categoriser_menace(nom_menace)
+        ressources = [_chemin_ressource_defender(r) for r in _as_list(d.get('Resources'))]
+        ressources = [r for r in ressources if r]
+        detections.append({
+            'threat': nom_menace,
+            'category': categorie,
+            'level': gravite,
+            'process': _clean(d.get('ProcessName')) or None,
+            'resource': ressources[0] if ressources else None,
+            'when': quand,
+            'cleaned': bool(d.get('ActionSuccess')),
+        })
+
+    if not detections:
+        return {}
+    detections.sort(key=lambda x: x['when'], reverse=True)
+    return {'malware_detections': detections[:limite],
+            'malware_detections_total': len(detections)}
+
+
+def _win_system_errors():
+    """Erreurs du journal Système au sens large, groupées par source.
+
+    Distinct de `system_incidents` (voir `_win_diagnostics`), qui ne retient
+    volontairement qu'une liste restreinte de signaux critiques — arrêts
+    inattendus, écrans bleus, disque. Ici, le reste : services qui échouent à
+    démarrer, erreurs DCOM, pilotes en échec… Les (fournisseur, ID) déjà
+    couverts par `_EVENT_SPECS` sont exclus pour ne pas doubler la même
+    information sous un autre nom.
+    """
+    exclus = {(prov, i) for prov, ids, _lib, _lvl in _EVENT_SPECS for i in ids}
+    data = _win_powershell_json(
+        "$since=(Get-Date).AddDays(-%d); $e=@(); "
+        "try { $e=@(Get-WinEvent -FilterHashtable @{LogName='System'; Level=@(1,2); "
+        "StartTime=$since} -MaxEvents 500 -EA SilentlyContinue "
+        "| Select-Object Id,ProviderName,"
+        "@{N='When';E={$_.TimeCreated.ToString('yyyy-MM-dd HH:mm')}},"
+        "@{N='Msg';E={($_.Message -split [char]10)[0].Trim()}}) } catch {}; "
+        "$e | ConvertTo-Json -Compress -Depth 3" % EVENT_WINDOW_DAYS,
+        timeout=60,
+    )
+
+    groupes = {}
+    for e in _as_list(data):
+        fournisseur = _clean(e.get('ProviderName'))
+        identifiant = e.get('Id')
+        if (fournisseur, identifiant) in exclus:
+            continue
+        cle = (fournisseur, identifiant, _clean(e.get('Msg')))
+        entree = groupes.setdefault(cle, {
+            'provider': fournisseur, 'event_id': identifiant, 'message': cle[2],
+            'count': 0, 'last_seen': '',
+        })
+        entree['count'] += 1
+        quand = _clean(e.get('When'))
+        if quand > entree['last_seen']:
+            entree['last_seen'] = quand
+
+    if not groupes:
+        return {}
+    erreurs = sorted(groupes.values(), key=lambda g: (-g['count'], g['last_seen']))
+    return {'system_errors': erreurs[:40]}
+
+
+#: Codes d'exception NTSTATUS les plus courants dans les plantages
+#: applicatifs — traduits pour ne pas laisser un technicien chercher
+#: « c0000005 » dans un moteur de recherche.
+_EXCEPTION_CODES = {
+    'c0000005': 'Violation d\'accès mémoire',
+    'c0000409': 'Protection contre le dépassement de pile (stack overrun)',
+    'c00000fd': 'Débordement de pile (stack overflow)',
+    'c0000135': 'DLL introuvable',
+    'c0000142': "Échec de l'initialisation d'une DLL",
+    '80000003': 'Point d\'arrêt (débogueur absent)',
+    'c0000374': 'Corruption du tas (heap corruption)',
+}
+
+
+def _champs_erreur_application(event_id, module_brut, exception_brut, chemin_brut):
+    """Type et champs valides d'un événement de plantage applicatif.
+
+    Les indices 3/6/10 du XML ne désignent module/exception/chemin que pour un
+    1000 (plantage) ; un 1002 (ne répond plus) suit un schéma à 10 champs sans
+    équivalent aux mêmes positions — les y lire renvoyait un horodatage ou un
+    GUID travesti en « module » ou en « exception ». Fonction pure, séparée de
+    l'appel PowerShell pour rester testable sans lui.
+    """
+    est_plantage = event_id == 1000
+    type_label = 'Plantage' if est_plantage else 'Ne répond plus'
+    if not est_plantage:
+        return type_label, None, None, None
+    module = _clean(module_brut)
+    module = module if module and module.lower() != 'unknown' else None
+    code = _clean(exception_brut).lower()
+    exception = _EXCEPTION_CODES.get(code, code) if code else None
+    return type_label, module, exception, (_clean(chemin_brut) or None)
+
+
+def _win_application_errors():
+    """Plantages et blocages applicatifs (journal Application).
+
+    Événements 1000 (l'application a cessé de fonctionner) et 1002 (ne répond
+    plus). Leurs champs ne sont pas nommés dans le XML — contrairement à la
+    plupart des événements déjà lus ailleurs dans ce fichier — Microsoft les
+    documente par position : nom, version, horodatage, module fautif, version
+    du module, horodatage du module, code d'exception, décalage, PID,
+    horodatage de création du processus, chemin de l'exécutable. Un événement
+    1002 n'en fournit qu'une poignée ; le reste vaut alors `None`, pas une
+    erreur (voir `_champs_erreur_application`).
+    """
+    data = _win_powershell_json(
+        "$since=(Get-Date).AddDays(-%d); $e=@(); "
+        "try { $e=@(Get-WinEvent -FilterHashtable @{LogName='Application'; "
+        "ID=@(1000,1002); StartTime=$since} -MaxEvents 300 -EA SilentlyContinue) } catch {}; "
+        "$e | ForEach-Object { $x=[xml]$_.ToXml(); $d=@($x.Event.EventData.Data); "
+        "[PSCustomObject]@{ Id=$_.Id; "
+        "When=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm'); "
+        "App=$d[0]; Version=$d[1]; Module=$d[3]; Exception=$d[6]; Path=$d[10] } } "
+        "| ConvertTo-Json -Compress -Depth 3" % EVENT_WINDOW_DAYS,
+        timeout=60,
+    )
+
+    groupes = {}
+    for e in _as_list(data):
+        app = _clean(e.get('App'))
+        if not app:
+            continue
+        type_label, module, exception, chemin = _champs_erreur_application(
+            e.get('Id'), e.get('Module'), e.get('Exception'), e.get('Path'))
+        cle = (app, type_label, module or '')
+        entree = groupes.setdefault(cle, {
+            'application': app, 'type': type_label, 'module': module,
+            'exception': exception, 'path': chemin, 'count': 0, 'last_seen': '',
+        })
+        entree['count'] += 1
+        if exception and not entree['exception']:
+            entree['exception'] = exception
+        quand = _clean(e.get('When'))
+        if quand > entree['last_seen']:
+            entree['last_seen'] = quand
+
+    if not groupes:
+        return {}
+    erreurs = sorted(groupes.values(), key=lambda g: (-g['count'], g['last_seen']))
+    return {'application_errors': erreurs[:40]}
+
+
+def _win_shutdown_history(jours=EVENT_WINDOW_DAYS, limite=25):
+    """Historique des arrêts/redémarrages, avec la raison indiquée par Windows.
+
+    Événement 1074 : distingue un arrêt planifié (mise à jour, maintenance
+    programmée) d'un arrêt réellement non planifié — complète
+    `unexpected_shutdowns`, déduit d'un signal plus pauvre (simple absence de
+    message d'arrêt propre, sans savoir si l'arrêt suivant était volontaire).
+    """
+    data = _win_powershell_json(
+        "$since=(Get-Date).AddDays(-%d); $e=@(); "
+        "try { $e=@(Get-WinEvent -FilterHashtable @{LogName='System'; ID=1074; "
+        "StartTime=$since} -MaxEvents %d -EA SilentlyContinue) } catch {}; "
+        "$e | ForEach-Object { $x=[xml]$_.ToXml(); $d=$x.Event.EventData.Data; "
+        "$val={ param($n) ($d | Where-Object {$_.Name -eq $n}).'#text' }; "
+        "[PSCustomObject]@{ "
+        "When=$_.TimeCreated.ToString('yyyy-MM-dd HH:mm'); "
+        "Action=(& $val 'param5'); Reason=(& $val 'param3'); "
+        "User=(& $val 'param7') } } "
+        "| ConvertTo-Json -Compress -Depth 3" % (jours, limite),
+        timeout=45,
+    )
+
+    historique = []
+    for e in _as_list(data):
+        quand = _clean(e.get('When'))
+        if not quand:
+            continue
+        raison = _clean(e.get('Reason'))
+        # Windows retourne ce libellé précis pour un arrêt dont il n'a pas pu
+        # déterminer la cause — c'est justement ce qui distingue un arrêt
+        # volontaire d'un arrêt qui ne l'était pas.
+        planifie = bool(raison) and not re.search(
+            r'non planifi|aucun titre', raison, re.IGNORECASE)
+        action = _clean(e.get('Action'))
+        historique.append({
+            'when': quand,
+            'action': 'Redémarrage' if re.search('red', action, re.IGNORECASE) else 'Arrêt',
+            'reason': raison or 'Non renseignée',
+            'planned': planifie,
+            'user': _clean(e.get('User')) or None,
+        })
+
+    return {'shutdown_history': historique} if historique else {}
 
 
 def _win_certificates(jours_alerte=90):
@@ -4996,6 +5268,13 @@ def build_summary_sections(info):
         s['listes'].append({'titre': 'Connexions Bureau à distance entrantes', 'elements': [
             '%s — depuis %s — %s' % (c.get('user', '?'), c.get('ip') or '?', c.get('when', '?'))
             for c in info['rdp_logon_history']]})
+    if info.get('malware_detections'):
+        total = info.get('malware_detections_total') or len(info['malware_detections'])
+        s['champs'].append(('Détections antivirus (1 an)', total))
+        s['listes'].append({'titre': 'Détections antivirus (Windows Defender)', 'elements': [
+            '%s (%s) — %s%s' % (d.get('threat', '?'), d.get('category', '?'), d.get('when', '?'),
+                                '' if d.get('cleaned') else ' — non traitée')
+            for d in info['malware_detections']]})
     sections.append(s)
 
     # ── Licences ───────────────────────────────────────────────────────────
@@ -5088,6 +5367,23 @@ def build_summary_sections(info):
                             ' — %s' % i['disk'] if i.get('disk') else '')
             if isinstance(i, dict) else str(i)
             for i in info['system_incidents']]})
+    if info.get('system_errors'):
+        s['listes'].append({'titre': 'Erreurs système (hors incidents ci-dessus)', 'elements': [
+            '%s/%s ×%s — dernière %s%s' % (e.get('provider', '?'), e.get('event_id', '?'),
+                                           e.get('count', 1), e.get('last_seen', '?'),
+                                           ' — %s' % e['message'] if e.get('message') else '')
+            for e in info['system_errors']]})
+    if info.get('application_errors'):
+        s['listes'].append({'titre': 'Erreurs applicatives', 'elements': [
+            '%s — %s ×%s — dernière %s%s' % (a.get('application', '?'), a.get('type', '?'),
+                                             a.get('count', 1), a.get('last_seen', '?'),
+                                             ' — %s' % a['exception'] if a.get('exception') else '')
+            for a in info['application_errors']]})
+    if info.get('shutdown_history'):
+        s['listes'].append({'titre': 'Arrêts & redémarrages', 'elements': [
+            '%s %s — %s%s' % (h.get('action', '?'), h.get('when', '?'), h.get('reason', '?'),
+                              '' if h.get('planned') else ' (non planifié)')
+            for h in info['shutdown_history']]})
     if info.get('stopped_auto_services'):
         s['listes'].append({'titre': "Services automatiques à l'arrêt", 'elements': [
             x.get('display_name') or x.get('name', '?') if isinstance(x, dict) else str(x)
@@ -6948,6 +7244,27 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             ] + extra))
             story.append(t)
 
+        # ── Détections antivirus ──────────────────────────────────────────────
+        # Historique Windows Defender sur un an — un antivirus tiers stocke sa
+        # quarantaine dans un format propre à l'éditeur, illisible ici.
+        detections = info.get('malware_detections') or []
+        if detections:
+            rows, extra = [], []
+            for i, d in enumerate(detections, start=1):
+                fg, bg = _LEVEL_COLORS.get(d.get('level'), _LEVEL_COLORS['muted'])
+                rows.append([
+                    Paragraph(f'<b>{_pdf_escape(d.get("threat"))}</b>', S['body']),
+                    Paragraph(f'<font color="{fg}"><b>{_pdf_escape(d.get("category"))}</b></font>', S['body']),
+                    Paragraph(_pdf_escape(d.get('resource')), S['small']),
+                    Paragraph('Oui' if d.get('cleaned') else 'Non', S['body']),
+                    Paragraph(_pdf_escape(d.get('when')), S['mono']),
+                ])
+                extra.append(('BACKGROUND', (1, i), (1, i), colors.HexColor(bg)))
+            story.append(Paragraph('Détections antivirus (%d)'
+                                   % (info.get('malware_detections_total') or len(detections)), S['h2']))
+            story.append(_pdf_data_table(tk, ['Menace', 'Catégorie', 'Fichier', 'Traitée', 'Date'],
+                                         rows, width, [0.22, 0.14, 0.38, 0.10, 0.16], extra))
+
         # ── Accès distant & exposition ───────────────────────────────────────
         acces = info.get('remote_access') or []
         if acces:
@@ -7392,6 +7709,37 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 tk, ['Type', 'Occurrences', 'Dernière', 'Disque', 'Message'],
                 rows, width, [0.17, 0.10, 0.15, 0.22, 0.36]))
 
+        # ── Erreurs système ───────────────────────────────────────────────────
+        # Journal Système hors incidents déjà listés ci-dessus.
+        erreurs_sys = info.get('system_errors') or []
+        if erreurs_sys:
+            rows = [[Paragraph(_pdf_escape('%s/%s' % (e.get('provider'), e.get('event_id'))), S['mono']),
+                     Paragraph(str(e.get('count', '')), S['body']),
+                     Paragraph(_pdf_escape(e.get('last_seen')), S['mono']),
+                     Paragraph(_pdf_escape(e.get('message')), S['small'])] for e in erreurs_sys]
+            story.append(Paragraph('Erreurs système (%d)' % len(erreurs_sys), S['h2']))
+            story.append(_pdf_data_table(tk, ['Source', 'Occurrences', 'Dernière', 'Message'],
+                                         rows, width, [0.24, 0.12, 0.16, 0.48]))
+
+        # ── Erreurs applicatives ──────────────────────────────────────────────
+        erreurs_app = info.get('application_errors') or []
+        if erreurs_app:
+            rows = []
+            for a in erreurs_app:
+                cause = a.get('exception') or '—'
+                if a.get('module'):
+                    cause += ' — %s' % a['module']
+                rows.append([
+                    Paragraph('<b>%s</b>' % _pdf_escape(a.get('application')), S['body']),
+                    Paragraph(a.get('type'), S['body']),
+                    Paragraph(str(a.get('count', '')), S['body']),
+                    Paragraph(_pdf_escape(a.get('last_seen')), S['mono']),
+                    Paragraph(_pdf_escape(cause), S['small']),
+                ])
+            story.append(Paragraph('Erreurs applicatives (%d)' % len(erreurs_app), S['h2']))
+            story.append(_pdf_data_table(tk, ['Application', 'Type', 'Occurrences', 'Dernière', 'Cause'],
+                                         rows, width, [0.24, 0.14, 0.10, 0.14, 0.38]))
+
         # ── Mises à jour disponibles ─────────────────────────────────────────
         maj = info.get('pending_updates') or []
         if maj:
@@ -7449,6 +7797,18 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(_pdf_data_table(
                 tk, ['Démarrage', 'Total', 'Noyau', 'Ouverture de session'],
                 rows, width, [0.34, 0.22, 0.22, 0.22]))
+
+        # ── Arrêts & redémarrages ─────────────────────────────────────────────
+        arrets = info.get('shutdown_history') or []
+        if arrets:
+            rows = [[Paragraph(_pdf_escape(h.get('when')), S['mono']),
+                     Paragraph(h.get('action'), S['body']),
+                     Paragraph('Oui' if h.get('planned') else 'Non', S['body']),
+                     Paragraph(_pdf_escape(h.get('reason')), S['small']),
+                     Paragraph(_pdf_escape(h.get('user')), S['small'])] for h in arrets]
+            story.append(Paragraph('Arrêts & redémarrages (%d)' % len(arrets), S['h2']))
+            story.append(_pdf_data_table(tk, ['Quand', 'Action', 'Planifié', 'Raison', 'Compte'],
+                                         rows, width, [0.18, 0.12, 0.10, 0.38, 0.22]))
 
         taches = info.get('scheduled_tasks') or []
         if taches:

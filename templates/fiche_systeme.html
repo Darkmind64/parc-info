@@ -880,6 +880,32 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
+<!-- ── DÉTECTIONS ANTIVIRUS ─────────────────────────────────────────────── -->
+{% if rapport.malware_detections %}
+<div class="fs-section">
+    <h3>■ Détections antivirus ({{ rapport.malware_detections_total or rapport.malware_detections|length }})</h3>
+    <div class="fs-label" style="font-size:.72rem;margin-bottom:.5rem;">
+        Historique Windows Defender, sur un an — un antivirus tiers stocke sa
+        quarantaine dans un format propre à l'éditeur, illisible ici.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Menace</th><th>Catégorie</th><th>Fichier</th><th>Processus</th><th>Traitée</th><th>Date</th></tr>
+        {% for d in rapport.malware_detections %}
+        <tr>
+            <td><strong>{{ d.threat }}</strong></td>
+            <td><span class="fs-pill {{ {'danger':'fs-bad','warn':'fs-warn'}.get(d.level, 'fs-muted') }}">{{ d.category }}</span></td>
+            <td class="fs-mono" style="font-size:.72rem;word-break:break-all;">{{ d.resource or '—' }}</td>
+            <td>{{ d.process or '—' }}</td>
+            <td>{% if d.cleaned %}<span class="fs-pill fs-ok">Oui</span>{% else %}<span class="fs-pill fs-bad">Non</span>{% endif %}</td>
+            <td class="fs-mono">{{ d.when }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
 <!-- ── ACCÈS DISTANT & EXPOSITION ───────────────────────────────────────── -->
 {% if rapport.remote_access or rapport.autologon is defined %}
 <div class="fs-section">
@@ -1673,6 +1699,57 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
+<!-- ── ERREURS SYSTÈME ──────────────────────────────────────────────────── -->
+{% if rapport.system_errors %}
+<div class="fs-section">
+    <h3>■ Erreurs système ({{ rapport.system_errors|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Journal Système des 30 derniers jours, hors incidents déjà listés
+        ci-dessus (arrêts, écrans bleus, disque) — services qui échouent à
+        démarrer, erreurs de composants, pilotes en échec…
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Source</th><th>Occurrences</th><th>Dernière</th><th>Message</th></tr>
+        {% for e in rapport.system_errors %}
+        <tr>
+            <td class="fs-mono" style="font-size:.72rem;">{{ e.provider }}/{{ e.event_id }}</td>
+            <td><strong>{{ e.count }}</strong></td>
+            <td class="fs-mono">{{ e.last_seen }}</td>
+            <td>{{ e.message or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── ERREURS APPLICATIVES ─────────────────────────────────────────────── -->
+{% if rapport.application_errors %}
+<div class="fs-section">
+    <h3>■ Erreurs applicatives ({{ rapport.application_errors|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Journal Application des 30 derniers jours — plantages et blocages,
+        regroupés par programme et par cause.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Application</th><th>Type</th><th>Occurrences</th><th>Dernière</th><th>Cause</th></tr>
+        {% for a in rapport.application_errors %}
+        <tr>
+            <td><strong>{{ a.application }}</strong>
+                {% if a.path %}<div class="fs-mono" style="font-size:.66rem;color:var(--text-secondary);">{{ a.path }}</div>{% endif %}</td>
+            <td><span class="fs-pill {{ 'fs-bad' if a.type == 'Plantage' else 'fs-warn' }}">{{ a.type }}</span></td>
+            <td><strong>{{ a.count }}</strong></td>
+            <td class="fs-mono">{{ a.last_seen }}</td>
+            <td>{{ a.exception or '—' }}{% if a.module %} <span style="color:var(--text-secondary);">— {{ a.module }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
 <!-- ── MISES À JOUR EN ATTENTE ──────────────────────────────────────────── -->
 {% if rapport.pending_updates %}
 <div class="fs-section">
@@ -1793,6 +1870,31 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
                 {{ b.secondes }} s</span></td>
             <td class="fs-mono">{{ b.noyau_s }} s</td>
             <td class="fs-mono">{{ b.bureau_s }} s</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── ARRÊTS & REDÉMARRAGES ────────────────────────────────────────────── -->
+{% if rapport.shutdown_history %}
+<div class="fs-section">
+    <h3>■ Arrêts &amp; redémarrages ({{ rapport.shutdown_history|length }})</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Raison indiquée par Windows pour chaque arrêt — distingue une mise à
+        jour ou une maintenance planifiée d'un arrêt réellement inattendu.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Quand</th><th>Action</th><th>Planifié</th><th>Raison</th><th>Compte</th></tr>
+        {% for h in rapport.shutdown_history %}
+        <tr>
+            <td class="fs-mono">{{ h.when }}</td>
+            <td>{{ h.action }}</td>
+            <td>{% if h.planned %}<span class="fs-pill fs-ok">Oui</span>{% else %}<span class="fs-pill fs-warn">Non</span>{% endif %}</td>
+            <td>{{ h.reason }}</td>
+            <td class="fs-mono" style="font-size:.72rem;">{{ h.user or '—' }}</td>
         </tr>
         {% endfor %}
     </table>

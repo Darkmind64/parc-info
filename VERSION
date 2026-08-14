@@ -1,8 +1,14 @@
-PARCINFO_VERSION=2.9.7
-RELEASE_DATE=2026-08-08
-BUILD_NUMBER=2026081006
+PARCINFO_VERSION=2.9.8
+RELEASE_DATE=2026-08-14
+BUILD_NUMBER=2026081401
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.9.8 - Détections antivirus, erreurs et arrêts/redémarrages
+# Historique des détections Windows Defender (1 an), erreurs système et
+# applicatives (journal Système/Application, hors incidents déjà signalés),
+# et historique des arrêts/redémarrages avec distinction planifié/inattendu
+# Date: 14 août 2026
 
 # Version 2.9.7 - Redemarrage apres mise a jour
 # Balayage de toutes les sources de clé produit, appairage sur les 5
