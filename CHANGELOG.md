@@ -1,5 +1,41 @@
 # CHANGELOG - ParcInfo
 
+## [2.9.9] - 2026-08-15 🔄
+
+### 🔄 Trigger de synchronisation Turso figé sur une définition périmée
+
+Repéré en production : le journal de synchronisation affichait, sur un site
+utilisant le mode multi-instance (Turso), `push documents_appareils: SQLite
+error: UNIQUE constraint failed: _sync_journal.tbl, _sync_journal.record_id,
+_sync_journal.action`. Aucune donnée perdue — `appareils` avait synchronisé
+195/195 dans le même cycle — mais un changement resté coincé sur cette seule
+table.
+
+**Cause.** `_ensure_turso_schema()` réplique vers Turso les triggers
+`_trg_journal_*` qui alimentent son propre journal de changements (nécessaire
+pour que chaque instance sache ce que les autres ont modifié). Cette
+réplication utilisait `CREATE TRIGGER IF NOT EXISTS` : un trigger déjà présent
+sur Turso — créé par une version antérieure du code — n'était donc **jamais**
+remis à jour, quoi que dise le code actuel. Le même défaut avait déjà été
+corrigé côté local il y a plusieurs versions (`_TRACKED_JOURNAL` dans
+`app.py`, en DROP+CREATE explicite), sans que le chemin de réplication vers
+Turso reçoive le même traitement.
+
+**Fix.** DROP+CREATE appliqué désormais côté Turso aussi — mais seulement
+quand la définition locale diffère de celle déjà présente sur Turso (comparée
+texte à texte). Un DROP+CREATE aveugle à chaque cycle (~30 s, potentiellement
+depuis plusieurs instances) aurait ouvert une fenêtre où le trigger n'existe
+pas, pile au moment où une autre instance pourrait écrire — la comparaison
+préalable évite cette contrepartie tout en rendant la réplication réellement
+capable de se corriger elle-même.
+
+Deux nouveaux tests dans `test_sync_turso.py` (connexions SQLite en mémoire,
+sans dépendance à un vrai Turso) : un trigger périmé est bien remplacé et la
+ré-insertion sur une clé déjà journalisée ne lève plus d'erreur ; un trigger
+déjà à jour n'est pas retouché.
+
+---
+
 ## [2.9.8] - 2026-08-14 🦠
 
 ### 🦠 Détections antivirus, erreurs système/applicatives, arrêts & redémarrages

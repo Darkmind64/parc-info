@@ -1,8 +1,17 @@
-PARCINFO_VERSION=2.9.8
-RELEASE_DATE=2026-08-14
-BUILD_NUMBER=2026081401
+PARCINFO_VERSION=2.9.9
+RELEASE_DATE=2026-08-15
+BUILD_NUMBER=2026081501
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.9.9 - Trigger de sync Turso figé sur une définition périmée
+# _ensure_turso_schema() ne mettait jamais à jour un trigger _trg_journal_*
+# déjà présent sur Turso (CREATE TRIGGER IF NOT EXISTS) : une définition
+# créée par une version antérieure du code y restait figée indéfiniment,
+# provoquant en production un « UNIQUE constraint failed » sur _sync_journal.
+# DROP+CREATE désormais, mais seulement quand la définition diffère de celle
+# déjà sur Turso, pour ne pas rouvrir une fenêtre sans trigger à chaque cycle
+# Date: 15 août 2026
 
 # Version 2.9.8 - Détections antivirus, erreurs et arrêts/redémarrages
 # Historique des détections Windows Defender (1 an), erreurs système et

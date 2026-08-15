@@ -643,16 +643,36 @@ def _ensure_turso_schema(local, turso):
     #    TOUTES les instances (pas seulement celle qui exécute ce cycle de sync).
     #    C'est ce journal Turso que chaque instance relit ensuite (pull) pour
     #    récupérer les changements faits ailleurs.
+    #
+    #    DROP + CREATE seulement si la définition diffère de celle déjà sur Turso —
+    #    jamais en aveugle : ce bloc tourne à chaque cycle (~30s par défaut), depuis
+    #    potentiellement plusieurs instances ; un DROP+CREATE systématique ouvrirait
+    #    à chaque fois une fenêtre où le trigger n'existe pas, pile quand une autre
+    #    instance pourrait écrire. Sans ce contrôle de version, un trigger déjà créé
+    #    sur Turso par une version antérieure du code resterait figé indéfiniment
+    #    (CREATE TRIGGER IF NOT EXISTS ne le mettrait jamais à jour) — même défaut
+    #    que celui déjà corrigé côté local, voir _TRACKED_JOURNAL dans app.py.
     try:
         trig_cur = local.execute(
             "SELECT name, sql FROM sqlite_master WHERE type='trigger' AND name LIKE '_trg_journal_%'")
-        for row in trig_cur.fetchall():
-            ddl = row[1]
-            if not ddl:
-                continue
-            safe_ddl = ddl.replace('CREATE TRIGGER', 'CREATE TRIGGER IF NOT EXISTS', 1)
+        local_triggers = {row[0]: row[1] for row in trig_cur.fetchall() if row[1]}
+
+        try:
+            remote_cur = turso.execute(
+                "SELECT name, sql FROM sqlite_master WHERE type='trigger' AND name LIKE '_trg_journal_%'")
+            remote_triggers = {row[0]: row[1] for row in remote_cur.fetchall()}
+        except Exception:
+            remote_triggers = {}
+
+        for name, ddl in local_triggers.items():
+            if remote_triggers.get(name) == ddl:
+                continue   # déjà à jour côté Turso, rien à faire
             try:
-                turso.execute(safe_ddl)
+                turso.execute(f"DROP TRIGGER IF EXISTS [{name}]")
+            except Exception:
+                pass
+            try:
+                turso.execute(ddl)
             except Exception:
                 pass
     except Exception:
