@@ -1,8 +1,15 @@
-PARCINFO_VERSION=2.12.0
+PARCINFO_VERSION=2.13.0
 RELEASE_DATE=2026-08-15
-BUILD_NUMBER=2026081504
+BUILD_NUMBER=2026081505
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.13.0 - Redirections du fichier hosts
+# Seul champ réseau cross-plateforme du collecteur (Windows/macOS/Linux) :
+# lecture directe de hosts, filtrée (localhost, entrées ip6-* et
+# 127.0.1.1 <hostname> que Linux inscrit lui-même, doublons exacts) et
+# marquée « local » (blocage pub/licence/télémétrie, dev local) ou « réseau »
+# Date: 15 août 2026
 
 # Version 2.12.0 - Règles de pare-feu, filtrées et fusionnées
 # netsh advfirewall (Get-NetFirewallRule exige l'élévation), décodé via la

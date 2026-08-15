@@ -184,7 +184,20 @@ enabled}` · `wifi{ssid, signal, band, channel}` · `latency[]{role, target,
 avg_ms, max_ms, loss_pct}` · `bandwidth{mbps, downloaded_mb, seconds}`
 (sur demande explicite, `--test-debit`) ·
 `smb_shares[]{name, path, administrative}` (partages exposés) ·
-`mapped_drives[]{letter, path}` (lecteurs mappés depuis d'autres machines)
+`mapped_drives[]{letter, path}` (lecteurs mappés depuis d'autres machines) ·
+`hosts_entries[]{ip, hostname, local}`
+
+> `hosts_entries` — **seul champ réseau qui n'est pas spécifique à
+> Windows** (`get_hosts_file_entries()`, appelé depuis `collect_system_info()`
+> plutôt que `_WIN_STEPS`/`get_system_info_windows()`, simple lecture de
+> fichier valable sur les trois OS). Filtré : `localhost`, les entrées
+> `ip6-*` que Linux inscrit lui-même, et la propre entrée `<ip loopback>
+> <hostname de la machine>` que Debian/Ubuntu écrivent automatiquement —
+> aucune de ces trois n'est une redirection volontaire. Les doublons exacts
+> (même IP, même nom — deux outils qui gèrent la même entrée) sont réduits à
+> une seule ligne. `local` distingue une redirection vers une IP
+> locale/nulle (blocage publicité/licence/télémétrie, ou serveur de dev)
+> d'une simple correspondance nom↔IP réelle sur le réseau local.
 
 ### Réseaux Wi-Fi enregistrés (hors rapport système)
 `get_wifi_profiles()` → `[{ssid, authentification, chiffrement, password?}]` —
@@ -437,6 +450,7 @@ avec un champ inaccessible.
 | Détections antivirus (Defender) | ✅ | — | — |
 | Pilotes non signés | ✅ | — | — |
 | Règles de pare-feu (filtrées, non par défaut) | ✅ | — | — |
+| Redirections du fichier hosts (filtrées) | ✅ | ✅ | ✅ |
 | Réseaux Wi-Fi enregistrés (SSID + mot de passe optionnel) | ✅ | — | — |
 | Stratégies de groupe appliquées | ✅ | — | — |
 | Ports en écoute | ✅ | — | ✅ (`ss`) |

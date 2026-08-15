@@ -862,6 +862,82 @@ def get_ip_addresses():
     return [ip for ip in ips if not ip.startswith('127.')]
 
 
+def _hosts_file_path():
+    """Chemin du fichier hosts, quel que soit l'OS."""
+    if IS_WINDOWS:
+        return os.path.join(os.environ.get('SystemRoot', r'C:\Windows'),
+                            'System32', 'drivers', 'etc', 'hosts')
+    return '/etc/hosts'
+
+
+# Noms que Windows/macOS/Linux inscrivent eux-mêmes par défaut, sans
+# intervention de quiconque — jamais une redirection à auditer.
+_HOSTS_NOMS_DEFAUT = {
+    'localhost', 'localhost.localdomain',
+    'broadcasthost',  # macOS
+    'ip6-localhost', 'ip6-loopback', 'ip6-localnet',
+    'ip6-mcastprefix', 'ip6-allnodes', 'ip6-allrouters', 'ip6-allhosts',  # Debian/Ubuntu
+}
+
+
+def _parse_hosts_lines(lignes, hostname_machine=None):
+    """Extrait les redirections utiles de lignes de fichier hosts déjà lues.
+
+    Fonction pure, séparée de get_hosts_file_entries pour rester testable
+    sans dépendre du fichier hosts réel de la machine — même principe que
+    _parse_wifi_profile_xml.
+
+    Un fichier hosts réel accumule vite des lignes commentées (le modèle
+    livré par Windows n'est qu'exemples désactivés), des doublons — le même
+    blocage recopié deux fois par deux outils différents n'est pas rare — et
+    la propre entrée `<ip loopback> <hostname de la machine>` que Debian/
+    Ubuntu écrivent d'eux-mêmes. Rien de tout ça n'est une redirection
+    volontaire ; c'est filtré ici plutôt que remonté tel quel.
+
+    `local` distingue une redirection vers une IP locale/nulle (blocage —
+    publicité, licence, télémétrie — ou serveur de dev local) d'une simple
+    correspondance nom↔IP réelle sur le réseau local (ex. un poste désigné
+    par son nom plutôt que redécouvert par DHCP à chaque fois).
+    """
+    hote_normalise = (hostname_machine or '').strip().lower()
+    vus = set()
+    entrees = []
+    for ligne in lignes:
+        ligne = ligne.split('#', 1)[0].strip()
+        if not ligne:
+            continue
+        morceaux = ligne.split()
+        if len(morceaux) < 2:
+            continue
+        ip = morceaux[0]
+        for nom in morceaux[1:]:
+            nom_normalise = nom.strip().lower()
+            if not nom_normalise or nom_normalise in _HOSTS_NOMS_DEFAUT:
+                continue
+            if hote_normalise and nom_normalise == hote_normalise and ip in ('127.0.0.1', '127.0.1.1', '::1'):
+                continue
+            cle = (ip, nom_normalise)
+            if cle in vus:
+                continue
+            vus.add(cle)
+            entrees.append({
+                'ip': ip, 'hostname': nom,
+                'local': ip in ('0.0.0.0', '127.0.0.1', '::1'),
+            })
+    return entrees
+
+
+def get_hosts_file_entries(hostname_machine=None):
+    """Redirections DNS actives du fichier hosts de cette machine (voir
+    _parse_hosts_lines pour le filtrage)."""
+    try:
+        with open(_hosts_file_path(), encoding='utf-8-sig', errors='replace') as f:
+            lignes = f.readlines()
+    except Exception:
+        return []
+    return _parse_hosts_lines(lignes, hostname_machine)
+
+
 def get_os_info():
     """Récupère l'OS et la version exacte avec édition (Pro/Home/Server).
 
@@ -5268,6 +5344,17 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data
         pass
     _publier(on_data, info)
 
+    # Fichier hosts : redirections DNS actives, hors bruit par défaut.
+    # Cross-plateforme (simple lecture de fichier), donc appelé ici plutôt
+    # que dans un bloc spécifique à un OS.
+    try:
+        redirections = get_hosts_file_entries(info.get('hostname'))
+        if redirections:
+            info['hosts_entries'] = redirections
+    except Exception:
+        pass
+    _publier(on_data, info)
+
     # Logiciels
     _report(progress, 0.82, 'Inventaire logiciel')
     info['installed_software'] = get_installed_software()
@@ -5612,6 +5699,12 @@ def build_summary_sections(info):
     ]
     if dns:
         s['listes'].append({'titre': 'Serveurs DNS', 'elements': dns})
+    if info.get('hosts_entries'):
+        s['listes'].append({'titre': 'Redirections du fichier hosts', 'elements': [
+            '%s → %s%s' % (h.get('hostname', '?'), h.get('ip', '?'),
+                           ' (local)' if h.get('local') else '')
+            if isinstance(h, dict) else str(h)
+            for h in info['hosts_entries']]})
     # La latence est mesurée vers plusieurs cibles (passerelle, Internet) :
     # chacune a son intérêt — une passerelle lente n'a pas la même cause qu'un
     # Internet lent.
@@ -8062,6 +8155,15 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(Paragraph('Serveurs DNS', S['h2']))
             story.append(_pdf_data_table(tk, ['Interface', 'Serveurs', 'Attribution'],
                                          rows, width, [0.42, 0.38, 0.20]))
+
+        hosts_entrees = info.get('hosts_entries') or []
+        if hosts_entrees:
+            rows = [[Paragraph(_pdf_escape(h.get('hostname')), S['body']),
+                     Paragraph(_pdf_escape(h.get('ip')), S['mono']),
+                     Paragraph('Local' if h.get('local') else 'Réseau', S['body'])] for h in hosts_entrees]
+            story.append(Paragraph('Redirections du fichier hosts (%d)' % len(hosts_entrees), S['h2']))
+            story.append(_pdf_data_table(tk, ['Nom', 'Adresse', 'Type'],
+                                         rows, width, [0.46, 0.30, 0.24]))
 
         # ── Qualité du lien ──────────────────────────────────────────────────
         latence = info.get('latency') or []

@@ -1,5 +1,36 @@
 # CHANGELOG - ParcInfo
 
+## [2.13.0] - 2026-08-15 🗺️
+
+### 🗺️ Redirections du fichier hosts
+
+Premier champ réseau du collecteur qui n'est pas spécifique à Windows :
+`get_hosts_file_entries()` lit `/etc/hosts` (ou son équivalent Windows)
+directement — pas de commande à lancer, ni PowerShell ni `netsh`, valable
+tel quel sur les trois OS, câblé depuis `collect_system_info()` plutôt que
+`_WIN_STEPS`.
+
+**Le filtre.** Un fichier hosts réel accumule vite du bruit qui n'est pas
+une redirection volontaire : `localhost` (IPv4 et IPv6), les entrées
+`ip6-*` que Linux inscrit lui-même, la propre entrée `127.0.1.1 <hostname>`
+que Debian/Ubuntu écrivent automatiquement, et des doublons exacts — sur la
+machine de test, deux outils de gestion de hosts différents géraient
+chacun leur propre copie des mêmes blocages, `192.168.1.37 ALTAIR` compris.
+Ce qui reste est dédupliqué et marqué **local** (redirection vers une IP
+nulle ou loopback — blocage publicité/licence/télémétrie, ou serveur de dev)
+ou **réseau** (correspondance nom↔IP réelle, ex. un poste désigné par son
+nom plutôt que redécouvert par DHCP à chaque fois).
+
+Nouveaux tests : chaque catégorie de bruit par défaut est bien écartée
+individuellement, un doublon exact ne compte qu'une fois, la distinction
+local/réseau est correcte, et l'exclusion `127.0.1.1 <hostname>` ne
+s'applique que si le nom de la machine est effectivement fourni — pas à
+l'aveugle. Vérifié aussi sur le fichier hosts réel de la machine de
+développement (57 lignes brutes → 21 redirections utiles) et un rendu de la
+fiche système inspecté dans le navigateur avant publication.
+
+---
+
 ## [2.12.0] - 2026-08-15 🧱
 
 ### 🧱 Règles de pare-feu autorisées, filtrées et fusionnées

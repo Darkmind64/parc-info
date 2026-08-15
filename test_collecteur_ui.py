@@ -253,6 +253,7 @@ DONNEES_AGENTS = dict(ETAPE_3, **{
     'firewall_rules': [{'name': 'ShareMouse', 'protocol': 'TCP/UDP', 'port': 'Tout',
                         'profiles': 'Domaine, Privé, Public'}],
     'firewall_rules_total': 1,
+    'hosts_entries': [{'ip': '127.0.0.1', 'hostname': 'activate.adobe.com', 'local': True}],
 })
 sections2 = {s['cle']: s for s in C.build_summary_sections(DONNEES_AGENTS)}
 
@@ -294,6 +295,8 @@ verifier('Stratégie de groupe locale' in contenu2('environnement')
          'stratégies de groupe dans « Environnement », pas dans « Sécurité »')
 verifier('ShareMouse' in contenu2('securite') and 'Domaine, Privé, Public' in contenu2('securite'),
          'règles de pare-feu dans « Sécurité »')
+verifier('activate.adobe.com' in contenu2('reseau') and 'activate.adobe.com' not in contenu2('securite'),
+         'redirections du fichier hosts dans « Réseau », pas dans « Sécurité »')
 
 print("\n=== 8. Détection des agents par sous-chaîne du nom affiché ===")
 SERVICES_TEST = [
@@ -534,7 +537,47 @@ verifier(C._filtrer_fusionner_regles_pare_feu([]) == {},
          'aucune règle en entrée → dict vide')
 verifier(C._parse_regles_pare_feu('') == [], 'texte vide → liste vide, pas une exception')
 
-print("\n=== 17. Onglets de l'interface ===")
+print("\n=== 17. Fichier hosts : redirections utiles, hors bruit par défaut ===")
+_LIGNES_HOSTS = [
+    '# --- SWITCHHOSTS_CONTENT_START ---\n',
+    '\n',
+    '127.0.0.1     localhost\n',
+    '::1           localhost\n',
+    '127.0.1.1     poste-test\n',            # auto-écrit par Debian/Ubuntu
+    '::1 ip6-localhost ip6-loopback\n',
+    '192.168.1.37  ALTAIR\n',
+    '192.168.1.37  ALTAIR\n',                 # doublon exact (deux outils, même entrée)
+    '127.0.0.1     activate.adobe.com   # Adobe Blocker\n',
+    '0.0.0.0       activation.phaseone.com\n',
+]
+entrees = C._parse_hosts_lines(_LIGNES_HOSTS, hostname_machine='POSTE-TEST')
+noms = {e['hostname'].lower(): e for e in entrees}
+verifier('localhost' not in noms, 'localhost (IPv4 et IPv6) est écarté par défaut')
+verifier('ip6-localhost' not in noms and 'ip6-loopback' not in noms,
+         'les noms ip6-* que Linux écrit lui-même sont écartés')
+verifier('poste-test' not in noms,
+         "la propre entrée 127.0.1.1 <hostname de la machine> (Debian/Ubuntu) est écartée")
+verifier(len([e for e in entrees if e['hostname'].upper() == 'ALTAIR']) == 1,
+         'un doublon exact (même IP, même nom) ne compte qu\'une fois', str(len(entrees)))
+verifier(noms.get('activate.adobe.com', {}).get('ip') == '127.0.0.1'
+         and noms['activate.adobe.com']['local'] is True,
+         'redirection vers 127.0.0.1 marquée locale, commentaire inline ignoré')
+verifier(noms.get('activation.phaseone.com', {}).get('local') is True,
+         '0.0.0.0 est aussi considéré comme une redirection locale (blocage)')
+verifier(noms.get('altair', {}).get('local') is False,
+         "une IP de réseau local (pas loopback) n'est pas marquée « local »")
+verifier(len(entrees) == 3, 'seules les 3 entrées utiles survivent au filtre', str(len(entrees)))
+
+# Sans hostname_machine fourni, l'exclusion 127.0.1.1 ne s'applique qu'aux
+# noms génériques déjà connus — une entrée légitime ne doit pas disparaître
+# simplement parce qu'on n'a pas précisé quel est le nom de la machine.
+sans_hostname = C._parse_hosts_lines(['127.0.1.1 poste-test\n'])
+verifier(len(sans_hostname) == 1,
+         "sans hostname_machine, une entrée 127.0.1.1 n'est pas supprimée à l'aveugle")
+
+verifier(C._parse_hosts_lines([]) == [], 'aucune ligne → liste vide')
+
+print("\n=== 18. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()

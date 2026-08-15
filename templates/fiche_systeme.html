@@ -1328,7 +1328,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 
 <!-- ── CONFIGURATION RÉSEAU ─────────────────────────────────────────────── -->
 {% if rapport.default_gateway or rapport.dns_servers or rapport.network_profiles
-      or rapport.proxy or rapport.wifi or rapport.latency %}
+      or rapport.proxy or rapport.wifi or rapport.latency or rapport.hosts_entries %}
 <div class="fs-section">
     <h3>■ Configuration &amp; qualité réseau</h3>
     <div class="fs-grid">
@@ -1387,6 +1387,24 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             <td class="fs-mono">{{ d.servers | join(', ') }}</td>
             <td><span class="fs-pill {{ 'fs-info' if d.dhcp else 'fs-muted' }}">
                 {{ 'DHCP' if d.dhcp else 'Manuelle' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.hosts_entries %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Redirections du fichier hosts ({{ rapport.hosts_entries|length }}) — hors
+        localhost et autres entrées que le système inscrit lui-même
+    </div>
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Nom</th><th>Adresse</th><th>Type</th></tr>
+        {% for h in rapport.hosts_entries %}
+        <tr>
+            <td class="fs-mono">{{ h.hostname }}</td>
+            <td class="fs-mono">{{ h.ip }}</td>
+            <td><span class="fs-pill {{ 'fs-warn' if h.local else 'fs-muted' }}">
+                {{ 'Local' if h.local else 'Réseau' }}</span></td>
         </tr>
         {% endfor %}
     </table>
