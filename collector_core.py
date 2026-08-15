@@ -1903,6 +1903,56 @@ def describe_disk_device(chemin, carte):
     return ' — '.join(parties) or 'disque n°%d' % numero
 
 
+# Codes STOP (bugcheck) les plus courants — Microsoft en documente plusieurs
+# centaines, mais la grande majorité des écrans bleus réels retombe sur cette
+# poignée. Un code non répertorié est affiché brut plutôt que masqué.
+_BUGCHECK_CODES = {
+    '0x0000000a': 'IRQL_NOT_LESS_OR_EQUAL',
+    '0x00000019': 'BAD_POOL_HEADER',
+    '0x0000001a': 'MEMORY_MANAGEMENT',
+    '0x0000001e': 'KMODE_EXCEPTION_NOT_HANDLED',
+    '0x00000024': 'NTFS_FILE_SYSTEM',
+    '0x00000027': 'RDR_FILE_SYSTEM',
+    '0x0000003b': 'SYSTEM_SERVICE_EXCEPTION',
+    '0x00000050': 'PAGE_FAULT_IN_NONPAGED_AREA',
+    '0x0000007b': 'INACCESSIBLE_BOOT_DEVICE',
+    '0x0000007e': 'SYSTEM_THREAD_EXCEPTION_NOT_HANDLED',
+    '0x0000007f': 'UNEXPECTED_KERNEL_MODE_TRAP',
+    '0x0000009f': 'DRIVER_POWER_STATE_FAILURE',
+    '0x000000a5': 'ACPI BIOS non conforme (ACPI_BIOS_ERROR)',
+    '0x000000c2': 'BAD_POOL_CALLER',
+    '0x000000c4': 'DRIVER_VERIFIER_DETECTED_VIOLATION',
+    '0x000000d1': 'DRIVER_IRQL_NOT_LESS_OR_EQUAL',
+    '0x000000ef': 'CRITICAL_PROCESS_DIED',
+    '0x000000f4': 'CRITICAL_OBJECT_TERMINATION',
+    '0x00000109': 'CRITICAL_STRUCTURE_CORRUPTION',
+    '0x00000116': 'VIDEO_TDR_FAILURE (pilote graphique)',
+    '0x00000124': 'WHEA_UNCORRECTABLE_ERROR (défaillance matérielle probable)',
+    '0x00000133': 'DPC_WATCHDOG_VIOLATION',
+    '0x00000139': 'KERNEL_SECURITY_CHECK_FAILURE',
+}
+
+_RE_BUGCHECK_HEX = re.compile(r'0x[0-9a-fA-F]{8}')
+
+
+def _code_arret_depuis_param1(param1):
+    """Code STOP et libellé depuis le param1 brut d'un événement 1001
+    (Microsoft-Windows-WER-SystemErrorReporting).
+
+    Le format documenté est « 0xXXXXXXXX (param, param, param, param) » — les
+    quatre paramètres entre parenthèses sont spécifiques au pilote/à
+    l'adresse mémoire en cause, illisibles sans les symboles de débogage :
+    seul le code lui-même est exploitable ici.
+
+    Retourne (code, libellé_ou_None) ; (None, None) si rien d'exploitable.
+    """
+    m = _RE_BUGCHECK_HEX.search(param1 or '')
+    if not m:
+        return None, None
+    code = m.group(0).lower()
+    return code, _BUGCHECK_CODES.get(code)
+
+
 def _win_diagnostics():
     """Signaux de diagnostic : incidents, correctifs en attente, démarrage.
 
@@ -1923,7 +1973,13 @@ def _win_diagnostics():
         "ProviderName=$s.P; ID=$s.I; StartTime=$since} -MaxEvents 60 -ErrorAction SilentlyContinue "
         "| Select-Object Id,ProviderName,"
         "@{N='When';E={$_.TimeCreated.ToString('yyyy-MM-dd HH:mm')}},"
-        "@{N='Msg';E={($_.Message -split [char]10)[0].Trim()}}) } catch {} }; "
+        "@{N='Msg';E={($_.Message -split [char]10)[0].Trim()}},"
+        "@{N='Code';E={ if ($s.P -eq 'Microsoft-Windows-WER-SystemErrorReporting') { try { "
+        "$d=([xml]$_.ToXml()).Event.EventData.Data; "
+        "$nomme=@($d | Where-Object {$_.Name -eq 'param1'}); "
+        "if ($nomme.Count -gt 0) { $nomme[0].'#text' } "
+        "elseif ($d.Count -gt 0) { $d[0].'#text' } else { '' } "
+        "} catch { '' } } else { '' } }}) } catch {} }; "
         "$out | ConvertTo-Json -Compress -Depth 3" % (EVENT_WINDOW_DAYS, specs_ps),
         timeout=90,
     )
@@ -1931,11 +1987,19 @@ def _win_diagnostics():
     libelles = {(p, i): (lib, lvl) for p, ids, lib, lvl in _EVENT_SPECS for i in ids}
     groupes = {}
     for e in _as_list(data):
-        cle = (_clean(e.get('ProviderName')), e.get('Id'), _clean(e.get('Msg')))
+        code, code_label = (None, None)
+        if _clean(e.get('ProviderName')) == 'Microsoft-Windows-WER-SystemErrorReporting':
+            code, code_label = _code_arret_depuis_param1(_clean(e.get('Code')))
+        # Le code STOP entre dans la clé de regroupement : deux écrans bleus
+        # de causes différentes ne doivent pas être comptés comme un seul
+        # incident répété.
+        cle = (_clean(e.get('ProviderName')), e.get('Id'), _clean(e.get('Msg')), code)
         lib, niveau = libelles.get((cle[0], cle[1]), ('Incident système', 'warn'))
+        if code:
+            lib = '%s — %s' % (lib, code_label or code)
         entree = groupes.setdefault(cle, {
             'category': lib, 'level': niveau, 'provider': cle[0], 'event_id': cle[1],
-            'message': cle[2], 'count': 0, 'last_seen': '',
+            'message': cle[2], 'count': 0, 'last_seen': '', 'code': code, 'code_label': code_label,
         })
         entree['count'] += 1
         quand = _clean(e.get('When'))
@@ -2104,6 +2168,141 @@ def _win_diagnostics():
     return info
 
 
+def _win_top_processes(echantillon_ms=600, limite=5):
+    """Cinq processus les plus gourmands en CPU, cinq en RAM, au moment de la collecte.
+
+    Le CPU de `Get-Process` est un temps CUMULÉ depuis le lancement du
+    processus, pas une charge instantanée : un navigateur ouvert depuis trois
+    jours dominerait ce classement même parfaitement inactif là, maintenant.
+    Deux relevés espacés de `echantillon_ms` et leur delta donnent, eux, un
+    vrai pourcentage instantané — normalisé par le nombre de cœurs.
+
+    Snapshot, pas une moyenne : utile pour « le poste rame maintenant », pas
+    pour un historique de charge. Le processus PowerShell qui exécute cette
+    mesure apparaît lui-même dans le classement — c'est une donnée honnête,
+    pas un artefact à masquer (un vrai autre processus PowerShell qui
+    consommerait, lui, mériterait d'être vu).
+    """
+    data = _win_powershell_json(
+        "$avant=Get-Process | Select-Object Id,@{N='C';E={$_.CPU}}; "
+        "Start-Sleep -Milliseconds %d; "
+        "$n=[Environment]::ProcessorCount; "
+        "$liste=@(Get-Process | ForEach-Object { $p=$_; "
+        "$old=$avant | Where-Object {$_.Id -eq $p.Id}; $cpu=0; "
+        "if ($old -and $p.CPU -and $old.C) { $d=$p.CPU-$old.C; "
+        "if ($d -gt 0) { $cpu=[math]::Round($d/(%d/1000.0)*100/$n,1) } }; "
+        "[PSCustomObject]@{ Name=$p.Name; Cpu=$cpu; RamMb=[math]::Round($p.WorkingSet/1MB,1) } }); "
+        "[PSCustomObject]@{ "
+        "ByCpu=@($liste | Sort-Object Cpu -Descending | Select-Object -First %d); "
+        "ByRam=@($liste | Sort-Object RamMb -Descending | Select-Object -First %d) "
+        "} | ConvertTo-Json -Compress -Depth 3" % (echantillon_ms, echantillon_ms, limite, limite),
+        timeout=15 + echantillon_ms // 1000,
+    )
+    if not data:
+        return {}
+
+    def _liste(cle):
+        sortie = []
+        for p in _as_list(data.get(cle)):
+            nom = _clean(p.get('Name'))
+            if not nom:
+                continue
+            sortie.append({'name': nom, 'cpu_pct': p.get('Cpu') or 0, 'ram_mb': p.get('RamMb') or 0})
+        return sortie
+
+    info = {}
+    par_cpu, par_ram = _liste('ByCpu'), _liste('ByRam')
+    if par_cpu:
+        info['top_processes_cpu'] = par_cpu
+    if par_ram:
+        info['top_processes_ram'] = par_ram
+    return info
+
+
+def _win_unsigned_drivers(limite=40):
+    """Pilotes installés sans signature numérique.
+
+    `DriverDate` n'est volontairement pas utilisé pour signaler des pilotes
+    « obsolètes » : de nombreux pilotes Windows intégrés portent une date
+    ancienne héritée de leur toute première publication sans que ce soit un
+    signal de problème — un faux positif systématique sur la moitié du parc.
+    L'absence de signature, elle, est un fait vérifiable sans ambiguïté
+    (`IsSigned`, exposé directement par `Win32_PNPSignedDriver`).
+    """
+    data = _win_powershell_json(
+        "@(Get-CimInstance Win32_PNPSignedDriver -ErrorAction SilentlyContinue "
+        "| Where-Object { $_.IsSigned -eq $false -and $_.DeviceName } "
+        "| Select-Object DeviceName,DriverVersion,DriverProviderName "
+        "| Select-Object -First %d) | ConvertTo-Json -Compress -Depth 3" % limite,
+        timeout=45,
+    )
+    pilotes = []
+    for p in _as_list(data):
+        nom = _clean(p.get('DeviceName'))
+        if not nom:
+            continue
+        pilotes.append({
+            'device': nom,
+            'version': _clean(p.get('DriverVersion')),
+            'provider': _clean(p.get('DriverProviderName')),
+        })
+    return {'unsigned_drivers': pilotes} if pilotes else {}
+
+
+def _win_group_policy():
+    """Stratégies de groupe (GPO) réellement appliquées à cet utilisateur/poste.
+
+    Passe par `gpresult /X` (export XML), pas par `gpresult /r` (texte) :
+    même raison que pour les profils Wi-Fi (`_win_wifi_profiles`) — le texte
+    change de libellés selon la langue de Windows, le schéma XML est fixe.
+
+    Le périmètre ORDINATEUR (`ComputerResults`) n'apparaît dans ce rapport que
+    si la collecte tourne élevée ; le périmètre UTILISATEUR (`UserResults`),
+    lui, ne demande aucun privilège particulier et est donc toujours présent.
+    """
+    fichier = tempfile.mktemp(suffix='.xml', prefix='parcinfo_gpo_')
+    try:
+        creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+        subprocess.run(['gpresult', '/X', fichier], capture_output=True, timeout=30,
+                       creationflags=creationflags)
+        if not os.path.exists(fichier):
+            return {}
+        return _lire_rapport_gpo(fichier)
+    except Exception:
+        return {}
+    finally:
+        try:
+            os.remove(fichier)
+        except Exception:
+            pass
+
+
+_GPO_XML_NS = {'r': 'http://www.microsoft.com/GroupPolicy/Rsop'}
+
+
+def _lire_rapport_gpo(chemin):
+    """Extrait les GPO appliquées d'un rapport `gpresult /X`.
+
+    Séparée de _win_group_policy pour rester testable sans lancer gpresult
+    (indisponible hors Windows) — même principe que _parse_wifi_profile_xml.
+    """
+    racine = ET.parse(chemin).getroot()
+    ns = _GPO_XML_NS
+    gpos = []
+    for perimetre, cle in (('r:UserResults', 'Utilisateur'), ('r:ComputerResults', 'Ordinateur')):
+        section = racine.find(perimetre, ns)
+        if section is None:
+            continue
+        for gpo in section.findall('r:GPO', ns):
+            nom = (gpo.findtext('r:Name', namespaces=ns) or '').strip()
+            if not nom:
+                continue
+            refuse = (gpo.findtext('r:AccessDenied', namespaces=ns) or '').strip().lower() == 'true'
+            actif = (gpo.findtext('r:Enabled', namespaces=ns) or '').strip().lower() == 'true'
+            gpos.append({'name': nom, 'scope': cle, 'enabled': actif, 'denied': refuse})
+    return {'group_policies': gpos} if gpos else {}
+
+
 # Étapes de la collecte Windows, avec le libellé montré à l'utilisateur. La
 # collecte dure une bonne minute : sans retour, elle est indiscernable d'un
 # blocage.
@@ -2115,14 +2314,17 @@ _WIN_STEPS = [
     ('Style de partition et démarrage', lambda: _win_boot_disk()),
     ('Licences et correctifs', lambda: _win_licensing()),
     ('Sécurité', lambda: _win_security()),
+    ('Pilotes non signés', lambda: _win_unsigned_drivers()),
     ('Détections antivirus (historique)', lambda: _win_malware_detections()),
     ('Comptes utilisateurs', lambda: _win_users()),
     ('Batterie et réseau', lambda: _win_extras()),
     ('Diagnostic (incidents, services, tâches)', lambda: _win_diagnostics()),
+    ('Processus les plus gourmands', lambda: _win_top_processes()),
     ('Erreurs système (historique)', lambda: _win_system_errors()),
     ('Erreurs applicatives (historique)', lambda: _win_application_errors()),
     ('Configuration réseau', lambda: _win_network()),
     ('Environnement (WSUS, domaine, temps)', lambda: _win_enterprise()),
+    ('Stratégies de groupe appliquées', lambda: _win_group_policy()),
     ('Hygiène système', lambda: _win_hygiene()),
     ('Maintenance et performance', lambda: _win_maintenance()),
     ('Accès distant et exposition', lambda: _win_remote_access()),
@@ -5390,6 +5592,13 @@ def build_summary_sections(info):
             '%s (%s) — %s%s' % (d.get('threat', '?'), d.get('category', '?'), d.get('when', '?'),
                                 '' if d.get('cleaned') else ' — non traitée')
             for d in info['malware_detections']]})
+    if info.get('unsigned_drivers'):
+        s['champs'].append(('Pilotes non signés', len(info['unsigned_drivers'])))
+        s['listes'].append({'titre': 'Pilotes non signés', 'elements': [
+            '%s — %s%s' % (p.get('device', '?'), p.get('version') or 'version inconnue',
+                           ' (%s)' % p['provider'] if p.get('provider') else '')
+            if isinstance(p, dict) else str(p)
+            for p in info['unsigned_drivers']]})
     sections.append(s)
 
     # ── Licences ───────────────────────────────────────────────────────────
@@ -5475,6 +5684,16 @@ def build_summary_sections(info):
     s = _sec('diagnostic', 'Diagnostic', '🩺')
     if info.get('unexpected_shutdowns') is not None:
         s['champs'].append(('Arrêts inattendus (30 j)', info['unexpected_shutdowns']))
+    if info.get('top_processes_cpu'):
+        s['listes'].append({'titre': 'Processus les plus gourmands (CPU, instantané)', 'elements': [
+            '%s — %s %%' % (p.get('name', '?'), p.get('cpu_pct', 0))
+            if isinstance(p, dict) else str(p)
+            for p in info['top_processes_cpu']]})
+    if info.get('top_processes_ram'):
+        s['listes'].append({'titre': 'Processus les plus gourmands (RAM, instantané)', 'elements': [
+            '%s — %s Mo' % (p.get('name', '?'), p.get('ram_mb', 0))
+            if isinstance(p, dict) else str(p)
+            for p in info['top_processes_ram']]})
     if info.get('system_incidents'):
         s['listes'].append({'titre': 'Incidents système (30 derniers jours)', 'elements': [
             '%s ×%s%s%s' % (i.get('category', '?'), i.get('count', 1),
@@ -5546,6 +5765,13 @@ def build_summary_sections(info):
         ('Rôle serveur', ('oui' if info['is_server'] else 'non')
          if info.get('is_server') is not None else None),
     ]
+    if info.get('group_policies'):
+        s['listes'].append({'titre': 'Stratégies de groupe appliquées', 'elements': [
+            '%s (%s)%s' % (g.get('name', '?'), g.get('scope', '?'),
+                           ' — refusée' if g.get('denied') else
+                           ('' if g.get('enabled') else ' — désactivée'))
+            if isinstance(g, dict) else str(g)
+            for g in info['group_policies']]})
     sections.append(s)
 
     # ── Hygiène ────────────────────────────────────────────────────────────
@@ -7380,6 +7606,15 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(_pdf_data_table(tk, ['Menace', 'Catégorie', 'Fichier', 'Traitée', 'Date'],
                                          rows, width, [0.22, 0.14, 0.38, 0.10, 0.16], extra))
 
+        pilotes_ns = info.get('unsigned_drivers') or []
+        if pilotes_ns:
+            rows = [[Paragraph(_pdf_escape(p.get('device')), S['body']),
+                     Paragraph(_pdf_escape(p.get('version')), S['mono']),
+                     Paragraph(_pdf_escape(p.get('provider')), S['small'])] for p in pilotes_ns]
+            story.append(Paragraph('Pilotes non signés (%d)' % len(pilotes_ns), S['h2']))
+            story.append(_pdf_data_table(tk, ['Périphérique', 'Version', 'Éditeur'],
+                                         rows, width, [0.40, 0.20, 0.40]))
+
         # ── Accès distant & exposition ───────────────────────────────────────
         acces = info.get('remote_access') or []
         if acces:
@@ -7726,6 +7961,17 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(Paragraph('Environnement & hygiène système', S['h2']))
             story.append(table)
 
+        gpos = info.get('group_policies') or []
+        if gpos:
+            rows = [[Paragraph(_pdf_escape(g.get('name')), S['body']),
+                     Paragraph(_pdf_escape(g.get('scope')), S['body']),
+                     Paragraph('Refusée' if g.get('denied') else
+                               ('Activée' if g.get('enabled') else 'Désactivée'), S['body'])]
+                    for g in gpos]
+            story.append(Paragraph('Stratégies de groupe appliquées (%d)' % len(gpos), S['h2']))
+            story.append(_pdf_data_table(tk, ['Stratégie', 'Périmètre', 'État'],
+                                         rows, width, [0.50, 0.25, 0.25]))
+
         # ── Comptes de messagerie ────────────────────────────────────────────
         mails = info.get('mail_accounts') or []
         if mails:
@@ -7806,6 +8052,20 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(_pdf_data_table(
                 tk, ['Profil', 'Emplacement', 'Taille', 'Dernière utilisation', 'Mesure'],
                 rows, width, [0.18, 0.34, 0.14, 0.20, 0.14]))
+
+        # ── Processus les plus gourmands ────────────────────────────────────────
+        top_cpu = info.get('top_processes_cpu') or []
+        top_ram = info.get('top_processes_ram') or []
+        if top_cpu or top_ram:
+            story.append(Paragraph('Processus les plus gourmands (instantané)', S['h2']))
+        if top_cpu:
+            rows = [[Paragraph(_pdf_escape(p.get('name')), S['body']),
+                     Paragraph('%s %%' % p.get('cpu_pct', 0), S['mono'])] for p in top_cpu]
+            story.append(_pdf_data_table(tk, ['Processus', 'CPU'], rows, width, [0.70, 0.30]))
+        if top_ram:
+            rows = [[Paragraph(_pdf_escape(p.get('name')), S['body']),
+                     Paragraph('%s Mo' % p.get('ram_mb', 0), S['mono'])] for p in top_ram]
+            story.append(_pdf_data_table(tk, ['Processus', 'RAM'], rows, width, [0.70, 0.30]))
 
         # ── Incidents système ────────────────────────────────────────────────
         incidents = info.get('system_incidents') or []

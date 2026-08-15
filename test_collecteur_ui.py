@@ -18,6 +18,7 @@ Usage :
 import io
 import os
 import sys
+import tempfile
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -243,6 +244,12 @@ DONNEES_AGENTS = dict(ETAPE_3, **{
                              'count': 2, 'last_seen': '2026-08-11 09:00'}],
     'shutdown_history': [{'when': '2026-08-10 18:00', 'action': 'Redémarrage',
                            'reason': "Mise à jour Windows (planifié)", 'planned': True, 'user': 'SYSTEM'}],
+    'top_processes_cpu': [{'name': 'msedge', 'cpu_pct': 12.4, 'ram_mb': 900.1}],
+    'top_processes_ram': [{'name': 'vmmem', 'cpu_pct': 0, 'ram_mb': 1872.3}],
+    'unsigned_drivers': [{'device': 'EldoS PnP virtual bus', 'version': '1.0.0.1',
+                          'provider': 'EldoS Corporation'}],
+    'group_policies': [{'name': 'Stratégie de groupe locale', 'scope': 'Utilisateur',
+                        'enabled': True, 'denied': False}],
 })
 sections2 = {s['cle']: s for s in C.build_summary_sections(DONNEES_AGENTS)}
 
@@ -275,6 +282,13 @@ verifier('Disk' in contenu2('diagnostic') and "Violation d'accès mémoire" in c
          'erreurs système, erreurs applicatives et arrêts/redémarrages dans « Diagnostic »')
 verifier("Violation d'accès mémoire" not in contenu2('securite') and 'Redémarrage' not in contenu2('securite'),
          'erreurs applicatives et arrêts/redémarrages absents de « Sécurité »')
+verifier('msedge' in contenu2('diagnostic') and 'vmmem' in contenu2('diagnostic'),
+         'processus les plus gourmands (CPU et RAM) dans « Diagnostic »')
+verifier('EldoS' in contenu2('securite') and 'EldoS' not in contenu2('diagnostic'),
+         'pilotes non signés dans « Sécurité », pas dans « Diagnostic »')
+verifier('Stratégie de groupe locale' in contenu2('environnement')
+         and 'Stratégie de groupe locale' not in contenu2('securite'),
+         'stratégies de groupe dans « Environnement », pas dans « Sécurité »')
 
 print("\n=== 8. Détection des agents par sous-chaîne du nom affiché ===")
 SERVICES_TEST = [
@@ -357,7 +371,53 @@ code_inconnu = C._champs_erreur_application(1000, None, 'deadbeef', None)
 verifier(code_inconnu[2] == 'deadbeef',
          'un code d\'exception non répertorié est affiché brut plutôt que masqué')
 
-print("\n=== 14. Onglets de l'interface ===")
+print("\n=== 14. Code STOP d'un écran bleu, depuis le param1 de l'événement 1001 ===")
+for param1, code_attendu, label_attendu in (
+    ('0x0000001a (0x0000000000041792, 0xffffbc058fc0d010, 0x0, 0x5)',
+     '0x0000001a', 'MEMORY_MANAGEMENT'),
+    ('0x00000124 (0x0, 0xffffb0011a2b3040, 0xb2000000, 0x51000)',
+     '0x00000124', 'WHEA_UNCORRECTABLE_ERROR (défaillance matérielle probable)'),
+    ('0x000000ab (paramètres non répertoriés)', '0x000000ab', None),
+    ('', None, None),
+    (None, None, None),
+):
+    code, label = C._code_arret_depuis_param1(param1)
+    verifier(code == code_attendu and label == label_attendu,
+             'code depuis « %s »' % (param1 or '(vide)')[:40], '%s/%s' % (code, label))
+
+print("\n=== 15. Rapport gpresult /X : GPO appliquées, périmètres utilisateur et ordinateur ===")
+_XML_GPO = """<?xml version="1.0"?>
+<Rsop xmlns="http://www.microsoft.com/GroupPolicy/Rsop">
+  <UserResults>
+    <GPO><Name>Stratégie de groupe locale</Name><Enabled>true</Enabled><AccessDenied>false</AccessDenied></GPO>
+    <GPO><Name>Restriction USB</Name><Enabled>false</Enabled><AccessDenied>false</AccessDenied></GPO>
+  </UserResults>
+  <ComputerResults>
+    <GPO><Name>Pare-feu renforcé</Name><Enabled>true</Enabled><AccessDenied>true</AccessDenied></GPO>
+  </ComputerResults>
+</Rsop>"""
+_fd, _chemin_gpo = tempfile.mkstemp(suffix='.xml')
+with os.fdopen(_fd, 'w', encoding='utf-8') as _f:
+    _f.write(_XML_GPO)
+gpos = C._lire_rapport_gpo(_chemin_gpo).get('group_policies', [])
+os.remove(_chemin_gpo)
+verifier(len(gpos) == 3, '3 GPO lues (2 utilisateur + 1 ordinateur)', str(len(gpos)))
+verifier(any(g['name'] == 'Stratégie de groupe locale' and g['scope'] == 'Utilisateur' and g['enabled']
+             for g in gpos), 'GPO utilisateur active correctement typée')
+verifier(any(g['name'] == 'Restriction USB' and not g['enabled'] for g in gpos),
+         'GPO désactivée correctement détectée')
+verifier(any(g['name'] == 'Pare-feu renforcé' and g['scope'] == 'Ordinateur' and g['denied']
+             for g in gpos), 'GPO ordinateur refusée correctement détectée')
+
+_fd2, _chemin_vide = tempfile.mkstemp(suffix='.xml')
+with os.fdopen(_fd2, 'w', encoding='utf-8') as _f:
+    _f.write('<?xml version="1.0"?><Rsop xmlns="http://www.microsoft.com/GroupPolicy/Rsop">'
+             '<UserResults></UserResults></Rsop>')
+verifier(C._lire_rapport_gpo(_chemin_vide) == {},
+         'aucune GPO appliquée → dict vide, pas une liste vide bruyante')
+os.remove(_chemin_vide)
+
+print("\n=== 16. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()

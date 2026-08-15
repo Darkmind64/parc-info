@@ -229,7 +229,8 @@ event_id, count, sources[], last_seen}` (échecs d'ouverture de session,
 verrouillages) · `failed_logons` · `account_lockouts` ·
 `certificates_expiring[]{sujet, emetteur, expire_le, jours_restants, expire}` ·
 `malware_detections[]{threat, category, level, process, resource, when,
-cleaned}` · `malware_detections_total`
+cleaned}` · `malware_detections_total` ·
+`unsigned_drivers[]{device, version, provider}`
 
 > `local_password_policy` se lit via `secedit /export`, dont les clés
 > restent en anglais quelle que soit la langue de Windows — `net accounts`,
@@ -244,6 +245,12 @@ cleaned}` · `malware_detections_total`
 > jours (les détections sont rares, contrairement aux 30 jours des autres
 > historiques) ; `resource` est nettoyé du jeton de session
 > (`file:_`/`webfile:_…|…`) via `_chemin_ressource_defender()`.
+>
+> `unsigned_drivers` s'appuie sur `IsSigned` de `Win32_PNPSignedDriver`, pas
+> sur `DriverDate` : de nombreux pilotes Windows intégrés portent une date
+> ancienne héritée de leur toute première publication sans que ce soit un
+> signal de problème — un faux positif systématique sur la moitié du parc.
+> L'absence de signature, elle, est un fait vérifiable sans ambiguïté.
 
 ### Accès distant & exposition
 `remote_access[]{key, label, enabled, secure, detail, level}` (RDP, WinRM,
@@ -286,7 +293,15 @@ note}` (comptes non énumérables de façon fiable, présence seule détectée)
 Core/5+, ce dernier via `dotnet --list-runtimes`) · `uac_enabled` ·
 `restore_points[]{description, when}` · `temp_files_mb` · `reboot_pending` ·
 `reboot_reasons[]` · `domain_joined` · `domain_name` · `domain_controller` ·
-`wsus_server` / `wsus_group` · `time_source` / `time_offset`
+`wsus_server` / `wsus_group` · `time_source` / `time_offset` ·
+`group_policies[]{name, scope, enabled, denied}`
+
+> `group_policies` vient de `gpresult /X` (export XML), pas de `gpresult /r`
+> (texte) — même raison que pour les profils Wi-Fi (`_win_wifi_profiles`) :
+> le texte change de libellés selon la langue de Windows, le schéma XML est
+> fixe. Le périmètre `scope='Utilisateur'` ne demande aucun privilège
+> particulier et est donc toujours présent ; `scope='Ordinateur'` n'apparaît
+> que si la collecte tourne élevée.
 
 ### Diagnostic
 `system_incidents[]{category, count, last_seen, disk, message, level}`
@@ -301,7 +316,24 @@ bureau_s}` · `boot_last_seconds` / `boot_average_seconds` ·
 mesure_complete}` · `system_errors[]{provider, event_id, message, count,
 last_seen}` · `application_errors[]{application, type, module, exception,
 path, count, last_seen}` · `shutdown_history[]{when, action, reason, planned,
-user}`
+user}` · `top_processes_cpu[]{name, cpu_pct, ram_mb}` ·
+`top_processes_ram[]{name, cpu_pct, ram_mb}`
+
+> `top_processes_cpu`/`top_processes_ram` sont un **instantané**, pas une
+> moyenne : `Get-Process` expose un temps CPU cumulé depuis le lancement du
+> processus, pas une charge instantanée (un navigateur ouvert depuis trois
+> jours dominerait sinon le classement même inactif). Deux relevés espacés
+> de ~600 ms et leur delta donnent un vrai pourcentage instantané, normalisé
+> par le nombre de cœurs. Le processus PowerShell qui exécute la mesure
+> apparaît lui-même dans le classement — donnée honnête, pas un artefact à
+> filtrer.
+>
+> `system_incidents` intègre désormais le code STOP (bugcheck) précis d'un
+> écran bleu quand disponible, extrait du `param1` structuré de l'événement
+> 1001 (`Microsoft-Windows-WER-SystemErrorReporting`) plutôt que du texte
+> localisé du message — voir `_code_arret_depuis_param1()`. Le code entre
+> dans la clé de regroupement : deux écrans bleus de causes différentes ne
+> sont pas comptés comme un seul incident répété.
 
 > `system_errors` interroge le journal Système (niveaux Erreur/Critique) et
 > **exclut explicitement** les couples (fournisseur, ID) déjà couverts par
@@ -382,7 +414,9 @@ avec un champ inaccessible.
 | Pare-feu | ✅ | ✅ | — |
 | TPM / Secure Boot | ✅ | — | — |
 | Détections antivirus (Defender) | ✅ | — | — |
+| Pilotes non signés | ✅ | — | — |
 | Réseaux Wi-Fi enregistrés (SSID + mot de passe optionnel) | ✅ | — | — |
+| Stratégies de groupe appliquées | ✅ | — | — |
 | Ports en écoute | ✅ | — | ✅ (`ss`) |
 | Comptes locaux | ✅ | ✅ | ✅ |
 | Logiciels (nom+version+éditeur) | ✅ | ⚠️ nom seul | ✅ dpkg/rpm/pacman |
@@ -395,12 +429,13 @@ avec un champ inaccessible.
 | Versions .NET installées | ✅ | — | — |
 | Style de partition / mode de démarrage | ✅ | — | — |
 | Diagnostic (incidents, erreurs, arrêts, tâches, profils…) | ✅ | — | — |
+| Processus les plus gourmands (CPU/RAM, instantané) | ✅ | — | — |
 
 ---
 
 ## ⚙️ Performance
 
-La collecte Windows tient en **30 étapes groupées** (`_WIN_STEPS` dans
+La collecte Windows tient en **33 étapes groupées** (`_WIN_STEPS` dans
 `collector_core.py`, une poignée d'appels PowerShell chacune plutôt qu'un
 appel par donnée). Chaque bloc est protégé par son propre `try/catch` côté
 PowerShell **et** côté Python : une source indisponible (module absent,

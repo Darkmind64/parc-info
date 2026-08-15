@@ -906,6 +906,25 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
+<!-- ── PILOTES NON SIGNÉS ────────────────────────────────────────────────── -->
+{% if rapport.unsigned_drivers %}
+<div class="fs-section">
+    <h3>■ Pilotes non signés ({{ rapport.unsigned_drivers|length }})</h3>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Périphérique</th><th>Version</th><th>Éditeur</th></tr>
+        {% for p in rapport.unsigned_drivers %}
+        <tr>
+            <td>{{ p.device }}</td>
+            <td class="fs-mono">{{ p.version or '—' }}</td>
+            <td>{{ p.provider or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
 <!-- ── ACCÈS DISTANT & EXPOSITION ───────────────────────────────────────── -->
 {% if rapport.remote_access or rapport.autologon is defined %}
 <div class="fs-section">
@@ -1435,7 +1454,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 {% if rapport.domain_joined is defined or rapport.wsus_server
       or rapport.uac_enabled is defined or rapport.restore_points is defined
       or rapport.reboot_pending is defined or rapport.power_plan
-      or rapport.dotnet_versions %}
+      or rapport.dotnet_versions or rapport.group_policies %}
 <div class="fs-section">
     <h3>■ Environnement &amp; hygiène système</h3>
     <div class="fs-grid">
@@ -1533,6 +1552,29 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     <div class="fs-value">
         {% for v in rapport.dotnet_versions %}<span class="fs-pill fs-muted">{{ v }}</span>{% endfor %}
     </div>
+    {% endif %}
+
+    {% if rapport.group_policies %}
+    <div class="fs-label" style="font-size:.75rem;margin:.7rem 0 .35rem;">
+        Stratégies de groupe appliquées
+        {% if rapport.group_policies|selectattr('scope', 'equalto', 'Ordinateur')|list|length == 0 %}
+        — <span style="color:var(--text-secondary);">périmètre ordinateur non lu (collecte sans élévation)</span>
+        {% endif %}
+    </div>
+    <table class="fs-table">
+        <tr><th>Stratégie</th><th>Périmètre</th><th>État</th></tr>
+        {% for g in rapport.group_policies %}
+        <tr>
+            <td>{{ g.name }}</td>
+            <td>{{ g.scope }}</td>
+            <td>
+                {% if g.denied %}<span class="fs-pill fs-warn">Refusée</span>
+                {% elif g.enabled %}<span class="fs-pill fs-ok">Activée</span>
+                {% else %}<span class="fs-pill fs-muted">Désactivée</span>{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
     {% endif %}
 </div>
 {% endif %}
@@ -1667,6 +1709,41 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         </tr>
         {% endfor %}
     </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ── PROCESSUS LES PLUS GOURMANDS ─────────────────────────────────────── -->
+{% if rapport.top_processes_cpu or rapport.top_processes_ram %}
+<div class="fs-section">
+    <h3>■ Processus les plus gourmands</h3>
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+        Instantané au moment de la collecte, pas une moyenne — utile pour « le
+        poste rame maintenant », pas pour un historique de charge.
+    </div>
+    <div class="fs-grid">
+        {% if rapport.top_processes_cpu %}
+        <div>
+            <div class="fs-label" style="font-size:.72rem;margin-bottom:.35rem;">CPU</div>
+            <table class="fs-table">
+                <tr><th>Processus</th><th>CPU</th></tr>
+                {% for p in rapport.top_processes_cpu %}
+                <tr><td>{{ p.name }}</td><td class="fs-mono">{{ p.cpu_pct }} %</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+        {% endif %}
+        {% if rapport.top_processes_ram %}
+        <div>
+            <div class="fs-label" style="font-size:.72rem;margin-bottom:.35rem;">RAM</div>
+            <table class="fs-table">
+                <tr><th>Processus</th><th>RAM</th></tr>
+                {% for p in rapport.top_processes_ram %}
+                <tr><td>{{ p.name }}</td><td class="fs-mono">{{ p.ram_mb }} Mo</td></tr>
+                {% endfor %}
+            </table>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endif %}

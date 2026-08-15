@@ -1,8 +1,15 @@
-PARCINFO_VERSION=2.10.0
+PARCINFO_VERSION=2.11.0
 RELEASE_DATE=2026-08-15
-BUILD_NUMBER=2026081502
+BUILD_NUMBER=2026081503
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.11.0 - GPO, pilotes non signés, processus et code STOP des BSOD
+# Stratégies de groupe appliquées (gpresult /X), pilotes non signés
+# (Win32_PNPSignedDriver), top 5 processus CPU/RAM en instantané (delta de
+# deux relevés, pas le cumul biaisé de Get-Process), et le code STOP précis
+# d'un écran bleu (événement 1001, plutôt que le seul comptage déjà en place)
+# Date: 15 août 2026
 
 # Version 2.10.0 - Réseaux Wi-Fi enregistrés, remontés comme identifiants
 # SSID et sécurité collectés systématiquement ; le mot de passe en clair

@@ -1,5 +1,51 @@
 # CHANGELOG - ParcInfo
 
+## [2.11.0] - 2026-08-15 🔍
+
+### 🔍 GPO, pilotes non signés, processus gourmands, code STOP des écrans bleus
+
+Quatre pistes de diagnostic/audit en plus, toutes sans donnée sensible —
+choisies parmi une liste de propositions, à l'exclusion explicite des mots de
+passe de comptes mail et de session, qui ne seront pas ajoutés.
+
+**Stratégies de groupe appliquées.** `gpresult /X` (export XML), pas
+`gpresult /r` (texte) : même raison que pour les profils Wi-Fi de la version
+précédente — le texte change de libellés selon la langue de Windows, le
+schéma XML est fixe. Le périmètre utilisateur ne demande aucun privilège
+particulier et est donc toujours présent ; le périmètre ordinateur
+n'apparaît que si la collecte tourne élevée — signalé explicitement plutôt
+que laissé silencieusement absent.
+
+**Pilotes non signés.** `Win32_PNPSignedDriver.IsSigned`, pas `DriverDate` :
+de nombreux pilotes Windows intégrés portent une date ancienne héritée de
+leur toute première publication sans que ce soit un signal de problème — un
+faux positif systématique sur la moitié du parc, écarté délibérément.
+L'absence de signature, elle, est un fait vérifiable sans ambiguïté.
+
+**Processus les plus gourmands.** `Get-Process` expose un temps CPU cumulé
+depuis le lancement du processus, pas une charge instantanée — un
+navigateur ouvert depuis trois jours dominerait le classement même
+parfaitement inactif là, maintenant. Deux relevés espacés d'environ 600 ms
+et leur delta donnent un vrai pourcentage instantané, normalisé par le
+nombre de cœurs. Top 5 CPU et top 5 RAM, séparément.
+
+**Code STOP des écrans bleus.** `system_incidents` savait déjà qu'il y avait
+eu un écran bleu ; il ne disait pas lequel. Le code (ex.
+`WHEA_UNCORRECTABLE_ERROR`, `MEMORY_MANAGEMENT`) est désormais extrait du
+champ structuré `param1` de l'événement 1001, pas du texte localisé du
+message — et entre dans la clé de regroupement, pour que deux écrans bleus
+de causes différentes ne soient plus comptés comme un seul incident répété.
+
+Nouveaux tests : extraction du code STOP (connu, inconnu, absent), lecture
+d'un rapport `gpresult /X` (périmètres utilisateur et ordinateur, GPO
+désactivée, GPO refusée, aucune GPO), et placement de chaque nouveau champ
+dans la bonne rubrique. Vérifié aussi sur des données réelles collectées sur
+la machine de développement (pilotes non signés, GPO locale, processus),
+avec un écran bleu simulé pour confirmer l'enrichissement du libellé —
+rendu réel de la fiche système inspecté dans le navigateur avant publication.
+
+---
+
 ## [2.10.0] - 2026-08-15 📶
 
 ### 📶 Réseaux Wi-Fi enregistrés, remontés comme identifiants chiffrés
