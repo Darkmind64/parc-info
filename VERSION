@@ -1,8 +1,16 @@
-PARCINFO_VERSION=2.11.0
+PARCINFO_VERSION=2.12.0
 RELEASE_DATE=2026-08-15
-BUILD_NUMBER=2026081503
+BUILD_NUMBER=2026081504
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.12.0 - Règles de pare-feu, filtrées et fusionnées
+# netsh advfirewall (Get-NetFirewallRule exige l'élévation), décodé via la
+# page de code OEM active plutôt qu'en UTF-8. Sur 1500+ règles brutes,
+# seules les autorisées, actives, hors groupes de fonctionnalités Windows et
+# hors noms générés (Docker/Hyper-V) sont gardées puis fusionnées par nom :
+# les trous ouverts par des logiciels installés, la vraie question d'audit
+# Date: 15 août 2026
 
 # Version 2.11.0 - GPO, pilotes non signés, processus et code STOP des BSOD
 # Stratégies de groupe appliquées (gpresult /X), pilotes non signés

@@ -925,6 +925,36 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
+<!-- ── RÈGLES DE PARE-FEU ───────────────────────────────────────────────── -->
+{% if rapport.firewall_rules %}
+<div class="fs-section">
+    <h3>■ Règles de pare-feu autorisées ({{ rapport.firewall_rules_total or rapport.firewall_rules|length }})
+        {% if rapport.firewall_rules|length < (rapport.firewall_rules_total or 0) %}
+        <span style="font-size:.65rem;font-weight:400;color:var(--text-secondary);">— {{ rapport.firewall_rules|length }} affichées</span>
+        {% endif %}
+    </h3>
+    <div class="fs-label" style="font-size:.72rem;margin-bottom:.5rem;">
+        Entrant, actives, hors groupes de fonctionnalités Windows (des centaines
+        de règles pilotées comme un bloc depuis les paramètres réseau — déjà
+        résumées ci-dessus) et hors noms générés automatiquement — ce qui reste,
+        ce sont les trous ouverts par des logiciels installés.
+    </div>
+    <div class="fs-wide">
+    <table class="fs-table">
+        <tr><th>Règle</th><th>Protocole</th><th>Port</th><th>Profils</th></tr>
+        {% for r in rapport.firewall_rules %}
+        <tr>
+            <td>{{ r.name }}</td>
+            <td class="fs-mono">{{ r.protocol or '—' }}</td>
+            <td class="fs-mono">{{ r.port or '—' }}</td>
+            <td style="font-size:.7rem;color:var(--text-secondary);">{{ r.profiles or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    </div>
+</div>
+{% endif %}
+
 <!-- ── ACCÈS DISTANT & EXPOSITION ───────────────────────────────────────── -->
 {% if rapport.remote_access or rapport.autologon is defined %}
 <div class="fs-section">

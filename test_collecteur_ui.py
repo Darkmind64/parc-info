@@ -250,6 +250,9 @@ DONNEES_AGENTS = dict(ETAPE_3, **{
                           'provider': 'EldoS Corporation'}],
     'group_policies': [{'name': 'Stratégie de groupe locale', 'scope': 'Utilisateur',
                         'enabled': True, 'denied': False}],
+    'firewall_rules': [{'name': 'ShareMouse', 'protocol': 'TCP/UDP', 'port': 'Tout',
+                        'profiles': 'Domaine, Privé, Public'}],
+    'firewall_rules_total': 1,
 })
 sections2 = {s['cle']: s for s in C.build_summary_sections(DONNEES_AGENTS)}
 
@@ -289,6 +292,8 @@ verifier('EldoS' in contenu2('securite') and 'EldoS' not in contenu2('diagnostic
 verifier('Stratégie de groupe locale' in contenu2('environnement')
          and 'Stratégie de groupe locale' not in contenu2('securite'),
          'stratégies de groupe dans « Environnement », pas dans « Sécurité »')
+verifier('ShareMouse' in contenu2('securite') and 'Domaine, Privé, Public' in contenu2('securite'),
+         'règles de pare-feu dans « Sécurité »')
 
 print("\n=== 8. Détection des agents par sous-chaîne du nom affiché ===")
 SERVICES_TEST = [
@@ -417,7 +422,119 @@ verifier(C._lire_rapport_gpo(_chemin_vide) == {},
          'aucune GPO appliquée → dict vide, pas une liste vide bruyante')
 os.remove(_chemin_vide)
 
-print("\n=== 16. Onglets de l'interface ===")
+print("\n=== 16. Règles de pare-feu : parsing, filtrage et fusion ===")
+# Reproduit le format réel de « netsh advfirewall firewall show rule » —
+# labels FR, « LocalPort »/« Profiles » volontairement non traduits par
+# Microsoft lui-même (constaté sur une collecte réelle).
+_TEXTE_PARE_FEU = """
+Nom de la règle :                     AnyDesk
+----------------------------------------------------------------------
+Activé :                              Oui
+Direction :                           Actif
+Profiles :                            Domaine,Privé,Public
+Groupement :
+LocalIP :                             Tout
+RemoteIP :                            Tout
+Protocole :                           TCP
+LocalPort :                           Tout
+RemotePort :                          Tout
+Action :                              Autoriser
+
+Nom de la règle :                     AnyDesk
+----------------------------------------------------------------------
+Activé :                              Oui
+Direction :                           Actif
+Profiles :                            Public
+Groupement :
+LocalIP :                             Tout
+RemoteIP :                            Tout
+Protocole :                           UDP
+LocalPort :                           Tout
+RemotePort :                          Tout
+Action :                              Autoriser
+
+Nom de la règle :                     Découverte du réseau (mDNS-In)
+----------------------------------------------------------------------
+Activé :                              Oui
+Direction :                           Actif
+Profiles :                            Privé
+Groupement :                          Découverte du réseau
+LocalIP :                             Tout
+RemoteIP :                            Tout
+Protocole :                           UDP
+LocalPort :                           5355
+RemotePort :                          Tout
+Action :                              Autoriser
+
+Nom de la règle :                     Ancienne règle désactivée
+----------------------------------------------------------------------
+Activé :                              Non
+Direction :                           Actif
+Profiles :                            Public
+Groupement :
+LocalIP :                             Tout
+RemoteIP :                            Tout
+Protocole :                           TCP
+LocalPort :                           4444
+RemotePort :                          Tout
+Action :                              Autoriser
+
+Nom de la règle :                     Blocage explicite d'un logiciel
+----------------------------------------------------------------------
+Activé :                              Oui
+Direction :                           Actif
+Profiles :                            Public
+Groupement :
+LocalIP :                             Tout
+RemoteIP :                            Tout
+Protocole :                           TCP
+LocalPort :                           Tout
+RemotePort :                          Tout
+Action :                              Bloquer
+
+Nom de la règle :                     HNS Container Networking - DNS (UDP-In) - C15A218E-FD5B-45AC-BDB3-6A342DDD224F - 0
+----------------------------------------------------------------------
+Activé :                              Oui
+Direction :                           Actif
+Profiles :                            Domaine,Privé,Public
+Groupement :
+LocalIP :                             Tout
+RemoteIP :                            Tout
+Protocole :                           UDP
+LocalPort :                           53
+RemotePort :                          Tout
+Action :                              Autoriser
+"""
+
+toutes = C._parse_regles_pare_feu(_TEXTE_PARE_FEU)
+verifier(len(toutes) == 6, '6 règles reconnues dans le texte', str(len(toutes)))
+verifier(toutes[0]['nom'] == 'AnyDesk' and toutes[0]['actif'] and toutes[0]['action'],
+         'première règle correctement typée (nom, actif, action)')
+verifier(toutes[2]['groupe'] == 'Découverte du réseau',
+         'groupement accentué correctement lu', toutes[2].get('groupe'))
+
+resultat = C._filtrer_fusionner_regles_pare_feu(toutes)
+regles = {r['name']: r for r in resultat.get('firewall_rules', [])}
+verifier(set(regles) == {'AnyDesk'}, 'seule AnyDesk survit au filtre', str(sorted(regles)))
+verifier(regles.get('AnyDesk', {}).get('protocol') == 'TCP/UDP',
+         'les deux protocoles AnyDesk sont fusionnés en une entrée')
+verifier(regles.get('AnyDesk', {}).get('profiles') == 'Domaine, Privé, Public',
+         'les profils des deux règles AnyDesk sont réunis, pas juste concaténés',
+         regles.get('AnyDesk', {}).get('profiles'))
+verifier('Découverte du réseau (mDNS-In)' not in regles,
+         'une règle groupée (fonctionnalité Windows) est écartée')
+verifier('Ancienne règle désactivée' not in regles, 'une règle désactivée est écartée')
+verifier("Blocage explicite d'un logiciel" not in regles, 'une règle de blocage est écartée')
+verifier(not any('HNS Container' in n for n in regles),
+         'une règle au nom généré (suffixe GUID) est écartée')
+verifier(resultat.get('firewall_rules_total') == 1,
+         'le total reflète le nombre après filtre+fusion, pas le nombre brut')
+
+verifier(C._filtrer_fusionner_regles_pare_feu([]) == {},
+         'aucune règle en entrée → dict vide')
+verifier(C._parse_regles_pare_feu('') == [], 'texte vide → liste vide, pas une exception')
+
+print("\n=== 17. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()

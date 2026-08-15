@@ -1,5 +1,48 @@
 # CHANGELOG - ParcInfo
 
+## [2.12.0] - 2026-08-15 🧱
+
+### 🧱 Règles de pare-feu autorisées, filtrées et fusionnées
+
+Demandé avec une contrainte explicite : une mise en forme compacte et
+lisible, quitte à écarter les règles « par défaut » pour tenir le volume —
+sans savoir à l'avance ce que ça représentait. Vérifié avant d'écrire une
+ligne de code : plus de 1500 règles entrantes brutes sur une machine de
+développement ordinaire, dont l'écrasante majorité pilotée comme un bloc par
+Windows (Découverte réseau, Partage d'imprimantes…) ou générée en masse par
+Docker/Hyper-V (`HNS Container Networking - <GUID> - 0`, un nouveau jeu de
+règles à chaque réseau de conteneur créé, jamais nettoyé).
+
+**Deux détours techniques, découverts en creusant.** `Get-NetFirewallRule`
+(le cmdlet PowerShell « propre ») exige l'élévation ; `netsh advfirewall
+firewall show rule`, lui, fonctionne sans droits particuliers — mais n'a pas
+d'export XML comme `netsh wlan` ou `gpresult`, donc retour au parsing de
+texte localisé (labels bilingues FR/EN, certains — `LocalPort`, `Profiles`
+— restant en anglais même sur un Windows français). Plus sournois : ce texte
+n'est **jamais** en UTF-8, mais dans la page de code OEM active du système
+(850 en français, 437 en anglais US…) — le décoder comme le reste de la
+collecte aurait silencieusement corrompu tout libellé accentué. `GetOEMCP()`
+donne la page de code réellement active plutôt que d'en parier une
+(`_win_console_output()`).
+
+**Le filtre.** Actives, autorisées, sans groupe de fonctionnalité Windows
+(déjà résumé par `firewall_profiles`), sans nom généré automatiquement — ce
+qui reste, ce sont les trous ouverts par des logiciels installés, la vraie
+question d'audit. Les entrées de même nom (plusieurs protocoles, mises à
+jour successives du même logiciel) sont fusionnées en une ligne. Résultat
+sur la machine de test : 1558 règles brutes → 94 lignes utiles. Entrant
+seulement — c'est la direction qui répond à « qu'est-ce qui peut joindre ce
+poste depuis l'extérieur ».
+
+Nouveaux tests : parsing d'un texte `netsh` synthétique (règle groupée,
+désactivée, bloquante, au nom généré — chacune doit être écartée ; deux
+entrées de même nom correctement fusionnées, profils réunis sans doublon),
+et placement dans « Sécurité ». Vérifié aussi sur les 1558 règles réelles de
+la machine de développement, rendu réel de la fiche système inspecté dans
+le navigateur avant publication.
+
+---
+
 ## [2.11.0] - 2026-08-15 🔍
 
 ### 🔍 GPO, pilotes non signés, processus gourmands, code STOP des écrans bleus

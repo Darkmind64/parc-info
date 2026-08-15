@@ -1623,6 +1623,168 @@ def _win_security():
     return info
 
 
+def _win_console_output(cmd, timeout=30):
+    """Exécute un outil console hérité (netsh, gpresult…) et décode sa sortie
+    avec la page de code OEM active.
+
+    Ces outils écrivent dans la page de code OEM du système — 850 en
+    français, 437 en anglais US, etc. — jamais en UTF-8. Décoder autrement
+    (`_run()`, pensé pour des outils déjà UTF-8) corrompt silencieusement tout
+    libellé accentué (« Découverte du réseau », « Activé »…). `GetOEMCP()`
+    donne la page de code réellement active plutôt que d'en supposer une,
+    ce qui reste valable quelle que soit la langue de Windows.
+    """
+    try:
+        import ctypes
+        page_de_code = 'cp%d' % ctypes.windll.kernel32.GetOEMCP()
+    except Exception:
+        page_de_code = 'cp850'
+    try:
+        creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+        resultat = subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=creationflags)
+        return (resultat.stdout or b'').decode(page_de_code, errors='replace')
+    except Exception:
+        return ''
+
+
+_RE_GUID_FW = re.compile(r'[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}')
+
+# Alias FR/EN par champ : contrairement à `netsh wlan` ou `gpresult`, `netsh
+# advfirewall` n'a pas d'export XML. Certains libellés restent d'ailleurs en
+# anglais même sur un Windows français (« LocalPort », « Profiles ») — la
+# preuve que ce n'est pas uniforme, d'où la couverture des deux langues plutôt
+# que le pari sur une seule.
+_FW_LABELS = {
+    'nom': {'nom de la regle', 'rule name'},
+    'actif': {'active', 'enabled'},
+    'groupe': {'groupement', 'grouping'},
+    'protocole': {'protocole', 'protocol'},
+    'port': {'localport', 'local port'},
+    'action': {'action'},
+    'profils': {'profiles', 'profils'},
+}
+
+
+def _parse_regles_pare_feu(texte):
+    """Parse la sortie de `netsh advfirewall firewall show rule name=all`.
+
+    Fonction pure, séparée de _win_firewall_rules pour rester testable sans
+    lancer netsh — même principe que _parse_wifi_profile_xml. Chaque règle
+    devient un dict {nom, actif, groupe, protocole, port, action, profils} ;
+    un champ absent de la sortie pour une règle donnée est simplement absent
+    du dict plutôt que forcé à une valeur par défaut trompeuse.
+    """
+    regles = []
+    cur = {}
+    for ligne in (texte or '').splitlines():
+        if ':' not in ligne:
+            continue
+        cle_brute, _, valeur = ligne.partition(':')
+        cle = _strip_accents(cle_brute).strip().lower()
+        valeur = valeur.strip()
+        if cle in _FW_LABELS['nom']:
+            if cur.get('nom'):
+                regles.append(cur)
+            cur = {'nom': valeur}
+        elif cle in _FW_LABELS['actif']:
+            cur['actif'] = _strip_accents(valeur).strip().lower() in ('oui', 'yes')
+        elif cle in _FW_LABELS['groupe']:
+            cur['groupe'] = valeur
+        elif cle in _FW_LABELS['protocole']:
+            cur['protocole'] = valeur
+        elif cle in _FW_LABELS['port']:
+            cur['port'] = valeur
+        elif cle in _FW_LABELS['action']:
+            cur['action'] = _strip_accents(valeur).strip().lower() in ('autoriser', 'allow')
+        elif cle in _FW_LABELS['profils']:
+            cur['profils'] = valeur
+    if cur.get('nom'):
+        regles.append(cur)
+    return regles
+
+
+def _win_firewall_rules(limite=150):
+    """Règles de pare-feu entrant qui ouvrent réellement quelque chose.
+
+    Un poste de travail compte facilement plus d'un millier de règles :
+    Windows en embarque des centaines par fonctionnalité (Découverte réseau,
+    Partage d'imprimantes…), chacune démultipliée par profil et protocole —
+    vérifié à plus de 1500 sur une machine de développement ordinaire. Cette
+    avalanche est délibérément écartée : ces règles groupées se pilotent comme
+    un bloc depuis les paramètres réseau, pas une par une, et leur état global
+    apparaît déjà dans `firewall_profiles`. Les noms comme « HNS Container
+    Networking - <GUID> - 0 », que Docker/Hyper-V régénèrent à chaque réseau de
+    conteneur créé, sont écartés pour la même raison : churn technique, jamais
+    une configuration à auditer.
+
+    Ce qui reste après filtre — actives, autorisées, sans groupe Windows, sans
+    nom généré — ce sont les trous ouverts par des logiciels installés : la
+    vraie question d'audit (« qu'est-ce qui écoute sur ce poste, et depuis
+    quels réseaux »). Sur un poste de développement chargé, ça tient encore en
+    une grosse centaine de lignes ; sur un poste bureautique ordinaire, une
+    poignée. Les entrées portant le même nom (plusieurs protocoles, mises à
+    jour successives du même logiciel) sont fusionnées en une seule ligne.
+
+    Entrant seulement : c'est la direction qui répond à « qu'est-ce qui peut
+    joindre ce poste depuis l'extérieur », l'angle d'audit habituel — les
+    règles sortantes apportent bien moins pour un filtrage symétrique
+    équivalent, pas de quoi doubler la collecte pour ça.
+    """
+    texte = _win_console_output(
+        ['netsh', 'advfirewall', 'firewall', 'show', 'rule', 'name=all', 'dir=in'], timeout=60)
+    return _filtrer_fusionner_regles_pare_feu(_parse_regles_pare_feu(texte), limite)
+
+
+def _filtrer_fusionner_regles_pare_feu(toutes, limite=150):
+    """Filtre et fusionne des règles déjà parsées (voir _win_firewall_rules).
+
+    Séparée de _win_firewall_rules pour rester testable sans lancer netsh —
+    même principe que _parse_wifi_profile_xml. Ne garde que les règles
+    actives, autorisées, sans groupe Windows et sans nom généré
+    automatiquement ; fusionne les entrées de même nom (protocoles/ports/
+    profils réunis) et trie par ordre alphabétique.
+    """
+    if not toutes:
+        return {}
+
+    filtrees = [r for r in toutes if r.get('actif') and r.get('action')
+                and not (r.get('groupe') or '').strip()
+                and not _RE_GUID_FW.search(r.get('nom') or '')]
+
+    fusion = {}
+    ordre = []
+    for r in filtrees:
+        nom = r.get('nom') or '?'
+        if nom not in fusion:
+            fusion[nom] = {'protocoles': set(), 'ports': set(), 'profils': set()}
+            ordre.append(nom)
+        e = fusion[nom]
+        if r.get('protocole'):
+            e['protocoles'].add(r['protocole'])
+        if r.get('port'):
+            e['ports'].add(r['port'])
+        for p in (r.get('profils') or '').split(','):
+            p = p.strip()
+            if p:
+                e['profils'].add(p)
+
+    if not ordre:
+        return {}
+
+    noms_tries = sorted(ordre, key=lambda n: n.lower())
+    regles = []
+    for nom in noms_tries[:limite]:
+        e = fusion[nom]
+        regles.append({
+            'name': nom,
+            'protocol': '/'.join(sorted(e['protocoles'])),
+            'port': ', '.join(sorted(e['ports'])),
+            'profiles': ', '.join(sorted(e['profils'])),
+        })
+
+    return {'firewall_rules': regles, 'firewall_rules_total': len(noms_tries)}
+
+
 # PrincipalSource de Get-LocalUser → libellé du type de compte.
 _ACCOUNT_SOURCES = {
     'local': 'Local',
@@ -2314,6 +2476,7 @@ _WIN_STEPS = [
     ('Style de partition et démarrage', lambda: _win_boot_disk()),
     ('Licences et correctifs', lambda: _win_licensing()),
     ('Sécurité', lambda: _win_security()),
+    ('Règles de pare-feu', lambda: _win_firewall_rules()),
     ('Pilotes non signés', lambda: _win_unsigned_drivers()),
     ('Détections antivirus (historique)', lambda: _win_malware_detections()),
     ('Comptes utilisateurs', lambda: _win_users()),
@@ -5556,6 +5719,17 @@ def build_summary_sections(info):
                                          for p in info['firewall_profiles']]})
     elif info.get('firewall'):
         s['listes'].append({'titre': 'Pare-feu', 'elements': list(info['firewall'])})
+    if info.get('firewall_rules'):
+        total = info.get('firewall_rules_total') or len(info['firewall_rules'])
+        titre = 'Règles de pare-feu autorisées (%d)' % total
+        if len(info['firewall_rules']) < total:
+            titre += ' — %d affichées' % len(info['firewall_rules'])
+        s['listes'].append({'titre': titre, 'elements': [
+            '%s — %s%s%s' % (r.get('name', '?'), r.get('protocol') or '?',
+                             ':%s' % r['port'] if r.get('port') else '',
+                             ' (%s)' % r['profiles'] if r.get('profiles') else '')
+            if isinstance(r, dict) else str(r)
+            for r in info['firewall_rules']]})
     if info.get('bitlocker'):
         s['listes'].append({'titre': 'Chiffrement', 'elements': list(info['bitlocker'])})
     if info.get('failed_logons'):
@@ -7614,6 +7788,20 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(Paragraph('Pilotes non signés (%d)' % len(pilotes_ns), S['h2']))
             story.append(_pdf_data_table(tk, ['Périphérique', 'Version', 'Éditeur'],
                                          rows, width, [0.40, 0.20, 0.40]))
+
+        regles_fw = info.get('firewall_rules') or []
+        if regles_fw:
+            total_fw = info.get('firewall_rules_total') or len(regles_fw)
+            rows = [[Paragraph(_pdf_escape(r.get('name')), S['body']),
+                     Paragraph(_pdf_escape(r.get('protocol')), S['mono']),
+                     Paragraph(_pdf_escape(r.get('port')), S['mono']),
+                     Paragraph(_pdf_escape(r.get('profiles')), S['small'])] for r in regles_fw]
+            titre_fw = 'Règles de pare-feu autorisées (%d)' % total_fw
+            if len(regles_fw) < total_fw:
+                titre_fw += ' — %d affichées' % len(regles_fw)
+            story.append(Paragraph(titre_fw, S['h2']))
+            story.append(_pdf_data_table(tk, ['Règle', 'Protocole', 'Port', 'Profils'],
+                                         rows, width, [0.34, 0.14, 0.16, 0.36]))
 
         # ── Accès distant & exposition ───────────────────────────────────────
         acces = info.get('remote_access') or []

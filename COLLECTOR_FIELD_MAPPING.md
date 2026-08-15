@@ -230,7 +230,8 @@ verrouillages) · `failed_logons` · `account_lockouts` ·
 `certificates_expiring[]{sujet, emetteur, expire_le, jours_restants, expire}` ·
 `malware_detections[]{threat, category, level, process, resource, when,
 cleaned}` · `malware_detections_total` ·
-`unsigned_drivers[]{device, version, provider}`
+`unsigned_drivers[]{device, version, provider}` ·
+`firewall_rules[]{name, protocol, port, profiles}` · `firewall_rules_total`
 
 > `local_password_policy` se lit via `secedit /export`, dont les clés
 > restent en anglais quelle que soit la langue de Windows — `net accounts`,
@@ -251,6 +252,26 @@ cleaned}` · `malware_detections_total` ·
 > ancienne héritée de leur toute première publication sans que ce soit un
 > signal de problème — un faux positif systématique sur la moitié du parc.
 > L'absence de signature, elle, est un fait vérifiable sans ambiguïté.
+>
+> `firewall_rules` vient de `netsh advfirewall firewall show rule name=all
+> dir=in` (`Get-NetFirewallRule` exige l'élévation, contrairement à
+> `netsh`) — décodé via la page de code OEM active (`GetOEMCP()`), jamais en
+> UTF-8 : ces outils console héritées de cmd.exe n'écrivent jamais en UTF-8,
+> et décoder autrement corrompt silencieusement tout libellé accentué (voir
+> `_win_console_output()`). Pas d'export XML disponible pour cette commande
+> (contrairement à `netsh wlan` ou `gpresult`), d'où un parsing bilingue
+> FR/EN par libellé — certains restent d'ailleurs en anglais même sur un
+> Windows français (`LocalPort`, `Profiles`), preuve que ce n'est pas
+> uniforme.
+>
+> Un poste compte facilement plus de 1500 règles : les centaines propres à
+> chaque fonctionnalité Windows (Découverte réseau, Partage d'imprimantes…),
+> déjà résumées via `firewall_profiles`, et les noms générés en masse par
+> Docker/Hyper-V (`HNS Container Networking - <GUID> - 0`, régénérés à
+> chaque réseau de conteneur créé) sont délibérément écartés. Ce qui reste —
+> actif, autorisé, sans groupe Windows, sans nom généré — ce sont les trous
+> ouverts par des logiciels installés, fusionnés par nom (`firewall_rules_total`
+> garde le compte avant la limite d'affichage). Entrant seulement.
 
 ### Accès distant & exposition
 `remote_access[]{key, label, enabled, secure, detail, level}` (RDP, WinRM,
@@ -415,6 +436,7 @@ avec un champ inaccessible.
 | TPM / Secure Boot | ✅ | — | — |
 | Détections antivirus (Defender) | ✅ | — | — |
 | Pilotes non signés | ✅ | — | — |
+| Règles de pare-feu (filtrées, non par défaut) | ✅ | — | — |
 | Réseaux Wi-Fi enregistrés (SSID + mot de passe optionnel) | ✅ | — | — |
 | Stratégies de groupe appliquées | ✅ | — | — |
 | Ports en écoute | ✅ | — | ✅ (`ss`) |
@@ -435,7 +457,7 @@ avec un champ inaccessible.
 
 ## ⚙️ Performance
 
-La collecte Windows tient en **33 étapes groupées** (`_WIN_STEPS` dans
+La collecte Windows tient en **34 étapes groupées** (`_WIN_STEPS` dans
 `collector_core.py`, une poignée d'appels PowerShell chacune plutôt qu'un
 appel par donnée). Chaque bloc est protégé par son propre `try/catch` côté
 PowerShell **et** côté Python : une source indisponible (module absent,
