@@ -6863,6 +6863,67 @@ def api_device_info():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route('/api/device-info/wifi-credentials', methods=['POST'])
+def api_device_info_wifi_credentials():
+    """
+    Reçoit les réseaux Wi-Fi enregistrés sur un poste, remontés par un appel
+    séparé de /api/device-info (voir collector_core.py:send_wifi_credentials_to_parcinfo) :
+    contrairement au reste de la collecte, ces données ne transitent jamais par
+    le snapshot système (rapport_systeme_json, PDF, visibles en clair) — elles
+    vont directement dans la table identifiants, chiffrées.
+
+    POST /api/device-info/wifi-credentials
+    {
+        "device_id": 42,
+        "client_id": 3,
+        "profiles": [
+            {"ssid": "Bureau-Principal", "authentification": "WPA2",
+             "chiffrement": "AES", "password": "..."},
+            {"ssid": "Invites", "authentification": "Ouvert"}
+        ]
+    }
+    Le mot de passe est optionnel par entrée : absent, l'identifiant existant
+    n'est pas touché ; nouveau, il est chiffré avant stockage.
+    """
+    if not jeton_collecteur_valide():
+        return jsonify({"status": "error", "message": "Jeton collecteur requis"}), 401
+    try:
+        data = request.json or {}
+        try:
+            cid = int(data.get('client_id'))
+        except (TypeError, ValueError):
+            return jsonify({"status": "error", "message": "client_id invalide"}), 400
+        profiles = data.get('profiles') or []
+        if not isinstance(profiles, list):
+            return jsonify({"status": "error", "message": "profiles doit être une liste"}), 400
+
+        conn = get_db()
+        if not conn.execute('SELECT id FROM clients WHERE id=?', (cid,)).fetchone():
+            conn.close()
+            return jsonify({"status": "error", "message": f"Client ID {cid} introuvable"}), 404
+
+        crees, maj = _sync_wifi_credentials_from_collector(conn, cid, profiles)
+        if crees or maj:
+            device_id = data.get('device_id')
+            nom_appareil = 'Collecteur'
+            if device_id:
+                row = conn.execute(
+                    'SELECT nom_machine FROM appareils WHERE id=? AND client_id=?',
+                    (device_id, cid)).fetchone()
+                if row and row[0]:
+                    nom_appareil = row[0]
+            log_history(conn, cid, 'appareil', device_id or 0, nom_appareil,
+                        'Réseaux Wi-Fi synchronisés (collecteur)',
+                        {'crees': crees, 'mis_a_jour': maj})
+            conn.commit()
+        conn.close()
+
+        return jsonify({"status": "success", "created": crees, "updated": maj}), 200
+    except Exception as e:
+        app.logger.exception("Error in /api/device-info/wifi-credentials")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 @app.route('/api/clients-public', methods=['GET'])
 def api_clients_public():
     """
@@ -9633,6 +9694,75 @@ def _sync_licences_from_collector(conn, client_id, appareil_id, licences):
              produit, cle, now))
         ajoutees += 1
     return ajoutees
+
+
+# netsh (authentification WLAN) → libellé du select wifi_securite de
+# form_identifiant.html. Ce que collector_core.py:_win_wifi_profiles() ne
+# reconnaît pas déjà est renvoyé tel quel côté collecteur, pas retenté ici.
+_WIFI_SECURITE_VALIDES = {'WPA2', 'WPA3', 'WPA', 'WEP', 'Ouvert'}
+
+
+def _sync_wifi_credentials_from_collector(conn, client_id, profiles):
+    """Enregistre les réseaux Wi-Fi remontés par le collecteur comme identifiants.
+
+    Un réseau déjà connu pour ce client (même SSID) est mis à jour plutôt que
+    dupliqué : nom/login/description saisis à la main restent intacts. Le mot
+    de passe existant n'est écrasé que si CE relevé en apporte un nouveau —
+    une collecte sans la case « mots de passe » cochée ne le vide jamais.
+
+    Retourne (créés, mis_à_jour).
+    """
+    if not profiles:
+        return 0, 0
+
+    existants = {}
+    for row in conn.execute(
+            "SELECT id, wifi_ssid FROM identifiants WHERE client_id=? AND categorie='Wi-Fi'",
+            (client_id,)).fetchall():
+        ssid = (row[1] or '').strip()
+        if ssid:
+            existants[ssid] = row[0]
+
+    crypto = _get_crypto_shared()
+    now = datetime.utcnow().isoformat()
+    crees = maj = 0
+
+    for profil in profiles[:100]:
+        if not isinstance(profil, dict):
+            continue
+        ssid = (profil.get('ssid') or '').strip()
+        if not ssid:
+            continue
+        securite = profil.get('authentification') or 'WPA2'
+        if securite not in _WIFI_SECURITE_VALIDES:
+            securite = 'WPA2'
+        mot_de_passe_brut = profil.get('password') or ''
+
+        if ssid in existants:
+            ident_id = existants[ssid]
+            if mot_de_passe_brut:
+                conn.execute(
+                    'UPDATE identifiants SET wifi_securite=?, mot_de_passe=?, date_maj=? '
+                    'WHERE id=? AND client_id=?',
+                    (securite, crypto.encrypt(mot_de_passe_brut), now, ident_id, client_id))
+            else:
+                conn.execute(
+                    'UPDATE identifiants SET wifi_securite=?, date_maj=? WHERE id=? AND client_id=?',
+                    (securite, now, ident_id, client_id))
+            maj += 1
+        else:
+            mdp_chiffre = crypto.encrypt(mot_de_passe_brut) if mot_de_passe_brut else ''
+            conn.execute(
+                '''INSERT INTO identifiants
+                   (client_id,categorie,nom,login,mot_de_passe,description,wifi_ssid,wifi_securite,
+                    date_creation,date_maj)
+                   VALUES (?,'Wi-Fi',?,?,?,?,?,?,?,?)''',
+                (client_id, ssid, ssid, mdp_chiffre,
+                 'Détecté automatiquement par le collecteur', ssid, securite, now, now))
+            existants[ssid] = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+            crees += 1
+
+    return crees, maj
 
 
 def _normalize_name(text):

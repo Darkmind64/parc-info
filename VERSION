@@ -1,8 +1,17 @@
-PARCINFO_VERSION=2.9.9
+PARCINFO_VERSION=2.10.0
 RELEASE_DATE=2026-08-15
-BUILD_NUMBER=2026081501
+BUILD_NUMBER=2026081502
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.10.0 - Réseaux Wi-Fi enregistrés, remontés comme identifiants
+# SSID et sécurité collectés systématiquement ; le mot de passe en clair
+# seulement sur un geste explicite (case décochée par défaut côté GUI,
+# --wifi-passwords côté CLI). Jamais dans la fiche appareil ni le PDF :
+# direction unique vers la table identifiants, chiffrée. Un réseau déjà
+# connu pour un client est mis à jour plutôt que dupliqué ; nom et
+# description saisis à la main ne sont jamais écrasés par la collecte
+# Date: 15 août 2026
 
 # Version 2.9.9 - Trigger de sync Turso figé sur une définition périmée
 # _ensure_turso_schema() ne mettait jamais à jour un trigger _trg_journal_*

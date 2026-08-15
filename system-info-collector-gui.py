@@ -34,8 +34,10 @@ from collector_core import (
     collect_system_info,
     fetch_clients,
     generate_pdf_report,
+    get_wifi_profiles,
     is_elevated,
     send_to_parcinfo,
+    send_wifi_credentials_to_parcinfo,
     upload_report_to_parcinfo,
 )
 
@@ -337,6 +339,16 @@ class CollectorGUI:
             self.root, variable=self.test_debit_var,
             text="Mesurer aussi le débit descendant (télécharge ~10 Mo)")
 
+        # Réseaux Wi-Fi enregistrés : décoché par défaut. Le SSID et le type de
+        # sécurité sont envoyés dans tous les cas (comme le reste de la
+        # collecte) ; c'est le mot de passe en clair, lui, qui doit rester un
+        # choix explicite — même principe que le test de débit ci-dessus, pour
+        # un secret plutôt qu'une bande passante.
+        self.wifi_passwords_var = tk.BooleanVar(value=False)
+        wifi_check = ttk.Checkbutton(
+            self.root, variable=self.wifi_passwords_var,
+            text="Inclure les mots de passe Wi-Fi enregistrés (stockés chiffrés)")
+
         # Status bar + progression : la collecte dure une bonne minute, une
         # interface figée sans indication passe pour un plantage.
         self.progress_var = tk.DoubleVar(value=0.0)
@@ -353,6 +365,7 @@ class CollectorGUI:
         # de la fenêtre.
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self.progress_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        wifi_check.pack(side=tk.BOTTOM, anchor=tk.W, padx=12, pady=2)
         debit_check.pack(side=tk.BOTTOM, anchor=tk.W, padx=12, pady=2)
         action_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=8)
         main_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -738,6 +751,9 @@ class CollectorGUI:
         self._save_config()
         client_id = self.selected_client.get('id')
         client_name = self.selected_client.get('nom', 'Inconnu')
+        # Lu ici, dans la boucle Tk : une variable Tkinter ne se lit pas
+        # depuis le thread d'envoi (même règle que test_debit dans _collect_info).
+        wifi_passwords = self.wifi_passwords_var.get()
 
         msg = f"Envoyer les informations vers le client :\n\n📍 {client_id} - {client_name}\n\nEtes-vous sûr ?"
         if not messagebox.askyesno("Confirmation", msg):
@@ -797,6 +813,24 @@ class CollectorGUI:
                     else:
                         logger.error(f"Report upload failed: {result_report}")
                         msg += f"\n⚠️ Erreur lors du stockage du rapport: {result_report}"
+
+                # Réseaux Wi-Fi enregistrés : SSID + sécurité systématiquement, le
+                # mot de passe seulement si la case est cochée. Appel séparé de
+                # l'envoi principal — voir send_wifi_credentials_to_parcinfo.
+                if device_id and client_id:
+                    wifi_profiles = get_wifi_profiles(inclure_mdp=wifi_passwords)
+                    if wifi_profiles:
+                        success_wifi, result_wifi = send_wifi_credentials_to_parcinfo(
+                            wifi_profiles, self.server_url, device_id, client_id,
+                            token=self.token or None
+                        )
+                        if success_wifi:
+                            logger.debug(f"Wifi credentials synced: {result_wifi}")
+                            msg += (f"\n✓ Réseaux Wi-Fi : {result_wifi.get('created', 0)} créé(s), "
+                                    f"{result_wifi.get('updated', 0)} mis à jour")
+                        else:
+                            logger.error(f"Wifi credentials sync failed: {result_wifi}")
+                            msg += f"\n⚠️ Erreur lors de l'envoi des réseaux Wi-Fi: {result_wifi}"
 
                 if report_file:
                     msg += f"\n\nRapport complet sauvegardé :\n{report_file}"

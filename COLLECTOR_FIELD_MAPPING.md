@@ -186,6 +186,38 @@ avg_ms, max_ms, loss_pct}` · `bandwidth{mbps, downloaded_mb, seconds}`
 `smb_shares[]{name, path, administrative}` (partages exposés) ·
 `mapped_drives[]{letter, path}` (lecteurs mappés depuis d'autres machines)
 
+### Réseaux Wi-Fi enregistrés (hors rapport système)
+`get_wifi_profiles()` → `[{ssid, authentification, chiffrement, password?}]` —
+tous les profils Wi-Fi enregistrés sur le poste (`netsh wlan export profile`),
+pas seulement celui actuellement connecté (`wifi` ci-dessus).
+
+> **Seul champ collecté qui ne transite jamais par `system_report`.** Tout le
+> reste de cette page finit, tel quel, dans `rapport_systeme_json` — visible
+> en clair dans la fiche appareil et le PDF. Un mot de passe Wi-Fi ne doit
+> avoir qu'une seule destination : la table `identifiants`, chiffrée. C'est
+> pourquoi `_win_wifi_profiles()` n'est **pas** dans `_WIN_STEPS` et pourquoi
+> `get_wifi_profiles()`/`send_wifi_credentials_to_parcinfo()` sont appelés
+> séparément de `collect_system_info()`/`send_to_parcinfo()`, avec leur propre
+> endpoint `POST /api/device-info/wifi-credentials`.
+>
+> Le SSID et le type de sécurité sont **toujours** remontés (comme le reste de
+> la collecte) ; le mot de passe en clair ne l'est que sur un geste explicite
+> — case décochée par défaut côté GUI, `--wifi-passwords` côté CLI. Sans ce
+> geste, `netsh wlan export profile` tourne sans `key=clear` : le mot de passe
+> n'est alors même pas présent dans le XML exporté, il n'est jamais lu.
+>
+> Le dossier d'export (`netsh wlan export profile folder=…`) est temporaire et
+> supprimé dès la lecture terminée, y compris en cas d'erreur — il contient
+> les mots de passe en clair sur disque tant qu'il existe.
+>
+> Côté serveur, `app.py:_sync_wifi_credentials_from_collector()` range chaque
+> réseau dans `identifiants` (catégorie `Wi-Fi`), chiffré via `crypto_utils`.
+> Un SSID déjà connu pour ce client est mis à jour plutôt que dupliqué ; son
+> mot de passe existant n'est écrasé que si CE relevé en apporte un nouveau —
+> jamais vidé par une collecte où la case n'était pas cochée. `nom` et
+> `description` saisis à la main (via le formulaire identifiant) ne sont
+> jamais touchés par la synchronisation automatique.
+
 ### Sécurité & conformité
 `antivirus` · `antivirus_products[]{name, enabled, status, up_to_date}` ·
 `firewall[]` / `firewall_profiles[]{name, enabled}` ·
@@ -350,6 +382,7 @@ avec un champ inaccessible.
 | Pare-feu | ✅ | ✅ | — |
 | TPM / Secure Boot | ✅ | — | — |
 | Détections antivirus (Defender) | ✅ | — | — |
+| Réseaux Wi-Fi enregistrés (SSID + mot de passe optionnel) | ✅ | — | — |
 | Ports en écoute | ✅ | — | ✅ (`ss`) |
 | Comptes locaux | ✅ | ✅ | ✅ |
 | Logiciels (nom+version+éditeur) | ✅ | ⚠️ nom seul | ✅ dpkg/rpm/pacman |

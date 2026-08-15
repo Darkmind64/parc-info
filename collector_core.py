@@ -18,11 +18,14 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import string
 import subprocess
 import sys
+import tempfile
 import uuid
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from urllib.error import URLError
 from urllib.parse import quote
@@ -34,6 +37,7 @@ __all__ = [
     'generate_pdf_report', 'generate_html_report',
     'get_api_payload', 'send_to_parcinfo', 'upload_report_to_parcinfo',
     'fetch_clients', 'is_elevated',
+    'get_wifi_profiles', 'send_wifi_credentials_to_parcinfo',
 ]
 
 # Platform detection
@@ -2272,6 +2276,117 @@ def _win_network():
             }
 
     return info
+
+
+# Table de correspondance netsh (authentification WLAN) → libellé identifiants.
+# `authentification` prend une poignée de valeurs documentées par Microsoft ;
+# tout ce qui n'y figure pas est renvoyé tel quel plutôt que forcé à WPA2.
+_WIFI_AUTH_LABELS = {
+    'open': 'Ouvert', 'none': 'Ouvert',
+    'shared': 'WEP', 'wep': 'WEP',
+    'wpapsk': 'WPA', 'wpa': 'WPA', 'wpaenterprise': 'WPA',
+    'wpa2psk': 'WPA2', 'wpa2': 'WPA2', 'wpa2enterprise': 'WPA2',
+    'wpa3sae': 'WPA3', 'wpa3ent': 'WPA3', 'wpa3ent192': 'WPA3', 'wpa3': 'WPA3',
+}
+
+_WIFI_PROFILE_XML_NS = {'w': 'http://www.microsoft.com/networking/WLAN/profile/v1'}
+
+
+def _parse_wifi_profile_xml(chemin, inclure_mdp=False):
+    """Extrait SSID/sécurité (et le mot de passe si demandé) d'un XML exporté
+    par `netsh wlan export profile`.
+
+    Fonction pure, séparée de _win_wifi_profiles pour rester testable sans
+    lancer netsh (indisponible hors Windows, et hors CI faute d'adaptateur
+    Wi-Fi) — même principe que _champs_erreur_application pour les journaux
+    d'événements. Retourne None si le fichier n'a pas de SSID exploitable.
+    """
+    racine = ET.parse(chemin).getroot()
+    ns = _WIFI_PROFILE_XML_NS
+    ssid = (racine.findtext('.//w:SSIDConfig/w:SSID/w:name', namespaces=ns) or '').strip()
+    if not ssid:
+        return None
+    auth_brute = (racine.findtext(
+        './/w:MSM/w:security/w:authEncryption/w:authentication', namespaces=ns) or '').strip()
+    cle = auth_brute.lower().replace('-', '').replace('_', '')
+    profil = {
+        'ssid': ssid,
+        'authentification': _WIFI_AUTH_LABELS.get(cle, auth_brute or 'WPA2'),
+        'chiffrement': (racine.findtext(
+            './/w:MSM/w:security/w:authEncryption/w:encryption', namespaces=ns) or '').strip(),
+    }
+    if inclure_mdp:
+        mdp = (racine.findtext(
+            './/w:MSM/w:security/w:sharedKey/w:keyMaterial', namespaces=ns) or '').strip()
+        if mdp:
+            profil['password'] = mdp
+    return profil
+
+
+def _win_wifi_profiles(inclure_mdp=False):
+    """Réseaux Wi-Fi enregistrés sur ce poste (SSID, sécurité, et le mot de
+    passe uniquement si `inclure_mdp` est vrai).
+
+    Passe par `netsh wlan export profile`, qui écrit un XML par réseau, plutôt
+    que par « netsh wlan show profile … key=clear » : le texte de cette
+    dernière commande est localisé (les libellés changent selon la langue de
+    Windows), alors que le schéma XML est fixe quelle que soit la langue.
+
+    Le dossier d'export est temporaire et supprimé — y compris en cas
+    d'erreur — dès la lecture terminée : avec `inclure_mdp`, il contient les
+    mots de passe en clair, qui ne doivent pas traîner sur le disque plus
+    longtemps que nécessaire pour les lire. Le nettoyage lui-même ne doit
+    jamais faire échouer la fonction : un verrou transitoire (antivirus qui
+    scanne le fichier qu'on vient d'écrire) ne doit pas maquiller en échec une
+    collecte par ailleurs réussie — d'où `shutil.rmtree(..., ignore_errors=True)`
+    plutôt que le context manager de TemporaryDirectory, qui propagerait une
+    telle erreur de nettoyage.
+
+    Volontairement tenu à l'écart de `_WIN_STEPS` : tout ce qui y entre finit
+    dans `system_report` (fiche système, PDF), en clair. Un mot de passe
+    Wi-Fi ne doit avoir qu'une seule destination, chiffrée — voir
+    `send_wifi_credentials_to_parcinfo`.
+    """
+    if not IS_WINDOWS:
+        return []
+    profils = []
+    dossier = tempfile.mkdtemp(prefix='parcinfo_wifi_')
+    try:
+        try:
+            cmd = ['netsh', 'wlan', 'export', 'profile', 'folder=' + dossier]
+            if inclure_mdp:
+                cmd.append('key=clear')
+            creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            subprocess.run(cmd, capture_output=True, timeout=20, creationflags=creationflags)
+        except Exception:
+            return []
+
+        try:
+            fichiers = [f for f in os.listdir(dossier) if f.lower().endswith('.xml')]
+        except Exception:
+            fichiers = []
+
+        for nom_fichier in fichiers:
+            try:
+                profil = _parse_wifi_profile_xml(os.path.join(dossier, nom_fichier), inclure_mdp)
+                if profil:
+                    profils.append(profil)
+            except Exception:
+                continue
+    finally:
+        shutil.rmtree(dossier, ignore_errors=True)
+
+    return profils
+
+
+def get_wifi_profiles(inclure_mdp=False):
+    """Point d'entrée public, indépendant de `_WIN_STEPS` (voir _win_wifi_profiles).
+
+    Windows uniquement pour l'instant — pas d'équivalent macOS/Linux implémenté.
+    """
+    if IS_WINDOWS:
+        return _win_wifi_profiles(inclure_mdp)
+    return []
 
 
 def _win_enterprise():
@@ -8044,6 +8159,43 @@ def upload_report_to_parcinfo(report_content, report_file, server_url, device_id
 
         with urlopen(request, timeout=30) as response:
             return True, json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        return False, str(e)
+
+
+def send_wifi_credentials_to_parcinfo(profiles, server_url, device_id, client_id, token=None):
+    """Envoie les réseaux Wi-Fi détectés (voir get_wifi_profiles) à ParcInfo.
+
+    Volontairement un appel séparé de send_to_parcinfo plutôt qu'un champ du
+    payload principal : les réseaux (et leur mot de passe, si collecté)
+    n'ont pas leur place dans le snapshot système envoyé à /api/device-info,
+    qui atterrit tel quel dans la fiche appareil et le PDF — le serveur range
+    ceux-ci dans la table des identifiants, chiffrés.
+    """
+    if not profiles:
+        return True, {'status': 'success', 'created': 0, 'updated': 0}
+    try:
+        headers = {'Content-Type': 'application/json'}
+        if token:
+            headers['Authorization'] = f'Bearer {token}'
+
+        payload = json.dumps({
+            'device_id': device_id,
+            'client_id': client_id,
+            'profiles': profiles,
+        })
+
+        request = Request(
+            f"{server_url.rstrip('/')}/api/device-info/wifi-credentials",
+            data=payload.encode('utf-8'),
+            headers=headers,
+            method='POST'
+        )
+
+        with urlopen(request, timeout=30) as response:
+            return True, json.loads(response.read().decode('utf-8'))
+    except URLError as e:
+        return False, f"Connection error: {e.reason}"
     except Exception as e:
         return False, str(e)
 

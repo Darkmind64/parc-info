@@ -1,21 +1,21 @@
 {
-  "version": "2.9.9",
+  "version": "2.10.0",
   "release_date": "2026-08-15T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.9/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.9/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.9.9",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.9/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.9/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.9.9/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.10.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.10.0/ParcInfo-macOS-ARM.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.10.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.10.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.10.0/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.10.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correction d'un trigger de synchronisation Turso figé sur une définition périmée",
+    "new_features": "Réseaux Wi-Fi enregistrés, remontés comme identifiants chiffrés",
     "improvements": [
-      "FIXED: _ensure_turso_schema() ne mettait jamais à jour un trigger _trg_journal_* déjà présent sur Turso (CREATE TRIGGER IF NOT EXISTS) — une définition créée par une version antérieure du code y restait figée indéfiniment, provoquant en production un 'UNIQUE constraint failed' sur _sync_journal lors du push de documents_appareils.",
-      "FIXED: DROP+CREATE appliqué désormais, mais seulement quand la définition locale diffère de celle déjà présente sur Turso — un DROP+CREATE systématique à chaque cycle (~30s, potentiellement depuis plusieurs instances) aurait rouvert une fenêtre sans trigger à chaque fois.",
-      "A SAVOIR: aucune donnée n'était perdue par ce bug — le push échoué restait en file dans le journal local et était retenté au cycle suivant."
+      "AJOUT: le collecteur relève désormais les réseaux Wi-Fi enregistrés sur le poste (SSID + type de sécurité systématiquement ; mot de passe en clair seulement sur un geste explicite — case décochée par défaut côté GUI, --wifi-passwords côté CLI).",
+      "AJOUT: ces réseaux n'atterrissent jamais dans la fiche appareil ni le PDF — direction unique vers la table identifiants (catégorie Wi-Fi), chiffrée comme tout autre identifiant stocké.",
+      "AJOUT: un réseau déjà connu pour un client est mis à jour plutôt que dupliqué ; son mot de passe existant n'est écrasé que si la collecte en apporte un nouveau, jamais vidé sans la case cochée ; nom et description saisis à la main restent intacts."
     ]
   },
   "checksums": {
@@ -26,5 +26,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.9.9"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.10.0"
 }

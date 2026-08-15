@@ -1,5 +1,49 @@
 # CHANGELOG - ParcInfo
 
+## [2.10.0] - 2026-08-15 📶
+
+### 📶 Réseaux Wi-Fi enregistrés, remontés comme identifiants chiffrés
+
+Le collecteur relève désormais les réseaux Wi-Fi enregistrés sur le poste —
+pas seulement celui actuellement connecté (déjà collecté depuis longtemps),
+tous les profils sauvegardés (`netsh wlan export profile`, un XML par réseau :
+le schéma est fixe quelle que soit la langue de Windows, contrairement au
+texte localisé de `netsh wlan show profile`).
+
+**Chemin séparé, volontairement.** SSID et type de sécurité sont collectés et
+envoyés systématiquement, comme le reste de la collecte. Le mot de passe en
+clair, lui, ne l'est que sur un geste explicite — case décochée par défaut
+côté GUI, `--wifi-passwords` côté CLI — et dans ce cas seulement, `netsh`
+tourne avec `key=clear` ; sans la case cochée, le mot de passe n'est même pas
+présent dans le XML exporté, il n'est jamais lu. Ni l'un ni l'autre n'entre
+dans `system_report` : contrairement à tout le reste de la collecte, ces
+données ne transitent jamais par la fiche appareil ni le PDF, où elles
+seraient visibles en clair. Un appel API séparé
+(`POST /api/device-info/wifi-credentials`) les range directement dans la
+table `identifiants` (catégorie Wi-Fi, déjà existante — le formulaire manuel
+l'utilisait déjà), chiffrées comme tout autre identifiant stocké.
+
+**Pas de doublon à chaque collecte.** Un SSID déjà connu pour le client est
+mis à jour plutôt que recréé ; son mot de passe existant n'est écrasé que si
+la collecte en apporte un nouveau — jamais vidé par une collecte où la case
+n'était pas cochée. Un nom ou une description personnalisés à la main, via le
+formulaire identifiant, survivent à toute resynchronisation automatique.
+
+**Dossier temporaire, nettoyé immédiatement.** `netsh wlan export profile`
+écrit ses XML dans un dossier qui n'existe que le temps de la lecture — avec
+`key=clear`, il contient des mots de passe en clair sur disque, supprimé y
+compris en cas d'erreur.
+
+Nouveaux tests (`test_wifi_credentials.py`) : lecture du XML (réseau protégé,
+réseau ouvert, authentification non répertoriée renvoyée telle quelle plutôt
+que forcée), le mot de passe n'est jamais lu sans le geste explicite même
+présent dans le XML, mise à jour sans duplication, préservation du nom/de la
+description personnalisés, isolation entre clients, et bout en bout via
+l'API — vérifié aussi par rendu réel de la page Identifiants et relecture du
+mot de passe via son point de reprise habituel.
+
+---
+
 ## [2.9.9] - 2026-08-15 🔄
 
 ### 🔄 Trigger de synchronisation Turso figé sur une définition périmée

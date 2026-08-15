@@ -28,8 +28,10 @@ from collector_core import (
     console_progress,
     fetch_clients,
     generate_pdf_report,
+    get_wifi_profiles,
     is_elevated,
     send_to_parcinfo,
+    send_wifi_credentials_to_parcinfo,
     upload_report_to_parcinfo,
 )
 
@@ -72,6 +74,14 @@ def main():
     # toujours mesurée et suffit à diagnostiquer une lenteur réseau.
     parser.add_argument('--test-debit', action='store_true',
                         help='Mesurer aussi le débit descendant (télécharge ~10 Mo)')
+
+    # Désactivé par défaut : le SSID et le type de sécurité des réseaux Wi-Fi
+    # enregistrés sont toujours remontés (comme le reste de la collecte), mais
+    # le mot de passe en clair ne l'est que sur ce geste explicite — même
+    # principe que --test-debit, pour un secret plutôt qu'une bande passante.
+    parser.add_argument('--wifi-passwords', action='store_true',
+                        help="Inclure les mots de passe Wi-Fi enregistrés "
+                             "(stockés chiffrés dans Identifiants côté serveur)")
 
     args = parser.parse_args()
     _forcer_sortie_utf8()
@@ -168,6 +178,24 @@ def main():
                 print(f"    Document ID: {result_report.get('document_id')}")
             else:
                 print(f"    ⚠️ Erreur lors du stockage du rapport: {result_report}")
+
+    # Réseaux Wi-Fi enregistrés : SSID + sécurité systématiquement, le mot de
+    # passe seulement avec --wifi-passwords. Appel séparé de l'envoi
+    # principal — voir send_wifi_credentials_to_parcinfo.
+    if device_id and client_id:
+        wifi_profiles = get_wifi_profiles(inclure_mdp=args.wifi_passwords)
+        if wifi_profiles:
+            if not args.quiet:
+                print("\n[*] Envoi des réseaux Wi-Fi détectés...")
+            success_wifi, result_wifi = send_wifi_credentials_to_parcinfo(
+                wifi_profiles, args.server, device_id, client_id, token=args.token
+            )
+            if not args.quiet:
+                if success_wifi:
+                    print(f"    ✓ {result_wifi.get('created', 0)} créé(s), "
+                          f"{result_wifi.get('updated', 0)} mis à jour")
+                else:
+                    print(f"    ⚠️ Erreur lors de l'envoi des réseaux Wi-Fi: {result_wifi}")
 
     return 0
 
