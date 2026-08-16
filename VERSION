@@ -1,8 +1,18 @@
-PARCINFO_VERSION=2.16.0
+PARCINFO_VERSION=2.16.1
 RELEASE_DATE=2026-08-16
-BUILD_NUMBER=2026081606
+BUILD_NUMBER=2026081607
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.16.1 - Mise à jour macOS : déblocage Gatekeeper renforcé
+# Après une mise à jour via le bouton « Installer » sur macOS, l'app
+# relancée pouvait rester bloquée par Gatekeeper malgré le nettoyage de
+# quarantaine déjà en place — cet échec passait en silence (check=False,
+# jamais journalisé). Désormais journalisé, et complété d'une signature ad
+# hoc locale (codesign --sign -, sans certificat Apple) : sur les versions
+# récentes de macOS, un bundle totalement non signé peut rester bloqué même
+# quarantaine levée, sans même proposer « Ouvrir quand même »
+# Date: 16 août 2026
 
 # Version 2.16.0 - Raccourcis de clic + page À propos / Contrôle
 # Le nom d'un appareil dans l'inventaire ouvre directement sa fiche

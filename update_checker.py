@@ -366,10 +366,7 @@ class UpdateChecker:
         # dessous, sans aucun moyen de les récupérer.
         self._migrer_donnees_bundle_macos(sauvegarde)
 
-        # L'archive téléchargée est dépourvue d'attribut de quarantaine tant
-        # qu'elle vient de nous, mais macOS en pose un dès le téléchargement :
-        # sans ce nettoyage, Gatekeeper refuse d'ouvrir l'application.
-        subprocess.run(['xattr', '-cr', str(app_actuelle)], check=False)
+        self._debloquer_gatekeeper_macos(app_actuelle)
         shutil.rmtree(sauvegarde, ignore_errors=True)
 
         # Relance différée : le processus courant doit d'abord rendre la main.
@@ -400,6 +397,42 @@ class UpdateChecker:
                     shutil.move(str(src), str(dst))
                 except OSError as e:
                     logger.error("Migration de %s impossible : %s", nom, e)
+
+    @staticmethod
+    def _debloquer_gatekeeper_macos(bundle: Path) -> None:
+        """Lève les deux blocages Gatekeeper connus sur un bundle non signé.
+
+        1. `com.apple.quarantine` : posé sur ce que télécharge un navigateur,
+           pas par `urllib` — donc pas censé être présent ici puisque ParcInfo
+           télécharge lui-même l'archive. Retiré quand même, sans coût, pour
+           couvrir un mécanisme de tagging qu'on n'aurait pas anticipé.
+        2. Signature ad hoc (`codesign --sign -`) : sur les versions récentes
+           de macOS, un bundle totalement non signé peut rester bloqué par
+           Gatekeeper même une fois la quarantaine levée, sans même proposer
+           « Ouvrir quand même » dans Réglages Système. Une signature ad hoc
+           ne demande aucun certificat Apple et suffit à satisfaire cette
+           vérification. Nécessite les outils en ligne de commande Xcode —
+           absents sur certains Mac ; échec silencieux dans ce cas (log
+           seulement), pas d'écran bloquant pour l'utilisateur.
+
+        Les deux échecs sont maintenant journalisés (contrairement à l'ancien
+        `check=False` muet) : si le blocage persiste malgré tout, le journal
+        dira enfin pourquoi, au lieu de forcer à deviner à nouveau.
+        """
+        for commande, nom in (
+            (['xattr', '-cr', str(bundle)], 'xattr -cr'),
+            (['codesign', '--force', '--deep', '--sign', '-', str(bundle)], 'codesign ad hoc'),
+        ):
+            try:
+                r = subprocess.run(commande, capture_output=True, text=True, timeout=30)
+                if r.returncode != 0:
+                    logger.warning("%s a échoué (code %s) : %s",
+                                   nom, r.returncode, (r.stderr or '').strip()[:300])
+            except FileNotFoundError:
+                logger.debug("%s indisponible sur ce Mac (outils en ligne de "
+                             "commande Xcode absents ?)", nom)
+            except Exception as e:
+                logger.warning("%s a échoué : %s", nom, e)
 
     def _macos_app_path(self) -> Optional[Path]:
         """Chemin du bundle .app en cours d'exécution, sinon /Applications."""

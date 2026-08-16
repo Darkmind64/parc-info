@@ -1,22 +1,20 @@
 {
-  "version": "2.16.0",
+  "version": "2.16.1",
   "release_date": "2026-08-16T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.16.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.0/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.1/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.1/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.1/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.16.1",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.1/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.1/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.1/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Raccourcis de clic dans les listes + page À propos / Contrôle",
+    "new_features": "Mise à jour macOS : déblocage Gatekeeper renforcé",
     "improvements": [
-      "AJOUT: le nom d'un appareil dans l'inventaire ouvre directement sa fiche système. Même principe étendu aux périphériques, utilisateurs, maintenances, plans et au widget réseau du tableau de bord — chacun vers sa destination naturelle (fiche système, édition, ou page Droits).",
-      "AJOUT: une page « À propos » (icône ℹ dans la barre du haut) affiche la version, le mode d'exécution, l'adresse, la durée depuis le démarrage et le statut de synchronisation Turso en direct.",
-      "AJOUT: sur les exécutables Windows et macOS, un administrateur peut désormais redémarrer ou arrêter ParcInfo depuis cette page — jusqu'ici, la seule façon d'arrêter l'application était de tuer le processus. Le menu de la barre système Windows gagne les mêmes actions."
+      "CORRIGÉ: après une mise à jour via le bouton « Installer » sur macOS, l'application relancée automatiquement pouvait rester bloquée par Gatekeeper, obligeant à lancer `xattr -cr` à la main. Le nettoyage de quarantaine échouait jusqu'ici en silence ; il est désormais journalisé, et une signature ad hoc locale (sans certificat Apple) est appliquée en complément — une deuxième protection Gatekeeper que la seule levée de quarantaine ne couvre pas toujours sur les versions récentes de macOS."
     ]
   },
   "checksums": {
@@ -27,5 +25,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.16.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.16.1"
 }

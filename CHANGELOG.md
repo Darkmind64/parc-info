@@ -1,5 +1,37 @@
 # CHANGELOG - ParcInfo
 
+## [2.16.1] - 2026-08-16 🔓
+
+### 🔓 Mise à jour macOS : déblocage Gatekeeper renforcé
+
+Signalé après un test réel : la mise à jour lancée depuis le bouton
+« Installer » sur macOS remplace correctement l'application, mais celle-ci
+pouvait rester bloquée par Gatekeeper au redémarrage — obligeant à relancer
+`xattr -cr ParcInfo.app` à la main, alors que ce nettoyage était censé
+tourner automatiquement.
+
+En relisant `_install_macos()`, deux défauts : l'appel `xattr -cr` existait
+déjà, mais son échec passait totalement sous silence (`check=False`, jamais
+consigné dans les logs) — impossible de savoir s'il avait seulement rendu la
+main sans rien faire. Et surtout : lever la quarantaine ne suffit pas
+toujours. Sur les versions récentes de macOS, un bundle totalement non signé
+(ParcInfo ne l'a jamais été — aucun certificat développeur Apple) peut
+rester bloqué par Gatekeeper même sans attribut de quarantaine, parfois sans
+même proposer « Ouvrir quand même » dans Réglages Système.
+
+Les deux étapes sont désormais regroupées dans `_debloquer_gatekeeper_macos()`,
+appliquée après chaque remplacement du bundle : nettoyage de quarantaine
+*et* signature ad hoc locale (`codesign --sign -`, sans certificat, sans
+coût), chaque échec journalisé plutôt qu'avalé en silence. La signature ad
+hoc se dégrade proprement si les outils en ligne de commande Xcode ne sont
+pas installés sur la machine (log seulement, jamais d'écran bloquant).
+
+Cette piste est la plus solide identifiée par relecture du code — sans accès
+à un Mac pour reproduire le blocage exact, elle reste à confirmer sur le
+prochain déploiement réel via le bouton « Installer ».
+
+---
+
 ## [2.16.0] - 2026-08-16 🖱️
 
 ### 🖱️ Raccourcis de clic + page À propos / Contrôle

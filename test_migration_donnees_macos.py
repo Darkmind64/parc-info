@@ -153,5 +153,18 @@ verifier(Path(nouveau_appsupport, 'parc_info.db').read_text() == 'base réelle a
 
 os.environ.pop('PARCINFO_MACOS_DATA_DIR', None)
 
+print("\n=== 7. Déblocage Gatekeeper (xattr -cr + signature ad hoc) ===")
+# xattr/codesign n'existent pas forcément sur la machine qui fait tourner ce
+# test (Windows, ou Linux en CI) — _debloquer_gatekeeper_macos() doit
+# dégrader proprement (logguer, ne jamais lever) plutôt que planter le
+# remplacement de bundle pour une histoire de commande absente.
+faux_bundle = Path(tempfile.mkdtemp(prefix='gatekeeper_'))
+try:
+    UC.UpdateChecker._debloquer_gatekeeper_macos(faux_bundle)
+    leve = False
+except Exception as e:
+    leve = e
+verifier(leve is False, "aucune exception même si xattr/codesign sont absents", str(leve))
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)
