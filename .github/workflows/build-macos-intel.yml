@@ -42,11 +42,16 @@ jobs:
           # cryptography's Rust extension still lands arm64 even with the process-level
           # forcing above (pip's own platform-tag detection under Rosetta picks the wrong
           # one for this package specifically) — force the wheel tag explicitly instead of
-          # relying on runtime arch detection. --platform disables source builds, hence
-          # --only-binary=:all:; --python-version/--abi/--implementation are inferred from
-          # the running (x86_64) interpreter.
-          arch -x86_64 python -m pip install --force-reinstall --no-deps --only-binary=:all: \
+          # relying on runtime arch detection. --platform requires --only-binary=:all: (no
+          # source build) AND --target (pip refuses platform-specific options on a normal
+          # in-place install); --python-version/--abi/--implementation are inferred from the
+          # running (x86_64) interpreter. Uninstall first so --target doesn't leave stale
+          # dist-info/RECORD metadata from the arm64 build sitting alongside the new files.
+          arch -x86_64 python -m pip uninstall -y cryptography
+          SITE_PACKAGES=$(arch -x86_64 python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+          arch -x86_64 python -m pip install --no-deps --only-binary=:all: \
               --platform macosx_10_12_x86_64 --platform macosx_11_0_x86_64 --platform macosx_12_0_x86_64 \
+              --target "$SITE_PACKAGES" \
               cryptography
 
       - name: Verify installed wheels are actually x86_64
