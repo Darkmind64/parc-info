@@ -1861,6 +1861,51 @@ def _filtrer_fusionner_regles_pare_feu(toutes, limite=150):
     return {'firewall_rules': regles, 'firewall_rules_total': len(noms_tries)}
 
 
+def _parse_portproxy(texte):
+    """Parse la sortie de `netsh interface portproxy show all`.
+
+    Fonction pure, séparée de _win_port_forwards pour rester testable — même
+    principe que _parse_regles_pare_feu. Le format est un tableau à largeur
+    fixe (adresse/port d'écoute, adresse/port de destination), stable depuis
+    Windows XP mais SANS libellés de champs à faire correspondre comme pour
+    `netsh advfirewall` : on retient simplement toute ligne à exactement 4
+    jetons dont le 2ᵉ et le 4ᵉ sont des nombres (les ports) — ça élimine
+    silencieusement l'en-tête, la ligne de séparateurs et les lignes vides
+    sans avoir à connaître leur texte exact, y compris dans une langue non
+    prévue.
+    """
+    redirections = []
+    for ligne in (texte or '').splitlines():
+        morceaux = ligne.split()
+        if len(morceaux) != 4:
+            continue
+        adresse_ecoute, port_ecoute, adresse_dest, port_dest = morceaux
+        if not (port_ecoute.isdigit() and port_dest.isdigit()):
+            continue
+        redirections.append({
+            'listen_address': adresse_ecoute, 'listen_port': int(port_ecoute),
+            'connect_address': adresse_dest, 'connect_port': int(port_dest),
+        })
+    return redirections
+
+
+def _win_port_forwards():
+    """Redirections de port locales (`netsh interface portproxy`).
+
+    Un troisième mécanisme de redirection silencieuse, distinct des deux
+    autres déjà collectés : le pare-feu décide ce qui peut ENTRER, le
+    fichier hosts redirige par NOM, portproxy redirige au niveau du PORT,
+    indépendamment des deux premiers — invisible dans l'un comme dans
+    l'autre. Généralement vide sur un poste ordinaire (aucun filtre de
+    volume nécessaire, contrairement aux règles de pare-feu) ; un service
+    métier qui redirige un port pour contourner une restriction en laisse
+    la trace ici, et nulle part ailleurs dans cette collecte.
+    """
+    texte = _win_console_output(['netsh', 'interface', 'portproxy', 'show', 'all'], timeout=20)
+    redirections = _parse_portproxy(texte)
+    return {'port_forwards': redirections} if redirections else {}
+
+
 # PrincipalSource de Get-LocalUser → libellé du type de compte.
 _ACCOUNT_SOURCES = {
     'local': 'Local',
@@ -2553,6 +2598,7 @@ _WIN_STEPS = [
     ('Licences et correctifs', lambda: _win_licensing()),
     ('Sécurité', lambda: _win_security()),
     ('Règles de pare-feu', lambda: _win_firewall_rules()),
+    ('Redirections de port', lambda: _win_port_forwards()),
     ('Pilotes non signés', lambda: _win_unsigned_drivers()),
     ('Détections antivirus (historique)', lambda: _win_malware_detections()),
     ('Comptes utilisateurs', lambda: _win_users()),
@@ -5705,6 +5751,12 @@ def build_summary_sections(info):
                            ' (local)' if h.get('local') else '')
             if isinstance(h, dict) else str(h)
             for h in info['hosts_entries']]})
+    if info.get('port_forwards'):
+        s['listes'].append({'titre': 'Redirections de port', 'elements': [
+            '%s:%s → %s:%s' % (p.get('listen_address', '?'), p.get('listen_port', '?'),
+                               p.get('connect_address', '?'), p.get('connect_port', '?'))
+            if isinstance(p, dict) else str(p)
+            for p in info['port_forwards']]})
     # La latence est mesurée vers plusieurs cibles (passerelle, Internet) :
     # chacune a son intérêt — une passerelle lente n'a pas la même cause qu'un
     # Internet lent.
@@ -8164,6 +8216,14 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             story.append(Paragraph('Redirections du fichier hosts (%d)' % len(hosts_entrees), S['h2']))
             story.append(_pdf_data_table(tk, ['Nom', 'Adresse', 'Type'],
                                          rows, width, [0.46, 0.30, 0.24]))
+
+        redirections_port = info.get('port_forwards') or []
+        if redirections_port:
+            rows = [[Paragraph('%s:%s' % (_pdf_escape(p.get('listen_address')), p.get('listen_port')), S['mono']),
+                     Paragraph('%s:%s' % (_pdf_escape(p.get('connect_address')), p.get('connect_port')), S['mono'])]
+                    for p in redirections_port]
+            story.append(Paragraph('Redirections de port (%d)' % len(redirections_port), S['h2']))
+            story.append(_pdf_data_table(tk, ['Écoute', 'Destination'], rows, width, [0.5, 0.5]))
 
         # ── Qualité du lien ──────────────────────────────────────────────────
         latence = info.get('latency') or []

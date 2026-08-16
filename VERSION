@@ -1,8 +1,15 @@
-PARCINFO_VERSION=2.13.0
-RELEASE_DATE=2026-08-15
-BUILD_NUMBER=2026081505
+PARCINFO_VERSION=2.14.0
+RELEASE_DATE=2026-08-16
+BUILD_NUMBER=2026081601
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.14.0 - Redirections de port locales (netsh portproxy)
+# Troisième mécanisme de redirection silencieuse collecté, distinct du
+# pare-feu (ce qui ENTRE) et du fichier hosts (redirection par NOM) :
+# portproxy redirige au niveau du PORT. Parsing structurel (4 jetons dont
+# 2 numériques) plutôt que par libellé — fonctionne dans toute langue
+# Date: 16 août 2026
 
 # Version 2.13.0 - Redirections du fichier hosts
 # Seul champ réseau cross-plateforme du collecteur (Windows/macOS/Linux) :

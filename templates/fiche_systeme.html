@@ -1328,7 +1328,8 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 
 <!-- ── CONFIGURATION RÉSEAU ─────────────────────────────────────────────── -->
 {% if rapport.default_gateway or rapport.dns_servers or rapport.network_profiles
-      or rapport.proxy or rapport.wifi or rapport.latency or rapport.hosts_entries %}
+      or rapport.proxy or rapport.wifi or rapport.latency or rapport.hosts_entries
+      or rapport.port_forwards %}
 <div class="fs-section">
     <h3>■ Configuration &amp; qualité réseau</h3>
     <div class="fs-grid">
@@ -1405,6 +1406,22 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             <td class="fs-mono">{{ h.ip }}</td>
             <td><span class="fs-pill {{ 'fs-warn' if h.local else 'fs-muted' }}">
                 {{ 'Local' if h.local else 'Réseau' }}</span></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if rapport.port_forwards %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Redirections de port ({{ rapport.port_forwards|length }}) — indépendantes
+        du pare-feu et du fichier hosts ci-dessus
+    </div>
+    <table class="fs-table" style="margin-bottom:.9rem;">
+        <tr><th>Écoute</th><th>Destination</th></tr>
+        {% for p in rapport.port_forwards %}
+        <tr>
+            <td class="fs-mono">{{ p.listen_address }}:{{ p.listen_port }}</td>
+            <td class="fs-mono">{{ p.connect_address }}:{{ p.connect_port }}</td>
         </tr>
         {% endfor %}
     </table>

@@ -254,6 +254,8 @@ DONNEES_AGENTS = dict(ETAPE_3, **{
                         'profiles': 'Domaine, Privé, Public'}],
     'firewall_rules_total': 1,
     'hosts_entries': [{'ip': '127.0.0.1', 'hostname': 'activate.adobe.com', 'local': True}],
+    'port_forwards': [{'listen_address': '0.0.0.0', 'listen_port': 8080,
+                       'connect_address': '192.168.1.50', 'connect_port': 80}],
 })
 sections2 = {s['cle']: s for s in C.build_summary_sections(DONNEES_AGENTS)}
 
@@ -297,6 +299,8 @@ verifier('ShareMouse' in contenu2('securite') and 'Domaine, Privé, Public' in c
          'règles de pare-feu dans « Sécurité »')
 verifier('activate.adobe.com' in contenu2('reseau') and 'activate.adobe.com' not in contenu2('securite'),
          'redirections du fichier hosts dans « Réseau », pas dans « Sécurité »')
+verifier('192.168.1.50:80' in contenu2('reseau') and '192.168.1.50:80' not in contenu2('securite'),
+         'redirections de port dans « Réseau », pas dans « Sécurité »')
 
 print("\n=== 8. Détection des agents par sous-chaîne du nom affiché ===")
 SERVICES_TEST = [
@@ -577,7 +581,28 @@ verifier(len(sans_hostname) == 1,
 
 verifier(C._parse_hosts_lines([]) == [], 'aucune ligne → liste vide')
 
-print("\n=== 18. Onglets de l'interface ===")
+print("\n=== 18. Redirections de port : parsing du tableau à largeur fixe ===")
+_TEXTE_PORTPROXY = """
+Écouter sur ipv4:             Se connecter à ipv4:
+
+Adresse         Port        Adresse         Port
+--------------- ----------  --------------- ----------
+0.0.0.0         8080        192.168.1.50    80
+127.0.0.1       3389        10.0.0.5        3389
+"""
+redirections = C._parse_portproxy(_TEXTE_PORTPROXY)
+verifier(len(redirections) == 2, "2 redirections reconnues, l'en-tête et le séparateur ignorés",
+         str(len(redirections)))
+verifier(redirections[0] == {'listen_address': '0.0.0.0', 'listen_port': 8080,
+                             'connect_address': '192.168.1.50', 'connect_port': 80},
+         'première redirection correctement typée (ports en entiers)', str(redirections[0]))
+verifier(redirections[1]['listen_port'] == 3389 and redirections[1]['connect_port'] == 3389,
+         'deuxième redirection également reconnue')
+verifier(C._parse_portproxy('') == [], 'texte vide → liste vide')
+verifier(C._parse_portproxy('Adresse Port Adresse Port') == [],
+         "une ligne d'en-tête seule (4 mots, aucun n'est un nombre) ne produit aucune entrée")
+
+print("\n=== 19. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()

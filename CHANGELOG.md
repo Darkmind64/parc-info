@@ -1,5 +1,39 @@
 # CHANGELOG - ParcInfo
 
+## [2.14.0] - 2026-08-16 🔀
+
+### 🔀 Redirections de port locales (netsh portproxy)
+
+Troisième et dernière pièce d'un même trio, complétant le pare-feu (v2.12,
+ce qui est autorisé à ENTRER) et le fichier hosts (v2.13, la redirection par
+NOM) : `netsh interface portproxy` redirige au niveau du PORT, un mécanisme
+indépendant des deux autres et invisible dans l'un comme dans l'autre — un
+classique de dépannage insoupçonné (« pourquoi se connecter au port 8080 en
+local tombe sur autre chose »).
+
+**Parsing sans libellés, cette fois.** Contrairement à `netsh advfirewall`
+(v2.12), ce tableau n'a ni export XML ni libellés de champs à faire
+correspondre en français/anglais — juste des colonnes à largeur fixe. Le
+parsing s'appuie donc sur la structure plutôt que sur le texte : toute ligne
+à exactement 4 jetons dont le 2ᵉ et le 4ᵉ sont des nombres est une
+redirection, ce qui élimine l'en-tête et le séparateur sans avoir à
+connaître leur texte exact — et fonctionne de fait dans une langue non
+prévue à l'avance, sans liste à tenir à jour.
+
+Généralement vide sur un poste ordinaire : aucun filtre de volume nécessaire,
+contrairement aux règles de pare-feu. N'a pas pu être vérifié sur une
+redirection réelle (aucune configurée sur la machine de développement, et en
+créer une pour tester — même temporairement — reviendrait à modifier la
+configuration réseau du poste, ce qui reste refusé même avec l'accord de
+l'utilisateur) : construit sur le format documenté, stable depuis Windows
+XP, avec un parsing volontairement tolérant (rejette silencieusement toute
+ligne inattendue plutôt que de produire une entrée erronée). Nouveaux tests
+sur un texte synthétique reproduisant fidèlement ce format ; rendu réel de
+la fiche système avec des redirections simulées inspecté dans le navigateur
+avant publication.
+
+---
+
 ## [2.13.0] - 2026-08-15 🗺️
 
 ### 🗺️ Redirections du fichier hosts

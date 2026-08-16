@@ -185,7 +185,8 @@ avg_ms, max_ms, loss_pct}` · `bandwidth{mbps, downloaded_mb, seconds}`
 (sur demande explicite, `--test-debit`) ·
 `smb_shares[]{name, path, administrative}` (partages exposés) ·
 `mapped_drives[]{letter, path}` (lecteurs mappés depuis d'autres machines) ·
-`hosts_entries[]{ip, hostname, local}`
+`hosts_entries[]{ip, hostname, local}` ·
+`port_forwards[]{listen_address, listen_port, connect_address, connect_port}`
 
 > `hosts_entries` — **seul champ réseau qui n'est pas spécifique à
 > Windows** (`get_hosts_file_entries()`, appelé depuis `collect_system_info()`
@@ -198,6 +199,18 @@ avg_ms, max_ms, loss_pct}` · `bandwidth{mbps, downloaded_mb, seconds}`
 > une seule ligne. `local` distingue une redirection vers une IP
 > locale/nulle (blocage publicité/licence/télémétrie, ou serveur de dev)
 > d'une simple correspondance nom↔IP réelle sur le réseau local.
+>
+> `port_forwards` vient de `netsh interface portproxy show all` — un
+> troisième mécanisme de redirection silencieuse, distinct des deux
+> précédents : le pare-feu décide ce qui peut ENTRER, le fichier hosts
+> redirige par NOM, portproxy redirige au niveau du PORT, indépendamment des
+> deux autres. Pas de libellés de champs à faire correspondre comme pour
+> `netsh advfirewall` (le tableau n'a pas d'export XML mais n'a pas non plus
+> de texte à traduire) : toute ligne à exactement 4 jetons dont le 2ᵉ et le
+> 4ᵉ sont des nombres est retenue, ce qui élimine l'en-tête et le séparateur
+> sans avoir à connaître leur texte exact — fonctionne donc aussi dans une
+> langue non prévue. Généralement vide sur un poste ordinaire, aucun filtre
+> de volume nécessaire contrairement aux règles de pare-feu.
 
 ### Réseaux Wi-Fi enregistrés (hors rapport système)
 `get_wifi_profiles()` → `[{ssid, authentification, chiffrement, password?}]` —
@@ -451,6 +464,7 @@ avec un champ inaccessible.
 | Pilotes non signés | ✅ | — | — |
 | Règles de pare-feu (filtrées, non par défaut) | ✅ | — | — |
 | Redirections du fichier hosts (filtrées) | ✅ | ✅ | ✅ |
+| Redirections de port (portproxy) | ✅ | — | — |
 | Réseaux Wi-Fi enregistrés (SSID + mot de passe optionnel) | ✅ | — | — |
 | Stratégies de groupe appliquées | ✅ | — | — |
 | Ports en écoute | ✅ | — | ✅ (`ss`) |
@@ -471,7 +485,7 @@ avec un champ inaccessible.
 
 ## ⚙️ Performance
 
-La collecte Windows tient en **34 étapes groupées** (`_WIN_STEPS` dans
+La collecte Windows tient en **35 étapes groupées** (`_WIN_STEPS` dans
 `collector_core.py`, une poignée d'appels PowerShell chacune plutôt qu'un
 appel par donnée). Chaque bloc est protégé par son propre `try/catch` côté
 PowerShell **et** côté Python : une source indisponible (module absent,
