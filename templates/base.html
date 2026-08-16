@@ -524,6 +524,13 @@
         .badge-gray { background:rgba(100,130,160,.1); color:var(--text-secondary); border:1px solid var(--border); }
         .badge-purple { background:rgba(150,80,255,.1); color:#c084fc; border:1px solid rgba(150,80,255,.3); }
 
+        /* Nom d'un enregistrement cliquable dans une liste (→ sa fiche/édition) */
+        .nom-appareil-lien {
+            color: inherit; text-decoration: none; cursor: pointer;
+            border-bottom: 1px dashed transparent; transition: color .12s, border-color .12s;
+        }
+        .nom-appareil-lien:hover { color: var(--accent); border-bottom-color: var(--accent); }
+
         .mono { font-family:'Share Tech Mono',monospace; font-size:.85rem; }
         .alert { padding:.8rem 1.2rem; border-radius:3px; margin-bottom:1rem; font-size:.88rem; border-left:3px solid; }
         .alert-success { background:rgba(0,255,136,.07); border-color:var(--accent-green); color:#80ffcc; }
@@ -779,6 +786,8 @@
         <span class="nav-version-pastille" hidden></span>
     </button>
     {% endif %}
+    <a href="/apropos" class="nav-version" title="À propos de ParcInfo"
+       style="text-decoration:none;">ℹ</a>
 
     <!-- SEARCH BAR -->
     <div style="display:flex;align-items:center;margin-left:1rem;margin-right:1rem;flex:0 0 auto;">

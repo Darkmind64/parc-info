@@ -120,7 +120,7 @@
 <div class="plans-grid">
     {% for plan in plans %}
     <div class="plan-card">
-        <div class="plan-card-name">{{ plan.nom }}</div>
+        <a href="{{ url_for('editer_plan', id=plan.id) }}" class="plan-card-name nom-appareil-lien" style="display:block;">{{ plan.nom }}</a>
         <div class="plan-card-desc">{{ plan.description or '–' }}</div>
         <div class="plan-card-meta">
             Modifié&nbsp;: {{ plan.date_maj[:16].replace('T',' ') if plan.date_maj else '–' }}

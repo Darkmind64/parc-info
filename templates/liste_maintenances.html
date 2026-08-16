@@ -163,10 +163,12 @@
                 <td>
                     <div style="display:flex; flex-direction:column; gap:0.25rem;">
                         {% if m.appareil_id %}
-                            <span style="color:var(--accent);font-weight:600; font-size:0.9rem;">{{ m.appareil_nom }}</span>
+                            <a href="/appareil/{{ m.appareil_id }}/fiche-systeme" class="nom-appareil-lien"
+                               style="color:var(--accent);font-weight:600; font-size:0.9rem;">{{ m.appareil_nom }}</a>
                             <span style="color:var(--text-secondary); font-size:0.75rem;">Appareil</span>
                         {% elif m.peripherique_id %}
-                            <span style="color:var(--accent-orange);font-weight:600; font-size:0.9rem;">{{ m.peripherique_marque }} {{ m.peripherique_modele }}</span>
+                            <a href="/peripherique/{{ m.peripherique_id }}/editer" class="nom-appareil-lien"
+                               style="color:var(--accent-orange);font-weight:600; font-size:0.9rem;">{{ m.peripherique_marque }} {{ m.peripherique_modele }}</a>
                             <span style="color:var(--text-secondary); font-size:0.75rem;">{{ m.peripherique_categorie }}</span>
                         {% else %}
                             <span style="color:var(--text-secondary);">—</span>

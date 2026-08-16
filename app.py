@@ -104,6 +104,7 @@ def _load_app_version():
         logging.getLogger('parcinfo').warning(f'version.json introuvable dans {_resource_base}: {e}')
         return ''
 APP_VERSION = _load_app_version()
+_APP_DEMARRAGE = time.time()  # pour l'uptime affiché sur /apropos
 
 # ─── HELPER: Retry pour requêtes DB verrouillées ─────────────────────────────
 def retry_db_query(query_func, max_retries=5):
@@ -10929,6 +10930,76 @@ def page_login():
 def page_logout():
     session.clear()
     return redirect(url_for('page_login'))
+
+def _mode_execution():
+    """'windows' | 'macos' | 'docker' | 'sources' — détermine ce que /apropos
+    peut proposer (Quitter/Redémarrer n'ont de sens que sur un exécutable)."""
+    if getattr(_sys, 'frozen', False):
+        return 'macos' if platform.system() == 'Darwin' else 'windows'
+    return 'docker' if os.environ.get('RUNNING_IN_DOCKER') else 'sources'
+
+
+@app.route('/apropos')
+@login_required
+def apropos():
+    user = get_auth_user()
+    mode = _mode_execution()
+    est_frozen = mode in ('windows', 'macos')
+
+    turso_actif = cfg_get('db_type', 'local') == 'turso'
+    sync_state = None
+    if turso_actif:
+        from database import get_sync_state
+        sync_state = get_sync_state()
+
+    uptime_s = int(time.time() - _APP_DEMARRAGE)
+    jours, reste = divmod(uptime_s, 86400)
+    heures, reste = divmod(reste, 3600)
+    minutes = reste // 60
+    if jours:
+        uptime_fmt = '%d j %d h' % (jours, heures)
+    elif heures:
+        uptime_fmt = '%d h %d min' % (heures, minutes)
+    else:
+        uptime_fmt = '%d min' % minutes
+
+    return render_template(
+        'apropos.html',
+        mode=mode,
+        peut_arreter=est_frozen and bool(user) and user.get('role') == 'admin',
+        turso_actif=turso_actif, sync_state=sync_state,
+        host=request.host, url_racine=request.url_root,
+        uptime_fmt=uptime_fmt,
+    )
+
+
+@app.route('/apropos/quitter', methods=['POST'])
+@login_required
+def apropos_quitter():
+    user = get_auth_user()
+    if not (user and user.get('role') == 'admin'):
+        return jsonify({'ok': False, 'error': 'Réservé aux administrateurs'}), 403
+    if _mode_execution() not in ('windows', 'macos'):
+        return jsonify({'ok': False, 'error': "Indisponible hors exécutable (Docker/sources)"}), 400
+    logger.info("Arrêt de ParcInfo demandé par %s", user['login'])
+    from launcher import quitter_application
+    quitter_application(logger)
+    return jsonify({'ok': True, 'message': 'Arrêt en cours…'})
+
+
+@app.route('/apropos/redemarrer', methods=['POST'])
+@login_required
+def apropos_redemarrer():
+    user = get_auth_user()
+    if not (user and user.get('role') == 'admin'):
+        return jsonify({'ok': False, 'error': 'Réservé aux administrateurs'}), 403
+    if _mode_execution() not in ('windows', 'macos'):
+        return jsonify({'ok': False, 'error': "Indisponible hors exécutable (Docker/sources)"}), 400
+    logger.info("Redémarrage de ParcInfo demandé par %s", user['login'])
+    from launcher import redemarrer_application
+    redemarrer_application(logger)
+    return jsonify({'ok': True, 'message': 'Redémarrage en cours…'})
+
 
 @app.route('/profil', methods=['GET','POST'])
 @login_required

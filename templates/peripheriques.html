@@ -246,7 +246,8 @@
             {% endif %}
             <tr data-search="{{ p.marque }} {{ p.modele }} {{ p.description }} {{ p.nom_machine or '' }} {{ p.utilisateur_nom or '' }} {{ p.localisation or '' }}" data-cat="{{ p.categorie|e }}">
                 <td>
-                    <div style="font-weight:600; cursor:default;"
+                    <a href="/peripherique/{{ p.id }}/editer"
+                         class="nom-appareil-lien" style="font-weight:600;"
                          onmouseenter="showSpecTip(event, this)"
                          onmouseleave="hideSpecTip()"
                          data-nom="{{ ((p.marque or '') ~ ' ' ~ (p.modele or ''))|trim|e }}"
@@ -261,7 +262,7 @@
                          data-app="{{ p.nom_machine|e if p.nom_machine else '' }}"
                          data-notes="{{ p.notes|e if p.notes else '' }}">
                         {{ p.marque or '' }} {{ p.modele or '—' }}
-                    </div>
+                    </a>
                     {% if p.description %}
                     <div style="color:var(--text-secondary);font-size:.78rem;">{{ p.description }}</div>
                     {% endif %}

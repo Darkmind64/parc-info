@@ -907,7 +907,7 @@
                             {% if not a.en_ligne and a.statut == 'actif' and a.adresse_ip %}
                             <div class="net-row">
                                 <span class="net-led led-off"></span>
-                                <span class="net-name">{{ a.nom_machine }}</span>
+                                <a class="net-name nom-appareil-lien" href="/appareil/{{ a.id }}/fiche-systeme">{{ a.nom_machine }}</a>
                                 <span class="net-ip">{{ a.adresse_ip }}</span>
                                 {% if a.dernier_ping_fmt %}<span class="net-ts">{{ a.dernier_ping_fmt }}</span>{% endif %}
                             </div>
@@ -919,7 +919,7 @@
                             {% for a in en_ligne_list[:4] %}
                             <div class="net-row">
                                 <span class="net-led led-on"></span>
-                                <span class="net-name">{{ a.nom_machine }}</span>
+                                <a class="net-name nom-appareil-lien" href="/appareil/{{ a.id }}/fiche-systeme">{{ a.nom_machine }}</a>
                                 <span class="net-ip">{{ a.adresse_ip }}</span>
                             </div>
                             {% endfor %}

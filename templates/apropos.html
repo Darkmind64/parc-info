@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}À propos — ParcInfo{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>À propos de <span>ParcInfo</span></h1>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;max-width:900px;">
+
+    <div class="card">
+        <div class="form-section-title">&#9632; Application</div>
+        <div style="font-size:.83rem;display:flex;flex-direction:column;gap:.6rem;margin-top:.7rem;">
+            <div>
+                <span style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:1px;">Version :</span>
+                <strong style="font-family:'Share Tech Mono',monospace;margin-left:.5rem;">{{ app_version or '—' }}</strong>
+            </div>
+            <div>
+                <span style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:1px;">Mode :</span>
+                <span class="badge {{ 'badge-blue' if mode in ('windows','macos') else 'badge-gray' }}" style="margin-left:.5rem;">
+                    {% if mode == 'windows' %}Exécutable Windows
+                    {% elif mode == 'macos' %}Exécutable macOS
+                    {% elif mode == 'docker' %}Docker
+                    {% else %}Sources (développement){% endif %}
+                </span>
+            </div>
+            <div>
+                <span style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:1px;">Adresse :</span>
+                <span class="mono" style="margin-left:.5rem;">{{ host }}</span>
+            </div>
+            <div>
+                <span style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:1px;">En ligne depuis :</span>
+                <span style="margin-left:.5rem;">{{ uptime_fmt }}</span>
+            </div>
+        </div>
+        <div style="margin-top:1.2rem;padding-top:1rem;border-top:1px solid var(--border);">
+            <a href="{{ url_racine }}" class="btn btn-primary btn-sm">🌐 Ouvrir l'interface</a>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="form-section-title">&#9632; Synchronisation Turso</div>
+        {% if not turso_actif %}
+        <div style="font-size:.83rem;color:var(--text-muted);margin-top:.7rem;">
+            Turso n'est pas configuré — cette installation utilise uniquement la base locale.
+        </div>
+        {% else %}
+        <div style="font-size:.83rem;display:flex;flex-direction:column;gap:.6rem;margin-top:.7rem;">
+            <div>
+                <span style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:1px;">Statut :</span>
+                {% if sync_state.running %}
+                <span class="badge badge-blue" style="margin-left:.5rem;">Synchronisation en cours</span>
+                {% elif sync_state.last_error %}
+                <span class="badge badge-red" style="margin-left:.5rem;" title="{{ sync_state.last_error }}">Dernière tentative en échec</span>
+                {% elif sync_state.last_sync %}
+                <span class="badge badge-green" style="margin-left:.5rem;">OK</span>
+                {% else %}
+                <span class="badge badge-gray" style="margin-left:.5rem;">Aucune synchronisation encore</span>
+                {% endif %}
+            </div>
+            {% if sync_state.last_sync %}
+            <div>
+                <span style="color:var(--text-muted);font-size:.72rem;text-transform:uppercase;letter-spacing:1px;">Dernière synchro :</span>
+                <span class="mono" style="margin-left:.5rem;">{{ sync_state.last_sync }}</span>
+            </div>
+            {% endif %}
+            {% if sync_state.last_error %}
+            <div style="color:var(--accent-red);font-size:.78rem;">{{ sync_state.last_error }}</div>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div style="margin-top:1.2rem;padding-top:1rem;border-top:1px solid var(--border);">
+            <a href="/journal-synchronisation" class="btn btn-primary btn-sm">📡 Journal de synchronisation</a>
+        </div>
+    </div>
+
+    {% if peut_arreter %}
+    <div class="card" style="grid-column:1 / -1;">
+        <div class="form-section-title">&#9632; Contrôle</div>
+        <div style="font-size:.8rem;color:var(--text-secondary);margin:.6rem 0 1rem;">
+            Réservé aux administrateurs. Redémarrer relance immédiatement une nouvelle instance ;
+            quitter arrête ParcInfo sans le relancer — il faudra le rouvrir manuellement.
+        </div>
+        <div style="display:flex;gap:.8rem;">
+            <button type="button" class="btn btn-primary btn-sm" id="btn-redemarrer" onclick="ProposControle.redemarrer()">⟳ Redémarrer</button>
+            <button type="button" class="btn btn-danger btn-sm" id="btn-quitter" onclick="ProposControle.quitter()">⏻ Quitter</button>
+        </div>
+        <div id="propos-controle-msg" style="margin-top:.8rem;font-size:.82rem;"></div>
+    </div>
+    {% endif %}
+
+</div>
+
+<script>
+const ProposControle = {
+    _msg(texte, couleur) {
+        const el = document.getElementById('propos-controle-msg');
+        el.textContent = texte;
+        el.style.color = couleur || 'var(--text-secondary)';
+    },
+    _appel(url, libelle) {
+        document.getElementById('btn-redemarrer').disabled = true;
+        document.getElementById('btn-quitter').disabled = true;
+        this._msg(libelle + '…', 'var(--accent)');
+        fetch(url, {method: 'POST'})
+            .then(r => r.json())
+            .then(d => {
+                if (d.ok) {
+                    this._msg(d.message + ' La page ne répondra plus tant que ParcInfo n\'aura pas redémarré.', 'var(--accent-green)');
+                } else {
+                    this._msg(d.error || 'Échec', 'var(--accent-red)');
+                    document.getElementById('btn-redemarrer').disabled = false;
+                    document.getElementById('btn-quitter').disabled = false;
+                }
+            })
+            .catch(() => {
+                // La connexion tombe normalement avant la réponse : c'est le signe que ça a marché.
+                this._msg('ParcInfo s\'arrête — la connexion a été coupée.', 'var(--accent-green)');
+            });
+    },
+    redemarrer() {
+        if (!confirm('Redémarrer ParcInfo maintenant ?')) return;
+        this._appel('/apropos/redemarrer', 'Redémarrage');
+    },
+    quitter() {
+        if (!confirm('Arrêter ParcInfo ? Il faudra le relancer manuellement.')) return;
+        this._appel('/apropos/quitter', 'Arrêt');
+    },
+};
+</script>
+{% endblock %}

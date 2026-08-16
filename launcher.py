@@ -109,6 +109,57 @@ def get_port(preferred=3456):
             s.bind(('127.0.0.1', 0))
             return s.getsockname()[1]
 
+# ── Arrêt / relance (utilisés par la barre système ET par la page /apropos) ────
+def quitter_application(logger=None):
+    """Arrête proprement le processus.
+
+    Un léger délai laisse le temps à l'appelant HTTP (route /apropos/quitter)
+    de recevoir sa réponse avant que le process ne meure — sinon le navigateur
+    voit la connexion coupée sans confirmation. Le menu de la barre système,
+    lui, n'a pas ce besoin (pas de requête en cours) mais réutilise la même
+    fonction pour rester cohérent.
+    """
+    if logger:
+        logger.info("Arrêt de ParcInfo demandé")
+    threading.Timer(0.6, lambda: os._exit(0)).start()
+
+def redemarrer_application(logger=None):
+    """Relance un nouvel exemplaire de l'exécutable, puis quitte celui-ci.
+
+    macOS : `open` sur le bundle .app plutôt qu'invoquer le binaire interne
+    directement — sans ça, l'app relancée perd son rattachement au Dock et à
+    Launch Services (elle tournerait comme un simple process Unix nu).
+    """
+    def _relancer():
+        time.sleep(0.6)
+        try:
+            if platform.system() == 'Darwin':
+                bundle = sys.executable
+                for _ in range(4):
+                    parent = os.path.dirname(bundle)
+                    if parent == bundle:
+                        bundle = None
+                        break
+                    if parent.endswith('.app'):
+                        bundle = parent
+                        break
+                    bundle = parent
+                if bundle:
+                    subprocess.Popen(['open', bundle])
+                else:
+                    subprocess.Popen([sys.executable])
+            else:
+                subprocess.Popen(
+                    [sys.executable], cwd=os.path.dirname(sys.executable) or None,
+                    close_fds=True, creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0))
+            if logger:
+                logger.info("ParcInfo relancé")
+        except Exception as e:
+            if logger:
+                logger.error("Relance impossible : %s", e)
+        os._exit(0)
+    threading.Thread(target=_relancer, daemon=True).start()
+
 # ── Systray optionnel ─────────────────────────────────────────────────────────
 def run_systray(url, logger):
     """Essaie de créer la barre système. Échoue silencieusement si indisponible."""
@@ -133,8 +184,10 @@ def run_systray(url, logger):
             d.ellipse([6, 6, 58, 58], fill='#00c9ff')
             d.text((14, 16), 'PI', fill='white')
         Icon('ParcInfo', img, 'ParcInfo', menu=Menu(
-            MenuItem('Ouvrir ParcInfo', lambda i, it: webbrowser.open(url), default=True),
-            MenuItem('Quitter',         lambda i, it: (i.stop(), os._exit(0))),
+            MenuItem('Ouvrir ParcInfo',  lambda i, it: webbrowser.open(url), default=True),
+            MenuItem('À propos',         lambda i, it: webbrowser.open(url + '/apropos')),
+            MenuItem('Redémarrer',       lambda i, it: (i.stop(), redemarrer_application(logger))),
+            MenuItem('Quitter',          lambda i, it: (i.stop(), quitter_application(logger))),
         )).run()
     except Exception as e:
         logger.debug(f"Systray unavailable: {e}")
