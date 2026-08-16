@@ -1,8 +1,19 @@
-PARCINFO_VERSION=2.16.1
+PARCINFO_VERSION=2.16.2
 RELEASE_DATE=2026-08-16
-BUILD_NUMBER=2026081607
+BUILD_NUMBER=2026081608
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.16.2 - Mise à jour macOS : le bon binaire (ARM/Intel) est enfin choisi
+# _get_platform_key() renvoyait toujours le zip ARM, quelle que soit
+# l'architecture réelle du Mac — un Mac Intel se voyait proposer et
+# installer le binaire ARM par la mise à jour in-app, que macOS refuse
+# ensuite d'ouvrir (« n'est pas pris en charge par ce Mac »). Signalé par
+# un test réel juste après le correctif Gatekeeper de la 2.16.1. Corrigé
+# sur l'architecture du processus en cours ; un filet de sécurité vérifie
+# aussi directement le binaire téléchargé avant de remplacer la version
+# actuelle, et refuse plutôt que de la casser en cas de désaccord
+# Date: 16 août 2026
 
 # Version 2.16.1 - Mise à jour macOS : déblocage Gatekeeper renforcé
 # Après une mise à jour via le bouton « Installer » sur macOS, l'app

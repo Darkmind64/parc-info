@@ -342,6 +342,29 @@ class UpdateChecker:
                 logger.error("Aucun bundle .app dans l'archive")
                 return False
 
+            # Filet de sécurité : le sélecteur de version.json vient d'être
+            # corrigé après avoir renvoyé le zip ARM à un Mac Intel (l'app
+            # remplacée refusait ensuite de démarrer, « n'est pas prise en
+            # charge par ce Mac », sans qu'aucun rollback ne se déclenche).
+            # Un contrôle direct sur le binaire téléchargé, ici, protège
+            # aussi contre une éventuelle prochaine confusion côté
+            # publication — en refusant AVANT de toucher à la version qui
+            # fonctionne, pas après coup une fois l'ancienne effacée.
+            archi_attendue = 'x86_64' if platform.machine() == 'x86_64' else 'arm64'
+            executable_source = source / 'Contents' / 'MacOS' / 'ParcInfo'
+            if executable_source.exists():
+                try:
+                    r = subprocess.run(['file', str(executable_source)],
+                                       capture_output=True, text=True, timeout=15)
+                    if archi_attendue not in r.stdout:
+                        logger.error(
+                            "Architecture du binaire téléchargé incompatible avec ce Mac "
+                            "(attendu %s) : %s — mise à jour annulée, version actuelle conservée",
+                            archi_attendue, r.stdout.strip())
+                        return False
+                except Exception as e:
+                    logger.debug("Vérification d'architecture impossible (non bloquant) : %s", e)
+
             sauvegarde = Path(str(app_actuelle) + '.old')
             if sauvegarde.exists():
                 shutil.rmtree(sauvegarde, ignore_errors=True)
@@ -547,7 +570,18 @@ class UpdateChecker:
     def _get_platform_key(self) -> str:
         """Clé de la section « downloads » de version.json."""
         mode = runtime_mode()
-        cles = {'windows': 'windows_installer', 'macos': 'macos_app', 'docker': 'docker'}
+        if mode == 'macos':
+            # Deux binaires macOS distincts depuis la 2.15.1 (ARM / Intel) —
+            # jusqu'ici toujours 'macos_app' (ARM) était renvoyé, quelle que
+            # soit l'architecture réelle : un Mac Intel se voyait proposer le
+            # binaire ARM, que macOS refuse ensuite d'ouvrir (« n'est pas pris
+            # en charge par ce Mac »). platform.machine() reflète l'archi DU
+            # PROCESSUS EN COURS, pas seulement celle de la puce — un
+            # exécutable Intel tournant sous Rosetta sur un Mac Apple Silicon
+            # continue ainsi à se mettre à jour vers un binaire Intel, plutôt
+            # que de basculer vers l'ARM en cours de route.
+            return 'macos_app_intel' if platform.machine() == 'x86_64' else 'macos_app'
+        cles = {'windows': 'windows_installer', 'docker': 'docker'}
         if mode in cles:
             return cles[mode]
         raise UpdateCheckError("Mise à jour automatique non prise en charge (%s)" % mode)

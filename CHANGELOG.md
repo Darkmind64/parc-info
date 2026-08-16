@@ -1,5 +1,41 @@
 # CHANGELOG - ParcInfo
 
+## [2.16.2] - 2026-08-16 🍏
+
+### 🍏 Mise à jour macOS : le bon binaire (ARM/Intel) est enfin choisi
+
+Le vrai coupable derrière le blocage Gatekeeper de la 2.16.1 — repéré grâce
+à un nouveau test réel, cette fois avec le message exact de macOS : « n'est
+pas prise en charge par ce Mac ». Ce message-là n'est pas un blocage
+Gatekeeper (application non identifiée) mais une incompatibilité
+d'architecture — le genre d'erreur qu'un Mac Intel renvoie quand on lui
+donne un binaire ARM, qu'aucune traduction Rosetta ne peut faire tourner
+dans l'autre sens.
+
+`_get_platform_key()` — la fonction qui choisit quel fichier télécharger
+dans `version.json` — renvoyait sans condition `'macos_app'` (le zip ARM)
+pour tout Mac, alors que `macos_app_intel` existe dans `version.json`
+depuis la 2.15.1 et n'était tout simplement jamais branché au sélecteur.
+Un Mac Intel qui cliquait sur « Installer » recevait donc systématiquement
+le mauvais binaire, remplaçait sa version fonctionnelle par une version
+qui refuse de démarrer, et se retrouvait bloqué jusqu'à une réinstallation
+manuelle.
+
+Corrigé sur `platform.machine()` — l'architecture du *processus en cours*,
+pas seulement de la puce : un exécutable Intel qui tourne sous Rosetta sur
+un Mac Apple Silicon continue ainsi de se mettre à jour vers un binaire
+Intel, sans jamais basculer sous le tapis vers l'ARM. Un filet de sécurité
+complète le correctif : avant de toucher à la version actuelle,
+l'architecture du binaire téléchargé est vérifiée directement (commande
+`file`) ; en cas de désaccord, la mise à jour est refusée et l'ancienne
+version — celle qui fonctionne — reste en place, plutôt que d'être
+remplacée par une version cassée. Couvert par une nouvelle suite dédiée
+(`test_maj_macos_architecture.py`) : sélection correcte du fichier par
+architecture, refus effectif en cas de désaccord, installation normale en
+cas d'accord.
+
+---
+
 ## [2.16.1] - 2026-08-16 🔓
 
 ### 🔓 Mise à jour macOS : déblocage Gatekeeper renforcé
