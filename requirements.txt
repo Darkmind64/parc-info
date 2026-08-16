@@ -8,3 +8,4 @@ flask-compress>=1.14.0
 qrcode[pil]>=8.0
 gunicorn>=21.2.0
 zeroconf>=0.135.0
+certifi>=2024.0.0

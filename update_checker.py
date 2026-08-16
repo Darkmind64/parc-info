@@ -355,6 +355,17 @@ class UpdateChecker:
                     shutil.move(str(sauvegarde), str(app_actuelle))
                 return False
 
+        # Avant les versions embarquant le correctif de launcher.py::data(),
+        # la BD/uploads/secret.key vivaient à côté de l'exe — c'est-à-dire
+        # DANS Contents/MacOS/ du bundle qu'on vient de mettre de côté. Une
+        # installation déjà à jour n'a plus rien à cet endroit (ses données
+        # sont dans ~/Library/Application Support/ParcInfo) ; ce rattrapage
+        # ne fait donc rien pour elle — il protège uniquement la toute
+        # première mise à jour depuis une version antérieure au correctif,
+        # sans quoi ces fichiers disparaîtraient avec `sauvegarde` juste en
+        # dessous, sans aucun moyen de les récupérer.
+        self._migrer_donnees_bundle_macos(sauvegarde)
+
         # L'archive téléchargée est dépourvue d'attribut de quarantaine tant
         # qu'elle vient de nous, mais macOS en pose un dès le téléchargement :
         # sans ce nettoyage, Gatekeeper refuse d'ouvrir l'application.
@@ -367,6 +378,28 @@ class UpdateChecker:
                          start_new_session=True)
         logger.info("Application macOS remplacée — redémarrage en cours")
         return True
+
+    @staticmethod
+    def _migrer_donnees_bundle_macos(ancien_bundle: Path) -> None:
+        """Déplace BD/uploads/secret.key/backups s'ils sont restés dans
+        l'ancien bundle .app (voir _install_macos ci-dessus)."""
+        ancien = ancien_bundle / 'Contents' / 'MacOS'
+        if not (ancien / 'parc_info.db').exists():
+            return
+        # PARCINFO_MACOS_DATA_DIR : surcharge réservée aux tests, pour ne
+        # jamais écrire dans le vrai dossier utilisateur pendant la suite.
+        nouveau = Path(os.environ.get('PARCINFO_MACOS_DATA_DIR') or (
+            Path(os.path.expanduser('~')) / 'Library' / 'Application Support' / 'ParcInfo'))
+        if (nouveau / 'parc_info.db').exists():
+            return
+        nouveau.mkdir(parents=True, exist_ok=True)
+        for nom in ('parc_info.db', 'secret.key', 'uploads', 'backups'):
+            src, dst = ancien / nom, nouveau / nom
+            if src.exists() and not dst.exists():
+                try:
+                    shutil.move(str(src), str(dst))
+                except OSError as e:
+                    logger.error("Migration de %s impossible : %s", nom, e)
 
     def _macos_app_path(self) -> Optional[Path]:
         """Chemin du bundle .app en cours d'exécution, sinon /Applications."""

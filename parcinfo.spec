@@ -19,6 +19,7 @@ Entry point: launcher.py (détecte port libre, ouvre navigateur)
 import sys, os
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
+import certifi
 
 sys.path.insert(0, str(Path(SPECPATH)))
 from __version__ import __version__ as _app_version
@@ -35,6 +36,10 @@ datas = [
     ('templates',    'templates'),    # Templates Jinja2 (25+ fichiers)
     ('static',       'static'),       # JS, CSS, images
     ('version.json', '.'),            # Version info (lue par _load_app_version)
+    # Certificats CA (Turso, vérification de mise à jour) : un exécutable
+    # PyInstaller n'a pas accès aux chemins OpenSSL par défaut du Python
+    # installé — launcher.py pointe SSL_CERT_FILE dessus au démarrage.
+    (certifi.where(), '.'),
 ]
 
 # Optionnel : base fabricants réseau (60k MACs)

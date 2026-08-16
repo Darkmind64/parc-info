@@ -2,7 +2,7 @@
 ParcInfo — launcher.py
 Point d'entrée PyInstaller : port libre, navigateur auto, pas de console.
 """
-import sys, os, threading, time, socket, webbrowser, logging, platform, subprocess
+import sys, os, shutil, threading, time, socket, webbrowser, logging, platform, subprocess
 
 # ── Résolution des chemins ────────────────────────────────────────────────────
 def res(relative=''):
@@ -10,13 +10,90 @@ def res(relative=''):
     base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, relative) if relative else base
 
+def _ancien_dossier_donnees_macos():
+    """Emplacement (dangereux) utilisé avant la correction : à côté de l'exe,
+    c'est-à-dire DANS le bundle .app — voir data() ci-dessous."""
+    return os.path.dirname(sys.executable)
+
+def _dossier_application_support_macos():
+    """~/Library/Application Support/ParcInfo — surchargeable par
+    PARCINFO_MACOS_DATA_DIR (tests uniquement, pour ne jamais écrire dans le
+    vrai dossier utilisateur pendant la suite)."""
+    return os.environ.get('PARCINFO_MACOS_DATA_DIR') or os.path.join(
+        os.path.expanduser('~'), 'Library', 'Application Support', 'ParcInfo')
+
 def data(relative=''):
-    """Données persistantes (DB, uploads) — à côté de l'exe."""
+    """Données persistantes (DB, uploads, secret.key) — à côté de l'exe sur
+    Windows/Linux, mais dans ~/Library/Application Support sur macOS.
+
+    Sur Windows, l'exe est un fichier unique dans son propre dossier : le
+    stocker à côté est sûr, une mise à jour ne remplace que ce fichier
+    (applique_maj.py). Sur macOS, « à côté de l'exe » veut dire dans
+    Contents/MacOS/ — À L'INTÉRIEUR du bundle .app — que
+    update_checker.py._install_macos() remplace ENTIÈREMENT à chaque mise à
+    jour (ancien bundle déplacé puis supprimé). Y stocker la BD, les uploads
+    et la clé de chiffrement les condamnait à disparaître à la première mise
+    à jour, sans aucun moyen de les récupérer.
+    """
     if getattr(sys, 'frozen', False):
-        base = os.path.dirname(sys.executable)
+        if platform.system() == 'Darwin':
+            base = _dossier_application_support_macos()
+            os.makedirs(base, exist_ok=True)
+        else:
+            base = os.path.dirname(sys.executable)
     else:
         base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, relative) if relative else base
+
+def _migrer_donnees_macos_si_besoin(logger):
+    """Rattrape les installations qui ont tourné avant ce correctif : si des
+    données existent encore dans l'ancien emplacement (dans le bundle .app)
+    et qu'aucune n'existe déjà dans le nouveau, les déplacer plutôt que les
+    laisser orphelines dans un bundle promis à disparaître à la prochaine
+    mise à jour.
+    """
+    if not (getattr(sys, 'frozen', False) and platform.system() == 'Darwin'):
+        return
+    ancien = _ancien_dossier_donnees_macos()
+    nouveau = data()
+    if ancien == nouveau:
+        return
+    ancienne_db = os.path.join(ancien, 'parc_info.db')
+    nouvelle_db = os.path.join(nouveau, 'parc_info.db')
+    if not os.path.exists(ancienne_db) or os.path.exists(nouvelle_db):
+        return
+    logger.info("Migration des données depuis l'ancien emplacement (%s) vers %s",
+                ancien, nouveau)
+    for nom in ('parc_info.db', 'secret.key', 'uploads', 'backups'):
+        src = os.path.join(ancien, nom)
+        dst = os.path.join(nouveau, nom)
+        if os.path.exists(src) and not os.path.exists(dst):
+            try:
+                shutil.move(src, dst)
+            except OSError as e:
+                logger.error("Migration de %s impossible : %s", nom, e)
+
+# ── Certificats CA pour les connexions HTTPS (Turso, vérification de mise à
+#    jour) ────────────────────────────────────────────────────────────────────
+# Un `pip install` normal trouve ses certificats via le magasin système ou le
+# script « Install Certificates.command » du Python.org installé — rien de
+# tel n'existe dans un exécutable PyInstaller sur la machine de l'utilisateur.
+# Sans ça, tout http.client.HTTPSConnection/urlopen non explicite échoue avec
+# CERTIFICATE_VERIFY_FAILED (constaté sur macOS ; Windows/Linux s'en sortent
+# via leur propre magasin de certs, mais autant fixer le chemin partout).
+# SSL_CERT_FILE est lu par ssl.get_default_verify_paths() pour TOUT usage du
+# contexte SSL par défaut du process, donc réglé une fois ici, avant tout
+# import réseau — pas besoin de toucher chaque appelant individuellement.
+if getattr(sys, 'frozen', False):
+    _cacert = res('cacert.pem')
+    if os.path.exists(_cacert):
+        os.environ.setdefault('SSL_CERT_FILE', _cacert)
+else:
+    try:
+        import certifi
+        os.environ.setdefault('SSL_CERT_FILE', certifi.where())
+    except ImportError:
+        pass
 
 # ── Port libre ────────────────────────────────────────────────────────────────
 def get_port(preferred=3456):
@@ -126,10 +203,19 @@ def main():
     logger = logging.getLogger('parcinfo')
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
+    _migrer_donnees_macos_si_besoin(logger)
+
     # Préparer les chemins de données AVANT d'importer app
     db_path      = data('parc_info.db')
     uploads_path = data('uploads')
     os.makedirs(uploads_path, exist_ok=True)
+
+    # secret.key et BACKUP_DIR (app.py) ne passent pas par db_init_paths()
+    # ci-dessous — ils lisent directement DATA_DIR au moment de l'import.
+    # Sans ça, sur macOS, ils resteraient dans le bundle .app malgré la
+    # correction de data() ci-dessus (voir son docstring).
+    if getattr(sys, 'frozen', False) and platform.system() == 'Darwin':
+        os.environ.setdefault('DATA_DIR', data())
 
     # Ajouter le dossier ressources au path Python
     sys.path.insert(0, res())

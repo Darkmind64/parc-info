@@ -1,5 +1,48 @@
 # CHANGELOG - ParcInfo
 
+## [2.15.3] - 2026-08-16 🔐
+
+### 🔐 Certificats HTTPS et emplacement des données sur macOS
+
+Deux corrections issues du premier vrai test sur un Mac, une fois le binaire
+Intel enfin capable de démarrer (2.15.2).
+
+**Turso, et toute connexion HTTPS, échouaient avec
+`CERTIFICATE_VERIFY_FAILED`.** `database.py` ouvre une
+`http.client.HTTPSConnection` sans contexte SSL explicite ; un `pip install`
+normal trouve ses certificats via le magasin système ou le script
+« Install Certificates.command » du Python.org installé, mais un
+exécutable PyInstaller n'a accès à rien de tel sur la machine de
+l'utilisateur. `certifi` est désormais embarqué (`parcinfo.spec`) et
+`SSL_CERT_FILE` pointé dessus au tout début de `launcher.py`, avant tout
+import réseau — ce qui couvre également, au passage, la vérification de
+mise à jour elle-même (mêmes symptômes possibles, juste pas encore
+observés).
+
+**Plus grave : la base de données, les uploads et la clé de chiffrement des
+identifiants vivaient à côté de l'exécutable — c'est-à-dire DANS le bundle
+`.app`.** Ce choix est sûr sur Windows, où une mise à jour ne remplace que
+le fichier `.exe` lui-même (`applique_maj.py`). Sur macOS, «&nbsp;à côté de
+l'exécutable&nbsp;» veut dire `Contents/MacOS/` — à l'intérieur d'un bundle
+qu'`update_checker.py::_install_macos()` remplace ENTIÈREMENT à chaque mise
+à jour (ancien bundle déplacé de côté, puis supprimé). Le premier clic sur
+« Installer » depuis la bannière aurait supprimé la base, les documents
+joints et la clé de chiffrement — sans elle, les identifiants déjà stockés
+deviennent illisibles pour toujours, sans aucun moyen de les récupérer.
+
+Corrigé en stockant ces données dans `~/Library/Application Support/ParcInfo`,
+hors d'atteinte du bundle. Une migration automatique rattrape les
+installations déjà en place (`launcher.py`, au démarrage) et protège même la
+toute première mise à jour lancée depuis une version antérieure au correctif
+(`update_checker.py`, juste avant la suppression de l'ancien bundle — sans
+quoi la migration côté `launcher.py` arriverait trop tard, l'ancien bundle
+ayant déjà disparu). Couvert par une nouvelle suite de tests dédiée
+(`test_migration_donnees_macos.py`) : localisation correcte selon l'OS,
+rattrapage effectif, non-rejeu si des données existent déjà à la nouvelle
+adresse, et protection du chemin de mise à jour in-app lui-même.
+
+---
+
 ## [2.15.2] - 2026-08-16 🐛
 
 ### 🐛 Correction du build macOS Intel (crash au lancement)

@@ -1,21 +1,21 @@
 {
-  "version": "2.15.2",
+  "version": "2.15.3",
   "release_date": "2026-08-16T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.15.2",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.3/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.3/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.3/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.15.3",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.3/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.3/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.3/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correction du build macOS Intel (crash au lancement)",
+    "new_features": "Certificats HTTPS et emplacement des données sur macOS",
     "improvements": [
-      "CORRIGÉ: le binaire macOS Intel publié en v2.15.1 plantait au lancement (TypeError sur `Thread | None`) — le job de build utilisait le Python système de macOS (3.9) au lieu du 3.11 utilisé partout ailleurs dans le pipeline ; app.py utilise une syntaxe qui ne s'évalue qu'à partir de Python 3.10.",
-      "AJOUT (CI): une étape d'import direct de app.py valide désormais chaque build Intel en quelques secondes, avant les ~5 minutes de compilation PyInstaller."
+      "CORRIGÉ: la synchronisation Turso (et toute connexion HTTPS) échouait sur macOS avec CERTIFICATE_VERIFY_FAILED — un exécutable PyInstaller n'a pas accès aux certificats CA du Python installé. certifi est désormais embarqué et pointé explicitement au démarrage.",
+      "CORRIGÉ (sécurité des données): sur macOS, la base de données, les uploads et la clé de chiffrement des identifiants vivaient à côté de l'exécutable — c'est-à-dire À L'INTÉRIEUR du bundle .app. Une mise à jour remplace ce bundle en entier, ce qui aurait supprimé ces fichiers, clé de chiffrement incluse, sans aucun moyen de les récupérer. Ils vivent désormais dans ~/Library/Application Support/ParcInfo, hors d'atteinte du bundle. Une migration automatique rattrape les installations déjà en place, y compris pendant une mise à jour in-app déjà lancée depuis une version antérieure."
     ]
   },
   "checksums": {
@@ -26,5 +26,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.15.2"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.15.3"
 }

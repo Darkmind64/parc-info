@@ -1,8 +1,20 @@
-PARCINFO_VERSION=2.15.2
+PARCINFO_VERSION=2.15.3
 RELEASE_DATE=2026-08-16
-BUILD_NUMBER=2026081604
+BUILD_NUMBER=2026081605
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.15.3 - Certificats HTTPS et emplacement des données sur macOS
+# Deux corrections liées au premier vrai test sur Mac : (1) la sync Turso
+# échouait avec CERTIFICATE_VERIFY_FAILED, faute de certificats CA
+# accessibles dans un exécutable PyInstaller — certifi embarqué, SSL_CERT_FILE
+# posé au démarrage. (2) plus grave : la BD, les uploads et la clé de
+# chiffrement vivaient DANS le bundle .app, qu'une mise à jour remplace en
+# entier — ils auraient disparu au premier clic sur « Installer », sans
+# recours. Déplacés vers ~/Library/Application Support/ParcInfo, avec
+# migration automatique des installations déjà en place (y compris pendant
+# une mise à jour in-app lancée depuis une version antérieure)
+# Date: 16 août 2026
 
 # Version 2.15.2 - Correction du build macOS Intel (crash au lancement)
 # Le binaire Intel publié en 2.15.1 plantait au lancement : TypeError sur
