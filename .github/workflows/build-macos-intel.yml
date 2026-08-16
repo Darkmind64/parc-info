@@ -22,16 +22,38 @@ jobs:
 
       - name: Create and use an x86_64 Python virtualenv, install deps and PyInstaller
         run: |
-          # Create an x86_64 venv so resulting binary is Intel-compatible when built under Rosetta
+          # Create an x86_64 venv so resulting binary is Intel-compatible when built under Rosetta.
+          #
+          # macos-latest runners are Apple Silicon now. `arch -x86_64` here only forces the venv's
+          # *interpreter file* to be the x86_64 slice — it does NOT carry over to later commands.
+          # `source venv/bin/activate` then invoking bare `pip`/`python` runs them under the shell's
+          # native arch (arm64), so every wheel with a compiled extension (Pillow, cryptography...)
+          # was silently installed arm64-only inside this supposedly-x86_64 venv. Every `python`/`pip`
+          # call below must be prefixed with `arch -x86_64` individually, or the mismatch resurfaces.
           arch -x86_64 /usr/bin/python3 -m venv venv
           source venv/bin/activate
-          pip install --upgrade pip setuptools wheel
-          pip install pyinstaller
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          arch -x86_64 python -m pip install --upgrade pip setuptools wheel
+          arch -x86_64 python -m pip install pyinstaller
+          if [ -f requirements.txt ]; then arch -x86_64 python -m pip install -r requirements.txt; fi
           # If your project is installable, install it so imports work (optional)
           if [ -f setup.py ] || [ -f pyproject.toml ]; then
-            pip install -e . || true
+            arch -x86_64 python -m pip install -e . || true
           fi
+
+      - name: Verify installed wheels are actually x86_64
+        run: |
+          # Fails fast (seconds, not minutes into the PyInstaller build) if a dependency's
+          # compiled extension is still the wrong slice.
+          source venv/bin/activate
+          bad=0
+          while IFS= read -r -d '' so; do
+            got=$(lipo -archs "$so" 2>/dev/null || file -b "$so")
+            case "$got" in
+              *x86_64*) ;;
+              *) echo "ARCH MISMATCH: $so -> $got"; bad=1 ;;
+            esac
+          done < <(find venv/lib -name '*.so' -print0)
+          exit $bad
 
       - name: Build .app with PyInstaller (Intel)
         run: |
@@ -43,16 +65,8 @@ jobs:
           if [ -f src/main.py ]; then ENTRY="src/main.py"; fi
           echo "Using entrypoint: $ENTRY"
           # Build a macOS application bundle (.app). Do not use --onefile: we want an app bundle.
-          #
-          # macos-latest runners are Apple Silicon now, so this whole step cross-builds
-          # x86_64 under Rosetta. Every dependency's wheel is a proper universal2/x86_64
-          # binary except Pillow's optional AVIF codec plugin, whose .so ships arm64-only
-          # even inside the "x86_64" venv — PyInstaller's final arch-conversion pass then
-          # refuses to convert it. ParcInfo never decodes AVIF images, so excluding the
-          # plugin from the build is safe (unlike forcing pip's wheel resolution, which
-          # would risk hitting the same slice bug on a different, actually-needed package).
           arch -x86_64 venv/bin/pyinstaller --noconfirm --clean --windowed --name "ParcInfo" \
-              --exclude-module PIL._avif --distpath dist/mac "$ENTRY"
+              --distpath dist/mac "$ENTRY"
 
       - name: List produced artifacts
         run: |
