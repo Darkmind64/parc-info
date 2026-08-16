@@ -1,8 +1,19 @@
-PARCINFO_VERSION=2.15.0
+PARCINFO_VERSION=2.15.1
 RELEASE_DATE=2026-08-16
-BUILD_NUMBER=2026081602
+BUILD_NUMBER=2026081603
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.15.1 - Build macOS Intel dans les releases
+# Les Mac Intel n'avaient jusqu'ici que Docker ou Windows-via-WSL : le
+# pipeline de release construit et publie désormais un vrai binaire Intel
+# (ParcInfo-macOS-Intel.zip). Deux bugs de CI corrigés au passage : le
+# croisement sous Rosetta ne forçait x86_64 que sur la création du venv, pas
+# sur les `pip install` qui suivaient (Pillow/cryptography s'installaient
+# arm64-only) ; et le build utilisait un appel PyInstaller ad hoc au lieu de
+# parcinfo.spec, produisant une app sans templates/static ni les imports
+# nécessaires à son fonctionnement
+# Date: 16 août 2026
 
 # Version 2.15.0 - Corrections du collecteur d'après retour d'usage réel
 # 10 points remontés après un premier déploiement réel : collecte non

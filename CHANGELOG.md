@@ -1,5 +1,42 @@
 # CHANGELOG - ParcInfo
 
+## [2.15.1] - 2026-08-16 🍎
+
+### 🍎 Build macOS Intel dans les releases
+
+Jusqu'ici, un Mac Intel n'avait aucun binaire natif : le tableau de
+téléchargements renvoyait vers Docker ou `ParcInfo-Windows.exe` via WSL. Le
+pipeline de release construit et publie désormais `ParcInfo-macOS-Intel.zip`
+à chaque tag, au même titre que les binaires Windows et macOS ARM.
+
+**Deux bugs de CI, découverts en cascade.** `macos-latest` est un runner
+Apple Silicon depuis un moment ; produire du x86_64 dessus demande de
+croiser sous Rosetta. Le job existant (`build-macos-intel.yml`, jusqu'ici
+non relié à la release) forçait `arch -x86_64` sur la ligne de création du
+venv, mais pas sur les `pip install` qui suivaient — chaque appel `pip`
+tournait donc nativement en arm64, et des extensions compilées (Pillow,
+puis l'extension Rust de `cryptography`) s'installaient arm64-only à
+l'intérieur d'un venv censé être x86_64. Corrigé en préfixant chaque appel
+`python`/`pip` individuellement, avec un forçage de tag de wheel explicite
+pour `cryptography` (`--platform` + `--target`, sa résolution de tag sous
+Rosetta restant erronée même une fois le process forcé). Une étape de
+vérification (`lipo -archs`) échoue désormais en quelques secondes si
+l'architecture d'une extension régresse, plutôt qu'après deux minutes de
+build PyInstaller.
+
+**Un second bug, plus sérieux, sous le premier.** Une fois la compilation
+correctement croisée, le job construisait `app.py` directement plutôt que
+`parcinfo.spec` — la seule recette qui embarque `templates/`, `static/`,
+`version.json`, les imports cachés (`apscheduler`, `zeroconf`, `pystray`) et
+les métadonnées du bundle macOS. L'app produite aurait démarré sur un
+`TemplateNotFound`. Le job utilise maintenant `parcinfo.spec`, qui lit déjà
+une variable `TARGET_ARCH` prévue pour ce cas — vérifié binaire par
+binaire : `Contents/MacOS/ParcInfo` est bien un exécutable Mach-O x86_64,
+`Info.plist` porte la bonne version, `launcher.py` est le point d'entrée
+analysé (pas `app.py`).
+
+---
+
 ## [2.15.0] - 2026-08-16 🩹
 
 ### 🩹 Corrections du collecteur d'après retour d'usage réel

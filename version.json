@@ -1,28 +1,22 @@
 {
-  "version": "2.15.0",
+  "version": "2.15.1",
   "release_date": "2026-08-16T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.0/ParcInfo-macOS-ARM.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.15.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.0/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.15.1",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Corrections du collecteur d'après retour d'usage réel (10 points)",
+    "new_features": "Build macOS Intel dans les releases",
     "improvements": [
-      "CORRIGÉ: le collecteur ne lance plus la collecte automatiquement à l'ouverture — cochez vos options (débit, mots de passe Wi-Fi) puis cliquez sur « Rafraîchir les infos ».",
-      "CORRIGÉ: le fuseau horaire affiche son nom lisible (ex. « (UTC+01:00) Bruxelles, Copenhague, Madrid, Paris ») plutôt que l'identifiant technique Windows (« Romance Standard Time »).",
-      "CORRIGÉ: l'adresse MAC/IP « canonique » de la fiche appareil et de l'identification système est désormais choisie parmi les cartes physiques connectées, pas la première carte que le système d'exploitation retourne (qui peut être une carte virtuelle ou débranchée).",
-      "AMÉLIORÉ: la partie non occupée des jauges d'utilisation est visible (gris foncé) au lieu de quasi invisible.",
-      "AJOUT: vue d'ensemble « table de partitions » sur la fiche système — un segment par volume, largeur proportionnelle à sa capacité, en complément des barres détaillées par volume.",
-      "AJOUT: direction (Entrant/Sortant) sur chaque règle de pare-feu affichée, collectée séparément pour les deux sens.",
-      "AMÉLIORÉ: la rubrique Réseau affiche désormais toutes les cartes (actives ou non), pas seulement celles connectées — avec mise en évidence des cartes physiques connectées.",
-      "AJOUT: programme par défaut pour davantage de types de fichiers (PDF, TXT, LOG, JPG, PNG, DOCX, XLSX, CSV), avec une icône par application pour une lecture plus rapide.",
-      "CORRIGÉ: le nom d'un appareil resté sur un repli (adresse IP ou « Device-XXXXXXXX ») est remplacé par le vrai nom de la machine dès qu'il est connu — un nom déjà personnalisé n'est, lui, jamais écrasé.",
-      "AMÉLIORÉ: les ports ouverts détectés s'affichent sous forme de badges (icône + numéro + nom du service) sur la fiche appareil, pas seulement dans les listes."
+      "AJOUT: un binaire macOS Intel (ParcInfo-macOS-Intel.zip) est désormais construit et publié avec chaque release — jusqu'ici les Mac Intel n'avaient que Docker ou Windows-via-WSL comme options.",
+      "CORRIGÉ (CI): le workflow de build Intel croisait sous Rosetta mais n'appliquait ce forçage qu'à la création du venv, pas aux installations pip qui suivaient — Pillow et cryptography s'installaient arm64-only à l'intérieur d'un venv censé être x86_64.",
+      "CORRIGÉ (CI): le build Intel utilisait un appel PyInstaller ad hoc plutôt que parcinfo.spec, produisant une app sans templates/ ni static/ ni les imports nécessaires à son fonctionnement — bascule sur parcinfo.spec (qui gère déjà le ciblage d'architecture via TARGET_ARCH)."
     ]
   },
   "checksums": {
@@ -33,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.15.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.15.1"
 }
