@@ -1,5 +1,52 @@
 # CHANGELOG - ParcInfo
 
+## [2.16.0] - 2026-08-16 🖱️
+
+### 🖱️ Raccourcis de clic + page À propos / Contrôle
+
+**Raccourcis de clic.** Dans l'inventaire des appareils, cliquer le nom
+ouvrait jusqu'ici… rien — il fallait passer par le bouton « Éditer ». Le nom
+ouvre désormais directement la fiche système. Le même principe a été
+étendu après un passage sur chaque liste de l'application, avec une
+destination choisie au cas par cas plutôt qu'un copier-coller aveugle :
+
+- **Périphériques** : marque/modèle → édition (aucune fiche détail dédiée
+  n'existe pour ce type d'enregistrement)
+- **Utilisateurs** : nom → page Droits, la vue la plus riche disponible,
+  volontairement distincte du bouton « Éditer » déjà présent
+- **Maintenances** : appareil/périphérique référencé → fiche système ou
+  édition, selon le type
+- **Plans de disposition** : nom du plan → éditeur de plan
+- **Tableau de bord client** : widget « État réseau », par cohérence avec
+  le reste du tableau de bord où tout est déjà cliquable
+
+Volontairement laissés tels quels : services (bouton déjà collé au nom),
+identifiants (ligne sensible, risque de conflit avec le bouton
+presse-papier), clients (cliquer un nom y évoque plutôt « sélectionner »
+que « éditer », et l'édition est parfois masquée selon le niveau
+d'accès) — contrats et historique l'étaient déjà.
+
+**Page « À propos / Contrôle ».** Nouvelle icône ℹ dans la barre du haut,
+ouvrant une page qui affiche version, mode d'exécution, adresse, durée
+depuis le démarrage, et le statut de synchronisation Turso en direct (sans
+appel réseau supplémentaire — elle relit l'état déjà tenu à jour par le fil
+de synchronisation existant). Pour un administrateur, sur un exécutable
+Windows ou macOS, elle ajoute ce qui manquait clairement : un bouton pour
+arrêter ParcInfo. Jusqu'ici, la seule façon d'y mettre fin proprement était
+de tuer le processus — aucun souci sur Windows, où une icône de barre
+système existait déjà, mais rien du tout sur macOS, où la barre système
+reste désactivée (incompatibilité AppKit, déjà rencontrée lors du travail
+sur le build Intel). Un bouton « Redémarrer » complète le tableau. Le menu
+de la barre système Windows gagne les deux mêmes actions, plus un accès
+direct à cette page.
+
+Sur macOS, la relance passe par `open` sur le bundle `.app` plutôt que par
+un appel direct au binaire interne — un détail qui compte : appeler le
+binaire directement fait tourner ParcInfo comme un simple process Unix nu,
+sans rattachement au Dock ni à Launch Services.
+
+---
+
 ## [2.15.3] - 2026-08-16 🔐
 
 ### 🔐 Certificats HTTPS et emplacement des données sur macOS

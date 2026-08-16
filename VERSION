@@ -1,8 +1,19 @@
-PARCINFO_VERSION=2.15.3
+PARCINFO_VERSION=2.16.0
 RELEASE_DATE=2026-08-16
-BUILD_NUMBER=2026081605
+BUILD_NUMBER=2026081606
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.16.0 - Raccourcis de clic + page À propos / Contrôle
+# Le nom d'un appareil dans l'inventaire ouvre directement sa fiche
+# système ; même principe sur périphériques, utilisateurs, maintenances,
+# plans et le widget réseau du dashboard. Nouvelle page « À propos »
+# (icône ℹ) : version, mode d'exécution, adresse, uptime, statut Turso en
+# direct — et, pour un admin sur exécutable Windows/macOS, des boutons
+# Redémarrer/Quitter (jusqu'ici la seule façon d'arrêter l'app était de
+# tuer le processus). Le menu de la barre système Windows gagne les mêmes
+# actions
+# Date: 16 août 2026
 
 # Version 2.15.3 - Certificats HTTPS et emplacement des données sur macOS
 # Deux corrections liées au premier vrai test sur Mac : (1) la sync Turso
