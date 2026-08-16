@@ -33,12 +33,10 @@ jobs:
           arch -x86_64 /usr/bin/python3 -m venv venv
           source venv/bin/activate
           arch -x86_64 python -m pip install --upgrade pip setuptools wheel
-          arch -x86_64 python -m pip install pyinstaller
+          # pystray isn't in requirements.txt (build-only, for the optional tray icon) —
+          # same trio BUILD.md/build-release.yml install before running parcinfo.spec.
+          arch -x86_64 python -m pip install pyinstaller pillow pystray
           if [ -f requirements.txt ]; then arch -x86_64 python -m pip install -r requirements.txt; fi
-          # If your project is installable, install it so imports work (optional)
-          if [ -f setup.py ] || [ -f pyproject.toml ]; then
-            arch -x86_64 python -m pip install -e . || true
-          fi
           # cryptography's Rust extension still lands arm64 even with the process-level
           # forcing above (pip's own platform-tag detection under Rosetta picks the wrong
           # one for this package specifically) — force the wheel tag explicitly instead of
@@ -72,23 +70,22 @@ jobs:
       - name: Build .app with PyInstaller (Intel)
         run: |
           source venv/bin/activate
-          # Choose entrypoint: adjust if your main script has a different name
-          ENTRY="parcinfo.py"
-          if [ -f main.py ]; then ENTRY="main.py"; fi
-          if [ -f app.py ]; then ENTRY="app.py"; fi
-          if [ -f src/main.py ]; then ENTRY="src/main.py"; fi
-          echo "Using entrypoint: $ENTRY"
-          # Build a macOS application bundle (.app). Do not use --onefile: we want an app bundle.
-          arch -x86_64 venv/bin/pyinstaller --noconfirm --clean --windowed --name "ParcInfo" \
-              --distpath dist/mac "$ENTRY"
+          # Use the project's real spec, not an ad-hoc PyInstaller invocation: it's the
+          # only recipe that bundles templates/, static/, version.json, and the hidden
+          # imports (apscheduler, zeroconf, pystray...) the app needs to actually run —
+          # a bare `pyinstaller app.py` produces a bundle that launches straight into a
+          # TemplateNotFound crash. The spec already reads TARGET_ARCH for exactly this.
+          TARGET_ARCH=x86_64 arch -x86_64 venv/bin/pyinstaller --noconfirm --clean parcinfo.spec
 
       - name: List produced artifacts
         run: |
           ls -la dist || true
-          ls -la dist/mac || true
+
+      - name: Zip .app
+        run: cd dist && zip -r ParcInfo-macOS-Intel.zip ParcInfo.app
 
       - name: Upload mac .app artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ParcInfo-macos-intel
-          path: dist/mac/ParcInfo.app
+          name: ParcInfo-macOS-Intel.zip
+          path: dist/ParcInfo-macOS-Intel.zip
