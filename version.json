@@ -1,22 +1,21 @@
 {
-  "version": "2.15.1",
+  "version": "2.15.2",
   "release_date": "2026-08-16T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.15.1",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.1/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.15.2",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.15.2/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Build macOS Intel dans les releases",
+    "new_features": "Correction du build macOS Intel (crash au lancement)",
     "improvements": [
-      "AJOUT: un binaire macOS Intel (ParcInfo-macOS-Intel.zip) est désormais construit et publié avec chaque release — jusqu'ici les Mac Intel n'avaient que Docker ou Windows-via-WSL comme options.",
-      "CORRIGÉ (CI): le workflow de build Intel croisait sous Rosetta mais n'appliquait ce forçage qu'à la création du venv, pas aux installations pip qui suivaient — Pillow et cryptography s'installaient arm64-only à l'intérieur d'un venv censé être x86_64.",
-      "CORRIGÉ (CI): le build Intel utilisait un appel PyInstaller ad hoc plutôt que parcinfo.spec, produisant une app sans templates/ ni static/ ni les imports nécessaires à son fonctionnement — bascule sur parcinfo.spec (qui gère déjà le ciblage d'architecture via TARGET_ARCH)."
+      "CORRIGÉ: le binaire macOS Intel publié en v2.15.1 plantait au lancement (TypeError sur `Thread | None`) — le job de build utilisait le Python système de macOS (3.9) au lieu du 3.11 utilisé partout ailleurs dans le pipeline ; app.py utilise une syntaxe qui ne s'évalue qu'à partir de Python 3.10.",
+      "AJOUT (CI): une étape d'import direct de app.py valide désormais chaque build Intel en quelques secondes, avant les ~5 minutes de compilation PyInstaller."
     ]
   },
   "checksums": {
@@ -27,5 +26,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.15.1"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.15.2"
 }

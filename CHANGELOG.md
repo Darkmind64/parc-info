@@ -1,5 +1,35 @@
 # CHANGELOG - ParcInfo
 
+## [2.15.2] - 2026-08-16 🐛
+
+### 🐛 Correction du build macOS Intel (crash au lancement)
+
+Le binaire Intel publié en 2.15.1 plantait au lancement — confirmé par un
+retour utilisateur réel : traceback lancé depuis le Terminal sur un vrai Mac
+Intel, montrant `TypeError: unsupported operand type(s) for |: 'type' and
+'NoneType'` au chargement de `app.py`.
+
+Cause : `app.py` porte des annotations de module comme
+`_sync_thread: threading.Thread | None = None` — la syntaxe `X | None`
+(PEP 604) ne s'évalue au runtime qu'à partir de Python 3.10. Le job de build
+Intel créait son venv depuis `/usr/bin/python3`, le Python système de macOS
+(Xcode Command Line Tools), qui est en 3.9 — alors que tous les autres jobs
+du pipeline (`tests`, `build` Windows/ARM) installent explicitement 3.11 via
+`actions/setup-python`. L'étape de vérification d'architecture ajoutée en
+2.15.1 (`lipo -archs`) ne portait que sur les extensions compilées (.so), pas
+sur la version de l'interpréteur lui-même — elle n'aurait donc jamais pu
+détecter ce problème.
+
+Corrigé en installant Python 3.11 via `actions/setup-python` avant de créer
+le venv (python.org publie des installeurs macOS universels depuis 3.9.1,
+donc `arch -x86_64 python3.11` obtient toujours un interpréteur Intel
+authentique). Une nouvelle étape de CI (`import app` direct, quelques
+secondes) valide désormais que le module se charge sous ce Python avant de
+lancer les ~5 minutes de compilation PyInstaller — pour attraper ce genre de
+régression avant qu'un utilisateur ne la découvre.
+
+---
+
 ## [2.15.1] - 2026-08-16 🍎
 
 ### 🍎 Build macOS Intel dans les releases

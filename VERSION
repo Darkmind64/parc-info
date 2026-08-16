@@ -1,8 +1,18 @@
-PARCINFO_VERSION=2.15.1
+PARCINFO_VERSION=2.15.2
 RELEASE_DATE=2026-08-16
-BUILD_NUMBER=2026081603
+BUILD_NUMBER=2026081604
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.15.2 - Correction du build macOS Intel (crash au lancement)
+# Le binaire Intel publié en 2.15.1 plantait au lancement : TypeError sur
+# `Thread | None`, une syntaxe qui ne s'évalue qu'à partir de Python 3.10.
+# Le job de build utilisait le Python système de macOS (3.9) au lieu du
+# 3.11 utilisé partout ailleurs dans le pipeline. Confirmé cassé par un
+# retour utilisateur réel (traceback lancé depuis le Terminal sur un vrai
+# Mac Intel). Ajout d'une étape d'import direct de app.py en CI pour
+# détecter ce genre de régression en quelques secondes désormais
+# Date: 16 août 2026
 
 # Version 2.15.1 - Build macOS Intel dans les releases
 # Les Mac Intel n'avaient jusqu'ici que Docker ou Windows-via-WSL : le
