@@ -39,6 +39,15 @@ jobs:
           if [ -f setup.py ] || [ -f pyproject.toml ]; then
             arch -x86_64 python -m pip install -e . || true
           fi
+          # cryptography's Rust extension still lands arm64 even with the process-level
+          # forcing above (pip's own platform-tag detection under Rosetta picks the wrong
+          # one for this package specifically) — force the wheel tag explicitly instead of
+          # relying on runtime arch detection. --platform disables source builds, hence
+          # --only-binary=:all:; --python-version/--abi/--implementation are inferred from
+          # the running (x86_64) interpreter.
+          arch -x86_64 python -m pip install --force-reinstall --no-deps --only-binary=:all: \
+              --platform macosx_10_12_x86_64 --platform macosx_11_0_x86_64 --platform macosx_12_0_x86_64 \
+              cryptography
 
       - name: Verify installed wheels are actually x86_64
         run: |
