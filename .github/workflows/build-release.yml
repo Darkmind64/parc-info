@@ -119,6 +119,85 @@ jobs:
           name: ${{ matrix.asset_name }}
           path: dist/${{ matrix.asset_name }}
 
+  # macos-latest est un runner Apple Silicon depuis un moment déjà : produire un
+  # binaire Intel demande de croiser sous Rosetta, ce que `build` (ci-dessus) ne
+  # fait pas — job séparé, avec ses propres étapes de compilation.
+  build-macos-intel:
+    needs: tests
+    runs-on: macos-latest
+    continue-on-error: true
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rosetta (when runner is Apple Silicon)
+        run: |
+          if [[ "$(uname -m)" == "arm64" ]]; then
+            sudo softwareupdate --install-rosetta --agree-to-license || true
+          fi
+
+      - name: Create and use an x86_64 Python virtualenv, install deps
+        run: |
+          # `arch -x86_64` on the venv-creation line only forces the venv's own
+          # interpreter file to be the x86_64 slice — it does NOT carry over to
+          # later commands. Invoking bare `pip`/`python` after `source
+          # venv/bin/activate` runs them under the runner's native arch (arm64),
+          # so every wheel with a compiled extension (Pillow, cryptography...)
+          # would silently install arm64-only inside this supposedly-x86_64 venv.
+          # Every python/pip call below is prefixed with `arch -x86_64` individually.
+          arch -x86_64 /usr/bin/python3 -m venv venv
+          source venv/bin/activate
+          arch -x86_64 python -m pip install --upgrade pip setuptools wheel
+          arch -x86_64 python -m pip install pyinstaller pillow pystray
+          arch -x86_64 python -m pip install -r requirements.txt
+          # cryptography's Rust extension still lands arm64 even with the process-level
+          # forcing above (pip's own platform-tag detection under Rosetta picks the wrong
+          # one for this package specifically) — force the wheel tag explicitly instead of
+          # relying on runtime arch detection. --platform requires --only-binary=:all: (no
+          # source build) AND --target (pip refuses platform-specific options on a normal
+          # in-place install). Uninstall first so --target doesn't leave stale dist-info/
+          # RECORD metadata from the arm64 build sitting alongside the new files.
+          arch -x86_64 python -m pip uninstall -y cryptography
+          SITE_PACKAGES=$(arch -x86_64 python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+          arch -x86_64 python -m pip install --no-deps --only-binary=:all: \
+              --platform macosx_10_12_x86_64 --platform macosx_11_0_x86_64 --platform macosx_12_0_x86_64 \
+              --target "$SITE_PACKAGES" \
+              cryptography
+
+      - name: Verify installed wheels are actually x86_64
+        run: |
+          # Fails fast (seconds, not minutes into the PyInstaller build) if a
+          # dependency's compiled extension is still the wrong slice.
+          source venv/bin/activate
+          bad=0
+          while IFS= read -r -d '' so; do
+            got=$(lipo -archs "$so" 2>/dev/null || file -b "$so")
+            case "$got" in
+              *x86_64*) ;;
+              *) echo "ARCH MISMATCH: $so -> $got"; bad=1 ;;
+            esac
+          done < <(find venv/lib -name '*.so' -print0)
+          exit $bad
+
+      - name: Build .app with PyInstaller (Intel)
+        run: |
+          source venv/bin/activate
+          # parcinfo.spec already reads TARGET_ARCH for exactly this — cross-arch
+          # building without it means reimplementing packaging (data files, hidden
+          # imports, bundle metadata) ad hoc.
+          TARGET_ARCH=x86_64 arch -x86_64 venv/bin/pyinstaller --noconfirm --clean parcinfo.spec
+
+      - name: Zip .app
+        run: cd dist && zip -r ParcInfo-macOS-Intel.zip ParcInfo.app
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ParcInfo-macOS-Intel.zip
+          path: dist/ParcInfo-macOS-Intel.zip
+
   docker:
     needs: tests
     runs-on: ubuntu-latest
@@ -149,7 +228,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   release:
-    needs: [build, docker]
+    needs: [build, build-macos-intel, docker]
     runs-on: ubuntu-latest
 
     permissions:
@@ -171,6 +250,12 @@ jobs:
           name: ParcInfo-macOS-ARM.zip
           path: ./
 
+      - name: Download macOS Intel artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ParcInfo-macOS-Intel.zip
+          path: ./
+
       - name: Download system-info-collector.exe
         uses: actions/download-artifact@v8
         with:
@@ -188,7 +273,7 @@ jobs:
       - name: Empreintes SHA256 des binaires
         run: |
           set -e
-          sha256sum ParcInfo-Windows.exe ParcInfo-macOS-ARM.zip \
+          sha256sum ParcInfo-Windows.exe ParcInfo-macOS-ARM.zip ParcInfo-macOS-Intel.zip \
                     system-info-collector.exe system-info-collector-gui.exe \
                     > SHA256SUMS.txt
           cat SHA256SUMS.txt
@@ -205,7 +290,7 @@ jobs:
             |-----------|---------|
             | Windows   | `ParcInfo-Windows.exe` |
             | macOS (Apple Silicon M1+) | `ParcInfo-macOS-ARM.zip` → dézipper → `ParcInfo.app` |
-            | macOS (Intel) | Utiliser `docker run` ou `ParcInfo-Windows.exe` via WSL |
+            | macOS (Intel) | `ParcInfo-macOS-Intel.zip` → dézipper → `ParcInfo.app` |
             | Docker    | `docker pull darkmind64/parcinfo:${{ github.ref_name }}` |
 
             ### Collecteurs Système
@@ -230,6 +315,7 @@ jobs:
           files: |
             ./ParcInfo-Windows.exe
             ./ParcInfo-macOS-ARM.zip
+            ./ParcInfo-macOS-Intel.zip
             ./system-info-collector.exe
             ./system-info-collector-gui.exe
             ./SHA256SUMS.txt
