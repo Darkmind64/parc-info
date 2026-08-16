@@ -160,11 +160,14 @@ class CollectorGUI:
         self._load_config()
 
         self._create_widgets()
-        # La collecte alimente self.system_info, dont l'adresse MAC sert à
-        # reconnaître le client : elle doit donc démarrer en premier. Les deux
-        # opérations restent asynchrones, la reconnaissance échoue simplement
-        # si la MAC n'est pas encore connue.
-        self._collect_info()
+        # La collecte ne démarre plus toute seule : elle lirait les cases
+        # (débit, mots de passe Wi-Fi) dans leur état par défaut avant que
+        # l'utilisateur ait pu les cocher, l'obligeant à cocher puis
+        # rafraîchir. Le bouton « Rafraîchir les infos » la déclenche
+        # explicitement une fois les options choisies.
+        # La reconnaissance du client, elle, ne dépend pas de la collecte :
+        # _fetch_clients() lit l'adresse MAC directement (immédiat), pas
+        # depuis self.system_info (qui ne serait rempli qu'une minute plus tard).
         self._fetch_clients()
 
     def _appliquer_icone(self):
@@ -356,7 +359,8 @@ class CollectorGUI:
                                             mode='determinate', maximum=100.0,
                                             variable=self.progress_var)
 
-        self.status_var = tk.StringVar(value="En attente...")
+        self.status_var = tk.StringVar(
+            value="Cochez vos options ci-dessous puis cliquez sur « Rafraîchir les infos »")
         status_bar = tk.Label(self.root, textvariable=self.status_var,
                               bg="#ecf0f1", fg="#2c3e50", anchor=tk.W)
 
@@ -743,6 +747,10 @@ class CollectorGUI:
 
     def _send_data(self):
         """Envoie les données à ParcInfo."""
+        if not self.system_info:
+            messagebox.showerror("Erreur", "Cliquez d'abord sur « Rafraîchir les infos » "
+                                           "pour lancer la collecte.")
+            return
         if not self.selected_client:
             messagebox.showerror("Erreur", "Veuillez sélectionner un client")
             return

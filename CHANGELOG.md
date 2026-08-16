@@ -1,5 +1,85 @@
 # CHANGELOG - ParcInfo
 
+## [2.15.0] - 2026-08-16 🩹
+
+### 🩹 Corrections du collecteur d'après retour d'usage réel
+
+Dix corrections issues d'un premier déploiement réel du collecteur (v2.14),
+plutôt qu'un thème unique — regroupées ici parce qu'elles ont toutes été
+signalées dans le même retour et corrigées ensemble.
+
+**Collecte non auto-démarrée.** Le GUI lançait `_collect_info()` dès
+l'ouverture, avant même que l'utilisateur ait pu cocher ses options (débit,
+mots de passe Wi-Fi) — obligeant à cocher puis relancer manuellement. La
+collecte ne démarre plus qu'au clic sur « Rafraîchir les infos » ; la
+reconnaissance du client, elle, reste immédiate (elle lit l'adresse MAC
+directement, pas `self.system_info`).
+
+**Fuseau horaire lisible.** `Get-TimeZone` était lu via `.Id` (« Romance
+Standard Time », un identifiant de registre Windows) plutôt que
+`.DisplayName` (« (UTC+01:00) Bruxelles, Copenhague, Madrid, Paris »).
+
+**MAC/IP « canoniques » choisies sur une carte physique connectée.**
+`uuid.getnode()` et la résolution DNS du hostname, utilisés pour poser le
+MAC/IP « de la machine », retournent la première interface que le système
+d'exploitation énumère — souvent une carte virtuelle ou débranchée.
+Vérifié empiriquement sur la machine de développement : le MAC posé était
+celui d'un adaptateur Bluetooth PAN débranché, pas celui de la carte
+Ethernet réellement utilisée. `_meilleure_carte_physique()` corrige
+maintenant le MAC/IP après collecte à partir des cartes physiques
+détaillées, en préférant une carte connectée avec IP assignée — sans
+casser le cas (rencontré sur la même machine) d'un pont Hyper-V où la carte
+physique partage son MAC avec une carte virtuelle qui, elle, porte l'IP.
+
+**Jauges plus lisibles.** La partie non occupée d'une barre d'utilisation
+était de la même couleur que le fond de la carte — quasi invisible. Elle
+utilise maintenant `var(--border)`, un gris foncé qui reste net sans
+dominer la partie occupée.
+
+**Vue d'ensemble « table de partitions ».** Nouvel affichage sur la fiche
+système, en complément des barres détaillées par volume : un seul bandeau
+segmenté, chaque segment large proportionnellement à la capacité du volume
+qu'il représente, coloré selon son niveau de remplissage — un coup d'œil sur
+la répartition du stockage entre tous les volumes, là où les barres
+existantes ne montraient qu'un volume à la fois.
+
+**Règles de pare-feu avec direction.** `netsh advfirewall` était interrogé
+sans préciser de sens, et le champ « Direction » du texte retourné s'est
+révélé peu fiable pour la distinguer. La direction est maintenant connue
+par construction (deux passes, `dir=in` puis `dir=out`) et stampée sur
+chaque règle ; la fusion par nom devient une fusion par (nom, direction)
+pour qu'un programme aux comportements entrant/sortant différents (constaté
+sur AnyDesk, ZeroTier One, MSMPI-*) affiche deux lignes distinctes plutôt
+qu'une seule ambiguë.
+
+**Toutes les cartes réseau affichées.** La rubrique Réseau ne listait que
+les cartes au statut « Up » ; une carte désactivée ou débranchée reste une
+information d'inventaire utile. Toutes les cartes sont désormais
+répertoriées, triées cartes physiques connectées en premier, les
+déconnectées légèrement atténuées.
+
+**Associations de fichiers étendues, avec icônes.** Au-delà du navigateur
+et du client mail par défaut déjà collectés, le programme par défaut est
+maintenant relevé pour PDF, TXT, LOG, JPG, PNG, DOCX, XLSX et CSV
+(`file_type_defaults`, `_EXTENSIONS_SUIVIES`). Un nouveau filtre Jinja
+`app_icon` associe une icône par mot-clé au nom du programme — sans
+extraire l'icône réelle de l'exécutable, ce qui alourdirait chaque collecte
+pour un simple confort visuel.
+
+**Nom d'appareil rattrapé.** Un appareil créé avant que son hostname soit
+connu restait nommé d'après son IP ou « Device-XXXXXXXX » indéfiniment. Une
+collecte ultérieure corrige maintenant ce nom de repli dès que le vrai
+hostname est connu — un nom déjà personnalisé par un technicien, lui,
+n'est jamais remplacé.
+
+**Ports ouverts en badges.** La fiche appareil affichait la liste des ports
+détectés en texte brut au-dessus du champ éditable ; elle affiche
+maintenant les mêmes badges (icône + numéro + nom de service) que la fiche
+système et la liste des appareils, réutilisant les filtres Jinja globaux
+`port_icon`/`port_name` déjà en place.
+
+---
+
 ## [2.14.0] - 2026-08-16 🔀
 
 ### 🔀 Redirections de port locales (netsh portproxy)

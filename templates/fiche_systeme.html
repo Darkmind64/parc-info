@@ -82,7 +82,10 @@
 .fs-warn { background: rgba(255,140,0,.12); color: var(--accent-orange); border: 1px solid rgba(255,140,0,.3); }
 .fs-bad  { background: rgba(255,51,85,.12); color: var(--accent-red); border: 1px solid rgba(255,51,85,.3); }
 .fs-empty { text-align: center; padding: 2.5rem; color: var(--text-secondary); }
-.fs-bar { height: 6px; background: var(--bg-secondary); border-radius: 3px; overflow: hidden; margin-top: 3px; }
+/* La piste (partie non occupée) doit rester visible sur fond sombre : trop
+   proche de --bg-secondary, elle se confondait avec l'arrière-plan de la
+   page et seule la portion remplie semblait « flotter » sans limite visible. */
+.fs-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 3px; }
 .fs-bar > span { display: block; height: 100%; background: var(--accent); }
 .fs-scroll { max-height: 480px; overflow-y: auto; }
 /* Les tableaux larges (imprimantes, USB) défilent dans leur propre conteneur
@@ -153,6 +156,21 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .fs-volume-nom { font-family: Consolas, monospace; font-weight: 700; font-size: .85rem; }
 .fs-volume-pct { font-weight: 700; font-size: .78rem; }
 .fs-volume-detail { font-size: .7rem; color: var(--text-secondary); margin-top: .3rem; }
+
+/* Vue d'ensemble « table de partitions » : un segment par volume, largeur
+   proportionnelle à sa capacité — complète les barres par volume ci-dessus
+   avec une vue globale de la répartition du stockage. */
+.fs-partition-map { display: flex; width: 100%; height: 28px; border-radius: 5px;
+    overflow: hidden; gap: 2px; background: var(--border); }
+.fs-partition-seg { display: flex; align-items: center; justify-content: center;
+    min-width: 4px; font-size: .68rem; color: #fff; font-weight: 600;
+    white-space: nowrap; overflow: hidden; opacity: .92; }
+.fs-partition-seg span { padding: 0 5px; overflow: hidden; text-overflow: ellipsis; }
+.fs-partition-legend { display: flex; flex-wrap: wrap; gap: .15rem 1rem; margin-top: .5rem;
+    font-size: .72rem; color: var(--text-secondary); }
+.fs-partition-legend-item { display: flex; align-items: center; gap: .35rem; }
+.fs-partition-legend-item i { display: inline-block; width: 8px; height: 8px;
+    border-radius: 2px; flex-shrink: 0; }
 .fs-key {
     font-family: Consolas, monospace; font-size: .8rem; font-weight: 700; letter-spacing: .05em;
     background: var(--bg-secondary); border: 1px solid var(--border);
@@ -509,6 +527,36 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
                 <div class="fs-bar"><span style="width:{{ pct }}%;{% if pct >= 90 %}background:var(--accent-red);{% elif pct >= 75 %}background:var(--accent-orange);{% endif %}"></span></div>
             {% endif %}
         </span>
+    </div>
+    {% endif %}
+
+    {% set vols_carte = disques | rejectattr('brut') | list %}
+    {% set total_general = vols_carte | sum(attribute='total') %}
+    {% if vols_carte and total_general %}
+    <div style="margin-top:.9rem;">
+        <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+            Vue d'ensemble — {{ vols_carte|length }} volume(s), {{ total_general|round(0)|int }} GB au total
+        </div>
+        <div class="fs-partition-map">
+            {% for v in vols_carte %}
+            {% set couleur = 'var(--accent-red)' if v.level == 'danger'
+                        else 'var(--accent-orange)' if v.level == 'warn'
+                        else 'var(--accent-green)' %}
+            {% set largeur = (v.total / total_general * 100) %}
+            <div class="fs-partition-seg" style="flex:{{ largeur }} 0 0%;background:{{ couleur }};"
+                 title="{{ v.libelle }} — {{ v.utilise }} / {{ v.total }} GB utilisés ({{ v.pct }} %)">
+                {% if largeur >= 6 %}<span>{{ v.libelle }} {{ v.pct }}%</span>{% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        <div class="fs-partition-legend">
+            {% for v in vols_carte %}
+            {% set couleur = 'var(--accent-red)' if v.level == 'danger'
+                        else 'var(--accent-orange)' if v.level == 'warn'
+                        else 'var(--accent-green)' %}
+            <span class="fs-partition-legend-item"><i style="background:{{ couleur }};"></i>{{ v.libelle }} · {{ v.total }} GB</span>
+            {% endfor %}
+        </div>
     </div>
     {% endif %}
 
@@ -934,17 +982,19 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         {% endif %}
     </h3>
     <div class="fs-label" style="font-size:.72rem;margin-bottom:.5rem;">
-        Entrant, actives, hors groupes de fonctionnalités Windows (des centaines
-        de règles pilotées comme un bloc depuis les paramètres réseau — déjà
+        Actives, hors groupes de fonctionnalités Windows (des centaines de
+        règles pilotées comme un bloc depuis les paramètres réseau — déjà
         résumées ci-dessus) et hors noms générés automatiquement — ce qui reste,
         ce sont les trous ouverts par des logiciels installés.
     </div>
     <div class="fs-wide">
     <table class="fs-table">
-        <tr><th>Règle</th><th>Protocole</th><th>Port</th><th>Profils</th></tr>
+        <tr><th>Règle</th><th>Direction</th><th>Protocole</th><th>Port</th><th>Profils</th></tr>
         {% for r in rapport.firewall_rules %}
         <tr>
             <td>{{ r.name }}</td>
+            <td><span class="fs-pill {{ 'fs-warn' if r.direction == 'Entrant' else 'fs-muted' }}">
+                {{ r.direction or '—' }}</span></td>
             <td class="fs-mono">{{ r.protocol or '—' }}</td>
             <td class="fs-mono">{{ r.port or '—' }}</td>
             <td style="font-size:.7rem;color:var(--text-secondary);">{{ r.profiles or '—' }}</td>
@@ -1263,15 +1313,22 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     {% endif %}
     <table class="fs-table" style="margin-bottom:.9rem;">
         <tr><th>Interface</th><th>Description</th><th>Adresse IP / plage</th><th>Débit</th><th>MAC</th></tr>
-        {# Les cartes physiques d'abord : sur un poste avec Hyper-V, WSL ou un
-           VPN, les interfaces virtuelles sont majoritaires et noieraient le
-           matériel réel. #}
-        {% for a in rapport.network_adapter_details | sort(attribute='physical', reverse=true) %}
-        <tr {% if a.physical %}class="fs-nic-phys"{% endif %}>
+        {# Les cartes physiques d'abord, puis les connectées : sur un poste avec
+           Hyper-V, WSL ou un VPN, les interfaces virtuelles sont majoritaires et
+           noieraient le matériel réel — et parmi celui-ci, une carte débranchée
+           reste une info d'inventaire, mais pas la priorité de lecture. #}
+        {% for a in rapport.network_adapter_details
+                    | sort(attribute='connected', reverse=true)
+                    | sort(attribute='physical', reverse=true) %}
+        <tr {% if a.physical %}class="fs-nic-phys"{% endif %} {% if a.connected == false %}style="opacity:.55;"{% endif %}>
             <td>
                 <strong>{{ a.name }}</strong>
                 <span class="fs-pill {{ 'fs-ok' if a.physical else 'fs-muted' }}"
                       style="margin-left:.35rem;">{{ 'Physique' if a.physical else 'Virtuelle' }}</span>
+                {% if a.connected is defined %}
+                <span class="fs-pill {{ 'fs-ok' if a.connected else 'fs-muted' }}"
+                      style="margin-left:.2rem;">{{ 'Connectée' if a.connected else 'Déconnectée' }}</span>
+                {% endif %}
             </td>
             <td>{{ a.description or '—' }}</td>
             <td class="fs-mono">
@@ -1691,20 +1748,33 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
    côté des partages exposés par cette machine — même sujet, même endroit.
    Le redémarrage en attente est un signal d'hygiène, pas une application :
    il est dans « Environnement & hygiène système ». #}
-{% if rapport.default_browser or rapport.default_mail or rapport.installed_browsers %}
+{% if rapport.default_browser or rapport.default_mail or rapport.installed_browsers or rapport.file_type_defaults %}
 <div class="fs-section">
     <h3>■ Applications par défaut</h3>
     <div class="fs-grid">
         <div>
-            {{ row("Navigateur par défaut", rapport.default_browser) }}
-            {{ row("Client mail par défaut", rapport.default_mail) }}
+            {% if rapport.default_browser %}
+            <div class="fs-row"><span class="fs-label">Navigateur par défaut</span><span class="fs-value">{{ rapport.default_browser | app_icon }} {{ rapport.default_browser }}</span></div>
+            {% endif %}
+            {% if rapport.default_mail %}
+            <div class="fs-row"><span class="fs-label">Client mail par défaut</span><span class="fs-value">{{ rapport.default_mail | app_icon }} {{ rapport.default_mail }}</span></div>
+            {% endif %}
+            {% if rapport.file_type_defaults %}
+            <div class="fs-label" style="font-size:.75rem;margin:.5rem 0 .35rem;">Types de fichiers</div>
+            {% for a in rapport.file_type_defaults %}
+            <div class="fs-row" style="grid-template-columns:1fr auto;">
+                <span class="fs-mono" style="color:var(--text-secondary);">{{ a.extension }}</span>
+                <span class="fs-value">{{ a.name | app_icon }} {{ a.name }}</span>
+            </div>
+            {% endfor %}
+            {% endif %}
         </div>
         <div>
             {% if rapport.installed_browsers %}
             <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">Navigateurs installés</div>
             {% for b in rapport.installed_browsers %}
             <div class="fs-row" style="grid-template-columns:1fr auto;">
-                <span class="fs-value">{{ b.name }}</span>
+                <span class="fs-value">{{ b.name | app_icon }} {{ b.name }}</span>
                 <span class="fs-mono" style="color:var(--text-secondary);">{{ b.version or '—' }}</span>
             </div>
             {% endfor %}

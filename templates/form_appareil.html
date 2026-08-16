@@ -193,6 +193,16 @@ async function loadHistorique() {
         <div class="form-row">
             <div class="form-group">
                 <label>Ports ouverts détectés</label>
+                <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.4rem;">
+                    {% for port_str in appareil.ports_ouverts.split(',') %}
+                        {% set p = port_str.strip() %}
+                        {% if p %}
+                        <span class="badge badge-gray" style="letter-spacing:normal;text-transform:none;font-weight:500;">
+                            {{ p|port_icon }} {{ p }} · {{ p|port_name }}
+                        </span>
+                        {% endif %}
+                    {% endfor %}
+                </div>
                 <input type="text" name="ports_ouverts" value="{{ appareil.ports_ouverts }}" class="mono">
             </div>
         </div>

@@ -183,5 +183,39 @@ verifier(ligne and ligne[1] == 'ESET', 'marque rattrapée', str(ligne and ligne[
 A._rattrapage_fait = False
 verifier(A.completer_fiches_existantes() == 0, 'le rattrapage ne rejoue pas')
 
+print("\n=== 6. Un nom d'appareil resté sur un repli (IP, Device-XXXXXXXX) est corrigé ===")
+# Un appareil créé avant que le hostname soit connu (résolution DNS échouée,
+# carte réseau pas encore identifiée) reste nommé d'après son IP ou
+# « Device-XXXXXXXX » pour toujours, sauf correction explicite ici.
+conn = A.get_db()
+conn.execute("INSERT INTO appareils (client_id, nom_machine, adresse_mac) "
+             "VALUES (1, '192.168.1.77', 'AA:BB:CC:REPLI:01:01')")
+conn.commit()
+conn.close()
+reponse = client.post('/api/device-info', json={
+    'mac_address': 'AA:BB:CC:REPLI:01:01', 'hostname': 'POSTE-Vrai-Nom',
+    'client_id': 1, 'ip_addresses': ['192.168.1.77']})
+verifier(reponse.status_code == 200, 'collecte acceptée', str(reponse.status_code))
+conn = A.get_db()
+nom = conn.execute("SELECT nom_machine FROM appareils WHERE adresse_mac='AA:BB:CC:REPLI:01:01'").fetchone()[0]
+conn.close()
+verifier(nom == 'POSTE-Vrai-Nom', "le nom d'IP est remplacé par le vrai hostname dès qu'il est connu",
+         nom)
+
+print("\n=== 7. ...mais un nom choisi à la main n'est jamais remplacé ===")
+conn = A.get_db()
+conn.execute("INSERT INTO appareils (client_id, nom_machine, adresse_mac) "
+             "VALUES (1, 'PC Comptabilité — Sophie', 'AA:BB:CC:REPLI:02:02')")
+conn.commit()
+conn.close()
+client.post('/api/device-info', json={
+    'mac_address': 'AA:BB:CC:REPLI:02:02', 'hostname': 'DESKTOP-7X2K9Q1',
+    'client_id': 1, 'ip_addresses': ['192.168.1.78']})
+conn = A.get_db()
+nom = conn.execute("SELECT nom_machine FROM appareils WHERE adresse_mac='AA:BB:CC:REPLI:02:02'").fetchone()[0]
+conn.close()
+verifier(nom == 'PC Comptabilité — Sophie',
+         "un nom déjà personnalisé n'est jamais écrasé par le hostname technique de la collecte", nom)
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

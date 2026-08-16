@@ -177,6 +177,8 @@ DONNEES_REGROUPEMENT = dict(ETAPE_3, **{
     'domain': 'ANCIEN-CHAMP', 'workgroup': 'ANCIEN-CHAMP',
     'domain_name': 'exemple.local', 'domain_joined': True,
     'default_browser': 'Firefox',
+    'file_type_defaults': [{'extension': '.pdf', 'name': 'Adobe Acrobat Reader DC'},
+                           {'extension': '.jpg', 'name': 'Photos'}],
     'reboot_pending': True, 'reboot_reasons': ['Windows Update'],
     'mapped_drives': [{'letter': 'Z:', 'path': r'\\serveur\partage'}],
     'smb_shares': [{'name': 'Public', 'path': r'C:\Public', 'administrative': False}],
@@ -209,6 +211,8 @@ verifier(r'\\serveur\partage' in contenu('reseau') and 'Public' in contenu('rese
          'lecteurs mappés et partages exposés réunis dans « Réseau »')
 verifier(r'\\serveur\partage' not in contenu('poste'),
          "lecteurs mappés absents d'« Applications par défaut »")
+verifier('.pdf → Adobe Acrobat Reader DC' in contenu('poste') and '.jpg → Photos' in contenu('poste'),
+         "associations de fichiers dans « Applications par défaut »", contenu('poste')[:200])
 verifier('invite' in contenu('securite') and 'RDS' in contenu('securite'),
          'journal de sécurité et certificats dans « Sécurité »')
 verifier('invite' not in contenu('diagnostic') and 'RDS' not in contenu('diagnostic'),
@@ -250,8 +254,8 @@ DONNEES_AGENTS = dict(ETAPE_3, **{
                           'provider': 'EldoS Corporation'}],
     'group_policies': [{'name': 'Stratégie de groupe locale', 'scope': 'Utilisateur',
                         'enabled': True, 'denied': False}],
-    'firewall_rules': [{'name': 'ShareMouse', 'protocol': 'TCP/UDP', 'port': 'Tout',
-                        'profiles': 'Domaine, Privé, Public'}],
+    'firewall_rules': [{'name': 'ShareMouse', 'direction': 'Entrant', 'protocol': 'TCP/UDP',
+                        'port': 'Tout', 'profiles': 'Domaine, Privé, Public'}],
     'firewall_rules_total': 1,
     'hosts_entries': [{'ip': '127.0.0.1', 'hostname': 'activate.adobe.com', 'local': True}],
     'port_forwards': [{'listen_address': '0.0.0.0', 'listen_port': 8080,
@@ -541,6 +545,22 @@ verifier(C._filtrer_fusionner_regles_pare_feu([]) == {},
          'aucune règle en entrée → dict vide')
 verifier(C._parse_regles_pare_feu('') == [], 'texte vide → liste vide, pas une exception')
 
+# La direction vient de l'appel netsh (dir=in/dir=out), pas d'un champ reparsé
+# dans le texte — _win_firewall_rules l'ajoute après coup, un même logiciel
+# peut très bien autoriser l'un sans l'autre.
+regles_entrant = C._parse_regles_pare_feu(_TEXTE_PARE_FEU)
+for r in regles_entrant:
+    r['direction'] = 'Entrant'
+regles_sortant = C._parse_regles_pare_feu(_TEXTE_PARE_FEU)
+for r in regles_sortant:
+    r['direction'] = 'Sortant'
+resultat_bidirectionnel = C._filtrer_fusionner_regles_pare_feu(regles_entrant + regles_sortant)
+par_direction = {(r['name'], r['direction']): r for r in resultat_bidirectionnel.get('firewall_rules', [])}
+verifier(('AnyDesk', 'Entrant') in par_direction and ('AnyDesk', 'Sortant') in par_direction,
+         'un même logiciel entrant ET sortant donne deux lignes distinctes, pas une seule')
+verifier(resultat_bidirectionnel.get('firewall_rules_total') == 2,
+         'le total compte les deux directions séparément', str(resultat_bidirectionnel.get('firewall_rules_total')))
+
 print("\n=== 17. Fichier hosts : redirections utiles, hors bruit par défaut ===")
 _LIGNES_HOSTS = [
     '# --- SWITCHHOSTS_CONTENT_START ---\n',
@@ -602,7 +622,38 @@ verifier(C._parse_portproxy('') == [], 'texte vide → liste vide')
 verifier(C._parse_portproxy('Adresse Port Adresse Port') == [],
          "une ligne d'en-tête seule (4 mots, aucun n'est un nombre) ne produit aucune entrée")
 
-print("\n=== 19. Onglets de l'interface ===")
+print("\n=== 19. Meilleure carte physique pour corriger MAC/IP « canoniques » ===")
+# Reproduit une topologie réelle constatée : la MAC/IP posées par
+# uuid.getnode()/résolution DNS avant que les cartes détaillées soient
+# connues tombent souvent sur une interface virtuelle (VPN, Docker, Hyper-V).
+CARTES_MIXTES = [
+    {'name': 'vEthernet (WSL)', 'physical': False, 'connected': True,
+     'mac_address': '00-15-5D-32-77-A6', 'ip_addresses': [{'address': '172.28.64.1'}]},
+    {'name': 'Connexion réseau Bluetooth', 'physical': False, 'connected': False,
+     'mac_address': '3C-6A-D2-B5-09-7C', 'ip_addresses': [{'address': '169.254.112.155'}]},
+    {'name': 'Ethernet 2', 'physical': True, 'connected': False,
+     'mac_address': '0A-00-27-00-00-0D', 'ip_addresses': []},
+    {'name': 'Ethernet 3', 'physical': True, 'connected': True,
+     'mac_address': 'D8-5E-D3-E2-3C-3F', 'ip_addresses': [{'address': '192.168.1.50'}]},
+]
+meilleure = C._meilleure_carte_physique(CARTES_MIXTES)
+verifier(meilleure is not None and meilleure['name'] == 'Ethernet 3',
+         'la carte physique connectée avec IP est préférée aux virtuelles et à la physique débranchée',
+         str(meilleure and meilleure['name']))
+
+verifier(C._meilleure_carte_physique([
+    {'name': 'Ethernet 2', 'physical': True, 'connected': False, 'ip_addresses': []},
+])['name'] == 'Ethernet 2',
+         "une carte physique débranchée est quand même choisie plutôt qu'aucune correction")
+
+verifier(C._meilleure_carte_physique([
+    {'name': 'vEthernet (WSL)', 'physical': False, 'connected': True, 'ip_addresses': [{'address': '1.2.3.4'}]},
+]) is None, "aucune carte physique disponible → pas de correction (None)")
+
+verifier(C._meilleure_carte_physique([]) is None, 'liste vide → None')
+verifier(C._meilleure_carte_physique(None) is None, 'None en entrée → None, pas une exception')
+
+print("\n=== 20. Onglets de l'interface ===")
 try:
     import tkinter as tk
     racine = tk.Tk()

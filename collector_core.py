@@ -1141,7 +1141,10 @@ def _win_core():
         "if ($os -and $os.InstallDate) { $installDate = $os.InstallDate.ToString('yyyy-MM-dd') }; "
         "$biosDate = $null; "
         "if ($bios -and $bios.ReleaseDate) { $biosDate = $bios.ReleaseDate.ToString('yyyy-MM-dd') }; "
-        "$tz = $null; try { $tz = (Get-TimeZone -ErrorAction SilentlyContinue).Id } catch {}; "
+        # .DisplayName ('(UTC+01:00) Bruxelles, Copenhague, Madrid, Paris'), pas .Id
+        # ('Romance Standard Time') : l'identifiant interne Windows ne dit rien à
+        # personne hors de la table de correspondance des fuseaux du registre.
+        "$tz = $null; try { $tz = (Get-TimeZone -ErrorAction SilentlyContinue).DisplayName } catch {}; "
         "[PSCustomObject]@{ "
         "Manufacturer=$cs.Manufacturer; Model=$cs.Model; Domain=$cs.Domain; "
         "PartOfDomain=$cs.PartOfDomain; Workgroup=$cs.Workgroup; LoggedOnUser=$cs.UserName; "
@@ -1779,36 +1782,45 @@ def _parse_regles_pare_feu(texte):
     return regles
 
 
+_FW_DIRECTIONS = (('in', 'Entrant'), ('out', 'Sortant'))
+
+
 def _win_firewall_rules(limite=150):
-    """Règles de pare-feu entrant qui ouvrent réellement quelque chose.
+    """Règles de pare-feu, entrantes et sortantes, qui ouvrent réellement quelque chose.
 
     Un poste de travail compte facilement plus d'un millier de règles :
     Windows en embarque des centaines par fonctionnalité (Découverte réseau,
     Partage d'imprimantes…), chacune démultipliée par profil et protocole —
-    vérifié à plus de 1500 sur une machine de développement ordinaire. Cette
-    avalanche est délibérément écartée : ces règles groupées se pilotent comme
-    un bloc depuis les paramètres réseau, pas une par une, et leur état global
-    apparaît déjà dans `firewall_profiles`. Les noms comme « HNS Container
-    Networking - <GUID> - 0 », que Docker/Hyper-V régénèrent à chaque réseau de
-    conteneur créé, sont écartés pour la même raison : churn technique, jamais
-    une configuration à auditer.
+    vérifié à plus de 1500 côté entrant seul sur une machine de développement
+    ordinaire. Cette avalanche est délibérément écartée : ces règles groupées
+    se pilotent comme un bloc depuis les paramètres réseau, pas une par une,
+    et leur état global apparaît déjà dans `firewall_profiles`. Les noms
+    comme « HNS Container Networking - <GUID> - 0 », que Docker/Hyper-V
+    régénèrent à chaque réseau de conteneur créé, sont écartés pour la même
+    raison : churn technique, jamais une configuration à auditer.
 
     Ce qui reste après filtre — actives, autorisées, sans groupe Windows, sans
     nom généré — ce sont les trous ouverts par des logiciels installés : la
-    vraie question d'audit (« qu'est-ce qui écoute sur ce poste, et depuis
-    quels réseaux »). Sur un poste de développement chargé, ça tient encore en
-    une grosse centaine de lignes ; sur un poste bureautique ordinaire, une
-    poignée. Les entrées portant le même nom (plusieurs protocoles, mises à
-    jour successives du même logiciel) sont fusionnées en une seule ligne.
-
-    Entrant seulement : c'est la direction qui répond à « qu'est-ce qui peut
-    joindre ce poste depuis l'extérieur », l'angle d'audit habituel — les
-    règles sortantes apportent bien moins pour un filtrage symétrique
-    équivalent, pas de quoi doubler la collecte pour ça.
+    vraie question d'audit (« qu'est-ce qui peut joindre ce poste, et qu'est-ce
+    que ce poste peut joindre »). La direction demandée à `netsh` (`dir=in`/
+    `dir=out`) est posée directement sur chaque règle plutôt que reparsée
+    depuis la sortie — netsh y répète l'état d'activation, pas « Entrant »/
+    « Sortant » en toutes lettres, un champ « Direction » qui dirait le
+    contraire de son nom serait trompeur à interpréter. Les entrées de même
+    nom ET même direction (plusieurs protocoles, mises à jour successives du
+    même logiciel) sont fusionnées en une seule ligne ; entrant et sortant
+    d'un même logiciel restent deux lignes distinctes, un programme pouvant
+    très bien autoriser l'un sans l'autre.
     """
-    texte = _win_console_output(
-        ['netsh', 'advfirewall', 'firewall', 'show', 'rule', 'name=all', 'dir=in'], timeout=60)
-    return _filtrer_fusionner_regles_pare_feu(_parse_regles_pare_feu(texte), limite)
+    toutes = []
+    for drapeau, libelle in _FW_DIRECTIONS:
+        texte = _win_console_output(
+            ['netsh', 'advfirewall', 'firewall', 'show', 'rule', 'name=all', 'dir=' + drapeau],
+            timeout=60)
+        for r in _parse_regles_pare_feu(texte):
+            r['direction'] = libelle
+            toutes.append(r)
+    return _filtrer_fusionner_regles_pare_feu(toutes, limite)
 
 
 def _filtrer_fusionner_regles_pare_feu(toutes, limite=150):
@@ -1817,8 +1829,8 @@ def _filtrer_fusionner_regles_pare_feu(toutes, limite=150):
     Séparée de _win_firewall_rules pour rester testable sans lancer netsh —
     même principe que _parse_wifi_profile_xml. Ne garde que les règles
     actives, autorisées, sans groupe Windows et sans nom généré
-    automatiquement ; fusionne les entrées de même nom (protocoles/ports/
-    profils réunis) et trie par ordre alphabétique.
+    automatiquement ; fusionne les entrées de même nom ET même direction
+    (protocoles/ports/profils réunis), triées par nom puis par direction.
     """
     if not toutes:
         return {}
@@ -1830,11 +1842,11 @@ def _filtrer_fusionner_regles_pare_feu(toutes, limite=150):
     fusion = {}
     ordre = []
     for r in filtrees:
-        nom = r.get('nom') or '?'
-        if nom not in fusion:
-            fusion[nom] = {'protocoles': set(), 'ports': set(), 'profils': set()}
-            ordre.append(nom)
-        e = fusion[nom]
+        cle = (r.get('nom') or '?', r.get('direction') or 'Entrant')
+        if cle not in fusion:
+            fusion[cle] = {'protocoles': set(), 'ports': set(), 'profils': set()}
+            ordre.append(cle)
+        e = fusion[cle]
         if r.get('protocole'):
             e['protocoles'].add(r['protocole'])
         if r.get('port'):
@@ -1847,18 +1859,20 @@ def _filtrer_fusionner_regles_pare_feu(toutes, limite=150):
     if not ordre:
         return {}
 
-    noms_tries = sorted(ordre, key=lambda n: n.lower())
+    cles_triees = sorted(ordre, key=lambda c: (c[0].lower(), c[1]))
     regles = []
-    for nom in noms_tries[:limite]:
-        e = fusion[nom]
+    for cle in cles_triees[:limite]:
+        nom, direction = cle
+        e = fusion[cle]
         regles.append({
             'name': nom,
+            'direction': direction,
             'protocol': '/'.join(sorted(e['protocoles'])),
             'port': ', '.join(sorted(e['ports'])),
             'profiles': ', '.join(sorted(e['profils'])),
         })
 
-    return {'firewall_rules': regles, 'firewall_rules_total': len(noms_tries)}
+    return {'firewall_rules': regles, 'firewall_rules_total': len(cles_triees)}
 
 
 def _parse_portproxy(texte):
@@ -2055,13 +2069,17 @@ def _win_extras():
         "| Select-Object -First 1; "
         "if ($st -or $fu) { $wear = [PSCustomObject]@{ Designed=$st.DesignedCapacity; "
         "Full=$fu.FullChargedCapacity; Cycles=$cy.CycleCount } } } catch {}; "
+        # Toutes les cartes, pas seulement celles « Up » : une carte désactivée
+        # ou débranchée reste une information d'inventaire (« ce poste a un
+        # second port Ethernet, inutilisé ») — Status permet de la distinguer
+        # à l'affichage plutôt que de la faire disparaître à la collecte.
         "$adapters = @(); try { $adapters = @(Get-NetAdapter -ErrorAction SilentlyContinue "
-        "| Where-Object Status -eq 'Up' | ForEach-Object { "
+        "| ForEach-Object { "
         "$ips = @(Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 "
         "-ErrorAction SilentlyContinue | Select-Object IPAddress,PrefixLength); "
         "[PSCustomObject]@{ Name=$_.Name; InterfaceDescription=$_.InterfaceDescription; "
         "LinkSpeed=$_.LinkSpeed; MacAddress=$_.MacAddress; Virtual=$_.Virtual; "
-        "MediaType=$_.MediaType; IPs=$ips } }) } catch {}; "
+        "Status=[string]$_.Status; MediaType=$_.MediaType; IPs=$ips } }) } catch {}; "
         "[PSCustomObject]@{ Battery=$battery; BatteryWear=$wear; Adapters=$adapters } "
         "| ConvertTo-Json -Compress -Depth 4",
         timeout=25
@@ -2108,6 +2126,7 @@ def _win_extras():
             'physical': a.get('Virtual') is False,
             'media_type': _clean(a.get('MediaType')),
             'ip_addresses': _ip_entries(a.get('IPs')),
+            'connected': _clean(a.get('Status')).lower() == 'up',
         })
     if adapters:
         info['network_adapters'] = adapters
@@ -4061,11 +4080,20 @@ def _nom_client_mail(progid):
     return progid
 
 
+#: Extensions de fichiers courantes dont on veut connaître le programme par
+#: défaut, en plus du navigateur/client mail — celles citées explicitement
+#: par les utilisateurs (PDF, TXT, LOG, JPG) plus quelques bureautiques
+#: fréquentes en dépannage.
+_EXTENSIONS_SUIVIES = ('.pdf', '.txt', '.log', '.jpg', '.png', '.docx', '.xlsx', '.csv')
+
+
 def _win_workstation_extras():
     """Réglages du poste utiles au dépannage : applications par défaut,
-    navigateurs installés, lecteurs réseau, redémarrage en attente.
+    navigateurs installés, associations de fichiers, lecteurs réseau,
+    redémarrage en attente.
     """
     info = {}
+    liste_ext_ps = "@(%s)" % ','.join("'%s'" % e for e in _EXTENSIONS_SUIVIES)
     data = _win_powershell_json(
         # Association par défaut https et mailto (choix de l'utilisateur)
         "$nav=$null; try { $nav=(Get-ItemProperty "
@@ -4083,6 +4111,18 @@ def _win_workstation_extras():
         "if ($exe -and (Test-Path $exe)) { try { $ver=(Get-Item $exe).VersionInfo.ProductVersion } catch {} }; "
         "$navs += [PSCustomObject]@{ Nom=(Get-ItemProperty $c.PSPath -EA SilentlyContinue).'(default)'; "
         "Version=$ver; Exe=$exe } } } } } catch {}; "
+        # Association par défaut pour une poignée d'extensions courantes :
+        # choix utilisateur (FileExts\UserChoice) sinon valeur globale HKCR,
+        # puis nom lisible du ProgId (description enregistrée, sinon le
+        # ProgId lui-même, plus parlant que rien).
+        "$assocs=@(); foreach ($ext in " + liste_ext_ps + ") { try { "
+        "$progId=$null; $cle=\"HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\$ext\\UserChoice\"; "
+        "if (Test-Path $cle) { $progId=(Get-ItemProperty $cle -EA SilentlyContinue).ProgId }; "
+        "if (-not $progId) { $progId=(Get-ItemProperty \"HKCR:\\$ext\" -EA SilentlyContinue).'(default)' }; "
+        "$nomProg=$null; "
+        "if ($progId) { $nomProg=(Get-ItemProperty \"HKCR:\\$progId\" -EA SilentlyContinue).'(default)' }; "
+        "if ($progId -or $nomProg) { $assocs += [PSCustomObject]@{ Ext=$ext; ProgId=$progId; Nom=$nomProg } } "
+        "} catch {} }; "
         # Lecteurs réseau mappés
         "$lecteurs=@(); try { $lecteurs=@(Get-CimInstance Win32_MappedLogicalDisk -EA SilentlyContinue "
         "| Select-Object DeviceID,ProviderName) } catch {}; "
@@ -4091,7 +4131,7 @@ def _win_workstation_extras():
         "if (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending') { $rb+='Servicing (mise à jour de composants)' }; "
         "if (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired') { $rb+='Windows Update' }; "
         "try { if ((Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager' -EA SilentlyContinue).PendingFileRenameOperations) { $rb+='Fichiers en attente de renommage' } } catch {}; "
-        "[PSCustomObject]@{ Navigateur=$nav; Courriel=$courriel; Navigateurs=$navs; "
+        "[PSCustomObject]@{ Navigateur=$nav; Courriel=$courriel; Navigateurs=$navs; Associations=$assocs; "
         "Lecteurs=$lecteurs; Reboot=$rb } | ConvertTo-Json -Compress -Depth 4",
         timeout=40,
     )
@@ -4104,6 +4144,18 @@ def _win_workstation_extras():
     prog_mail = _clean(data.get('Courriel'))
     if prog_mail:
         info['default_mail'] = _nom_client_mail(prog_mail)
+
+    associations = []
+    for a in _as_list(data.get('Associations')):
+        ext = _clean(a.get('Ext'))
+        if not ext:
+            continue
+        nom = _clean(a.get('Nom')) or _clean(a.get('ProgId'))
+        if not nom:
+            continue
+        associations.append({'extension': ext, 'name': nom})
+    if associations:
+        info['file_type_defaults'] = associations
 
     navigateurs = []
     for n in _as_list(data.get('Navigateurs')):
@@ -5347,6 +5399,32 @@ def console_progress(largeur=32, flux=None):
     return rappel
 
 
+def _meilleure_carte_physique(adapters):
+    """Choisit la carte physique la plus pertinente pour l'identité de la machine.
+
+    `get_mac_address()`/`get_ip_addresses()` (utilisés au tout début de la
+    collecte, avant que les cartes détaillées soient connues) retombent
+    respectivement sur `uuid.getnode()` et la résolution DNS du hostname —
+    ni l'un ni l'autre ne garantit de tomber sur la carte physique réellement
+    utilisée : un VPN, Docker ou Hyper-V s'intercalent facilement devant, et
+    l'un ou l'autre devient alors la MAC/IP « officielle » de l'appareil.
+
+    Une fois les cartes détaillées disponibles (Windows), la meilleure
+    candidate les remplace : physique, connectée, avec au moins une adresse
+    IP — à défaut la meilleure approximation possible, jamais pire que ce
+    qu'on avait déjà.
+
+    Retourne le dict de la carte choisie, ou None si aucune carte physique
+    n'est disponible (macOS/Linux aujourd'hui, faute de collecte équivalente,
+    ou aucune carte physique détectée).
+    """
+    candidats = [a for a in (adapters or []) if isinstance(a, dict) and a.get('physical')]
+    if not candidats:
+        return None
+    candidats.sort(key=lambda a: (a.get('connected') is True, bool(a.get('ip_addresses'))), reverse=True)
+    return candidats[0]
+
+
 def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data=None):
     """Collecte toutes les infos système.
 
@@ -5386,6 +5464,23 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data
         elif IS_LINUX:
             _report(progress, 0.30, 'Collecte Linux')
             info.update(get_system_info_linux())
+    except Exception:
+        pass
+    _publier(on_data, info)
+
+    # Le MAC/IP « canoniques » posés au tout début (uuid.getnode() / résolution
+    # DNS du hostname) tombent souvent sur une interface virtuelle plutôt que
+    # la carte physique réellement utilisée — corrigés ici si une meilleure
+    # source existe (voir _meilleure_carte_physique), pour que la fiche
+    # appareil et le rapport système restent cohérents avec « Réseau ».
+    try:
+        meilleure = _meilleure_carte_physique(info.get('network_adapter_details'))
+        if meilleure:
+            if meilleure.get('mac_address'):
+                info['mac_address'] = meilleure['mac_address']
+            adresses = [ip['address'] for ip in (meilleure.get('ip_addresses') or []) if ip.get('address')]
+            if adresses:
+                info['ip_addresses'] = adresses
     except Exception:
         pass
     _publier(on_data, info)
@@ -5800,6 +5895,8 @@ def build_summary_sections(info):
         if a.get('link_speed'):
             details.append(str(a['link_speed']))
         details.append('physique' if a.get('physical') else 'virtuelle')
+        if a.get('connected') is not None:
+            details.append('connectée' if a['connected'] else 'déconnectée')
         cartes.append('%s  [%s]' % (libelle, ' · '.join(details)))
     if not cartes and info.get('network_adapters'):
         cartes = list(info['network_adapters'])
@@ -5870,9 +5967,10 @@ def build_summary_sections(info):
         if len(info['firewall_rules']) < total:
             titre += ' — %d affichées' % len(info['firewall_rules'])
         s['listes'].append({'titre': titre, 'elements': [
-            '%s — %s%s%s' % (r.get('name', '?'), r.get('protocol') or '?',
-                             ':%s' % r['port'] if r.get('port') else '',
-                             ' (%s)' % r['profiles'] if r.get('profiles') else '')
+            '%s [%s] — %s%s%s' % (r.get('name', '?'), r.get('direction') or '?',
+                                  r.get('protocol') or '?',
+                                  ':%s' % r['port'] if r.get('port') else '',
+                                  ' (%s)' % r['profiles'] if r.get('profiles') else '')
             if isinstance(r, dict) else str(r)
             for r in info['firewall_rules']]})
     if info.get('bitlocker'):
@@ -6186,6 +6284,9 @@ def build_summary_sections(info):
     if info.get('installed_browsers'):
         s['listes'].append({'titre': 'Navigateurs installés', 'elements': [
             '%s %s' % (b.get('name'), b.get('version') or '') for b in info['installed_browsers']]})
+    if info.get('file_type_defaults'):
+        s['listes'].append({'titre': 'Types de fichiers', 'elements': [
+            '%s → %s' % (a.get('extension'), a.get('name')) for a in info['file_type_defaults']]})
     sections.append(s)
 
     # ── Batterie ───────────────────────────────────────────────────────────
@@ -7938,6 +8039,7 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         if regles_fw:
             total_fw = info.get('firewall_rules_total') or len(regles_fw)
             rows = [[Paragraph(_pdf_escape(r.get('name')), S['body']),
+                     Paragraph(_pdf_escape(r.get('direction')), S['body']),
                      Paragraph(_pdf_escape(r.get('protocol')), S['mono']),
                      Paragraph(_pdf_escape(r.get('port')), S['mono']),
                      Paragraph(_pdf_escape(r.get('profiles')), S['small'])] for r in regles_fw]
@@ -7945,8 +8047,8 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             if len(regles_fw) < total_fw:
                 titre_fw += ' — %d affichées' % len(regles_fw)
             story.append(Paragraph(titre_fw, S['h2']))
-            story.append(_pdf_data_table(tk, ['Règle', 'Protocole', 'Port', 'Profils'],
-                                         rows, width, [0.34, 0.14, 0.16, 0.36]))
+            story.append(_pdf_data_table(tk, ['Règle', 'Direction', 'Protocole', 'Port', 'Profils'],
+                                         rows, width, [0.28, 0.12, 0.14, 0.14, 0.32]))
 
         # ── Accès distant & exposition ───────────────────────────────────────
         acces = info.get('remote_access') or []
@@ -8147,13 +8249,21 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         # liste brute plus loin) ; ils sont désormais ensemble.
         adaptateurs = info.get('network_adapter_details') or []
         if adaptateurs:
+            # Physiques d'abord, puis connectées : même ordre de lecture que la
+            # fiche système.
+            adaptateurs = sorted(adaptateurs, key=lambda a: (bool(a.get('physical')),
+                                                              a.get('connected') is True),
+                                 reverse=True)
             rows = []
             for a in adaptateurs:
                 ips = ' · '.join('%s/%s' % (i['address'], i['prefix'])
                                  for i in a.get('ip_addresses') or []) or '—'
+                nature = 'Physique' if a.get('physical') else 'Virtuelle'
+                if a.get('connected') is not None:
+                    nature += ' · %s' % ('connectée' if a['connected'] else 'déconnectée')
                 rows.append([
                     Paragraph('<b>%s</b>' % _pdf_escape(a['name']), S['body']),
-                    Paragraph('Physique' if a.get('physical') else 'Virtuelle', S['body']),
+                    Paragraph(nature, S['body']),
                     Paragraph(_pdf_escape(ips), S['mono']),
                     Paragraph(_pdf_escape(a.get('link_speed')), S['body']),
                     Paragraph(_pdf_escape(a.get('mac_address')), S['mono']),
@@ -8361,6 +8471,10 @@ def generate_pdf_report(info, client_id=None, client_name=None):
              ', '.join('%s %s' % (b.get('name'), b.get('version') or '')
                        for b in info['installed_browsers']).strip()
              if info.get('installed_browsers') else None),
+            ('Types de fichiers',
+             ', '.join('%s → %s' % (a.get('extension'), a.get('name'))
+                       for a in info['file_type_defaults'])
+             if info.get('file_type_defaults') else None),
         ], width)
         if table:
             story.append(Paragraph('Applications par défaut', S['h2']))

@@ -332,7 +332,13 @@ note}` (comptes non énumérables de façon fiable, présence seule détectée)
 > compte de l'utilisateur. Seule leur présence (`password_stored`) est notée.
 
 ### Applications par défaut
-`default_browser` · `default_mail` · `installed_browsers[]{name, version}`
+`default_browser` · `default_mail` · `installed_browsers[]{name, version}` ·
+`file_type_defaults[]{extension, name}` — programme par défaut pour une
+poignée d'extensions courantes (`.pdf`, `.txt`, `.log`, `.jpg`, `.png`,
+`.docx`, `.xlsx`, `.csv`, voir `_EXTENSIONS_SUIVIES`). Le filtre Jinja
+`app_icon` (app.py) associe une icône par mot-clé au nom du programme,
+utilisé sur la fiche système pour ces trois champs — best-effort, pas
+d'extraction de l'icône réelle de l'exécutable.
 
 ### Maintenance & hygiène
 `power_plan` · `fast_startup` · `defender_last_full_scan` /

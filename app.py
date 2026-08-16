@@ -592,6 +592,31 @@ def port_info_filter(port):
 def port_action_filter(port):
     try: return _PORT_MAP.get(int(port), ('other','','','info'))[3]
     except: return 'info'
+
+#: Icône par mot-clé (recherché en minuscules dans le nom du programme), pour
+#: repérer d'un coup d'œil navigateur/mail/type de fichier par défaut — sans
+#: extraire ni stocker l'icône réelle de l'exécutable (coûteux, et alourdirait
+#: chaque collecte pour un simple confort visuel).
+_ICONES_APPLICATIONS = (
+    ('chrome', '🌐'), ('firefox', '🦊'), ('edge', '🌊'), ('brave', '🦁'),
+    ('opera', '🎭'), ('internet explorer', '🌐'),
+    ('outlook', '📧'), ('thunderbird', '📨'), ('onenote', '📓'), ('mail', '📧'),
+    ('acrobat', '📕'), ('reader', '📕'), ('pdf', '📕'), ('foxit', '📕'),
+    ('photos', '🖼'), ('paint', '🖼'), ('image', '🖼'), ('viewer', '🖼'),
+    ('word', '📘'), ('excel', '📗'), ('powerpoint', '📙'), ('office', '📘'),
+    ('notepad++', '📝'), ('notepad', '📝'), ('bloc-notes', '📝'), ('texte', '📝'),
+    ('code', '💻'), ('sublime', '💻'), ('vim', '💻'),
+    ('7-zip', '🗜'), ('winrar', '🗜'), ('zip', '🗜'),
+)
+
+@app.template_filter('app_icon')
+def app_icon_filter(nom):
+    """Icône représentative d'une application, déduite de son nom (best-effort)."""
+    n = (nom or '').lower()
+    for mot, icone in _ICONES_APPLICATIONS:
+        if mot in n:
+            return icone
+    return '📦'
 DB_PATH = DATABASE  # alias conservé pour compatibilité
 
 _crypto_shared_cache = None   # CryptoManager en cache mémoire (valide pour toute la durée du process)
@@ -6693,6 +6718,19 @@ def api_device_info():
             if mac_address:
                 updates.append('adresse_mac=?')
                 params.append(mac_address)
+
+            # Un appareil créé avant que le hostname soit connu (résolution
+            # échouée, ou carte réseau pas encore identifiée) reste nommé
+            # d'après son IP ou « Device-XXXXXXXX » pour toujours : rien dans
+            # la boucle normale ne corrige `nom_machine` après la création.
+            # Un vrai hostname obtenu depuis remplace ce repli — jamais un
+            # nom que quelqu'un a choisi à la main.
+            nom_actuel = (old_data.get('nom_machine') or '').strip()
+            est_repli = bool(re.match(r'^\d{1,3}(\.\d{1,3}){3}$', nom_actuel)) \
+                or nom_actuel.startswith('Device-')
+            if hostname and est_repli and hostname != nom_actuel:
+                updates.append('nom_machine=?')
+                params.append(hostname)
 
             if os_name:
                 updates.append('os=?')

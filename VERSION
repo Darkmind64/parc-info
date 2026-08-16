@@ -1,8 +1,19 @@
-PARCINFO_VERSION=2.14.0
+PARCINFO_VERSION=2.15.0
 RELEASE_DATE=2026-08-16
-BUILD_NUMBER=2026081601
+BUILD_NUMBER=2026081602
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.15.0 - Corrections du collecteur d'après retour d'usage réel
+# 10 points remontés après un premier déploiement réel : collecte non
+# auto-démarrée (cases cochables avant lancement), fuseau horaire lisible,
+# MAC/IP canoniques choisies sur une carte physique connectée plutôt que la
+# première trouvée, jauges plus lisibles, vue d'ensemble « table de
+# partitions » des disques, direction Entrant/Sortant sur le pare-feu, toutes
+# les cartes réseau affichées (pas seulement actives), associations de
+# fichiers étendues avec icônes, rattrapage du nom d'appareil resté sur un
+# repli (IP/Device-XXXXXXXX), ports ouverts en badges sur la fiche appareil
+# Date: 16 août 2026
 
 # Version 2.14.0 - Redirections de port locales (netsh portproxy)
 # Troisième mécanisme de redirection silencieuse collecté, distinct du
