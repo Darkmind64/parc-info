@@ -1,8 +1,27 @@
-PARCINFO_VERSION=2.17.1
+PARCINFO_VERSION=2.18.0
 RELEASE_DATE=2026-08-17
-BUILD_NUMBER=2026081703
+BUILD_NUMBER=2026081704
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.0 - Vraies icônes, statut de mise à jour tri-état, correctif antivirus collecteur
+# Fiche système : chaque application (navigateur, mail, types de fichiers)
+# affiche sa vraie icône extraite de son exécutable (ExtractIconEx), plus un
+# émoji approximatif — colonne d'icône à largeur fixe pour un alignement
+# correct des noms. Le statut de mise à jour logicielle distingue maintenant
+# « à jour confirmé » de « non vérifiable » (winget list recoupé pour
+# Windows) : 208 logiciels avec un statut définitif sur un poste réel,
+# contre 106 avant. Identifiants RDP enregistrés en badges, dix processus
+# les plus gourmands au lieu de cinq. Corrigé au passage : le lecteur de
+# registre HKCR: n'existe pas en contexte non interactif (résolution de nom
+# de certaines associations de fichiers muette depuis toujours), et un
+# index d'icône négatif (identifiant de ressource) mal converti en positif.
+# Corrigé aussi : faux positif antivirus (Trojan:Win32/Sabsik.TE.A!ml,
+# Windows Defender) sur les deux exécutables du collecteur — la compression
+# UPX, déjà désactivée sur ParcInfo.exe pour la même raison (voir 4f07720),
+# était restée active sur ces deux builds. Même correctif : UPX désactivé,
+# manifeste Windows de confiance ajouté
+# Date: 17 août 2026
 
 # Version 2.17.1 - Mise à jour automatique macOS : app "endommagée" sur Mac Intel
 # Signalé en usage réel après la 2.17.0 : sur Mac Intel, l'app remplacée par

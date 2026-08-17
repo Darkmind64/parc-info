@@ -1,5 +1,66 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.0] - 2026-08-17 🎨
+
+### 🎨 Vraies icônes d'applications, statut de mise à jour tri-état, correctif antivirus
+
+**Vraies icônes d'applications.** La fiche système affichait jusqu'ici un
+émoji approximatif déduit du nom de chaque application (navigateur, client
+mail, type de fichier) — un même mot-clé produisant parfois un icône trompeur
+pour deux logiciels sans rapport. Le collecteur extrait désormais la vraie
+icône depuis l'exécutable lui-même (`ExtractIconEx`, Win32), en PNG 32×32
+encodé en base64, à partir de la clé de registre `DefaultIcon` de chaque
+ProgId. Au passage, une colonne de largeur fixe pour l'icône corrige un
+défaut d'alignement signalé : la largeur variable des émojis faisait démarrer
+les noms d'application à des positions différentes d'une ligne à l'autre.
+
+Deux bugs trouvés en testant sur un poste réel, tous deux invisibles sans
+exécution effective : un index d'icône négatif (identifiant de ressource,
+ex. `-9403` pour Outlook) était converti en positif avant l'appel à
+`ExtractIconEx`, qui gère pourtant nativement les deux conventions —
+extraction silencieusement vide dans ce cas. Et le lecteur de registre
+`HKCR:` n'existe pas dans le contexte non interactif où tourne le
+collecteur (`powershell -NoProfile -NonInteractive`, seuls `HKCU:`/`HKLM:`
+y sont montés) — bug préexistant qui, en plus de bloquer l'extraction
+d'icône, faisait déjà silencieusement échouer la résolution du nom lisible
+de certaines associations de fichiers (« Acrobat.Document.DC » affiché au
+lieu de « Document Adobe Acrobat »). Les deux corrigés : index transmis tel
+quel, `Registry::HKEY_CLASSES_ROOT\...` à la place de `HKCR:\...`.
+
+**Statut de mise à jour tri-état.** Depuis la 2.17.0, un logiciel sans mise
+à jour disponible et un logiciel simplement non suivi par le gestionnaire de
+paquets affichaient tous deux un tiret — impossible de distinguer les deux.
+Sur Windows, `winget list` est désormais recoupé avec `winget upgrade` : un
+logiciel présent dans la liste complète avec une source réelle mais absent
+des mises à jour est maintenant marqué « à jour » avec confiance, plutôt que
+de rester muet. Sur Linux, `installed_software` provient déjà du même
+gestionnaire que celui interrogé pour les mises à jour (apt/dpkg, dnf/rpm,
+pacman partagent chacun leur propre base) : même principe, sans appel
+supplémentaire. macOS reste volontairement sans ce statut — son inventaire
+mélange /Applications, `pkgutil` et Homebrew sans distinguer leur origine,
+rien ne garantirait la fiabilité d'un « à jour » affirmé à tort. Résultat
+sur un poste réel : 208 logiciels avec un statut définitif (106 mises à jour
+disponibles + 102 confirmés à jour), contre 106 seulement avant.
+
+**Autres ajustements de la fiche système** (retour d'usage) : identifiants
+RDP enregistrés affichés en badges plutôt qu'en liste texte séparée par des
+virgules ; dix processus les plus gourmands listés au lieu de cinq.
+
+**Correctif antivirus sur le collecteur.** Windows Defender signalait les
+deux exécutables du collecteur (`Trojan:Win32/Sabsik.TE.A!ml`, une détection
+heuristique, pas une signature connue) — déjà résolu une première fois pour
+`ParcInfo.exe` par le commit `4f07720` (désactivation de la compression UPX,
+ajout d'un manifeste Windows de confiance), mais jamais appliqué aux deux
+specs du collecteur, restées avec `upx=True`. UPX est un déclencheur connu
+de faux positifs : les logiciels malveillants l'utilisent aussi pour
+échapper à la détection par signature, ce qui rend tout exécutable non signé
+compressé avec UPX suspect aux yeux des moteurs heuristiques. Même correctif
+appliqué aux deux specs, vérifié par une reconstruction réelle des deux
+exécutables. Le fichier déjà publié en 2.17.1 reste flagué tel quel ; cette
+version republie des binaires propres.
+
+---
+
 ## [2.17.1] - 2026-08-17 🍏
 
 ### 🍏 Mise à jour automatique macOS : application « endommagée » sur Mac Intel
