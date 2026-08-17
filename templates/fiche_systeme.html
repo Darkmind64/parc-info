@@ -171,6 +171,18 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 .fs-partition-legend-item { display: flex; align-items: center; gap: .35rem; }
 .fs-partition-legend-item i { display: inline-block; width: 8px; height: 8px;
     border-radius: 2px; flex-shrink: 0; }
+
+/* Vue d'ensemble par disque : une carte par disque physique, la carte de
+   partitions ci-dessus posée dedans plutôt qu'un seul ruban mélangeant tous
+   les volumes de tous les disques. */
+.fs-disks { display: flex; flex-direction: column; gap: .7rem; }
+.fs-disk-card { background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 5px; padding: .6rem .8rem; }
+.fs-disk-head { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem;
+    margin-bottom: .5rem; }
+.fs-disk-nom { font-weight: 700; font-size: .85rem; color: var(--text-primary); }
+.fs-disk-taille { margin-left: auto; font-size: .78rem; color: var(--text-secondary);
+    font-variant-numeric: tabular-nums; }
 .fs-key {
     font-family: Consolas, monospace; font-size: .8rem; font-weight: 700; letter-spacing: .05em;
     background: var(--bg-secondary); border: 1px solid var(--border);
@@ -530,6 +542,51 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     </div>
     {% endif %}
 
+    {% if disque_layout %}
+    <div style="margin-top:.9rem;">
+        <div class="fs-label" style="font-size:.75rem;margin-bottom:.45rem;">
+            Vue d'ensemble — {{ disque_layout|length }} disque(s)
+        </div>
+        <div class="fs-disks">
+            {% for d in disque_layout %}
+            <div class="fs-disk-card">
+                <div class="fs-disk-head">
+                    <span class="fs-disk-nom">{{ d.model or ('Disque ' ~ (d.number if d.number is not none else '?')) }}</span>
+                    {% if d.media_type %}<span class="fs-pill fs-info">{{ d.media_type }}</span>{% endif %}
+                    {% if d.sante %}
+                    <span class="fs-pill {{ {'ok': 'fs-ok', 'warn': 'fs-warn', 'danger': 'fs-bad'}.get(d.sante_niveau, 'fs-muted') }}">{{ d.sante }}</span>
+                    {% endif %}
+                    {% if d.etat %}<span class="fs-pill fs-warn">{{ d.etat }}</span>{% endif %}
+                    <span class="fs-disk-taille">{{ d.size_gb }} GB</span>
+                </div>
+                {% if d.partitions %}
+                <div class="fs-partition-map">
+                    {% for p in d.partitions %}
+                    {% set libelle = p.letter if p.letter else (p.type if p.type else 'Non attribué') %}
+                    {% set largeur = (p.total / d.size_gb * 100) if d.size_gb else 0 %}
+                    <div class="fs-partition-seg" style="flex:{{ largeur }} 0 0%;background:{{ p.couleur }};"
+                         title="{{ libelle }} — {% if p.pct is not none %}{{ p.used }} / {{ p.total }} GB utilisés ({{ p.pct }} %){% else %}{{ p.taille_txt or (p.total ~ ' GB') }}{% endif %}">
+                        {% if largeur >= 6 %}<span>{{ libelle }}{% if p.pct is not none %} {{ p.pct }}%{% endif %}</span>{% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+                <div class="fs-partition-legend">
+                    {% for p in d.partitions %}
+                    {% set libelle = p.letter if p.letter else (p.type if p.type else 'Non attribué') %}
+                    <span class="fs-partition-legend-item"><i style="background:{{ p.couleur }};"></i>{{ libelle }} · {{ p.taille_txt or ((p.total ~ ' GB')) }}</span>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="fs-empty" style="padding:.6rem;">Aucune partition détectée sur ce disque</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    {# Repli pour les fiches collectées avant l'introduction de `disk_layout`
+       (collecteur < 3.1) ou sur macOS/Linux sans association disque connue :
+       tous les volumes dans une seule barre, sans regroupement par disque. #}
     {% set vols_carte = disques | rejectattr('brut') | list %}
     {% set total_general = vols_carte | sum(attribute='total') %}
     {% if vols_carte and total_general %}
@@ -558,6 +615,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {% endfor %}
         </div>
     </div>
+    {% endif %}
     {% endif %}
 
     {% if disques %}
@@ -2155,20 +2213,22 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 
 <!-- ── LOGICIELS ────────────────────────────────────────────────────────── -->
 {% if logiciels %}
+{% set obsoletes = logiciels|selectattr('update_status', 'equalto', 'obsolete')|list %}
 <div class="fs-section">
-    <h3>■ Logiciels installés ({{ logiciels|length }})</h3>
+    <h3>■ Logiciels installés ({{ logiciels|length }}){% if obsoletes %} <span class="fs-pill fs-warn">{{ obsoletes|length }} MISE(S) À JOUR DISPONIBLE(S)</span>{% endif %}</h3>
     <input type="text" id="fs-soft-filter" placeholder="Filtrer par nom ou éditeur…"
            style="width:100%;max-width:360px;margin-bottom:.7rem;padding:.4rem .6rem;font-size:.8rem;
                   background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);">
     <div class="fs-scroll">
         <table class="fs-table" id="fs-soft-table">
-            <tr><th>Nom</th><th>Version</th><th>Éditeur</th><th>Installé le</th></tr>
+            <tr><th>Nom</th><th>Version</th><th>Éditeur</th><th>Installé le</th><th>Mise à jour</th></tr>
             {% for s in logiciels %}
             <tr>
                 <td>{{ s.name }}</td>
                 <td class="fs-mono">{{ s.version or '—' }}</td>
                 <td>{{ s.publisher or '—' }}</td>
                 <td>{{ s.install_date or '—' }}</td>
+                <td>{% if s.update_status == 'obsolete' %}<span class="fs-pill fs-warn">v{{ s.latest_version or '?' }} disponible</span>{% else %}—{% endif %}</td>
             </tr>
             {% endfor %}
         </table>

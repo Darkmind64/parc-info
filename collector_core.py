@@ -45,7 +45,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.0'
+COLLECTOR_VERSION = '3.1'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -2035,25 +2035,80 @@ def _win_extras():
     """Batterie (dont usure réelle), adaptateurs réseau actifs, disques physiques."""
     info = {}
 
-    # Disques physiques : type (SSD/HDD) + état de santé SMART (natif Windows 8+)
-    physical_disks_data = _win_powershell_json(
-        "Get-PhysicalDisk | Select-Object FriendlyName,MediaType,HealthStatus,Size,OperationalStatus "
-        "| ConvertTo-Json -Compress"
+    # Disques physiques : type (SSD/HDD), état de santé SMART (natif Windows 8+),
+    # et leurs partitions (lettre, taille, libre) pour la vue « un disque, ses
+    # partitions dedans » de la fiche système. Une seule requête pour les deux :
+    # Get-Partition/Get-Volume par disque n'est pas gratuit, pas la peine de le
+    # payer deux fois.
+    #
+    # Get-PhysicalDisk n'a PAS de paramètre -DeviceId (constaté sur un poste
+    # réel : erreur de liaison de paramètre, avalée par le try/catch — Health
+    # et MediaType retombaient silencieusement à 'Inconnu' pour tous les
+    # disques). La table de correspondance DeviceId → disque est donc
+    # construite une fois via Where-Object plutôt qu'interrogée par disque.
+    # Get-Disk remonte aussi des périphériques sans rapport (lecteur de carte
+    # d'imprimante USB vu en test, 0 octet) : exclus par la taille.
+    disks_data = _win_powershell_json(
+        "$pdMap=@{}; try { Get-PhysicalDisk -ErrorAction SilentlyContinue "
+        "| ForEach-Object { $pdMap[[int]$_.DeviceId] = $_ } } catch {}; "
+        "@(Get-Disk -ErrorAction SilentlyContinue | Where-Object { $_.Size -gt 0 } | ForEach-Object { "
+        "$d=$_; $pd=$pdMap[[int]$d.Number]; "
+        # Toutes les partitions, pas seulement celles avec une lettre de
+        # lecteur : la réservée système (MSR), l'EFI et les partitions de
+        # récupération n'en ont jamais et n'en restent pas moins des
+        # partitions réelles du disque, avec leur propre taille.
+        "$parts=@(); try { Get-Partition -DiskNumber $d.Number -ErrorAction SilentlyContinue "
+        "| ForEach-Object { "
+        "$p=$_; $vol=$null; if ($p.DriveLetter) { try { $vol = Get-Volume -DriveLetter $p.DriveLetter "
+        "-ErrorAction SilentlyContinue } catch {} }; "
+        "$parts += [PSCustomObject]@{ "
+        "Letter=$(if ($p.DriveLetter) { [string]$p.DriveLetter } else { $null }); "
+        "Type=[string]$p.Type; SizeGB=[math]::Round($p.Size/1GB,2); "
+        "FreeGB=$(if ($vol) { [math]::Round($vol.SizeRemaining/1GB,1) } else { $null }) } } } catch {}; "
+        "[PSCustomObject]@{ Number=$d.Number; Model=$d.FriendlyName; Bus=$d.BusType; "
+        "SizeGB=[math]::Round($d.Size/1GB,1); "
+        "MediaType=$(if ($pd) { [string]$pd.MediaType } else { 'Inconnu' }); "
+        "Health=$(if ($pd) { [string]$pd.HealthStatus } else { 'Inconnu' }); "
+        "OpStatus=$(if ($pd) { [string]$pd.OperationalStatus } else { '' }); "
+        "Partitions=$parts } }) | ConvertTo-Json -Compress -Depth 5",
+        timeout=45,
     )
-    if physical_disks_data:
+    if disks_data:
         physical_list = []
-        for d in _as_list(physical_disks_data):
-            name = d.get('FriendlyName') or 'Disque'
+        layout = []
+        for d in _as_list(disks_data):
+            name = d.get('Model') or 'Disque'
             media = d.get('MediaType') or 'Inconnu'
-            health = d.get('HealthStatus') or 'Inconnu'
-            op_status = d.get('OperationalStatus') or ''
-            size_gb = round((d.get('Size') or 0) / (1024 ** 3), 1)
+            health = d.get('Health') or 'Inconnu'
+            op_status = d.get('OpStatus') or ''
+            size_gb = round(_num(d.get('SizeGB')) or 0, 1)
             entry = f"{name} — {media} — {size_gb} GB — Santé (SMART): {health}"
             if op_status and op_status != 'OK':
                 entry += f" ({op_status})"
             physical_list.append(entry)
+
+            partitions = []
+            for p in _as_list(d.get('Partitions')):
+                total = _num(p.get('SizeGB'))
+                if total is None:
+                    continue
+                letter = _clean(p.get('Letter')) or None
+                free = _num(p.get('FreeGB'))
+                used = round(total - free, 2) if free is not None else None
+                pct = round(used / total * 100) if used is not None and total else None
+                partitions.append({
+                    'letter': letter, 'type': _clean(p.get('Type')), 'total': total,
+                    'free': free, 'used': used, 'pct': pct,
+                })
+            layout.append({
+                'number': d.get('Number'), 'model': name, 'bus': _clean(d.get('Bus')),
+                'media_type': media, 'health': health, 'op_status': op_status,
+                'size_gb': size_gb, 'partitions': partitions,
+            })
         if physical_list:
             info['physical_disks'] = physical_list
+        if layout:
+            info['disk_layout'] = layout
 
     extras_data = _win_powershell_json(
         "$battery = @(); try { $battery = @(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue "
@@ -4846,8 +4901,28 @@ def get_system_info_mac():
 # COLLECTE LINUX
 # ════════════════════════════════════════════════════════════════════════════
 
+def _unix_disk_parent(device):
+    """Nom du disque physique parent d'une partition Linux/macOS telle que
+    `df` la nomme : /dev/sda1 -> sda, /dev/nvme0n1p1 -> nvme0n1,
+    /dev/mmcblk0p1 -> mmcblk0, /dev/disk3s1 -> disk3 (macOS/APFS)."""
+    nom = re.sub(r'^/dev/', '', device or '')
+    for motif in (r'^(nvme\d+n\d+)p\d+$', r'^(mmcblk\d+)p\d+$', r'^(disk\d+)s\d+'):
+        m = re.match(motif, nom)
+        if m:
+            return m.group(1)
+    m = re.match(r'^([a-z]+)\d+$', nom)
+    return m.group(1) if m else nom
+
+
 def _unix_disks():
-    """Disques via df (commun macOS / Linux)."""
+    """Disques via df (commun macOS / Linux).
+
+    En plus du détail par volume (`disk_drives`), regroupe les partitions par
+    disque physique parent (`disk_layout`) pour la vue « un disque, ses
+    partitions dedans » de la fiche système. Sans modèle ni type ici — Linux
+    les ajoute séparément via lsblk juste après ; macOS n'a pas de source pour
+    ces deux champs et le groupe reste identifié par son seul nom d'appareil.
+    """
     info = {}
     try:
         result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=10)
@@ -4856,6 +4931,7 @@ def _unix_disks():
         total_disk = 0.0
         total_free = 0.0
         seen = set()
+        groupes = {}
         for line in lines:
             parts = line.split()
             if len(parts) < 4:
@@ -4890,11 +4966,25 @@ def _unix_disks():
             )
             total_disk += size_gb
             total_free += free_gb
+
+            parent = _unix_disk_parent(device)
+            groupe = groupes.setdefault(parent, {
+                'number': parent, 'model': '', 'bus': '', 'media_type': '',
+                'health': '', 'op_status': '', 'size_gb': 0.0, 'partitions': [],
+            })
+            groupe['size_gb'] = round(groupe['size_gb'] + size_gb, 1)
+            groupe['partitions'].append({
+                'letter': device.replace('/dev/', ''), 'type': '', 'total': round(size_gb, 1),
+                'used': round(used_gb, 1), 'free': round(free_gb, 1),
+                'pct': round(used_gb / size_gb * 100) if size_gb else None,
+            })
         if disk_list:
             info['disk_drives'] = disk_list
             info['disk_total_gb'] = round(total_disk, 1)
             info['disk_free_gb'] = round(total_free, 1)
             info['disk_used_gb'] = round(total_disk - total_free, 1)
+        if groupes:
+            info['disk_layout'] = list(groupes.values())
     except Exception:
         pass
     return info
@@ -5049,13 +5139,22 @@ def get_system_info_linux():
         if out.strip():
             devices = json.loads(out).get('blockdevices', [])
             physical = []
+            par_nom = {}
             for d in devices:
                 if d.get('name', '').startswith(('loop', 'ram', 'sr')):
                     continue
                 media = 'HDD' if d.get('rota') in (True, '1', 1) else 'SSD'
                 physical.append(f"{d.get('model') or d.get('name')} — {media} — {d.get('size', '?')}")
+                par_nom[d.get('name')] = {'model': d.get('model') or '', 'media_type': media}
             if physical:
                 info['physical_disks'] = physical
+            # Rattache modèle et type au groupe déjà construit par _unix_disks() :
+            # lsblk connaît le disque physique, df n'en a que le nom d'appareil.
+            for groupe in info.get('disk_layout') or []:
+                enrichi = par_nom.get(groupe.get('number'))
+                if enrichi:
+                    groupe['model'] = enrichi['model']
+                    groupe['media_type'] = enrichi['media_type']
     except Exception:
         pass
 
@@ -5331,6 +5430,195 @@ def get_installed_software():
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# MISES À JOUR LOGICIELLES DISPONIBLES
+# ════════════════════════════════════════════════════════════════════════════
+
+def _run_hidden(cmd, timeout=10):
+    """Comme _run(), mais masque la fenêtre console qui apparaîtrait sinon par-
+    dessus le collecteur GUI (sans console attachée) — utilisé pour winget."""
+    try:
+        creationflags = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout, creationflags=creationflags)
+        return (result.stdout or b'').decode('utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
+def _normalize_software_name(name):
+    """Réduit un nom de logiciel à une forme comparable entre deux sources
+    (registre Windows vs gestionnaire de paquets) : casse, ponctuation et
+    mentions d'architecture entre parenthèses ignorées."""
+    n = re.sub(r'\([^)]*\)', ' ', str(name or '').lower())
+    n = re.sub(r'[^a-z0-9]+', ' ', n)
+    return n.strip()
+
+
+def _winget_upgradable():
+    """Liste les paquets winget ayant une mise à jour disponible.
+
+    Retourne {nom_normalise: version_disponible}, vide si winget est absent,
+    hors ligne ou si le format de sortie change. winget n'a pas de sortie
+    machine-readable stable pour `upgrade` : le tableau texte est parsé par
+    POSITION de colonne, jamais par intitulé — sur un Windows non anglophone,
+    l'en-tête est traduit (« Name »/« Nom », « Available »/« Disponible »…),
+    seul l'ordre des colonnes (nom, ID, version, disponible, source) est
+    stable d'une langue à l'autre (constaté sur un Windows en français : la
+    version par intitulé anglais ne trouvait jamais l'en-tête et retournait
+    silencieusement un dict vide).
+
+    La sortie peut contenir un second tableau, « paquets nécessitant un
+    ciblage explicite » (mises à jour majeures que winget ne fait pas
+    automatiquement) — chaque bloc « en-tête + séparateur + lignes » rencontré
+    est parsé, ligne de résumé finale comprise : elle est ignorée d'elle-même
+    car trop courte pour remplir la colonne « disponible ».
+    """
+    resultat = {}
+    if not shutil.which('winget'):
+        return resultat
+    sortie = _run_hidden(
+        ['winget', 'upgrade', '--include-unknown', '--disable-interactivity',
+         '--accept-source-agreements'],
+        timeout=90)
+    lignes = sortie.splitlines()
+    i = 1
+    while i < len(lignes):
+        # Un séparateur (----) désigne la ligne précédente comme en-tête de
+        # tableau : aucune ligne vide ne sépare forcément la dernière ligne de
+        # données de la phrase de résumé qui suit (constaté), donc on ne peut
+        # pas non plus s'arrêter uniquement sur une ligne vide — seule
+        # l'apparition d'un nouveau séparateur signale un nouveau tableau.
+        if not re.match(r'^-{5,}\s*$', lignes[i].strip()):
+            i += 1
+            continue
+        entete = lignes[i - 1]
+        colonnes = [m.start() for m in re.finditer(r'\S+', entete)]
+        i += 1
+        if len(colonnes) < 4:
+            continue
+        idx_dispo = 3  # nom, id, version, disponible, [source] — ordre fixe winget
+        while i < len(lignes) and not re.match(r'^-{5,}\s*$', lignes[i].strip()):
+            ligne = lignes[i]
+            if ligne.strip():
+                champs = []
+                for k, debut in enumerate(colonnes):
+                    fin = colonnes[k + 1] if k + 1 < len(colonnes) else len(ligne)
+                    champs.append(ligne[debut:fin].strip())
+                if len(champs) > idx_dispo and champs[0] and champs[idx_dispo]:
+                    resultat[_normalize_software_name(champs[0])] = champs[idx_dispo]
+            i += 1
+    return resultat
+
+
+def _brew_outdated():
+    """Consulte `brew outdated` (Homebrew, formules + casks) pour les logiciels
+    ayant une mise à jour disponible. Retourne {nom_normalise: version_dispo}."""
+    resultat = {}
+    if not shutil.which('brew'):
+        return resultat
+    sortie = _run(['brew', 'outdated', '--json=v2'], timeout=45)
+    try:
+        data = json.loads(sortie) if sortie.strip() else {}
+    except (ValueError, TypeError):
+        return resultat
+    for cle in ('formulae', 'casks'):
+        for item in (data.get(cle) or []):
+            try:
+                nom = item.get('name')
+                if isinstance(nom, list):
+                    nom = nom[0] if nom else None
+                version = item.get('current_version')
+                if nom and version:
+                    resultat[_normalize_software_name(nom)] = str(version)
+            except Exception:
+                continue
+    return resultat
+
+
+def _apt_upgradable():
+    """Paquets Debian/Ubuntu ayant une mise à jour dans le cache apt local —
+    pas de `apt update` déclenché ici : réseau et droits non garantis."""
+    resultat = {}
+    if not shutil.which('apt'):
+        return resultat
+    sortie = _run(['apt', 'list', '--upgradable'], timeout=30)
+    for ligne in sortie.splitlines():
+        m = re.match(r'^(\S+)/\S+\s+(\S+)\s', ligne.strip())
+        if m:
+            resultat[_normalize_software_name(m.group(1))] = m.group(2)
+    return resultat
+
+
+def _dnf_upgradable():
+    """Paquets RedHat/CentOS/Fedora ayant une mise à jour (`dnf`/`yum check-update`)."""
+    resultat = {}
+    exe = 'dnf' if shutil.which('dnf') else ('yum' if shutil.which('yum') else None)
+    if not exe:
+        return resultat
+    sortie = _run([exe, 'check-update'], timeout=45)
+    for ligne in sortie.splitlines():
+        m = re.match(r'^(\S+)\.\S+\s+(\S+)\s+\S+\s*$', ligne.strip())
+        if m:
+            resultat[_normalize_software_name(m.group(1))] = m.group(2)
+    return resultat
+
+
+def _pacman_upgradable():
+    """Paquets Arch Linux ayant une mise à jour (`pacman -Qu`)."""
+    resultat = {}
+    if not shutil.which('pacman'):
+        return resultat
+    sortie = _run(['pacman', '-Qu'], timeout=30)
+    for ligne in sortie.splitlines():
+        parts = ligne.split()
+        if len(parts) >= 4 and parts[2] == '->':
+            resultat[_normalize_software_name(parts[0])] = parts[3]
+    return resultat
+
+
+def check_software_updates(software):
+    """Annote chaque entrée de `software` avec `update_status` ('obsolete' ou
+    'inconnu') et, si une mise à jour est repérée, `latest_version` /
+    `update_source`. Modifie et retourne la même liste.
+
+    Le statut ne devient jamais 'a_jour' : un gestionnaire de paquets
+    n'indexe qu'une partie des logiciels remontés par le registre ou les
+    listes système (bien des installations manuelles lui échappent). Son
+    silence sur un logiciel donné signifie « non vérifiable par cette
+    source », pas « à jour ».
+    """
+    resultat, source = {}, ''
+    try:
+        if IS_WINDOWS:
+            resultat, source = _winget_upgradable(), 'winget'
+        elif IS_MAC:
+            resultat, source = _brew_outdated(), 'brew'
+        elif IS_LINUX:
+            for fn, nom_source in ((_apt_upgradable, 'apt'),
+                                    (_dnf_upgradable, 'dnf/yum'),
+                                    (_pacman_upgradable, 'pacman')):
+                trouve = fn()
+                if trouve:
+                    resultat, source = trouve, nom_source
+                    break
+    except Exception:
+        resultat, source = {}, ''
+
+    for soft in software:
+        if not isinstance(soft, dict):
+            continue
+        soft['update_status'] = 'inconnu'
+        soft['latest_version'] = ''
+        if not resultat:
+            continue
+        dispo = resultat.get(_normalize_software_name(soft.get('name')))
+        if dispo:
+            soft['update_status'] = 'obsolete'
+            soft['latest_version'] = dispo
+            soft['update_source'] = source
+    return software
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # TYPE D'APPAREIL
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -5499,6 +5787,17 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data
     # Logiciels
     _report(progress, 0.82, 'Inventaire logiciel')
     info['installed_software'] = get_installed_software()
+    _publier(on_data, info)
+
+    # Mises à jour disponibles : dépend d'un gestionnaire de paquets (winget/
+    # brew/apt/dnf/pacman) et peut interroger le réseau — isolé pour qu'un
+    # échec ou une lenteur ici ne prive pas le rapport de l'inventaire déjà
+    # récupéré ci-dessus.
+    _report(progress, 0.85, 'Vérification des mises à jour logicielles')
+    try:
+        check_software_updates(info['installed_software'])
+    except Exception:
+        pass
     _publier(on_data, info)
 
     # Périphériques USB connectés. Isolé de la collecte système : une erreur ici
@@ -6306,6 +6605,9 @@ def build_summary_sections(info):
     software = info.get('installed_software') or []
     if software:
         s['champs'].append(('Total', '%d logiciel(s)' % len(software)))
+        obsoletes = [x for x in software if isinstance(x, dict) and x.get('update_status') == 'obsolete']
+        if obsoletes:
+            s['champs'].append(('Mises à jour disponibles', '%d logiciel(s)' % len(obsoletes)))
         elements = []
         for soft in software:
             if isinstance(soft, dict):
@@ -6315,6 +6617,8 @@ def build_summary_sections(info):
                 extras = [x for x in (soft.get('publisher'), soft.get('install_date')) if x]
                 if extras:
                     libelle += '  [' + ' · '.join(str(e) for e in extras) + ']'
+                if soft.get('update_status') == 'obsolete':
+                    libelle += '  ⚠ maj disponible (v%s)' % soft.get('latest_version', '?')
             else:
                 libelle = str(soft)
             elements.append(libelle)
@@ -6511,6 +6815,20 @@ _SANTE_DISQUE = {
     'warning': ('À surveiller', 'warn'),
     'unhealthy': ('Défaillant', 'danger'),
     'unknown': ('Inconnu', 'muted'),
+}
+
+#: Type renvoyé par `Get-Partition.Type` (Windows) → libellé lisible. Une
+#: partition système (Reserved/System/Recovery) n'a jamais de lettre de
+#: lecteur : c'est ce type qui l'identifie à l'affichage, faute de lettre.
+#: 'IFS' est le libellé legacy MBR pour une partition de données NTFS/exFAT
+#: (équivalent GPT de 'Basic') — constaté sur un disque MBR réel.
+_TYPE_PARTITION = {
+    'basic': 'Données',
+    'ifs': 'Données',
+    'system': 'Système EFI',
+    'reserved': 'Réservé (MSR)',
+    'recovery': 'Récupération',
+    'unknown': 'Inconnu',
 }
 
 
@@ -6710,6 +7028,13 @@ def build_alerts(info):
         add('warn', '%d mise(s) à jour de sécurité en attente' % maj_secu)
     elif info.get('pending_updates'):
         add('info', '%d mise(s) à jour en attente' % len(info['pending_updates']))
+
+    obsoletes = [s for s in (info.get('installed_software') or [])
+                 if isinstance(s, dict) and s.get('update_status') == 'obsolete']
+    if obsoletes:
+        add('warn', '%d logiciel(s) avec une mise à jour disponible' % len(obsoletes),
+            ' · '.join('%s → v%s' % (s.get('name', '?'), s.get('latest_version', '?'))
+                       for s in obsoletes[:5]))
 
     age = hardware_age_years(info.get('bios_release_date'))
     if age is not None and age >= 6:
@@ -7060,14 +7385,19 @@ def _software_html(software):
             version = soft.get('version', '')
             publisher = soft.get('publisher', '')
             install = soft.get('install_date', '')
+            if soft.get('update_status') == 'obsolete':
+                maj = _pill_html('v%s disponible' % (soft.get('latest_version') or '?'), 'warn')
+            else:
+                maj = '<span class="empty">—</span>'
         else:
             name, version, publisher, install = str(soft), '', '', ''
+            maj = '<span class="empty">—</span>'
         rows.append(
             f'<tr><td class="idx">{i}</td><td>{_esc(name)}</td>'
             f'<td class="mono">{_esc(version)}</td><td>{_esc(publisher)}</td>'
-            f'<td class="mono">{_esc(install)}</td></tr>')
+            f'<td class="mono">{_esc(install)}</td><td>{maj}</td></tr>')
     return ('<div class="scroll"><table class="tbl"><thead><tr><th>#</th><th>Nom</th>'
-            '<th>Version</th><th>Éditeur</th><th>Installé le</th></tr></thead>'
+            '<th>Version</th><th>Éditeur</th><th>Installé le</th><th>Mise à jour</th></tr></thead>'
             f'<tbody>{"".join(rows)}</tbody></table></div>')
 
 
@@ -8671,8 +9001,14 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                 if isinstance(soft, dict):
                     name, version = soft.get('name', ''), soft.get('version', '')
                     publisher, install = soft.get('publisher', ''), soft.get('install_date', '')
+                    if soft.get('update_status') == 'obsolete':
+                        maj = (f'<font color="#c27803" size="7.5">v'
+                               f'{_pdf_escape(soft.get("latest_version") or "?")} disponible</font>')
+                    else:
+                        maj = '<font color="#9ca3af" size="7.5">—</font>'
                 else:
                     name, version, publisher, install = str(soft), '', '', ''
+                    maj = '<font color="#9ca3af" size="7.5">—</font>'
                 rows.append([
                     Paragraph(f'<font color="#9ca3af" size="7">{i}</font>', S['body']),
                     Paragraph(_pdf_escape(name), S['body']),
@@ -8680,10 +9016,11 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                               f'{_pdf_escape(version)}</font>', S['body']),
                     Paragraph(_pdf_escape(publisher), S['body']),
                     Paragraph(f'<font size="7.5">{_pdf_escape(install)}</font>', S['body']),
+                    Paragraph(maj, S['body']),
                 ])
             story.append(_pdf_data_table(
-                tk, ['#', 'Nom', 'Version', 'Éditeur', 'Installé le'], rows, width,
-                [0.06, 0.40, 0.16, 0.24, 0.14]))
+                tk, ['#', 'Nom', 'Version', 'Éditeur', 'Installé le', 'Mise à jour'], rows, width,
+                [0.05, 0.32, 0.13, 0.19, 0.12, 0.19]))
 
         story.append(Spacer(1, 10))
         story.append(Paragraph(

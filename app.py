@@ -4442,6 +4442,113 @@ def _fiche_systeme_disques_physiques(rapport):
     return disques
 
 
+#: Couleur fixe par type de partition, la même sur tous les disques de la
+#: fiche système : contrairement au rouge/orange/vert « niveau de
+#: remplissage » (déjà porté par le pourcentage affiché sur le segment), ce
+#: code n'a pas vocation à changer avec l'usage — une partition EFI est
+#: toujours sarcelle, qu'elle soit pleine à 10 % ou 90 %. Clé = type traduit
+#: en minuscules (voir `_TYPE_PARTITION` dans collector_core.py) ; « données »
+#: couvre aussi bien Windows (Basic/IFS) que macOS/Linux (type non détecté,
+#: mais une lettre/un point de montage prouve qu'il s'agit de données).
+_COULEUR_PARTITION = {
+    'données': '#00c9ff',
+    'réservé (msr)': '#a78bfa',
+    'récupération': '#fbbf24',
+    'système efi': '#2dd4bf',
+    'non attribué': '#64748b',
+}
+_COULEUR_PARTITION_INCONNU = '#475569'
+
+
+def _fiche_systeme_disk_layout(rapport):
+    """Regroupe les partitions par disque physique pour la vue « un disque,
+    ses partitions dedans » de la fiche système.
+
+    `disk_layout` vient du collecteur (3.1+, `_win_extras`/`_unix_disks` dans
+    collector_core.py) : une fiche collectée avant cet ajout n'a pas ce champ,
+    et la vue retombe alors sur l'ancienne carte à plat (gérée directement
+    dans le template).
+
+    Windows expose désormais TOUTES les partitions, pas seulement celles avec
+    une lettre de lecteur : réservée système (MSR), EFI et récupération en
+    ont, et n'en restent pas moins des partitions réelles à montrer — un
+    disque qui n'affichait qu'une seule partition sur cinq laissait croire à
+    de l'espace non identifié là où il n'y en avait pas. macOS/Linux n'ont pas
+    cette granularité (`df` ne voit que les systèmes de fichiers montés) : le
+    type y reste vide et la partition s'affiche par son seul nom d'appareil.
+    """
+    from collector_core import _SANTE_DISQUE, _TYPE_PARTITION
+
+    def _taille_lisible(go):
+        if go is None:
+            return None
+        if go < 1:
+            return '%d Mo' % round(go * 1024)
+        return '%.1f GB' % go if go < 10 else '%d GB' % round(go)
+
+    def _couleur_partition(non_attribue, lettre, type_libelle):
+        if non_attribue:
+            cle = 'non attribué'
+        elif lettre is not None:
+            # Une partition montée/lettrée est par définition des données,
+            # même si le type n'a pas pu être traduit (macOS/Linux).
+            cle = (type_libelle or 'données').lower()
+        else:
+            cle = (type_libelle or '').lower()
+        return _COULEUR_PARTITION.get(cle, _COULEUR_PARTITION_INCONNU)
+
+    disques = []
+    for d in rapport.get('disk_layout') or []:
+        partitions = []
+        total_partitionne = 0.0
+        for p in d.get('partitions') or []:
+            total = p.get('total')
+            if total is None:
+                continue
+            pct = p.get('pct')
+            lettre = p.get('letter') or None
+            type_brut = (p.get('type') or '').strip()
+            type_libelle = _TYPE_PARTITION.get(type_brut.lower(), type_brut or None) if type_brut else None
+            partitions.append({
+                'letter': lettre, 'type': type_libelle, 'total': total,
+                'taille_txt': _taille_lisible(total),
+                'used': p.get('used'), 'free': p.get('free'), 'pct': pct,
+                'non_attribue': False,
+                'couleur': _couleur_partition(False, lettre, type_libelle),
+            })
+            total_partitionne += total
+
+        taille_disque = d.get('size_gb') or round(total_partitionne, 1)
+        # Résiduel rare (arrondi, espace jamais partitionné en fin de disque) :
+        # les partitions système sans lettre sont désormais listées ci-dessus,
+        # ce segment ne comble plus que ce qu'aucune partition ne couvre.
+        non_attribue = round(taille_disque - total_partitionne, 2)
+        if non_attribue > 0.05:
+            partitions.append({
+                'letter': None, 'type': None, 'total': non_attribue,
+                'taille_txt': _taille_lisible(non_attribue), 'used': None,
+                'free': non_attribue, 'pct': None,
+                'non_attribue': True, 'couleur': _couleur_partition(True, None, None),
+            })
+
+        brut_sante = (d.get('health') or '').strip()
+        if brut_sante:
+            sante, sante_niveau = _SANTE_DISQUE.get(brut_sante.lower(), (brut_sante, 'muted'))
+        else:
+            sante, sante_niveau = None, None
+
+        op_status = (d.get('op_status') or '').strip()
+
+        disques.append({
+            'number': d.get('number'), 'model': (d.get('model') or '').strip(),
+            'media_type': (d.get('media_type') or '').strip(),
+            'sante': sante, 'sante_niveau': sante_niveau,
+            'etat': op_status if op_status and op_status != 'OK' else None,
+            'size_gb': taille_disque, 'partitions': partitions,
+        })
+    return disques
+
+
 def _fiche_systeme_kpis(rapport):
     """Vignettes chiffrées de la fiche système : valeur, barre et criticité.
 
@@ -4533,6 +4640,7 @@ def fiche_systeme_appareil(id):
     # le même jugement que le rapport PDF sur une machine donnée.
     alertes, kpis, disques, ports_cartes, ports_masques = [], [], [], [], 0
     disques_physiques = []
+    disque_layout = []
     age_materiel = None
     if rapport:
         try:
@@ -4543,6 +4651,7 @@ def fiche_systeme_appareil(id):
             kpis = _fiche_systeme_kpis(rapport)
             disques = _fiche_systeme_disques(rapport)
             disques_physiques = _fiche_systeme_disques_physiques(rapport)
+            disque_layout = _fiche_systeme_disk_layout(rapport)
             from collector_core import hardware_age_years
             age_materiel = hardware_age_years(rapport.get('bios_release_date'))
             ports = [describe_listening_port(p)
@@ -4571,6 +4680,7 @@ def fiche_systeme_appareil(id):
                            logiciels=logiciels, client=client, clients=get_clients(),
                            client_actif_id=cid, alertes=alertes, kpis=kpis,
                            disques=disques, disques_physiques=disques_physiques,
+                           disque_layout=disque_layout,
                            ports_cartes=ports_cartes,
                            ports_masques=ports_masques, age_materiel=age_materiel,
                            historique=historique)

@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.0 · **Version ParcInfo :** 2.9.7+
+**Version collecteur :** 3.1 · **Version ParcInfo :** 2.9.7+
 
 ---
 
@@ -51,7 +51,7 @@ servent donc une **archive ZIP** contenant les deux fichiers.
 | `gpu` | `carte_graphique` | Avec VRAM quand elle est lisible |
 | `antivirus` | `antivirus` | |
 | `open_ports` | `ports_ouverts` | Ports TCP en écoute, format identique au scan réseau |
-| `installed_software` | `logiciels_installes_json` | Liste complète, plafond 2000 entrées |
+| `installed_software` | `logiciels_installes_json` | Liste complète, plafond 2000 entrées. Chaque entrée porte aussi `update_status` (`obsolete`/`inconnu`) et `latest_version` — voir § Mises à jour logicielles |
 | *(tout le reste)* | `rapport_systeme_json` | **Snapshot JSON complet**, plafond 1 Mo |
 | *(horodatage)* | `derniere_synchro` | Mis à jour à chaque collecte |
 
@@ -142,6 +142,10 @@ rated_speed_mhz, manufacturer, part_number, serial_number}`
 ### Stockage
 `disk_total_gb` / `_used_gb` / `_free_gb` · `disk_drives[]` (volumes logiques) ·
 `physical_disks[]` (type SSD/HDD + santé SMART) ·
+`disk_layout[]{number, model, bus, media_type, health, op_status, size_gb,
+partitions[]{letter, type, total, used, free, pct}}` (depuis 3.1, un disque
+physique avec TOUTES ses partitions imbriquées, y compris celles sans lettre
+de lecteur — voir note ci-dessous) ·
 `disk_reliability[]{name, serial_number, power_on_hours, wear_percent,
 temperature_c, read_errors, write_errors}` ·
 `disk_partition_styles[]{number, style, boot}` (GPT/MBR) · `boot_disk_style` ·
@@ -150,6 +154,28 @@ temperature_c, read_errors, write_errors}` ·
 > `boot_mode` se lit via `Get-ComputerInfo -Property BiosFirmwareType`, sans
 > élévation — `bcdedit /enum`, essayé en premier, s'est révélé exiger les
 > droits administrateur même en lecture (constaté, pas supposé).
+
+> `disk_layout` alimente la vue « un disque, ses partitions dedans » de la
+> fiche système (remplace l'ancienne carte à plat qui mélangeait les volumes
+> de tous les disques). Sur Windows, `Get-Disk`/`Get-Partition`/`Get-Volume`
+> donnent la relation disque ↔ lettre de lecteur ; `physical_disks[]` est
+> dérivé de la même requête, pas d'un second appel. Sur macOS/Linux, il n'y a
+> pas d'équivalent WMI : le regroupement se fait par nom d'appareil
+> (`/dev/sda1` → `sda`, `/dev/nvme0n1p1` → `nvme0n1`, `/dev/disk3s1` → `disk3`
+> côté macOS) — `model`/`media_type` restent vides sauf sur Linux, où `lsblk`
+> les fournit. Une fiche collectée avant la 3.1 n'a pas ce champ : la fiche
+> système retombe alors sur l'ancienne vue à plat (`_fiche_systeme_disques`
+> dans `app.py`).
+>
+> `partitions[].type` vient de `Get-Partition.Type` (Windows uniquement —
+> `df` sur macOS/Linux ne voit que les systèmes de fichiers montés, donc pas
+> les partitions système sans lettre) : `Basic`/`IFS` (données), `System`
+> (EFI), `Reserved` (MSR), `Recovery`. Traduit à l'affichage par
+> `_TYPE_PARTITION` (collector_core.py) puis colorié par
+> `_COULEUR_PARTITION` (app.py) — un code couleur fixe par type, identique
+> sur tous les disques de la fiche, distinct du rouge/orange/vert de
+> remplissage (qui reste porté par le pourcentage affiché sur le segment
+> « Données », pas par sa couleur).
 
 ### Graphique & affichage
 `gpu` · `gpu_details[]{name, vram_gb, driver_version, driver_date, resolution}` ·
@@ -417,7 +443,38 @@ user}` · `top_processes_cpu[]{name, cpu_pct, ram_mb}` ·
 `users[]` (statut + appartenance au groupe Administrateurs) ·
 `users_details[]{name, status, enabled, admin, role, account_type,
 description, password_never_expires, last_logon}` ·
-`installed_software[]{name, version, publisher, install_date}`
+`installed_software[]{name, version, publisher, install_date, update_status,
+latest_version, update_source}`
+
+#### Mises à jour logicielles (depuis 3.1)
+
+Chaque entrée de `installed_software` reçoit deux champs supplémentaires,
+calculés par `check_software_updates()` juste après l'inventaire :
+
+| Champ | Valeurs | Notes |
+|---|---|---|
+| `update_status` | `'obsolete'` \| `'inconnu'` | Jamais `'a_jour'` — voir note ci-dessous |
+| `latest_version` | version dispo, ou `''` | Rempli seulement si `update_status == 'obsolete'` |
+| `update_source` | `'winget'` \| `'brew'` \| `'apt'` \| `'dnf/yum'` \| `'pacman'` | Présent seulement si `update_status == 'obsolete'` |
+
+Le statut ne vaut jamais `'a_jour'` : le gestionnaire de paquets consulté
+n'indexe qu'une partie des logiciels remontés par le registre ou les listes
+système (beaucoup d'installations manuelles lui échappent). Son silence sur
+un logiciel donné signifie « non vérifiable par cette source », pas « à jour ».
+
+Source consultée par OS — chacune est une commande locale, best-effort
+(dict vide si l'outil est absent, hors ligne, ou le format de sortie a changé) :
+
+| OS | Commande | Portée |
+|---|---|---|
+| Windows | `winget upgrade --include-unknown` | Paquets connus de winget uniquement |
+| macOS | `brew outdated --json=v2` | Formules + casks Homebrew uniquement |
+| Linux | `apt list --upgradable` puis `dnf`/`yum check-update` puis `pacman -Qu` (le premier gestionnaire présent qui répond) | Paquets du gestionnaire natif de la distribution |
+
+Le rapprochement entre le nom du registre/du gestionnaire de paquets se fait
+via `_normalize_software_name()` (casse, ponctuation et architecture entre
+parenthèses ignorées) — un logiciel installé hors de ces canaux (exe
+téléchargé à la main, par exemple) reste donc en `'inconnu'`.
 
 ### Métadonnées
 `collector_version` · `timestamp` · `elevated` · `platform`
@@ -476,6 +533,7 @@ avec un champ inaccessible.
 | Ports en écoute | ✅ | — | ✅ (`ss`) |
 | Comptes locaux | ✅ | ✅ | ✅ |
 | Logiciels (nom+version+éditeur) | ✅ | ⚠️ nom seul | ✅ dpkg/rpm/pacman |
+| Mise à jour logicielle disponible | ✅ winget | ✅ brew | ✅ apt/dnf/pacman |
 | Périphériques USB | ✅ | — | — |
 | Accès distant (RDP/WinRM/SSH/Telnet…) | ✅ | — | — |
 | Agents de télémaintenance & EDR | ✅ | — | — |
@@ -500,6 +558,13 @@ privilège manquant, édition Windows différente) ne fait jamais échouer les a
 Point d'attention : `SoftwareLicensingProduct` doit impérativement être interrogé
 avec un filtre WQL (`PartialProductKey IS NOT NULL`). Sans filtre, l'énumération
 parcourt plusieurs centaines d'entrées et dépasse 30 s à elle seule.
+
+L'étape « Vérification des mises à jour logicielles » (`check_software_updates()`)
+appelle un gestionnaire de paquets local (winget/brew/apt/dnf/pacman), donc sa
+durée dépend de l'accès réseau de la machine : jusqu'à 90 s de timeout sur
+Windows (`winget upgrade` peut resynchroniser ses sources). Comme les autres
+étapes, un échec ou une absence d'outil ne bloque jamais la collecte — le
+statut retombe alors à `'inconnu'` pour tous les logiciels.
 
 ---
 
