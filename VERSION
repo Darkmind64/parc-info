@@ -1,8 +1,22 @@
-PARCINFO_VERSION=2.17.0
+PARCINFO_VERSION=2.17.1
 RELEASE_DATE=2026-08-17
-BUILD_NUMBER=2026081702
+BUILD_NUMBER=2026081703
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.17.1 - Mise à jour automatique macOS : app "endommagée" sur Mac Intel
+# Signalé en usage réel après la 2.17.0 : sur Mac Intel, l'app remplacée par
+# une mise à jour automatique refusait ensuite de se lancer ("impossible
+# d'exécuter cette application"), alors qu'un remplacement manuel suivi
+# d'un simple xattr -cr fonctionnait. La signature ad hoc posée après
+# remplacement utilisait codesign --deep, qui re-signe récursivement tout
+# le bundle — Python.framework et les bibliothèques embarquées par
+# PyInstaller compris — un cas connu pour produire une signature invalide
+# sur un bundle complexe. --deep retiré : signer le bundle suffit à signer
+# l'exécutable principal qu'il référence, sans toucher aux composants
+# imbriqués. Correctif basé sur l'analyse du code et un comportement
+# codesign documenté ; pas encore confirmé sur Mac Intel réel
+# Date: 17 août 2026
 
 # Version 2.17.0 - Mises à jour logicielles détectées + stockage revu disque par disque
 # Le collecteur signale, pour chaque logiciel installé, si une version plus

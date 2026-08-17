@@ -438,13 +438,25 @@ class UpdateChecker:
            absents sur certains Mac ; échec silencieux dans ce cas (log
            seulement), pas d'écran bloquant pour l'utilisateur.
 
+        SANS `--deep` : signaler en production après la 2.16.1 (Mac Intel) —
+        l'app se relançait avec « impossible d'exécuter cette application »
+        après une mise à jour automatique, alors qu'un remplacement manuel
+        suivi du seul `xattr -cr` (sans codesign) fonctionnait. `--deep`
+        re-signe récursivement tout le bundle, y compris Python.framework et
+        les bibliothèques embarquées par PyInstaller — un cas que codesign
+        gère mal sur des bundles complexes (signature invalide au lancement,
+        bien documenté pour les apps PyInstaller). `--deep` n'était pas
+        nécessaire : signer le bundle suffit à signer l'exécutable principal
+        qu'il référence (CFBundleExecutable), sans toucher aux composants
+        imbriqués.
+
         Les deux échecs sont maintenant journalisés (contrairement à l'ancien
         `check=False` muet) : si le blocage persiste malgré tout, le journal
         dira enfin pourquoi, au lieu de forcer à deviner à nouveau.
         """
         for commande, nom in (
             (['xattr', '-cr', str(bundle)], 'xattr -cr'),
-            (['codesign', '--force', '--deep', '--sign', '-', str(bundle)], 'codesign ad hoc'),
+            (['codesign', '--force', '--sign', '-', str(bundle)], 'codesign ad hoc'),
         ):
             try:
                 r = subprocess.run(commande, capture_output=True, text=True, timeout=30)

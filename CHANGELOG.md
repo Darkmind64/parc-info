@@ -1,5 +1,37 @@
 # CHANGELOG - ParcInfo
 
+## [2.17.1] - 2026-08-17 🍏
+
+### 🍏 Mise à jour automatique macOS : application « endommagée » sur Mac Intel
+
+Signalé en usage réel juste après la 2.17.0 : sur Mac Intel, l'application
+remplacée par une mise à jour automatique refusait ensuite de se lancer
+(« impossible d'exécuter cette application »), alors qu'un remplacement
+manuel de l'archive téléchargée, suivi d'un simple `xattr -cr`, fonctionnait
+normalement — signe que le blocage ne venait pas de la quarantaine du
+navigateur (déjà levée par les deux méthodes) mais d'une étape propre au
+mécanisme automatique.
+
+La différence : après remplacement, `_debloquer_gatekeeper_macos()` pose une
+signature ad hoc (`codesign --sign -`, sans certificat Apple, introduite en
+2.16.1) avec l'option `--deep` — qui re-signe récursivement tout le bundle,
+Python.framework et les bibliothèques embarquées par PyInstaller compris.
+C'est un comportement connu et documenté : `codesign --deep` gère mal les
+bundles complexes et peut produire une signature invalide au lancement,
+sans qu'aucune erreur ne remonte à la signature elle-même (le programme
+rapporte un succès, l'échec n'apparaît qu'à l'ouverture). `--deep` n'était
+pas nécessaire : signer le bundle suffit à signer l'exécutable principal
+qu'il référence (`CFBundleExecutable`), sans toucher aux composants
+imbriqués — exactement ce que fait la réparation manuelle, qui n'appelle
+jamais `codesign`.
+
+`--deep` retiré. Correctif basé sur l'analyse du code et un comportement
+`codesign`/PyInstaller bien documenté par ailleurs — aucun accès direct à
+un Mac Intel pour reproduire le blocage exact avant correction, à confirmer
+par un prochain retour d'usage réel.
+
+---
+
 ## [2.17.0] - 2026-08-17 📀
 
 ### 📀 Mises à jour logicielles détectées + stockage revu disque par disque
