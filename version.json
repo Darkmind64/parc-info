@@ -1,21 +1,20 @@
 {
-  "version": "2.16.2",
-  "release_date": "2026-08-16T00:00:00.000000",
+  "version": "2.16.3",
+  "release_date": "2026-08-17T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.2/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.2/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.2/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.16.2",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.2/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.2/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.2/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.16.3",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Mise à jour macOS : le bon binaire (ARM/Intel) est enfin choisi",
+    "new_features": "Correction d'une erreur de synchronisation Turso (UNIQUE constraint failed)",
     "improvements": [
-      "CORRIGÉ (important): le sélecteur de mise à jour in-app renvoyait toujours le binaire ARM, quelle que soit l'architecture réelle du Mac — un Mac Intel se voyait proposer et installer le binaire ARM, que macOS refuse ensuite d'ouvrir (« n'est pas pris en charge par ce Mac »). Corrigé : le choix se fait maintenant sur l'architecture du processus en cours.",
-      "AJOUT: filet de sécurité — avant de remplacer la version actuelle (qui fonctionne), l'architecture du binaire téléchargé est vérifiée directement. En cas de désaccord, la mise à jour est refusée et l'ancienne version reste en place, plutôt que d'être remplacée par une version qui ne démarrera pas."
+      "CORRIGÉ: la synchronisation Turso pouvait échouer avec « UNIQUE constraint failed: _sync_journal.tbl, _sync_journal.record_id, _sync_journal.action » lors du push de documents. Le trigger de journalisation utilisait INSERT OR REPLACE ; la contrainte UNIQUE ... ON CONFLICT REPLACE était bien détectée mais sa résolution ne semblait pas s'appliquer de façon fiable une fois le trigger exécuté à distance par Turso. Remplacé par une paire DELETE puis INSERT, qui ne dépend d'aucune résolution de conflit. Se corrige automatiquement sur les bases déjà déployées, au prochain cycle de synchronisation."
     ]
   },
   "checksums": {
@@ -26,5 +25,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.16.2"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.16.3"
 }

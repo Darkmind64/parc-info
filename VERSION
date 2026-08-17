@@ -1,8 +1,19 @@
-PARCINFO_VERSION=2.16.2
-RELEASE_DATE=2026-08-16
-BUILD_NUMBER=2026081608
+PARCINFO_VERSION=2.16.3
+RELEASE_DATE=2026-08-17
+BUILD_NUMBER=2026081701
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.16.3 - Correction d'une erreur de synchronisation Turso
+# Signalé en production : « UNIQUE constraint failed » sur _sync_journal
+# lors du push de documents. Le trigger de journalisation utilisait INSERT
+# OR REPLACE ; la contrainte UNIQUE(...) ON CONFLICT REPLACE était bien
+# détectée (le message d'erreur le prouve) mais sa résolution ne semblait
+# pas s'appliquer de façon fiable une fois le trigger exécuté à distance
+# par Turso. Remplacé par DELETE puis INSERT, qui n'a besoin d'aucune
+# résolution de conflit. Se corrige automatiquement sur les bases déjà
+# déployées, au prochain cycle de sync — aucune action manuelle
+# Date: 17 août 2026
 
 # Version 2.16.2 - Mise à jour macOS : le bon binaire (ARM/Intel) est enfin choisi
 # _get_platform_key() renvoyait toujours le zip ARM, quelle que soit

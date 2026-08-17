@@ -1,5 +1,37 @@
 # CHANGELOG - ParcInfo
 
+## [2.16.3] - 2026-08-17 🔄
+
+### 🔄 Correction d'une erreur de synchronisation Turso
+
+Signalé en production : `⚠ push documents_appareils: SQLite error: UNIQUE
+constraint failed: _sync_journal.tbl, _sync_journal.record_id,
+_sync_journal.action`.
+
+Le trigger `_trg_journal_*` qui journalise chaque écriture pour la
+synchronisation utilisait `INSERT OR REPLACE INTO _sync_journal`, sur une
+table portant `UNIQUE(tbl, record_id, action) ON CONFLICT REPLACE` depuis sa
+toute première version (vérifié dans l'historique — aucune dérive de schéma
+locale). Le message d'erreur lui-même le confirme : la contrainte est bien
+détectée. C'est sa résolution `REPLACE` qui ne semble pas s'appliquer de
+façon fiable une fois le trigger exécuté à distance par Turso — un écart de
+compatibilité SQLite/libSQL plausible pour ce genre de mécanisme moins
+courant, plutôt qu'une erreur de schéma des deux côtés.
+
+Plutôt que de chercher à confirmer la cause exacte sans accès direct à
+l'instance concernée, le trigger a été réécrit pour ne plus en dépendre :
+`DELETE FROM _sync_journal WHERE …` suivi d'un `INSERT` simple, en deux
+instructions distinctes dans le corps du trigger. Reproduit avec succès le
+scénario exact de production (une clé déjà présente dans le journal, puis
+une nouvelle écriture dessus) dans une nouvelle suite de tests.
+
+Se corrige automatiquement sur les instances déjà déployées : le mécanisme
+qui compare et remplace un trigger périmé sur Turso (introduit en 2.9.9)
+détecte la nouvelle définition au prochain cycle de synchronisation, sans
+action manuelle.
+
+---
+
 ## [2.16.2] - 2026-08-16 🍏
 
 ### 🍏 Mise à jour macOS : le bon binaire (ARM/Intel) est enfin choisi

@@ -1579,25 +1579,39 @@ def init_db():
         c.execute(f"DROP TRIGGER IF EXISTS _trg_journal_ins_{_t}")
         c.execute(f"DROP TRIGGER IF EXISTS _trg_journal_upd_{_t}")
         c.execute(f"DROP TRIGGER IF EXISTS _trg_journal_del_{_t}")
+        # DELETE puis INSERT plutôt qu'un seul INSERT OR REPLACE : signalé en
+        # production, « UNIQUE constraint failed » sur _sync_journal côté
+        # Turso alors que la contrainte est UNIQUE(...) ON CONFLICT REPLACE
+        # ET que le trigger dit bien OR REPLACE — la contrainte est donc
+        # correctement détectée, mais sa résolution REPLACE ne semble pas
+        # s'appliquer de façon fiable une fois le trigger exécuté à distance
+        # par Turso (écart de compatibilité SQLite/libSQL plausible plutôt
+        # qu'une erreur de schéma : la table _sync_journal locale porte cette
+        # clause ON CONFLICT REPLACE depuis sa toute première version). Deux
+        # instructions simples plutôt qu'une résolution de conflit évite ce
+        # risque, quelle qu'en soit la cause exacte.
         # INSERT trigger
         c.execute(f"""CREATE TRIGGER _trg_journal_ins_{_t}
             AFTER INSERT ON {_t}
             WHEN NOT EXISTS (SELECT 1 FROM _sync_applying) BEGIN
-                INSERT OR REPLACE INTO _sync_journal (tbl, record_id, action, timestamp)
+                DELETE FROM _sync_journal WHERE tbl='{_t}' AND record_id=NEW.{_pk} AND action='INSERT';
+                INSERT INTO _sync_journal (tbl, record_id, action, timestamp)
                 VALUES ('{_t}', NEW.{_pk}, 'INSERT', datetime('now'));
             END""")
         # UPDATE trigger
         c.execute(f"""CREATE TRIGGER _trg_journal_upd_{_t}
             AFTER UPDATE ON {_t}
             WHEN NOT EXISTS (SELECT 1 FROM _sync_applying) BEGIN
-                INSERT OR REPLACE INTO _sync_journal (tbl, record_id, action, timestamp)
+                DELETE FROM _sync_journal WHERE tbl='{_t}' AND record_id=NEW.{_pk} AND action='UPDATE';
+                INSERT INTO _sync_journal (tbl, record_id, action, timestamp)
                 VALUES ('{_t}', NEW.{_pk}, 'UPDATE', datetime('now'));
             END""")
         # DELETE trigger
         c.execute(f"""CREATE TRIGGER _trg_journal_del_{_t}
             AFTER DELETE ON {_t}
             WHEN NOT EXISTS (SELECT 1 FROM _sync_applying) BEGIN
-                INSERT OR REPLACE INTO _sync_journal (tbl, record_id, action, timestamp)
+                DELETE FROM _sync_journal WHERE tbl='{_t}' AND record_id=OLD.{_pk} AND action='DELETE';
+                INSERT INTO _sync_journal (tbl, record_id, action, timestamp)
                 VALUES ('{_t}', OLD.{_pk}, 'DELETE', datetime('now'));
             END""")
 
