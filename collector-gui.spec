@@ -65,7 +65,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,                          # Désactiver UPX (réduit faux positifs antivirus)
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,  # GUI app - no console
@@ -73,6 +73,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    manifest='app.manifest',            # Manifest de confiance Windows
     icon='static/icon.ico',             # La même que ParcInfo : même outillage
 )
 
