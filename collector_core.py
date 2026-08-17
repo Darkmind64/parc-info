@@ -45,7 +45,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.1'
+COLLECTOR_VERSION = '3.2'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -2525,8 +2525,8 @@ def _win_diagnostics():
     return info
 
 
-def _win_top_processes(echantillon_ms=600, limite=5):
-    """Cinq processus les plus gourmands en CPU, cinq en RAM, au moment de la collecte.
+def _win_top_processes(echantillon_ms=600, limite=10):
+    """Dix processus les plus gourmands en CPU, dix en RAM, au moment de la collecte.
 
     Le CPU de `Get-Process` est un temps CUMULÉ depuis le lancement du
     processus, pas une charge instantanée : un navigateur ouvert depuis trois
@@ -4146,59 +4146,140 @@ def _win_workstation_extras():
     """Réglages du poste utiles au dépannage : applications par défaut,
     navigateurs installés, associations de fichiers, lecteurs réseau,
     redémarrage en attente.
+
+    Chaque application identifiée (navigateur/mail par défaut, association de
+    fichier, navigateur installé) porte aussi sa vraie icône — extraite du
+    fichier exécutable via `ExtractIconEx` (Win32), pas une icône générique
+    déduite du nom. `DefaultIcon` (clé de registre associée à chaque ProgId)
+    donne le chemin et l'index à extraire ; mise en cache par valeur brute
+    dans le script PowerShell pour ne jamais extraire deux fois la même icône
+    (plusieurs associations pointent souvent vers le même programme).
     """
     info = {}
     liste_ext_ps = "@(%s)" % ','.join("'%s'" % e for e in _EXTENSIONS_SUIVIES)
-    data = _win_powershell_json(
-        # Association par défaut https et mailto (choix de l'utilisateur)
-        "$nav=$null; try { $nav=(Get-ItemProperty "
-        "'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice' "
-        "-EA SilentlyContinue).ProgId } catch {}; "
-        "$courriel=$null; try { $courriel=(Get-ItemProperty "
-        "'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\mailto\\UserChoice' "
-        "-EA SilentlyContinue).ProgId } catch {}; "
-        # Navigateurs installés : déclarés sous StartMenuInternet, avec leur exe
-        "$navs=@(); try { foreach ($ruche in @('HKLM:\\SOFTWARE\\Clients\\StartMenuInternet',"
-        "'HKCU:\\SOFTWARE\\Clients\\StartMenuInternet')) { "
-        "if (Test-Path $ruche) { foreach ($c in Get-ChildItem $ruche -EA SilentlyContinue) { "
-        "$exe=(Get-ItemProperty \"$($c.PSPath)\\shell\\open\\command\" -EA SilentlyContinue).'(default)'; "
-        "$exe=($exe -replace '\"','').Trim(); $ver=''; "
-        "if ($exe -and (Test-Path $exe)) { try { $ver=(Get-Item $exe).VersionInfo.ProductVersion } catch {} }; "
-        "$navs += [PSCustomObject]@{ Nom=(Get-ItemProperty $c.PSPath -EA SilentlyContinue).'(default)'; "
-        "Version=$ver; Exe=$exe } } } } } catch {}; "
-        # Association par défaut pour une poignée d'extensions courantes :
-        # choix utilisateur (FileExts\UserChoice) sinon valeur globale HKCR,
-        # puis nom lisible du ProgId (description enregistrée, sinon le
-        # ProgId lui-même, plus parlant que rien).
-        "$assocs=@(); foreach ($ext in " + liste_ext_ps + ") { try { "
-        "$progId=$null; $cle=\"HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\FileExts\\$ext\\UserChoice\"; "
-        "if (Test-Path $cle) { $progId=(Get-ItemProperty $cle -EA SilentlyContinue).ProgId }; "
-        "if (-not $progId) { $progId=(Get-ItemProperty \"HKCR:\\$ext\" -EA SilentlyContinue).'(default)' }; "
-        "$nomProg=$null; "
-        "if ($progId) { $nomProg=(Get-ItemProperty \"HKCR:\\$progId\" -EA SilentlyContinue).'(default)' }; "
-        "if ($progId -or $nomProg) { $assocs += [PSCustomObject]@{ Ext=$ext; ProgId=$progId; Nom=$nomProg } } "
-        "} catch {} }; "
-        # Lecteurs réseau mappés
-        "$lecteurs=@(); try { $lecteurs=@(Get-CimInstance Win32_MappedLogicalDisk -EA SilentlyContinue "
-        "| Select-Object DeviceID,ProviderName) } catch {}; "
-        # Redémarrage en attente : plusieurs indices possibles
-        "$rb=@(); "
-        "if (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending') { $rb+='Servicing (mise à jour de composants)' }; "
-        "if (Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired') { $rb+='Windows Update' }; "
-        "try { if ((Get-ItemProperty 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager' -EA SilentlyContinue).PendingFileRenameOperations) { $rb+='Fichiers en attente de renommage' } } catch {}; "
-        "[PSCustomObject]@{ Navigateur=$nav; Courriel=$courriel; Navigateurs=$navs; Associations=$assocs; "
-        "Lecteurs=$lecteurs; Reboot=$rb } | ConvertTo-Json -Compress -Depth 4",
-        timeout=40,
+    script = (
+        r'''
+Add-Type -AssemblyName System.Drawing
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class ParcInfoIconExtractor {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int ExtractIconEx(string file, int index, out IntPtr large, out IntPtr small, int count);
+}
+'@ -ErrorAction SilentlyContinue
+} catch {}
+
+$iconCache = @{}
+function Resolve-DefaultIconSpec($progId) {
+    if (-not $progId) { return $null }
+    try { return (Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\$progId\DefaultIcon" -EA SilentlyContinue).'(default)' } catch { return $null }
+}
+function Get-IconBase64($spec) {
+    if (-not $spec) { return $null }
+    if ($iconCache.ContainsKey($spec)) { return $iconCache[$spec] }
+    $resultat = $null
+    try {
+        $path = $spec; $idx = 0
+        if ($spec -match '^"?(.+?)"?,(-?\d+)$') { $path = $matches[1]; $idx = [int]$matches[2] }
+        $path = [Environment]::ExpandEnvironmentVariables($path.Trim('"'))
+        if (Test-Path -LiteralPath $path) {
+            # Un index négatif dans DefaultIcon désigne un identifiant de
+            # ressource (pas une position) — ExtractIconEx le sait déjà
+            # nativement, il ne faut surtout pas le rendre positif.
+            $large=[IntPtr]::Zero; $small=[IntPtr]::Zero
+            [void][ParcInfoIconExtractor]::ExtractIconEx($path, $idx, [ref]$large, [ref]$small, 1)
+            $handle = if ($large -ne [IntPtr]::Zero) { $large } elseif ($small -ne [IntPtr]::Zero) { $small } else { [IntPtr]::Zero }
+            if ($handle -ne [IntPtr]::Zero) {
+                $icon = [System.Drawing.Icon]::FromHandle($handle)
+                # Canevas fixe 32x32 : une icône source plus grande ou plus
+                # petite est mise à l'échelle, la taille du rapport reste
+                # prévisible quelle que soit l'application.
+                $bmp = New-Object System.Drawing.Bitmap 32,32
+                $g = [System.Drawing.Graphics]::FromImage($bmp)
+                $g.DrawIcon($icon, 0, 0)
+                $g.Dispose()
+                $ms = New-Object System.IO.MemoryStream
+                $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+                $resultat = [Convert]::ToBase64String($ms.ToArray())
+            }
+        }
+    } catch {}
+    $iconCache[$spec] = $resultat
+    return $resultat
+}
+
+# Association par défaut https et mailto (choix de l'utilisateur)
+$nav=$null; try { $nav=(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice' -EA SilentlyContinue).ProgId } catch {}
+$courriel=$null; try { $courriel=(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\mailto\UserChoice' -EA SilentlyContinue).ProgId } catch {}
+
+# Navigateurs installés : déclarés sous StartMenuInternet, avec leur exe
+$navs=@()
+try {
+    foreach ($ruche in @('HKLM:\SOFTWARE\Clients\StartMenuInternet','HKCU:\SOFTWARE\Clients\StartMenuInternet')) {
+        if (Test-Path $ruche) {
+            foreach ($c in Get-ChildItem $ruche -EA SilentlyContinue) {
+                $exe=(Get-ItemProperty "$($c.PSPath)\shell\open\command" -EA SilentlyContinue).'(default)'
+                $exe=($exe -replace '"','').Trim()
+                $ver=''
+                if ($exe -and (Test-Path $exe)) { try { $ver=(Get-Item $exe).VersionInfo.ProductVersion } catch {} }
+                $icone = if ($exe -and (Test-Path $exe)) { Get-IconBase64 "$exe,0" } else { $null }
+                $navs += [PSCustomObject]@{ Nom=(Get-ItemProperty $c.PSPath -EA SilentlyContinue).'(default)'; Version=$ver; Exe=$exe; Icone=$icone }
+            }
+        }
+    }
+} catch {}
+
+# Association par défaut pour une poignée d'extensions courantes : choix
+# utilisateur (FileExts\UserChoice) sinon valeur globale HKCR, puis nom
+# lisible du ProgId (description enregistrée, sinon le ProgId lui-même).
+$assocs=@()
+foreach ($ext in ''' + liste_ext_ps + r''') {
+    try {
+        $progId=$null; $cle="HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\$ext\UserChoice"
+        if (Test-Path $cle) { $progId=(Get-ItemProperty $cle -EA SilentlyContinue).ProgId }
+        if (-not $progId) { $progId=(Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\$ext" -EA SilentlyContinue).'(default)' }
+        $nomProg=$null
+        if ($progId) { $nomProg=(Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\$progId" -EA SilentlyContinue).'(default)' }
+        if ($progId -or $nomProg) {
+            $assocs += [PSCustomObject]@{ Ext=$ext; ProgId=$progId; Nom=$nomProg; Icone=(Get-IconBase64 (Resolve-DefaultIconSpec $progId)) }
+        }
+    } catch {}
+}
+
+# Lecteurs réseau mappés
+$lecteurs=@(); try { $lecteurs=@(Get-CimInstance Win32_MappedLogicalDisk -EA SilentlyContinue | Select-Object DeviceID,ProviderName) } catch {}
+
+# Redémarrage en attente : plusieurs indices possibles
+$rb=@()
+if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $rb+='Servicing (mise à jour de composants)' }
+if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') { $rb+='Windows Update' }
+try { if ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -EA SilentlyContinue).PendingFileRenameOperations) { $rb+='Fichiers en attente de renommage' } } catch {}
+
+$navIcon = Get-IconBase64 (Resolve-DefaultIconSpec $nav)
+$courrielIcon = Get-IconBase64 (Resolve-DefaultIconSpec $courriel)
+
+[PSCustomObject]@{ Navigateur=$nav; NavigateurIcone=$navIcon; Courriel=$courriel; CourrielIcone=$courrielIcon;
+    Navigateurs=$navs; Associations=$assocs; Lecteurs=$lecteurs; Reboot=$rb } | ConvertTo-Json -Compress -Depth 4
+'''
     )
+    data = _win_powershell_json(script, timeout=50)
     if not data:
         return info
 
     prog_nav = _clean(data.get('Navigateur'))
     if prog_nav:
         info['default_browser'] = _PROGID_NAVIGATEURS.get(prog_nav, prog_nav)
+        icone = _clean(data.get('NavigateurIcone'))
+        if icone:
+            info['default_browser_icon'] = icone
     prog_mail = _clean(data.get('Courriel'))
     if prog_mail:
         info['default_mail'] = _nom_client_mail(prog_mail)
+        icone = _clean(data.get('CourrielIcone'))
+        if icone:
+            info['default_mail_icon'] = icone
 
     associations = []
     for a in _as_list(data.get('Associations')):
@@ -4208,7 +4289,7 @@ def _win_workstation_extras():
         nom = _clean(a.get('Nom')) or _clean(a.get('ProgId'))
         if not nom:
             continue
-        associations.append({'extension': ext, 'name': nom})
+        associations.append({'extension': ext, 'name': nom, 'icon': _clean(a.get('Icone')) or None})
     if associations:
         info['file_type_defaults'] = associations
 
@@ -4217,7 +4298,10 @@ def _win_workstation_extras():
         nom = _clean(n.get('Nom'))
         if not nom:
             continue
-        navigateurs.append({'name': nom, 'version': _clean(n.get('Version'))})
+        navigateurs.append({
+            'name': nom, 'version': _clean(n.get('Version')),
+            'icon': _clean(n.get('Icone')) or None,
+        })
     if navigateurs:
         # Dédoublonnage : une même install peut figurer sous HKLM et HKCU.
         vus, uniques = set(), []
@@ -5453,24 +5537,58 @@ def _normalize_software_name(name):
     return n.strip()
 
 
+def _parse_winget_table(sortie):
+    """Parse un tableau texte produit par winget (`upgrade` ou `list`), par
+    POSITION de colonne, jamais par intitulé d'en-tête — sur un Windows non
+    anglophone, l'en-tête est traduit (« Name »/« Nom », « Available »/
+    « Disponible »…), seul l'ordre des colonnes (nom, ID, version,
+    disponible, source) est stable d'une langue à l'autre (constaté sur un
+    Windows en français : la version par intitulé anglais ne trouvait jamais
+    l'en-tête et retournait silencieusement un résultat vide).
+
+    La sortie peut contenir plusieurs tableaux (`upgrade` en affiche un
+    second pour les paquets nécessitant un ciblage explicite) — chaque bloc
+    « en-tête + séparateur + lignes » rencontré est parsé, ligne de résumé
+    finale comprise : elle ne produit pas de ligne exploitable, trop courte
+    pour remplir les dernières colonnes.
+
+    Retourne une liste de lignes, chacune une liste de champs alignés sur les
+    colonnes de SON propre en-tête (pas forcément le même nombre de colonnes
+    d'un tableau à l'autre dans une même sortie).
+    """
+    lignes = sortie.splitlines()
+    resultat = []
+    i = 1
+    while i < len(lignes):
+        if not re.match(r'^-{5,}\s*$', lignes[i].strip()):
+            i += 1
+            continue
+        colonnes = [m.start() for m in re.finditer(r'\S+', lignes[i - 1])]
+        i += 1
+        if len(colonnes) < 2:
+            continue
+        while i < len(lignes) and not re.match(r'^-{5,}\s*$', lignes[i].strip()):
+            ligne = lignes[i]
+            if ligne.strip():
+                champs = []
+                for k, debut in enumerate(colonnes):
+                    fin = colonnes[k + 1] if k + 1 < len(colonnes) else len(ligne)
+                    champs.append(ligne[debut:fin].strip())
+                resultat.append(champs)
+            i += 1
+    return resultat
+
+
+#: Position des colonnes dans un tableau winget (upgrade ou list) — ordre
+#: fixe, contrairement aux intitulés d'en-tête (voir _parse_winget_table).
+_WINGET_COL_NOM, _WINGET_COL_DISPONIBLE, _WINGET_COL_SOURCE = 0, 3, 4
+
+
 def _winget_upgradable():
     """Liste les paquets winget ayant une mise à jour disponible.
 
     Retourne {nom_normalise: version_disponible}, vide si winget est absent,
-    hors ligne ou si le format de sortie change. winget n'a pas de sortie
-    machine-readable stable pour `upgrade` : le tableau texte est parsé par
-    POSITION de colonne, jamais par intitulé — sur un Windows non anglophone,
-    l'en-tête est traduit (« Name »/« Nom », « Available »/« Disponible »…),
-    seul l'ordre des colonnes (nom, ID, version, disponible, source) est
-    stable d'une langue à l'autre (constaté sur un Windows en français : la
-    version par intitulé anglais ne trouvait jamais l'en-tête et retournait
-    silencieusement un dict vide).
-
-    La sortie peut contenir un second tableau, « paquets nécessitant un
-    ciblage explicite » (mises à jour majeures que winget ne fait pas
-    automatiquement) — chaque bloc « en-tête + séparateur + lignes » rencontré
-    est parsé, ligne de résumé finale comprise : elle est ignorée d'elle-même
-    car trop courte pour remplir la colonne « disponible ».
+    hors ligne ou si le format de sortie change.
     """
     resultat = {}
     if not shutil.which('winget'):
@@ -5479,33 +5597,35 @@ def _winget_upgradable():
         ['winget', 'upgrade', '--include-unknown', '--disable-interactivity',
          '--accept-source-agreements'],
         timeout=90)
-    lignes = sortie.splitlines()
-    i = 1
-    while i < len(lignes):
-        # Un séparateur (----) désigne la ligne précédente comme en-tête de
-        # tableau : aucune ligne vide ne sépare forcément la dernière ligne de
-        # données de la phrase de résumé qui suit (constaté), donc on ne peut
-        # pas non plus s'arrêter uniquement sur une ligne vide — seule
-        # l'apparition d'un nouveau séparateur signale un nouveau tableau.
-        if not re.match(r'^-{5,}\s*$', lignes[i].strip()):
-            i += 1
-            continue
-        entete = lignes[i - 1]
-        colonnes = [m.start() for m in re.finditer(r'\S+', entete)]
-        i += 1
-        if len(colonnes) < 4:
-            continue
-        idx_dispo = 3  # nom, id, version, disponible, [source] — ordre fixe winget
-        while i < len(lignes) and not re.match(r'^-{5,}\s*$', lignes[i].strip()):
-            ligne = lignes[i]
-            if ligne.strip():
-                champs = []
-                for k, debut in enumerate(colonnes):
-                    fin = colonnes[k + 1] if k + 1 < len(colonnes) else len(ligne)
-                    champs.append(ligne[debut:fin].strip())
-                if len(champs) > idx_dispo and champs[0] and champs[idx_dispo]:
-                    resultat[_normalize_software_name(champs[0])] = champs[idx_dispo]
-            i += 1
+    for champs in _parse_winget_table(sortie):
+        if len(champs) > _WINGET_COL_DISPONIBLE and champs[_WINGET_COL_NOM] and champs[_WINGET_COL_DISPONIBLE]:
+            resultat[_normalize_software_name(champs[_WINGET_COL_NOM])] = champs[_WINGET_COL_DISPONIBLE]
+    return resultat
+
+
+def _winget_installed():
+    """Ensemble des logiciels (noms normalisés) que winget confirme suivre
+    via une vraie source de paquets (colonne Source non vide) — `winget
+    list` remonte aussi les entrées qu'il a simplement lues dans le Panneau
+    de configuration sans pouvoir les rapprocher d'aucune source, ce qui ne
+    permet de rien affirmer sur leur statut.
+
+    Sert à distinguer, dans `check_software_updates()`, un logiciel confirmé
+    à jour (suivi par winget, absent de la liste des mises à jour) d'un
+    logiciel simplement non vérifiable (absent des deux — winget ne le
+    connaît pas du tout). Sans cette distinction, les deux cas se
+    ressemblaient à l'affichage : silence total.
+    """
+    resultat = set()
+    if not shutil.which('winget'):
+        return resultat
+    sortie = _run_hidden(
+        ['winget', 'list', '--disable-interactivity', '--accept-source-agreements'],
+        timeout=90)
+    for champs in _parse_winget_table(sortie):
+        if (len(champs) > _WINGET_COL_SOURCE and champs[_WINGET_COL_NOM]
+                and champs[_WINGET_COL_SOURCE]):
+            resultat.add(_normalize_software_name(champs[_WINGET_COL_NOM]))
     return resultat
 
 
@@ -5576,45 +5696,58 @@ def _pacman_upgradable():
 
 
 def check_software_updates(software):
-    """Annote chaque entrée de `software` avec `update_status` ('obsolete' ou
-    'inconnu') et, si une mise à jour est repérée, `latest_version` /
-    `update_source`. Modifie et retourne la même liste.
+    """Annote chaque entrée de `software` avec `update_status`
+    ('obsolete' / 'a_jour' / 'inconnu') et, si une mise à jour est repérée,
+    `latest_version` / `update_source`. Modifie et retourne la même liste.
 
-    Le statut ne devient jamais 'a_jour' : un gestionnaire de paquets
-    n'indexe qu'une partie des logiciels remontés par le registre ou les
-    listes système (bien des installations manuelles lui échappent). Son
-    silence sur un logiciel donné signifie « non vérifiable par cette
-    source », pas « à jour ».
+    'a_jour' n'est posé QUE quand le gestionnaire de paquets confirme
+    explicitement connaître ce logiciel (winget : présent dans `winget list`
+    avec une source réelle ; Linux : `installed_software` vient déjà du même
+    gestionnaire que celui interrogé ici, apt/dpkg ou dnf/rpm ou pacman
+    partagent la même base de paquets). Un simple silence ne suffit jamais :
+    un gestionnaire n'indexe qu'une partie de ce que remonte le registre ou
+    les listes système (bien des installations manuelles lui échappent), et
+    son silence sur un logiciel qu'il ne connaît pas du tout ('inconnu')
+    n'a rien à voir avec un logiciel qu'il connaît et confirme à jour.
+
+    macOS reste volontairement sans 'a_jour' : `installed_software` y mélange
+    /Applications, pkgutil et Homebrew sans distinguer leur origine, donc
+    rien ne garantit qu'un logiciel donné soit dans le champ de `brew`.
     """
     resultat, source = {}, ''
+    connus = None  # None : aucune confirmation possible ; set : noms confirmés (winget) ; True : tout installed_software vient de la même base que `resultat` (Linux)
     try:
         if IS_WINDOWS:
             resultat, source = _winget_upgradable(), 'winget'
+            connus = _winget_installed()
         elif IS_MAC:
             resultat, source = _brew_outdated(), 'brew'
         elif IS_LINUX:
-            for fn, nom_source in ((_apt_upgradable, 'apt'),
-                                    (_dnf_upgradable, 'dnf/yum'),
-                                    (_pacman_upgradable, 'pacman')):
-                trouve = fn()
-                if trouve:
-                    resultat, source = trouve, nom_source
-                    break
+            if shutil.which('apt'):
+                resultat, source, connus = _apt_upgradable(), 'apt', True
+            elif shutil.which('dnf') or shutil.which('yum'):
+                resultat, source, connus = _dnf_upgradable(), 'dnf/yum', True
+            elif shutil.which('pacman'):
+                resultat, source, connus = _pacman_upgradable(), 'pacman', True
     except Exception:
-        resultat, source = {}, ''
+        resultat, source, connus = {}, '', None
 
     for soft in software:
         if not isinstance(soft, dict):
             continue
-        soft['update_status'] = 'inconnu'
-        soft['latest_version'] = ''
-        if not resultat:
-            continue
-        dispo = resultat.get(_normalize_software_name(soft.get('name')))
+        cle = _normalize_software_name(soft.get('name'))
+        dispo = resultat.get(cle) if resultat else None
         if dispo:
             soft['update_status'] = 'obsolete'
             soft['latest_version'] = dispo
             soft['update_source'] = source
+        elif connus is True or (isinstance(connus, set) and cle in connus):
+            soft['update_status'] = 'a_jour'
+            soft['latest_version'] = ''
+            soft['update_source'] = source
+        else:
+            soft['update_status'] = 'inconnu'
+            soft['latest_version'] = ''
     return software
 
 
@@ -6606,8 +6739,11 @@ def build_summary_sections(info):
     if software:
         s['champs'].append(('Total', '%d logiciel(s)' % len(software)))
         obsoletes = [x for x in software if isinstance(x, dict) and x.get('update_status') == 'obsolete']
+        a_jour = [x for x in software if isinstance(x, dict) and x.get('update_status') == 'a_jour']
         if obsoletes:
             s['champs'].append(('Mises à jour disponibles', '%d logiciel(s)' % len(obsoletes)))
+        if a_jour:
+            s['champs'].append(('Confirmés à jour', '%d logiciel(s)' % len(a_jour)))
         elements = []
         for soft in software:
             if isinstance(soft, dict):
@@ -6619,6 +6755,8 @@ def build_summary_sections(info):
                     libelle += '  [' + ' · '.join(str(e) for e in extras) + ']'
                 if soft.get('update_status') == 'obsolete':
                     libelle += '  ⚠ maj disponible (v%s)' % soft.get('latest_version', '?')
+                elif soft.get('update_status') == 'a_jour':
+                    libelle += '  ✓ à jour'
             else:
                 libelle = str(soft)
             elements.append(libelle)
@@ -7387,6 +7525,8 @@ def _software_html(software):
             install = soft.get('install_date', '')
             if soft.get('update_status') == 'obsolete':
                 maj = _pill_html('v%s disponible' % (soft.get('latest_version') or '?'), 'warn')
+            elif soft.get('update_status') == 'a_jour':
+                maj = _pill_html('À jour', 'ok')
             else:
                 maj = '<span class="empty">—</span>'
         else:
@@ -9004,6 +9144,8 @@ def generate_pdf_report(info, client_id=None, client_name=None):
                     if soft.get('update_status') == 'obsolete':
                         maj = (f'<font color="#c27803" size="7.5">v'
                                f'{_pdf_escape(soft.get("latest_version") or "?")} disponible</font>')
+                    elif soft.get('update_status') == 'a_jour':
+                        maj = '<font color="#0e9f6e" size="7.5">À jour</font>'
                     else:
                         maj = '<font color="#9ca3af" size="7.5">—</font>'
                 else:

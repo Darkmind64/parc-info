@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.1 · **Version ParcInfo :** 2.9.7+
+**Version collecteur :** 3.2 · **Version ParcInfo :** 2.9.7+
 
 ---
 
@@ -51,7 +51,7 @@ servent donc une **archive ZIP** contenant les deux fichiers.
 | `gpu` | `carte_graphique` | Avec VRAM quand elle est lisible |
 | `antivirus` | `antivirus` | |
 | `open_ports` | `ports_ouverts` | Ports TCP en écoute, format identique au scan réseau |
-| `installed_software` | `logiciels_installes_json` | Liste complète, plafond 2000 entrées. Chaque entrée porte aussi `update_status` (`obsolete`/`inconnu`) et `latest_version` — voir § Mises à jour logicielles |
+| `installed_software` | `logiciels_installes_json` | Liste complète, plafond 2000 entrées. Chaque entrée porte aussi `update_status` (`obsolete`/`a_jour`/`inconnu`) et `latest_version` — voir § Mises à jour logicielles |
 | *(tout le reste)* | `rapport_systeme_json` | **Snapshot JSON complet**, plafond 1 Mo |
 | *(horodatage)* | `derniere_synchro` | Mis à jour à chaque collecte |
 
@@ -358,13 +358,32 @@ note}` (comptes non énumérables de façon fiable, présence seule détectée)
 > compte de l'utilisateur. Seule leur présence (`password_stored`) est notée.
 
 ### Applications par défaut
-`default_browser` · `default_mail` · `installed_browsers[]{name, version}` ·
-`file_type_defaults[]{extension, name}` — programme par défaut pour une
+`default_browser` / `default_browser_icon` · `default_mail` /
+`default_mail_icon` · `installed_browsers[]{name, version, icon}` ·
+`file_type_defaults[]{extension, name, icon}` — programme par défaut pour une
 poignée d'extensions courantes (`.pdf`, `.txt`, `.log`, `.jpg`, `.png`,
-`.docx`, `.xlsx`, `.csv`, voir `_EXTENSIONS_SUIVIES`). Le filtre Jinja
-`app_icon` (app.py) associe une icône par mot-clé au nom du programme,
-utilisé sur la fiche système pour ces trois champs — best-effort, pas
-d'extraction de l'icône réelle de l'exécutable.
+`.docx`, `.xlsx`, `.csv`, voir `_EXTENSIONS_SUIVIES`).
+
+> `icon` (depuis 3.2, Windows uniquement) est la VRAIE icône de l'application,
+> extraite de son exécutable via `ExtractIconEx` (Win32) — PNG 32×32 en
+> base64, pas un émoji déduit du nom. La clé de registre `DefaultIcon` de
+> chaque ProgId donne le chemin et l'index à extraire ; un index négatif y
+> désigne un identifiant de ressource (pas une position), `ExtractIconEx` le
+> gère nativement — ne surtout pas le rendre positif (constaté sur Outlook :
+> index `-9403`, extraction silencieusement vide si converti en `9403`).
+> Toutes ces résolutions passent par `Registry::HKEY_CLASSES_ROOT\...`, pas
+> par le lecteur `HKCR:` — celui-ci n'existe pas dans le contexte non
+> interactif (`powershell -NoProfile -NonInteractive -Command`) où tourne le
+> collecteur (constaté : seuls `HKCU:`/`HKLM:` y sont montés par défaut).
+> Cette même correction a aussi réparé la résolution du nom lisible d'une
+> association de fichier, qui retombait silencieusement sur le ProgId brut
+> (`Acrobat.Document.DC` au lieu de « Document Adobe Acrobat »).
+>
+> Sans icône extraite (app UWP/AppX — mécanisme de packaging différent,
+> sans `DefaultIcon` classique — ou extraction échouée), le filtre Jinja
+> `app_icon` (app.py) prend le relais avec une icône par mot-clé déduite du
+> nom, comme avant la 3.2. `icon` est vide dans les deux cas ; la fiche
+> système choisit entre image réelle et émoji via la macro `app_icone`.
 
 ### Maintenance & hygiène
 `power_plan` · `fast_startup` · `defender_last_full_scan` /
@@ -405,7 +424,8 @@ user}` · `top_processes_cpu[]{name, cpu_pct, ram_mb}` ·
 > de ~600 ms et leur delta donnent un vrai pourcentage instantané, normalisé
 > par le nombre de cœurs. Le processus PowerShell qui exécute la mesure
 > apparaît lui-même dans le classement — donnée honnête, pas un artefact à
-> filtrer.
+> filtrer. Dix processus par liste (`_win_top_processes(limite=10)`, cinq
+> avant la 3.2).
 >
 > `system_incidents` intègre désormais le code STOP (bugcheck) précis d'un
 > écran bleu quand disponible, extrait du `param1` structuré de l'événement
@@ -446,24 +466,30 @@ description, password_never_expires, last_logon}` ·
 `installed_software[]{name, version, publisher, install_date, update_status,
 latest_version, update_source}`
 
-#### Mises à jour logicielles (depuis 3.1)
+#### Mises à jour logicielles (depuis 3.1, tri-état depuis 3.2)
 
 Chaque entrée de `installed_software` reçoit deux champs supplémentaires,
 calculés par `check_software_updates()` juste après l'inventaire :
 
 | Champ | Valeurs | Notes |
 |---|---|---|
-| `update_status` | `'obsolete'` \| `'inconnu'` | Jamais `'a_jour'` — voir note ci-dessous |
+| `update_status` | `'obsolete'` \| `'a_jour'` \| `'inconnu'` | Voir tableau de décision ci-dessous |
 | `latest_version` | version dispo, ou `''` | Rempli seulement si `update_status == 'obsolete'` |
-| `update_source` | `'winget'` \| `'brew'` \| `'apt'` \| `'dnf/yum'` \| `'pacman'` | Présent seulement si `update_status == 'obsolete'` |
+| `update_source` | `'winget'` \| `'brew'` \| `'apt'` \| `'dnf/yum'` \| `'pacman'` | Présent pour `'obsolete'` **et** `'a_jour'` |
 
-Le statut ne vaut jamais `'a_jour'` : le gestionnaire de paquets consulté
-n'indexe qu'une partie des logiciels remontés par le registre ou les listes
-système (beaucoup d'installations manuelles lui échappent). Son silence sur
-un logiciel donné signifie « non vérifiable par cette source », pas « à jour ».
+`'a_jour'` n'est posé QUE quand le gestionnaire de paquets confirme
+explicitement connaître ce logiciel — jamais déduit d'un simple silence,
+qui ne distingue pas « connu et à jour » de « pas indexé par cette source » :
 
-Source consultée par OS — chacune est une commande locale, best-effort
-(dict vide si l'outil est absent, hors ligne, ou le format de sortie a changé) :
+| OS | Comment `'a_jour'` est confirmé | Portée |
+|---|---|---|
+| Windows | `winget list` recoupé : présent avec une colonne Source non vide (une entrée sans source vient d'une lecture brute du Panneau de configuration, sans rien à vérifier) | Paquets connus de winget uniquement |
+| Linux | `installed_software` vient déjà du même gestionnaire que celui interrogé ici (dpkg/apt, rpm/dnf, pacman partagent chacun la même base de paquets que leur outil d'inventaire) | Tout `installed_software` quand apt/dnf/yum/pacman est présent |
+| macOS | Jamais — `installed_software` mélange /Applications, `pkgutil` et Homebrew sans distinguer leur origine ; rien ne garantit qu'un logiciel donné soit dans le champ de `brew` | — |
+
+Source consultée par OS pour la liste des mises à jour DISPONIBLES — chacune
+est une commande locale, best-effort (résultat vide si l'outil est absent,
+hors ligne, ou le format de sortie a changé) :
 
 | OS | Commande | Portée |
 |---|---|---|
@@ -475,6 +501,15 @@ Le rapprochement entre le nom du registre/du gestionnaire de paquets se fait
 via `_normalize_software_name()` (casse, ponctuation et architecture entre
 parenthèses ignorées) — un logiciel installé hors de ces canaux (exe
 téléchargé à la main, par exemple) reste donc en `'inconnu'`.
+
+> `winget upgrade`/`winget list` partagent le même parseur de tableau
+> texte, `_parse_winget_table()` : positionnel (colonnes nom/ID/version/
+> disponible/source, ordre fixe), jamais par intitulé d'en-tête (localisé
+> selon la langue de Windows). Gère aussi plusieurs tableaux dans une même
+> sortie (`upgrade` en affiche un second pour les mises à jour nécessitant
+> un ciblage explicite). Vérifié sur un poste réel : 106 logiciels avec
+> mise à jour disponible + 102 confirmés à jour sur 878 au total (le reste,
+> inconnu de winget — pilotes, redistribuables, installations manuelles).
 
 ### Métadonnées
 `collector_version` · `timestamp` · `elevated` · `platform`

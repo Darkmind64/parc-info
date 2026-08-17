@@ -57,6 +57,15 @@
 }
 .fs-label { color: var(--text-secondary); }
 .fs-value { color: var(--text-primary); word-break: break-word; }
+/* Icône d'application + nom : une colonne de largeur fixe pour l'icône, sinon
+   le nom démarre à une position différente selon la largeur de l'émoji ou de
+   l'image qui le précède — l'alignement recherché ici. */
+.fs-app { display: inline-flex; align-items: center; gap: .4rem; }
+.fs-app-icon { width: 18px; height: 18px; flex-shrink: 0; object-fit: contain; }
+.fs-app-icon-emoji {
+    width: 18px; height: 18px; flex-shrink: 0; display: inline-flex;
+    align-items: center; justify-content: center; font-size: .9rem; line-height: 1;
+}
 .fs-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
 .fs-table th {
     text-align: left; color: var(--text-secondary); font-weight: 600;
@@ -329,6 +338,15 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     <div class="fs-row"><span class="fs-label">{{ label }}</span><span class="fs-value">{{ value }}</span></div>
     {% endif %}
 {% endmacro %}
+
+{# Icône réelle de l'application (extraite de son exécutable par le
+   collecteur) si disponible, repli sur l'émoji déduit du nom sinon —
+   toujours dans une colonne de largeur fixe, voir .fs-app-icon. #}
+{%- macro app_icone(nom, icone) -%}
+{%- if icone -%}<img class="fs-app-icon" src="data:image/png;base64,{{ icone }}" alt="">
+{%- else -%}<span class="fs-app-icon-emoji">{{ nom | app_icon }}</span>
+{%- endif %} {{ nom }}
+{%- endmacro %}
 
 {# ── POINTS D'ATTENTION ────────────────────────────────────────────────── #}
 {% if rapport %}
@@ -1117,8 +1135,8 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     <div class="fs-row">
         <span class="fs-label">Identifiants RDP enregistrés</span>
         <span class="fs-value">
-            {% for c in rapport.saved_rdp_credentials %}<span class="fs-mono">{{ c }}</span>{% if not loop.last %}, {% endif %}{% endfor %}
-            <div style="font-size:.7rem;color:var(--text-secondary);margin-top:.2rem;">
+            {% for c in rapport.saved_rdp_credentials %}<span class="fs-pill fs-muted">{{ c }}</span>{% endfor %}
+            <div style="font-size:.7rem;color:var(--text-secondary);margin-top:.3rem;">
                 Un serveur qui n'existe plus dans cette liste est une piste de nettoyage.
             </div>
         </span>
@@ -1812,17 +1830,17 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     <div class="fs-grid">
         <div>
             {% if rapport.default_browser %}
-            <div class="fs-row"><span class="fs-label">Navigateur par défaut</span><span class="fs-value">{{ rapport.default_browser | app_icon }} {{ rapport.default_browser }}</span></div>
+            <div class="fs-row"><span class="fs-label">Navigateur par défaut</span><span class="fs-value fs-app">{{ app_icone(rapport.default_browser, rapport.default_browser_icon) }}</span></div>
             {% endif %}
             {% if rapport.default_mail %}
-            <div class="fs-row"><span class="fs-label">Client mail par défaut</span><span class="fs-value">{{ rapport.default_mail | app_icon }} {{ rapport.default_mail }}</span></div>
+            <div class="fs-row"><span class="fs-label">Client mail par défaut</span><span class="fs-value fs-app">{{ app_icone(rapport.default_mail, rapport.default_mail_icon) }}</span></div>
             {% endif %}
             {% if rapport.file_type_defaults %}
             <div class="fs-label" style="font-size:.75rem;margin:.5rem 0 .35rem;">Types de fichiers</div>
             {% for a in rapport.file_type_defaults %}
             <div class="fs-row" style="grid-template-columns:1fr auto;">
                 <span class="fs-mono" style="color:var(--text-secondary);">{{ a.extension }}</span>
-                <span class="fs-value">{{ a.name | app_icon }} {{ a.name }}</span>
+                <span class="fs-value fs-app">{{ app_icone(a.name, a.icon) }}</span>
             </div>
             {% endfor %}
             {% endif %}
@@ -1832,7 +1850,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">Navigateurs installés</div>
             {% for b in rapport.installed_browsers %}
             <div class="fs-row" style="grid-template-columns:1fr auto;">
-                <span class="fs-value">{{ b.name | app_icon }} {{ b.name }}</span>
+                <span class="fs-value fs-app">{{ app_icone(b.name, b.icon) }}</span>
                 <span class="fs-mono" style="color:var(--text-secondary);">{{ b.version or '—' }}</span>
             </div>
             {% endfor %}
@@ -2214,8 +2232,9 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 <!-- ── LOGICIELS ────────────────────────────────────────────────────────── -->
 {% if logiciels %}
 {% set obsoletes = logiciels|selectattr('update_status', 'equalto', 'obsolete')|list %}
+{% set a_jour = logiciels|selectattr('update_status', 'equalto', 'a_jour')|list %}
 <div class="fs-section">
-    <h3>■ Logiciels installés ({{ logiciels|length }}){% if obsoletes %} <span class="fs-pill fs-warn">{{ obsoletes|length }} MISE(S) À JOUR DISPONIBLE(S)</span>{% endif %}</h3>
+    <h3>■ Logiciels installés ({{ logiciels|length }}){% if obsoletes %} <span class="fs-pill fs-warn">{{ obsoletes|length }} MISE(S) À JOUR DISPONIBLE(S)</span>{% endif %}{% if a_jour %} <span class="fs-pill fs-ok">{{ a_jour|length }} CONFIRMÉ(S) À JOUR</span>{% endif %}</h3>
     <input type="text" id="fs-soft-filter" placeholder="Filtrer par nom ou éditeur…"
            style="width:100%;max-width:360px;margin-bottom:.7rem;padding:.4rem .6rem;font-size:.8rem;
                   background:var(--bg-secondary);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);">
@@ -2228,7 +2247,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
                 <td class="fs-mono">{{ s.version or '—' }}</td>
                 <td>{{ s.publisher or '—' }}</td>
                 <td>{{ s.install_date or '—' }}</td>
-                <td>{% if s.update_status == 'obsolete' %}<span class="fs-pill fs-warn">v{{ s.latest_version or '?' }} disponible</span>{% else %}—{% endif %}</td>
+                <td>{% if s.update_status == 'obsolete' %}<span class="fs-pill fs-warn">v{{ s.latest_version or '?' }} disponible</span>{% elif s.update_status == 'a_jour' %}<span class="fs-pill fs-ok">À jour</span>{% else %}—{% endif %}</td>
             </tr>
             {% endfor %}
         </table>

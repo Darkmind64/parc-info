@@ -45,6 +45,11 @@ TOLERANCES = {
     'problem_devices_count': "rendu via le bandeau de points d'attention ; "
                              "la fiche compte elle-même les périphériques listés",
     'uptime_hours': 'consommé par les vignettes chiffrées',
+    # Icônes réelles d'application (32x32, base64) : décoratif, propre à la
+    # fiche web. Le PDF n'affiche aucune icône pour cette section (ni avant,
+    # ni après leur ajout) — texte seul, comme le reste du document imprimé.
+    'default_browser_icon': "pas d'icône dans le PDF, texte seul",
+    'default_mail_icon': "pas d'icône dans le PDF, texte seul",
 }
 
 
