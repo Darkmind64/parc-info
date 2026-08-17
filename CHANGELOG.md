@@ -1,5 +1,58 @@
 # CHANGELOG - ParcInfo
 
+## [2.17.0] - 2026-08-17 📀
+
+### 📀 Mises à jour logicielles détectées + stockage revu disque par disque
+
+**Mises à jour logicielles.** Le collecteur signale désormais, pour chaque
+logiciel installé, si une version plus récente est disponible : winget sur
+Windows, brew sur macOS, apt puis dnf/yum puis pacman sur Linux (le premier
+gestionnaire présent qui répond). Le statut ne bascule jamais sur « à jour » :
+un gestionnaire de paquets n'indexe qu'une partie de ce que remonte le
+registre ou les listes système — bien des installations manuelles lui
+échappent — et son silence sur un logiciel donné signifie « non vérifiable
+par cette source », pas « à jour ».
+
+Repéré et corrigé pendant un test en conditions réelles : winget n'a pas de
+sortie machine-readable pour `upgrade`, et son en-tête de tableau est traduit
+selon la langue de Windows (« Nom »/« Disponible » en français, pas
+« Name »/« Available »). La première version, qui cherchait l'en-tête anglais,
+ne le trouvait jamais sur un poste français et retournait silencieusement
+zéro résultat — un faux négatif total, indétectable sans exécution réelle.
+Le parsing repose maintenant sur la position des colonnes (stable d'une
+langue à l'autre), pas sur leur intitulé, et gère aussi le second tableau que
+winget affiche parfois (paquets nécessitant un ciblage explicite).
+
+**Stockage : vue par disque physique.** La « vue d'ensemble » des partitions
+mélangeait jusqu'ici tous les volumes de tous les disques dans un seul ruban
+— impossible d'y voir la structure réelle du parc, ni de savoir quelle
+partition appartenait à quel disque. Chaque disque a maintenant sa propre
+carte (modèle, type SSD/HDD, santé SMART) avec ses partitions à l'intérieur,
+lettrées ou non : réservée système (MSR), EFI et récupération apparaissent
+désormais aussi, avec leur taille et leur type — jusqu'ici, la vue ne
+montrait que la partition de données et laissait croire à de l'espace non
+identifié là où il n'y en avait pas. Un code couleur fixe par type de
+partition, identique sur tous les disques de la fiche (données en cyan,
+réservé en violet, récupération en ambre, EFI en sarcelle, non attribué en
+gris), distinct du pourcentage de remplissage — toujours affiché en texte
+sur le segment de données, mais qui ne pilote plus sa couleur.
+
+Deuxième bug trouvé par le même test réel : `Get-PhysicalDisk` n'a pas de
+paramètre `-DeviceId` — l'erreur de liaison de paramètre était avalée par le
+`try/catch` existant, laissant santé et type de disque à « Inconnu » pour
+tous les disques sans jamais rien signaler. La correspondance disque
+physique ↔ numéro se fait maintenant via une table construite une seule
+fois plutôt qu'interrogée par disque (plus correct, et plus rapide).
+macOS/Linux regroupent les partitions par nom d'appareil (`/dev/sda1` →
+`sda`, faute d'équivalent WMI) ; le type de partition individuelle n'y est
+pas disponible, `df` ne voyant que les systèmes de fichiers montés.
+
+Une fiche déjà collectée avant cette version n'a ni l'un ni l'autre champ :
+la détection de mises à jour reste absente et la vue stockage retombe
+automatiquement sur l'ancien ruban plat, le temps d'une prochaine collecte.
+
+---
+
 ## [2.16.3] - 2026-08-17 🔄
 
 ### 🔄 Correction d'une erreur de synchronisation Turso

@@ -1,8 +1,25 @@
-PARCINFO_VERSION=2.16.3
+PARCINFO_VERSION=2.17.0
 RELEASE_DATE=2026-08-17
-BUILD_NUMBER=2026081701
+BUILD_NUMBER=2026081702
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.17.0 - Mises à jour logicielles détectées + stockage revu disque par disque
+# Le collecteur signale, pour chaque logiciel installé, si une version plus
+# récente est disponible (winget/brew/apt/dnf/pacman selon l'OS) — ne
+# bascule jamais sur « à jour », un gestionnaire de paquets n'indexant
+# qu'une partie de ce que remonte le registre. La fiche système montre
+# désormais chaque disque physique avec toutes ses partitions dedans, y
+# compris réservée système/EFI/récupération jusqu'ici invisibles, avec un
+# code couleur fixe par type identique sur tous les disques — remplace
+# l'ancienne vue qui mélangeait tous les volumes de tous les disques dans un
+# seul ruban. Deux bugs trouvés et corrigés grâce à un test sur poste réel :
+# Get-PhysicalDisk n'a pas de paramètre -DeviceId (jointure silencieusement
+# vide, Health/MediaType toujours "Inconnu"), et l'en-tête du tableau
+# winget est traduit sur un Windows non anglophone (« Nom »/« Disponible »
+# en français) — la détection cherchait « Name »/« Available » et ne
+# trouvait donc jamais rien sur un poste français
+# Date: 17 août 2026
 
 # Version 2.16.3 - Correction d'une erreur de synchronisation Turso
 # Signalé en production : « UNIQUE constraint failed » sur _sync_journal

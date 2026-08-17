@@ -1,20 +1,23 @@
 {
-  "version": "2.16.3",
+  "version": "2.17.0",
   "release_date": "2026-08-17T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.16.3",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.16.3/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.17.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.17.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.17.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.17.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.17.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.17.0/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.17.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correction d'une erreur de synchronisation Turso (UNIQUE constraint failed)",
+    "new_features": "Mises à jour logicielles détectées par le collecteur + stockage revu disque par disque",
     "improvements": [
-      "CORRIGÉ: la synchronisation Turso pouvait échouer avec « UNIQUE constraint failed: _sync_journal.tbl, _sync_journal.record_id, _sync_journal.action » lors du push de documents. Le trigger de journalisation utilisait INSERT OR REPLACE ; la contrainte UNIQUE ... ON CONFLICT REPLACE était bien détectée mais sa résolution ne semblait pas s'appliquer de façon fiable une fois le trigger exécuté à distance par Turso. Remplacé par une paire DELETE puis INSERT, qui ne dépend d'aucune résolution de conflit. Se corrige automatiquement sur les bases déjà déployées, au prochain cycle de synchronisation."
+      "AJOUTÉ: le collecteur signale, pour chaque logiciel installé, si une version plus récente est disponible (winget/brew/apt/dnf/pacman selon l'OS). Ne bascule jamais sur « à jour » : l'absence d'un logiciel dans la liste d'un gestionnaire de paquets ne prouve rien, seulement qu'il n'est pas vérifiable par cette source.",
+      "AJOUTÉ: la fiche système montre désormais chaque disque physique avec toutes ses partitions dedans (y compris réservée système, EFI, récupération, jusqu'ici invisibles), un code couleur fixe par type de partition identique sur tous les disques, remplaçant l'ancienne vue qui mélangeait tous les volumes de tous les disques dans un seul ruban.",
+      "CORRIGÉ: sur un Windows non anglophone, la détection des mises à jour winget cherchait un en-tête de tableau en anglais (« Name »/« Available ») qui n'existe jamais quand Windows est en français (« Nom »/« Disponible ») — retournait silencieusement zéro résultat. Le parsing repose maintenant sur la position des colonnes, stable d'une langue à l'autre.",
+      "CORRIGÉ: Get-PhysicalDisk n'a pas de paramètre -DeviceId — la jointure avec Get-Disk échouait silencieusement (erreur de liaison de paramètre avalée par un try/catch), laissant santé et type de disque à « Inconnu » pour tous les disques."
     ]
   },
   "checksums": {
@@ -25,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.16.3"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.17.0"
 }
