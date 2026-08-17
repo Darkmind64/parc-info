@@ -1,6 +1,6 @@
 # ParcInfo — Guide de Développement Claude 🚀
 
-**Dernière mise à jour** : 2026-08-12
+**Dernière mise à jour** : 2026-08-17
 
 ## 📋 Aperçu Exécutif
 
@@ -1539,7 +1539,9 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 | Debug SQL | database.py | `def get_db` / `def get_local_db` |
 | Ajouter un champ collecté | collector_core.py | `_WIN_STEPS`, voir COLLECTOR_FIELD_MAPPING.md |
 | Préremplir un champ de la fiche appareil depuis la collecte | app.py | `def champs_deduits_du_collecteur` |
-| Toucher au mécanisme de mise à jour | applique_maj.py / update_checker.py | `def appliquer` / `def _install_windows` |
+| Toucher au mécanisme de mise à jour | applique_maj.py / update_checker.py | `def appliquer` / `def _install_windows` / `def _install_macos` |
+| Arrêter/redémarrer ParcInfo depuis l'app | launcher.py / app.py | `def quitter_application` / `def redemarrer_application` / route `/apropos` |
+| Build macOS Intel (croisement Rosetta) | .github/workflows/build-macos-intel.yml | job répliqué dans build-release.yml (`build-macos-intel`) |
 
 ---
 
@@ -1557,6 +1559,6 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 
 ---
 
-**Dernier update** : 2026-08-12 (v2.9.7)
+**Dernier update** : 2026-08-17 (v2.16.3)
 **Mainteneur** : ParcInfo Team
 **License** : Voir LICENSE.md
