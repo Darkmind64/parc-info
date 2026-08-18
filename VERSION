@@ -1,8 +1,24 @@
-PARCINFO_VERSION=2.18.5
+PARCINFO_VERSION=2.18.6
 RELEASE_DATE=2026-08-18
-BUILD_NUMBER=2026081804
+BUILD_NUMBER=2026081805
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.6 - Délai de grâce avant d'abandonner xattr -cr (Gatekeeper macOS)
+# Question posée en usage réel : pourquoi un script séparé qui reproduirait
+# exactement la réparation manuelle (télécharger, remplacer, xattr -cr,
+# lancer) ne réussirait-il pas là où le mécanisme actuel échoue ? En
+# reconstituant le déroulé manuel qui fonctionne, une différence concrète
+# ressort : un humain qui tape ces commandes dans un Terminal laisse
+# naturellement passer quelques secondes entre xattr -cr et le lancement.
+# Le code, lui, vérifiait avec spctl immédiatement après — assez tôt, peut-
+# être, pour lire un rejet que syspolicyd (le service qui répond à spctl)
+# n'avait pas encore fini de mettre à jour après le retrait de la
+# quarantaine. La vérification est maintenant retentée jusqu'à 5 fois, à une
+# seconde d'intervalle, avant de passer à la signature ad hoc (qui, elle,
+# durcit l'évaluation sur certains Mac plutôt que de l'assouplir — voir
+# 2.18.1). Non confirmé sans Mac réel : à valider au prochain retour d'usage
+# Date: 18 août 2026
 
 # Version 2.18.5 - spctl --add en dernier recours pour le blocage Gatekeeper macOS
 # Suite du blocage signalé en usage réel (Mac Intel), où xattr -cr et la

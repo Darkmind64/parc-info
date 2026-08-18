@@ -1,5 +1,32 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.6] - 2026-08-18 ⏱️
+
+### ⏱️ Délai de grâce avant d'abandonner xattr -cr (Gatekeeper macOS)
+
+**La question qui a débloqué le diagnostic.** Signalée en usage réel : « un
+script séparé qui ferait exactement ce que je fais à la main (télécharger,
+remplacer, `xattr -cr`, lancer) ne fonctionnerait-il pas ? » En reconstituant
+ce déroulé manuel commande par commande pour répondre, une différence
+concrète est apparue — pas une question de « script séparé » ou non (`spctl`
+évalue le fichier, pas qui l'appelle), mais de **timing** : un humain qui
+tape ces commandes dans un Terminal laisse naturellement passer plusieurs
+secondes entre `xattr -cr` et le lancement de l'app. Le code, lui,
+enchaînait la vérification `spctl` immédiatement après le retrait de
+quarantaine — potentiellement trop tôt pour que `syspolicyd` (le service
+que `spctl` interroge) ait fini de la prendre en compte.
+
+La vérification est maintenant retentée jusqu'à 5 fois, à une seconde
+d'intervalle, avant de passer à la signature ad hoc — qui, elle, durcit
+l'évaluation sur certains Mac plutôt que de l'assouplir (diagnostic de la
+2.18.1). Si cette hypothèse est la bonne, `xattr -cr` seul devrait
+désormais suffire dans la majorité des cas, sans jamais atteindre les
+étapes plus intrusives (signature, `spctl --add`).
+
+> Non confirmé sans Mac réel avant publication, comme les correctifs
+> Gatekeeper précédents de cette série — à valider au prochain retour
+> d'usage sur le Mac à l'origine du signalement.
+
 ## [2.18.5] - 2026-08-18 🔓
 
 ### 🔓 spctl --add en dernier recours pour le blocage Gatekeeper macOS (expérimental)
