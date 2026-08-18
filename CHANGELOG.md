@@ -1,5 +1,41 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.4] - 2026-08-18 🖥️
+
+### 🖥️ Détection matérielle fiable sous Rosetta (mise à jour macOS)
+
+**Le piège Rosetta.** Trouvé en creusant un blocage Gatekeeper signalé en
+usage réel sur un Mac Intel : la sélection du binaire macOS à télécharger
+(`_get_platform_key`) et le contrôle qui refuse d'installer une architecture
+incompatible (`_install_macos`) s'appuyaient tous les deux sur
+`platform.machine()` — qui reflète l'architecture du **processus en cours**,
+pas celle de la puce. Sous Rosetta (la traduction automatique de macOS), un
+exécutable Intel tournant sur un Mac Apple Silicon y répond « x86_64 »
+indéfiniment. Concrètement : un Mac Apple Silicon qui se serait un jour
+retrouvé avec le binaire Intel (ancien bug de sélection déjà corrigé en
+2.15.2/2.16.2, téléchargement manuel malencontreux...) restait piégé dessus
+pour toujours — chaque mise à jour reconfirmait « Intel » comme architecture
+attendue et retéléchargeait le même binaire, sans jamais basculer vers l'ARM
+natif qui aurait dû tourner nativement depuis le début.
+
+Remplacé par une lecture matérielle directe (`sysctl hw.optional.arm64`),
+qui répond correctement même pour un processus traduit par Rosetta, avec
+repli sur `platform.machine()` en cas d'échec (Mac Intel authentique, où
+cette commande sysctl échoue naturellement).
+
+> Vérifié sur le Mac Intel à l'origine du signalement : il s'agit bien de
+> matériel Intel authentique, pas d'un piège Rosetta — ce correctif ne
+> change donc rien pour ce cas précis, mais protège tout futur poste Apple
+> Silicon du même piège. Le blocage Gatekeeper de ce Mac reste ouvert : les
+> deux stratégies automatisées actuelles (quarantaine seule via `xattr -cr`,
+> puis signature ad hoc en repli) sont toutes deux rejetées par `spctl` sur
+> cette machine — limite structurelle sans signature Apple reconnue
+> (Developer ID + notarisation), qu'aucun script ne peut garantir de
+> contourner. Le comportement de repli déjà en place depuis la 2.18.1 reste
+> la meilleure protection réaliste : en cas d'échec, l'ancienne version
+> continue de tourner sans rien perdre, avec un message clair invitant au
+> geste manuel habituel.
+
 ## [2.18.3] - 2026-08-18 🔍
 
 ### 🔍 Découverte automatique des instances ParcInfo par le collecteur

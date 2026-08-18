@@ -1,8 +1,28 @@
-PARCINFO_VERSION=2.18.3
+PARCINFO_VERSION=2.18.4
 RELEASE_DATE=2026-08-18
-BUILD_NUMBER=2026081802
+BUILD_NUMBER=2026081803
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.4 - Détection matérielle fiable sous Rosetta (mise à jour macOS)
+# Trouvé en creusant un blocage Gatekeeper signalé en usage réel (Mac Intel) :
+# platform.machine(), utilisé pour choisir le binaire macOS à télécharger et
+# pour refuser une installation d'architecture incompatible, reflète
+# l'architecture du PROCESSUS EN COURS, pas celle de la puce. Sous Rosetta,
+# un exécutable Intel tournant sur un Mac Apple Silicon y répond "x86_64"
+# indéfiniment : un Mac qui se serait un jour retrouvé sur le mauvais binaire
+# resterait piégé dessus pour toujours, chaque mise à jour reconfirmant
+# "Intel" et retéléchargeant le même binaire plutôt que de basculer vers
+# l'ARM natif. Détection remplacée par une lecture matérielle directe
+# (sysctl hw.optional.arm64), fiable même sous traduction. Vérifié sur le
+# Mac Intel signalé : il s'agit bien de matériel Intel authentique, pas d'un
+# piège Rosetta — ce correctif ne change donc rien pour ce cas précis, mais
+# protège tout futur poste Apple Silicon du même piège. Le blocage Gatekeeper
+# lui-même reste ouvert : les deux stratégies automatisées actuelles
+# (quarantaine seule, puis signature ad hoc en repli) sont toutes deux
+# rejetées par ce Mac — limite structurelle sans signature Apple reconnue,
+# qu'aucun script ne peut garantir de contourner
+# Date: 18 août 2026
 
 # Version 2.18.3 - Découverte automatique des instances ParcInfo sur le réseau
 # Suite demandée après le correctif de détection de client (2.18.2) : le
