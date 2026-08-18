@@ -1,5 +1,35 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.7] - 2026-08-18 📋
+
+### 📋 Fichier journal persistant pour les exécutables packagés
+
+**Le vrai blocage n'était pas la mise à jour, c'était l'absence de preuve.**
+En cherchant le détail exact d'un nouvel échec de mise à jour macOS (la
+2.18.6 avait tout de même demandé le mot de passe administrateur, signe que
+`xattr -cr` et la signature ad hoc avaient échoué malgré le délai de grâce),
+`~/Library/Application Support/ParcInfo/_maj.log` — qu'on pensait être LE
+journal de la mise à jour — s'est révélé introuvable. Pour cause : ce
+fichier n'existe en réalité que sur **Windows**, écrit par le processus
+séparé qui remplace l'exécutable verrouillé. Sur macOS, tout se passe dans
+le processus déjà en cours d'exécution, qui n'a jamais utilisé ce mécanisme.
+
+Pire en creusant : `logging.basicConfig()` n'écrit que sur la console —
+or ParcInfo est construit **sans console** (`console=False`, pour ne pas
+ouvrir une fenêtre noire à chaque lancement). Sur un exécutable packagé
+(Windows ET macOS), tout ce que le code journalise part donc dans le vide,
+sans qu'aucune fenêtre ne l'affiche ni qu'aucun fichier ne le conserve — y
+compris le détail précis de chaque tentative de déblocage Gatekeeper
+(`xattr`, signature, `spctl --add`) ajouté au fil de cette série de
+correctifs. Un diagnostic qu'on croyait juste difficile à obtenir était en
+réalité tout simplement perdu.
+
+Ajout d'un fichier `parcinfo.log` (rotation automatique, 2 Mo × 3 copies) à
+côté de la base de données, activé uniquement sur les exécutables packagés
+— le mode source garde sa console existante. Le prochain échec de mise à
+jour macOS pourra enfin être diagnostiqué avec le détail réel de chaque
+étape, plutôt qu'en reconstituant des hypothèses sans preuve.
+
 ## [2.18.6] - 2026-08-18 ⏱️
 
 ### ⏱️ Délai de grâce avant d'abandonner xattr -cr (Gatekeeper macOS)

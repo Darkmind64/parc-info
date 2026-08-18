@@ -1,20 +1,20 @@
 {
-  "version": "2.18.6",
+  "version": "2.18.7",
   "release_date": "2026-08-18T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.6/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.6/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.6/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.6",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.6/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.6/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.6/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.7",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Délai de grâce avant d'abandonner le retrait de quarantaine (xattr -cr) lors d'une mise à jour macOS bloquée par Gatekeeper",
+    "new_features": "Fichier journal persistant (parcinfo.log) sur les exécutables packagés Windows et macOS, jusqu'ici sans aucune trace consultable en dehors d'une console qui n'existe pas",
     "improvements": [
-      "NOUVEAU: la vérification Gatekeeper après xattr -cr est retentée jusqu'à 5 fois, à une seconde d'intervalle, avant de passer à la signature ad hoc — reproduit le délai naturel d'une réparation manuelle (commandes tapées à la main) que la vérification immédiate d'un script ne laissait pas à syspolicyd pour se mettre à jour. Non confirmé sans Mac réel : à valider au prochain retour d'usage."
+      "CORRIGÉ: logging.basicConfig() n'écrit que sur la console, or ParcInfo est construit sans console (console=False) — sur un exécutable packagé, tout ce que le code journalisait (y compris le détail d'un blocage Gatekeeper macOS) partait dans le vide. _maj.log, qu'on croyait être LE journal de mise à jour, n'existe en réalité que sur Windows. Ajout de parcinfo.log (rotation 2 Mo x 3) à côté de la base de données sur les exécutables packagés."
     ]
   },
   "checksums": {
@@ -25,5 +25,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.6"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.7"
 }

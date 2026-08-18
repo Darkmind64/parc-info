@@ -1,8 +1,25 @@
-PARCINFO_VERSION=2.18.6
+PARCINFO_VERSION=2.18.7
 RELEASE_DATE=2026-08-18
-BUILD_NUMBER=2026081805
+BUILD_NUMBER=2026081806
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.7 - Fichier journal persistant pour les exécutables packagés
+# En cherchant le détail exact d'un échec de mise à jour macOS (xattr,
+# signature ad hoc, spctl --add) suite à un nouveau retour d'usage réel :
+# `_maj.log`, qu'on croyait être LE journal de mise à jour, n'existe en
+# réalité que sur Windows (écrit par le processus séparé qui remplace l'exe
+# verrouillé) — jamais sur macOS, où tout se passe dans le processus déjà en
+# cours. Plus grave : logging.basicConfig() n'écrit que sur la console, or
+# ParcInfo est construit avec console=False (parcinfo.spec) — sur un
+# exécutable packagé (Windows ET macOS), cette sortie ne va donc nulle part
+# de consultable, aucune fenêtre ne l'affiche. Tout ce que journalise le code
+# en usage réel — y compris les diagnostics ajoutés au fil de cette série de
+# correctifs Gatekeeper — était perdu sans que personne ne s'en aperçoive.
+# Ajout d'un fichier journal (parcinfo.log, 2 Mo x 3 avec rotation) à côté de
+# la base de données, sur les exécutables packagés uniquement (le mode
+# source a déjà sa console)
+# Date: 18 août 2026
 
 # Version 2.18.6 - Délai de grâce avant d'abandonner xattr -cr (Gatekeeper macOS)
 # Question posée en usage réel : pourquoi un script séparé qui reproduirait
