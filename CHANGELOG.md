@@ -1,5 +1,33 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.9] - 2026-08-18 🔍
+
+### 🔍 Diagnostic de translocation macOS (mise à jour toujours en échec)
+
+**Ce que le journal de la 2.18.7 vient de révéler.** Premier vrai bénéfice
+du fichier journal ajouté hier : le dernier échec de mise à jour sur le Mac
+Intel suivi depuis plusieurs versions ne montre plus **aucun** avertissement
+xattr/codesign/`spctl --add` entre le téléchargement et l'échec final —
+signe que Gatekeeper a peut-être fini par accepter le bundle cette fois
+(grâce au délai de grâce de la 2.18.6, ou à `spctl --add` de la 2.18.5).
+Et pourtant, la vérification de démarrage échoue quand même.
+
+**Piste la plus probable : la translocation macOS**, un mécanisme séparé de
+Gatekeeper. Un bundle non notarié peut être exécuté par macOS depuis une
+copie en lecture seule à un chemin aléatoire (`AppTranslocation/...`)
+plutôt que `/Applications/ParcInfo.app` — le processus existerait alors
+bien réellement, mais jamais au chemin exact que la vérification de
+démarrage recherche jusqu'ici (`pgrep -f <chemin complet>`), la faisant
+échouer à tort.
+
+**Pas encore un correctif.** Après m'être trompé une fois cette série sans
+preuve solide (le `--deep` de la 2.17.1), pas de nouvelle tentative à
+l'aveugle : une recherche de secours (nom du processus seul, sans le
+chemin) se déclenche maintenant quand la recherche stricte échoue, pour
+distinguer clairement dans le journal les deux cas possibles — translocation
+(l'app tourne ailleurs) ou échec de lancement pur et simple (rien ne tourne
+du tout) — au prochain échec.
+
 ## [2.18.8] - 2026-08-18 🗑️
 
 ### 🗑️ Un appareil supprimé ne revient plus tout seul (ordre pull/push de la synchronisation)

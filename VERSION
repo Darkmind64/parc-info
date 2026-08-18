@@ -1,8 +1,27 @@
-PARCINFO_VERSION=2.18.8
+PARCINFO_VERSION=2.18.9
 RELEASE_DATE=2026-08-18
-BUILD_NUMBER=2026081807
+BUILD_NUMBER=2026081808
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.9 - Diagnostic de translocation macOS (mise à jour toujours en échec)
+# Le tout nouveau fichier journal (2.18.7) vient de révéler quelque chose
+# d'inattendu sur le Mac Intel suivi depuis plusieurs versions : le dernier
+# échec de mise à jour ne montre plus AUCUN avertissement xattr/codesign/
+# spctl --add (signe que Gatekeeper a peut-être fini par accepter le bundle
+# cette fois, grâce au délai de grâce de la 2.18.6 ou à spctl --add de la
+# 2.18.5), et pourtant la vérification de démarrage échoue quand même.
+# Piste la plus probable : la « translocation » macOS — un bundle non
+# notarié peut tourner depuis une copie en lecture seule à un chemin
+# aléatoire plutôt que /Applications/ParcInfo.app, un mécanisme séparé de
+# Gatekeeper. Le process existerait alors bien, mais jamais au chemin exact
+# recherché jusqu'ici (pgrep -f <chemin complet>), le rendant invisible à la
+# vérification actuelle malgré un lancement réussi.
+# Pas encore un correctif : ajoute une recherche de secours (pgrep sur le
+# seul nom, sans le chemin) quand la recherche stricte échoue, pour
+# distinguer clairement les deux cas dans le journal au prochain échec,
+# plutôt que de deviner une nouvelle fois sans preuve
+# Date: 18 août 2026
 
 # Version 2.18.8 - Un appareil supprimé ne revient plus tout seul (ordre pull/push)
 # Signalé en usage réel : un appareil supprimé dans l'inventaire disparaissait
