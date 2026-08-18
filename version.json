@@ -1,24 +1,22 @@
 {
-  "version": "2.18.0",
+  "version": "2.18.1",
   "release_date": "2026-08-17T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.0/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.1/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.1/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.1/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.1",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.1/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.1/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.1/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Vraies icônes d'applications, statut de mise à jour logicielle tri-état, et correction d'un faux positif antivirus sur le collecteur",
+    "new_features": "Mise à jour automatique macOS enfin fiable + synchronisation qui ne perd plus une entrée en échec",
     "improvements": [
-      "AJOUTÉ: la fiche système extrait maintenant la vraie icône de chaque application (navigateur, client mail, types de fichiers) depuis son exécutable, au lieu d'un émoji approximatif. Colonne d'icône à largeur fixe pour corriger l'alignement des noms.",
-      "AJOUTÉ: le statut de mise à jour logicielle distingue désormais « à jour confirmé » de « non vérifiable » (les deux affichaient « — » auparavant) — sur un poste réel, 208 logiciels avec un statut définitif contre 106 avant.",
-      "AJOUTÉ: identifiants RDP enregistrés affichés en badges. Dix processus les plus gourmands affichés au lieu de cinq.",
-      "CORRIGÉ: faux positif antivirus (Trojan:Win32/Sabsik.TE.A!ml signalé par Windows Defender) sur les exécutables du collecteur — la compression UPX, connue pour déclencher ce type de détection heuristique, était restée activée sur ces deux builds alors qu'elle avait déjà été désactivée sur ParcInfo.exe. Même correctif appliqué : UPX désactivé, manifeste Windows de confiance ajouté.",
-      "CORRIGÉ: le lecteur de registre HKCR: n'existe pas dans le contexte non interactif où tourne le collecteur — la résolution du nom lisible de certaines associations de fichiers retombait silencieusement sur le ProgId brut."
+      "CORRIGÉ: sur un Mac (Intel, diagnostiqué en usage réel via spctl/codesign/xattr), l'application mise à jour automatiquement restait bloquée par Gatekeeper alors qu'un remplacement manuel fonctionnait. La signature ad hoc posée après remplacement était pourtant valide (pas de corruption) — c'est sa seule présence qui durcissait l'évaluation de Gatekeeper sur cette version de macOS, un bundle non signé passant mieux qu'un bundle signé ad hoc sans Team ID. La signature n'est désormais tentée que si `spctl --assess` rejette encore le bundle après le simple retrait de la quarantaine, jamais par défaut.",
+      "CORRIGÉ: le mécanisme de mise à jour macOS arrêtait l'ancienne instance sans jamais vérifier que la nouvelle avait réellement démarré — un blocage Gatekeeper faisait disparaître les deux, sans que rien n'explique pourquoi. La nouvelle version doit maintenant prouver qu'elle tourne avant que l'ancienne soit arrêtée ; en cas d'échec, l'ancienne reste active et l'erreur précise est affichée et journalisée (visible depuis n'importe quel poste).",
+      "CORRIGÉ: la synchronisation entre postes (Turso) pouvait perdre silencieusement et définitivement une donnée reçue d'un autre poste — le curseur de lecture avançait même quand une table avait échoué à s'appliquer, sautant cette entrée sans plus jamais la retenter. Signalé en usage réel : les fiches système ne se synchronisaient plus entre machines, sans aucune erreur visible (l'erreur du cycle en échec disparaissait dès le cycle suivant). Le curseur ne dépasse plus jamais une entrée en échec ; elle est relue et retentée au cycle suivant."
     ]
   },
   "checksums": {
@@ -29,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.1"
 }

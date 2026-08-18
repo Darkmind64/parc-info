@@ -128,6 +128,11 @@ class UpdateChecker:
         self.download_progress = None
         # Débit observé, en Ko/s : sans lui, « c'est lent » reste invérifiable.
         self.download_rate_kbs = None
+        # Raison précise du dernier install_update() en échec, si connue —
+        # UpdateNotifier s'en sert pour un message d'erreur exploitable plutôt
+        # que le générique « le remplacement a échoué », visible dans l'UI et
+        # journalisé (journal_maj, synchronisé) pour un diagnostic à distance.
+        self.last_install_error = None
 
     # ─────────────────────────────────────────────────────────────────────────
     # Détection
@@ -361,6 +366,9 @@ class UpdateChecker:
                             "Architecture du binaire téléchargé incompatible avec ce Mac "
                             "(attendu %s) : %s — mise à jour annulée, version actuelle conservée",
                             archi_attendue, r.stdout.strip())
+                        self.last_install_error = (
+                            "Le fichier téléchargé ne correspond pas à l'architecture de ce "
+                            "Mac (attendu %s) — version actuelle conservée." % archi_attendue)
                         return False
                 except Exception as e:
                     logger.debug("Vérification d'architecture impossible (non bloquant) : %s", e)
@@ -392,11 +400,56 @@ class UpdateChecker:
         self._debloquer_gatekeeper_macos(app_actuelle)
         shutil.rmtree(sauvegarde, ignore_errors=True)
 
-        # Relance différée : le processus courant doit d'abord rendre la main.
-        subprocess.Popen(['/bin/sh', '-c',
-                          'sleep 3; open "%s"' % app_actuelle],
-                         start_new_session=True)
-        logger.info("Application macOS remplacée — redémarrage en cours")
+        # Relance VÉRIFIÉE, pas un tir à l'aveugle suivi d'un arrêt inconditionnel
+        # de l'instance actuelle par l'appelant (UpdateNotifier._arreter_pour_
+        # redemarrage, sur la seule foi du True retourné ici). Signalé en usage
+        # réel sur Mac Intel : l'ancienne instance disparaissait (tuée dès que
+        # cette méthode rendait la main) et la nouvelle ne s'ouvrait jamais —
+        # rien ne tournait, sans qu'aucune erreur n'explique pourquoi, faute de
+        # vérification à cet endroit. macOS ne verrouille pas un bundle .app en
+        # cours d'exécution (contrairement à un .exe Windows) : rien n'empêche
+        # de vérifier que la nouvelle version démarre bien avant de laisser
+        # l'appelant arrêter l'ancienne — la nouvelle prend simplement un autre
+        # port libre le temps du recouvrement (voir launcher.py).
+        executable_cible = app_actuelle / 'Contents' / 'MacOS' / 'ParcInfo'
+        try:
+            r = subprocess.run(['open', str(app_actuelle)], capture_output=True,
+                               text=True, timeout=15)
+            if r.returncode != 0:
+                logger.warning("« open » a renvoyé %s pour %s : %s",
+                               r.returncode, app_actuelle, (r.stderr or '').strip()[:300])
+        except Exception as e:
+            logger.warning("Échec du lancement de %s : %s", app_actuelle, e)
+
+        # `open` rend la main dès que macOS a accepté la demande, pas quand
+        # l'app tourne réellement — un blocage Gatekeeper survient après. Seule
+        # l'apparition du processus prouve un démarrage effectif.
+        lancee = False
+        for _ in range(20):  # jusqu'à 10 s : le temps normal d'un démarrage Flask
+            try:
+                if subprocess.run(['pgrep', '-f', str(executable_cible)],
+                                  capture_output=True, timeout=5).returncode == 0:
+                    lancee = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+        if not lancee:
+            logger.error(
+                "La nouvelle version ne démarre pas après remplacement — probablement "
+                "bloquée par Gatekeeper malgré xattr -cr et la signature ad hoc "
+                "(voir les avertissements ci-dessus). L'instance actuelle n'est PAS "
+                "arrêtée : mieux vaut rester sur l'ancienne version que de ne laisser "
+                "tourner ni l'une ni l'autre.")
+            self.last_install_error = (
+                "L'application a été remplacée mais ne démarre pas — probablement "
+                "bloquée par macOS (Gatekeeper). L'ancienne version continue de "
+                "tourner, rien n'a été perdu. Essayez de l'ouvrir manuellement pour "
+                "voir le message exact, ou consultez le journal de l'application.")
+            return False
+
+        logger.info("Application macOS remplacée et relancée avec succès")
         return True
 
     @staticmethod
@@ -422,52 +475,91 @@ class UpdateChecker:
                     logger.error("Migration de %s impossible : %s", nom, e)
 
     @staticmethod
+    def _gatekeeper_accepte(bundle: Path) -> bool:
+        """True si `spctl` — la même évaluation que macOS fait réellement à
+        l'ouverture — accepterait de lancer ce bundle maintenant. Interrogé
+        directement plutôt que supposé à partir de ce qu'on vient de faire :
+        voir la note dans `_debloquer_gatekeeper_macos` sur pourquoi deviner
+        s'est révélé peu fiable ici."""
+        try:
+            r = subprocess.run(['spctl', '--assess', '--type', 'execute', str(bundle)],
+                               capture_output=True, text=True, timeout=15)
+            return r.returncode == 0
+        except Exception:
+            return False
+
+    @staticmethod
     def _debloquer_gatekeeper_macos(bundle: Path) -> None:
-        """Lève les deux blocages Gatekeeper connus sur un bundle non signé.
+        """Lève le blocage Gatekeeper sur un bundle non signé, en vérifiant
+        à chaque étape avec `spctl --assess` plutôt qu'en supposant qu'une
+        approche fonctionne partout.
 
         1. `com.apple.quarantine` : posé sur ce que télécharge un navigateur,
            pas par `urllib` — donc pas censé être présent ici puisque ParcInfo
            télécharge lui-même l'archive. Retiré quand même, sans coût, pour
            couvrir un mécanisme de tagging qu'on n'aurait pas anticipé.
-        2. Signature ad hoc (`codesign --sign -`) : sur les versions récentes
-           de macOS, un bundle totalement non signé peut rester bloqué par
-           Gatekeeper même une fois la quarantaine levée, sans même proposer
-           « Ouvrir quand même » dans Réglages Système. Une signature ad hoc
-           ne demande aucun certificat Apple et suffit à satisfaire cette
-           vérification. Nécessite les outils en ligne de commande Xcode —
-           absents sur certains Mac ; échec silencieux dans ce cas (log
-           seulement), pas d'écran bloquant pour l'utilisateur.
+        2. Signature ad hoc (`codesign --sign -`), SEULEMENT si `spctl`
+           rejette encore le bundle après le retrait de la quarantaine.
 
-        SANS `--deep` : signaler en production après la 2.16.1 (Mac Intel) —
-        l'app se relançait avec « impossible d'exécuter cette application »
-        après une mise à jour automatique, alors qu'un remplacement manuel
-        suivi du seul `xattr -cr` (sans codesign) fonctionnait. `--deep`
-        re-signe récursivement tout le bundle, y compris Python.framework et
-        les bibliothèques embarquées par PyInstaller — un cas que codesign
-        gère mal sur des bundles complexes (signature invalide au lancement,
-        bien documenté pour les apps PyInstaller). `--deep` n'était pas
-        nécessaire : signer le bundle suffit à signer l'exécutable principal
-        qu'il référence (CFBundleExecutable), sans toucher aux composants
-        imbriqués.
+        Le point 2 a changé de logique après un diagnostic en usage réel (Mac
+        Intel, `spctl -a -vv` + `codesign -dv --verbose=4` + `xattr -l`) :
+        - `xattr -l` vide : la quarantaine était déjà correctement levée ;
+        - la signature ad hoc posée par cette fonction était pourtant
+          parfaitement valide (`codesign -dv` ne montrait aucune corruption,
+          contrairement à l'hypothèse de la 2.17.1 sur `--deep`) ;
+        - et `spctl -a` REJETAIT quand même ce bundle signé ad hoc.
+        Sur ce Mac, la réparation manuelle qui fonctionne (retélécharger,
+        remplacer, `xattr -cr` — sans jamais appeler `codesign`) laisse le
+        bundle SANS AUCUNE signature. C'est cette absence de signature qui
+        passait l'évaluation de Gatekeeper, pas une signature ad hoc : sur
+        cette version de macOS, apposer une identité ad hoc sans Team ID ni
+        notarisation durcit l'évaluation au lieu de l'assouplir — Gatekeeper
+        se met à juger une identité qu'il ne peut pas faire confiance, là où
+        un bundle nu n'était tout simplement pas évalué de la même façon.
 
-        Les deux échecs sont maintenant journalisés (contrairement à l'ancien
-        `check=False` muet) : si le blocage persiste malgré tout, le journal
-        dira enfin pourquoi, au lieu de forcer à deviner à nouveau.
+        La 2.16.1 (avant ce changement) rapportait l'inverse : un bundle NON
+        signé restait bloqué même quarantaine levée. Les deux observations
+        peuvent être vraies sur des versions de macOS différentes — d'où la
+        vérification systématique avec `spctl` plutôt qu'un choix figé : la
+        signature ad hoc n'est tentée que si la quarantaine seule ne suffit
+        pas, jamais par défaut.
+
+        Codesign nécessite les outils en ligne de commande Xcode — absents
+        sur certains Mac ; échec silencieux dans ce cas (log seulement), pas
+        d'écran bloquant pour l'utilisateur. Si le blocage persiste malgré
+        les deux étapes, `_install_macos` le détecte à la vérification de
+        démarrage et n'arrête pas l'instance actuelle pour autant.
         """
-        for commande, nom in (
-            (['xattr', '-cr', str(bundle)], 'xattr -cr'),
-            (['codesign', '--force', '--sign', '-', str(bundle)], 'codesign ad hoc'),
-        ):
-            try:
-                r = subprocess.run(commande, capture_output=True, text=True, timeout=30)
-                if r.returncode != 0:
-                    logger.warning("%s a échoué (code %s) : %s",
-                                   nom, r.returncode, (r.stderr or '').strip()[:300])
-            except FileNotFoundError:
-                logger.debug("%s indisponible sur ce Mac (outils en ligne de "
-                             "commande Xcode absents ?)", nom)
-            except Exception as e:
-                logger.warning("%s a échoué : %s", nom, e)
+        try:
+            r = subprocess.run(['xattr', '-cr', str(bundle)],
+                               capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                logger.warning("xattr -cr a échoué (code %s) : %s",
+                               r.returncode, (r.stderr or '').strip()[:300])
+        except Exception as e:
+            logger.warning("xattr -cr a échoué : %s", e)
+
+        if UpdateChecker._gatekeeper_accepte(bundle):
+            return
+
+        try:
+            r = subprocess.run(['codesign', '--force', '--sign', '-', str(bundle)],
+                               capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                logger.warning("codesign ad hoc a échoué (code %s) : %s",
+                               r.returncode, (r.stderr or '').strip()[:300])
+        except FileNotFoundError:
+            logger.debug("codesign indisponible sur ce Mac (outils en ligne "
+                         "de commande Xcode absents ?)")
+        except Exception as e:
+            logger.warning("codesign ad hoc a échoué : %s", e)
+
+        if not UpdateChecker._gatekeeper_accepte(bundle):
+            logger.warning(
+                "Gatekeeper rejette encore %s après xattr -cr et signature ad "
+                "hoc — seule une approbation manuelle (Réglages Système > "
+                "Confidentialité et sécurité > Ouvrir quand même) débloque ce "
+                "cas, macOS ne permet pas de l'automatiser plus loin.", bundle)
 
     def _macos_app_path(self) -> Optional[Path]:
         """Chemin du bundle .app en cours d'exécution, sinon /Applications."""

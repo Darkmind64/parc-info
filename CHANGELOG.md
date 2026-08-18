@@ -1,5 +1,53 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.1] - 2026-08-17 🔓
+
+### 🔓 Mise à jour automatique macOS enfin fiable + synchronisation qui ne perd plus rien
+
+**Mise à jour macOS.** Après deux tentatives précédentes (2.16.1, 2.17.1) sur
+le même Mac Intel encore bloqué par « Impossible d'ouvrir l'application
+ParcInfo », un vrai diagnostic (`spctl -a -vv`, `codesign -dv --verbose=4`,
+`xattr -l`, tous trois exécutés directement sur la machine qui échoue) a
+enfin donné la réponse : `xattr -l` ne montrait plus aucune quarantaine, et
+`codesign -dv` montrait une signature ad hoc parfaitement valide (pas de
+corruption, contrairement à l'hypothèse de la 2.17.1 sur `codesign --deep`)
+— et pourtant `spctl -a` rejetait toujours le bundle. La réparation manuelle
+qui fonctionne, elle, ne signe jamais rien : juste `xattr -cr` après un
+remplacement. C'est la signature ad hoc elle-même, sans Team ID ni
+notarisation, qui durcit l'évaluation de Gatekeeper sur cette version de
+macOS — un bundle nu passe, un bundle signé ad hoc sans identité de
+confiance est jugé et recalé. La 2.16.1 avait pourtant rapporté l'inverse
+(bundle non signé bloqué). Les deux peuvent être vraies selon la version de
+macOS : `_debloquer_gatekeeper_macos()` ne suppose plus rien et vérifie
+avec `spctl --assess` à chaque étape — la signature ad hoc n'est tentée que
+si le simple retrait de quarantaine ne suffit pas.
+
+Deuxième défaut trouvé en creusant le même mécanisme : l'ancienne instance
+était arrêtée dès que le fichier était remplacé sur disque, sans jamais
+vérifier que la nouvelle version démarrait réellement. Un blocage Gatekeeper
+faisait donc disparaître les deux à la fois — l'ancienne tuée, la nouvelle
+jamais ouverte, rien ne tournait, et rien n'expliquait pourquoi. La nouvelle
+version doit maintenant prouver qu'elle a démarré (jusqu'à 10 secondes
+d'attente) avant que l'ancienne soit arrêtée ; en cas d'échec, l'ancienne
+continue de tourner et l'erreur précise s'affiche dans l'interface, en plus
+d'être journalisée (visible depuis n'importe quel poste, la table étant
+synchronisée entre instances).
+
+**Synchronisation entre postes.** Signalé sans rapport avec ce qui précède :
+les fiches système ne se synchronisaient plus entre plusieurs postes
+ParcInfo, sans aucune erreur visible. Le curseur de lecture de la
+synchronisation (`_sync_using_journal`, pull Turso → local) avançait
+jusqu'à la fin du lot reçu même quand une table de ce lot avait échoué à
+s'appliquer — l'entrée en échec n'était donc plus jamais retentée, perdue en
+silence, et l'erreur elle-même ne survivait que le temps du cycle où elle
+s'était produite avant de disparaître de l'état affiché. Le curseur ne
+dépasse plus jamais la plus ancienne entrée en échec d'un lot : elle est
+relue et retentée au cycle suivant, indéfiniment jusqu'à réussir — exactement
+le comportement déjà en place côté push, maintenant symétrique côté pull.
+Couvert par un nouveau test dédié (`test_sync_curseur_echec.py`).
+
+---
+
 ## [2.18.0] - 2026-08-17 🎨
 
 ### 🎨 Vraies icônes d'applications, statut de mise à jour tri-état, correctif antivirus

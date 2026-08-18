@@ -183,7 +183,9 @@ class UpdateNotifier:
                     # sur l'ancienne version comme si de rien n'était.
                     self._arreter_pour_redemarrage()
                 else:
-                    raise UpdateCheckError("Le remplacement de l'application a échoué")
+                    raise UpdateCheckError(
+                        self.checker.last_install_error
+                        or "Le remplacement de l'application a échoué")
             except Exception as e:
                 self.phase = 'erreur'
                 self.erreur = str(e)

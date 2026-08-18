@@ -41,6 +41,7 @@ jobs:
           python test_journal_maj.py
           python test_maj_macos_architecture.py
           python test_migration_donnees_macos.py
+          python test_sync_curseur_echec.py
           python test_securite.py
           python test_remplissage_fiche.py
           python test_historique_collectes.py

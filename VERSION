@@ -1,8 +1,29 @@
-PARCINFO_VERSION=2.18.0
+PARCINFO_VERSION=2.18.1
 RELEASE_DATE=2026-08-17
-BUILD_NUMBER=2026081704
+BUILD_NUMBER=2026081705
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.1 - Mise à jour automatique macOS enfin fiable + curseur de synchronisation
+# Deux corrections issues d'un diagnostic en usage réel (Mac Intel bloqué par
+# la mise à jour automatique depuis plusieurs versions malgré des tentatives
+# précédentes). Diagnostic complet cette fois (spctl -a -vv, codesign -dv
+# --verbose=4, xattr -l) : la signature ad hoc posée après remplacement était
+# parfaitement valide, mais c'est sa seule présence qui faisait rejeter le
+# bundle par Gatekeeper sur cette version de macOS — un bundle NON signé
+# (quarantaine levée) passait, un bundle signé ad hoc sans Team ID ni
+# notarisation était refusé. La signature n'est plus tentée que si `spctl
+# --assess` rejette encore le bundle après le seul retrait de la quarantaine.
+# Deuxième défaut trouvé au passage : l'ancienne instance était arrêtée sans
+# jamais vérifier que la nouvelle avait réellement démarré — un blocage
+# Gatekeeper faisait disparaître les deux à la fois. La nouvelle version doit
+# maintenant prouver qu'elle tourne avant que l'ancienne soit arrêtée.
+# Et un deuxième problème signalé sans rapport : les fiches système ne se
+# synchronisaient plus entre postes, sans erreur visible. Le curseur de
+# lecture de la synchronisation (Turso) avançait même quand une table avait
+# échoué à s'appliquer, sautant cette entrée pour toujours — corrigé, une
+# entrée en échec est maintenant relue et retentée au cycle suivant
+# Date: 17 août 2026
 
 # Version 2.18.0 - Vraies icônes, statut de mise à jour tri-état, correctif antivirus collecteur
 # Fiche système : chaque application (navigateur, mail, types de fichiers)

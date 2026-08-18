@@ -107,6 +107,18 @@ def _fausse_commande_file(arch_annoncee):
                 stderr = ''
                 returncode = 0
             return _R()
+        if cmd and cmd[0] in ('open', 'pgrep'):
+            # Simule une relance réussie : la vérification de démarrage
+            # ajoutée à _install_macos() ne doit pas dépendre d'un vrai
+            # macOS ici — sans ce faux succès immédiat, `pgrep` échouerait
+            # (absent sur cette machine) à chaque tentative de la boucle de
+            # vérification, jusqu'à épuiser ses ~10 s et faire échouer à tort
+            # le test 3 (résultat False au lieu de True).
+            class _R:
+                stdout = ''
+                stderr = ''
+                returncode = 0
+            return _R()
         # xattr / codesign : laisser échouer naturellement (FileNotFoundError
         # sur cette machine) — déjà couvert par test_migration_donnees_macos.py.
         return _faux_run_original(cmd, **kw)

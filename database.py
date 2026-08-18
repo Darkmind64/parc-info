@@ -902,10 +902,12 @@ def _sync_using_journal(local, turso) -> tuple:
 
     if remote_entries:
         by_table = {}
+        ids_by_table = {}
         max_id = last_pulled
         for rid, tbl, record_id, action in remote_entries:
             g = by_table.setdefault(tbl, {'INSERT': set(), 'UPDATE': set(), 'DELETE': set()})
             g[action].add(record_id)
+            ids_by_table.setdefault(tbl, []).append(rid)
             max_id = max(max_id, rid)
 
         # Garde anti-rebouclage : le temps d'appliquer le pull, les triggers locaux
@@ -915,27 +917,43 @@ def _sync_using_journal(local, turso) -> tuple:
         # est réécrite — ce qui écraserait silencieusement les changements distants).
         local.execute("INSERT OR IGNORE INTO _sync_applying (id) VALUES (1)")
         local.commit()
+        # Le curseur ne doit JAMAIS dépasser l'entrée la plus ancienne restée en
+        # échec : signalé en usage réel — un pull qui échoue une fois (ligne trop
+        # grosse, erreur réseau transitoire...) faisait quand même avancer le
+        # curseur jusqu'à la fin du lot, ce qui SAUTAIT DÉFINITIVEMENT cette
+        # entrée : plus aucune nouvelle tentative au cycle suivant, et l'erreur
+        # elle-même disparaissait de `last_error` dès que ce cycle-là était passé
+        # — silencieux et permanent, sans rien à observer après coup. Chaque table
+        # qui réussit fait avancer le curseur jusqu'à sa propre entrée la plus
+        # récente ; une table en échec plafonne le curseur juste avant sa plus
+        # ancienne entrée, pour que celle-ci soit relue et retentée au prochain
+        # cycle plutôt que perdue.
+        max_id_ok = last_pulled
+        limite_echec = None
         try:
             for tbl, changes in by_table.items():
+                ids_tbl = ids_by_table[tbl]
                 try:
                     pk_col = _pk_column(local, tbl)
                     _apply_table_changes(turso, local, tbl, pk_col, changes)
                     stats.setdefault(tbl, {})['pulled'] = len(changes['INSERT'] | changes['UPDATE'])
                     stats[tbl]['pulled_deletes'] = len(changes['DELETE'])
+                    max_id_ok = max(max_id_ok, max(ids_tbl))
                 except Exception as e:
                     errors.append(f'pull {tbl}: {e}')
+                    plus_ancien = min(ids_tbl)
+                    limite_echec = plus_ancien if limite_echec is None else min(limite_echec, plus_ancien)
         finally:
             local.execute("DELETE FROM _sync_applying")
             local.commit()
 
-        # Le curseur avance même si certaines tables ont échoué : ces erreurs sont
-        # rares (table renommée/supprimée) et une nouvelle tentative indéfinie sur
-        # la même entrée n'apporterait rien ; elles sont visibles dans errors/logs.
+        nouveau_curseur = max_id_ok if limite_echec is None else min(max_id_ok, limite_echec - 1)
+
         try:
             local.execute(
                 "INSERT INTO _sync_meta (key, value) VALUES ('last_pulled_journal_id', ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                (str(max_id),))
+                (str(nouveau_curseur),))
             local.commit()
         except Exception:
             pass
