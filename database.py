@@ -828,16 +828,36 @@ def _sync_using_journal(local, turso) -> tuple:
     Synchronise en utilisant le journal de modifications _sync_journal, dans les
     DEUX sens :
 
-    - PUSH (local → Turso) : les entrées du journal LOCAL sont envoyées à Turso.
-      Seules les entrées effectivement poussées avec succès sont retirées du
-      journal local — une erreur réseau ne fait donc pas perdre la modification,
-      elle est retentée au cycle suivant.
-
     - PULL (Turso → local) : Turso tient son PROPRE _sync_journal, alimenté par
       les mêmes triggers (répliqués sur Turso par _ensure_turso_schema) qui se
       déclenchent quand N'IMPORTE QUELLE instance y écrit. Cette instance retient
       un curseur local (_sync_meta.last_pulled_journal_id) et ne relit que les
       entrées Turso plus récentes que ce curseur — peu importe qui les a produites.
+
+    - PUSH (local → Turso) : les entrées du journal LOCAL sont envoyées à Turso.
+      Seules les entrées effectivement poussées avec succès sont retirées du
+      journal local — une erreur réseau ne fait donc pas perdre la modification,
+      elle est retentée au cycle suivant.
+
+    PULL avant PUSH, jamais l'inverse — signalé en usage réel : un appareil
+    supprimé sur une instance, bien supprimé PARTOUT dans l'instant, revenait
+    tout seul après plusieurs cycles de synchronisation. Cause : une instance
+    en retard (hors ligne un moment, ou simplement pas encore passée par un
+    cycle) peut garder dans son propre journal local une modification de CET
+    appareil datant d'AVANT sa suppression ailleurs — un futur cycle sur cette
+    instance n'a alors pas encore appris la suppression au moment de pousser
+    cette entrée périmée, qui recrée l'appareil sur Turso via INSERT OR
+    REPLACE (l'appareil existe toujours, localement, sur cette instance en
+    retard). Ce nouvel événement, journalisé sur Turso avec un identifiant
+    postérieur à la suppression d'origine, se propage ensuite normalement à
+    toutes les autres instances — la résurrection semble alors venir de nulle
+    part, plusieurs cycles après la suppression.
+    En tirant D'ABORD les modifications distantes, une instance en retard
+    apprend la suppression et l'applique localement avant de pousser quoi que
+    ce soit : sa propre entrée périmée ne trouve alors plus rien à lire
+    localement pour cet appareil (déjà supprimé par le pull qui vient de
+    s'exécuter) et ne pousse donc plus rien — sans qu'aucune logique
+    supplémentaire de détection ne soit nécessaire.
 
     Avec < 10 modifications/jour, ceci réduit les reads/writes Turso de ~99%
     tout en synchronisant réellement toutes les instances entre elles.
@@ -850,39 +870,6 @@ def _sync_using_journal(local, turso) -> tuple:
     local.commit()
 
     stats, errors = {}, []
-
-    # ── PUSH : journal local → Turso ──────────────────────────────────────
-    try:
-        journal_entries = local.execute(
-            "SELECT id, tbl, record_id, action FROM _sync_journal ORDER BY id"
-        ).fetchall()
-    except Exception:
-        journal_entries = []
-
-    if journal_entries:
-        by_table: dict = {}
-        for jid, tbl, record_id, action in journal_entries:
-            g = by_table.setdefault(tbl, {'INSERT': set(), 'UPDATE': set(), 'DELETE': set(), 'jids': []})
-            g[action].add(record_id)
-            g['jids'].append(jid)
-
-        for tbl, changes in by_table.items():
-            try:
-                pk_col = _pk_column(local, tbl)
-                _apply_table_changes(local, turso, tbl, pk_col, changes)
-                # Succès uniquement : purger les entrées de journal traitées pour cette table
-                jids = changes['jids']
-                for i in range(0, len(jids), _BATCH_SIZE):
-                    chunk = jids[i:i + _BATCH_SIZE]
-                    local.execute(
-                        f"DELETE FROM _sync_journal WHERE id IN ({','.join('?' * len(chunk))})",
-                        chunk)
-                local.commit()
-                stats.setdefault(tbl, {})['pushed'] = len(changes['INSERT'] | changes['UPDATE'])
-                stats[tbl]['pushed_deletes'] = len(changes['DELETE'])
-            except Exception as e:
-                # Échec (réseau/Turso) : on NE supprime PAS ces entrées → retentées au prochain cycle
-                errors.append(f'push {tbl}: {e}')
 
     # ── PULL : journal Turso (toutes instances) → local ──────────────────
     try:
@@ -958,13 +945,49 @@ def _sync_using_journal(local, turso) -> tuple:
         except Exception:
             pass
 
+    # ── PUSH : journal local → Turso ──────────────────────────────────────
+    # Après le pull ci-dessus, pas avant : voir la note sur l'ordre en tête de
+    # fonction (résurrection d'un appareil supprimé ailleurs).
+    try:
+        journal_entries = local.execute(
+            "SELECT id, tbl, record_id, action FROM _sync_journal ORDER BY id"
+        ).fetchall()
+    except Exception:
+        journal_entries = []
+
+    if journal_entries:
+        by_table: dict = {}
+        for jid, tbl, record_id, action in journal_entries:
+            g = by_table.setdefault(tbl, {'INSERT': set(), 'UPDATE': set(), 'DELETE': set(), 'jids': []})
+            g[action].add(record_id)
+            g['jids'].append(jid)
+
+        for tbl, changes in by_table.items():
+            try:
+                pk_col = _pk_column(local, tbl)
+                _apply_table_changes(local, turso, tbl, pk_col, changes)
+                # Succès uniquement : purger les entrées de journal traitées pour cette table
+                jids = changes['jids']
+                for i in range(0, len(jids), _BATCH_SIZE):
+                    chunk = jids[i:i + _BATCH_SIZE]
+                    local.execute(
+                        f"DELETE FROM _sync_journal WHERE id IN ({','.join('?' * len(chunk))})",
+                        chunk)
+                local.commit()
+                stats.setdefault(tbl, {})['pushed'] = len(changes['INSERT'] | changes['UPDATE'])
+                stats[tbl]['pushed_deletes'] = len(changes['DELETE'])
+            except Exception as e:
+                # Échec (réseau/Turso) : on NE supprime PAS ces entrées → retentées au prochain cycle
+                errors.append(f'push {tbl}: {e}')
+
     return stats, errors
 
 
 def _bidirectional_sync(local, turso) -> tuple:
     """
     Synchronise toutes les tables via le journal de modifications, dans les deux
-    sens (push local→Turso, pull Turso→local — voir _sync_using_journal).
+    sens (pull Turso→local, puis push local→Turso — voir _sync_using_journal
+    pour l'ordre, qui compte).
     Retourne (stats_dict, errors_list).
     """
     # Désactiver les FK locales pour éviter les erreurs d'ordre lors du pull
