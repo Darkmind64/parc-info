@@ -1,8 +1,25 @@
-PARCINFO_VERSION=2.18.1
-RELEASE_DATE=2026-08-17
-BUILD_NUMBER=2026081705
+PARCINFO_VERSION=2.18.2
+RELEASE_DATE=2026-08-18
+BUILD_NUMBER=2026081801
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.2 - Détection multi-cartes réseau du collecteur + noms mDNS uniques
+# Signalé en usage réel : le collecteur GUI ne présélectionnait plus le
+# client déjà connu d'une machine. get_mac_address() (uuid.getnode()) n'a
+# aucune notion de « la bonne » carte réseau — constaté sur un poste réel :
+# 7 adresses MAC différentes (carte physique, VirtualBox, Hyper-V/WSL), et
+# c'est une carte DÉCONNECTÉE qui était choisie pour la vérification rapide
+# au démarrage du collecteur, pas celle réellement enregistrée côté serveur
+# (qui, elle, vient de la détection sophistiquée de la collecte complète,
+# _meilleure_carte_physique — jamais utilisée pour cette vérification
+# rapide). Le collecteur envoie maintenant toutes les adresses MAC visibles
+# (get_all_mac_addresses), le serveur reconnaît la machine sur n'importe
+# laquelle. Trouvé au passage, sans rapport : plusieurs instances ParcInfo
+# sur le même réseau (Docker + PC + Mac) s'annonçaient toutes sous le même
+# nom mDNS — une seule survivait, les autres invisibles à la découverte
+# réseau sans erreur visible. Chaque instance a maintenant un nom unique
+# Date: 18 août 2026
 
 # Version 2.18.1 - Mise à jour automatique macOS enfin fiable + curseur de synchronisation
 # Deux corrections issues d'un diagnostic en usage réel (Mac Intel bloqué par

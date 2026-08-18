@@ -29,7 +29,7 @@ from urllib.request import urlopen
 
 from collector_core import (
     COLLECTOR_VERSION,
-    get_mac_address,
+    get_all_mac_addresses,
     build_summary_sections,
     collect_system_info,
     fetch_clients,
@@ -545,12 +545,16 @@ class CollectorGUI:
             try:
                 logger.debug(f"Fetching clients from server: {self.server_url}")
                 # L'adresse MAC permet au serveur de reconnaître une machine
-                # déjà inventoriée et de désigner son client. Elle est lue
-                # directement plutôt que prise dans self.system_info : la
-                # collecte complète dure une minute et tourne en parallèle,
-                # alors que cette lecture est immédiate.
-                mac = get_mac_address()
-                clients, suggestion = fetch_clients(self.server_url, mac_address=mac,
+                # déjà inventoriée et de désigner son client. Lue directement
+                # plutôt que prise dans self.system_info : la collecte
+                # complète dure une minute et tourne en parallèle, alors que
+                # cette lecture est immédiate. Toutes les cartes sont
+                # envoyées, pas une seule choisie au hasard par
+                # get_mac_address() : sur une machine à plusieurs adaptateurs
+                # (VPN, Hyper-V/WSL, VirtualBox…), rien ne dit laquelle est
+                # celle effectivement enregistrée côté serveur.
+                macs = get_all_mac_addresses()
+                clients, suggestion = fetch_clients(self.server_url, mac_address=macs,
                                                     token=self.token)
                 logger.debug(f"Got {len(clients)} clients, suggestion={suggestion}")
                 self.root.after(0, self._appliquer_clients, clients, suggestion)

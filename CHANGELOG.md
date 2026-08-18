@@ -1,5 +1,46 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.2] - 2026-08-18 📡
+
+### 📡 Détection multi-cartes réseau du collecteur + noms mDNS uniques
+
+**Le collecteur retrouve le bon client.** Signalé en usage réel : la
+présélection automatique du client déjà connu d'une machine ne fonctionnait
+plus. La vérification rapide au démarrage du collecteur GUI utilisait
+`get_mac_address()` (`uuid.getnode()`), qui n'a aucune notion de « la bonne »
+carte réseau — sur un poste de développement réel, cette fonction a renvoyé
+l'une de **sept** adresses MAC différentes (carte physique, VirtualBox,
+Hyper-V/WSL), et c'est une carte **déconnectée** qui a été choisie, pas celle
+réellement enregistrée côté serveur. Cette dernière vient d'un mécanisme
+différent et plus sophistiqué (`_meilleure_carte_physique`, qui choisit la
+carte physique connectée) exécuté seulement pendant la collecte complète —
+jamais repris par cette vérification rapide, volontairement immédiate pour
+ne pas attendre la minute que prend la collecte. Le collecteur envoie
+maintenant toutes les adresses MAC visibles localement
+(`get_all_mac_addresses`), le serveur reconnaît la machine sur n'importe
+laquelle d'entre elles plutôt que sur une seule devinée au hasard.
+
+**mDNS : un nom par instance.** Trouvé en creusant le même sujet, sans
+rapport direct : chaque instance ParcInfo s'annonce sur le réseau local via
+mDNS pour permettre sa découverte automatique — mais toutes s'annonçaient
+sous le **même nom** (`"ParcInfo._http._tcp.local."`). Plusieurs instances
+sur un même réseau (Docker + PC + Mac, par exemple, exactement le cas d'un
+retour d'usage réel) entraient donc en conflit : une seule restait
+visible, les autres invisibles à la découverte réseau, sans la moindre
+erreur pour le signaler. Chaque instance a maintenant un nom unique (nom de
+poste inclus) et publie sa vraie version dans ses informations mDNS (la
+valeur était figée à « 2.6.22 » depuis des versions).
+
+> À savoir : un conteneur Docker en réseau « bridge » (le mode par défaut de
+> `docker-compose.yml` fourni) ne relaie généralement pas le trafic
+> multicast mDNS vers le réseau local — ce correctif rend la découverte
+> fiable entre plusieurs instances PC/macOS, mais une instance Docker en
+> réseau bridge restera probablement invisible à la découverte automatique
+> tant qu'elle n'est pas basculée en réseau `host`. Poursuite en cours sur
+> la fonctionnalité de découverte automatique complète demandée en usage réel.
+
+---
+
 ## [2.18.1] - 2026-08-17 🔓
 
 ### 🔓 Mise à jour automatique macOS enfin fiable + synchronisation qui ne perd plus rien

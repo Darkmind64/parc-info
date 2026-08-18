@@ -109,6 +109,23 @@ verifier(reponse.status_code == 200, 'collecteur accepté sans jeton',
 verifier(client.get('/api/clients-public').status_code == 200,
          'liste des clients ouverte sans jeton')
 
+print('\n=== 4b. Suggestion de client sur plusieurs adresses MAC ===')
+# Une machine à plusieurs cartes (VPN, Hyper-V/WSL, VirtualBox…) n'a pas de
+# « bonne » adresse évidente côté collecteur : get_all_mac_addresses() les
+# envoie toutes, le serveur doit reconnaître l'appareil sur N'IMPORTE
+# LAQUELLE — pas seulement la première ou la seule qu'un ancien collecteur
+# aurait envoyée.
+reponse = client.get('/api/clients-public?mac=11:22:33:44:55:66&mac=AA:BB:CC:DD:EE:01')
+verifier(reponse.status_code == 200, 'requête à plusieurs adresses MAC acceptée')
+suggestion = (reponse.get_json() or {}).get('suggested_client')
+verifier(suggestion is not None and suggestion.get('id') == 1,
+         "le client est reconnu via la deuxième adresse MAC, la première étant inconnue",
+         str(suggestion))
+reponse_inconnue = client.get('/api/clients-public?mac=11:22:33:44:55:66&mac=22:33:44:55:66:77')
+verifier(isinstance(reponse_inconnue.get_json(), list),
+         'aucune suggestion quand aucune des adresses ne correspond '
+         '(réponse = liste simple, pas un objet avec suggested_client)')
+
 print('\n=== 5. API collecteur avec jeton ===')
 cfg_set('collecteur_token', 'jeton-Sécurisé-42')
 reponse = client.post('/api/device-info', json=charge)

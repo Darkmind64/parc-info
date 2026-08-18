@@ -7126,19 +7126,24 @@ def api_clients_public():
             conn.close()
             clients = [{"id": new_id, "nom": "Client par défaut"}]
 
-        # Suggestion : si l'adresse MAC fournie correspond à un appareil déjà
-        # enregistré, le collecteur peut présélectionner son client au lieu de
-        # laisser l'utilisateur deviner. On ne divulgue que l'identifiant et le
-        # nom du client — déjà publics sur cet endpoint — et rien n'est révélé
-        # quand la machine est inconnue.
-        mac = (request.args.get('mac') or '').strip().upper()
+        # Suggestion : si l'une des adresses MAC fournies correspond à un
+        # appareil déjà enregistré, le collecteur peut présélectionner son
+        # client au lieu de laisser l'utilisateur deviner. Plusieurs adresses
+        # possibles (paramètre répété) : une machine avec plusieurs cartes
+        # (VPN, Hyper-V/WSL, VirtualBox…) n'a pas de « bonne » adresse
+        # évidente côté collecteur — voir get_all_mac_addresses() dans
+        # collector_core.py — donc on compare à toutes. On ne divulgue que
+        # l'identifiant et le nom du client — déjà publics sur cet endpoint —
+        # et rien n'est révélé quand la machine est inconnue.
+        macs = [m.strip().upper() for m in request.args.getlist('mac') if m.strip()]
         suggestion = None
-        if mac:
+        if macs:
             conn = get_db()
+            placeholders = ','.join('?' * len(macs))
             row = conn.execute(
                 'SELECT c.id, c.nom FROM appareils a JOIN clients c ON c.id = a.client_id'
-                ' WHERE UPPER(a.adresse_mac) = ? ORDER BY a.date_maj DESC LIMIT 1',
-                (mac,)).fetchone()
+                f' WHERE UPPER(a.adresse_mac) IN ({placeholders}) ORDER BY a.date_maj DESC LIMIT 1',
+                macs).fetchone()
             conn.close()
             if row:
                 suggestion = {'id': row[0], 'nom': row[1]}
@@ -11853,36 +11858,63 @@ def qrcode_generate():
 
 # ─── MDNS REGISTRATION ────────────────────────────────────────────────────────
 _mdns_instance = None
+_mdns_service_name = None  # nom réellement enregistré — _unregister_mdns doit annoncer EXACTEMENT ce nom, pas en reconstruire un autre
+
+
+def _nom_service_mdns(hostname):
+    """Nom de service mDNS unique par instance (hostname inclus).
+
+    Plusieurs instances ParcInfo (Docker + PC + Mac, par exemple) qui
+    s'annonceraient toutes sous le même nom entreraient en conflit sur le
+    réseau — une seule serait annoncée, les autres resteraient invisibles à
+    la découverte, sans qu'aucune erreur ne le signale (zeroconf ne prévient
+    pas d'un conflit après coup, il choisit juste un nom différent ou perd
+    silencieusement la course). Le nom fixe `"ParcInfo._http._tcp.local."`
+    d'origine ne permettait donc de découvrir qu'une seule instance à la fois
+    sur un même réseau.
+    """
+    propre = re.sub(r'[^A-Za-z0-9 _-]', '', hostname or '').strip() or 'Poste'
+    return f"ParcInfo sur {propre}._http._tcp.local."
+
 
 def _register_mdns(port=3456):
-    """Register ParcInfo on mDNS (parcinfo.local)"""
-    global _mdns_instance
+    """Annonce cette instance sur le réseau local via mDNS.
+
+    Sert à deux choses : l'ancien raccourci http://parcinfo.local (ne
+    fonctionne de façon fiable qu'avec une seule instance sur le réseau —
+    limite déjà présente avant ce changement, pas introduite ici) et la
+    découverte automatique par le collecteur (get_all_mac_addresses() côté
+    collecteur, ServiceBrowser côté client) — celle-ci, elle, fonctionne bien
+    avec plusieurs instances grâce au nom de service unique par poste.
+    """
+    global _mdns_instance, _mdns_service_name
     if not MDNS_AVAILABLE:
         return
 
     try:
-        # Get local IP address
         hostname = socket.gethostname()
         local_ip = socket.gethostbyname(hostname)
+        nom_service = _nom_service_mdns(hostname)
 
-        # Create mDNS service info
         info = ServiceInfo(
             "_http._tcp.local.",
-            name="ParcInfo._http._tcp.local.",
+            name=nom_service,
             addresses=[socket.inet_aton(local_ip)],
             port=port,
             properties={
                 "path": "/",
-                "version": "2.6.22",
-                "description": "IT Asset Management"
+                "version": APP_VERSION,
+                "description": "IT Asset Management",
+                "hostname": hostname,
+                "docker": "1" if os.environ.get('RUNNING_IN_DOCKER') else "0",
             },
             server="parcinfo.local."
         )
 
-        # Register the service
         _mdns_instance = Zeroconf()
         _mdns_instance.register_service(info)
-        logger.info(f"✅ mDNS registered: http://parcinfo.local:{port} ({local_ip})")
+        _mdns_service_name = nom_service
+        logger.info(f"✅ mDNS registered: {nom_service} → http://{local_ip}:{port}")
     except Exception as e:
         logger.warning(f"⚠️ mDNS registration failed: {e}")
 
@@ -11893,7 +11925,7 @@ def _unregister_mdns(port=3456):
         try:
             _mdns_instance.unregister_service(ServiceInfo(
                 "_http._tcp.local.",
-                name="ParcInfo._http._tcp.local.",
+                name=_mdns_service_name or _nom_service_mdns(socket.gethostname()),
                 addresses=[],
                 port=port
             ))

@@ -36,7 +36,7 @@ __all__ = [
     'collect_system_info', 'build_summary_lines', 'build_summary_sections',
     'generate_pdf_report', 'generate_html_report',
     'get_api_payload', 'send_to_parcinfo', 'upload_report_to_parcinfo',
-    'fetch_clients', 'is_elevated',
+    'fetch_clients', 'is_elevated', 'get_mac_address', 'get_all_mac_addresses',
     'get_wifi_profiles', 'send_wifi_credentials_to_parcinfo',
 ]
 
@@ -823,13 +823,75 @@ def enrich_licenses_with_keys(info):
 # ════════════════════════════════════════════════════════════════════════════
 
 def get_mac_address():
-    """Récupère l'adresse MAC réelle de la machine."""
+    """Récupère l'adresse MAC réelle de la machine.
+
+    `uuid.getnode()` n'a aucune notion de « la bonne » carte : sur une machine
+    avec plusieurs adaptateurs (VPN, Hyper-V/WSL, VirtualBox, Bluetooth…), il
+    peut renvoyer n'importe lequel — pas forcément le physique connecté, ni
+    celui effectivement enregistré pour cette machine lors d'une collecte
+    complète (voir _meilleure_carte_physique, utilisée là mais pas ici : plus
+    lente, elle nécessite l'énumération PowerShell des cartes). Gardé pour
+    compatibilité et comme repli ; le pré-remplissage du client dans le
+    collecteur GUI utilise get_all_mac_addresses() ci-dessous à la place,
+    plus lent d'un appel système mais fiable quelle que soit la carte que
+    uuid.getnode() aurait choisie.
+    """
     try:
         mac = uuid.getnode()
         mac_str = ':'.join(['{:02x}'.format((mac >> (i << 3)) & 0xff) for i in range(5, -1, -1)])
         return mac_str.upper()
     except Exception:
         return ""
+
+
+def get_all_mac_addresses():
+    """Adresses MAC de TOUTES les cartes réseau visibles localement — pas
+    seulement celle que uuid.getnode() choisit arbitrairement (voir sa
+    docstring). Sert au pré-remplissage rapide du client dans le collecteur
+    GUI, avant même que la collecte complète (qui choisit sa propre
+    « meilleure » carte physique connectée) ne s'exécute.
+
+    Constaté sur un poste de développement réel : jusqu'à sept adresses MAC
+    différentes (carte physique, VirtualBox, Hyper-V/WSL…) — get_mac_address()
+    ne renvoyant qu'une seule d'entre elles, souvent PAS celle effectivement
+    enregistrée côté serveur pour cette machine. En envoyer la liste complète
+    et laisser le serveur comparer à N'IMPORTE LAQUELLE règle le problème
+    sans avoir à deviner laquelle est « la bonne » avant la collecte.
+    """
+    macs = set()
+    brute = get_mac_address()
+    if brute:
+        macs.add(brute)
+    try:
+        if IS_WINDOWS:
+            sortie = _run(['getmac', '/fo', 'csv', '/nh'], timeout=10)
+            for ligne in sortie.splitlines():
+                champs = [c.strip('"') for c in ligne.strip().split('","')]
+                if champs and re.match(r'^([0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}$', champs[0]):
+                    macs.add(champs[0].replace('-', ':').upper())
+        elif IS_MAC:
+            sortie = _run(['networksetup', '-listallhardwareports'], timeout=10)
+            for ligne in sortie.splitlines():
+                if ligne.strip().startswith('Ethernet Address:'):
+                    valeur = ligne.split(':', 1)[1].strip()
+                    if valeur and valeur.lower() != 'n/a':
+                        macs.add(valeur.upper())
+        elif IS_LINUX:
+            racine = '/sys/class/net'
+            if os.path.isdir(racine):
+                for carte in os.listdir(racine):
+                    if carte == 'lo':
+                        continue
+                    try:
+                        with open(os.path.join(racine, carte, 'address')) as f:
+                            valeur = f.read().strip()
+                        if valeur and valeur != '00:00:00:00:00:00':
+                            macs.add(valeur.upper())
+                    except OSError:
+                        pass
+    except Exception:
+        pass
+    return sorted(macs)
 
 
 def get_hostname():
@@ -9406,17 +9468,25 @@ def send_wifi_credentials_to_parcinfo(profiles, server_url, device_id, client_id
 def fetch_clients(server_url, mac_address=None, token=None):
     """Récupère la liste des clients depuis ParcInfo.
 
-    Quand une adresse MAC est fournie et que le serveur connaît déjà cette
-    machine, il renvoie en plus le client auquel elle est rattachée : le
-    collecteur peut alors le présélectionner au lieu de demander à l'utilisateur
-    de le retrouver dans une liste qui compte parfois des dizaines d'entrées.
+    Quand une (ou plusieurs) adresse(s) MAC sont fournies et que le serveur
+    connaît déjà cette machine par l'une d'elles, il renvoie en plus le
+    client auquel elle est rattachée : le collecteur peut alors le
+    présélectionner au lieu de demander à l'utilisateur de le retrouver dans
+    une liste qui compte parfois des dizaines d'entrées.
+
+    `mac_address` accepte une chaîne (une seule adresse, compatibilité) ou
+    une liste — voir get_all_mac_addresses() : une machine avec plusieurs
+    cartes (VPN, Hyper-V/WSL, VirtualBox…) n'a pas de « bonne » adresse
+    évidente à envoyer seule, le serveur compare donc à toutes à la fois.
 
     Retourne (clients, client_suggéré_ou_None).
     """
     try:
         url = "%s/api/clients-public" % server_url.rstrip('/')
-        if mac_address:
-            url += '?mac=' + quote(mac_address)
+        macs = [mac_address] if isinstance(mac_address, str) else list(mac_address or [])
+        macs = [m for m in macs if m]
+        if macs:
+            url += '?' + '&'.join('mac=' + quote(m) for m in macs)
         entete = {'Authorization': 'Bearer %s' % token} if token else {}
         with urlopen(Request(url, headers=entete), timeout=10) as response:
             data = json.loads(response.read().decode('utf-8'))
