@@ -83,6 +83,29 @@ def can_self_install() -> bool:
     return runtime_mode() in ('windows', 'macos')
 
 
+def archi_materielle_macos() -> str:
+    """Architecture matérielle réelle du Mac ('arm64' ou 'x86_64'), fiable
+    même sous Rosetta.
+
+    platform.machine() reflète l'architecture du PROCESSUS EN COURS, pas
+    celle de la puce : un exécutable Intel tournant sous Rosetta sur un Mac
+    Apple Silicon y répond 'x86_64' indéfiniment. Un Mac qui se serait
+    retrouvé une fois sur le mauvais binaire (ancien bug de sélection,
+    téléchargement manuel...) resterait donc bloqué dessus pour toujours :
+    chaque mise à jour reconfirmerait 'x86_64' comme architecture attendue et
+    retéléchargerait le même binaire Intel, jamais l'ARM natif. hw.optional.arm64
+    interroge le matériel lui-même, jamais traduit par Rosetta.
+    """
+    try:
+        r = subprocess.run(['sysctl', '-n', 'hw.optional.arm64'],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0 and r.stdout.strip() == '1':
+            return 'arm64'
+    except Exception:
+        pass
+    return 'x86_64' if platform.machine() == 'x86_64' else 'arm64'
+
+
 #: Variables posées par le lanceur de PyInstaller pour désigner le dossier
 #: temporaire où l'application a été décompressée. Un processus lancé depuis
 #: l'application packagée en hérite ; on ne les transmet pas plus loin, par
@@ -355,7 +378,7 @@ class UpdateChecker:
             # aussi contre une éventuelle prochaine confusion côté
             # publication — en refusant AVANT de toucher à la version qui
             # fonctionne, pas après coup une fois l'ancienne effacée.
-            archi_attendue = 'x86_64' if platform.machine() == 'x86_64' else 'arm64'
+            archi_attendue = archi_materielle_macos()
             executable_source = source / 'Contents' / 'MacOS' / 'ParcInfo'
             if executable_source.exists():
                 try:
@@ -679,12 +702,12 @@ class UpdateChecker:
             # jusqu'ici toujours 'macos_app' (ARM) était renvoyé, quelle que
             # soit l'architecture réelle : un Mac Intel se voyait proposer le
             # binaire ARM, que macOS refuse ensuite d'ouvrir (« n'est pas pris
-            # en charge par ce Mac »). platform.machine() reflète l'archi DU
-            # PROCESSUS EN COURS, pas seulement celle de la puce — un
-            # exécutable Intel tournant sous Rosetta sur un Mac Apple Silicon
-            # continue ainsi à se mettre à jour vers un binaire Intel, plutôt
-            # que de basculer vers l'ARM en cours de route.
-            return 'macos_app_intel' if platform.machine() == 'x86_64' else 'macos_app'
+            # en charge par ce Mac »). archi_materielle_macos() interroge le
+            # matériel réel (hw.optional.arm64), pas l'archi du processus en
+            # cours : un exécutable Intel tournant sous Rosetta sur un Mac
+            # Apple Silicon bascule maintenant vers le binaire ARM natif au
+            # prochain cycle, au lieu de reconfirmer indéfiniment l'Intel.
+            return 'macos_app_intel' if archi_materielle_macos() == 'x86_64' else 'macos_app'
         cles = {'windows': 'windows_installer', 'docker': 'docker'}
         if mode in cles:
             return cles[mode]

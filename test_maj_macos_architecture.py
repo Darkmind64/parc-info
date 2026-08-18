@@ -65,8 +65,43 @@ _ancien_frozen = getattr(sys, 'frozen', False)
 _ancien_platform_system = UC.platform.system
 _ancien_platform_machine = UC.platform.machine
 _ancien_running_in_docker = UC.running_in_docker
+_faux_run_original = UC.subprocess.run
+_faux_popen_original = UC.subprocess.Popen
 
-print("=== 1. _get_platform_key() choisit le bon fichier selon l'architecture ===")
+print("=== 0. archi_materielle_macos() résiste à la traduction Rosetta ===")
+
+
+def _sysctl_repond(sortie, code=0):
+    def _run(cmd, **kw):
+        if cmd and cmd[0] == 'sysctl':
+            class _R:
+                stdout = sortie
+                stderr = ''
+                returncode = code
+            return _R()
+        raise FileNotFoundError(cmd[0])
+    return _run
+
+
+UC.platform.machine = lambda: 'x86_64'  # process traduit par Rosetta
+UC.subprocess.run = _sysctl_repond('1\n')
+verifier(UC.archi_materielle_macos() == 'arm64',
+         "Mac Apple Silicon sous Rosetta (process x86_64) -> matériel détecté 'arm64'",
+         UC.archi_materielle_macos())
+
+UC.subprocess.run = _sysctl_repond('0\n')
+verifier(UC.archi_materielle_macos() == 'x86_64',
+         "sysctl répond '0' (pas Apple Silicon) -> repli sur platform.machine()",
+         UC.archi_materielle_macos())
+
+UC.subprocess.run = _sysctl_repond('', code=1)  # sysctl: unknown oid — vrai Mac Intel
+verifier(UC.archi_materielle_macos() == 'x86_64',
+         "sysctl échoue (vrai Mac Intel, oid inconnu) -> repli sur platform.machine()",
+         UC.archi_materielle_macos())
+
+UC.subprocess.run = _faux_run_original
+
+print("\n=== 1. _get_platform_key() choisit le bon fichier selon l'architecture ===")
 checker = UC.UpdateChecker(config_dir=tempfile.mkdtemp(prefix='majarch_cfg_'))
 
 _preparer_macos('x86_64')
@@ -94,9 +129,6 @@ def _construire_bundle_zip(dossier, contenu_exe):
 
 
 from pathlib import Path  # noqa: E402
-
-_faux_run_original = UC.subprocess.run
-_faux_popen_original = UC.subprocess.Popen
 
 
 def _fausse_commande_file(arch_annoncee):
