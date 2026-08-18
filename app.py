@@ -46,6 +46,25 @@ if _data_dir_env:
     _data_base = _data_dir_env
     os.makedirs(_data_base, exist_ok=True)
 
+# Fichier journal persistant, en plus du flux console de basicConfig() —
+# indispensable en exécutable packagé (console=False, cf. parcinfo.spec) :
+# sans fenêtre de console, cette sortie ne va nulle part de consultable après
+# coup. Signalé en cherchant en vain le détail d'un blocage Gatekeeper macOS
+# (xattr/codesign/spctl --add) : chaque étape est bien journalisée par ce
+# même logger, mais rien ne la conservait sur un Mac ou un PC packagés.
+if getattr(_sys, 'frozen', False):
+    try:
+        from logging.handlers import RotatingFileHandler
+        _handler_fichier = RotatingFileHandler(
+            os.path.join(_data_base, 'parcinfo.log'),
+            maxBytes=2 * 1024 * 1024, backupCount=2, encoding='utf-8')
+        _handler_fichier.setFormatter(logging.Formatter(
+            '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'))
+        logging.getLogger().addHandler(_handler_fichier)
+    except Exception:
+        logger.exception("Impossible de créer parcinfo.log (non bloquant)")
+
 app = Flask(
     __name__,
     template_folder=os.path.join(_resource_base, 'templates'),
