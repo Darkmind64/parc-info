@@ -566,9 +566,17 @@ class UpdateChecker:
         1. `com.apple.quarantine` : posé sur ce que télécharge un navigateur,
            pas par `urllib` — donc pas censé être présent ici puisque ParcInfo
            télécharge lui-même l'archive. Retiré quand même, sans coût, pour
-           couvrir un mécanisme de tagging qu'on n'aurait pas anticipé.
+           couvrir un mécanisme de tagging qu'on n'aurait pas anticipé. La
+           vérification `spctl` qui suit est répétée quelques secondes,
+           plutôt qu'une seule fois immédiatement : la réparation manuelle
+           qui fonctionne sur certains Mac (xattr -cr, rien d'autre) laisse
+           naturellement passer quelques secondes entre la commande et le
+           lancement, le temps que syspolicyd prenne en compte le retrait de
+           la quarantaine — une vérification scriptée, elle, enchaînait tout
+           en quelques millisecondes.
         2. Signature ad hoc (`codesign --sign -`), SEULEMENT si `spctl`
-           rejette encore le bundle après le retrait de la quarantaine.
+           rejette encore le bundle après le retrait de la quarantaine et son
+           délai de grâce.
         3. `spctl --add` (voir _autoriser_via_spctl_add), SEULEMENT si les
            deux premières étapes échouent encore — demande le mot de passe
            administrateur, dernier recours avant le message d'échec manuel.
@@ -611,8 +619,18 @@ class UpdateChecker:
         except Exception as e:
             logger.warning("xattr -cr a échoué : %s", e)
 
-        if UpdateChecker._gatekeeper_accepte(bundle):
-            return
+        # Plusieurs vérifications espacées, pas une seule immédiate : signalé
+        # en usage réel, la réparation manuelle qui fonctionne (xattr -cr,
+        # rien d'autre) laisse naturellement passer quelques secondes entre
+        # la commande tapée dans un Terminal et le lancement de l'app — ce
+        # script, lui, enchaînait la vérification en quelques millisecondes.
+        # Si syspolicyd (le service que `spctl` interroge) met un instant à
+        # prendre en compte le retrait de la quarantaine, une vérification
+        # trop hâtive pouvait lire un rejet qui se serait résolu tout seul.
+        for _ in range(5):
+            if UpdateChecker._gatekeeper_accepte(bundle):
+                return
+            time.sleep(1)
 
         try:
             r = subprocess.run(['codesign', '--force', '--sign', '-', str(bundle)],

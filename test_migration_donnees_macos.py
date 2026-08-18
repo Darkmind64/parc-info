@@ -158,6 +158,14 @@ print("\n=== 7. Déblocage Gatekeeper (xattr -cr + signature ad hoc) ===")
 # test (Windows, ou Linux en CI) — _debloquer_gatekeeper_macos() doit
 # dégrader proprement (logguer, ne jamais lever) plutôt que planter le
 # remplacement de bundle pour une histoire de commande absente.
+# time.sleep neutralisé : la vérification spctl est répétée à quelques
+# secondes d'intervalle en usage réel (laisser à syspolicyd le temps de
+# prendre en compte le retrait de quarantaine) — inutile de ralentir ce test
+# pour autant, spctl échouera de la même façon immédiatement ou 5 secondes
+# plus tard sur une machine qui n'a pas cette commande.
+_faux_sleep = UC.time.sleep
+UC.time.sleep = lambda s: None
+
 faux_bundle = Path(tempfile.mkdtemp(prefix='gatekeeper_'))
 try:
     UC.UpdateChecker._debloquer_gatekeeper_macos(faux_bundle)
@@ -165,6 +173,8 @@ try:
 except Exception as e:
     leve = e
 verifier(leve is False, "aucune exception même si xattr/codesign sont absents", str(leve))
+
+UC.time.sleep = _faux_sleep
 
 print("\n=== 8. spctl --add : dernier recours après xattr/codesign ===")
 # Simule uniquement 'osascript' (invite mot de passe) et 'spctl' (vérif finale) —
@@ -203,6 +213,45 @@ verifier(resultat is False,
          "invite mot de passe annulée par l'utilisateur (-128) -> échec propre, pas d'exception")
 
 UC.subprocess.run = _faux_run_gatekeeper
+
+print("\n=== 9. Délai de grâce après xattr -cr : évite la signature si spctl finit par accepter ===")
+# Reproduit le scénario signalé en usage réel : xattr -cr seul suffit, mais
+# syspolicyd met un instant à en tenir compte. Si la 3e vérification (sur les
+# 5 tentées) accepte enfin le bundle, codesign ne doit JAMAIS être appelé.
+_faux_sleep3 = UC.time.sleep
+UC.time.sleep = lambda s: None
+_compteur_spctl = {'n': 0}
+_codesign_appele = {'valeur': False}
+
+
+def _mock_delai_grace(cmd, **kw):
+    class _R:
+        returncode = 0
+        stdout = ''
+        stderr = ''
+    if cmd and cmd[0] == 'xattr':
+        return _R()
+    if cmd and cmd[0] == 'spctl':
+        _compteur_spctl['n'] += 1
+        r = _R()
+        r.returncode = 0 if _compteur_spctl['n'] >= 3 else 1
+        return r
+    if cmd and cmd[0] == 'codesign':
+        _codesign_appele['valeur'] = True
+        return _R()
+    raise FileNotFoundError(cmd[0])
+
+
+UC.subprocess.run = _mock_delai_grace
+faux_bundle_delai = Path(tempfile.mkdtemp(prefix='gatekeeper_delai_'))
+UC.UpdateChecker._debloquer_gatekeeper_macos(faux_bundle_delai)
+verifier(_compteur_spctl['n'] == 3,
+         "spctl est réinterrogé plusieurs fois avant d'abandonner", str(_compteur_spctl['n']))
+verifier(_codesign_appele['valeur'] is False,
+         "codesign n'est jamais appelé si spctl finit par accepter tout seul")
+
+UC.subprocess.run = _faux_run_gatekeeper
+UC.time.sleep = _faux_sleep3
 
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

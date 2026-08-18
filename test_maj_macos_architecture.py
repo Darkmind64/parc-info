@@ -192,7 +192,14 @@ dossier_nouveau_src2 = Path(tempfile.mkdtemp(prefix='majarch_nouveau2_')) / 'rac
 zip_bonne_archi = _construire_bundle_zip(dossier_nouveau_src2, 'nouvelle version, bonne architecture')
 
 UC.subprocess.run = _fausse_commande_file('x86_64')  # le zip livré est bien x86_64, comme la machine
+# _debloquer_gatekeeper_macos espace ses vérifications de quelques secondes en
+# usage réel (laisser à syspolicyd le temps de digérer le retrait de
+# quarantaine) — spctl étant absent sur cette machine de toute façon, inutile
+# de subir ce délai ici.
+_faux_sleep = UC.time.sleep
+UC.time.sleep = lambda s: None
 resultat = checker._install_macos(zip_bonne_archi)
+UC.time.sleep = _faux_sleep
 verifier(resultat is True, "installation acceptée quand l'architecture correspond")
 verifier((dossier_ancien / 'Contents' / 'MacOS' / 'ParcInfo').read_text()
          == 'nouvelle version, bonne architecture',
