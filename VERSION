@@ -1,8 +1,24 @@
-PARCINFO_VERSION=2.18.2
+PARCINFO_VERSION=2.18.3
 RELEASE_DATE=2026-08-18
-BUILD_NUMBER=2026081801
+BUILD_NUMBER=2026081802
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.3 - Découverte automatique des instances ParcInfo sur le réseau
+# Suite demandée après le correctif de détection de client (2.18.2) : le
+# collecteur GUI cherche maintenant lui-même les instances ParcInfo présentes
+# sur le réseau local au lieu d'exiger une adresse saisie à la main. Deux
+# méthodes combinées : découverte mDNS (immédiate, retrouve nom de poste,
+# version et badge Docker grâce au nommage unique de la 2.18.2) puis, en
+# complément, le balayage de sous-réseau déjà existant pour tout ce qui
+# n'a pas répondu en mDNS (pare-feu, ancien poste). Les instances trouvées
+# sont proposées dans une liste à choisir avant transfert des données
+# collectées. Limite connue : une instance ParcInfo tournant dans Docker
+# avec un réseau en mode bridge (le cas par défaut) n'est pas jointe par le
+# balayage de sous-réseau car son adresse IP n'est pas celle de la machine
+# hôte sur le réseau local — la sélection d'URL manuelle reste nécessaire
+# dans ce cas, comme aujourd'hui
+# Date: 18 août 2026
 
 # Version 2.18.2 - Détection multi-cartes réseau du collecteur + noms mDNS uniques
 # Signalé en usage réel : le collecteur GUI ne présélectionnait plus le

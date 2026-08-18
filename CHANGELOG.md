@@ -1,5 +1,32 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.3] - 2026-08-18 🔍
+
+### 🔍 Découverte automatique des instances ParcInfo par le collecteur
+
+**Le collecteur cherche maintenant les instances lui-même.** Suite directe
+de la 2.18.2 (noms mDNS uniques par instance) : le collecteur GUI proposait
+déjà un bouton « Scan Network » qui balayait le sous-réseau /24 local sur le
+port 3456, mais uniquement en dernier recours et sans exploiter les
+informations mDNS désormais fiables. La découverte combine maintenant deux
+méthodes, dans l'ordre :
+
+1. **mDNS** (immédiate, quelques secondes) : retrouve nom de poste, version
+   affichée et badge Docker pour chaque instance qui s'annonce sur le réseau.
+2. **Balayage de sous-réseau** (méthode existante, en complément) : reprend
+   automatiquement pour toute adresse non trouvée en mDNS — pare-feu qui
+   bloque le multicast, ancien poste, etc.
+
+Les instances trouvées sont proposées dans une liste à choisir avant tout
+transfert de données collectées, avec leur nom et version affichés plutôt
+qu'une simple adresse IP.
+
+> À savoir, sans changement depuis la 2.18.2 : une instance Docker en réseau
+> « bridge » (le mode par défaut de `docker-compose.yml`) n'est généralement
+> pas jointe par mDNS ni par le balayage de sous-réseau, son adresse IP
+> n'étant pas celle de la machine hôte sur le réseau local. La sélection
+> d'URL manuelle reste nécessaire pour une instance Docker dans ce cas.
+
 ## [2.18.2] - 2026-08-18 📡
 
 ### 📡 Détection multi-cartes réseau du collecteur + noms mDNS uniques
