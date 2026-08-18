@@ -1,5 +1,40 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.8] - 2026-08-18 🗑️
+
+### 🗑️ Un appareil supprimé ne revient plus tout seul (ordre pull/push de la synchronisation)
+
+**Signalé en usage réel, reproduit avec plusieurs appareils** (avec et sans
+fiche système) : un appareil supprimé dans l'inventaire disparaissait bien
+immédiatement sur toutes les instances (Docker/PC/Mac), mais réapparaissait
+de lui-même après plusieurs cycles de synchronisation — sans qu'aucune
+suppression manuelle n'ait eu lieu entre-temps.
+
+**La cause : l'ordre PUSH puis PULL.** `_sync_using_journal` envoyait
+d'abord le journal local vers Turso, avant de tirer ensuite les changements
+distants. Une instance en retard (pas encore passée par un cycle de sync
+depuis la suppression faite ailleurs) peut garder dans son propre journal
+local une modification de cet appareil **datant d'avant** sa suppression —
+localement, sur cette instance, l'appareil existe toujours. En poussant
+avant de tirer, cette entrée périmée recréait l'appareil sur Turso (`INSERT
+OR REPLACE`), avec un identifiant de journal **postérieur** à la suppression
+d'origine — qui se propageait ensuite normalement, comme n'importe quelle
+autre modification légitime, vers toutes les autres instances. La
+suppression semblait alors s'annuler toute seule, plusieurs cycles plus
+tard, sans qu'aucune action ne l'explique.
+
+**Le correctif : tirer d'abord, pousser ensuite.** Une instance en retard
+apprend ainsi la suppression et l'applique localement avant de pousser quoi
+que ce soit — son entrée périmée ne trouve alors plus rien à lire localement
+pour cet appareil (déjà supprimé par le pull qui vient de s'exécuter) et ne
+pousse donc plus rien. Aucune logique de détection supplémentaire n'était
+nécessaire : le simple réordonnancement suffit.
+
+> Vérifié par un test dédié qui reproduit exactement le scénario signalé, et
+> confirme — en simulant l'ancien ordre PUSH-avant-PULL sur les mêmes
+> données — que l'appareil est bien ressuscité sans le correctif, et ne
+> l'est plus avec.
+
 ## [2.18.7] - 2026-08-18 📋
 
 ### 📋 Fichier journal persistant pour les exécutables packagés

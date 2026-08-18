@@ -1,20 +1,20 @@
 {
-  "version": "2.18.7",
+  "version": "2.18.8",
   "release_date": "2026-08-18T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.7",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.7/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.8/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.8/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.8/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.8",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.8/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.8/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.8/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Fichier journal persistant (parcinfo.log) sur les exécutables packagés Windows et macOS, jusqu'ici sans aucune trace consultable en dehors d'une console qui n'existe pas",
+    "new_features": "Un appareil supprimé de l'inventaire ne revient plus tout seul après plusieurs cycles de synchronisation entre instances",
     "improvements": [
-      "CORRIGÉ: logging.basicConfig() n'écrit que sur la console, or ParcInfo est construit sans console (console=False) — sur un exécutable packagé, tout ce que le code journalisait (y compris le détail d'un blocage Gatekeeper macOS) partait dans le vide. _maj.log, qu'on croyait être LE journal de mise à jour, n'existe en réalité que sur Windows. Ajout de parcinfo.log (rotation 2 Mo x 3) à côté de la base de données sur les exécutables packagés."
+      "CORRIGÉ: la synchronisation poussait d'abord le journal local vers Turso avant de tirer les changements distants. Une instance en retard pouvait ainsi pousser une modification périmée d'un appareil supprimé ailleurs (faite avant d'avoir appris la suppression), le recréant sur Turso puis sur toutes les autres instances, plusieurs cycles après la suppression d'origine. Ordre inversé : tirer d'abord les changements distants, une instance en retard apprend la suppression avant de pousser quoi que ce soit."
     ]
   },
   "checksums": {
@@ -25,5 +25,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.7"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.8"
 }

@@ -1,8 +1,27 @@
-PARCINFO_VERSION=2.18.7
+PARCINFO_VERSION=2.18.8
 RELEASE_DATE=2026-08-18
-BUILD_NUMBER=2026081806
+BUILD_NUMBER=2026081807
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.8 - Un appareil supprimé ne revient plus tout seul (ordre pull/push)
+# Signalé en usage réel : un appareil supprimé dans l'inventaire disparaissait
+# bien immédiatement sur toutes les instances, mais réapparaissait de
+# lui-même après plusieurs cycles de synchronisation. Cause : _sync_using_
+# journal poussait d'abord le journal local vers Turso, puis tirait ensuite
+# les changements distants. Une instance en retard (pas encore passée par un
+# cycle depuis la suppression faite ailleurs) peut garder dans son propre
+# journal local une modification de cet appareil datant d'avant sa
+# suppression — l'appareil existe toujours localement sur cette instance. En
+# poussant avant de tirer, cette entrée périmée recréait l'appareil sur
+# Turso (INSERT OR REPLACE), avec un identifiant de journal postérieur à la
+# suppression d'origine, qui se propageait ensuite normalement à toutes les
+# autres instances. Corrigé en inversant l'ordre : tirer d'abord les
+# changements distants, une instance en retard apprend ainsi la suppression
+# et l'applique localement avant de pousser quoi que ce soit — son entrée
+# périmée ne trouve alors plus rien à lire localement et ne pousse donc plus
+# rien. Reproduit et vérifié par un test dédié (avant/après le correctif)
+# Date: 18 août 2026
 
 # Version 2.18.7 - Fichier journal persistant pour les exécutables packagés
 # En cherchant le détail exact d'un échec de mise à jour macOS (xattr,
