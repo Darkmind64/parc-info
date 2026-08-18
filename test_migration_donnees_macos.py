@@ -166,5 +166,43 @@ except Exception as e:
     leve = e
 verifier(leve is False, "aucune exception même si xattr/codesign sont absents", str(leve))
 
+print("\n=== 8. spctl --add : dernier recours après xattr/codesign ===")
+# Simule uniquement 'osascript' (invite mot de passe) et 'spctl' (vérif finale) —
+# tout le reste (xattr, codesign) lève FileNotFoundError naturellement sur cette
+# machine, comme dans la section 7.
+_faux_run_gatekeeper = UC.subprocess.run
+
+
+def _mock_spctl_add(code_osascript, spctl_accepte_ensuite):
+    def _run(cmd, **kw):
+        if cmd and cmd[0] == 'osascript':
+            class _R:
+                returncode = code_osascript
+                stdout = ''
+                stderr = '' if code_osascript == 0 else 'execution error: User canceled. (-128)'
+            return _R()
+        if cmd and cmd[0] == 'spctl':
+            class _R:
+                returncode = 0 if spctl_accepte_ensuite else 1
+                stdout = ''
+                stderr = ''
+            return _R()
+        raise FileNotFoundError(cmd[0])
+    return _run
+
+
+faux_bundle_spctladd = Path(tempfile.mkdtemp(prefix='gatekeeper_spctladd_'))
+
+UC.subprocess.run = _mock_spctl_add(0, True)
+resultat = UC.UpdateChecker._autoriser_via_spctl_add(faux_bundle_spctladd)
+verifier(resultat is True, "spctl --add posé avec succès -> Gatekeeper accepte ensuite le bundle")
+
+UC.subprocess.run = _mock_spctl_add(1, False)
+resultat = UC.UpdateChecker._autoriser_via_spctl_add(faux_bundle_spctladd)
+verifier(resultat is False,
+         "invite mot de passe annulée par l'utilisateur (-128) -> échec propre, pas d'exception")
+
+UC.subprocess.run = _faux_run_gatekeeper
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -512,6 +513,51 @@ class UpdateChecker:
             return False
 
     @staticmethod
+    def _autoriser_via_spctl_add(bundle: Path) -> bool:
+        """Dernier recours, SEULEMENT si xattr -cr et la signature ad hoc ont
+        toutes deux échoué à convaincre `spctl` : inscrit explicitement une
+        exception pour ce bundle dans la base de confiance de Gatekeeper
+        (`spctl --add`), plutôt que de simplement nettoyer le fichier et
+        espérer que ça passe. Mécanisme différent de tout ce qui précède —
+        une autorisation posée en dur, pas un nettoyage d'attributs.
+
+        Nécessite les droits administrateur : contrairement à xattr/codesign,
+        `spctl --add` modifie une base système partagée. Demandés via
+        `osascript ... with administrator privileges`, qui déclenche
+        l'invite mot de passe/Touch ID native de macOS — la mise à jour n'est
+        donc plus silencieuse à cette étape précise, uniquement atteinte
+        après l'échec des deux méthodes silencieuses. Un mot de passe refusé
+        ou une invite annulée (erreur AppleScript -128) n'est pas une panne :
+        on redescend simplement sur le message d'échec déjà en place.
+
+        Pas de certitude que ceci fonctionne sur toutes les versions de
+        macOS : Apple a resserré `spctl --add` ces dernières années
+        précisément pour empêcher ce genre d'auto-approbation par un
+        logiciel — à vérifier en usage réel plutôt qu'à supposer.
+        """
+        try:
+            commande = 'spctl --add --label ParcInfo ' + shlex.quote(str(bundle))
+            script = 'do shell script %s with administrator privileges' % (
+                json.dumps(commande),)
+            r = subprocess.run(['osascript', '-e', script],
+                               capture_output=True, text=True, timeout=120)
+            if r.returncode != 0:
+                detail = (r.stderr or '').strip()
+                if '-128' in detail:
+                    logger.info("spctl --add annulé par l'utilisateur (invite mot de passe refusée)")
+                else:
+                    logger.warning("spctl --add a échoué (code %s) : %s",
+                                   r.returncode, detail[:300])
+                return False
+        except FileNotFoundError:
+            logger.debug("osascript indisponible sur ce Mac")
+            return False
+        except Exception as e:
+            logger.warning("spctl --add a échoué : %s", e)
+            return False
+        return UpdateChecker._gatekeeper_accepte(bundle)
+
+    @staticmethod
     def _debloquer_gatekeeper_macos(bundle: Path) -> None:
         """Lève le blocage Gatekeeper sur un bundle non signé, en vérifiant
         à chaque étape avec `spctl --assess` plutôt qu'en supposant qu'une
@@ -523,6 +569,9 @@ class UpdateChecker:
            couvrir un mécanisme de tagging qu'on n'aurait pas anticipé.
         2. Signature ad hoc (`codesign --sign -`), SEULEMENT si `spctl`
            rejette encore le bundle après le retrait de la quarantaine.
+        3. `spctl --add` (voir _autoriser_via_spctl_add), SEULEMENT si les
+           deux premières étapes échouent encore — demande le mot de passe
+           administrateur, dernier recours avant le message d'échec manuel.
 
         Le point 2 a changé de logique après un diagnostic en usage réel (Mac
         Intel, `spctl -a -vv` + `codesign -dv --verbose=4` + `xattr -l`) :
@@ -550,7 +599,7 @@ class UpdateChecker:
         Codesign nécessite les outils en ligne de commande Xcode — absents
         sur certains Mac ; échec silencieux dans ce cas (log seulement), pas
         d'écran bloquant pour l'utilisateur. Si le blocage persiste malgré
-        les deux étapes, `_install_macos` le détecte à la vérification de
+        les trois étapes, `_install_macos` le détecte à la vérification de
         démarrage et n'arrête pas l'instance actuelle pour autant.
         """
         try:
@@ -577,12 +626,18 @@ class UpdateChecker:
         except Exception as e:
             logger.warning("codesign ad hoc a échoué : %s", e)
 
-        if not UpdateChecker._gatekeeper_accepte(bundle):
-            logger.warning(
-                "Gatekeeper rejette encore %s après xattr -cr et signature ad "
-                "hoc — seule une approbation manuelle (Réglages Système > "
-                "Confidentialité et sécurité > Ouvrir quand même) débloque ce "
-                "cas, macOS ne permet pas de l'automatiser plus loin.", bundle)
+        if UpdateChecker._gatekeeper_accepte(bundle):
+            return
+
+        if UpdateChecker._autoriser_via_spctl_add(bundle):
+            return
+
+        logger.warning(
+            "Gatekeeper rejette encore %s après xattr -cr, signature ad hoc "
+            "et spctl --add — seule une approbation manuelle (Réglages "
+            "Système > Confidentialité et sécurité > Ouvrir quand même) "
+            "débloque ce cas, macOS ne permet pas de l'automatiser plus "
+            "loin.", bundle)
 
     def _macos_app_path(self) -> Optional[Path]:
         """Chemin du bundle .app en cours d'exécution, sinon /Applications."""
