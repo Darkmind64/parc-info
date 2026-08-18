@@ -29,6 +29,7 @@ from urllib.request import urlopen
 
 from collector_core import (
     COLLECTOR_VERSION,
+    discover_parcinfo_mdns,
     get_all_mac_addresses,
     build_summary_sections,
     collect_system_info,
@@ -79,56 +80,84 @@ def get_local_network_range():
     return None, None
 
 
+def _compter_clients(server_url, timeout):
+    """Nombre de clients visibles sur une instance — confirme au passage que
+    c'est bien du ParcInfo (l'endpoint existe et répond en JSON), pas un
+    service HTTP quelconque tombé sur le même port. None si injoignable ou
+    protégé par un jeton collecteur (pas encore saisi à ce stade du flux)."""
+    try:
+        with urlopen(f"{server_url}/api/clients-public", timeout=timeout) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            if isinstance(data, list):
+                return len(data)
+            if isinstance(data, dict):
+                return len((data.get('clients') or []))
+            return 0
+    except Exception:
+        return None
+
+
 def scan_network_for_parcinfo(timeout=2, progress_callback=None):
     """
-    Scan le réseau local pour chercher des instances ParcInfo.
-    Retourne une liste de serveurs trouvés: [{"url": "...", "clients": N}, ...]
+    Découvre les instances ParcInfo sur le réseau local — d'abord par mDNS
+    (rapide, donne le port réel, pas seulement le 3456 par défaut), puis par
+    balayage du sous-réseau en repli pour ce que le mDNS ne trouve pas.
+
+    Le repli reste nécessaire : une instance Docker en réseau « bridge » (le
+    mode par défaut) ne relaie généralement pas le trafic multicast mDNS
+    vers le réseau local et n'apparaît donc probablement que via le balayage
+    — voir discover_parcinfo_mdns() dans collector_core.py.
+
+    Retourne une liste de serveurs trouvés, dédupliqués par URL :
+    [{"url", "ip", "clients", "nom", "version", "docker"}, ...]
     """
-    servers = []
+    servers = {}
+
+    if progress_callback:
+        progress_callback("Recherche via mDNS...")
+    try:
+        for trouve in discover_parcinfo_mdns(timeout=3):
+            entree = dict(trouve)
+            compte = _compter_clients(entree['url'], timeout)
+            entree['clients'] = compte if compte is not None else 0
+            servers[entree['url']] = entree
+    except Exception as e:
+        logger.debug(f"mDNS discovery failed: {e}")
+
     base, local_ip = get_local_network_range()
+    if base:
+        logger.debug(f"Scanning network range {base}.x for ParcInfo instances...")
+        for i in range(1, 255):
+            if progress_callback:
+                progress_callback(f"Scan {base}.{i}...")
 
-    if not base:
-        return servers
+            ip = f"{base}.{i}"
+            if ip == local_ip:
+                continue
+            server_url = f"http://{ip}:3456"
+            if server_url in servers:
+                continue  # déjà trouvé par mDNS, inutile de le sonder deux fois
 
-    logger.debug(f"Scanning network range {base}.x for ParcInfo instances...")
+            try:
+                # Test rapide si le port 3456 est ouvert
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                result = sock.connect_ex((ip, 3456))
+                sock.close()
 
-    for i in range(1, 255):
-        if progress_callback:
-            progress_callback(f"Scan {base}.{i}...")
-
-        ip = f"{base}.{i}"
-        if ip == local_ip:
-            continue
-
-        try:
-            # Test rapide si le port 3456 est ouvert
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = sock.connect_ex((ip, 3456))
-            sock.close()
-
-            if result == 0:  # Port ouvert
-                logger.debug(f"Port 3456 open on {ip}, checking if ParcInfo...")
-
-                # Vérifier que c'est ParcInfo en appelant l'endpoint public
-                try:
-                    test_url = f"http://{ip}:3456/api/clients-public"
-                    with urlopen(test_url, timeout=timeout) as response:
-                        data = json.loads(response.read().decode('utf-8'))
-                        clients_count = len(data) if isinstance(data, list) else 0
-                        server_url = f"http://{ip}:3456"
-                        servers.append({
-                            'url': server_url,
-                            'ip': ip,
-                            'clients': clients_count
-                        })
+                if result == 0:  # Port ouvert
+                    logger.debug(f"Port 3456 open on {ip}, checking if ParcInfo...")
+                    clients_count = _compter_clients(server_url, timeout)
+                    if clients_count is not None:
+                        servers[server_url] = {
+                            'url': server_url, 'ip': ip, 'clients': clients_count,
+                            'nom': ip, 'version': '', 'docker': False,
+                        }
                         logger.debug(f"Found ParcInfo at {server_url} with {clients_count} clients")
-                except Exception as e:
-                    logger.debug(f"Not ParcInfo at {ip}: {e}")
-        except Exception as e:
-            logger.debug(f"Error scanning {ip}: {e}")
+            except Exception as e:
+                logger.debug(f"Error scanning {ip}: {e}")
 
-    return servers
+    return list(servers.values())
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -421,7 +450,16 @@ class CollectorGUI:
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         for server in servers:
-            btn_text = f"📍 {server['url']}   ({server['clients']} clients)"
+            # 'nom'/'version'/'docker' ne viennent que de la découverte mDNS
+            # (voir discover_parcinfo_mdns) — absents pour une instance
+            # trouvée seulement par balayage de sous-réseau (repli).
+            nom = server.get('nom')
+            libelle_poste = f"{nom} — " if nom and nom != server.get('ip') else ""
+            version = server.get('version')
+            libelle_version = f"  v{version}" if version else ""
+            libelle_docker = "  🐳 Docker" if server.get('docker') else ""
+            btn_text = (f"📍 {libelle_poste}{server['url']}   "
+                       f"({server['clients']} clients){libelle_version}{libelle_docker}")
             btn = tk.Button(
                 frame,
                 text=btn_text,

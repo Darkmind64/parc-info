@@ -37,6 +37,7 @@ __all__ = [
     'generate_pdf_report', 'generate_html_report',
     'get_api_payload', 'send_to_parcinfo', 'upload_report_to_parcinfo',
     'fetch_clients', 'is_elevated', 'get_mac_address', 'get_all_mac_addresses',
+    'discover_parcinfo_mdns',
     'get_wifi_profiles', 'send_wifi_credentials_to_parcinfo',
 ]
 
@@ -9498,3 +9499,82 @@ def fetch_clients(server_url, mac_address=None, token=None):
         return (data if isinstance(data, list) else [], None)
     except Exception:
         return ([], None)
+
+
+def discover_parcinfo_mdns(timeout=3):
+    """Découvre les instances ParcInfo sur le réseau local par mDNS.
+
+    Chaque instance s'annonce elle-même (app.py::_register_mdns, un nom
+    unique par poste depuis la 2.18.2) — bien plus rapide et fiable qu'un
+    balayage de sous-réseau : le port réel est connu directement, pas
+    seulement le 3456 par défaut (utile pour une instance Docker republiée
+    sur un autre port, par exemple), et rien n'est à deviner.
+
+    Limite connue : un conteneur Docker en réseau « bridge » (le mode par
+    défaut) ne relaie généralement pas le trafic multicast mDNS vers le
+    réseau local — une telle instance restera probablement invisible ici
+    tant qu'elle n'est pas passée en réseau « host ». Le scan de sous-réseau
+    (scan_network_for_parcinfo, côté collecteur GUI) reste le repli pour ce
+    cas.
+
+    Retourne une liste de {'url', 'ip', 'port', 'nom', 'version', 'docker'},
+    vide si zeroconf est absent ou si rien n'a répondu dans le délai.
+    """
+    try:
+        from zeroconf import Zeroconf, ServiceBrowser
+        import time
+    except ImportError:
+        return []
+
+    trouves = {}
+
+    class _Ecouteur:
+        def add_service(self, zc, type_service, nom):
+            if not nom.startswith('ParcInfo'):
+                return
+            try:
+                info = zc.get_service_info(type_service, nom, timeout=1500)
+            except Exception:
+                info = None
+            if not info:
+                return
+            try:
+                adresses = info.parsed_addresses()
+            except Exception:
+                adresses = []
+            if not adresses:
+                return
+            proprietes = {}
+            for cle, valeur in (info.properties or {}).items():
+                try:
+                    cle_txt = cle.decode('utf-8', 'replace') if isinstance(cle, (bytes, bytearray)) else str(cle)
+                    val_txt = valeur.decode('utf-8', 'replace') if isinstance(valeur, (bytes, bytearray)) else str(valeur)
+                    proprietes[cle_txt] = val_txt
+                except Exception:
+                    continue
+            url = 'http://%s:%s' % (adresses[0], info.port)
+            trouves[url] = {
+                'url': url, 'ip': adresses[0], 'port': info.port,
+                'nom': proprietes.get('hostname') or nom.split('.')[0],
+                'version': proprietes.get('version') or '',
+                'docker': proprietes.get('docker') == '1',
+            }
+
+        def update_service(self, *a, **k):
+            pass
+
+        def remove_service(self, *a, **k):
+            pass
+
+    zc = Zeroconf()
+    try:
+        ServiceBrowser(zc, "_http._tcp.local.", _Ecouteur())
+        time.sleep(timeout)
+    except Exception:
+        pass
+    finally:
+        try:
+            zc.close()
+        except Exception:
+            pass
+    return list(trouves.values())

@@ -35,6 +35,11 @@ hiddenimports += ['collector_report']
 if sys.platform == 'win32':
     hiddenimports += ['winreg']
 hiddenimports += collect_submodules('reportlab')
+# Découverte réseau des instances ParcInfo par mDNS (discover_parcinfo_mdns
+# dans collector_core.py) — best-effort : son absence dégrade proprement
+# vers le seul balayage de sous-réseau, mais elle doit être présente pour
+# que la découverte rapide (port réel, pas seulement 3456) fonctionne.
+hiddenimports += collect_submodules('zeroconf')
 
 a = Analysis(
     ['system-info-collector-gui.py'],
