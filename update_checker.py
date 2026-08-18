@@ -439,9 +439,9 @@ class UpdateChecker:
         try:
             r = subprocess.run(['open', str(app_actuelle)], capture_output=True,
                                text=True, timeout=15)
-            if r.returncode != 0:
-                logger.warning("« open » a renvoyé %s pour %s : %s",
-                               r.returncode, app_actuelle, (r.stderr or '').strip()[:300])
+            logger.info("« open » %s pour %s%s", app_actuelle,
+                        'accepté' if r.returncode == 0 else 'a échoué (code %s)' % r.returncode,
+                        (' : ' + (r.stderr or '').strip()[:300]) if r.returncode != 0 else '')
         except Exception as e:
             logger.warning("Échec du lancement de %s : %s", app_actuelle, e)
 
@@ -460,6 +460,37 @@ class UpdateChecker:
             time.sleep(0.5)
 
         if not lancee:
+            # Diagnostic supplémentaire, signalé en usage réel : un cycle où
+            # aucun avertissement xattr/codesign/spctl --add n'est remonté
+            # (Gatekeeper semble avoir accepté le bundle cette fois), et
+            # pourtant ce test échoue quand même — la piste alors la plus
+            # probable est la « translocation » macOS : un bundle non
+            # notarié, lancé sans avoir été déplacé « proprement » (Finder,
+            # premier lancement approuvé), peut tourner depuis une copie en
+            # lecture seule à un chemin aléatoire (AppTranslocation) plutôt
+            # que /Applications/ParcInfo.app — le process existe bien, mais
+            # jamais à CE chemin précis, donc invisible à la recherche
+            # ci-dessus. Une recherche plus large sur le seul nom de
+            # l'exécutable permet de distinguer les deux cas plutôt que de
+            # deviner encore une fois.
+            try:
+                r_large = subprocess.run(['pgrep', '-f', 'ParcInfo'],
+                                         capture_output=True, text=True, timeout=5)
+                if r_large.returncode == 0:
+                    logger.warning(
+                        "Aucun processus au chemin attendu (%s), mais au moins un "
+                        "processus « ParcInfo » tourne ailleurs (pids : %s) — "
+                        "possible translocation macOS plutôt qu'un blocage "
+                        "Gatekeeper classique.",
+                        executable_cible, r_large.stdout.strip().replace('\n', ', '))
+                else:
+                    logger.warning(
+                        "Aucun processus « ParcInfo » trouvé nulle part (recherche "
+                        "large aussi négative) — l'application ne semble pas avoir "
+                        "démarré du tout, pas juste à un autre chemin.")
+            except Exception as e:
+                logger.debug("Recherche large de processus impossible : %s", e)
+
             logger.error(
                 "La nouvelle version ne démarre pas après remplacement — probablement "
                 "bloquée par Gatekeeper malgré xattr -cr et la signature ad hoc "

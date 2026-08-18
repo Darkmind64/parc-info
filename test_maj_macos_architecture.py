@@ -205,6 +205,45 @@ verifier((dossier_ancien / 'Contents' / 'MacOS' / 'ParcInfo').read_text()
          == 'nouvelle version, bonne architecture',
          "le bundle est bien remplacé dans ce cas")
 
+print("\n=== 4. Diagnostic de translocation : pgrep strict échoue, pgrep large trouve un process ===")
+# Signalé en usage réel : un cycle sans le moindre avertissement Gatekeeper
+# (xattr/codesign/spctl --add tous silencieux, donc probablement acceptés),
+# et pourtant la vérification de démarrage échouait quand même — piste la
+# plus probable : l'app tourne réellement, mais depuis un chemin translocé
+# par macOS, invisible à la recherche pgrep sur le chemin exact attendu.
+
+
+def _fausse_commande_translocation(cmd, **kw):
+    class _R:
+        stdout = ''
+        stderr = ''
+        returncode = 0
+    if cmd and cmd[0] == 'file':
+        r = _R(); r.stdout = 'Mach-O 64-bit executable x86_64\n'
+        return r
+    if cmd and cmd[0] == 'open':
+        return _R()
+    if cmd and cmd[0] == 'pgrep':
+        motif = cmd[2] if len(cmd) > 2 else ''
+        r = _R(); r.returncode = 0 if motif == 'ParcInfo' else 1  # large trouve, strict échoue
+        return r
+    return _faux_run_original(cmd, **kw)
+
+
+dossier_nouveau_src3 = Path(tempfile.mkdtemp(prefix='majarch_nouveau3_')) / 'racine'
+zip_translocation = _construire_bundle_zip(dossier_nouveau_src3, 'nouvelle version, translocation suspectee')
+
+UC.subprocess.run = _fausse_commande_translocation
+_faux_sleep2 = UC.time.sleep
+UC.time.sleep = lambda s: None
+resultat = checker._install_macos(zip_translocation)
+UC.time.sleep = _faux_sleep2
+verifier(resultat is False,
+         "translocation suspectée -> reste un échec, pas de faux positif silencieux")
+verifier((dossier_ancien / 'Contents' / 'MacOS' / 'ParcInfo').read_text()
+         == 'nouvelle version, translocation suspectee',
+         "le bundle est quand même remplacé sur disque (seule la vérification de démarrage échoue)")
+
 UC.subprocess.run = _faux_run_original
 UC.subprocess.Popen = _faux_popen_original
 sys.frozen = _ancien_frozen
