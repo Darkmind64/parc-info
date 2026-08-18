@@ -1,8 +1,26 @@
-PARCINFO_VERSION=2.18.4
+PARCINFO_VERSION=2.18.5
 RELEASE_DATE=2026-08-18
-BUILD_NUMBER=2026081803
+BUILD_NUMBER=2026081804
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.5 - spctl --add en dernier recours pour le blocage Gatekeeper macOS
+# Suite du blocage signalé en usage réel (Mac Intel), où xattr -cr et la
+# signature ad hoc sont toutes deux rejetées par Gatekeeper : troisième
+# mécanisme ajouté, de nature différente des deux précédents. Plutôt que de
+# nettoyer le bundle et espérer que ça passe, spctl --add inscrit
+# explicitement une exception pour ce bundle dans la base de confiance de
+# Gatekeeper. Nécessite les droits administrateur (invite mot de passe/Touch
+# ID native, via osascript), donc n'est tenté qu'en dernier recours après
+# l'échec des deux méthodes silencieuses — la mise à jour cesse d'être
+# totalement silencieuse à cette étape précise, uniquement dans ce cas de
+# figure. Une invite annulée par l'utilisateur redescend proprement sur le
+# message d'échec déjà en place, sans planter.
+# À savoir : mécanisme expérimental, non garanti. Apple a resserré spctl
+# --add ces dernières années pour empêcher ce genre d'auto-approbation par
+# un logiciel ; peut échouer selon la version de macOS. À valider en usage
+# réel sur le Mac à l'origine du signalement
+# Date: 18 août 2026
 
 # Version 2.18.4 - Détection matérielle fiable sous Rosetta (mise à jour macOS)
 # Trouvé en creusant un blocage Gatekeeper signalé en usage réel (Mac Intel) :

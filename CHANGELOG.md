@@ -1,5 +1,35 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.5] - 2026-08-18 🔓
+
+### 🔓 spctl --add en dernier recours pour le blocage Gatekeeper macOS (expérimental)
+
+**Un troisième mécanisme, de nature différente.** Suite directe du blocage
+Gatekeeper toujours ouvert sur le Mac Intel à l'origine du signalement : les
+deux méthodes actuelles (`xattr -cr` puis signature ad hoc en repli) sont
+toutes deux des *nettoyages* — elles espèrent que le bundle passera
+l'évaluation de Gatekeeper sans jamais lui dire explicitement de faire
+confiance. `spctl --add` fait l'inverse : il inscrit une exception en dur
+pour ce bundle précis dans la base de confiance de Gatekeeper.
+
+Tenté uniquement en dernier recours, après l'échec des deux méthodes
+silencieuses — et pour cause : `spctl --add` modifie une base système
+partagée, ce qui nécessite les droits administrateur. Demandés via
+`osascript ... with administrator privileges`, qui déclenche l'invite mot
+de passe/Touch ID native de macOS. La mise à jour cesse donc d'être
+totalement silencieuse, mais uniquement dans ce cas précis (les deux
+méthodes silencieuses ont déjà échoué). Une invite annulée par
+l'utilisateur (erreur AppleScript -128) redescend proprement sur le message
+d'échec déjà en place depuis la 2.18.1 — pas de plantage.
+
+> **Expérimental, à valider en usage réel.** Apple a resserré `spctl --add`
+> ces dernières années précisément pour empêcher ce genre d'auto-approbation
+> par un logiciel — son comportement peut varier selon la version de macOS,
+> et rien ne garantit qu'il lève le blocage constaté. Contrairement aux
+> correctifs précédents de cette série, celui-ci n'a pas pu être vérifié
+> avant publication faute d'accès à un Mac réel : le prochain retour
+> d'usage sur le Mac concerné confirmera s'il fonctionne.
+
 ## [2.18.4] - 2026-08-18 🖥️
 
 ### 🖥️ Détection matérielle fiable sous Rosetta (mise à jour macOS)
