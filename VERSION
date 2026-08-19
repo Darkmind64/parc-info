@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.18.15
+PARCINFO_VERSION=2.18.16
 RELEASE_DATE=2026-08-19
-BUILD_NUMBER=2026081904
+BUILD_NUMBER=2026081905
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.16 - Audit complet : code mort retiré, documentation corrigée
+# Demandé explicitement : vérifier le projet entier pour du code mort et des
+# incohérences, et s'assurer que la documentation est à jour.
+# Code retiré (jamais appelé, confirmé par recherche exhaustive) : 7 scripts
+# racine obsolètes (validate_optimizations.py, test_optimizations.py/_v2.py,
+# check_indexes.py, INTEGRATION_EXAMPLE.py, system_checker.py, build.py — un
+# ancien orchestrateur de build remplacé par des appels pyinstaller directs),
+# 2 gabarits HTML jamais rendus (dashboard.html, remplacé par
+# client_dashboard.html/user_dashboard.html ; rapport_maintenance_pdf.html,
+# remplacé par une génération PDF directe via reportlab), une fonction
+# ICMP raw-socket explicitement remplacée par une autre (documenté dans le
+# docstring de sa remplaçante), une fonction et un import jamais utilisés,
+# une clé de configuration fantôme (theme, jamais lue ni écrite).
+# Documentation corrigée dans claude.md, README.md, BUILD.md,
+# CONTRIBUTING.md, IMPLEMENTATION_GUIDE.md, DOCKERHUB_SETUP.md,
+# COLLECTOR_FIELD_MAPPING.md : références de ligne fausses, liens morts,
+# URL placeholder oubliées, auto-contradiction sur la sécurité des uploads,
+# branche par défaut erronée (main au lieu de master), affirmations qui
+# décrivaient l'inverse du code actuel (UPX, icône, binaire macOS
+# "universel"). SYNOLOGY_DEPLOYMENT.md réécrit : son affirmation centrale
+# (passage à Gunicorn pour corriger Hyper Backup) était devenue l'inverse
+# de la réalité — le code est revenu à Werkzeug depuis la 2.6.6, Gunicorn
+# ayant lui-même causé des plantages (code 255) plus graves que le problème
+# qu'il devait résoudre. SOLUTION_403_VERSION.md (incident pleinement
+# résolu, 12+ versions plus vieux) archivé dans docs/archive/, suivant la
+# convention déjà en place ; sa seule information encore utile (pourquoi
+# /api/* est exempté du CSRF) reprise dans claude.md
+# Date: 19 août 2026
 
 # Version 2.18.15 - Inventaire des appareils allégé (plus rapide avec beaucoup d'appareils)
 # Signalé en usage réel : l'inventaire un peu lent à s'afficher avec une

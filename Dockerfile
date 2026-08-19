@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 LABEL maintainer="Darkmind64"
 LABEL description="ParcInfo - Gestion de parc informatique multi-clients"
-LABEL version="2.18.15"
+LABEL version="2.18.16"
 
 # Variables d'environnement
 ENV PYTHONUNBUFFERED=1 \

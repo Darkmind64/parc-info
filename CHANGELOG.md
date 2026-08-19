@@ -1,5 +1,72 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.16] - 2026-08-19 🧹
+
+### 🧹 Audit complet du projet : code mort retiré, documentation corrigée
+
+**Demandé explicitement** : vérifier tout le projet pour du code mort et
+des incohérences, et s'assurer que la documentation est à jour. Recherche
+exhaustive (chaque candidat confirmé par recherche croisée — imports, CI,
+templates, JS — avant d'être retiré, aucune suppression sur simple
+intuition).
+
+**Code retiré, jamais appelé nulle part :**
+- 7 scripts racine obsolètes : `validate_optimizations.py`,
+  `test_optimizations.py`/`_v2.py` (nécessitaient un serveur en marche sur
+  une URL codée en dur, jamais branchés à la CI, superseded par la suite de
+  tests actuelle), `check_indexes.py`, `INTEGRATION_EXAMPLE.py` (tutoriel
+  d'intégration déjà réalisée en direct dans `app.py`), `system_checker.py`,
+  `build.py` (ancien orchestrateur, remplacé par des appels `pyinstaller`
+  directs dans le pipeline CI actuel)
+- 2 gabarits HTML jamais rendus par aucune route : `dashboard.html`
+  (remplacé par `client_dashboard.html`/`user_dashboard.html`, séparés par
+  rôle) et `rapport_maintenance_pdf.html` (remplacé depuis par une
+  génération PDF directe via reportlab, `/rapport/maintenances/pdf`)
+- Une fonction TTL par socket ICMP brut, explicitement remplacée par une
+  autre — sa remplaçante documente déjà dans son propre docstring pourquoi
+  l'approche par raw socket a été abandonnée
+- Un import et une fonction jamais appelés, une clé de configuration
+  fantôme (`theme`, jamais lue ni écrite — la personnalisation réelle passe
+  par des clés de couleur individuelles)
+
+**Documentation corrigée** (claude.md, README.md, BUILD.md,
+CONTRIBUTING.md, IMPLEMENTATION_GUIDE.md, DOCKERHUB_SETUP.md,
+COLLECTOR_FIELD_MAPPING.md) :
+- claude.md se contredisait lui-même sur la sécurité des uploads (« aucune
+  validation » alors qu'extension, signature de fichier et taille sont
+  bien vérifiées) ; référence de ligne fausse pour le middleware CSRF ;
+  liste de dépendances tronquée (3 citées sur 11 réelles) ; lien mort vers
+  `LICENSE.md` (le fichier s'appelle `LICENSE`)
+- README.md gardait des URL placeholder (`your-org`) à côté de liens
+  fonctionnels vers le vrai dépôt — même fichier, deux origines différentes
+- BUILD.md affirmait l'inverse du code actuel sur deux points (UPX
+  activé — en réalité désactivé pour réduire les faux positifs antivirus ;
+  icône « à décommenter » — en réalité déjà active) et décrivait un
+  binaire macOS « universel » qui n'existe pas (deux builds séparés,
+  ARM et Intel) ; recommandation `codesign --deep` retirée (cas documenté
+  de signature cassée sur bundle complexe, voir 2.17.1)
+- CONTRIBUTING.md envoyait les contributeurs créer leur branche depuis
+  `main` — la vraie branche par défaut est `master`
+- IMPLEMENTATION_GUIDE.md affirmait l'authentification du collecteur « pas
+  encore implémentée » alors qu'elle l'est ; commandes de téléchargement
+  produisant un fichier corrompu (la route sert une archive ZIP, pas un
+  script `.py` seul)
+
+**SYNOLOGY_DEPLOYMENT.md réécrit** — son affirmation centrale était devenue
+l'inverse de la réalité. Le document expliquait qu'un passage à Gunicorn
+avait corrigé des soucis Hyper Backup/Centre de paquets sur Synology. En
+réalité (retracé dans l'historique Git) : Gunicorn avait bien été
+introduit (v2.6.1), mais ses workers plantaient avec le code 255 — cause
+plus grave que le problème initial — et le code est revenu à Werkzeug
+directement dès la v2.6.6, stable depuis. `docker-entrypoint.sh` installe
+encore `gunicorn` par précaution mais ne l'invoque jamais.
+
+**SOLUTION_403_VERSION.md archivé** dans `docs/archive/` (convention déjà
+en place dans le projet) — incident pleinement résolu depuis plus de 12
+versions. Sa seule information encore utile (pourquoi `/api/*` est exempté
+de la vérification CSRF) reprise sous forme de note permanente dans
+claude.md.
+
 ## [2.18.15] - 2026-08-19 ⚡
 
 ### ⚡ Inventaire des appareils allégé
