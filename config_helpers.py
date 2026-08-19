@@ -20,7 +20,6 @@ PERSONAL_CONFIG_KEYS = {
     'lignes_par_page',   # Pagination
     'date_format',       # Format de date
     'nav_mode',          # Menu horizontal/vertical
-    'theme',             # Thème prédéfini
     'contrast_level',    # Niveau de contraste (normal/high/max)
     'dashboard_widgets_enabled',   # Widgets activés sur le dashboard
     'dashboard_widgets_order',     # Ordre des widgets sur le dashboard
@@ -142,7 +141,6 @@ LISTE_DEFAULTS = {
 # ─── VALEURS PAR DÉFAUT DE LA CONFIG ─────────────────────────────────────────
 
 CFG_DEFAULTS = {
-    'theme': 'dark-blue',
     # Vide : les collecteurs déjà déployés continuent de fonctionner. Une fois
     # renseigné, il devient obligatoire pour écrire via l'API.
     'collecteur_token': '',

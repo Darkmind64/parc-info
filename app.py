@@ -118,7 +118,7 @@ from config_helpers import (LISTE_DEFAULTS, CFG_DEFAULTS,
                              get_liste, cfg_get, cfg_set, cfg_all, cfg_invalidate,
                              get_port_config, get_port_icon)
 from client_helpers import (paginate, get_client_access, can_write,
-                             get_client_with_acces, get_client_id, get_clients,
+                             get_client_id, get_clients,
                              log_history, log_error, garantie_active, human_size,
                              fmt_appareils, fmt_garantie_periph, fmt_contrat, fmt_intervention,
                              get_clients_for_filter, _format_date_field)
@@ -5772,32 +5772,6 @@ def _netbios_name(ip_str):
     except Exception:
         pass
     return ""
-
-def _icmp_ttl(ip_str):
-    """Récupère le TTL d'une réponse ICMP via raw socket."""
-    try:
-        import struct as _struct
-        s = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
-        s.settimeout(1.5)
-        def _chk(data):
-            s2 = sum((data[i] << 8) + (data[i+1] if i+1 < len(data) else 0)
-                     for i in range(0, len(data), 2))
-            s2 = (s2 >> 16) + (s2 & 0xffff)
-            return ~(s2 + (s2 >> 16)) & 0xffff
-        pid = os.getpid() & 0xFFFF
-        hdr = _struct.pack('bbHHh', 8, 0, 0, pid, 1)
-        payload = b'parcinfo'
-        chk = _chk(hdr + payload)
-        pkt = _struct.pack('bbHHh', 8, 0, chk, pid, 1) + payload
-        s.sendto(pkt, (ip_str, 0))
-        resp = s.recv(1024)
-        s.close()
-        # TTL est à l'offset 8 de l'en-tête IP
-        if len(resp) >= 9:
-            return resp[8]
-    except Exception:
-        pass
-    return None
 
 def _ttl_os_guess(ip_str):
     """Deviner l'OS par le TTL de la réponse ping.

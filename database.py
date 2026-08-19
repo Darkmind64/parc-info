@@ -713,14 +713,6 @@ def _get_cols(conn, tbl: str) -> list:
     return []
 
 
-def _get_user_tables(conn) -> list:
-    """Retourne la liste des tables utilisateur (hors tables système SQLite)."""
-    cur = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' "
-        "AND name NOT LIKE 'sqlite_%' ORDER BY name")
-    return [r[0] for r in cur.fetchall()]
-
-
 def _cleanup_sync_journal(turso, days: int = 30):
     """Purge les entrées _sync_journal de Turso vieilles de plus de `days` jours.
 
