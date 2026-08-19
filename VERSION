@@ -1,8 +1,27 @@
-PARCINFO_VERSION=2.18.9
+PARCINFO_VERSION=2.18.10
 RELEASE_DATE=2026-08-18
-BUILD_NUMBER=2026081808
+BUILD_NUMBER=2026081809
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.10 - Mise à jour macOS relancée directement (fin de la translocation)
+# Reprise complète de la logique de mise à jour macOS, documentation externe
+# à l'appui plutôt qu'une nouvelle hypothèse non vérifiée. La translocation
+# macOS (Gatekeeper Path Randomization) est un mécanisme documenté,
+# indépendant de Gatekeeper lui-même : un bundle non notarié copié vers un
+# chemin aléatoire en lecture seule dès qu'il réunit deux conditions
+# précises — porter encore une trace de quarantaine, ET être ouvert via
+# Launch Services (Finder ou la commande `open`). Lancer l'exécutable
+# directement (comme depuis un terminal) élimine cette seconde condition
+# d'office, quel que soit l'état de la quarantaine — confirmé par plusieurs
+# sources techniques indépendantes. `open` est donc retiré du mécanisme de
+# relance : remplacement direct de l'exécutable via subprocess.Popen, dont
+# le .poll() sert aussi de vérification de démarrage — plus fiable qu'une
+# recherche par chemin (pgrep), qui échouait justement à trouver un process
+# translocé. Diagnostic permanent ajouté au démarrage : ParcInfo journalise
+# désormais lui-même s'il tourne depuis un chemin transloqué, sans plus
+# jamais avoir à le deviner après coup
+# Date: 18 août 2026
 
 # Version 2.18.9 - Diagnostic de translocation macOS (mise à jour toujours en échec)
 # Le tout nouveau fichier journal (2.18.7) vient de révéler quelque chose

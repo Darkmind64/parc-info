@@ -1,5 +1,46 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.10] - 2026-08-18 🚀
+
+### 🚀 Mise à jour macOS relancée directement — fin (probable) de la saga Gatekeeper
+
+**Reprise complète de la logique, documentation externe à l'appui.** Après
+plusieurs correctifs incrémentaux sur la même mise à jour macOS bloquée
+(2.16.1, 2.17.1, 2.18.1, 2.18.5, 2.18.6, 2.18.9), la cause a été confirmée
+par recherche plutôt que par une nouvelle hypothèse non vérifiée : la
+**translocation macOS** (Gatekeeper Path Randomization), un mécanisme
+documenté et **distinct** de l'évaluation Gatekeeper elle-même.
+
+Un bundle non notarié est copié par macOS vers un chemin aléatoire en
+lecture seule dès que deux conditions sont réunies : porter encore une
+trace de quarantaine, **et** être ouvert via Launch Services — Finder ou la
+commande `open`. Notre mise à jour utilisait justement `open` pour relancer
+l'application après remplacement. Le processus démarrait alors bel et bien,
+mais depuis cette copie translocée plutôt que `/Applications/ParcInfo.app`
+— invisible à la vérification par chemin exact (`pgrep`) mise en place en
+2.18.1, expliquant les échecs signalés sans le moindre avertissement
+Gatekeeper à partir de la 2.18.6 (`xattr`/signature/`spctl --add` tous
+silencieux, car le bundle était bel et bien accepté).
+
+**Le correctif : ne plus jamais passer par `open`.** Lancer l'exécutable
+directement (comme depuis un terminal) élimine cette condition d'office,
+quel que soit l'état de la quarantaine — confirmé par plusieurs sources
+techniques indépendantes (voir liens ci-dessous). La relance utilise
+maintenant `subprocess.Popen` directement sur le binaire, dont l'indicateur
+de vie (`.poll()`) sert aussi de vérification de démarrage — plus fiable
+qu'une recherche par chemin, puisqu'il vient directement du fork/exec et ne
+dépend plus d'où macOS a pu faire tourner le process.
+
+**Diagnostic permanent ajouté.** ParcInfo journalise désormais lui-même, à
+chaque démarrage, s'il tourne depuis un chemin transloqué
+(`sys.executable` contient « AppTranslocation ») — cette question ne devra
+plus jamais être devinée après coup depuis un journal incomplet.
+
+> Sources consultées pour ce correctif :
+> [App Translocation — lapcatsoftware.com](https://lapcatsoftware.com/articles/app-translocation.html),
+> [Untranslocating Apps — Synack](https://www.synack.com/blog/untranslocating-apps/),
+> [Sparkle framework, documentation officielle](https://sparkle-project.org/documentation/).
+
 ## [2.18.9] - 2026-08-18 🔍
 
 ### 🔍 Diagnostic de translocation macOS (mise à jour toujours en échec)

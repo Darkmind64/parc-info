@@ -1,20 +1,21 @@
 {
-  "version": "2.18.9",
+  "version": "2.18.10",
   "release_date": "2026-08-18T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.9/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.9/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.9/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.9",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.9/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.9/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.9/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.10/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.10/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.10/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.10",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.10/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.10/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.10/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Diagnostic supplémentaire (pas encore un correctif) pour un échec de mise à jour macOS qui persiste sans plus aucun avertissement Gatekeeper — piste : la translocation macOS",
+    "new_features": "La mise à jour macOS relance désormais l'exécutable directement, sans jamais passer par `open` — élimine la translocation macOS, cause documentée des derniers échecs de mise à jour",
     "improvements": [
-      "NOUVEAU: quand la vérification de démarrage après une mise à jour macOS échoue sans qu'aucun avertissement xattr/codesign/spctl --add n'ait été journalisé, une recherche de secours (nom de processus seul, sans le chemin complet) permet de distinguer une translocation macOS (l'app tourne, mais depuis un chemin aléatoire) d'un échec de lancement pur et simple."
+      "CORRIGÉ: `open` (Launch Services) est l'une des conditions nécessaires à la translocation macOS (Gatekeeper Path Randomization) — un bundle non notarié peut être exécuté depuis une copie en lecture seule à un chemin aléatoire plutôt que /Applications/ParcInfo.app, invisible à la vérification par chemin (pgrep) utilisée jusqu'ici. Lancement direct de l'exécutable désormais (subprocess.Popen), vérifié par son propre indicateur de vie plutôt qu'une recherche par chemin.",
+      "NOUVEAU: ParcInfo journalise désormais lui-même au démarrage s'il tourne depuis un chemin transloqué par macOS, pour ne plus jamais avoir à le deviner après coup."
     ]
   },
   "checksums": {
@@ -25,5 +26,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.9"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.10"
 }
