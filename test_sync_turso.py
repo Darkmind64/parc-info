@@ -176,6 +176,37 @@ lignes = conn.execute(
     "SELECT COUNT(*) FROM _sync_journal WHERE tbl='appareils' AND record_id=? AND action='UPDATE'",
     (appareil_id,)).fetchone()[0]
 verifier(lignes == 1, "une seule ligne de journal pour cette clé, pas de doublon", str(lignes))
+
+print("\n=== 4. Une ligne _sync_applying restée d'un crash n'éteint pas la sync pour toujours ===")
+# Contrôle du système de synchronisation : _sync_applying protège contre une
+# boucle pendant un pull (voir database.py), mais si le PROCESS entier meurt
+# entre l'INSERT et le DELETE (kill, coupure), la ligne reste sur disque et
+# survit au redémarrage — WHEN NOT EXISTS (SELECT 1 FROM _sync_applying) ne
+# serait alors plus jamais vrai, éteignant tous les triggers pour toujours.
+conn.execute("INSERT OR IGNORE INTO _sync_applying (id) VALUES (1)")
+conn.commit()
+A.init_db()  # simule un redémarrage après un crash laissant la ligne en place
+reste = conn.execute("SELECT COUNT(*) FROM _sync_applying").fetchone()[0]
+verifier(reste == 0, "la ligne périmée est purgée au (ré)démarrage", str(reste))
+
+conn.execute("INSERT INTO appareils (client_id, nom_machine) VALUES (1, 'POSTE-Apres-Crash')")
+conn.commit()
+nouvel_id = conn.execute(
+    "SELECT id FROM appareils WHERE nom_machine='POSTE-Apres-Crash'").fetchone()[0]
+journalise = conn.execute(
+    "SELECT COUNT(*) FROM _sync_journal WHERE tbl='appareils' AND record_id=? AND action='INSERT'",
+    (nouvel_id,)).fetchone()[0]
+verifier(journalise == 1,
+         "une écriture locale après purge est bien journalisée (les triggers refonctionnent)",
+         str(journalise))
+
+print("\n=== 5. _sync_deletions / _trg_del_* : mécanisme legacy bien retiré ===")
+del_triggers = conn.execute(
+    "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name LIKE '_trg_del_%'"
+).fetchone()[0]
+verifier(del_triggers == 0,
+         "aucun trigger _trg_del_* — mécanisme legacy jamais relu par la sync actuelle, retiré",
+         str(del_triggers))
 conn.close()
 
 print()

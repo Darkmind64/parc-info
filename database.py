@@ -553,8 +553,20 @@ def log_sync_event(event_type: str, statut: str, resume: str, details: dict = No
 
 def sync_once() -> tuple:
     """
-    Effectue une synchronisation complète local ↔ Turso.
-    Règle de conflit : l'enregistrement avec date_maj la plus récente gagne.
+    Effectue une synchronisation complète local ↔ Turso (voir
+    _sync_using_journal pour le détail : pull puis push, journal par journal).
+
+    Pas de fusion par champ ni de comparaison de date_maj — corrigé ici après
+    un contrôle du système de synchronisation, cette docstring affirmait
+    l'inverse alors que rien de tel n'existe dans le code depuis le passage à
+    _sync_journal. Le dernier écrit CÔTÉ TURSO gagne, ligne entière comprise :
+    si deux instances modifient le MÊME enregistrement avant d'avoir chacune
+    synchronisé, celle qui pousse en second écrase silencieusement l'autre —
+    aucun avertissement, aucune fusion des deux jeux de changements. En usage
+    normal (des appareils différents modifiés depuis des instances
+    différentes), ce n'est jamais rencontré ; ça reste une limite réelle si
+    deux personnes modifient la MÊME fiche depuis deux instances au même
+    moment, sans y avoir accès en même temps dans l'interface elle-même.
     Retourne (ok: bool, stats: dict, error: str|None).
     """
     from config_helpers import cfg_get
@@ -707,24 +719,6 @@ def _get_user_tables(conn) -> list:
         "SELECT name FROM sqlite_master WHERE type='table' "
         "AND name NOT LIKE 'sqlite_%' ORDER BY name")
     return [r[0] for r in cur.fetchall()]
-
-
-def _cleanup_deletion_log(local, turso, days: int = 30):
-    """Supprime les entrées de _sync_deletions vieilles de plus de `days` jours.
-
-    Table legacy conservée pour compatibilité (encore alimentée par les triggers
-    _trg_del_* dans app.py) mais non utilisée par la sync actuelle, basée sur
-    _sync_journal (voir _sync_using_journal ci-dessous)."""
-    cutoff = f"datetime('now','-{days} days')"
-    sql = f"DELETE FROM _sync_deletions WHERE deleted_at < {cutoff}"
-    try:
-        local.execute(sql); local.commit()
-    except Exception:
-        pass
-    try:
-        turso.execute(sql)
-    except Exception:
-        pass
 
 
 def _cleanup_sync_journal(turso, days: int = 30):
@@ -1001,7 +995,6 @@ def _bidirectional_sync(local, turso) -> tuple:
         stats, errors = _sync_using_journal(local, turso)
 
         try:
-            _cleanup_deletion_log(local, turso)
             _cleanup_sync_journal(turso)
         except Exception:
             pass

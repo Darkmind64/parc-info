@@ -1558,7 +1558,11 @@ def init_db():
     if 'garantie_alerte_ignoree' not in cols_app2:
         c.execute("ALTER TABLE appareils ADD COLUMN garantie_alerte_ignoree INTEGER DEFAULT 0")
 
-    # ── TABLE JOURNAL DES SUPPRESSIONS (pour sync bidirectionnelle) ──────────
+    # Legacy, plus alimentée (voir plus bas où les triggers _trg_del_* sont
+    # retirés) : mécanisme d'avant _sync_journal, jamais relu par la sync
+    # actuelle. CREATE conservé pour ne rien casser sur une base existante qui
+    # porte encore ses anciennes lignes ; rien ne les purge plus, sans
+    # conséquence (elles ne grossissent plus et ne gênent personne).
     c.execute('''CREATE TABLE IF NOT EXISTS _sync_deletions (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         tbl        TEXT    NOT NULL,
@@ -1582,8 +1586,17 @@ def init_db():
     # recevoir est immédiatement re-marquée comme "modification locale" et
     # repoussée au cycle suivant — avec un vieil état si la ligne existait déjà,
     # ce qui écrase silencieusement les changements faits par une autre instance).
-    # database.py insère une ligne ici le temps d'appliquer le pull, puis la retire.
+    # database.py insère une ligne ici le temps d'appliquer le pull, puis la retire
+    # dans un `finally` — sauf si le PROCESS entier disparaît entre les deux (kill,
+    # coupure de courant, crash) : la ligne reste alors sur disque, survit au
+    # redémarrage, et bloquerait silencieusement TOUS les triggers ci-dessous pour
+    # toujours (WHEN NOT EXISTS (SELECT 1 FROM _sync_applying) ne serait plus
+    # jamais vrai) — plus aucune modification locale ne serait journalisée, donc
+    # plus jamais poussée vers les autres instances, sans la moindre erreur pour
+    # le signaler. Un redémarrage de l'application est la seule preuve possible
+    # qu'aucun pull n'est en cours : la vider ici est donc toujours sûr.
     c.execute('''CREATE TABLE IF NOT EXISTS _sync_applying (id INTEGER PRIMARY KEY)''')
+    c.execute('DELETE FROM _sync_applying')
 
     # Triggers : enregistre automatiquement chaque modification dans _sync_journal
     # Toutes les tables de données sont couvertes (auth_users, client_partages, config, etc.
@@ -1652,21 +1665,27 @@ def init_db():
                 VALUES ('{_t}', OLD.{_pk}, 'DELETE', datetime('now'));
             END""")
 
-    # Triggers : enregistre automatiquement chaque suppression dans _sync_deletions
-    _TRACKED = ['appareils','peripheriques','identifiants','contrats',
-                'utilisateurs','services','clients','baie_slots',
-                'outils','kb_articles','kb_categories',
-                'documents_appareils','documents_contrats',
-                'documents_peripheriques','baie_photos',
-                'types_droits','droits_utilisateurs',
-                'contrats_appareils','contrats_peripheriques',
-                'peripheriques_appareils','parc_general','historique','plans']
-    for _t in _TRACKED:
-        c.execute(f"""CREATE TRIGGER IF NOT EXISTS _trg_del_{_t}
-            AFTER DELETE ON {_t} BEGIN
-                INSERT OR REPLACE INTO _sync_deletions (tbl, record_id, deleted_at)
-                VALUES ('{_t}', OLD.id, datetime('now'));
-            END""")
+    # _sync_deletions / _trg_del_* : mécanisme legacy d'avant _sync_journal,
+    # jamais relu par la synchronisation actuelle (voir _sync_using_journal
+    # dans database.py, entièrement basée sur _sync_journal). Trouvé lors
+    # d'un contrôle du système de synchronisation : ces triggers écrivaient
+    # encore sur chaque suppression, sur 23 tables, pour une table que plus
+    # rien ne lisait — et une liste restée figée à l'ancienne, jamais mise à
+    # jour avec les tables ajoutées depuis (contrairement à _TRACKED_JOURNAL
+    # ci-dessus). Supprimés plutôt que recréés ; DROP explicite (pas juste
+    # l'absence de CREATE) pour retirer aussi ceux déjà posés sur les bases
+    # existantes. La table _sync_deletions elle-même est laissée en place
+    # (vide désormais) : un DROP TABLE n'apporterait rien et risquerait une
+    # erreur sur un code qui la référencerait encore ailleurs sans qu'on l'ait vu.
+    for _t in ('appareils', 'peripheriques', 'identifiants', 'contrats',
+               'utilisateurs', 'services', 'clients', 'baie_slots',
+               'outils', 'kb_articles', 'kb_categories',
+               'documents_appareils', 'documents_contrats',
+               'documents_peripheriques', 'baie_photos',
+               'types_droits', 'droits_utilisateurs',
+               'contrats_appareils', 'contrats_peripheriques',
+               'peripheriques_appareils', 'parc_general', 'historique', 'plans'):
+        c.execute(f"DROP TRIGGER IF EXISTS _trg_del_{_t}")
 
     # Migration : ajouter colonnes BLOB + sync si n'existent pas
     for table in ['documents_appareils', 'documents_contrats', 'documents_peripheriques',
@@ -3840,10 +3859,6 @@ def supprimer_plan(id):
     cid = get_client_id()
     conn = get_db()
     conn.execute('DELETE FROM plans WHERE id=? AND client_id=?', (id, cid))
-    # Enregistrer explicitement la suppression pour la sync Turso
-    conn.execute(
-        "INSERT OR REPLACE INTO _sync_deletions (tbl, record_id, deleted_at) VALUES ('plans', ?, datetime('now'))",
-        (id,))
     conn.commit(); conn.close()
     flash('Plan supprimé', 'info')
     return redirect(url_for('liste_plans'))
@@ -10305,10 +10320,6 @@ def supprimer_entree_historique(hist_id):
         conn.close()
         return jsonify({'ok': False, 'message': 'Entrée introuvable'}), 404
     conn.execute('DELETE FROM historique WHERE id=?', (hist_id,))
-    # Enregistrer explicitement la suppression pour la sync Turso
-    conn.execute(
-        "INSERT OR REPLACE INTO _sync_deletions (tbl, record_id, deleted_at) VALUES ('historique', ?, datetime('now'))",
-        (hist_id,))
     conn.commit()
     conn.close()
     return jsonify({'ok': True})
@@ -10322,16 +10333,12 @@ def vider_erreurs_historique():
     if not cid:
         return jsonify({'ok': False, 'message': 'Aucun client actif'}), 400
     conn = get_db()
-    # Récupérer les IDs avant suppression pour les enregistrer dans _sync_deletions
+    # Compte des lignes à supprimer, pour le retourner dans la réponse
     ids = [r[0] for r in conn.execute(
         "SELECT id FROM historique WHERE (client_id=? OR client_id=0) AND action='Erreur'", (cid,)).fetchall()]
     if ids:
         conn.execute(
             "DELETE FROM historique WHERE (client_id=? OR client_id=0) AND action='Erreur'", (cid,))
-        # Enregistrer chaque suppression pour la sync Turso
-        conn.executemany(
-            "INSERT OR REPLACE INTO _sync_deletions (tbl, record_id, deleted_at) VALUES ('historique', ?, datetime('now'))",
-            [(i,) for i in ids])
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'nb': len(ids)})
@@ -11112,7 +11119,15 @@ def apropos():
     mode = _mode_execution()
     est_frozen = mode in ('windows', 'macos')
 
-    turso_actif = cfg_get('db_type', 'local') == 'turso'
+    # != 'local', pas seulement == 'turso' : le mode le plus courant en usage
+    # réel (Docker/PC/Mac qui se synchronisent entre eux) est 'sync' — base
+    # locale au quotidien, synchronisée en tâche de fond avec Turso — pas
+    # 'turso' (chaque requête interroge Turso directement, sans base locale).
+    # Cette page affichait « Turso n'est pas configuré » sur toute instance en
+    # mode 'sync', qui pourtant synchronise activement : la carte de statut
+    # censée servir à diagnostiquer un souci de sync était donc invisible
+    # exactement là où elle aurait le plus servi.
+    turso_actif = cfg_get('db_type', 'local') != 'local'
     sync_state = None
     if turso_actif:
         from database import get_sync_state
