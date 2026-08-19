@@ -1,5 +1,43 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.12] - 2026-08-19 🔓
+
+### 🔓 Le vrai bug de la mise à jour macOS, enfin trouvé : bit exécutable perdu
+
+**Ce que le journal a fini par révéler.** Le fichier `parcinfo.log` ajouté
+en 2.18.7 a donné, cette fois, la preuve directe qui manquait depuis le
+début de cette série : plus aucun blocage Gatekeeper, mais
+`[Errno 13] Permission denied` sur l'exécutable fraîchement remplacé, au
+moment précis du lancement direct introduit en 2.18.10.
+
+**La cause, une fois qu'on la cherchait.** Le zip macOS est créé par
+`zip -r` (voir les workflows de build), qui embarque correctement le mode
+Unix de chaque fichier dans ses métadonnées. Mais `zipfile.ZipFile.
+extractall()`, de la bibliothèque standard Python, **ignore silencieusement
+cette métadonnée** — un gotcha connu et documenté de ce module. L'exécutable
+ressortait donc de chaque extraction sans son bit `+x`. `open` (Launch
+Services), utilisé jusqu'à la 2.18.9, tolérait apparemment cette absence ;
+`subprocess.Popen()` directement sur le binaire (2.18.10), non.
+
+**C'est le changement pensé pour régler la translocation qui a démasqué ce
+problème.** Il était là depuis le tout début de cette série de correctifs,
+cerné années durant par des diagnostics Gatekeeper qui n'en étaient jamais
+la vraie cause — sans le passage au lancement direct (nécessaire pour
+éliminer la translocation, voir 2.18.10), cette permission perdue serait
+peut-être restée invisible indéfiniment.
+
+**Le correctif.** Les permissions Unix de chaque fichier extrait sont
+désormais restaurées depuis les métadonnées du zip (`ZipInfo.
+external_attr`), avec un `chmod +x` de sécurité supplémentaire juste avant
+la tentative de lancement, au cas où quoi que ce soit d'autre l'aurait
+perdu en route. Vérifié par un test dédié qui reproduit exactement le
+mécanisme (bit restauré pour un exécutable, jamais ajouté à tort à un
+fichier ordinaire, aucune exception sur une entrée sans métadonnées Unix).
+
+> À valider au prochain cycle de mise à jour réel — mais pour la première
+> fois dans cette série, la preuve technique (le message d'erreur exact,
+> pas une hypothèse) pointe directement vers ce correctif.
+
 ## [2.18.11] - 2026-08-19 🔎
 
 ### 🔎 Contrôle complet du système de synchronisation

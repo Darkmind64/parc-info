@@ -1,8 +1,27 @@
-PARCINFO_VERSION=2.18.11
+PARCINFO_VERSION=2.18.12
 RELEASE_DATE=2026-08-19
-BUILD_NUMBER=2026081900
+BUILD_NUMBER=2026081901
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.12 - Le vrai bug de la mise à jour macOS, enfin trouvé : bit exécutable perdu
+# Le journal parcinfo.log (2.18.7) a enfin donné la preuve directe : plus de
+# blocage Gatekeeper, mais [Errno 13] Permission denied sur l'exécutable
+# fraîchement remplacé, au moment du lancement direct introduit en 2.18.10.
+# Cause : le zip macOS (créé par `zip -r`, qui embarque bien le mode Unix de
+# chaque fichier) est extrait par zipfile.ZipFile.extractall() de la
+# bibliothèque standard Python — qui ignore silencieusement cette
+# métadonnée, laissant chaque fichier extrait sans son bit +x. `open`
+# (Launch Services), utilisé jusqu'à la 2.18.9, tolérait apparemment cette
+# absence ; subprocess.Popen() directement sur le binaire (2.18.10), non —
+# c'est justement le passage au lancement direct, pensé pour éliminer la
+# translocation macOS, qui a démasqué ce problème resté invisible depuis le
+# début derrière des diagnostics Gatekeeper qui n'étaient jamais la vraie
+# cause. Corrigé : les permissions Unix de chaque fichier sont désormais
+# restaurées après extraction (ZipInfo.external_attr), avec un filet de
+# sécurité supplémentaire juste avant le lancement (chmod +x explicite sur
+# l'exécutable). Vérifié par un test dédié
+# Date: 19 août 2026
 
 # Version 2.18.11 - Contrôle complet du système de synchronisation
 # Demandé explicitement : audit du système de sync (conflits, cohérence,
