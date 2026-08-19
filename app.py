@@ -3428,6 +3428,36 @@ def api_get_client_services(client_id):
         logger.exception(f'Erreur lecture services client {client_id}')
         return jsonify({'error': str(e)}), 500
 
+#: Colonnes de `appareils` jamais affichées par la LISTE d'inventaire (seule
+#: la fiche détail les utilise) mais pouvant peser plusieurs centaines de Ko
+#: chacune une fois remplies par une vraie collecte — jusqu'à 1 Mo pour
+#: rapport_systeme_json (voir sa limite dans /api/device-info). `SELECT a.*`
+#: les ramenait sur CHAQUE page de la liste, pour CHAQUE appareil affiché :
+#: signalé en usage réel comme un peu lent avec une soixantaine d'appareils,
+#: exactement le genre de ralentissement qu'un tel sur-chargement produit.
+_APP_COLONNES_LOURDES = frozenset({'rapport_systeme_json', 'logiciels_installes_json'})
+_app_colonnes_liste_cache = None
+
+def _colonnes_appareils_liste():
+    """Colonnes de `appareils` pour la liste d'inventaire, sans les blobs
+    lourds ci-dessus. Construite depuis PRAGMA (mise en cache : le schéma ne
+    change pas en cours de vie du process) plutôt qu'à la main — `appareils`
+    a beaucoup grandi et continue de grandir (voir claude.md), une liste
+    figée se démoderait silencieusement à la prochaine colonne ajoutée
+    ailleurs dans le code.
+    """
+    global _app_colonnes_liste_cache
+    if _app_colonnes_liste_cache is None:
+        conn = get_db()
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(appareils)").fetchall()
+                    if r[1] not in _APP_COLONNES_LOURDES]
+        finally:
+            conn.close()
+        _app_colonnes_liste_cache = ', '.join(f'a.{c}' for c in cols)
+    return _app_colonnes_liste_cache
+
+
 # Colonnes triables pour l'inventaire appareils
 _APP_SORT_COLS = {
     'nom':      'a.nom_machine',
@@ -3455,7 +3485,7 @@ def liste_appareils():
     order_expr = _APP_SORT_COLS.get(sort_col, 'ip_sort_key(a.adresse_ip)')
     direction  = 'DESC' if sort_dir == 'desc' else 'ASC'
 
-    q = '''SELECT a.*,
+    q = f'''SELECT {_colonnes_appareils_liste()},
             (SELECT COUNT(*) FROM documents_appareils d WHERE d.appareil_id=a.id) as nb_docs,
             (SELECT COUNT(*) FROM contrats_appareils ca JOIN contrats ct ON ca.contrat_id=ct.id
              WHERE ca.appareil_id=a.id AND ct.client_id=a.client_id) as nb_contrats

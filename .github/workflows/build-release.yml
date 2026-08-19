@@ -45,6 +45,7 @@ jobs:
           python test_sync_curseur_echec.py
           python test_sync_resurrection_suppression.py
           python test_sync_turso.py
+          python test_liste_appareils_colonnes_legeres.py
           python test_securite.py
           python test_remplissage_fiche.py
           python test_historique_collectes.py
