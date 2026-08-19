@@ -255,6 +255,60 @@ verifier((dossier_ancien / 'Contents' / 'MacOS' / 'ParcInfo').read_text()
          == 'nouvelle version, plantage immediat',
          "le bundle est quand même remplacé sur disque (seule la vérification de démarrage échoue)")
 
+print("\n=== 6. Le lancement direct hérite un environnement nettoyé, pas celui de l'ancienne instance ===")
+# Signalé en usage réel juste après le correctif du bit exécutable (section 4/5
+# ci-dessus, qui a bien éliminé l'erreur de permission) : le nouveau process
+# démarrait, puis se terminait aussitôt (code 255) sans autre explication.
+# Cause : sans env= explicite, Popen() fait hériter tel quel l'environnement
+# de CETTE instance (l'ancienne, encore vivante) — _MEIPASS2 et les autres
+# repères du lanceur PyInstaller (applique_maj._VARIABLES_LANCEUR) pointent
+# alors vers l'extraction de l'ANCIENNE version, que le bootloader de la
+# nouvelle tente de réutiliser au lieu de faire sa propre extraction. Déjà
+# neutralisé côté Windows (_install_windows) via
+# applique_maj.environnement_propre() — jamais repris ici avant ce correctif.
+_ancien_meipass2 = os.environ.get('_MEIPASS2')
+os.environ['_MEIPASS2'] = '/chemin/perime/de/l/ancienne/version'
+
+appels_popen = []
+
+
+def _popen_espion(cmd, **kw):
+    # subprocess.run() construit lui-même un Popen en interne : patcher Popen
+    # globalement intercepte donc AUSSI xattr/codesign/spctl/file, pas
+    # seulement le lancement direct final. Même discrimination que
+    # _fausse_relance ci-dessus pour n'observer que ce dernier ; tout le
+    # reste doit continuer à passer par le vrai Popen, sans quoi
+    # subprocess.run() (utilisé par _fausse_commande_file) cesse de fonctionner.
+    if isinstance(cmd, list) and len(cmd) == 1 and str(cmd[0]).endswith('ParcInfo'):
+        appels_popen.append(kw)
+        return _FauxProcessusVivant()
+    return _faux_popen_original(cmd, **kw)
+
+
+dossier_nouveau_src5 = Path(tempfile.mkdtemp(prefix='majarch_nouveau5_')) / 'racine'
+zip_env = _construire_bundle_zip(dossier_nouveau_src5, 'nouvelle version, environnement propre')
+
+UC.subprocess.run = _fausse_commande_file('x86_64')
+UC.subprocess.Popen = _popen_espion
+_faux_sleep4 = UC.time.sleep
+UC.time.sleep = lambda s: None
+checker._install_macos(zip_env)
+UC.time.sleep = _faux_sleep4
+
+if _ancien_meipass2 is None:
+    os.environ.pop('_MEIPASS2', None)
+else:
+    os.environ['_MEIPASS2'] = _ancien_meipass2
+
+verifier(len(appels_popen) == 1, "le lancement direct a bien été tenté", str(len(appels_popen)))
+if appels_popen:
+    env_transmis = appels_popen[0].get('env')
+    verifier(env_transmis is not None, "un environnement explicite est transmis (pas d'héritage tacite)")
+    verifier(env_transmis is not None and '_MEIPASS2' not in env_transmis,
+             "_MEIPASS2 (repère du lanceur PyInstaller) retiré de l'environnement transmis")
+    verifier(appels_popen[0].get('cwd') is not None,
+             "un répertoire de travail explicite est transmis (pas hérité de l'ancienne instance)")
+
 UC.subprocess.run = _faux_run_original
 UC.subprocess.Popen = _faux_popen_original
 sys.frozen = _ancien_frozen

@@ -496,10 +496,24 @@ class UpdateChecker:
 
         processus = None
         try:
+            # env=environnement_propre() : sans ça, le nouveau process hérite
+            # tel quel de l'environnement de CETTE instance (l'ancienne,
+            # encore vivante) — _MEIPASS2 et les autres repères du lanceur
+            # PyInstaller (voir applique_maj._VARIABLES_LANCEUR) pointent
+            # alors vers l'extraction de l'ANCIENNE version, que le
+            # bootloader de la nouvelle tente de réutiliser au lieu de faire
+            # sa propre extraction — incohérent avec son propre contenu.
+            # Confirmé en usage réel : le process démarrait bien (plus
+            # d'erreur de permission, correctif précédent) puis se terminait
+            # aussitôt avec le code 255, sans autre explication. Ce mécanisme
+            # était déjà identifié et neutralisé côté Windows
+            # (_install_windows, quelques dizaines de lignes plus haut) —
+            # jamais repris ici lors du passage au lancement direct.
             processus = subprocess.Popen(
                 [str(executable_cible)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL, start_new_session=True)
+                stdin=subprocess.DEVNULL, start_new_session=True,
+                cwd=str(Path.home()), env=applique_maj.environnement_propre())
             logger.info("Lancement direct de %s (pid %s)", executable_cible, processus.pid)
         except Exception as e:
             logger.warning("Échec du lancement direct de %s : %s", executable_cible, e)
