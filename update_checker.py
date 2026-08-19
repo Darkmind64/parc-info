@@ -107,6 +107,35 @@ def archi_materielle_macos() -> str:
     return 'x86_64' if platform.machine() == 'x86_64' else 'arm64'
 
 
+def _restaurer_permissions_unix_zip(zf: zipfile.ZipFile, dest: str) -> None:
+    """Restaure les permissions Unix (bit exécutable compris) que
+    ZipFile.extractall() ignore silencieusement.
+
+    Le zip macOS est créé par `zip -r` (voir .github/workflows/*.yml), qui
+    embarque bien le mode Unix de chaque fichier dans ZipInfo.external_attr
+    (bits hauts, format "mode << 16") — mais extractall() ne le restaure
+    jamais à l'extraction, laissant chaque fichier avec les permissions par
+    défaut du système qui extrait. Repéré via le message d'erreur exact
+    obtenu en usage réel après le passage au lancement direct de
+    l'exécutable (2.18.10, qui a justement arrêté de masquer ce problème
+    derrière un diagnostic Gatekeeper) : [Errno 13] Permission denied sur
+    l'exécutable fraîchement remplacé, qui avait perdu son bit +x pendant
+    l'extraction. `open` (Launch Services), utilisé jusqu'à la 2.18.9,
+    tolérait apparemment cette absence — subprocess.Popen() directement sur
+    le binaire, non.
+    """
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        mode = (info.external_attr >> 16) & 0o777
+        if not mode:
+            continue  # zip sans métadonnées Unix (rare) : rien à restaurer
+        try:
+            os.chmod(os.path.join(dest, info.filename), mode)
+        except OSError as e:
+            logger.debug("chmod impossible sur %s : %s", info.filename, e)
+
+
 #: Variables posées par le lanceur de PyInstaller pour désigner le dossier
 #: temporaire où l'application a été décompressée. Un processus lancé depuis
 #: l'application packagée en hérite ; on ne les transmet pas plus loin, par
@@ -354,6 +383,7 @@ class UpdateChecker:
             try:
                 with zipfile.ZipFile(archive_path) as zf:
                     zf.extractall(tmp)
+                    _restaurer_permissions_unix_zip(zf, tmp)
             except zipfile.BadZipFile:
                 logger.error("Archive macOS illisible : %s", archive_path)
                 return False
@@ -454,6 +484,16 @@ class UpdateChecker:
         # besoin de deviner un chemin via pgrep (qui échouait justement à
         # trouver un process translocé, invisible à ce chemin précis).
         executable_cible = app_actuelle / 'Contents' / 'MacOS' / 'ParcInfo'
+        # Filet de sécurité : _restaurer_permissions_unix_zip() plus haut
+        # devrait déjà avoir donné le bit +x à ce fichier avant la copie vers
+        # app_actuelle — s'assurer que rien ne l'a perdu en route (résultat
+        # observé en usage réel avant ce correctif : [Errno 13] Permission
+        # denied juste en dessous, faute de ce bit).
+        try:
+            os.chmod(executable_cible, os.stat(executable_cible).st_mode | 0o111)
+        except OSError as e:
+            logger.warning("chmod +x impossible sur %s : %s", executable_cible, e)
+
         processus = None
         try:
             processus = subprocess.Popen(
