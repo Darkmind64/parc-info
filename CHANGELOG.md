@@ -1,5 +1,25 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.15] - 2026-08-19 ⚡
+
+### ⚡ Inventaire des appareils allégé
+
+Signalé en usage réel : l'inventaire un peu lent à s'afficher avec une
+soixantaine d'appareils. La requête faisait `SELECT a.*`, ramenant sur
+**chaque page** de la liste toutes les colonnes de la table `appareils` —
+y compris `rapport_systeme_json` et `logiciels_installes_json`, qui peuvent
+peser jusqu'à 1 Mo **chacune** une fois remplies par une vraie collecte
+(icônes d'applications, liste complète des logiciels installés...). La
+liste d'inventaire ne les affiche pourtant jamais — seule la fiche détail
+d'un appareil les utilise.
+
+La liste de colonnes de la requête est désormais construite dynamiquement
+(via `PRAGMA table_info`, mise en cache) en excluant ces deux blobs,
+plutôt qu'une énumération figée à la main qui se démoderait silencieusement
+à la prochaine colonne ajoutée à `appareils` (une table qui, comme le note
+`claude.md`, continue de grandir). La fiche détail d'un appareil continue
+de tout ramener comme avant, sans changement.
+
 ## [2.18.14] - 2026-08-19 🧹
 
 ### 🧹 Environnement nettoyé avant la relance directe (mise à jour macOS)

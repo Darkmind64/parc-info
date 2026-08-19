@@ -1,8 +1,20 @@
-PARCINFO_VERSION=2.18.14
+PARCINFO_VERSION=2.18.15
 RELEASE_DATE=2026-08-19
-BUILD_NUMBER=2026081903
+BUILD_NUMBER=2026081904
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.15 - Inventaire des appareils allégé (plus rapide avec beaucoup d'appareils)
+# Signalé en usage réel : l'inventaire un peu lent à s'afficher avec une
+# soixantaine d'appareils. La requête faisait SELECT a.*, ramenant sur
+# CHAQUE page toutes les colonnes de la table appareils — y compris
+# rapport_systeme_json et logiciels_installes_json, qui peuvent peser
+# jusqu'à 1 Mo chacune une fois remplies par une vraie collecte — alors que
+# la liste ne les affiche jamais, seule la fiche détail les utilise. Liste
+# de colonnes désormais construite dynamiquement (PRAGMA, mise en cache) en
+# excluant ces deux blobs ; la fiche détail continue de tout ramener comme
+# avant. Vérifié par un test dédié
+# Date: 19 août 2026
 
 # Version 2.18.14 - Environnement nettoyé avant la relance directe (mise à jour macOS)
 # Suite du correctif de bit exécutable (2.18.12) : le journal parcinfo.log a
