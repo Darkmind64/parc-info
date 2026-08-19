@@ -1,5 +1,37 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.14] - 2026-08-19 🧹
+
+### 🧹 Environnement nettoyé avant la relance directe (mise à jour macOS)
+
+**Suite directe du correctif de bit exécutable (2.18.12).** Le journal
+`parcinfo.log` a confirmé la disparition de l'erreur de permission — mais a
+révélé un troisième problème : le nouveau process démarrait bel et bien
+(un PID lui était attribué), puis se terminait aussitôt, code de sortie
+255, sans autre explication.
+
+**La cause, déjà connue et corrigée ailleurs dans ce même code.** Sans
+`env=` explicite, `subprocess.Popen()` fait hériter le nouveau process de
+l'environnement de **l'ancienne** instance, encore vivante à cet instant
+précis. Or `_MEIPASS2` et les autres repères du lanceur PyInstaller pointent
+alors vers l'extraction de l'ANCIENNE version — que le bootloader de la
+NOUVELLE tente de réutiliser au lieu de faire sa propre extraction,
+incohérent avec son propre contenu. Ce mécanisme était déjà identifié et
+neutralisé côté Windows (`applique_maj.environnement_propre()`, utilisé par
+`_install_windows` depuis le début) ; jamais repris lors du passage de la
+relance macOS vers un lancement direct en 2.18.10.
+
+**Le correctif** applique exactement le même traitement déjà éprouvé côté
+Windows, plus un répertoire de travail explicite (le domicile utilisateur,
+plutôt qu'hérité de l'ancienne instance). Vérifié par un test dédié qui
+piège un repère de lanceur périmé dans l'environnement et confirme qu'il
+n'atteint jamais le nouveau process.
+
+> Troisième cause distincte trouvée et corrigée sur cette seule mise à jour
+> macOS depuis que `parcinfo.log` existe (2.18.7) : translocation (2.18.10),
+> bit exécutable (2.18.12), et maintenant l'environnement hérité — chacune
+> confirmée par une preuve directe plutôt que devinée.
+
 ## [2.18.13] - 2026-08-19 🎨
 
 ### 🎨 Numéro de version et lien « à propos » sur une seule ligne

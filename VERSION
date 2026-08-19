@@ -1,8 +1,25 @@
-PARCINFO_VERSION=2.18.13
+PARCINFO_VERSION=2.18.14
 RELEASE_DATE=2026-08-19
-BUILD_NUMBER=2026081902
+BUILD_NUMBER=2026081903
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.14 - Environnement nettoyé avant la relance directe (mise à jour macOS)
+# Suite du correctif de bit exécutable (2.18.12) : le journal parcinfo.log a
+# confirmé la disparition de l'erreur de permission, mais a révélé un
+# troisième problème — le nouveau process démarrait (pid attribué) puis se
+# terminait aussitôt, code de sortie 255, sans autre explication. Cause :
+# sans env= explicite, le nouveau process hérite tel quel de l'environnement
+# de l'ancienne instance (encore vivante à ce moment précis) — _MEIPASS2 et
+# les autres repères du lanceur PyInstaller pointent alors vers l'extraction
+# de l'ANCIENNE version, que le bootloader de la nouvelle tente de réutiliser
+# au lieu de faire sa propre extraction. Ce mécanisme était déjà identifié et
+# neutralisé côté Windows (applique_maj.environnement_propre(), utilisé par
+# _install_windows) — jamais repris lors du passage de la relance macOS vers
+# un lancement direct (2.18.10). Corrigé en appliquant le même correctif,
+# plus un répertoire de travail explicite (le domicile utilisateur, pas
+# hérité de l'ancienne instance). Vérifié par un test dédié
+# Date: 19 août 2026
 
 # Version 2.18.13 - Numéro de version et lien « à propos » sur une seule ligne
 # Signalé : en navigation latérale (Réglages → thème → nav verticale), le

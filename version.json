@@ -1,20 +1,20 @@
 {
-  "version": "2.18.13",
+  "version": "2.18.14",
   "release_date": "2026-08-19T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.13/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.13/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.13/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.13",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.13/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.13/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.13/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.14/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.14/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.14/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.14",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.14/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.14/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.14/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Le numéro de version et le lien « à propos » restent sur une seule ligne en navigation verticale (thème latéral), au lieu de s'empiler l'un sous l'autre",
+    "new_features": "Le lancement direct de la mise à jour macOS reçoit désormais un environnement nettoyé plutôt que d'hériter de celui de l'ancienne instance, ce qui provoquait un plantage immédiat (code 255) après le correctif de permission de la 2.18.12",
     "improvements": [
-      "CORRIGÉ: en navigation verticale (Réglages → thème), chaque enfant direct de la barre de navigation prenait toute sa largeur, empilant le numéro de version et le lien ⓘ « à propos » l'un sous l'autre. Regroupés dans un même bloc — numéro à gauche, ⓘ à droite — aligné sur une seule ligne dans les deux modes de navigation."
+      "CORRIGÉ: sans env= explicite, le nouveau process héritait de l'environnement de l'ancienne instance — _MEIPASS2 et les autres repères du lanceur PyInstaller pointaient vers l'extraction de l'ANCIENNE version, que le bootloader de la nouvelle tentait de réutiliser au lieu de faire sa propre extraction, provoquant un plantage immédiat. Déjà neutralisé côté Windows (applique_maj.environnement_propre()), jamais repris lors du passage au lancement direct macOS (2.18.10) — corrigé, avec un répertoire de travail explicite en plus."
     ]
   },
   "checksums": {
@@ -25,5 +25,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.13"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.14"
 }
