@@ -435,76 +435,76 @@ class UpdateChecker:
         # de vérifier que la nouvelle version démarre bien avant de laisser
         # l'appelant arrêter l'ancienne — la nouvelle prend simplement un autre
         # port libre le temps du recouvrement (voir launcher.py).
+        #
+        # Lancement DIRECT de l'exécutable — jamais via `open` (Launch
+        # Services). Diagnostic confirmé sur plusieurs cycles de mise à jour
+        # réels (2.18.6 à 2.18.9, journal parcinfo.log à l'appui) : la
+        # vérification échouait alors même qu'AUCUN avertissement Gatekeeper
+        # n'était journalisé — signe que le bundle était accepté, mais que le
+        # process ne démarrait quand même pas au chemin attendu. Cause
+        # documentée : la « translocation » macOS (Gatekeeper Path
+        # Randomization) copie un bundle non notarié vers un chemin aléatoire
+        # en lecture seule dès qu'il est ouvert via Launch Services (Finder ou
+        # `open`) ET porte encore une trace de quarantaine — deux des trois
+        # conditions que `open` réunissait justement ici. Lancer l'exécutable
+        # directement (comme depuis un terminal) élimine cette condition
+        # d'office, quel que soit l'état de la quarantaine — confirmé par
+        # plusieurs sources indépendantes (voir CHANGELOG). Bénéfice
+        # secondaire : le PID est connu directement, la vérification n'a plus
+        # besoin de deviner un chemin via pgrep (qui échouait justement à
+        # trouver un process translocé, invisible à ce chemin précis).
         executable_cible = app_actuelle / 'Contents' / 'MacOS' / 'ParcInfo'
+        processus = None
         try:
-            r = subprocess.run(['open', str(app_actuelle)], capture_output=True,
-                               text=True, timeout=15)
-            logger.info("« open » %s pour %s%s", app_actuelle,
-                        'accepté' if r.returncode == 0 else 'a échoué (code %s)' % r.returncode,
-                        (' : ' + (r.stderr or '').strip()[:300]) if r.returncode != 0 else '')
+            processus = subprocess.Popen(
+                [str(executable_cible)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL, start_new_session=True)
+            logger.info("Lancement direct de %s (pid %s)", executable_cible, processus.pid)
         except Exception as e:
-            logger.warning("Échec du lancement de %s : %s", app_actuelle, e)
+            logger.warning("Échec du lancement direct de %s : %s", executable_cible, e)
 
-        # `open` rend la main dès que macOS a accepté la demande, pas quand
-        # l'app tourne réellement — un blocage Gatekeeper survient après. Seule
-        # l'apparition du processus prouve un démarrage effectif.
+        # Un Popen encore vivant après quelques secondes est un signal bien
+        # plus fiable qu'une recherche par chemin (pgrep) : il vient
+        # directement du fork/exec, indépendant de la façon dont macOS a pu
+        # déplacer le bundle. Fenêtre inchangée (~10 s, le temps normal d'un
+        # démarrage Flask) ; `for…else` : le `else` ne s'exécute que si la
+        # boucle est allée à son terme SANS `break`, donc si le process n'est
+        # jamais sorti pendant toute la fenêtre d'attente.
         lancee = False
-        for _ in range(20):  # jusqu'à 10 s : le temps normal d'un démarrage Flask
-            try:
-                if subprocess.run(['pgrep', '-f', str(executable_cible)],
-                                  capture_output=True, timeout=5).returncode == 0:
-                    lancee = True
+        code_sortie_immediat = None
+        if processus is not None:
+            for _ in range(20):
+                code_sortie_immediat = processus.poll()
+                if code_sortie_immediat is not None:
                     break
-            except Exception:
-                pass
-            time.sleep(0.5)
+                time.sleep(0.5)
+            else:
+                lancee = True
 
         if not lancee:
-            # Diagnostic supplémentaire, signalé en usage réel : un cycle où
-            # aucun avertissement xattr/codesign/spctl --add n'est remonté
-            # (Gatekeeper semble avoir accepté le bundle cette fois), et
-            # pourtant ce test échoue quand même — la piste alors la plus
-            # probable est la « translocation » macOS : un bundle non
-            # notarié, lancé sans avoir été déplacé « proprement » (Finder,
-            # premier lancement approuvé), peut tourner depuis une copie en
-            # lecture seule à un chemin aléatoire (AppTranslocation) plutôt
-            # que /Applications/ParcInfo.app — le process existe bien, mais
-            # jamais à CE chemin précis, donc invisible à la recherche
-            # ci-dessus. Une recherche plus large sur le seul nom de
-            # l'exécutable permet de distinguer les deux cas plutôt que de
-            # deviner encore une fois.
-            try:
-                r_large = subprocess.run(['pgrep', '-f', 'ParcInfo'],
-                                         capture_output=True, text=True, timeout=5)
-                if r_large.returncode == 0:
-                    logger.warning(
-                        "Aucun processus au chemin attendu (%s), mais au moins un "
-                        "processus « ParcInfo » tourne ailleurs (pids : %s) — "
-                        "possible translocation macOS plutôt qu'un blocage "
-                        "Gatekeeper classique.",
-                        executable_cible, r_large.stdout.strip().replace('\n', ', '))
-                else:
-                    logger.warning(
-                        "Aucun processus « ParcInfo » trouvé nulle part (recherche "
-                        "large aussi négative) — l'application ne semble pas avoir "
-                        "démarré du tout, pas juste à un autre chemin.")
-            except Exception as e:
-                logger.debug("Recherche large de processus impossible : %s", e)
+            if processus is None:
+                logger.error("Le lancement direct n'a jamais pu démarrer (voir l'avertissement ci-dessus).")
+            else:
+                logger.error(
+                    "Le process relancé directement s'est arrêté tout seul (code de "
+                    "sortie %s) au lieu de continuer à tourner — pas un blocage "
+                    "Gatekeeper/translocation (le lancement direct l'élimine), plutôt "
+                    "un plantage immédiat de la nouvelle version elle-même.",
+                    code_sortie_immediat)
 
             logger.error(
-                "La nouvelle version ne démarre pas après remplacement — probablement "
-                "bloquée par Gatekeeper malgré xattr -cr et la signature ad hoc "
-                "(voir les avertissements ci-dessus). L'instance actuelle n'est PAS "
-                "arrêtée : mieux vaut rester sur l'ancienne version que de ne laisser "
-                "tourner ni l'une ni l'autre.")
+                "La nouvelle version ne démarre pas après remplacement. L'instance "
+                "actuelle n'est PAS arrêtée : mieux vaut rester sur l'ancienne version "
+                "que de ne laisser tourner ni l'une ni l'autre.")
             self.last_install_error = (
-                "L'application a été remplacée mais ne démarre pas — probablement "
-                "bloquée par macOS (Gatekeeper). L'ancienne version continue de "
-                "tourner, rien n'a été perdu. Essayez de l'ouvrir manuellement pour "
-                "voir le message exact, ou consultez le journal de l'application.")
+                "L'application a été remplacée mais ne démarre pas. L'ancienne "
+                "version continue de tourner, rien n'a été perdu. Essayez de "
+                "l'ouvrir manuellement pour voir le message exact, ou consultez "
+                "le journal de l'application (parcinfo.log).")
             return False
 
-        logger.info("Application macOS remplacée et relancée avec succès")
+        logger.info("Application macOS remplacée et relancée avec succès (pid %s)", processus.pid)
         return True
 
     @staticmethod

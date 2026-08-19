@@ -139,34 +139,45 @@ def _fausse_commande_file(arch_annoncee):
                 stderr = ''
                 returncode = 0
             return _R()
-        if cmd and cmd[0] in ('open', 'pgrep'):
-            # Simule une relance réussie : la vérification de démarrage
-            # ajoutée à _install_macos() ne doit pas dépendre d'un vrai
-            # macOS ici — sans ce faux succès immédiat, `pgrep` échouerait
-            # (absent sur cette machine) à chaque tentative de la boucle de
-            # vérification, jusqu'à épuiser ses ~10 s et faire échouer à tort
-            # le test 3 (résultat False au lieu de True).
-            class _R:
-                stdout = ''
-                stderr = ''
-                returncode = 0
-            return _R()
-        # xattr / codesign : laisser échouer naturellement (FileNotFoundError
-        # sur cette machine) — déjà couvert par test_migration_donnees_macos.py.
+        # xattr / codesign / spctl : laisser échouer naturellement
+        # (FileNotFoundError sur cette machine) — déjà couvert par
+        # test_migration_donnees_macos.py.
         return _faux_run_original(cmd, **kw)
     return _run
 
 
-def _fausse_relance(cmd, **kw):
-    # Ne pas vraiment relancer/ouvrir quoi que ce soit — mais laisser
-    # subprocess.run() (utilisé par _debloquer_gatekeeper_macos) tranquille :
-    # il se sert de Popen en interne, un remplacement global le casserait.
-    if cmd and cmd[0] == '/bin/sh':
+class _FauxProcessusVivant:
+    """Simule un Popen dont le process reste vivant pendant toute la fenêtre
+    de vérification (poll() renvoie toujours None — jamais sorti)."""
+    pid = 99999
+
+    def poll(self):
         return None
-    return _faux_popen_original(cmd, **kw)
 
 
-UC.subprocess.Popen = _fausse_relance
+class _FauxProcessusMort:
+    """Simule un Popen dont le process s'arrête tout de suite (plantage
+    immédiat de la nouvelle version elle-même)."""
+    pid = 99998
+    returncode = 137
+
+    def poll(self):
+        return self.returncode
+
+
+def _fausse_relance(processus_simule):
+    def _popen(cmd, **kw):
+        # Lancement direct de l'exécutable ParcInfo (voir _install_macos) :
+        # premier argument = liste à un seul élément, le chemin de l'exe.
+        if isinstance(cmd, list) and len(cmd) == 1 and str(cmd[0]).endswith('ParcInfo'):
+            return processus_simule
+        if cmd and cmd[0] == '/bin/sh':
+            return None
+        return _faux_popen_original(cmd, **kw)
+    return _popen
+
+
+UC.subprocess.Popen = _fausse_relance(_FauxProcessusVivant())
 
 # Ancien bundle « en place », qui fonctionne — ne doit pas être touché si le
 # nouveau a la mauvaise architecture.
@@ -205,43 +216,43 @@ verifier((dossier_ancien / 'Contents' / 'MacOS' / 'ParcInfo').read_text()
          == 'nouvelle version, bonne architecture',
          "le bundle est bien remplacé dans ce cas")
 
-print("\n=== 4. Diagnostic de translocation : pgrep strict échoue, pgrep large trouve un process ===")
-# Signalé en usage réel : un cycle sans le moindre avertissement Gatekeeper
-# (xattr/codesign/spctl --add tous silencieux, donc probablement acceptés),
-# et pourtant la vérification de démarrage échouait quand même — piste la
-# plus probable : l'app tourne réellement, mais depuis un chemin translocé
-# par macOS, invisible à la recherche pgrep sur le chemin exact attendu.
-
-
-def _fausse_commande_translocation(cmd, **kw):
-    class _R:
-        stdout = ''
-        stderr = ''
-        returncode = 0
-    if cmd and cmd[0] == 'file':
-        r = _R(); r.stdout = 'Mach-O 64-bit executable x86_64\n'
-        return r
-    if cmd and cmd[0] == 'open':
-        return _R()
-    if cmd and cmd[0] == 'pgrep':
-        motif = cmd[2] if len(cmd) > 2 else ''
-        r = _R(); r.returncode = 0 if motif == 'ParcInfo' else 1  # large trouve, strict échoue
-        return r
-    return _faux_run_original(cmd, **kw)
-
+print("\n=== 4. Lancement direct de l'exécutable : plus jamais via `open` ===")
+# Signalé en usage réel sur plusieurs cycles (2.18.6 à 2.18.9, journal
+# parcinfo.log à l'appui) : la vérification de démarrage échouait sans le
+# moindre avertissement Gatekeeper — signe que le bundle était accepté, mais
+# invisible à la recherche par chemin exact (pgrep) après translocation
+# macOS. Cause documentée : `open` (Launch Services) est justement l'une des
+# conditions nécessaires à la translocation. Lancer l'exécutable directement
+# (subprocess.Popen sur le chemin de l'exe, jamais `open`) l'élimine d'office
+# — et donne un signal de vie fiable (Popen.poll()) qui ne dépend plus du
+# chemin réel depuis lequel macOS a pu faire tourner le process.
 
 dossier_nouveau_src3 = Path(tempfile.mkdtemp(prefix='majarch_nouveau3_')) / 'racine'
-zip_translocation = _construire_bundle_zip(dossier_nouveau_src3, 'nouvelle version, translocation suspectee')
+zip_vivant = _construire_bundle_zip(dossier_nouveau_src3, 'nouvelle version, lancement direct')
 
-UC.subprocess.run = _fausse_commande_translocation
+UC.subprocess.run = _fausse_commande_file('x86_64')
+UC.subprocess.Popen = _fausse_relance(_FauxProcessusVivant())
 _faux_sleep2 = UC.time.sleep
 UC.time.sleep = lambda s: None
-resultat = checker._install_macos(zip_translocation)
+resultat = checker._install_macos(zip_vivant)
 UC.time.sleep = _faux_sleep2
+verifier(resultat is True,
+         "lancement direct vérifié vivant (Popen.poll() reste None) -> succès, aucun `open` impliqué")
+
+print("\n=== 5. Le process relancé plante tout de suite : échec correctement détecté ===")
+dossier_nouveau_src4 = Path(tempfile.mkdtemp(prefix='majarch_nouveau4_')) / 'racine'
+zip_plantage = _construire_bundle_zip(dossier_nouveau_src4, 'nouvelle version, plantage immediat')
+
+UC.subprocess.run = _fausse_commande_file('x86_64')
+UC.subprocess.Popen = _fausse_relance(_FauxProcessusMort())
+_faux_sleep3 = UC.time.sleep
+UC.time.sleep = lambda s: None
+resultat = checker._install_macos(zip_plantage)
+UC.time.sleep = _faux_sleep3
 verifier(resultat is False,
-         "translocation suspectée -> reste un échec, pas de faux positif silencieux")
+         "le process relancé s'arrête tout seul (poll() renvoie un code) -> détecté comme un échec")
 verifier((dossier_ancien / 'Contents' / 'MacOS' / 'ParcInfo').read_text()
-         == 'nouvelle version, translocation suspectee',
+         == 'nouvelle version, plantage immediat',
          "le bundle est quand même remplacé sur disque (seule la vérification de démarrage échoue)")
 
 UC.subprocess.run = _faux_run_original

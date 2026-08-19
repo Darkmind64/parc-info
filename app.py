@@ -65,6 +65,24 @@ if getattr(_sys, 'frozen', False):
     except Exception:
         logger.exception("Impossible de créer parcinfo.log (non bloquant)")
 
+# Diagnostic permanent : sur macOS, un bundle non notarié ouvert via Launch
+# Services (Finder, `open`) alors qu'il porte encore une trace de quarantaine
+# peut être « transloqué » — exécuté depuis une copie en lecture seule à un
+# chemin aléatoire plutôt que /Applications/ParcInfo.app. Signalé en usage
+# réel : plusieurs cycles de mise à jour macOS échouaient sans le moindre
+# avertissement Gatekeeper, signe probable d'une translocation plutôt que
+# d'un vrai blocage. sys.executable révèle directement le chemin RÉEL depuis
+# lequel ce process tourne — si « AppTranslocation » y figure, le doute est
+# levé pour de bon, sans avoir à deviner depuis un journal après coup.
+if getattr(_sys, 'frozen', False) and _sys.platform == 'darwin' \
+        and 'AppTranslocation' in _sys.executable:
+    logger.warning(
+        "⚠️ Cette instance tourne depuis un chemin transloqué par macOS (%s), "
+        "pas depuis son emplacement réel — signe que le bundle a été ouvert "
+        "via Launch Services alors qu'il portait encore une trace de "
+        "quarantaine. Une mise à jour lancée depuis cet état a de bonnes "
+        "chances d'échouer.", _sys.executable)
+
 app = Flask(
     __name__,
     template_folder=os.path.join(_resource_base, 'templates'),
