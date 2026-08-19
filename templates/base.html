@@ -348,13 +348,21 @@
            à l'intérieur (justify-content: space-between), au lieu de forcer
            chaque enfant de <nav> à sa propre ligne comme avant ce correctif. */
         body.nav-left .nav-version-group {
-            margin: 0 0 .3rem; padding: .15rem 1.15rem .55rem;
+            margin: 0 0 .3rem; padding: .35rem 1.15rem;
             width: 100%; box-sizing: border-box; justify-content: space-between;
             border-bottom: 1px solid var(--border); border-radius: 0;
             flex-shrink: 0;
         }
         body.nav-left .nav-version-group .nav-version {
             width: auto; padding: 0; margin: 0; border-bottom: none;
+        }
+        /* .nav-version-info est un <a>, donc visé par la règle générale
+           "nav a { height: 50px }" pensée pour la barre horizontale — dans
+           la colonne étroite, ça forçait toute la ligne à 50px de haut
+           (bien plus que le texte qu'elle contient) et rejetait le ⓘ vers
+           le haut de cette zone démesurée. Hauteur naturelle à la place. */
+        body.nav-left .nav-version-group .nav-version-info {
+            height: auto;
         }
         /* Liens simples */
         body.nav-left nav > a:not(.nav-brand) {
