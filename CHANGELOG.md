@@ -1,5 +1,46 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.17] - 2026-08-19 🎨
+
+### 🎨 Curseur de luminosité, ligne version corrigée, fiche appareil réparée
+
+**Ajouté**
+- Curseur de luminosité des textes secondaires/atténués (Paramètres →
+  Apparence & Couleurs → Luminosité des textes secondaires) : éclaircit ces
+  textes en mode sombre, les fonce en mode clair — dans les deux cas pour
+  augmenter le contraste avec le fond plutôt que le réduire. Complète le
+  niveau de contraste existant (3 paliers fixes) par un réglage continu ;
+  recalculé à partir de la même base (mode + niveau de contraste) à chaque
+  changement, donc jamais cumulatif.
+- Bouton d'annulation (↩) sur chaque entrée « Modification » de
+  l'historique inline de la fiche appareil, identique à celui du journal
+  global (`/historique`).
+
+**Corrigé**
+- En navigation latérale (Réglages → Menu de navigation → Vertical), la
+  ligne « v2.18.16 ⓘ » faisait 50px de haut au lieu d'environ 33px : le
+  lien ⓘ « à propos » est un `<a>`, visé par la règle générale
+  `nav a { height: 50px }` pensée pour la barre horizontale (où 50px = la
+  hauteur pleine de la barre). Dans la colonne étroite, cette hauteur
+  imposée gonflait toute la ligne bien au-delà de son texte. Neutralisé en
+  navigation latérale uniquement ; barre horizontale inchangée.
+- Fiche appareil : l'historique des modifications restait bloqué sur
+  « Chargement… ». Cause réelle : le script qui devait le charger était
+  collé juste après `{% block title %}` sans balise `<script>` et sans
+  fermer ce bloc — son corps finissait littéralement dans le texte du
+  `<title>`, jamais exécuté comme JavaScript, et de toute façon jamais
+  appelé. Déplacé au bon endroit (`{% block extra_scripts %}`), appel
+  ajouté.
+- Fiche appareil : la liste texte brut éditable des « ports ouverts
+  détectés » (ex. `22,80,443`) faisait doublon avec les badges juste
+  au-dessus, sans jamais avoir été destinée à l'édition manuelle (résultat
+  d'un scan réseau) — passée en champ caché, la valeur continue de voyager
+  avec le formulaire sans plus s'afficher deux fois.
+- Fiche appareil : les badges de ports étaient tous gris uniformes.
+  Reprennent maintenant les couleurs par type de service (SSH, HTTP,
+  RDP...) déjà utilisées dans la liste des appareils, pilotables depuis
+  Réglages → Noms des services.
+
 ## [2.18.16] - 2026-08-19 🧹
 
 ### 🧹 Audit complet du projet : code mort retiré, documentation corrigée

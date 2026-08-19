@@ -1,8 +1,35 @@
-PARCINFO_VERSION=2.18.16
+PARCINFO_VERSION=2.18.17
 RELEASE_DATE=2026-08-19
-BUILD_NUMBER=2026081905
+BUILD_NUMBER=2026081906
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.17 - Curseur de luminosité, ligne version corrigée, fiche appareil réparée
+# Trois demandes distinctes sur l'interface :
+# 1) Curseur de réglage (Paramètres → Apparence & Couleurs → Luminosité des
+#    textes secondaires) pour éclaircir (mode sombre) ou foncer (mode clair)
+#    les libellés, dates et textes atténués les moins lisibles, dans toutes
+#    les rubriques — vient compléter le niveau de contraste existant (3
+#    paliers fixes) par un réglage continu, recalculé à partir de la même
+#    base pour ne jamais se cumuler.
+# 2) En navigation latérale, la ligne « v2.18.16 ⓘ » faisait 50px de haut au
+#    lieu de ~33px : le lien ⓘ, un <a>, était visé par la règle générale
+#    "nav a { height: 50px }" pensée pour la barre horizontale, ce qui
+#    gonflait toute la ligne bien au-delà de son texte et rejetait le
+#    contenu vers le haut de cette zone démesurée. Neutralisé en nav
+#    latérale, barre horizontale inchangée.
+# 3) Fiche appareil : l'historique des modifications restait bloqué sur
+#    « Chargement… » — bug de code, pas de données : le script qui devait le
+#    charger était mal placé dans le template (dans la balise <title> au
+#    lieu d'un <script>), jamais exécuté, et de toute façon jamais appelé.
+#    Déplacé au bon endroit, appel ajouté, plus un bouton d'annulation par
+#    modification (même mécanisme que le journal global). Ports ouverts
+#    détectés : la liste texte brut éditable faisait doublon avec les
+#    badges juste au-dessus sans jamais être destinée à l'édition manuelle
+#    (résultat de scan) — passée en champ caché ; les badges reprennent les
+#    couleurs par type de service (SSH, HTTP, RDP...) déjà utilisées dans
+#    la liste des appareils, au lieu d'un badge gris unique.
+# Date: 19 août 2026
 
 # Version 2.18.16 - Audit complet : code mort retiré, documentation corrigée
 # Demandé explicitement : vérifier le projet entier pour du code mort et des
