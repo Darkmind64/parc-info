@@ -1747,6 +1747,65 @@ const THEMES = {
     'light-purple':{ mode:'light', accent:'#7c3aed', green:'#16a34a', red:'#dc2626', orange:'#ea580c', label:'☀ Clair — Violet' },
 };
 
+// Couleurs de base des textes secondaire/atténué, par mode et niveau de contraste
+// (miroir des valeurs définies dans le <style> ci-dessus — sert de point de départ
+// au curseur de luminosité, qui les éclaircit/assombrit ensuite).
+const TEXT_BASE = {
+    dark:  { normal: { secondary:'#6a8aaa', muted:'#3a5570' },
+             high:   { secondary:'#7a9bc5', muted:'#3a5570' },
+             max:    { secondary:'#9ad0ff', muted:'#7aa0c0' } },
+    light: { normal: { secondary:'#334155', muted:'#64748b' },
+             high:   { secondary:'#2d5a8a', muted:'#4a6fa8' },
+             max:    { secondary:'#1a4d80', muted:'#3a6b9f' } },
+};
+
+function hexToHsl(hex) {
+    const r = parseInt(hex.slice(1,3),16)/255, g = parseInt(hex.slice(3,5),16)/255, b = parseInt(hex.slice(5,7),16)/255;
+    const max = Math.max(r,g,b), min = Math.min(r,g,b);
+    let h=0, s=0; const l = (max+min)/2;
+    const d = max-min;
+    if (d !== 0) {
+        s = l > 0.5 ? d/(2-max-min) : d/(max+min);
+        switch(max) {
+            case r: h = (g-b)/d + (g<b?6:0); break;
+            case g: h = (b-r)/d + 2; break;
+            case b: h = (r-g)/d + 4; break;
+        }
+        h /= 6;
+    }
+    return [h*360, s*100, l*100];
+}
+
+function hslToHex(h, s, l) {
+    h/=360; s/=100; l/=100;
+    let r, g, b;
+    if (s === 0) { r = g = b = l; }
+    else {
+        const hue2rgb = (p,q,t) => {
+            if (t<0) t+=1; if (t>1) t-=1;
+            if (t<1/6) return p+(q-p)*6*t;
+            if (t<1/2) return q;
+            if (t<2/3) return p+(q-p)*(2/3-t)*6;
+            return p;
+        };
+        const q = l < 0.5 ? l*(1+s) : l+s-l*s;
+        const p = 2*l-q;
+        r = hue2rgb(p,q,h+1/3); g = hue2rgb(p,q,h); b = hue2rgb(p,q,h-1/3);
+    }
+    const toHex = v => Math.round(Math.max(0,Math.min(1,v))*255).toString(16).padStart(2,'0');
+    return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// Éclaircit (mode sombre) ou assombrit (mode clair) les textes secondaire/atténué
+// pour toujours augmenter le contraste avec le fond, quel que soit le thème.
+function ajusterLuminositeTexte(hex, deltaPct, mode) {
+    if (!deltaPct) return hex;
+    const [h,s,l] = hexToHsl(hex);
+    const direction = mode === 'light' ? -1 : 1;
+    const newL = Math.max(0, Math.min(100, l + direction*deltaPct));
+    return hslToHex(h, s, newL);
+}
+
 function appliquerMode(mode) {
     cfgData.mode = mode; // persist in memory so sauvegarderConfig picks it up
     const body = document.body;
@@ -1787,6 +1846,9 @@ function appliquerContraste(level) {
         if (btn.textContent.trim() === 'Élevé' && level === 'high') btn.classList.add('active');
         if (btn.textContent.trim() === 'Maximum' && level === 'max') btn.classList.add('active');
     });
+    // Le curseur de luminosité des textes part d'une base qui dépend du niveau
+    // de contraste : la recalculer pour que la prévisualisation reste juste.
+    if (typeof appliquerVariables === 'function' && Object.keys(cfgData).length) appliquerVariables(cfgData);
 }
 
 function initNavVertical() {
@@ -2684,8 +2746,21 @@ function appliquerVariables(patch) {
     });
     const typeRules = Object.entries(typeMap).map(([k,col])=>`.type-${k}{color:${col};background:${col}15;border-color:${col}55}`).join('');
 
+    // Luminosité des textes secondaire/atténué : recalculée à partir des bases
+    // (mode + niveau de contraste courants), donc ne se cumule jamais tout seul.
+    const brightness = parseInt(g('text_brightness','0'), 10) || 0;
+    let textBrightnessRule = '';
+    if (brightness > 0) {
+        const mode = c.mode === 'light' ? 'light' : 'dark';
+        const level = (c.contrast_level === 'high' || c.contrast_level === 'max') ? c.contrast_level : 'normal';
+        const base = TEXT_BASE[mode][level];
+        const secondary = ajusterLuminositeTexte(base.secondary, brightness, mode);
+        const muted = ajusterLuminositeTexte(base.muted, brightness, mode);
+        textBrightnessRule = `body{--text-secondary:${secondary} !important;--text-muted:${muted} !important}`;
+    }
+
     const style = document.getElementById('cfg-vars');
-    if (style) style.textContent = `:root{--accent:${accent};--accent-green:${green};--accent-red:${red};--accent-orange:${orange}}${portRules}${periphRules}${typeRules}`;
+    if (style) style.textContent = `:root{--accent:${accent};--accent-green:${green};--accent-red:${red};--accent-orange:${orange}}${portRules}${periphRules}${typeRules}${textBrightnessRule}`;
 }
 
 function appliquerTheme(themeKey) {
@@ -2931,6 +3006,22 @@ function rendreConfig() {
             <button onclick="appliquerContraste('max');document.querySelector('[data-cfg=contrast_level]').value='max';"
                 class="cfg-contrast-btn ${(g('contrast_level')||'normal')==='max'?'active':''}">Maximum</button>
             <input type="hidden" data-cfg="contrast_level" value="${g('contrast_level')||'normal'}">
+        </div>
+    </div>
+
+    <!-- Luminosité des textes secondaires/atténués -->
+    <div class="cfg-row">
+        <label class="cfg-label">Luminosité des textes secondaires</label>
+        <div style="display:flex;align-items:center;gap:.6rem;flex:1;min-width:180px;">
+            <input type="range" data-cfg="text_brightness" min="0" max="40" step="5"
+                value="${g('text_brightness')||'0'}" class="cfg-range" style="flex:1;"
+                oninput="document.getElementById('text-brightness-val').textContent=this.value+'%';appliquerVariables({text_brightness:this.value});sauvegarderConfigAuto();">
+            <span id="text-brightness-val" style="font-family:'Share Tech Mono',monospace;font-size:.75rem;color:var(--text-muted);min-width:2.6em;text-align:right;">${g('text_brightness')||'0'}%</span>
+        </div>
+    </div>
+    <div class="cfg-row" style="margin-top:-.5rem;">
+        <div style="font-size:.72rem;color:var(--text-muted);">
+            💡 Éclaircit (mode sombre) ou fonce (mode clair) les libellés, dates et textes secondaires les moins lisibles, dans toutes les rubriques.
         </div>
     </div>
 
@@ -3630,6 +3721,7 @@ body.theme-light .cfg-color-hint { color: #64748b; }
 .cfg-color { width: 36px; height: 28px; border: 1px solid rgba(255,255,255,.15); border-radius: 3px; padding: 1px; background: none; cursor: pointer; flex-shrink: 0; }
 .cfg-color-hint { font-size: .72rem; color: var(--text-muted); }
 .cfg-check { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.cfg-range { accent-color: var(--accent); cursor: pointer; height: 4px; }
 
 /* ── MODE BUTTONS (clair/sombre) ── */
 .cfg-mode-btn {

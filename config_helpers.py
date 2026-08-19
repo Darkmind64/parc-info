@@ -21,6 +21,7 @@ PERSONAL_CONFIG_KEYS = {
     'date_format',       # Format de date
     'nav_mode',          # Menu horizontal/vertical
     'contrast_level',    # Niveau de contraste (normal/high/max)
+    'text_brightness',   # Luminosité des textes secondaires/atténués (0-40)
     'dashboard_widgets_enabled',   # Widgets activés sur le dashboard
     'dashboard_widgets_order',     # Ordre des widgets sur le dashboard
     'dashboard_widgets_size',      # Tailles des widgets (JSON: {"widget-id": "size-class"})
@@ -148,6 +149,7 @@ CFG_DEFAULTS = {
     'accent_green': '#00ff88',
     'accent_red': '#ff3355',
     'accent_orange': '#ff8c00',
+    'text_brightness': '0',
     'ping_interval': '60',
     'ping_workers': '30',
     'ping_timeout': '1.0',
