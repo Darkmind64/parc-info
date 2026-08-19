@@ -1,36 +1,44 @@
 # 🐳 Guide de Déploiement ParcInfo sur Synology DS1522+
 
-**Version**: 2.6.1+
-**Dernière mise à jour**: 2026-06-12
+**Version** : 2.18.15
+**Dernière mise à jour** : 2026-08-19
 
 ## 📋 Table des matières
 
-1. [Problèmes résolus](#problèmes-résolus)
+1. [Historique : Werkzeug, pas Gunicorn](#historique--werkzeug-pas-gunicorn)
 2. [Architecture](#architecture)
-3. [Installation](#installation)
-4. [Configuration](#configuration)
-5. [Troubleshooting](#troubleshooting)
+3. [Accès](#accès)
 
 ---
 
-## 🔧 Problèmes Résolus
+## 🔧 Historique : Werkzeug, pas Gunicorn
 
-### Version 2.6.1+
+**Corrigé ici : ce document affirmait l'inverse de ce que fait le code
+actuel.** Un passage à Gunicorn avait bien été tenté (v2.6.1), mais annulé
+quasi aussitôt (v2.6.6) — le code Docker utilise **Werkzeug directement**
+depuis, avec le commentaire explicite `# En Docker, utiliser Werkzeug
+directement (plus stable que Gunicorn)` dans `app.py`.
 
-**Problème** : Hyper Backup, Centre de paquets, Compte Synology ne se connectent plus après déploiement ParcInfo
+**Ce qui s'est réellement passé, dans l'ordre :**
 
-**Causes identifiées** :
-- ❌ Serveur Werkzeug (développement) utilisé en production
-- ❌ Écoute sur `0.0.0.0` sans thread-safety
-- ❌ Pas de gestion concurrente des connexions
-- ❌ Interferait avec la couche réseau Synology
+1. **v2.6.1** : Hyper Backup / Centre de paquets / Compte Synology
+   cessaient de répondre après déploiement. Gunicorn est introduit comme
+   correctif supposé.
+2. **v2.6.2** : les workers Gunicorn plantent avec le code 255 (exception
+   non gérée dans son initialisation), même après être passé de la classe
+   `sync` à `gthread`.
+3. **v2.6.6** : retour à Werkzeug **directement**, correctement configuré
+   (`threaded=True`, `use_reloader=False`, `host='0.0.0.0'`) — plus simple,
+   et stable depuis sans régression rapportée sur Hyper Backup / Centre de
+   paquets / Compte Synology.
 
-**Solutions implémentées** :
-- ✅ Gunicorn comme serveur WSGI production
-- ✅ Workers et threads configurés pour concurrence
-- ✅ Entrypoint optimisé pour Synology
-- ✅ Health checks robustes
-- ✅ Logging amélioré
+Ce n'était donc pas le choix du serveur WSGI en lui-même qui posait
+problème à l'origine, mais probablement l'absence de `use_reloader=False`
+(le rechargeur de Werkzeug duplique le processus, ce qui peut perturber la
+gestion réseau/processus d'un NAS) — Gunicorn, lui, s'est révélé une cause
+de panne distincte et plus grave. `docker-entrypoint.sh` installe encore
+`gunicorn` par précaution mais ne l'invoque jamais (`exec python app.py`
+uniquement) ; ce n'est plus qu'un vestige, sans conséquence.
 
 ---
 
@@ -38,62 +46,19 @@
 
 ```
 Synology DS1522+ avec Container Docker
-  → Gunicorn (Production WSGI)
-    - 2 workers
-    - 2 threads par worker
+  → Werkzeug (threaded=True, use_reloader=False)
     - Écoute 0.0.0.0:3456
   → Flask Application
     - Multi-tenant
     - ACL granulaire
-  → SQLite Database
+  → SQLite Database (+ synchronisation Turso optionnelle)
     - /data/parc_info.db
     - /data/uploads/
 
-Services Synology (NON affectés) :
+Services Synology (non affectés depuis v2.6.6) :
   - Hyper Backup ✅
   - Centre de paquets ✅
   - Compte Synology ✅
-```
-
----
-
-## 📦 Installation
-
-### Configuration Gunicorn Recommandée
-
-Pour DS1522+ (4 cores, 8GB RAM) :
-
-```
-workers: 2
-threads: 2 par worker
-total connexions: 4 concurrentes
-```
-
-Pour matériel plus faible (2 cores, 4GB RAM) :
-```
-workers: 1
-threads: 2
-```
-
-Pour matériel plus puissant (8+ cores, 16GB RAM) :
-```
-workers: 4
-threads: 4
-```
-
----
-
-## 🐛 Problèmes Résolvus
-
-### Hyper Backup, Centre de paquets, Compte Synology ne répondent plus
-
-**Cause** : Ancien serveur Werkzeug interferait avec le réseau
-
-**Solution** : Mettre à jour vers 2.6.1+ qui utilise Gunicorn
-
-```bash
-# Vérifier que Gunicorn est actif
-docker logs parcinfo | grep Gunicorn
 ```
 
 ---
@@ -106,4 +71,5 @@ URL : http://<ip-synology>:3456
 
 ---
 
-**Compatible avec** : DSM 7.0+, DS1522+, DS1821+, DS923+
+**Compatible avec** : DSM 7.0+, DS1522+, DS1821+, DS923+ (et tout NAS
+Synology capable de faire tourner Docker/Container Manager)

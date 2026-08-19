@@ -116,7 +116,7 @@ docker pull darkmind64/parcinfo:v2.9.7
    ↓
 4. Suites de tests (échec → rien n'est publié)
    ↓
-5. Build des binaires (Windows ParcInfo/collecteurs, macOS ARM)
+5. Build des binaires (Windows ParcInfo/collecteurs, macOS ARM et Intel — ce dernier croisé sous Rosetta, job séparé `build-macos-intel`)
    ↓
 6. Build & push de l'image Docker, tags :
    - darkmind64/parcinfo:latest
@@ -158,5 +158,5 @@ docker pull darkmind64/parcinfo:v2.9.7
 ---
 
 **Status** : Opérationnel depuis plusieurs dizaines de versions.
-**Dernière mise à jour** : 2026-08-12 (v2.9.7)
+**Dernière mise à jour** : 2026-08-19 (v2.18.15)
 

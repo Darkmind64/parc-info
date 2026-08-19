@@ -115,17 +115,14 @@ Double-clic sur `dist\ParcInfo.exe` :
 - ✅ BD `parc_info.db` créée à côté de l'exe
 - ✅ Attendre 3-5s première utilisation (init DB)
 
-### Optionnel : Icône Personnalisée
+### Icône (déjà active)
 
-1. Créer/placer icône : `static/icon.ico` (256×256px)
-2. Décommenter dans `parcinfo.spec` ligne ~69 :
-   ```python
-   icon='static/icon.ico',
-   ```
-3. Recompiler :
-   ```cmd
-   pyinstaller parcinfo.spec
-   ```
+`parcinfo.spec` référence déjà `icon='static/icon.ico'` (256×256px) — rien à
+décommenter. Pour changer l'icône, remplacer le fichier `static/icon.ico`
+puis recompiler :
+```cmd
+pyinstaller parcinfo.spec
+```
 
 ---
 
@@ -202,18 +199,28 @@ xattr -cr /Applications/ParcInfo.app
 open /Applications/ParcInfo.app
 ```
 
-**Méthode 3** : Signer (optionnel, évite le blocage future)
+**Méthode 3** : Signer ad hoc, seulement si la méthode 2 ne suffit pas.
+Constaté en usage réel : sur certaines versions de macOS, une signature ad
+hoc est REFUSÉE alors qu'un bundle non signé (quarantaine levée) est
+accepté — signer peut donc *durcir* le blocage au lieu de le lever. Ne
+jamais utiliser `--deep` (resigne récursivement Python.framework et les
+bibliothèques embarquées par PyInstaller — cas connu de signature invalide
+sur un bundle complexe comme celui-ci) :
 ```bash
-codesign --deep --force --sign - dist/ParcInfo.app
+codesign --force --sign - dist/ParcInfo.app
 ```
+Voir `update_checker.py::_debloquer_gatekeeper_macos` pour le mécanisme
+automatisé équivalent (méthode 2, puis 3 seulement si nécessaire, avec
+vérification `spctl` à chaque étape).
 
-### Optionnel : Custom App Icon
+### Icône macOS (optionnelle, désactivée par défaut)
 
+`parcinfo.spec` porte `icon=None,  # 'static/icon.icns' pour custom icon` —
+contrairement à Windows, aucune icône macOS custom n'est active par défaut.
+Pour en ajouter une :
 1. Créer icône : `static/icon.icns` (1024×1024, format ICNS)
-2. Décommenter `parcinfo.spec` ligne ~77 :
-   ```python
-   icon='static/icon.icns',
-   ```
+2. Remplacer `icon=None` par `icon='static/icon.icns'` dans `parcinfo.spec`
+   (bloc `BUNDLE`, section macOS)
 3. Recompiler
 
 ---
@@ -320,11 +327,14 @@ disable_windowed_traceback=False,  # ← Logs en fichier
 ### Optimisations
 
 ```python
-upx=True,               # ← Compression (si UPX installé)
+upx=False,              # ← Compression désactivée : réduit les faux positifs
+                        #   antivirus (signalés en usage réel, voir CHANGELOG)
 noarchive=False,        # ← Archive zip interne
 ```
 
-**Pour modifier** : éditer `parcinfo.spec`, puis recompiler.
+**Pour modifier** : éditer `parcinfo.spec`, puis recompiler. Ne pas réactiver
+UPX sans en avoir mesuré l'effet sur les faux positifs antivirus — c'est
+précisément pour ça qu'il a été désactivé.
 
 ---
 
@@ -383,30 +393,37 @@ Dans app Web :
 
 ### Paquetage Utilisateur Final
 
-```
-ParcInfo-1.0.0-Windows-x64.zip
-├── ParcInfo.exe
-├── README.txt
-└── LICENSE.txt
+Le pipeline de release (`.github/workflows/build-release.yml` +
+`build-macos-intel.yml`) publie l'exécutable Windows nu et **deux archives
+macOS séparées** — pas de binaire universel :
 
-ParcInfo-1.0.0-macOS-universal.dmg
-├── ParcInfo.app
-├── Applications/ (lien)
-└── README.txt
+```
+ParcInfo-Windows.exe                # exe unique, pas de zip
+
+ParcInfo-macOS-ARM.zip              # Apple Silicon (M1+), natif
+└── ParcInfo.app
+
+ParcInfo-macOS-Intel.zip            # Intel, croisé sous Rosetta en CI
+└── ParcInfo.app
 ```
 
 ### Hébergement
 
-- **Releases GitHub** : https://github.com/your-org/parc_info/releases
-- **Cloud** : Dropbox, OneDrive, Google Drive
-- **Intranet** : serveur partage interne
+- **Releases GitHub** : https://github.com/Darkmind64/parc-info/releases
+  (publication automatique par CI sur chaque tag `vX.Y.Z`, `SHA256SUMS.txt`
+  généré et vérifié par la mise à jour in-app avant tout remplacement)
+- **Docker Hub** : `docker pull darkmind64/parcinfo` (voir DOCKERHUB_SETUP.md)
 
 ### Mise à Jour
 
-1. Recompiler (`pyinstaller parcinfo.spec`)
-2. Envoyer nouvel exe
-3. Utilisateur remplace exe (BD/uploads restent)
-4. Relancer exe → ready !
+En développement, un simple tag suffit à déclencher la publication :
+```bash
+git tag -a vX.Y.Z -m "..."
+git push origin vX.Y.Z
+```
+Côté utilisateur final, voir README.md § Mises à Jour — la bannière in-app
+gère le téléchargement, la vérification d'empreinte et le remplacement
+(BD/uploads/clé de chiffrement toujours conservés).
 
 ---
 
@@ -431,7 +448,7 @@ ParcInfo-1.0.0-macOS-universal.dmg
 
 **macOS**
 - macOS 10.13+ (High Sierra)
-- Intel x64 + Apple Silicon (universal)
+- Intel x64 et Apple Silicon, en deux builds natifs séparés (pas un binaire universel — voir § Distribution)
 - Authentification requise pour ARP
 
 **Linux** (si compilé)
@@ -456,4 +473,4 @@ ParcInfo-1.0.0-macOS-universal.dmg
 
 ---
 
-**ParcInfo Build Guide v1.0** — 2026-04-07
+**ParcInfo Build Guide** — mis à jour 2026-08-19 (v2.18.15)

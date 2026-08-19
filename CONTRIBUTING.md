@@ -10,7 +10,7 @@ By participating in this project, you agree to be respectful and constructive in
 
 ### Before Submitting
 - Check existing [Issues](../../issues) to avoid duplicates
-- Test with the latest version from `main` branch
+- Test with the latest version from `master` branch
 - Gather information:
   - Python version (`python --version`)
   - OS (Windows/macOS/Linux)
@@ -113,7 +113,7 @@ python app.py
 - Keep functions under 50 lines or comment non-obvious logic
 - No wildcard imports (`from module import *`)
 
-**Key Patterns** (see [CLAUDE.md](CLAUDE.md) for details)
+**Key Patterns** (see [claude.md](claude.md) for details)
 
 ```python
 # ✅ Parameterized SQL (ALWAYS)
@@ -172,7 +172,7 @@ if errors:
 ## Making a Pull Request
 
 ### Before Submitting
-1. **Create a feature branch** off `main`
+1. **Create a feature branch** off `master`
    ```bash
    git checkout -b feature/your-feature-name
    ```
@@ -259,7 +259,7 @@ python app.py
 ## Documentation
 
 - **User Guide:** See [README.md](README.md)
-- **Architecture & API:** See [CLAUDE.md](CLAUDE.md)
+- **Architecture & API:** See [claude.md](claude.md)
 - **Code Examples:** Look for docstrings and comments in source files
 
 When adding features, update relevant sections in documentation.
@@ -278,14 +278,14 @@ We'll work with you to fix and credit the discovery.
 
 ## Branch Strategy
 
-- **main** — Stable releases, protected branch
+- **master** — Stable releases, protected branch
 - **feature/** — New features
 - **bugfix/** — Bug fixes
 - **docs/** — Documentation updates
 
 ## Questions?
 
-- Check [CLAUDE.md](CLAUDE.md) for architecture decisions
+- Check [claude.md](claude.md) for architecture decisions
 - Search existing [Issues](../../issues) and [Discussions](../../discussions)
 - Open a Discussion for questions (not bugs)
 

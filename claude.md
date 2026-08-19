@@ -1,6 +1,6 @@
 # ParcInfo — Guide de Développement Claude 🚀
 
-**Dernière mise à jour** : 2026-08-17
+**Dernière mise à jour** : 2026-08-19
 
 ## 📋 Aperçu Exécutif
 
@@ -11,9 +11,20 @@
 - ✅ **Authentification** : PBKDF2, sessions 8h, rate-limiting
 - ✅ **Scan réseau** : découverte automatique (ping/arp/ports TCP)
 - ✅ **CRUD complet** : appareils, contrats, utilisateurs, identifiants, périphériques
+- ✅ **Collecteur système** : fiche détaillée par appareil (icônes d'applications,
+  stockage disque par disque, statut de mise à jour logicielle), jeton
+  d'authentification optionnel
+- ✅ **Synchronisation multi-instance** : base locale + Turso en tâche de fond
+  (Docker/PC/Mac peuvent partager le même parc)
+- ✅ **Étiquettes QR** : génération de labels imprimables (AVERY J8159)
 - ✅ **Portabilité** : exécutable autonome (.exe/.app) avec BD locale
 - ✅ **Audit trail** : historique complet de chaque modification
 - ✅ **Configuration persistée** : thèmes, couleurs, listes personnalisées
+
+> Vue d'ensemble plus détaillée, orientée utilisateur : voir README.md. Les
+> deux documents se recoupent volontairement (public différent) — en cas de
+> divergence sur un point factuel, README.md fait foi côté fonctionnalités
+> utilisateur, ce fichier fait foi côté architecture/implémentation.
 
 ### Stack Technique
 - **Backend** : Python 3.8+, Flask 3.0+, Werkzeug 3.0+
@@ -269,7 +280,7 @@ parc_info/                           # Répertoire racine
 | update_checker.py | ~615 | Interroge version.json, SHA256, téléchargement reprenable |
 | update_notifier.py | ~315 | Bannière UI, fil de fond, nettoyage des reliquats de mise à jour |
 | database.py | 300+ | Connexion SQLite/Turso, helpers SQL |
-| auth_utils.py | 200+ | Auth PBKDF2, CSRF, rate-limit, validation |
+| auth_utils.py | ~165 | Auth PBKDF2, CSRF, rate-limit, validation |
 | config_helpers.py | 200+ | Config persistée, listes perso (LISTE_DEFAULTS) |
 | client_helpers.py | 300+ | ACL, audit, pagination, formatage |
 | models.py | 200+ | Modèles SQLAlchemy (optionnel) |
@@ -590,7 +601,7 @@ reset_attempts(ip)         # Après /login réussi
 ```
 
 ```python
-# Middleware automatique : app.py:99-101
+# Middleware automatique : app.py, def csrf_protect() (grep -n "def csrf_protect")
 @app.before_request
 def csrf_protect():
     validate_csrf_request()  # Lève 403 si CSRF manquant/invalide
@@ -600,7 +611,15 @@ def csrf_protect():
 - Token généré : `secrets.token_hex(32)` (256 bits)
 - Stocké : `session['csrf_token']`
 - Validé : compare timing-safe (`secrets.compare_digest()`)
-- Exceptions : GET, /static/*, /login, /logout
+- Exceptions : GET, /static/*, /login, /logout, /api/* (voir ci-dessous)
+
+**Pourquoi `/api/*` est exempté.** Les collecteurs (scripts externes, sans
+session Flask ni cookies) ne peuvent pas fournir de token CSRF — un
+collecteur qui poste sur `/api/device-info` recevait sinon un 403 pour
+n'importe quel appareil, quel que soit le token collecteur configuré.
+Ces endpoints restent protégés autrement : `client_id` obligatoire et
+vérifié, jeton collecteur (`Réglages → Collecteur & sauvegardes`) une fois
+renseigné.
 
 **JS AJAX**
 ```javascript
@@ -725,47 +744,32 @@ conn.execute(
 <a href="/appareil?name={{ user_input }}">  <!-- XSS possible -->
 ```
 
-### 8. Uploads (Points d'Amélioration)
+### 8. Uploads
 
-**État actuel**
+**État actuel** (voir `app.py` autour de `ALLOWED_EXTENSIONS`)
 - ✅ Stockés hors webroot (uploads/)
 - ✅ Servis via `send_from_directory()` avec headers `attachment`
-- ❌ Aucune validation d'extension
-- ❌ Aucune validation MIME
-- ❌ Pas de limite de taille fichier
-- ❌ Pas de scan antivirus
+- ✅ Extension validée contre une liste blanche (`ALLOWED_EXTENSIONS` — documents ;
+  `ALLOWED_IMAGE_EXTENSIONS`, plus restreinte, pour logos/avatars/photos de baie)
+- ✅ Signature de fichier vérifiée pour les formats connus (`signature_coherente()`
+  — les premiers octets doivent correspondre à l'extension annoncée, pas
+  seulement le type déclaré par le navigateur, qui ne prouve rien)
+- ✅ Taille limitée (`MAX_UPLOAD_MB`, 64 Mo par défaut, réglable via la variable
+  d'environnement `PARCINFO_MAX_UPLOAD_MB`)
+- ❌ Pas de scan antivirus (seul point encore ouvert de cette section)
 
-**Recommandations prod**
 ```python
-# Whitelist extensions
-ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg', 'png', 'docx', 'xlsx', 'txt'}
-
-# Whitelist MIME types
-ALLOWED_MIMES = {
-    'application/pdf', 'image/jpeg', 'image/png',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ...
-}
-
-# Limiter taille
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-
-# Vérifier extension + MIME
-def secure_upload(file):
-    if '.' not in file.filename:
-        return False, 'Extension requise'
-
-    ext = file.filename.rsplit('.', 1)[1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        return False, f'Extension {ext} non autorisée'
-
-    mime = file.content_type  # ou file.mimetype
-    if mime not in ALLOWED_MIMES:
-        return False, f'Type {mime} non autorisé'
-
-    if file.content_length > MAX_FILE_SIZE:
-        return False, 'Fichier trop volumineux'
-
+# app.py — validation réelle, pas un exemple à implémenter
+def verifier_fichier(fichier, extensions=None):
+    """Contrôle nom, extension et signature. Retourne (ok, message)."""
+    if not fichier or not fichier.filename:
+        return False, "Aucun fichier sélectionné"
+    extension = extension_de(fichier.filename)
+    if not allowed_file(fichier.filename, extensions):
+        return False, ("Extension « %s » non autorisée" % (extension or '?'))
+    if not signature_coherente(fichier, extension):
+        return False, ("Le contenu du fichier ne correspond pas à un %s"
+                       % extension.upper())
     return True, None
 ```
 
@@ -780,7 +784,7 @@ def secure_upload(file):
 - [ ] Sessions HttpOnly + SameSite
 - [ ] Audit trail complet (`log_history()`)
 - [ ] Pas de secrets en logs
-- [ ] Uploads whitelistés (extension + MIME)
+- [x] Uploads whitelistés (extension + signature vérifiée)
 
 ---
 
@@ -1021,11 +1025,10 @@ python -m venv venv
 source venv/bin/activate  # Linux/macOS
 venv\Scripts\activate     # Windows
 
-# 3. Installer dépendances
+# 3. Installer dépendances (voir requirements.txt pour la liste complète :
+# flask, werkzeug, flask-sqlalchemy, apscheduler, reportlab, cryptography,
+# flask-compress, qrcode, gunicorn, zeroconf, certifi)
 pip install -r requirements.txt
-# flask>=3.0.0
-# werkzeug>=3.0.0
-# flask-sqlalchemy>=3.1.0
 
 # 4. Lancer
 python app.py
@@ -1559,6 +1562,6 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 
 ---
 
-**Dernier update** : 2026-08-17 (v2.16.3)
+**Dernier update** : 2026-08-19 (v2.18.15)
 **Mainteneur** : ParcInfo Team
-**License** : Voir LICENSE.md
+**License** : Voir LICENSE

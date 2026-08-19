@@ -50,13 +50,13 @@ system-info-collector.exe --client-name "Mon Entreprise"
 ### Ou Scripts Python (si Python est disponible)
 
 ```bash
-# Télécharger GUI
-curl -o system-info-collector-gui.py http://parcinfo.local:3456/download/system-info-collector-gui
-python system-info-collector-gui.py
+# Télécharger GUI (archive ZIP : script + collector_core.py, pas un .py seul)
+curl -o system-info-collector-gui.zip http://parcinfo.local:3456/download/system-info-collector-gui
+unzip system-info-collector-gui.zip && python system-info-collector-gui.py
 
 # Télécharger CLI
-curl -o system-info-collector.py http://parcinfo.local:3456/download/system-info-collector
-python system-info-collector.py --client-id 5
+curl -o system-info-collector.zip http://parcinfo.local:3456/download/system-info-collector
+unzip system-info-collector.zip && python system-info-collector.py --client-id 5
 ```
 
 ### 2a. Version GUI (Recommandée pour les utilisateurs) ⭐
@@ -419,14 +419,13 @@ Si serial connu → ne pas changer
 
 ### Authentification
 
-Actuellement **pas d'authentification requise** (collecteur s'exécute localement sur la machine).
-
-Pour ajouter une sécurité :
-```python
-# À implémenter si nécessaire
-if data.get('token') != cfg_get('collector_token'):
-    return {"error": "Unauthorized"}, 401
-```
+Optionnelle mais implémentée (`app.py::jeton_collecteur_valide()`) : tant
+qu'aucun jeton n'est configuré (Réglages → Collecteur & sauvegardes), tout
+collecteur atteignant le serveur peut écrire — comportement historique,
+conservé pour ne pas casser les collecteurs déjà déployés sans prévenir.
+Dès qu'un jeton est renseigné, il devient obligatoire pour `/api/*` et pour
+la liste des clients, envoyé par le collecteur via l'en-tête
+`X-Collector-Token` (ou `Authorization: Bearer <jeton>`).
 
 ---
 
@@ -667,5 +666,5 @@ tail -f parc_info.log | grep "Device info received"
 
 ---
 
-**Version:** 2.9.7  
-**Dernière mise à jour:** 2026-08-12
+**Version:** 2.18.15
+**Dernière mise à jour:** 2026-08-19
