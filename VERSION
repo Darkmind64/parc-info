@@ -1,8 +1,18 @@
-PARCINFO_VERSION=2.18.12
+PARCINFO_VERSION=2.18.13
 RELEASE_DATE=2026-08-19
-BUILD_NUMBER=2026081901
+BUILD_NUMBER=2026081902
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.13 - Numéro de version et lien « à propos » sur une seule ligne
+# Signalé : en navigation latérale (Réglages → thème → nav verticale), le
+# numéro de version et le lien ⓘ vers « à propos » apparaissaient l'un sous
+# l'autre au lieu d'être côte à côte — chaque enfant direct de la barre de
+# navigation y prend toute la largeur, ce qui les empilait. Les deux sont
+# désormais regroupés dans un même bloc (numéro à gauche, ⓘ à droite),
+# inchangé en navigation horizontale (déjà correcte), aligné sur une seule
+# ligne aussi en navigation verticale
+# Date: 19 août 2026
 
 # Version 2.18.12 - Le vrai bug de la mise à jour macOS, enfin trouvé : bit exécutable perdu
 # Le journal parcinfo.log (2.18.7) a enfin donné la preuve directe : plus de

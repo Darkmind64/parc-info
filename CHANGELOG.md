@@ -1,5 +1,17 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.13] - 2026-08-19 🎨
+
+### 🎨 Numéro de version et lien « à propos » sur une seule ligne
+
+Signalé en usage réel : en navigation verticale (barre latérale, activable
+dans Réglages → thème), le numéro de version et le lien ⓘ vers « à propos »
+apparaissaient l'un sous l'autre au lieu d'être côte à côte — chaque enfant
+direct de la barre de navigation y prend toute sa largeur, ce qui empilait
+les deux au lieu de les aligner. Regroupés dans un même bloc, numéro à
+gauche et ⓘ à droite comme demandé, désormais alignés sur une seule ligne
+dans les deux modes de navigation (horizontale, déjà correcte, et verticale).
+
 ## [2.18.12] - 2026-08-19 🔓
 
 ### 🔓 Le vrai bug de la mise à jour macOS, enfin trouvé : bit exécutable perdu
