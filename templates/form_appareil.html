@@ -1,23 +1,24 @@
 {% extends "base.html" %}
-{% block title %}{{ action }} un appareil — ParcInfo
-async function loadHistorique() {
-    const r = await fetch('/api/historique/entite/appareil/{{ appareil.id }}');
-    const items = await r.json();
-    const el = document.getElementById('hist-list');
-    if (!items.length) { el.textContent = 'Aucune modification enregistrée.'; return; }
-    const icons = { Création: '🟢', Modification: '🔵', Suppression: '🔴' };
-    el.innerHTML = items.map(h => `
-        <div style="display:flex;align-items:center;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border);font-size:.8rem;">
-            <span>${icons[h.action] || '●'}</span>
-            <span style="flex:1;color:var(--text-secondary);">${h.action}</span>
-            <span style="font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--text-muted);">${(h.date_action||'').slice(0,16).replace('T',' ')}</span>
-        </div>`).join('');
-}
-
-{% endblock %}
+{% block title %}{{ action }} un appareil — ParcInfo{% endblock %}
 
 {% block extra_styles %}
 <style>
+/* Badges de ports ouverts (couleurs dans base.html cfg-vars, comme liste_appareils.html) */
+.port-btn {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 2px 7px; border-radius: 3px; border: 1px solid;
+    font-family: 'Share Tech Mono', monospace; font-size: 0.68rem;
+    font-weight: 700; cursor: default; text-decoration: none;
+    white-space: nowrap; margin: 1px; background: none;
+}
+/* Bouton annuler (historique inline) — repris de historique.html */
+.hist-revert-btn {
+    font-size:.62rem; padding:.12rem .45rem; line-height:1.4;
+    border:1px solid rgba(255,140,0,.4); color:var(--accent-orange);
+    background:rgba(255,140,0,.08); border-radius:4px;
+    cursor:pointer; white-space:nowrap; transition:all .15s;
+}
+.hist-revert-btn:hover { background:rgba(255,140,0,.2); border-color:rgba(255,140,0,.75); }
 .aer-tabs {
     display: flex;
     gap: .35rem;
@@ -193,17 +194,17 @@ async function loadHistorique() {
         <div class="form-row">
             <div class="form-group">
                 <label>Ports ouverts détectés</label>
-                <div style="display:flex;flex-wrap:wrap;gap:.3rem;margin-bottom:.4rem;">
+                <div style="display:flex;flex-wrap:wrap;gap:.3rem;">
                     {% for port_str in appareil.ports_ouverts.split(',') %}
                         {% set p = port_str.strip() %}
                         {% if p %}
-                        <span class="badge badge-gray" style="letter-spacing:normal;text-transform:none;font-weight:500;">
+                        <span class="port-btn port-{{ p|port_class }} port-num-{{ p }}" title="{{ p|port_info }}">
                             {{ p|port_icon }} {{ p }} · {{ p|port_name }}
                         </span>
                         {% endif %}
                     {% endfor %}
                 </div>
-                <input type="text" name="ports_ouverts" value="{{ appareil.ports_ouverts }}" class="mono">
+                <input type="hidden" name="ports_ouverts" value="{{ appareil.ports_ouverts }}">
             </div>
         </div>
         {% endif %}
@@ -892,6 +893,35 @@ async function loadContrats() {
     }).join('');
 }
 loadContrats();
+{% endif %}
+
+{% if appareil and appareil.id %}
+async function loadHistorique() {
+    const r = await fetch('/api/historique/entite/appareil/{{ appareil.id }}');
+    const items = await r.json();
+    const el = document.getElementById('hist-list');
+    if (!items.length) { el.textContent = 'Aucune modification enregistrée.'; return; }
+    const icons = { Création: '🟢', Modification: '🔵', Suppression: '🔴', Annulation: '↩' };
+    const canWrite = {{ 'true' if can_write_flag else 'false' }};
+    el.innerHTML = items.map(h => {
+        const hasDiff = h.action === 'Modification' && h.details && h.details.trim().startsWith('{');
+        const revert = (hasDiff && canWrite) ? `
+            <form method="POST" action="/historique/${h.id}/annuler"
+                  onsubmit="return confirm('Restaurer cet appareil à son état avant cette modification ?')"
+                  style="margin:0;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="hist-revert-btn" title="Annuler cette modification">↩ Annuler</button>
+            </form>` : '';
+        return `
+        <div style="display:flex;align-items:center;gap:.6rem;padding:.35rem 0;border-bottom:1px solid var(--border);font-size:.8rem;">
+            <span>${icons[h.action] || '●'}</span>
+            <span style="flex:1;color:var(--text-secondary);">${h.action}</span>
+            <span style="font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--text-muted);">${(h.date_action||'').slice(0,16).replace('T',' ')}</span>
+            ${revert}
+        </div>`;
+    }).join('');
+}
+loadHistorique();
 {% endif %}
 
 {% if appareil and appareil.id %}

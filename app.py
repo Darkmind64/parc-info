@@ -3719,7 +3719,7 @@ def editer_appareil(id):
                            logiciels_metier_list=lm_list,
                            sw_sel=sw_sel,
                            sw_custom_sel=sw_custom_sel,
-                           licences=licences,
+                           licences=licences, can_write_flag=can_write(),
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/appareil/<int:id>/supprimer', methods=['POST'])
