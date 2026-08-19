@@ -174,6 +174,14 @@
         /* Le numéro de version déclenche la recherche de mise à jour. C'est un
            bouton et non un fragment du lien d'accueil : imbriqué dans celui-ci,
            un clic aurait ramené à l'accueil au lieu d'agir. */
+        /* Regroupe le numéro de version et le lien « à propos » sur une seule
+           ligne (numéro à gauche, ⓘ à droite) — y compris en nav latérale
+           (body.nav-left), où chaque enfant direct de <nav> prend sinon toute
+           la largeur et forcerait les deux l'un sous l'autre. */
+        .nav-version-group {
+            display: flex; align-items: center; gap: .35rem; margin-right: 1.5rem;
+        }
+        .nav-version-group .nav-version { margin-right: 0; }
         .nav-version {
             font-size: .6rem; font-family: 'Share Tech Mono', monospace;
             color: var(--text-muted); letter-spacing: 1px; opacity: .7;
@@ -183,6 +191,16 @@
             white-space: nowrap; transition: all .2s;
         }
         .nav-version:hover, .nav-version:focus-visible {
+            opacity: 1; color: var(--accent); border-color: var(--border);
+            background: rgba(0, 201, 255, .07);
+        }
+        .nav-version-info {
+            font-size: .6rem; color: var(--text-muted); opacity: .7;
+            text-decoration: none; padding: .2rem .4rem; border-radius: 3px;
+            border: 1px solid transparent; display: flex; align-items: center;
+            transition: all .2s;
+        }
+        .nav-version-info:hover, .nav-version-info:focus-visible {
             opacity: 1; color: var(--accent); border-color: var(--border);
             background: rgba(0, 201, 255, .07);
         }
@@ -325,13 +343,18 @@
             flex-shrink: 0; letter-spacing: 3px;
             display: flex; align-items: center; gap: .5rem;
         }
-        /* En colonne, la version prend sa propre ligne sous la marque et ferme
-           le bloc d'en-tête. */
-        body.nav-left .nav-version {
+        /* En colonne, c'est le GROUPE qui prend toute la largeur et ferme le
+           bloc d'en-tête ; le numéro de version et le ⓘ restent côte à côte
+           à l'intérieur (justify-content: space-between), au lieu de forcer
+           chaque enfant de <nav> à sa propre ligne comme avant ce correctif. */
+        body.nav-left .nav-version-group {
             margin: 0 0 .3rem; padding: .15rem 1.15rem .55rem;
-            width: 100%; box-sizing: border-box; justify-content: flex-start;
+            width: 100%; box-sizing: border-box; justify-content: space-between;
             border-bottom: 1px solid var(--border); border-radius: 0;
             flex-shrink: 0;
+        }
+        body.nav-left .nav-version-group .nav-version {
+            width: auto; padding: 0; margin: 0; border-bottom: none;
         }
         /* Liens simples */
         body.nav-left nav > a:not(.nav-brand) {
@@ -779,15 +802,16 @@
 {% set secu_active = ep in ['liste_identifiants','nouvel_identifiant','editer_identifiant','liste_utilisateurs','nouvel_utilisateur','editer_utilisateur','droits_utilisateur'] %}
 <nav>
     <a href="/" class="nav-brand">PARCINFO</a>
-    {% if app_version %}
-    <button type="button" class="nav-version" id="maj-version"
-            title="Version {{ app_version }} — cliquer pour rechercher une mise à jour">
-        <span class="nav-version-num">v{{ app_version }}</span>
-        <span class="nav-version-pastille" hidden></span>
-    </button>
-    {% endif %}
-    <a href="/apropos" class="nav-version" title="À propos de ParcInfo"
-       style="text-decoration:none;">ℹ</a>
+    <div class="nav-version-group">
+        {% if app_version %}
+        <button type="button" class="nav-version" id="maj-version"
+                title="Version {{ app_version }} — cliquer pour rechercher une mise à jour">
+            <span class="nav-version-num">v{{ app_version }}</span>
+            <span class="nav-version-pastille" hidden></span>
+        </button>
+        {% endif %}
+        <a href="/apropos" class="nav-version-info" title="À propos de ParcInfo">ℹ</a>
+    </div>
 
     <!-- SEARCH BAR -->
     <div style="display:flex;align-items:center;margin-left:1rem;margin-right:1rem;flex:0 0 auto;">
