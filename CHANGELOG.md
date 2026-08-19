@@ -1,5 +1,59 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.11] - 2026-08-19 🔎
+
+### 🔎 Contrôle complet du système de synchronisation
+
+**Demandé explicitement** : un audit du système de sync Turso — conflits,
+cohérence, restes devenus inutiles. Lecture complète de `database.py` et de
+toute la mécanique de triggers dans `app.py`. Quatre trouvailles concrètes,
+toutes corrigées.
+
+**La plus significative : la page « À propos » mentait sur l'état de la
+synchronisation, exactement là où elle a été consultée plusieurs fois cette
+série pour diagnostiquer un souci de sync.** Elle n'affichait le statut Turso
+qu'en mode `db_type='turso'` (chaque requête interroge Turso directement,
+sans base locale) — jamais en mode `'sync'` (base locale au quotidien,
+synchronisée en tâche de fond), qui est le mode réellement utilisé par des
+instances Docker/PC/Mac qui se synchronisent entre elles. Résultat : la page
+affichait *« Turso n'est pas configuré — cette installation utilise
+uniquement la base locale »*, alors que la synchronisation tournait
+activement en arrière-plan. Corrigé pour se baser sur « autre chose que
+`local` » plutôt que sur un seul mode particulier.
+
+**Un risque de panne silencieuse permanente, corrigé avant qu'il ne se soit
+jamais produit.** `_sync_applying` — la garde qui empêche les triggers de se
+redéclencher pendant qu'un pull applique des données reçues — n'était jamais
+purgée au démarrage de l'application. Un crash exact au mauvais moment
+(coupure de courant, kill du process) entre la pose de cette garde et son
+retrait laisserait la ligne survivre au redémarrage : plus aucun trigger ne
+se déclencherait jamais plus, donc plus aucune modification locale ne
+serait journalisée ni poussée vers les autres instances — sans la moindre
+erreur pour le signaler. La ligne est maintenant systématiquement purgée à
+chaque démarrage, une preuve suffisante qu'aucun pull n'est en cours.
+
+**Nettoyage de code mort.** `_sync_deletions` et ses triggers `_trg_del_*` :
+un mécanisme antérieur à `_sync_journal`, jamais relu par la synchronisation
+actuelle, mais encore alimenté à chaque suppression sur 23 tables — avec une
+liste restée figée à l'ancienne, jamais mise à jour contrairement à celle
+qui alimente réellement la sync. Retiré.
+
+**Documentation corrigée.** La docstring de `sync_once()` affirmait une
+résolution de conflit par `date_maj` qui n'existe pas dans le code actuel
+depuis le passage au journal de modifications. Corrigée pour décrire
+honnêtement la vraie règle — le dernier écrit côté Turso gagne, ligne
+entière, sans fusion des champs — et sa vraie limite, documentée pour la
+première fois : deux instances qui modifient le **même** enregistrement
+avant d'avoir chacune synchronisé verront l'une écraser silencieusement
+l'autre. En usage normal (des appareils différents modifiés depuis des
+instances différentes), cette situation ne se présente jamais ; elle reste
+une limite réelle si la même fiche est éditée depuis deux instances au même
+moment.
+
+> `test_sync_turso.py`, qui couvrait déjà une partie de ce mécanisme, n'était
+> jamais exécuté en intégration continue — corrigé au passage, avec deux
+> nouvelles sections couvrant les deux correctifs ci-dessus.
+
 ## [2.18.10] - 2026-08-18 🚀
 
 ### 🚀 Mise à jour macOS relancée directement — fin (probable) de la saga Gatekeeper

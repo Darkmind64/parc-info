@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.18.10
-RELEASE_DATE=2026-08-18
-BUILD_NUMBER=2026081809
+PARCINFO_VERSION=2.18.11
+RELEASE_DATE=2026-08-19
+BUILD_NUMBER=2026081900
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.11 - Contrôle complet du système de synchronisation
+# Demandé explicitement : audit du système de sync (conflits, cohérence,
+# restes inutiles). Quatre trouvailles concrètes, toutes corrigées :
+# 1) La page « À propos » n'affichait le statut de synchronisation Turso
+#    qu'en mode db_type='turso' (chaque requête interroge Turso directement) —
+#    jamais en mode 'sync' (base locale + synchronisation en tâche de fond),
+#    le mode réellement utilisé par les instances Docker/PC/Mac qui se
+#    synchronisent entre elles. Cette page affichait donc « Turso n'est pas
+#    configuré » alors que la synchronisation tournait activement — elle a
+#    été demandée plusieurs fois cette série pour diagnostiquer un souci de
+#    sync, sans jamais pouvoir montrer quoi que ce soit d'utile
+# 2) _sync_applying (garde anti-boucle pendant un pull) n'était jamais purgée
+#    au démarrage : si le PROCESS entier meurt entre l'écriture de cette
+#    garde et son retrait (crash, coupure), la ligne survit au redémarrage
+#    et éteint silencieusement TOUS les triggers de suivi pour toujours —
+#    plus aucune modification locale journalisée, donc plus jamais poussée
+#    vers les autres instances, sans la moindre erreur pour le signaler
+# 3) _sync_deletions et ses triggers _trg_del_* : mécanisme d'avant
+#    _sync_journal, jamais relu par la synchronisation actuelle mais encore
+#    alimenté à chaque suppression sur 23 tables, avec une liste de tables
+#    restée figée (jamais mise à jour, contrairement à celle qui suit
+#    réellement la sync) — retiré
+# 4) Docstring de sync_once() corrigée : elle affirmait une résolution de
+#    conflit par date_maj qui n'existe pas dans le code actuel — corrigée
+#    pour décrire honnêtement la vraie règle (dernier écrit gagne, ligne
+#    entière, sans fusion) et sa vraie limite (deux instances qui modifient
+#    le même enregistrement avant d'avoir chacune synchronisé)
+# Date: 19 août 2026
 
 # Version 2.18.10 - Mise à jour macOS relancée directement (fin de la translocation)
 # Reprise complète de la logique de mise à jour macOS, documentation externe
