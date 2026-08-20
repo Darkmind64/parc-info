@@ -10169,6 +10169,17 @@ def api_services_supprimer():
 
 # --- WATCHDOG PING -----------------------------------------------------------
 # Thread de surveillance : ping tous les appareils avec une IP toutes les N sec.
+#
+# Signalé en usage réel : ParcInfo tourne souvent sur un poste qui se déplace
+# physiquement d'un client à l'autre (portable technicien), pas sur un serveur
+# fixe. Ce thread pingeait jusqu'ici TOUS les appareils de TOUS les clients à
+# chaque cycle, sans savoir sur quel réseau il se trouvait réellement — dès
+# qu'on quitte le réseau d'un client, ses appareils passaient à « hors ligne »
+# non pas parce qu'ils le sont, mais parce que le ping échoue depuis un autre
+# réseau. Chaque cycle détermine maintenant les réseaux locaux actuels de CE
+# poste et ne ping (donc ne modifie en base) que les appareils plausiblement
+# sur l'un d'eux — les autres gardent leur dernier statut connu, jamais
+# écrasé par un faux « hors ligne ».
 
 PING_INTERVAL = 60   # secondes entre deux cycles complets
 PING_TIMEOUT  = 1.0  # timeout par tentative ping
@@ -10177,6 +10188,58 @@ PING_WORKERS  = 30   # threads simultanes
 _ping_cache = {}           # { appareil_id: {en_ligne, ts, ip} }
 _ping_cache_lock = threading.Lock()
 _watchdog_state  = {'running': False, 'last_cycle': None, 'cycle_count': 0}
+
+
+def _reseaux_locaux_actuels():
+    """Réseaux (/24, best-effort) sur lesquels CE poste se trouve actuellement.
+
+    Un poste technicien a souvent plusieurs interfaces actives à la fois
+    (Ethernet + Wi-Fi) : socket.gethostbyname_ex() (même technique que
+    collector_core.get_ip_addresses(), côté collecteur) remonte les adresses
+    IP de toutes les interfaces connues du système, pas une seule — sans
+    dépendance supplémentaire (pas de psutil/netifaces)."""
+    reseaux = set()
+    try:
+        ips = socket.gethostbyname_ex(socket.gethostname())[2]
+    except Exception:
+        ips = []
+    for ip in ips:
+        if ip.startswith('127.'):
+            continue
+        try:
+            reseaux.add(ipaddress.ip_network(f'{ip}/24', strict=False))
+        except Exception:
+            pass
+    return reseaux
+
+
+def _appareil_sur_reseau_courant(ip_appareil, plage_client, reseaux_locaux):
+    """Vrai si CE poste est plausiblement sur le même réseau que l'appareil visé.
+
+    Compare les réseaux locaux actuels à la plage IP configurée du client
+    (parc_general.plage_ip_locale, la source la plus fiable quand elle est
+    renseignée) ET au repli /24 déduit de l'IP de l'appareil lui-même (utile
+    quand ce champ est resté sur sa valeur par défaut, ou vide). `overlaps()`
+    reste vrai même si l'un des réseaux comparés est un sous-ensemble de
+    l'autre (ex : client configuré en /22, poste sur un /24 dedans).
+
+    `reseaux_locaux` vide (résolution DNS locale indisponible) : on ne peut
+    rien affirmer sur notre propre position — mieux vaut pinger comme avant
+    (comportement historique) que perdre toute surveillance.
+    """
+    if not reseaux_locaux:
+        return True
+    cibles = []
+    if plage_client:
+        try:
+            cibles.append(ipaddress.ip_network(plage_client, strict=False))
+        except Exception:
+            pass
+    try:
+        cibles.append(ipaddress.ip_network(f'{ip_appareil}/24', strict=False))
+    except Exception:
+        pass
+    return any(reseau_local.overlaps(cible) for reseau_local in reseaux_locaux for cible in cibles)
 
 def _ping_once(ip_str):
     try:
@@ -10208,28 +10271,39 @@ def _watchdog_cycle():
     try:
         conn = get_db()
         rows = conn.execute(
-            "SELECT id, adresse_ip FROM appareils WHERE adresse_ip != \'\' AND adresse_ip IS NOT NULL"
+            "SELECT a.id, a.adresse_ip, p.plage_ip_locale "
+            "FROM appareils a LEFT JOIN parc_general p ON p.client_id = a.client_id "
+            "WHERE a.adresse_ip != '' AND a.adresse_ip IS NOT NULL"
         ).fetchall()
         conn.close()
     except Exception:
         return
     if not rows:
         return
-    items = [(r[0], r[1]) for r in rows]
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=PING_WORKERS) as ex:
-        for res in ex.map(_ping_worker, items):
-            results.append(res)
-    try:
-        conn = get_db()
-        for aid, ip, en_ligne, ts in results:
-            conn.execute("UPDATE appareils SET en_ligne=?, dernier_ping=? WHERE id=?",
-                         (1 if en_ligne else 0, ts, aid))
-            with _ping_cache_lock:
-                _ping_cache[aid] = {'en_ligne': en_ligne, 'ts': ts, 'ip': ip}
-        conn.commit(); conn.close()
-    except Exception:
-        pass
+    reseaux_locaux = _reseaux_locaux_actuels()
+    items = [(r[0], r[1]) for r in rows
+            if _appareil_sur_reseau_courant(r[1], r[2], reseaux_locaux)]
+    # Aucun appareil connu sur le réseau actuel (poste ailleurs que chez un
+    # client suivi) : rien à pinger, et surtout rien à écraser en base — mais
+    # le cycle a bien eu lieu, l'horodatage ci-dessous avance quand même
+    # (sans quoi la pastille « dernier cycle » de la topbar semblerait figée
+    # dès qu'on quitte un réseau client, alors que la surveillance tourne
+    # normalement).
+    if items:
+        results = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=PING_WORKERS) as ex:
+            for res in ex.map(_ping_worker, items):
+                results.append(res)
+        try:
+            conn = get_db()
+            for aid, ip, en_ligne, ts in results:
+                conn.execute("UPDATE appareils SET en_ligne=?, dernier_ping=? WHERE id=?",
+                             (1 if en_ligne else 0, ts, aid))
+                with _ping_cache_lock:
+                    _ping_cache[aid] = {'en_ligne': en_ligne, 'ts': ts, 'ip': ip}
+            conn.commit(); conn.close()
+        except Exception:
+            pass
     with _ping_cache_lock:
         # UTC + 'Z' explicite : sans indicateur de fuseau, le JS qui affiche cette
         # heure (new Date(...).toLocaleTimeString(...) dans base.html) l'interprète

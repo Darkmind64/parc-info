@@ -50,6 +50,7 @@ jobs:
           python test_securite.py
           python test_remplissage_fiche.py
           python test_scan_reseau_precision.py
+          python test_watchdog_reseau_courant.py
           python test_ip_publique_collecteur.py
           python test_dns_router_collecteur.py
           python test_historique_collectes.py
