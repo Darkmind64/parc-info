@@ -1,10 +1,34 @@
-PARCINFO_VERSION=2.18.22
+PARCINFO_VERSION=2.18.23
 RELEASE_DATE=2026-08-20
-BUILD_NUMBER=2026082005
+BUILD_NUMBER=2026082006
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.18.22 - Fin de l'audit architecture : identification réseau, doublons, pistes d'amélioration
+# Version 2.18.23 - Identification réseau : SMB n'implique plus Windows, objets connectés reconnus
+# Retour d'usage réel après la 2.18.22 : un Mac ressortait comme "PC
+# (Windows)", un switch comme "Serveur", un ESP32/une prise connectée
+# comme "PC". Recherche sur les pratiques de fingerprinting réseau (nmap,
+# Fingerbank) à l'appui de ces correctifs.
+# 1) SMB (ports 135/445) n'est pas un signal Windows fiable à lui seul :
+#    Samba (Linux) et le partage de fichiers natif de macOS y répondent
+#    aussi. Le port l'emportait pourtant systématiquement sur le TTL —
+#    corrigé, le TTL garde la priorité quand il pointe clairement ailleurs
+#    (Linux/Unix, macOS). RDP (3389) reste un signal fort à lui seul.
+# 2) "server"/"srv" nu (mot-clé hostname/bannière) ne suffit plus seul à
+#    conclure "Serveur" : un switch/imprimante bon marché non reconnu peut
+#    afficher "Print Server" ou "Web Server Login" sur sa page d'admin
+#    embarquée. Un vrai port de service serveur est désormais exigé à
+#    l'appui ; les mots-clés non ambigus (Exchange/vCenter/ESXi/contrôleur
+#    de domaine) suffisent toujours seuls.
+# 3) Nouvelle catégorie "Objet connecté" : la quasi-totalité des prises/
+#    capteurs/relais grand public (Tuya, Sonoff, Shelly...) sont bâtis sur
+#    des puces Espressif (ESP32/ESP8266) revendues en marque blanche sous
+#    des dizaines de noms commerciaux — le fabricant MAC officiel de la
+#    puce radio est bien plus robuste qu'une liste de mots-clés. Complété
+#    par les noms de firmware courants en hostname (Tasmota, ESPHome,
+#    Shelly, Sonoff, Tuya, ESP32) et par 3 nouveaux services mDNS
+#    (HomeKit, Shelly, ESPHome).
+# Date: 20 août 2026
 # Suite du travail sur l'audit architecture (2.18.21), quatre lots :
 # 1) Modale de sélection du client au scan : alignement des boutons radio
 #    réparé (une règle CSS globale les étirait), liste défilante au-delà de

@@ -1,24 +1,22 @@
 {
-  "version": "2.18.22",
+  "version": "2.18.23",
   "release_date": "2026-08-20T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.22/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.22/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.22/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.22",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.22/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.22/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.22/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.23",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Fin de l'audit architecture : identification réseau plus précise (MacBook, switch, bornes WiFi, SNMP), fin du doublon appareil/périphérique, lien croisé parc général/baie de brassage, suggestion d'entrées baie depuis le scan, autocomplétion sur le champ Utilisateur",
+    "new_features": "Identification réseau affinée après retour d'usage réel : SMB n'implique plus Windows à tort (Mac/Samba), une nouvelle catégorie « Objet connecté » reconnaît les ESP32/prises connectées via le fabricant de la puce radio, un mot-clé « server » nu n'entraîne plus une fausse détection de serveur",
     "improvements": [
-      "CORRIGÉ: scan réseau — un MacBook n'est plus jamais détecté comme machine Linux (le fabricant MAC Apple et le hostname mDNS affinent désormais la détection) ; un équipement Ubiquiti/UniFi n'est plus systématiquement classé comme routeur (une borne WiFi ou un switch de la même marque étaient mal identifiés).",
-      "AJOUTÉ: détection réseau enrichie par SNMP (sysDescr/sysName) — un switch ou une imprimante managés s'identifient souvent dès le premier scan, sans dépendance ajoutée.",
-      "AJOUTÉ: suggestion (jamais imposée) d'ajouter à la baie de brassage tout équipement réseau détecté au scan qui n'y est pas encore positionné ; lien croisé entre la fiche parc général et le plan visuel de la baie.",
-      "AJOUTÉ: autocomplétion et avertissement de non-correspondance sur le champ Utilisateur (texte libre) de la fiche appareil.",
-      "CORRIGÉ: fin du doublon de représentation appareil<->périphérique (colonne historique jamais nettoyée) ; suppression d'un périphérique nettoie désormais les tables liées ; ACL manquante sur la suppression d'entrées d'historique ; widget d'alertes critiques du dashboard ignorant le délai configuré ; notifications de maintenance renvoyées en boucle."
+      "CORRIGÉ: SMB (ports 135/445) n'est plus un signal Windows fiable à lui seul — Samba (Linux) et le partage de fichiers natif de macOS y répondent aussi ; un Mac avec le partage de fichiers activé ressortait comme « PC (Windows) ». Le TTL garde désormais la priorité, RDP (3389) reste un signal fort à lui seul.",
+      "CORRIGÉ: le mot-clé « server »/« srv » nu ne suffit plus seul à conclure « Serveur » — un switch ou une imprimante bon marché non reconnu peut afficher « Print Server » sur sa page d'administration embarquée ; un vrai port de service serveur est désormais exigé à l'appui.",
+      "AJOUTÉ: nouvelle catégorie « Objet connecté » — la quasi-totalité des prises/capteurs/relais grand public (Tuya, Sonoff, Shelly...) sont bâtis sur des puces Espressif (ESP32/ESP8266), reconnues via le fabricant MAC officiel de la puce radio plutôt qu'une liste de marques commerciales condamnée à rater le marché blanche. Complété par les noms de firmware courants en hostname et 3 nouveaux services mDNS (HomeKit, Shelly, ESPHome)."
     ]
   },
   "checksums": {
@@ -29,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.22"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.23"
 }

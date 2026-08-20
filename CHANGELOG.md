@@ -1,5 +1,53 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.23] - 2026-08-20 🔌
+
+### 🔌 Identification réseau affinée : SMB, objets connectés (ESP32/Tuya/Shelly)
+
+Retour d'usage réel après la 2.18.22 : un Mac ressortait comme « PC
+(Windows) », un switch comme « Serveur », un ESP32 ou une prise connectée
+comme « PC ». Recherche sur les pratiques de fingerprinting réseau (nmap,
+Fingerbank) à l'appui de ces correctifs.
+
+**SMB n'implique plus Windows à tort**
+
+Les ports 135/445 (SMB) l'emportaient systématiquement sur le TTL, alors
+que ce n'est pas un signal Windows fiable à lui seul : Samba (Linux) et le
+partage de fichiers natif de macOS y répondent aussi. Un Mac avec le
+partage de fichiers activé ressortait donc comme « PC (Windows) »,
+corrigé — le TTL garde désormais la priorité quand il pointe clairement
+ailleurs (Linux/Unix, macOS) ; ces ports ne servent de repli Windows que
+faute de meilleur indice. RDP (3389), lui, reste un signal fort à lui
+seul : aucun équivalent légitime n'existe hors Windows.
+
+**Fin des faux « Serveur »**
+
+Le mot-clé « server »/« srv » nu (hostname ou bannière de service)
+suffisait seul à conclure « Serveur » — or un switch ou une imprimante bon
+marché non reconnu par ailleurs peut très bien afficher « Print Server »
+ou « Web Server Login » sur sa page d'administration embarquée. Un vrai
+port de service serveur (MySQL, MSSQL, PostgreSQL, SMTP, IMAP...) est
+désormais exigé à l'appui ; les mots-clés non ambigus (Exchange, vCenter,
+ESXi, contrôleur de domaine) suffisent toujours seuls.
+
+**Nouvelle catégorie « Objet connecté »**
+
+La quasi-totalité des prises, capteurs et relais grand public (Tuya,
+Sonoff, Shelly...) sont bâtis sur des puces Espressif (ESP32/ESP8266),
+revendues en marque blanche sous des dizaines de noms commerciaux — une
+liste de mots-clés ne peut pas suivre le marché. Le fabricant MAC officiel
+de la puce radio, lui, est un signal bien plus robuste : c'est le même
+principe qu'utilise Fingerbank, la référence du secteur pour le
+fingerprinting réseau. Complété par les noms de firmware les plus
+courants en hostname (Tasmota, ESPHome, Shelly, Sonoff, Tuya, ESP32) et
+par 3 nouveaux services mDNS interrogés (HomeKit, Shelly, ESPHome).
+
+**Limite connue, non implémentée** : le fingerprinting DHCP (options
+55/60) est le signal le plus fiable du secteur, mais nécessite une capture
+passive du trafic — incompatible avec l'architecture actuelle du scan
+(sondes actives par IP). Notée comme limite plutôt que contournée à
+moitié.
+
 ## [2.18.22] - 2026-08-20 📡
 
 ### 📡 Fin de l'audit architecture : identification réseau, SNMP, baie de brassage
