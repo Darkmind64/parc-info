@@ -1,5 +1,44 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.20] - 2026-08-20 🔍
+
+### 🔍 Scan réseau plus précis, surveillance ping limitée au bon client
+
+Suite à une revue du code de détection matériel réseau, deux volets.
+
+**Scan réseau (page Scan) plus précis**
+- Les données WMI (marque, modèle, n° série, RAM, CPU, disque) étaient
+  calculées mais jamais écrites à l'import — corrigé, sans jamais écraser
+  une valeur déjà saisie à la main.
+- Bannières de service sur les ports déjà trouvés ouverts (salutation SSH/
+  FTP/SMTP/POP3/IMAP, en-tête Server + titre de page HTTP/HTTPS) pour
+  affiner marque/type détectés.
+- Découverte UPnP élargie à tout le segment (`ssdp:all`), pas restreinte à
+  la box Internet comme côté collecteur — NAS, TV connectées, serveurs
+  média identifiés avec leur vraie marque/modèle.
+- mDNS élargi à 9 types de service courants (imprimantes IPP, Apple
+  AirPlay, Chromecast, SMB, AFP) — `zeroconf`, déjà une dépendance, ne
+  servait jusqu'ici qu'à retrouver d'autres instances ParcInfo.
+
+**Surveillance ping limitée au bon client**
+
+Signalé en usage réel : ParcInfo tourne souvent sur un poste qui se
+déplace physiquement d'un client à l'autre (portable technicien). La
+surveillance ping en tâche de fond pingeait jusqu'ici tous les appareils
+de tous les clients à chaque cycle — dès qu'on quitte le réseau d'un
+client, ses appareils passaient à « hors ligne » non pas parce qu'ils le
+sont, mais parce que le ping échoue depuis un réseau différent.
+
+Corrigé par détection automatique du réseau courant : chaque cycle
+détermine les réseaux locaux actuels de ce poste (toutes interfaces
+actives) et ne ping que les appareils plausiblement sur l'un d'eux — les
+autres gardent leur dernier statut connu, jamais écrasé par un faux
+« hors ligne ». Complété ensuite, signalé à raison : deux clients à la
+même plage IP par défaut (`192.168.1.0/24`, très courant) ne pouvaient
+pas être départagés par la seule IP — ajout d'une vérification par
+adresse MAC (vue via ARP) qui identifie sans ambiguïté quelle machine
+répond vraiment, avant de marquer quoi que ce soit.
+
 ## [2.18.19] - 2026-08-20 📡
 
 ### 📡 IP publique par appareil, options DNS/box internet au collecteur, curseur de luminosité corrigé

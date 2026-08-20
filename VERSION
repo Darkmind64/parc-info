@@ -1,8 +1,32 @@
-PARCINFO_VERSION=2.18.19
+PARCINFO_VERSION=2.18.20
 RELEASE_DATE=2026-08-20
-BUILD_NUMBER=2026082002
+BUILD_NUMBER=2026082003
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.20 - Scan réseau plus précis, surveillance ping limitée au bon client
+# Suite à une revue du code de détection matériel réseau, deux volets.
+# 1) Scan réseau (page Scan) plus précis, quatre améliorations :
+#    - Les données WMI (marque, modèle, n° série, RAM, CPU, disque) étaient
+#      calculées mais jamais écrites à l'import — corrigé, sans jamais
+#      écraser une valeur déjà saisie à la main.
+#    - Bannières de service sur les ports déjà trouvés ouverts (SSH, HTTP...)
+#      pour affiner marque/type détectés.
+#    - Découverte UPnP élargie à tout le segment (ssdp:all), pas restreinte
+#      à la box Internet comme côté collecteur.
+#    - mDNS élargi (imprimantes, Apple, Chromecast, NAS) — zeroconf, déjà
+#      une dépendance, ne servait qu'à retrouver d'autres instances ParcInfo.
+# 2) La surveillance ping en tâche de fond marquait à tort « hors ligne »
+#    les appareils d'un client dont on avait quitté le réseau physique
+#    (poste technicien qui se déplace d'un client à l'autre). Corrigé par
+#    détection automatique du réseau courant (réseaux locaux de CE poste
+#    comparés à la plage IP du client) : les appareils hors réseau gardent
+#    leur dernier statut connu, jamais écrasé. Signalé ensuite, à raison :
+#    deux clients à la même plage IP par défaut (192.168.1.0/24, très
+#    courant) ne pouvaient pas être départagés par la seule IP — ajout
+#    d'une vérification par adresse MAC (vue via ARP) en second passage,
+#    qui identifie sans ambiguïté quelle machine répond vraiment.
+# Date: 20 août 2026
 
 # Version 2.18.19 - IP publique par appareil, options DNS/box internet au collecteur, curseur de luminosité corrigé
 # Trois demandes distinctes.
