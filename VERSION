@@ -1,8 +1,39 @@
-PARCINFO_VERSION=2.18.21
+PARCINFO_VERSION=2.18.22
 RELEASE_DATE=2026-08-20
-BUILD_NUMBER=2026082004
+BUILD_NUMBER=2026082005
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.22 - Fin de l'audit architecture : identification réseau, doublons, pistes d'amélioration
+# Suite du travail sur l'audit architecture (2.18.21), quatre lots :
+# 1) Modale de sélection du client au scan : alignement des boutons radio
+#    réparé (une règle CSS globale les étirait), liste défilante au-delà de
+#    260px. 3 correctifs orange : ACL manquante sur la suppression d'une
+#    entrée d'historique, widget "Alertes critiques" du dashboard ignorant
+#    le délai configuré et le drapeau "ignorer cette alerte", notifications
+#    de maintenance renvoyées en boucle (une par jour au lieu d'une seule).
+# 2) Fin du doublon de représentation appareil<->périphérique : la colonne
+#    historique peripheriques.appareil_id n'est plus jamais écrite (seule
+#    la table pivot N:N fait foi, comme partout ailleurs) ; l'historique ne
+#    journalise plus de faux écarts sur ce champ ; suppression d'un
+#    périphérique nettoie enfin les tables liées (cas oublié du correctif
+#    précédent sur appareils/contrats).
+# 3) Identification au scan réseau, retour d'usage réel : un MacBook
+#    ressortait comme "machine Linux" (le TTL seul ne distingue pas macOS
+#    de Linux, tous deux à 64 par défaut) — corrigé via le fabricant MAC
+#    Apple et le hostname mDNS typique. Un équipement Ubiquiti/UniFi
+#    devenait systématiquement "Routeur/Pare-feu" même s'il s'agissait
+#    d'une borne WiFi ou d'un switch — une douzaine de fabricants réseau
+#    reconnus retombent maintenant sur une catégorie neutre en l'absence
+#    d'indice de sous-type. Lien croisé ajouté entre parc_general (résumé
+#    switch/routeur) et la baie de brassage (position par U).
+# 4) Les 3 dernières pistes d'amélioration : autocomplétion + avertissement
+#    sur le champ "Utilisateur" en texte libre de la fiche appareil ;
+#    détection SNMP (sysDescr/sysName, encodage BER écrit à la main, sans
+#    dépendance) qui identifie souvent un switch/imprimante managé dès le
+#    premier scan ; suggestion (jamais imposée) d'ajouter à la baie de
+#    brassage tout équipement réseau détecté qui n'y est pas encore.
+# Date: 20 août 2026
 
 # Version 2.18.21 - 5 correctifs issus de l'audit architecture (scan, collecteur, cascades)
 # Suite à un audit complet de la logique de fonctionnement (obtention des

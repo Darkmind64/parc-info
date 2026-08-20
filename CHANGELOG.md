@@ -1,5 +1,87 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.22] - 2026-08-20 📡
+
+### 📡 Fin de l'audit architecture : identification réseau, SNMP, baie de brassage
+
+Suite directe de la 2.18.21 (5 correctifs rouges), les points orange et
+jaune restants de l'audit architecture, plus un retour d'usage réel sur la
+précision du scan.
+
+**Modale de sélection client (scan) et 3 correctifs orange**
+- Modale de choix du client : une règle CSS globale (`input{width:100%}`)
+  étirait les boutons radio, créant un grand vide entre la puce et le
+  libellé — corrigé, liste défilante conservée au-delà de 260px.
+- Suppression d'une entrée d'historique / vidage des erreurs : ne
+  vérifiaient que la connexion, jamais les droits d'écriture — un
+  utilisateur en lecture seule pouvait purger le journal.
+- Widget « Alertes critiques » du dashboard : seuil de 30 jours en dur au
+  lieu du délai configuré (garantie_alerte_jours), et ignorait le drapeau
+  « ignorer cette alerte » — un appareil mis en sourdine réapparaissait
+  quand même.
+- Notifications de maintenance : la vérification anti-doublon ne
+  regardait que « notifiée aujourd'hui », donc une maintenance dans sa
+  fenêtre de préavis de 3 jours recevait un email par jour au lieu d'un
+  seul.
+
+**Fin du doublon de représentation appareil ↔ périphérique**
+
+La colonne historique `peripheriques.appareil_id` coexistait avec la
+table pivot N:N `peripheriques_appareils`, jamais nettoyée après une
+migration à moitié faite. Elle n'est désormais plus jamais écrite (le
+dédoublonnage USB du collecteur, qui s'appuyait dessus, a été reporté sur
+la table pivot) ; l'historique ne journalise plus de faux écarts sur ce
+champ ; la suppression d'un périphérique nettoie enfin les tables liées
+(un oubli du correctif équivalent sur appareils/contrats en 2.18.21).
+
+**Identification au scan réseau — retour d'usage réel**
+
+Signalé : un MacBook ressortait comme « machine Linux », switches et
+bornes WiFi n'étaient pas identifiés comme tels.
+- Le TTL seul ne distingue pas macOS de Linux (les deux à 64 par défaut) :
+  le fabricant MAC officiel Apple et le hostname mDNS typique
+  (`...-MacBook-Pro.local`) affinent désormais la détection — un Mac n'est
+  plus jamais classé « PC/Serveur (Linux) ».
+- Un fabricant réseau reconnu (Ubiquiti, MikroTik, TP-Link, Netgear, Aruba,
+  Zyxel, Ruckus, Meraki...) sans indice de sous-type dans le hostname
+  tombe sur une catégorie réseau neutre plutôt que d'être systématiquement
+  supposé « Routeur/Pare-feu » (cas réel : une borne ou un switch
+  Ubiquiti/UniFi devenaient tous les deux « routeur »).
+- NAS reconnu comme catégorie propre (n'était auparavant que « Serveur »).
+- Détection réseau enrichie par **SNMP** (sysDescr/sysName) — absente
+  jusqu'ici. Client SNMPv1 GET minimal, encodage BER écrit à la main
+  (aucune dépendance ajoutée, même logique que la vérification DNS déjà
+  construite à la main) : un switch ou une imprimante managés
+  s'identifient désormais souvent dès le premier scan, sans configuration
+  supplémentaire.
+- Corrigé au passage : les valeurs renvoyées par le scan ne correspondaient
+  pas toujours exactement à la liste canonique des types d'appareils — un
+  type hors liste fait silencieusement retomber le sélecteur de la fiche
+  appareil sur la première option au prochain enregistrement, effaçant le
+  type détecté sans avertissement.
+
+**Baie de brassage et lien croisé**
+
+`parc_general` (résumé switch/routeur/UPS) et la baie de brassage
+(position physique par U) décrivaient le même matériel sans jamais se
+recouper. La fiche parc général affiche désormais un lien vers le plan
+visuel de la baie avec le nombre d'emplacements réellement positionnés ;
+et puisque le scan sait maintenant identifier marque/modèle des
+équipements réseau, `/api/scan/importer` **suggère** (jamais n'impose)
+d'ajouter à la baie tout équipement détecté qui n'y est pas encore — la
+position physique dans le rack reste à saisir, elle ne peut pas être
+déduite d'un scan réseau.
+
+**Champ Utilisateur (fiche appareil)**
+
+Texte libre rattaché aux fiches utilisateurs par comparaison de nom : une
+coquille ou un surnom cassait le lien silencieusement, sans le moindre
+signalement. Le champ reste du texte libre (aucune migration), mais
+propose désormais une autocomplétion sur les utilisateurs connus du
+client et affiche un avertissement quand la saisie ne correspond à aucune
+fiche — avec la même normalisation (accents, casse, ordre Nom/Prénom) que
+la résolution réelle côté serveur.
+
 ## [2.18.21] - 2026-08-20 🛡️
 
 ### 🛡️ 5 correctifs issus de l'audit architecture (scan, collecteur, cascades)
