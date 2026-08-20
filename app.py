@@ -3662,6 +3662,7 @@ def nouvel_appareil():
     contrats = [row_to_dict(r) for r in conn.execute(
         "SELECT id,titre,fournisseur,statut FROM contrats WHERE client_id=? ORDER BY titre", (cid,)).fetchall()]
     lm_list = _get_logiciels_metier_list(conn, cid)
+    utilisateurs_noms, utilisateurs_variantes = _utilisateurs_pour_formulaire(conn, cid)
     conn.close()
     if request.method == 'POST':
         if not can_write():
@@ -3713,6 +3714,8 @@ def nouvel_appareil():
                            sw_sel=[],
                            sw_custom_sel=[],
                            licences=[],
+                           utilisateurs_noms=utilisateurs_noms,
+                           utilisateurs_variantes=utilisateurs_variantes,
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/appareil/<int:id>/editer', methods=['GET','POST'])
@@ -3766,6 +3769,7 @@ def editer_appareil(id):
         d['taille_fmt'] = human_size(d.get('taille', 0))
     contrats = [row_to_dict(r) for r in conn.execute(
         "SELECT id,titre,fournisseur,statut FROM contrats WHERE client_id=? ORDER BY titre", (cid,)).fetchall()]
+    utilisateurs_noms, utilisateurs_variantes = _utilisateurs_pour_formulaire(conn, cid)
     licences = [row_to_dict(r) for r in conn.execute(
         'SELECT * FROM licences_appareils WHERE appareil_id=? ORDER BY id', (id,)).fetchall()]
     lm_list = _get_logiciels_metier_list(conn, cid)
@@ -3787,6 +3791,8 @@ def editer_appareil(id):
 
     return render_template('form_appareil.html', appareil=a, documents=docs, action='Modifier',
                            cles_bitlocker=cles_bitlocker,
+                           utilisateurs_noms=utilisateurs_noms,
+                           utilisateurs_variantes=utilisateurs_variantes,
                            types_appareils=get_liste_cached('types_appareils'),
                            marques_av=get_liste('marques_antivirus'),
                            noms_av=get_liste('noms_antivirus'),
@@ -6061,7 +6067,7 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
     h = (hostname + " " + vendor + " " + extra_signal).lower()
     # Imprimante
     if any(x in h for x in ['printer','print','canon','epson','brother','ricoh',
-                              'xerox','kyocera','konica','lexmark','hp printer']):
+                              'xerox','kyocera','konica','lexmark','hp printer','jetdirect']):
         return 'Imprimante'
     if 9100 in ports or 631 in ports:
         return 'Imprimante'
@@ -6380,6 +6386,130 @@ def _decouverte_mdns_reseau(timeout=3):
     return trouves
 
 
+# ── SNMP (sysDescr/sysName) ──────────────────────────────────────────────────
+# Absent jusqu'ici (audit architecture : "toujours aucun SNMP") — pourtant le
+# moyen le plus fiable d'identifier précisément un switch/imprimante/routeur
+# managé : sysDescr renvoie en général le texte exact du constructeur
+# ("Cisco IOS Software, C2960...", "HP ETHERNET MULTI-ENVIRONMENT..."). Client
+# SNMPv1 GET minimal, encodage BER à la main (même logique que la requête DNS
+# construite à la main pour la vérification DNS) : aucune dépendance
+# supplémentaire pour une fonctionnalité de scan optionnelle. Communauté
+# "public" en lecture seule uniquement, jamais d'écriture SNMP.
+_OID_SYS_DESCR = '1.3.6.1.2.1.1.1.0'
+_OID_SYS_NAME  = '1.3.6.1.2.1.1.5.0'
+
+
+def _ber_longueur(n):
+    if n < 0x80:
+        return bytes([n])
+    octets = []
+    while n:
+        octets.insert(0, n & 0xff)
+        n >>= 8
+    return bytes([0x80 | len(octets)]) + bytes(octets)
+
+
+def _ber_entier(n):
+    corps = n.to_bytes((n.bit_length() // 8) + 1, 'big', signed=True) if n else b'\x00'
+    return b'\x02' + _ber_longueur(len(corps)) + corps
+
+
+def _ber_chaine(s):
+    b = s.encode('utf-8') if isinstance(s, str) else s
+    return b'\x04' + _ber_longueur(len(b)) + b
+
+
+def _ber_oid(oid_str):
+    parties = [int(x) for x in oid_str.split('.')]
+    octets = bytearray([parties[0] * 40 + parties[1]])
+    for p in parties[2:]:
+        if p == 0:
+            octets.append(0)
+            continue
+        chunk = []
+        while p:
+            chunk.insert(0, p & 0x7f)
+            p >>= 7
+        for i in range(len(chunk) - 1):
+            chunk[i] |= 0x80
+        octets.extend(chunk)
+    return b'\x06' + _ber_longueur(len(octets)) + bytes(octets)
+
+
+def _ber_sequence(tag, contenu):
+    return bytes([tag]) + _ber_longueur(len(contenu)) + contenu
+
+
+def _ber_lire_tlv(data, pos):
+    """Lit un TLV BER à partir de `pos`. Retourne (tag, valeur_brute, position_suivante)."""
+    tag = data[pos]; pos += 1
+    longueur = data[pos]; pos += 1
+    if longueur & 0x80:
+        n = longueur & 0x7f
+        longueur = int.from_bytes(data[pos:pos + n], 'big')
+        pos += n
+    valeur = data[pos:pos + longueur]
+    return tag, valeur, pos + longueur
+
+
+def _snmp_get(ip_str, oids, communaute='public', timeout=0.5, port=161):
+    """GET SNMPv1 minimal. Retourne {oid: texte} pour les OID qui ont répondu
+    avec une chaîne (sysDescr/sysName sont toujours des OCTET STRING) — {}
+    au moindre souci (agent absent, communauté refusée, timeout, réponse
+    inattendue) : ce n'est qu'un signal supplémentaire, jamais bloquant.
+    `port` n'existe que pour les tests (agent factice sur un port non
+    privilégié) ; toujours 161 en usage réel."""
+    try:
+        varbinds = b''.join(_ber_sequence(0x30, _ber_oid(oid) + b'\x05\x00') for oid in oids)
+        pdu_corps = _ber_entier(1) + _ber_entier(0) + _ber_entier(0) + _ber_sequence(0x30, varbinds)
+        pdu = _ber_sequence(0xa0, pdu_corps)
+        message = _ber_sequence(
+            0x30, _ber_entier(0) + _ber_chaine(communaute) + pdu)
+
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            s.sendto(message, (ip_str, port))
+            data, _ = s.recvfrom(2048)
+
+        # SEQUENCE { version, communaute, GetResponse-PDU(0xA2) { ..., varbindlist } }
+        _, corps, _ = _ber_lire_tlv(data, 0)
+        pos = 0
+        _, _version, pos = _ber_lire_tlv(corps, pos)
+        _, _comm, pos = _ber_lire_tlv(corps, pos)
+        tag_pdu, pdu_corps, _ = _ber_lire_tlv(corps, pos)
+        if tag_pdu != 0xa2:
+            return {}
+        p = 0
+        _, _reqid, p = _ber_lire_tlv(pdu_corps, p)
+        _, err_status, p = _ber_lire_tlv(pdu_corps, p)
+        _, _err_idx, p = _ber_lire_tlv(pdu_corps, p)
+        if err_status and int.from_bytes(err_status, 'big', signed=True) != 0:
+            return {}
+        _, varbindlist, p = _ber_lire_tlv(pdu_corps, p)
+
+        # Un agent SNMP répond dans le MÊME ordre que les OID demandés (RFC
+        # 1157) — associer varbind #i à oids[i] directement, plutôt que de
+        # tenter de ré-identifier l'OID retourné : un varbind en erreur (type
+        # différent d'OCTET STRING) ne doit pas décaler les suivants.
+        resultats = {}
+        vp = 0
+        i = 0
+        while vp < len(varbindlist) and i < len(oids):
+            tag_vb, vb_corps, vp = _ber_lire_tlv(varbindlist, vp)
+            if tag_vb == 0x30:
+                vbp = 0
+                _tag_oid, _oid_brut, vbp = _ber_lire_tlv(vb_corps, vbp)
+                tag_val, val_brut, vbp = _ber_lire_tlv(vb_corps, vbp)
+                if tag_val == 0x04:  # OCTET STRING
+                    texte = val_brut.decode('utf-8', errors='replace').strip()
+                    if texte:
+                        resultats[oids[i]] = texte
+            i += 1
+        return resultats
+    except Exception:
+        return {}
+
+
 def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
     """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant.
 
@@ -6394,11 +6524,12 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
     # 0.5s est suffisant même sur les réseaux chargés
     time.sleep(0.5)
     # Lancer hostname + NetBIOS + OS + ports en parallèle
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
         f_hostname = ex.submit(_hostname,     ip_str)
         f_netbios  = ex.submit(_netbios_name, ip_str)
         f_os       = ex.submit(_ttl_os_guess, ip_str)
         f_ports    = ex.submit(_scan_ports,   ip_str)
+        f_snmp     = ex.submit(_snmp_get,     ip_str, [_OID_SYS_DESCR, _OID_SYS_NAME])
         try: hostname  = f_hostname.result(timeout=5)
         except Exception: hostname = ""
         try: netbios   = f_netbios.result(timeout=5)
@@ -6407,6 +6538,8 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
         except Exception: os_guess = ""
         try: ports     = f_ports.result(timeout=15)
         except Exception: ports = []
+        try: snmp_info = f_snmp.result(timeout=2)
+        except Exception: snmp_info = {}
     # Lire le MAC APRÈS les sondes (table ARP forcément peuplée maintenant)
     mac = _mac_from_arp(ip_str)
     # Si toujours vide, deuxième tentative après ping supplémentaire
@@ -6425,11 +6558,18 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
     upnp_info = (upnp_par_ip or {}).get(ip_str) or {}
     mdns_info = (mdns_par_ip or {}).get(ip_str) or {}
 
-    display_name = netbios or hostname or upnp_info.get('friendly_name') or mdns_info.get('nom') or ip_str
+    # sysName (SNMP) est en général le nom configuré à la main sur un
+    # équipement managé — aussi fiable qu'un hostname DNS/NetBIOS, en repli
+    # juste après eux (avant IGD UPnP/mDNS, moins spécifiques à CET appareil).
+    snmp_sysname = (snmp_info or {}).get(_OID_SYS_NAME, '')
+    snmp_sysdescr = (snmp_info or {}).get(_OID_SYS_DESCR, '')
+    display_name = (netbios or hostname or snmp_sysname
+                    or upnp_info.get('friendly_name') or mdns_info.get('nom') or ip_str)
     signal_supplementaire = ' '.join(bannieres.values())
     host_type = _deviner_type(
         display_name, ports, os_guess, vendor,
-        extra_signal=' '.join([signal_supplementaire, upnp_info.get('friendly_name', ''),
+        extra_signal=' '.join([signal_supplementaire, snmp_sysdescr,
+                               upnp_info.get('friendly_name', ''),
                                upnp_info.get('manufacturer', ''), mdns_info.get('nom', '')]),
         upnp_device_type=upnp_info.get('device_type', ''),
         mdns_service=mdns_info.get('service', ''),
@@ -6453,6 +6593,8 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
         result["upnp"] = upnp_info
     if mdns_info:
         result["mdns"] = mdns_info
+    if snmp_sysdescr or snmp_sysname:
+        result["snmp"] = {'sysDescr': snmp_sysdescr, 'sysName': snmp_sysname}
 
     # Marque/modèle « les plus précis disponibles » : UPnP et mDNS
     # identifient déjà l'appareil lui-même (contrairement à vendor, qui ne
@@ -6625,6 +6767,16 @@ def _fmt_go(valeur):
     return f"{int(nombre)} Go" if nombre == int(nombre) else f"{nombre} Go"
 
 
+# Types pour lesquels une position dans la baie de brassage a du sens —
+# audit architecture : parc_general et la baie décrivaient le même matériel
+# sans jamais se recouper ; le scan sait maintenant identifier ces types
+# avec marque/modèle, autant s'en servir pour suggérer une entrée plutôt
+# que de laisser la baie 100% manuelle. Jamais imposé : juste suggéré, la
+# position physique dans le rack reste à saisir (elle ne peut pas être
+# déduite d'un scan réseau).
+_TYPES_SUGGESTION_BAIE = {'Switch', 'Routeur/Pare-feu', 'Switch/AP', 'NAS'}
+
+
 @app.route('/api/scan/importer', methods=['POST'])
 @login_required
 def importer_scan():
@@ -6632,6 +6784,7 @@ def importer_scan():
     items = request.json.get('appareils', [])
     conn = get_db(); now = datetime.utcnow().isoformat()
     importes = 0; mis_a_jour = 0
+    suggestions_baie = []
     for item in items:
         ip        = item.get('ip', '')
         ports_str = ','.join(str(p) for p in item.get('ports', []))
@@ -6683,8 +6836,16 @@ def importer_scan():
             importes += 1
             log_history(conn, cid, 'appareil', app_id, nom, 'Création (scan réseau)',
                         {'source': 'scan-reseau', 'ip': ip, 'mac': mac})
+
+        type_detecte = item.get('type', 'PC')
+        if type_detecte in _TYPES_SUGGESTION_BAIE:
+            deja_dans_baie = conn.execute(
+                'SELECT 1 FROM baie_slots WHERE appareil_id=?', (app_id,)).fetchone()
+            if not deja_dans_baie:
+                suggestions_baie.append({'id': app_id, 'nom': nom, 'type': type_detecte,
+                                         'marque': marque, 'modele': modele})
     conn.commit(); conn.close()
-    return jsonify({"importes":importes,"total":len(items)})
+    return jsonify({"importes": importes, "total": len(items), "suggestions_baie": suggestions_baie})
 
 
 def _sync_collector_peripherals(conn, cid, appareil_id, monitors, printers, usb_devices=None):
@@ -10714,6 +10875,34 @@ def _normalize_name(text):
     text = unicodedata.normalize('NFD', str(text or ''))
     text = ''.join(ch for ch in text if unicodedata.category(ch) != 'Mn')
     return ' '.join(text.lower().split())
+
+
+def _utilisateurs_pour_formulaire(conn, client_id):
+    """Noms affichables (datalist) + variantes normalisées (détection de non-
+    correspondance côté JS) des utilisateurs actifs du client.
+
+    Mêmes variantes que _resolve_utilisateur_id ci-dessous (Prénom Nom, Nom
+    Prénom, Nom seul) : le formulaire peut ainsi signaler côté client, sans
+    aller-retour serveur, qu'une saisie ne correspondra à aucune fiche —
+    piste « champ Utilisateur en texte libre » de l'audit architecture
+    (une coquille ou un surnom cassait le rattachement automatique aux
+    périphériques sans le moindre signalement).
+    """
+    rows = conn.execute(
+        "SELECT prenom, nom FROM utilisateurs WHERE client_id=? AND statut='actif' ORDER BY nom",
+        (client_id,)).fetchall()
+    noms = []
+    variantes = set()
+    for prenom, nom in rows:
+        prenom, nom = prenom or '', nom or ''
+        affichage = ('%s %s' % (prenom, nom)).strip()
+        if affichage:
+            noms.append(affichage)
+        for candidat in ('%s %s' % (prenom, nom), '%s %s' % (nom, prenom), nom):
+            v = _normalize_name(candidat)
+            if v:
+                variantes.add(v)
+    return noms, sorted(variantes)
 
 
 def _resolve_utilisateur_id(conn, client_id, texte):

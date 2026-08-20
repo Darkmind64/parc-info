@@ -160,7 +160,18 @@
         <div class="form-row cols-3">
             <div class="form-group">
                 <label>Utilisateur</label>
-                <input type="text" name="utilisateur" value="{{ appareil.utilisateur if appareil else '' }}" placeholder="Nom de l'utilisateur">
+                <input type="text" name="utilisateur" id="input-utilisateur" list="datalist-utilisateurs"
+                       value="{{ appareil.utilisateur if appareil else '' }}" placeholder="Nom de l'utilisateur"
+                       oninput="verifierUtilisateurConnu()" autocomplete="off">
+                <datalist id="datalist-utilisateurs">
+                    {% for nom in utilisateurs_noms %}
+                    <option value="{{ nom }}">
+                    {% endfor %}
+                </datalist>
+                <small id="warn-utilisateur-inconnu" style="display:none;color:var(--accent-orange,#f59e0b);font-size:.72rem;margin-top:.25rem;">
+                    ⚠ Aucune fiche utilisateur ne correspond à ce nom — le rattachement automatique
+                    aux périphériques ne fonctionnera pas pour cette saisie.
+                </small>
             </div>
             <div class="form-group">
                 <label>Service / Département</label>
@@ -989,6 +1000,27 @@ function calcFinGarantie() {
 document.addEventListener("DOMContentLoaded", () => {
     FormTools.init('form-appareil', { draftKey: 'draft_app' });
 });
+</script>
+<script>
+// ── UTILISATEUR EN TEXTE LIBRE : signaler une saisie sans correspondance ──
+// Même normalisation que _normalize_name()/_resolve_utilisateur_id() côté
+// serveur (accents, casse, espaces) : une coquille ou un surnom qui
+// casserait silencieusement le rattachement automatique aux périphériques
+// est désormais visible avant l'enregistrement, pas après.
+const UTILISATEURS_VARIANTES = new Set({{ utilisateurs_variantes | tojson }});
+const RE_COMBINING_MARKS = new RegExp('[̀-ͯ]', 'g');
+function normaliserNomUtilisateur(s) {
+    return (s || '').normalize('NFD').replace(RE_COMBINING_MARKS, '')
+        .toLowerCase().trim().replace(/\s+/g, ' ');
+}
+function verifierUtilisateurConnu() {
+    const champ = document.getElementById('input-utilisateur');
+    const warn  = document.getElementById('warn-utilisateur-inconnu');
+    if (!champ || !warn) return;
+    const val = normaliserNomUtilisateur(champ.value);
+    warn.style.display = (val && !UTILISATEURS_VARIANTES.has(val)) ? '' : 'none';
+}
+document.addEventListener('DOMContentLoaded', verifierUtilisateurConnu);
 </script>
 <script>
 // ── COPIER DANS LE PRESSE-PAPIERS ────────────────────────────────────────────

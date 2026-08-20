@@ -416,7 +416,8 @@ function renderTable(results) {
     const filtered = sorted.filter(h => {
         const txt = [h.ip, h.display_name||'', h.hostname||'', h.netbios||'',
                      h.type||'', h.vendor||'', h.mac||'', h.marque_detectee||'', h.modele_detectee||'',
-                     (h.upnp&&h.upnp.friendly_name)||'', (h.mdns&&h.mdns.nom)||''].join(' ').toLowerCase();
+                     (h.upnp&&h.upnp.friendly_name)||'', (h.mdns&&h.mdns.nom)||'',
+                     (h.snmp&&h.snmp.sysName)||'', (h.snmp&&h.snmp.sysDescr)||''].join(' ').toLowerCase();
         return (!q || txt.includes(q)) && (!typ || h.type === typ);
     });
 
@@ -442,17 +443,23 @@ function renderTable(results) {
         const osBadge = h.os_guess
             ? `<span class="badge-os badge-os-${osBadgeClass}">${h.os_guess}</span>`
             : '—';
-        const bannieresTxt = h.bannieres ? Object.entries(h.bannieres).map(([p,b]) => `${p}: ${b}`).join('\n') : '';
+        const bannieresTxt = [h.bannieres ? Object.entries(h.bannieres).map(([p,b]) => `${p}: ${b}`).join('\n') : '',
+                              (h.snmp && h.snmp.sysDescr) ? `SNMP: ${h.snmp.sysDescr}` : '']
+                              .filter(Boolean).join('\n');
         const ports = (h.ports||[]).slice(0,7).map(p => `<span class="port-chip">${p}</span>`).join('')
                     + (h.ports&&h.ports.length>7 ? `<span class="port-chip">+${h.ports.length-7}</span>` : '');
         const macLine = h.mac ? `<div style="font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--text-muted);">${h.mac}</div>` : '';
-        // Nom UPnP/mDNS : affiché seulement s'il apporte quelque chose que
-        // NetBIOS/DNS n'avait pas déjà (évite la redondance sur la majorité
-        // des postes, où seul UPnP/mDNS répond rarement de toute façon).
-        const nomAlt = (h.upnp && h.upnp.friendly_name) || (h.mdns && h.mdns.nom) || '';
+        // Nom UPnP/mDNS/SNMP : affiché seulement s'il apporte quelque chose
+        // que NetBIOS/DNS n'avait pas déjà (évite la redondance sur la
+        // majorité des postes, où ces sondes répondent rarement de toute
+        // façon). sysName (SNMP) est en général le nom configuré à la main
+        // sur un équipement managé — aussi fiable qu'un hostname.
+        const nomAlt = (h.upnp && h.upnp.friendly_name) || (h.mdns && h.mdns.nom)
+                     || (h.snmp && h.snmp.sysName) || '';
         const nomActuel = h.netbios || h.hostname || '';
+        const sourceAlt = h.upnp&&h.upnp.friendly_name ? 'UPnP' : h.mdns&&h.mdns.nom ? 'mDNS' : 'SNMP';
         const nomAltLine = (nomAlt && nomAlt !== nomActuel)
-            ? `<div style="font-size:.68rem;color:var(--text-muted);" title="Détecté par ${h.upnp&&h.upnp.friendly_name?'UPnP':'mDNS'}">📡 ${escH(nomAlt)}</div>` : '';
+            ? `<div style="font-size:.68rem;color:var(--text-muted);" title="Détecté par ${sourceAlt}">📡 ${escH(nomAlt)}</div>` : '';
         // Fabricant/modèle « les plus précis » (WMI/UPnP identifient
         // l'appareil, pas seulement la puce réseau comme le préfixe MAC) —
         // affichés à la place du simple fabricant OUI quand disponibles.
@@ -522,9 +529,26 @@ async function importerSelection() {
         body: JSON.stringify({appareils: toImport})
     });
     const d = await r.json();
-    alert(`Import terminé :\n• ${d.importes} ajouté(s)\n• ${d.mis_a_jour||0} mis à jour`);
+    let msg = `Import terminé :\n• ${d.importes} ajouté(s)\n• ${d.mis_a_jour||0} mis à jour`;
     toImport.forEach(h => INVENTAIRE_IPS.add(h.ip));
     renderTable(scanResults);
+
+    // Suggestion (jamais imposée) : équipements réseau détectés mais pas
+    // encore positionnés dans la baie de brassage — voir _TYPES_SUGGESTION_BAIE
+    // côté serveur. La position physique dans le rack reste à saisir, elle
+    // ne peut pas être déduite d'un scan réseau.
+    const suggestions = d.suggestions_baie || [];
+    if (suggestions.length) {
+        const liste = suggestions.map(s => `• ${s.nom} (${s.type})`).join('\n');
+        msg += `\n\n📡 ${suggestions.length} équipement(s) réseau détecté(s), pas encore ` +
+               `positionné(s) dans la baie de brassage :\n${liste}\n\n` +
+               `Ouvrir la baie de brassage pour les placer maintenant ?`;
+        if (confirm(msg)) {
+            location.href = '/baie';
+            return;
+        }
+    }
+    alert(msg);
 }
 
 // ── STATS + BARGRAPH ──────────────────────────────────────────────────────────
