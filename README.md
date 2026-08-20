@@ -92,7 +92,9 @@ system-info-collector.exe --client-id 5  # Windows
 
 ### Parc & Configuration
 - ✅ **Parc général** : site, réseau, baie de brassage, switches, serveurs, UPS
-- ✅ **Scan réseau** : découverte auto via ping → ARP → scan ports TCP
+- ✅ **Scan réseau** : découverte auto via ping → ARP → scan ports TCP, avec
+  bannières de service, découverte UPnP et mDNS (imprimantes, NAS, Apple,
+  Chromecast) pour affiner marque/modèle/type détectés
 - ✅ **Détection fabricants** : identification MAC avec base IEEE OUI
 - ✅ **Plans de disposition** : éditeur visuel (optionnel)
 - ✅ **Tableau de bord** : statistiques, warranties, contrats actifs

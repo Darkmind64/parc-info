@@ -5934,9 +5934,105 @@ def _scan_ports(ip_str):
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(PORTS), 50)) as ex:
         return sorted([p for p in ex.map(check, PORTS) if p])
 
-def _deviner_type(hostname, ports, os_guess="", vendor=""):
-    """Détermine le type d'équipement depuis le hostname, les ports ouverts, l'OS et le fabricant."""
-    h = (hostname + " " + vendor).lower()
+# ── BANNIÈRES DE SERVICE ────────────────────────────────────────────────────
+# Le scan ne savait dire que "port ouvert ou non" — un port 22 répond souvent
+# "SSH-2.0-OpenSSH_8.9 Ubuntu" ou "...Cisco", un port web a un en-tête Server
+# et un titre de page. Affine la détection de type/fabricant sans dépendance
+# supplémentaire. Uniquement sur les ports déjà trouvés ouverts (pas de
+# tentative sur un port fermé).
+_PORTS_BANNIERE_TEXTE = {21, 22, 23, 25, 110, 143}   # saluent en premier, sans requête
+_PORTS_BANNIERE_HTTP  = {80, 8000, 8008, 8080, 8888}
+_PORTS_BANNIERE_HTTPS = {443, 8443}
+
+
+def _grab_banniere_texte(ip_str, port, timeout=1.2):
+    """Bannière de salutation (SSH/FTP/SMTP/POP3/IMAP...), envoyée par le
+    serveur dès la connexion, sans qu'on ait besoin d'écrire quoi que ce soit."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((ip_str, port))
+        data = s.recv(256)
+        s.close()
+        texte = re.sub(r'[\r\n\x00-\x1f]+', ' ', data.decode('utf-8', errors='replace')).strip()
+        return texte[:200]
+    except Exception:
+        return ''
+
+
+def _grab_banniere_http(ip_str, port, https=False, timeout=2.0):
+    """En-tête Server + titre de page — beaucoup d'imprimantes/NAS/routeurs
+    s'identifient dans leur page de connexion. HTTPS avec vérification
+    désactivée : ces panneaux d'administration LAN utilisent presque
+    toujours un certificat auto-signé, on ne fait ici que lire un en-tête,
+    pas transmettre de secret."""
+    import urllib.request
+    try:
+        ctx = None
+        if https:
+            import ssl
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        url = f"{'https' if https else 'http'}://{ip_str}:{port}/"
+        requete = urllib.request.Request(url, headers={'User-Agent': 'ParcInfo-Scan'})
+        with urllib.request.urlopen(requete, timeout=timeout, context=ctx) as reponse:
+            serveur = reponse.headers.get('Server', '')
+            corps = reponse.read(4096).decode('utf-8', errors='replace')
+        m = re.search(r'<title[^>]*>(.*?)</title>', corps, re.IGNORECASE | re.DOTALL)
+        titre = re.sub(r'\s+', ' ', m.group(1)).strip() if m else ''
+        return ' — '.join(x for x in (serveur, titre) if x)[:200]
+    except Exception:
+        return ''
+
+
+def _grab_banniere(ip_str, port):
+    if port in _PORTS_BANNIERE_HTTPS:
+        return _grab_banniere_http(ip_str, port, https=True)
+    if port in _PORTS_BANNIERE_HTTP:
+        return _grab_banniere_http(ip_str, port, https=False)
+    if port in _PORTS_BANNIERE_TEXTE:
+        return _grab_banniere_texte(ip_str, port)
+    return ''
+
+
+def _grab_bannieres(ip_str, ports_ouverts):
+    """Bannière de service pour chaque port ouvert pertinent. Retourne
+    {port: texte}, sans les ports muets."""
+    pertinents = [p for p in ports_ouverts
+                  if p in _PORTS_BANNIERE_TEXTE or p in _PORTS_BANNIERE_HTTP or p in _PORTS_BANNIERE_HTTPS]
+    if not pertinents:
+        return {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(pertinents)) as ex:
+        resultats = dict(zip(pertinents, ex.map(lambda p: _grab_banniere(ip_str, p), pertinents)))
+    return {p: b for p, b in resultats.items() if b}
+
+
+def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp_device_type="", mdns_service=""):
+    """Détermine le type d'équipement depuis le hostname, les ports ouverts, l'OS et le fabricant.
+
+    `extra_signal` regroupe tout texte identifiant supplémentaire (bannières
+    de service, nom UPnP/mDNS) : traité comme le hostname/fabricant, en plus
+    des signaux structurés plus fiables (device_type UPnP, type de service
+    mDNS) vérifiés en premier quand ils sont sans ambiguïté.
+    """
+    # Signaux structurés d'abord : un deviceType UPnP ou un type de service
+    # mDNS ne laisse en général aucun doute, contrairement à une simple
+    # sous-chaîne de hostname.
+    dt = (upnp_device_type or '').lower()
+    if 'internetgatewaydevice' in dt:
+        return 'Routeur/Pare-feu'
+    if 'printer' in dt:
+        return 'Imprimante'
+    if 'mediaserver' in dt or 'nas' in dt:
+        return 'Serveur'
+    svc = (mdns_service or '').lower()
+    if svc in ('ipp', 'printer', 'pdl-datastream'):
+        return 'Imprimante'
+    if svc == 'smb':
+        return 'Serveur'
+
+    h = (hostname + " " + vendor + " " + extra_signal).lower()
     # Imprimante
     if any(x in h for x in ['printer','print','canon','epson','brother','ricoh',
                               'xerox','kyocera','konica','lexmark','hp printer']):
@@ -6053,11 +6149,186 @@ def _enrich_from_wmi(ip_str, hostname_hint=""):
 
     return enriched
 
-def _scan_host(ip_str, enrich_wmi=False):
+# ── DÉCOUVERTE UPnP (ssdp:all) ───────────────────────────────────────────────
+# collector_core._upnp_decouvrir_passerelle (côté collecteur) ne cherche que
+# la box Internet (ST=InternetGatewayDevice) depuis LE poste qui collecte.
+# Ici, côté scan réseau, on cherche TOUT appareil UPnP du segment (NAS, TV
+# connectées, serveurs média...) — une seule requête multicast pour tout le
+# scan plutôt qu'une par hôte, les réponses portent chacune l'IP de leur
+# émetteur.
+def _ssdp_decouvrir_tout(timeout=3):
+    """Retourne {ip: url_description_xml} pour chaque appareil UPnP qui répond."""
+    message = (
+        'M-SEARCH * HTTP/1.1\r\n'
+        'HOST: 239.255.255.250:1900\r\n'
+        'MAN: "ssdp:discover"\r\n'
+        'MX: 2\r\n'
+        'ST: ssdp:all\r\n'
+        '\r\n'
+    ).encode('utf-8')
+    trouves = {}
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            s.sendto(message, ('239.255.255.250', 1900))
+            fin = time.time() + timeout
+            while time.time() < fin:
+                try:
+                    data, (ip_source, _port) = s.recvfrom(4096)
+                except socket.timeout:
+                    break
+                except Exception:
+                    continue
+                if ip_source in trouves:
+                    continue
+                texte = data.decode('utf-8', errors='ignore')
+                for ligne in texte.split('\r\n'):
+                    if ligne.upper().startswith('LOCATION:'):
+                        trouves[ip_source] = ligne.split(':', 1)[1].strip()
+                        break
+    except Exception:
+        pass
+    return trouves
+
+
+def _upnp_description_appareil(location_url):
+    """Fabricant/modèle/nom/type depuis la description XML d'un appareil UPnP."""
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    try:
+        requete = urllib.request.Request(location_url, headers={'User-Agent': 'ParcInfo-Scan'})
+        with urllib.request.urlopen(requete, timeout=3) as reponse:
+            xml_brut = reponse.read()
+        racine = ET.fromstring(xml_brut)
+    except Exception:
+        return {}
+    ns = {'u': 'urn:schemas-upnp-org:device-1-0'}
+
+    def texte(chemin):
+        el = racine.find('.//u:' + chemin, ns)
+        return el.text.strip() if el is not None and el.text else ''
+
+    resultat = {
+        'manufacturer': texte('manufacturer'),
+        'model_name': texte('modelName'),
+        'friendly_name': texte('friendlyName'),
+        'device_type': texte('deviceType'),
+    }
+    return {k: v for k, v in resultat.items() if v}
+
+
+def _decouverte_upnp_reseau(timeout=3):
+    """SSDP ssdp:all + description XML pour chaque appareil trouvé.
+    Retourne {ip: {manufacturer, model_name, friendly_name, device_type}} —
+    best-effort, {} si rien ne répond (fréquent : beaucoup d'appareils
+    grand public seulement, UPnP souvent désactivé sur le matériel pro)."""
+    emplacements = _ssdp_decouvrir_tout(timeout=timeout)
+    if not emplacements:
+        return {}
+    resultat = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(emplacements), 10)) as ex:
+        futurs = {ex.submit(_upnp_description_appareil, url): ip for ip, url in emplacements.items()}
+        for f in concurrent.futures.as_completed(futurs):
+            ip_source = futurs[f]
+            try:
+                description = f.result()
+            except Exception:
+                description = {}
+            if description:
+                resultat[ip_source] = description
+    return resultat
+
+
+# ── DÉCOUVERTE mDNS (imprimantes, Apple, Chromecast, NAS...) ────────────────
+# zeroconf (déjà une dépendance) ne servait jusqu'ici qu'à retrouver d'autres
+# instances ParcInfo (_register_mdns / collector_core.discover_parcinfo_mdns)
+# — jamais à identifier le reste du matériel réseau. Types de service les
+# plus courants sur un LAN grand public/PME.
+_MDNS_TYPES_APPAREILS = [
+    '_ipp._tcp.local.',            # Imprimantes IPP (la grande majorité aujourd'hui)
+    '_printer._tcp.local.',        # Partage d'imprimante plus ancien
+    '_pdl-datastream._tcp.local.', # Impression brute port 9100
+    '_airplay._tcp.local.',        # Apple TV / récepteurs AirPlay
+    '_raop._tcp.local.',           # AirPlay audio (ancien)
+    '_googlecast._tcp.local.',     # Chromecast
+    '_smb._tcp.local.',            # Partages SMB / NAS
+    '_afpovertcp._tcp.local.',     # Partage Apple ancien (Time Capsule, vieux NAS)
+    '_device-info._tcp.local.',    # Identification d'appareil Apple (Mac/iPhone)
+]
+
+
+def _decouverte_mdns_reseau(timeout=3):
+    """Parcourt les types de service mDNS les plus courants. Retourne
+    {ip: {'nom':, 'service':}} — une seule session de navigation pour tout
+    le scan, pas une par hôte.
+
+    Limite connue (même que collector_core.discover_parcinfo_mdns) : un
+    ParcInfo en conteneur Docker réseau « bridge » ne relaie généralement
+    pas le trafic multicast — cette découverte reste alors silencieuse, le
+    scan IP classique restant le repli.
+    """
+    if not MDNS_AVAILABLE:
+        return {}
+    try:
+        from zeroconf import Zeroconf, ServiceBrowser
+    except ImportError:
+        return {}
+
+    trouves = {}
+
+    class _EcouteurAppareils:
+        def add_service(self, zc, type_service, nom):
+            if nom.startswith('ParcInfo'):
+                return  # une autre instance ParcInfo, pas un appareil du parc
+            try:
+                info = zc.get_service_info(type_service, nom, timeout=1500)
+            except Exception:
+                info = None
+            if not info:
+                return
+            try:
+                adresses = info.parsed_addresses()
+            except Exception:
+                adresses = []
+            for ip_str in adresses:
+                if ip_str not in trouves:
+                    trouves[ip_str] = {
+                        'nom': nom.split('.')[0],
+                        'service': type_service.rstrip('.').lstrip('_').split('._')[0],
+                    }
+
+        def update_service(self, *a, **k):
+            pass
+
+        def remove_service(self, *a, **k):
+            pass
+
+    zc = Zeroconf()
+    try:
+        ecouteur = _EcouteurAppareils()
+        for type_service in _MDNS_TYPES_APPAREILS:
+            try:
+                ServiceBrowser(zc, type_service, ecouteur)
+            except Exception:
+                pass
+        time.sleep(timeout)
+    except Exception:
+        pass
+    finally:
+        try:
+            zc.close()
+        except Exception:
+            pass
+    return trouves
+
+
+def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
     """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant.
 
     Optionnellement enrichit avec WMI si enrich_wmi=True et que c'est une machine Windows
-    accessible en RPC.
+    accessible en RPC. `upnp_par_ip`/`mdns_par_ip` : résultats de la découverte
+    UPnP/mDNS faite UNE fois pour tout le scan (_run_scan), pas par hôte —
+    on y cherche simplement l'entrée pour CETTE ip.
     """
     if not _ping(ip_str):
         return None
@@ -6084,9 +6355,20 @@ def _scan_host(ip_str, enrich_wmi=False):
     if not mac:
         time.sleep(0.5)
         mac = _mac_from_arp(ip_str)
-    vendor       = _oui_vendor(mac)
-    display_name = netbios or hostname or ip_str
-    host_type    = _deviner_type(display_name, ports, os_guess, vendor)
+    vendor    = _oui_vendor(mac)
+    bannieres = _grab_bannieres(ip_str, ports)
+    upnp_info = (upnp_par_ip or {}).get(ip_str) or {}
+    mdns_info = (mdns_par_ip or {}).get(ip_str) or {}
+
+    display_name = netbios or hostname or upnp_info.get('friendly_name') or mdns_info.get('nom') or ip_str
+    signal_supplementaire = ' '.join(bannieres.values())
+    host_type = _deviner_type(
+        display_name, ports, os_guess, vendor,
+        extra_signal=' '.join([signal_supplementaire, upnp_info.get('friendly_name', ''),
+                               upnp_info.get('manufacturer', ''), mdns_info.get('nom', '')]),
+        upnp_device_type=upnp_info.get('device_type', ''),
+        mdns_service=mdns_info.get('service', ''),
+    )
 
     result = {
         "ip":           ip_str,
@@ -6100,6 +6382,22 @@ def _scan_host(ip_str, enrich_wmi=False):
         "type":         host_type,
         "en_ligne":     True,
     }
+    if bannieres:
+        result["bannieres"] = bannieres
+    if upnp_info:
+        result["upnp"] = upnp_info
+    if mdns_info:
+        result["mdns"] = mdns_info
+
+    # Marque/modèle « les plus précis disponibles » : UPnP et mDNS
+    # identifient déjà l'appareil lui-même (contrairement à vendor, qui ne
+    # vient que du préfixe MAC — le fabricant de la puce réseau, pas
+    # toujours celui de l'appareil). Le WMI ci-dessous, plus fiable encore
+    # quand disponible, aura le dernier mot en écrasant ces valeurs.
+    if upnp_info.get('manufacturer'):
+        result['marque_detectee'] = upnp_info['manufacturer']
+    if upnp_info.get('model_name'):
+        result['modele_detectee'] = upnp_info['model_name']
 
     # Enrichissement WMI optionnel (pour Windows)
     if enrich_wmi and os_guess == "Windows":
@@ -6115,6 +6413,10 @@ def _scan_host(ip_str, enrich_wmi=False):
                 'cpu_cores': wmi_data.get('cpu_cores', ''),
                 'disk_total_gb': wmi_data.get('disk_total_gb', ''),
             })
+            if wmi_data.get('brand'):
+                result['marque_detectee'] = wmi_data['brand']
+            if wmi_data.get('model'):
+                result['modele_detectee'] = wmi_data['model']
 
     return result
 
@@ -6132,6 +6434,39 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
                     scan_status["errors"].append(f"Plage invalide '{plage}': {e}")
         # Dédoublonner
         hosts = list(dict.fromkeys(hosts))
+
+        # Découverte UPnP (ssdp:all) + mDNS (imprimantes, Apple, Chromecast,
+        # NAS...) : UNE fois pour tout le scan, pas par hôte — et terminée
+        # AVANT de démarrer le balayage IP, pour que chaque résultat soit
+        # enrichi dès sa première apparition. Un petit balayage (peu d'IP)
+        # peut finir en moins de temps que les ~3s que prend chacune de ces
+        # découvertes ; les lancer après aurait laissé une course où les
+        # premiers hôtes scannés n'auraient jamais leur enrichissement.
+        with scan_lock:
+            scan_status["message"] = "Découverte UPnP/mDNS..."
+        decouvertes_upnp, decouvertes_mdns = {}, {}
+
+        def _decouvrir_upnp():
+            nonlocal decouvertes_upnp
+            try:
+                decouvertes_upnp = _decouverte_upnp_reseau()
+            except Exception:
+                pass
+
+        def _decouvrir_mdns():
+            nonlocal decouvertes_mdns
+            try:
+                decouvertes_mdns = _decouverte_mdns_reseau()
+            except Exception:
+                pass
+
+        fils_decouverte = [threading.Thread(target=_decouvrir_upnp, daemon=True),
+                           threading.Thread(target=_decouvrir_mdns, daemon=True)]
+        for f in fils_decouverte:
+            f.start()
+        for f in fils_decouverte:
+            f.join(timeout=6)
+
         total = len(hosts); found = []; scanned = [0]
         def on_done(future, ip):
             scanned[0] += 1
@@ -6144,7 +6479,9 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
                     found.append(result)
                     scan_status["results"] = list(found)
         with concurrent.futures.ThreadPoolExecutor(max_workers=nb_threads) as executor:
-            futures = {executor.submit(_scan_host, ip, enrich_wmi=enrich_wmi): ip for ip in hosts}
+            futures = {executor.submit(_scan_host, ip, enrich_wmi=enrich_wmi,
+                                       upnp_par_ip=decouvertes_upnp, mdns_par_ip=decouvertes_mdns): ip
+                      for ip in hosts}
             for f in concurrent.futures.as_completed(futures):
                 on_done(f, futures[f])
         with scan_lock:
@@ -6182,6 +6519,17 @@ def lancer_scan():
 def status_scan():
     with scan_lock: return jsonify(dict(scan_status))
 
+def _fmt_go(valeur):
+    """'16' / 16.0 -> '16 Go' ; '512.5' -> '512.5 Go'. Vide si valeur absente."""
+    if valeur in (None, ''):
+        return ''
+    try:
+        nombre = float(valeur)
+    except (TypeError, ValueError):
+        return ''
+    return f"{int(nombre)} Go" if nombre == int(nombre) else f"{nombre} Go"
+
+
 @app.route('/api/scan/importer', methods=['POST'])
 @login_required
 def importer_scan():
@@ -6196,20 +6544,43 @@ def importer_scan():
         dns       = item.get('hostname', '')
         mac       = item.get('mac', '')
         vendor    = item.get('vendor', '')
-        marque    = vendor.split('/')[0].strip() if vendor else ''
+        # Marque : la plus précise disponible (WMI/UPnP identifient l'appareil
+        # lui-même — marque_detectee, posée par _scan_host) sinon repli sur le
+        # fabricant de la puce réseau déduit du préfixe MAC.
+        marque    = (item.get('marque_detectee') or item.get('brand') or '').strip() \
+                    or (vendor.split('/')[0].strip() if vendor else '')
+        modele       = (item.get('modele_detectee') or item.get('model') or '').strip()
+        numero_serie = (item.get('serial_number') or '').strip()
+        cpu          = (item.get('cpu') or '').strip()
+        ram          = _fmt_go(item.get('ram_gb'))
+        stockage     = _fmt_go(item.get('disk_total_gb'))
         existing  = conn.execute('SELECT id FROM appareils WHERE client_id=? AND adresse_ip=?', (cid, ip)).fetchone()
         if existing:
+            # Une valeur déjà présente (saisie à la main, ou posée par une
+            # collecte précédente) n'est jamais écrasée par une simple
+            # détection de scan — même principe que adresse_mac ci-dessous,
+            # déjà en place.
             conn.execute(
-                'UPDATE appareils SET en_ligne=1, dernier_ping=?, ports_ouverts=?, adresse_mac=COALESCE(NULLIF(adresse_mac,""),?), date_maj=? WHERE client_id=? AND adresse_ip=?',
-                (now, ports_str, mac, now, cid, ip))
+                '''UPDATE appareils SET en_ligne=1, dernier_ping=?, ports_ouverts=?,
+                   adresse_mac=COALESCE(NULLIF(adresse_mac,""),?),
+                   marque=COALESCE(NULLIF(marque,""),?),
+                   modele=COALESCE(NULLIF(modele,""),?),
+                   numero_serie=COALESCE(NULLIF(numero_serie,""),?),
+                   cpu=COALESCE(NULLIF(cpu,""),?),
+                   ram=COALESCE(NULLIF(ram,""),?),
+                   stockage=COALESCE(NULLIF(stockage,""),?),
+                   date_maj=? WHERE client_id=? AND adresse_ip=?''',
+                (now, ports_str, mac, marque, modele, numero_serie, cpu, ram, stockage,
+                 now, cid, ip))
             mis_a_jour += 1
         else:
             conn.execute(
-                '''INSERT INTO appareils (client_id,adresse_ip,nom_machine,nom_dns,adresse_mac,marque,type_appareil,
+                '''INSERT INTO appareils (client_id,adresse_ip,nom_machine,nom_dns,adresse_mac,marque,modele,
+                   numero_serie,cpu,ram,stockage,type_appareil,
                    ports_ouverts,en_ligne,dernier_ping,decouvert_scan,statut,date_creation,date_maj)
-                   VALUES (?,?,?,?,?,?,?,?,1,?,1,'actif',?,?)''',
-                (cid, ip, nom, dns, mac, marque, item.get('type', 'PC'),
-                 ports_str, now, now, now))
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,1,'actif',?,?)''',
+                (cid, ip, nom, dns, mac, marque, modele, numero_serie, cpu, ram, stockage,
+                 item.get('type', 'PC'), ports_str, now, now, now))
             importes += 1
     conn.commit(); conn.close()
     return jsonify({"importes":importes,"total":len(items)})

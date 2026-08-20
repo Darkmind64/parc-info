@@ -329,7 +329,8 @@ function renderTable(results) {
 
     const filtered = sorted.filter(h => {
         const txt = [h.ip, h.display_name||'', h.hostname||'', h.netbios||'',
-                     h.type||'', h.vendor||'', h.mac||''].join(' ').toLowerCase();
+                     h.type||'', h.vendor||'', h.mac||'', h.marque_detectee||'', h.modele_detectee||'',
+                     (h.upnp&&h.upnp.friendly_name)||'', (h.mdns&&h.mdns.nom)||''].join(' ').toLowerCase();
         return (!q || txt.includes(q)) && (!typ || h.type === typ);
     });
 
@@ -353,9 +354,25 @@ function renderTable(results) {
         const osBadge = h.os_guess
             ? `<span class="badge-os badge-os-${h.os_guess==='Windows'?'win':h.os_guess==='Linux/Unix'?'lin':'net'}">${h.os_guess}</span>`
             : '—';
+        const bannieresTxt = h.bannieres ? Object.entries(h.bannieres).map(([p,b]) => `${p}: ${b}`).join('\n') : '';
         const ports = (h.ports||[]).slice(0,7).map(p => `<span class="port-chip">${p}</span>`).join('')
                     + (h.ports&&h.ports.length>7 ? `<span class="port-chip">+${h.ports.length-7}</span>` : '');
         const macLine = h.mac ? `<div style="font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--text-muted);">${h.mac}</div>` : '';
+        // Nom UPnP/mDNS : affiché seulement s'il apporte quelque chose que
+        // NetBIOS/DNS n'avait pas déjà (évite la redondance sur la majorité
+        // des postes, où seul UPnP/mDNS répond rarement de toute façon).
+        const nomAlt = (h.upnp && h.upnp.friendly_name) || (h.mdns && h.mdns.nom) || '';
+        const nomActuel = h.netbios || h.hostname || '';
+        const nomAltLine = (nomAlt && nomAlt !== nomActuel)
+            ? `<div style="font-size:.68rem;color:var(--text-muted);" title="Détecté par ${h.upnp&&h.upnp.friendly_name?'UPnP':'mDNS'}">📡 ${escH(nomAlt)}</div>` : '';
+        // Fabricant/modèle « les plus précis » (WMI/UPnP identifient
+        // l'appareil, pas seulement la puce réseau comme le préfixe MAC) —
+        // affichés à la place du simple fabricant OUI quand disponibles.
+        const marquePrecise = h.marque_detectee || h.brand || '';
+        const modelePrecise = h.modele_detectee || h.model || '';
+        const fabricantCell = marquePrecise
+            ? `${escH(marquePrecise)}${modelePrecise?` <span style="color:var(--text-muted);">${escH(modelePrecise)}</span>`:''}`
+            : escH(h.vendor||'—');
         const statusBadge = isNew
             ? '<span class="new-badge">✦ Nouveau</span>'
             : '<span class="exists-badge">↩ Inventaire</span>';
@@ -363,11 +380,11 @@ function renderTable(results) {
         html += `<tr class="${isNew?'diff-new':''}" data-ip="${h.ip}">
             <td class="td-check"><input type="checkbox" class="chk-host" value="${h.ip}"></td>
             <td style="font-family:'Share Tech Mono',monospace;font-weight:700;white-space:nowrap;">${h.ip}</td>
-            <td>${escH(h.netbios||h.hostname||'')?`<div style="font-size:.8rem;">${escH(h.netbios||h.hostname||'')}</div>`:''}${macLine}</td>
+            <td>${escH(nomActuel)?`<div style="font-size:.8rem;">${escH(nomActuel)}</div>`:''}${nomAltLine}${macLine}</td>
             <td style="white-space:nowrap;">${escH(h.type||'—')}</td>
-            <td style="font-size:.75rem;white-space:nowrap;">${escH(h.vendor||'—')}</td>
+            <td style="font-size:.75rem;white-space:nowrap;" title="${escH(marquePrecise?'Détecté (WMI/UPnP)':'Déduit du préfixe MAC')}">${fabricantCell}</td>
             <td>${osBadge}</td>
-            <td>${ports||'—'}</td>
+            <td${bannieresTxt?` title="${escH(bannieresTxt)}"`:''}>${ports||'—'}</td>
             <td>${statusBadge}</td>
         </tr>`;
     });
