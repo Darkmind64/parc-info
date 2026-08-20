@@ -3413,8 +3413,16 @@ def parc_general():
         conn.commit(); conn.close()
         flash('Informations du parc sauvegardées', 'success')
         return redirect(url_for('parc_general'))
+    # Lien croisé avec la baie de brassage : parc_general (résumé
+    # switch/routeur/UPS) et baie_slots (position physique par U) décrivent
+    # le même matériel sans jamais se recouper. Un simple comptage suffit à
+    # signaler l'écart le plus fréquent (ex. switch/routeur renseignés ici,
+    # jamais positionnés dans la baie) sans dupliquer la donnée.
+    baie_nb_slots_occupes = conn.execute(
+        "SELECT COUNT(*) FROM baie_slots WHERE client_id=?", (cid,)).fetchone()[0]
     conn.close()
     return render_template('parc_general.html', parc=parc, client=client,
+                           baie_nb_slots_occupes=baie_nb_slots_occupes,
                            clients=get_clients(), client_actif_id=cid)
 
 # ─── ROUTES API PRESTATAIRES ─────────────────────────────────────────────────────
@@ -6042,13 +6050,14 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
     if 'printer' in dt:
         return 'Imprimante'
     if 'mediaserver' in dt or 'nas' in dt:
-        return 'Serveur'
+        return 'NAS'
     svc = (mdns_service or '').lower()
     if svc in ('ipp', 'printer', 'pdl-datastream'):
         return 'Imprimante'
     if svc == 'smb':
         return 'Serveur'
 
+    v = (vendor or '').lower()
     h = (hostname + " " + vendor + " " + extra_signal).lower()
     # Imprimante
     if any(x in h for x in ['printer','print','canon','epson','brother','ricoh',
@@ -6056,21 +6065,53 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
         return 'Imprimante'
     if 9100 in ports or 631 in ports:
         return 'Imprimante'
-    # Équipements réseau
+
+    # NAS : gamme dédiée, fabricant identifiable au hostname/vendor — avant
+    # le repli générique "Serveur" plus bas.
+    if any(x in h for x in ['synology','qnap','readynas','truenas','freenas',
+                              'terramaster',' nas']):
+        return 'NAS'
+
+    # Mac : le TTL seul ne distingue pas macOS de Linux (les deux à 64 par
+    # défaut) — signalé en usage réel, un MacBook ressortait comme "machine
+    # Linux". _scan_host affine déjà os_guess en 'macOS' via le fabricant
+    # MAC officiel Apple ; le hostname mDNS/NetBIOS typique
+    # ("Prenom-MacBook-Pro.local") est un second signal indépendant, tout
+    # aussi fiable et disponible même sans lecture ARP.
+    if os_guess == 'macOS' or 'apple' in v or any(
+            x in h for x in ['macbook','imac','mac-mini','macmini','mac-pro','macstudio']):
+        if not any(x in h for x in ['iphone','ipad','apple tv','watch',
+                                      'airport','time capsule','homepod']):
+            return 'MacBook'
+
+    # Équipements réseau — mots-clés explicites d'abord (sans ambiguïté sur
+    # le sous-type), puis fabricants réseau reconnus en repli.
     if any(x in h for x in ['router',' gw ','gateway','firewall','pfsense',
-                              'fortigate','palo','checkpoint']):
+                              'fortigate','palo alto','checkpoint','sonicwall',
+                              'watchguard','edgerouter','edgemax']):
         return 'Routeur/Pare-feu'
-    if any(x in h for x in ['ubnt','unifi']):
-        return 'Routeur/Pare-feu'
-    if any(x in h for x in ['switch',' sw-']):
+    if any(x in h for x in ['switch',' sw-','usw-','poe switch']):
         return 'Switch'
-    if any(x in h for x in ['cisco','juniper','extreme','3com']) and not any(x in h for x in ['server','srv']):
+    if any(x in h for x in ['cisco','juniper','extreme','3com','h3c','brocade',
+                              'procurve']) and not any(x in h for x in ['server','srv']):
         return 'Switch'
-    if any(x in h for x in ['ap-','borne','access point']):
-        return 'Borne WiFi'
-    # NAS / Serveur
-    if any(x in h for x in ['synology','qnap',' nas']):
-        return 'Serveur'
+    if any(x in h for x in ['ap-','borne','access point','wifi ap',' uap',
+                              'accesspoint']):
+        return 'Borne Wi-Fi'
+    # Fabricant réseau reconnu (via le préfixe MAC officiel), mais sans
+    # indice sur le sous-type précis dans le hostname : mieux vaut une
+    # catégorie réseau générique correcte qu'une supposition erronée — une
+    # borne Ubiquiti n'est pas un routeur juste parce que la marque en fait
+    # aussi (c'était le cas avant : tout Ubiquiti/UniFi devenait
+    # "Routeur/Pare-feu", même une borne WiFi ou un switch de la même gamme).
+    if any(x in v for x in ['ubiquiti','mikrotik','tp-link','netgear','d-link',
+                              'dlink','zyxel','ruckus','aruba','meraki',
+                              'netonix','ruijie','huawei technologies',
+                              'hewlett packard enterprise','draytek','tenda',
+                              'grandstream']):
+        return 'Switch/AP'
+
+    # Serveur
     if any(x in h for x in ['server',' srv','exchange','vcenter','esxi',' dc']):
         return 'Serveur'
     # PC Windows
@@ -6084,7 +6125,7 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
             return 'PC/Serveur (Linux)'
     # OS fingerprint
     if os_guess == 'Network':
-        return 'Équipement réseau'
+        return 'Switch/AP'
     if os_guess == 'Linux/Unix':
         return 'PC/Serveur (Linux)'
     if os_guess == 'Windows':
@@ -6373,6 +6414,13 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
         time.sleep(0.5)
         mac = _mac_from_arp(ip_str)
     vendor    = _oui_vendor(mac)
+    # Le TTL seul ne distingue pas macOS de Linux (les deux répondent à 64
+    # par défaut) — signalé en usage réel : un MacBook ressortait comme
+    # « Linux/Unix ». Le préfixe MAC officiel Apple, lui, ne laisse aucun
+    # doute quand il est disponible ; affiné ici pour profiter à la fois de
+    # la colonne OS affichée et de _deviner_type (qui reconnaît 'macOS').
+    if os_guess == 'Linux/Unix' and 'apple' in (vendor or '').lower():
+        os_guess = 'macOS'
     bannieres = _grab_bannieres(ip_str, ports)
     upnp_info = (upnp_par_ip or {}).get(ip_str) or {}
     mdns_info = (mdns_par_ip or {}).get(ip_str) or {}

@@ -83,6 +83,7 @@
 .badge-os-win { background:rgba(8,145,178,.2);  color:#38bdf8; border:1px solid rgba(8,145,178,.3); }
 .badge-os-lin { background:rgba(22,163,74,.2);  color:#4ade80; border:1px solid rgba(22,163,74,.3); }
 .badge-os-net { background:rgba(217,119,6,.2);  color:#fbbf24; border:1px solid rgba(217,119,6,.3); }
+.badge-os-mac { background:rgba(148,163,184,.2); color:#cbd5e1; border:1px solid rgba(148,163,184,.35); }
 
 .port-chip {
     display:inline-block; font-family:'Share Tech Mono',monospace;
@@ -225,12 +226,14 @@
         <option value="">Tous les types</option>
         <option>PC (Windows)</option>
         <option>PC/Serveur (Linux)</option>
+        <option>MacBook</option>
         <option>Serveur</option>
+        <option>NAS</option>
         <option>Imprimante</option>
         <option>Switch</option>
         <option>Routeur/Pare-feu</option>
-        <option>Borne WiFi</option>
-        <option>Équipement réseau</option>
+        <option>Borne Wi-Fi</option>
+        <option>Switch/AP</option>
     </select>
     <span id="sel-count" style="font-size:.72rem;color:var(--text-muted);white-space:nowrap;"></span>
 </div>
@@ -434,8 +437,10 @@ function renderTable(results) {
 
     filtered.forEach(h => {
         const isNew = !INVENTAIRE_IPS.has(h.ip);
+        const osBadgeClass = h.os_guess==='Windows' ? 'win' : h.os_guess==='macOS' ? 'mac'
+                            : h.os_guess==='Linux/Unix' ? 'lin' : 'net';
         const osBadge = h.os_guess
-            ? `<span class="badge-os badge-os-${h.os_guess==='Windows'?'win':h.os_guess==='Linux/Unix'?'lin':'net'}">${h.os_guess}</span>`
+            ? `<span class="badge-os badge-os-${osBadgeClass}">${h.os_guess}</span>`
             : '—';
         const bannieresTxt = h.bannieres ? Object.entries(h.bannieres).map(([p,b]) => `${p}: ${b}`).join('\n') : '';
         const ports = (h.ports||[]).slice(0,7).map(p => `<span class="port-chip">${p}</span>`).join('')
@@ -526,12 +531,14 @@ async function importerSelection() {
 const TYPE_COLORS = {
     'PC (Windows)':       '#38bdf8',
     'PC/Serveur (Linux)': '#4ade80',
+    'MacBook':            '#cbd5e1',
     'Serveur':            '#a78bfa',
+    'NAS':                '#c084fc',
     'Imprimante':         '#fb923c',
     'Switch':             '#fbbf24',
     'Routeur/Pare-feu':   '#f472b6',
-    'Borne WiFi':         '#34d399',
-    'Équipement réseau':  '#94a3b8',
+    'Borne Wi-Fi':        '#34d399',
+    'Switch/AP':          '#94a3b8',
     'PC':                 '#60a5fa',
 };
 const DEFAULT_COLOR = '#64748b';

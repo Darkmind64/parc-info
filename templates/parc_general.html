@@ -94,7 +94,12 @@
 
     <!-- BAIE DE BRASSAGE -->
     <div class="form-section">
-        <div class="form-section-title">&#9632; Baie de brassage &amp; infrastructure réseau</div>
+        <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap;">
+            <span>&#9632; Baie de brassage &amp; infrastructure réseau</span>
+            <a href="/baie" class="btn btn-primary btn-sm" style="text-transform:none;letter-spacing:normal;font-weight:600;">
+                &#128225; Voir le plan visuel de la baie{% if baie_nb_slots_occupes %} ({{ baie_nb_slots_occupes }} emplacement{{ 's' if baie_nb_slots_occupes > 1 else '' }} positionné{{ 's' if baie_nb_slots_occupes > 1 else '' }}){% endif %}
+            </a>
+        </div>
         <div class="form-row cols-3">
             <div class="form-group">
                 <label>Marque / Modèle de la baie</label>
