@@ -38,11 +38,15 @@ INDICATEUR = '--appliquer-maj'
 #: CERTIFICATE_VERIFY_FAILED sur la sync Turso juste après une mise à jour
 #: macOS — constaté en usage réel. launcher.py se protège désormais aussi de
 #: son côté (affectation directe plutôt que setdefault), mais autant ne pas
-#: transmettre une valeur qu'on sait fausse.
+#: transmettre une valeur qu'on sait fausse. PARCINFO_RELANCE_MAJ, lui, n'a
+#: de sens que pour LE lancement direct qui l'a posé (voir
+#: update_checker._install_macos et launcher.get_port) — ne doit pas se
+#: propager tel quel si ce même process relance à son tour une génération
+#: suivante (celle-ci le repose explicitement si besoin).
 _VARIABLES_LANCEUR = (
     '_MEIPASS', '_MEIPASS2', '_PYI_APPLICATION_HOME_DIR',
     '_PYI_ARCHIVE_FILE', '_PYI_PARENT_PROCESS_LEVEL', '_PYI_SPLASH_IPC',
-    'SSL_CERT_FILE',
+    'SSL_CERT_FILE', 'PARCINFO_RELANCE_MAJ',
 )
 
 #: Durée maximale d'attente de la sortie de l'application.

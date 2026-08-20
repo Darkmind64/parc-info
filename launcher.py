@@ -106,17 +106,33 @@ else:
 
 # ── Port libre ────────────────────────────────────────────────────────────────
 def get_port(preferred=3456):
-    """Essaie le port préféré (3456), sinon un port libre."""
-    try:
-        with socket.socket() as s:
-            s.bind(('127.0.0.1', preferred))
-            s.close()
-        return preferred
-    except OSError:
-        # Port préféré occupé, utiliser un port libre
-        with socket.socket() as s:
-            s.bind(('127.0.0.1', 0))
-            return s.getsockname()[1]
+    """Essaie le port préféré (3456), sinon un port libre.
+
+    PARCINFO_RELANCE_MAJ (posé uniquement par la relance macOS après mise à
+    jour, voir update_checker._install_macos) : l'ancienne instance garde
+    volontairement le port préféré le temps de sa propre vérification avant
+    de s'arrêter (jusqu'à ~12 s, voir _install_macos) — sans patience ici,
+    la nouvelle version basculait aussitôt sur un port au hasard et y
+    restait bloquée pour le reste de son exécution, l'ancienne n'étant
+    plus là ensuite pour le libérer une seconde fois. Signalé en usage réel
+    (macOS Intel). Un lancement normal, lui, bascule tout de suite comme
+    avant — utile quand plusieurs instances légitimes (Docker/PC/Mac)
+    tournent en parallèle et se partagent volontairement des ports distincts.
+    """
+    tentatives = 30 if os.environ.get('PARCINFO_RELANCE_MAJ') else 1
+    for i in range(tentatives):
+        try:
+            with socket.socket() as s:
+                s.bind(('127.0.0.1', preferred))
+                s.close()
+            return preferred
+        except OSError:
+            if i < tentatives - 1:
+                time.sleep(0.5)
+    # Port préféré indisponible (ou toujours occupé après patience) : port libre
+    with socket.socket() as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
 
 # ── Arrêt / relance (utilisés par la barre système ET par la page /apropos) ────
 def quitter_application(logger=None):

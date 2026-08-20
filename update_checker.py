@@ -509,11 +509,20 @@ class UpdateChecker:
             # était déjà identifié et neutralisé côté Windows
             # (_install_windows, quelques dizaines de lignes plus haut) —
             # jamais repris ici lors du passage au lancement direct.
+            # PARCINFO_RELANCE_MAJ : signale à launcher.get_port() que le port
+            # préféré (3456) est probablement encore tenu par CETTE instance
+            # (l'ancienne), qui ne s'arrêtera que quelques secondes après avoir
+            # vérifié que la nouvelle a bien démarré (ci-dessous) — sans ce
+            # signal, la nouvelle bascule aussitôt sur un port au hasard et y
+            # reste bloquée pour le reste de son exécution. Signalé en usage
+            # réel (macOS Intel).
+            env_relance = applique_maj.environnement_propre()
+            env_relance['PARCINFO_RELANCE_MAJ'] = '1'
             processus = subprocess.Popen(
                 [str(executable_cible)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL, start_new_session=True,
-                cwd=str(Path.home()), env=applique_maj.environnement_propre())
+                cwd=str(Path.home()), env=env_relance)
             logger.info("Lancement direct de %s (pid %s)", executable_cible, processus.pid)
         except Exception as e:
             logger.warning("Échec du lancement direct de %s : %s", executable_cible, e)

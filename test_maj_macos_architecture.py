@@ -318,6 +318,8 @@ if appels_popen:
              "_MEIPASS2 (repère du lanceur PyInstaller) retiré de l'environnement transmis")
     verifier(env_transmis is not None and 'SSL_CERT_FILE' not in env_transmis,
              "SSL_CERT_FILE (pointait vers le cacert.pem de l'ancienne instance) retiré de l'environnement transmis")
+    verifier(env_transmis is not None and env_transmis.get('PARCINFO_RELANCE_MAJ') == '1',
+             "PARCINFO_RELANCE_MAJ posé — la nouvelle instance saura patienter sur le port 3456")
     verifier(appels_popen[0].get('cwd') is not None,
              "un répertoire de travail explicite est transmis (pas hérité de l'ancienne instance)")
 

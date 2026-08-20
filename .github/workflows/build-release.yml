@@ -40,6 +40,7 @@ jobs:
           python test_maj.py
           python test_journal_maj.py
           python test_maj_macos_architecture.py
+          python test_launcher_port.py
           python test_maj_macos_permissions_zip.py
           python test_migration_donnees_macos.py
           python test_sync_curseur_echec.py
