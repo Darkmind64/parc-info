@@ -49,6 +49,7 @@ jobs:
           python test_liste_appareils_colonnes_legeres.py
           python test_securite.py
           python test_remplissage_fiche.py
+          python test_ip_publique_collecteur.py
           python test_historique_collectes.py
           python test_sauvegarde.py
           python test_parite_rapports.py

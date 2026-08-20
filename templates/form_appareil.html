@@ -208,6 +208,19 @@
             </div>
         </div>
         {% endif %}
+        {% if appareil and appareil.adresse_ip_publique %}
+        <div class="form-row">
+            <div class="form-group">
+                <label>IP publique détectée</label>
+                <div class="mono" style="color:var(--text-primary);">
+                    {{ appareil.adresse_ip_publique }}
+                    {% if appareil.operateur_ip_publique %}
+                    <span style="color:var(--text-muted);font-family:'Exo 2',sans-serif;">— {{ appareil.operateur_ip_publique }}</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- SYSTÈME -->

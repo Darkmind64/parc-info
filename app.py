@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, make_response, send_file, abort
 from werkzeug.utils import secure_filename
 from datetime import datetime, date, timedelta, timezone
-import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time, io
+import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time, io, colorsys
 from PIL import Image
 from io import BytesIO
 try:
@@ -321,6 +321,36 @@ def get_liste_cached(nom: str, ttl: int = 600) -> list:
 
 # ─── CSRF ─────────────────────────────────────────────────────────────────────
 
+# Couleurs de base des textes secondaire/atténué, par mode et niveau de
+# contraste — miroir exact de TEXT_BASE dans templates/base.html (fonction JS
+# appliquerVariables). Sert de point de départ au curseur de luminosité des
+# textes secondaires (Réglages → Apparence & Couleurs).
+_TEXT_BASE = {
+    'dark':  {'normal': {'secondary': '#6a8aaa', 'muted': '#3a5570'},
+              'high':   {'secondary': '#7a9bc5', 'muted': '#3a5570'},
+              'max':    {'secondary': '#9ad0ff', 'muted': '#7aa0c0'}},
+    'light': {'normal': {'secondary': '#334155', 'muted': '#64748b'},
+              'high':   {'secondary': '#2d5a8a', 'muted': '#4a6fa8'},
+              'max':    {'secondary': '#1a4d80', 'muted': '#3a6b9f'}},
+}
+
+
+def _ajuster_luminosite_texte(hex_couleur, delta_pct, mode):
+    """Éclaircit (mode sombre) ou assombrit (mode clair) une couleur hex,
+    pour toujours augmenter le contraste avec le fond — miroir Python de
+    ajusterLuminositeTexte() dans templates/base.html."""
+    if not delta_pct:
+        return hex_couleur
+    hexc = hex_couleur.lstrip('#')
+    r, g_, b = (int(hexc[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+    h, l, s = colorsys.rgb_to_hls(r, g_, b)
+    direction = -1 if mode == 'light' else 1
+    nouveau_l = max(0.0, min(1.0, l + direction * delta_pct / 100))
+    r2, g2, b2 = colorsys.hls_to_rgb(h, nouveau_l, s)
+    vers255 = lambda v: max(0, min(255, round(v * 255)))
+    return '#%02x%02x%02x' % (vers255(r2), vers255(g2), vers255(b2))
+
+
 def _generate_dynamic_css(auth_user_id=None):
     """
     Génère le CSS dynamique basé sur les configurations de l'utilisateur.
@@ -346,6 +376,26 @@ def _generate_dynamic_css(auth_user_id=None):
         css += "html.contrast-high{--text-primary-opacity:1;--text-secondary-opacity:0.95;--text-muted-opacity:0.85}html.contrast-high body{--text-primary:rgba(208,232,255,1);--text-secondary:rgba(106,138,170,1)}"
     elif contrast_level == 'max':
         css += "html.contrast-max{--text-primary-opacity:1;--text-secondary-opacity:1;--text-muted-opacity:0.9}html.contrast-max body{--text-primary:#ffffff;--text-secondary:#a6c5e8;filter:contrast(1.2)}"
+
+    # Luminosité des textes secondaire/atténué (curseur, Réglages → Apparence).
+    # Générée ici pour que le réglage tienne dès le rendu de la page, pas
+    # seulement après ouverture du panneau Réglages (qui, lui, ne fait que
+    # prévisualiser en direct côté JS pendant qu'on bouge le curseur —
+    # oublié ici lors de l'ajout de ce réglage, d'où la perte au changement
+    # de page malgré une valeur bien enregistrée).
+    mode = g('mode', 'dark')
+    if mode not in ('dark', 'light'):
+        mode = 'dark'
+    try:
+        text_brightness = int(g('text_brightness', '0') or 0)
+    except (TypeError, ValueError):
+        text_brightness = 0
+    if text_brightness > 0:
+        niveau = contrast_level if contrast_level in ('high', 'max') else 'normal'
+        base_texte = _TEXT_BASE[mode][niveau]
+        secondary_txt = _ajuster_luminosite_texte(base_texte['secondary'], text_brightness, mode)
+        muted_txt = _ajuster_luminosite_texte(base_texte['muted'], text_brightness, mode)
+        css += f"body{{--text-secondary:{secondary_txt} !important;--text-muted:{muted_txt} !important}}"
 
     # Couleurs des ports (serviceType)
     port_colors = {
@@ -1457,6 +1507,17 @@ def init_db():
         c.execute("ALTER TABLE appareils ADD COLUMN logiciels TEXT DEFAULT '[]'")
     except Exception:
         pass
+
+    # Migration : IP publique + opérateur constatés par le collecteur, par
+    # APPAREIL — distinct de parc_general.ip_publique/fournisseur_internet
+    # (un par site, saisi à la main) : utile pour un poste itinérant dont
+    # l'IP publique varie selon le lieu de connexion.
+    for _col, _def in [('adresse_ip_publique', "TEXT DEFAULT ''"),
+                        ('operateur_ip_publique', "TEXT DEFAULT ''")]:
+        try:
+            c.execute(f"ALTER TABLE appareils ADD COLUMN {_col} {_def}")
+        except Exception:
+            pass
 
     # Migration : date_maj sur outils et baie_slots (pour sync bidirectionnelle)
     for _tbl in ('outils', 'baie_slots'):
@@ -6795,6 +6856,12 @@ def api_device_info():
         gpu = data.get('gpu', '')
         dns_name = (data.get('dns_name') or '').strip()
         device_type = (data.get('device_type') or '').strip()
+        # IP publique + opérateur : comme adresse_ip, une valeur qui peut
+        # légitimement changer d'une collecte à l'autre (poste itinérant,
+        # IP dynamique) — toujours resynchronisée, jamais figée sur la
+        # première collecte (voir plus bas, même traitement qu'adresse_ip).
+        public_ip = (data.get('public_ip') or '').strip()
+        public_ip_isp = (data.get('public_ip_isp') or '').strip()
 
         # Ports TCP en écoute → colonne ports_ouverts (format identique au scan réseau)
         open_ports = data.get('open_ports') or []
@@ -6900,6 +6967,14 @@ def api_device_info():
                 updates.append('adresse_mac=?')
                 params.append(mac_address)
 
+            if public_ip:
+                updates.append('adresse_ip_publique=?')
+                params.append(public_ip)
+
+            if public_ip_isp:
+                updates.append('operateur_ip_publique=?')
+                params.append(public_ip_isp)
+
             # Un appareil créé avant que le hostname soit connu (résolution
             # échouée, ou carte réseau pas encore identifiée) reste nommé
             # d'après son IP ou « Device-XXXXXXXX » pour toujours : rien dans
@@ -6996,11 +7071,13 @@ def api_device_info():
                    (client_id, nom_machine, nom_dns, adresse_ip, adresse_mac, marque, modele, numero_serie,
                     os, version_os, ram, cpu, stockage, antivirus, carte_graphique, ports_ouverts,
                     logiciels_installes_json, rapport_systeme_json,
+                    adresse_ip_publique, operateur_ip_publique,
                     type_appareil, statut, decouvert_scan, en_ligne, derniere_synchro, date_creation, date_maj)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                 (cid, device_name, dns_name, ip_address, mac_address, brand, model, serial,
                  os_name, os_version, str(ram_gb) if ram_gb else '', cpu, str(disk_gb) if disk_gb else '',
                  antivirus, gpu, ports_str, software_json, system_report_json,
+                 public_ip, public_ip_isp,
                  device_type or 'PC', 'actif', 0, 1, now, now, now)
             )
             app_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]

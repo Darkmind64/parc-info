@@ -46,7 +46,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.2'
+COLLECTOR_VERSION = '3.3'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -4846,6 +4846,45 @@ def _mesurer_debit(url):
         return None
 
 
+# Service consulté pour l'IP publique + opérateur. Un seul fournisseur,
+# best-effort, comme SPEEDTEST_URL ci-dessus — pas de repli si indisponible :
+# une panne ou un réseau filtrant ne doit jamais faire échouer la collecte.
+PUBLIC_IP_API_URL = 'https://ipapi.co/json/'
+
+
+def get_public_ip_info():
+    """IP publique et opérateur (FAI) constatés depuis CE poste, à l'instant
+    de la collecte.
+
+    Distinct de parc_general.ip_publique (un par SITE, saisi à la main) :
+    ce champ-ci vient de chaque appareil individuellement, ce qui a un sens
+    pour un poste itinérant (laptop) dont l'IP publique change selon le lieu
+    de connexion. Cross-plateforme (un simple appel HTTPS), donc pas rattaché
+    à measure_network() ci-dessus, qui est réservée à Windows (mesures de
+    latence via `ping`).
+    """
+    try:
+        requete = Request(PUBLIC_IP_API_URL, headers={'User-Agent': 'ParcInfo-Collector'})
+        with urlopen(requete, timeout=6) as reponse:
+            data = json.loads(reponse.read().decode('utf-8', errors='replace'))
+        if not isinstance(data, dict) or data.get('error'):
+            return {}
+        resultat = {}
+        ip = _clean(data.get('ip'))
+        if ip:
+            resultat['public_ip'] = ip
+        # 'org' renvoie typiquement le nom du FAI/opérateur (ex: "Orange S.A.",
+        # "Free SAS") ou, pour un hébergeur, celui-ci — pas toujours un nom
+        # d'opérateur grand public au sens strict, mais la meilleure
+        # approximation disponible sans service payant.
+        operateur = _clean(data.get('org'))
+        if operateur:
+            resultat['public_ip_isp'] = operateur
+        return resultat
+    except Exception:
+        return {}
+
+
 def _publier(on_data, info):
     """Livre l'état partiel de la collecte, sans jamais l'interrompre.
 
@@ -6005,6 +6044,16 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data
         pass
     _publier(on_data, info)
 
+    # IP publique et opérateur : cross-plateforme (simple appel HTTPS), donc
+    # appelé ici plutôt que dans measure_network() ci-dessus, réservée à
+    # Windows.
+    _report(progress, 0.90, 'IP publique')
+    try:
+        info.update(get_public_ip_info())
+    except Exception:
+        pass
+    _publier(on_data, info)
+
     _report(progress, 0.93, 'Périphériques USB')
     try:
         info['usb_devices'] = collect_usb_devices()
@@ -6330,6 +6379,8 @@ def build_summary_sections(info):
                            '' if proxy.get('enabled') else ' — inactif')) or None
     s['champs'] += [
         ('Passerelle', passerelles),
+        ('IP publique', info.get('public_ip')),
+        ('Opérateur (FAI)', info.get('public_ip_isp')),
         ('Suffixes DNS', ', '.join(info.get('dns_suffixes') or []) or None),
         ('Proxy', proxy),
     ]
@@ -8820,6 +8871,8 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         wifi = info.get('wifi') or {}
         table = _pdf_kv_table(tk, [
             ('Passerelle par défaut', info.get('default_gateway')),
+            ('IP publique', info.get('public_ip')),
+            ('Opérateur (FAI)', info.get('public_ip_isp')),
             ('Suffixes DNS', info.get('dns_suffixes')),
             ('Proxy', ('%s (%s)' % (proxy.get('server') or proxy.get('auto_config_url'),
                                     'actif' if proxy.get('enabled') else 'configuré mais inactif'))
@@ -9308,6 +9361,10 @@ def get_api_payload(info, client_id=None, client_name=None):
         'disk_total_gb': info.get('disk_total_gb', ''),
         'antivirus': info.get('antivirus', ''),
         'gpu': gpu_display,
+        # IP publique + opérateur constatés depuis ce poste (get_public_ip_info) —
+        # distincts de ip_addresses (réseau local).
+        'public_ip': info.get('public_ip', ''),
+        'public_ip_isp': info.get('public_ip_isp', ''),
         'installed_software': info.get('installed_software', []),
         # Ports TCP en écoute → colonne ports_ouverts
         'open_ports': [p['port'] for p in info.get('listening_ports', [])],

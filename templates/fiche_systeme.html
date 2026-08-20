@@ -1462,12 +1462,14 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 <!-- ── CONFIGURATION RÉSEAU ─────────────────────────────────────────────── -->
 {% if rapport.default_gateway or rapport.dns_servers or rapport.network_profiles
       or rapport.proxy or rapport.wifi or rapport.latency or rapport.hosts_entries
-      or rapport.port_forwards %}
+      or rapport.port_forwards or rapport.public_ip %}
 <div class="fs-section">
     <h3>■ Configuration &amp; qualité réseau</h3>
     <div class="fs-grid">
         <div>
             {{ row("Passerelle par défaut", rapport.default_gateway) }}
+            {{ row("IP publique", rapport.public_ip) }}
+            {{ row("Opérateur (FAI)", rapport.public_ip_isp) }}
             {{ row("Suffixes DNS", rapport.dns_suffixes) }}
             {% if rapport.wifi %}
             {{ row("Réseau Wi-Fi", rapport.wifi.ssid) }}

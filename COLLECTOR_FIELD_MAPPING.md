@@ -203,7 +203,7 @@ non repris dans l'inventaire matériel (`inventoriable=false`)
 ### Réseau
 `network_adapters[]` · `network_adapter_details[]{name, description, link_speed,
 mac_address, physical, ip_addresses[]}` · `listening_ports[]{port, process}` ·
-`default_gateway` · `gateways[]{address, interface}` · `dns_suffixes[]` ·
+`default_gateway` · `public_ip` · `public_ip_isp` · `gateways[]{address, interface}` · `dns_suffixes[]` ·
 `dns_servers[]{interface, servers[], dhcp}` · `network_profiles[]{name,
 interface, category, connectivity}` · `proxy{server, auto_config_url,
 enabled}` · `wifi{ssid, signal, band, channel}` · `latency[]{role, target,
@@ -214,10 +214,12 @@ avg_ms, max_ms, loss_pct}` · `bandwidth{mbps, downloaded_mb, seconds}`
 `hosts_entries[]{ip, hostname, local}` ·
 `port_forwards[]{listen_address, listen_port, connect_address, connect_port}`
 
-> `hosts_entries` — **seul champ réseau qui n'est pas spécifique à
-> Windows** (`get_hosts_file_entries()`, appelé depuis `collect_system_info()`
-> plutôt que `_WIN_STEPS`/`get_system_info_windows()`, simple lecture de
-> fichier valable sur les trois OS). Filtré : `localhost`, les entrées
+> `hosts_entries`, `public_ip` et `public_ip_isp` sont les seuls champs
+> réseau qui ne sont pas spécifiques à Windows — tous trois appelés depuis
+> `collect_system_info()` plutôt que `_WIN_STEPS`/`get_system_info_windows()`
+> (simple lecture de fichier pour `hosts_entries` ; simple appel HTTPS,
+> `get_public_ip_info()`, pour les deux autres — valable sur les trois OS).
+> `hosts_entries` filtré : `localhost`, les entrées
 > `ip6-*` que Linux inscrit lui-même, et la propre entrée `<ip loopback>
 > <hostname de la machine>` que Debian/Ubuntu écrivent automatiquement —
 > aucune de ces trois n'est une redirection volontaire. Les doublons exacts
