@@ -54,6 +54,22 @@
     </div>
 
     <div class="form-section">
+        <div class="form-section-title">&#9632; Sécurité</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Jeton collecteur dédié à ce client</label>
+                <input type="text" name="collecteur_token" value="{{ client.collecteur_token if client else '' }}"
+                       placeholder="vide = pas de jeton dédié pour ce client" autocomplete="off">
+                <small style="color:var(--text-secondary);">
+                    Optionnel. Une fois renseigné, seul ce jeton (ou le jeton collecteur
+                    global s'il est configuré) autorise un collecteur à écrire sur ce
+                    client — un jeton valide pour un autre client ne suffit plus.
+                </small>
+            </div>
+        </div>
+    </div>
+
+    <div class="form-section">
         <div class="form-section-title">&#9632; Notes</div>
         <div class="form-group">
             <textarea name="notes" rows="4"

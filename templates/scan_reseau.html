@@ -227,6 +227,35 @@
         Lancez un scan pour découvrir les équipements du réseau.
     </div>
 </div>
+
+<!-- ── MODALE : POUR QUEL CLIENT SCANNE-T-ON ? ── -->
+<div id="scan-client-modal" class="modal-overlay">
+    <div style="
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-glow);
+        border-radius: 8px;
+        padding: 2rem;
+        max-width: 420px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    ">
+        <h3 style="margin: 0 0 .5rem 0; color: var(--text-primary);">Pour quel client ?</h3>
+        <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.85rem;">
+            Choisissez le client pour lequel lancer ce scan. Le client actif basculera
+            automatiquement sur ce choix si nécessaire.
+        </p>
+        <div id="scan-client-list" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:.3rem .5rem;margin-bottom:1rem;">
+            <!-- rempli par JS -->
+        </div>
+        <div id="scan-client-hint" style="font-size:.72rem;color:var(--accent-green);margin:-.5rem 0 1rem;display:none;">
+            ✓ Correspondance détectée avec le réseau actuel — présélectionnée.
+        </div>
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="fermerModaleClientScan()">Annuler</button>
+            <button type="button" class="btn btn-success btn-sm" onclick="confirmerClientEtScanner()">▶ Lancer le scan</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -257,7 +286,48 @@ function getPlages() {
 ajouterPlage('{{ parc_plage or "192.168.1.0/24" }}');
 
 // ── SCAN ─────────────────────────────────────────────────────────────────────
+let _scanClientActifId = null;
+
 async function lancerScan() {
+    const plages = getPlages();
+    if (!plages.length) { alert('Entrez au moins une plage IP'); return; }
+
+    const r = await fetch('/api/scan/client-suggere');
+    const d = await r.json();
+    _scanClientActifId = d.client_actif;
+
+    const list = document.getElementById('scan-client-list');
+    list.innerHTML = (d.clients || []).map(c => `
+        <label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .2rem;cursor:pointer;font-size:.85rem;">
+            <input type="radio" name="scan-client-choice" value="${c.id}" ${c.id === d.suggestion ? 'checked' : ''}>
+            <span>${escH(c.nom)}</span>
+        </label>`).join('') || '<div style="color:var(--text-muted);font-size:.8rem;padding:.4rem;">Aucun client accessible.</div>';
+    document.getElementById('scan-client-hint').style.display = d.suggestion ? '' : 'none';
+    document.getElementById('scan-client-modal').classList.add('open');
+}
+
+function fermerModaleClientScan() {
+    document.getElementById('scan-client-modal').classList.remove('open');
+}
+
+async function confirmerClientEtScanner() {
+    const sel = document.querySelector('input[name="scan-client-choice"]:checked');
+    if (!sel) { alert('Choisissez un client'); return; }
+    const clientId = sel.value;
+    fermerModaleClientScan();
+
+    if (String(clientId) !== String(_scanClientActifId)) {
+        await fetch('/client/' + clientId + '/selectionner');
+        // Les données rendues côté serveur (plage par défaut, inventaire pour
+        // la comparaison) sont propres au client actif : on recharge la page
+        // pour ce nouveau client, puis on relance le scan automatiquement.
+        location.href = location.pathname + '?auto_scan=1';
+        return;
+    }
+    demarrerScanReel();
+}
+
+async function demarrerScanReel() {
     const plages = getPlages();
     if (!plages.length) { alert('Entrez au moins une plage IP'); return; }
     document.getElementById('scan-progress-wrap').style.display = '';
@@ -532,6 +602,15 @@ function showDiff() {
 document.addEventListener('DOMContentLoaded', () => {
     ['btn-import','btn-select-all','btn-select-new'].forEach(id =>
         document.getElementById(id).disabled = true);
+
+    // Retour depuis la modale de sélection de client après un changement de
+    // client (voir confirmerClientEtScanner) : la page vient d'être rechargée
+    // pour le nouveau client, on relance directement le scan sans repasser
+    // par la modale.
+    if (new URLSearchParams(location.search).get('auto_scan') === '1') {
+        history.replaceState(null, '', location.pathname);
+        demarrerScanReel();
+    }
 });
 </script>
 {% endblock %}

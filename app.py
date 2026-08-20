@@ -1352,6 +1352,12 @@ def init_db():
     if 'auth_user_id' not in cols_clients:
         c.execute('ALTER TABLE clients ADD COLUMN auth_user_id INTEGER DEFAULT NULL')
 
+    # Migration : jeton collecteur dédié à ce client (optionnel — voir
+    # jeton_collecteur_valide()). Vide par défaut : aucun changement de
+    # comportement tant qu'un admin ne l'a pas explicitement renseigné.
+    if 'collecteur_token' not in cols_clients:
+        c.execute("ALTER TABLE clients ADD COLUMN collecteur_token TEXT DEFAULT ''")
+
     # Migration : ajouter must_change_password si absent
     cols_auth = [r[1] for r in c.execute('PRAGMA table_info(auth_users)').fetchall()]
     if 'must_change_password' not in cols_auth:
@@ -2476,10 +2482,10 @@ def nouveau_client():
         uid = session.get('auth_user_id')
         conn = get_db()
         c = conn.execute(
-            "INSERT INTO clients (nom,contact,telephone,email,adresse,notes,couleur,auth_user_id,date_creation,date_maj) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO clients (nom,contact,telephone,email,adresse,notes,couleur,auth_user_id,collecteur_token,date_creation,date_maj) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (f.get('nom','Nouveau client'), f.get('contact',''), f.get('telephone',''),
              f.get('email',''), f.get('adresse',''), f.get('notes',''),
-             f.get('couleur','#00c9ff'), uid, now, now))
+             f.get('couleur','#00c9ff'), uid, f.get('collecteur_token','').strip(), now, now))
         cid = c.lastrowid
         conn.execute("INSERT INTO parc_general (client_id, nom_site, date_maj) VALUES (?,?,?)",
                      (cid, f.get('nom','Nouveau client'), now))
@@ -2495,10 +2501,11 @@ def editer_client(id):
     conn = get_db()
     if request.method == 'POST':
         f = request.form
-        conn.execute('''UPDATE clients SET nom=?,contact=?,telephone=?,email=?,adresse=?,notes=?,couleur=?,date_maj=?
+        conn.execute('''UPDATE clients SET nom=?,contact=?,telephone=?,email=?,adresse=?,notes=?,couleur=?,collecteur_token=?,date_maj=?
             WHERE id=?''', (f.get('nom',''), f.get('contact',''), f.get('telephone',''),
              f.get('email',''), f.get('adresse',''), f.get('notes',''),
-             f.get('couleur','#00c9ff'), datetime.utcnow().isoformat(), id))
+             f.get('couleur','#00c9ff'), f.get('collecteur_token','').strip(),
+             datetime.utcnow().isoformat(), id))
         conn.commit(); conn.close()
         flash('Client mis à jour', 'success')
         return redirect(url_for('liste_clients'))
@@ -3791,8 +3798,13 @@ def supprimer_appareil(id):
         return redirect(url_for('liste_appareils'))
     cid = get_client_id()
     conn = get_db()
+    conn.execute('PRAGMA foreign_keys = ON')
     a = row_to_dict(conn.execute('SELECT nom_machine FROM appareils WHERE id=?',(id,)).fetchone() or {})
     log_history(conn, cid, 'appareil', id, a.get('nom_machine','?'), 'Suppression')
+    # Tables sans FK déclarée (ajoutées via ALTER TABLE) — non couvertes par le
+    # PRAGMA ci-dessus, nettoyage manuel nécessaire pour éviter les orphelins.
+    conn.execute('DELETE FROM cles_recuperation WHERE appareil_id=?', (id,))
+    conn.execute('DELETE FROM collectes WHERE appareil_id=?', (id,))
     conn.execute('DELETE FROM appareils WHERE id=?', (id,))
     conn.commit(); conn.close()
     flash('Appareil supprimé', 'info')
@@ -6495,6 +6507,36 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
         with scan_lock:
             scan_status.update({"message": f"Erreur : {e}", "running": False})
 
+@app.route('/api/scan/client-suggere')
+@login_required
+def api_scan_client_suggere():
+    """Liste des clients accessibles + suggestion pour la modale de sélection
+    de client affichée avant chaque scan (voir scan_reseau.html).
+
+    La suggestion n'est renvoyée que si un seul client, sans ambiguïté, a une
+    plage IP locale (parc_general.plage_ip_locale) qui recoupe le réseau
+    physique sur lequel CE poste ParcInfo se trouve actuellement — même
+    logique que la surveillance ping (_reseaux_locaux_actuels /
+    _appareil_sur_reseau_courant). Zéro ou plusieurs correspondances :
+    aucune suggestion, la modale ne pré-coche rien.
+    """
+    clients = get_clients()
+    reseaux_locaux = _reseaux_locaux_actuels()
+    conn = get_db()
+    matches = []
+    for cl in clients:
+        row = conn.execute(
+            'SELECT plage_ip_locale FROM parc_general WHERE client_id=?', (cl['id'],)).fetchone()
+        plage = ((row[0] if row else '') or '').strip()
+        if plage and _appareil_sur_reseau_courant('', plage, reseaux_locaux):
+            matches.append(cl['id'])
+    conn.close()
+    return jsonify({
+        'clients': [{'id': cl['id'], 'nom': cl['nom']} for cl in clients],
+        'client_actif': get_client_id(),
+        'suggestion': matches[0] if len(matches) == 1 else None,
+    })
+
 @app.route('/api/scan/lancer', methods=['POST'])
 @login_required
 def lancer_scan():
@@ -6556,6 +6598,7 @@ def importer_scan():
         stockage     = _fmt_go(item.get('disk_total_gb'))
         existing  = conn.execute('SELECT id FROM appareils WHERE client_id=? AND adresse_ip=?', (cid, ip)).fetchone()
         if existing:
+            app_id = existing[0]
             # Une valeur déjà présente (saisie à la main, ou posée par une
             # collecte précédente) n'est jamais écrasée par une simple
             # détection de scan — même principe que adresse_mac ci-dessous,
@@ -6573,6 +6616,8 @@ def importer_scan():
                 (now, ports_str, mac, marque, modele, numero_serie, cpu, ram, stockage,
                  now, cid, ip))
             mis_a_jour += 1
+            log_history(conn, cid, 'appareil', app_id, nom, 'Auto-remplissage (scan réseau)',
+                        {'source': 'scan-reseau', 'ip': ip})
         else:
             conn.execute(
                 '''INSERT INTO appareils (client_id,adresse_ip,nom_machine,nom_dns,adresse_mac,marque,modele,
@@ -6581,7 +6626,10 @@ def importer_scan():
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,1,'actif',?,?)''',
                 (cid, ip, nom, dns, mac, marque, modele, numero_serie, cpu, ram, stockage,
                  item.get('type', 'PC'), ports_str, now, now, now))
+            app_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
             importes += 1
+            log_history(conn, cid, 'appareil', app_id, nom, 'Création (scan réseau)',
+                        {'source': 'scan-reseau', 'ip': ip, 'mac': mac})
     conn.commit(); conn.close()
     return jsonify({"importes":importes,"total":len(items)})
 
@@ -7069,30 +7117,55 @@ def completer_fiches_existantes():
         conn.close()
 
 
-def jeton_collecteur_valide():
+def jeton_collecteur_valide(cid=None):
     """Vrai si la requête du collecteur est autorisée.
 
-    Tant qu'aucun jeton n'est configuré, tout passe : c'était le comportement
-    depuis toujours, et le durcir sans prévenir couperait les collecteurs déjà
-    déployés. Dès qu'un jeton est renseigné dans la configuration, il devient
-    obligatoire — sans lui, n'importe qui atteignant le serveur peut créer ou
-    modifier des appareils et déposer des fichiers.
+    Tant qu'aucun jeton global n'est configuré, tout passe : c'était le
+    comportement depuis toujours, et le durcir sans prévenir couperait les
+    collecteurs déjà déployés. Dès qu'un jeton global est renseigné dans la
+    configuration, il devient obligatoire — sans lui, n'importe qui atteignant
+    le serveur peut créer ou modifier des appareils et déposer des fichiers.
+    Il agit comme un jeton maître : valide, il donne accès à tous les clients.
+
+    Si aucun jeton global n'est configuré, un client peut malgré tout se
+    protéger individuellement en renseignant son propre jeton (fiche client) :
+    tant qu'il reste vide, ce client suit le comportement permissif historique
+    (aucune régression pour les déploiements existants qui ignorent ce champ) ;
+    une fois renseigné, seul ce jeton (passé en paramètre `cid`) autorise les
+    requêtes ciblant CE client — ça referme la faille « un jeton valide pour
+    un client donne accès à tous les autres », sans rien casser pour ceux qui
+    n'ont configuré qu'un jeton global unique.
     """
     attendu = (cfg_get('collecteur_token', '') or '').strip()
-    if not attendu:
-        return True
     recu = (request.headers.get('X-Collector-Token')
             or request.headers.get('Authorization', '')).strip()
     if recu.lower().startswith('bearer '):
         recu = recu[7:].strip()
-    # Comparaison sur les octets : compare_digest refuse les chaînes contenant
-    # des caractères non-ASCII, et un jeton accentué faisait répondre 500 au
-    # lieu de 401 — la fonction censée protéger l'API la cassait.
-    if not recu or not secrets.compare_digest(recu.encode('utf-8'),
-                                              attendu.encode('utf-8')):
-        logger.warning('Collecteur refusé : jeton absent ou invalide (ip=%s, chemin=%s)',
-                       request.remote_addr, request.path)
-        return False
+
+    if attendu:
+        # Comparaison sur les octets : compare_digest refuse les chaînes
+        # contenant des caractères non-ASCII, et un jeton accentué faisait
+        # répondre 500 au lieu de 401 — la fonction censée protéger l'API
+        # la cassait.
+        if not recu or not secrets.compare_digest(recu.encode('utf-8'),
+                                                  attendu.encode('utf-8')):
+            logger.warning('Collecteur refusé : jeton absent ou invalide (ip=%s, chemin=%s)',
+                           request.remote_addr, request.path)
+            return False
+        return True
+
+    if cid:
+        conn = get_db()
+        row = conn.execute('SELECT collecteur_token FROM clients WHERE id=?', (cid,)).fetchone()
+        conn.close()
+        jeton_client = ((row[0] if row else '') or '').strip()
+        if jeton_client:
+            if not recu or not secrets.compare_digest(recu.encode('utf-8'),
+                                                       jeton_client.encode('utf-8')):
+                logger.warning('Collecteur refusé : jeton dédié requis pour client_id=%s (ip=%s)',
+                               cid, request.remote_addr)
+                return False
+
     return True
 
 
@@ -7211,6 +7284,9 @@ def api_device_info():
         if not cid:
             return jsonify({"status": "error", "message": "No valid client found - specify client_id or configure collector token"}), 400
 
+        if not jeton_collecteur_valide(cid):
+            return jsonify({"status": "error", "message": "Jeton collecteur requis pour ce client"}), 401
+
         # Marque et modèle
         brand = data.get('brand', '')
         model = data.get('model', '')
@@ -7318,15 +7394,22 @@ def api_device_info():
             updates = []
             params = []
 
-            if brand:
+            # Marque/modèle/n° de série ne peuvent pas varier sur une machine
+            # réelle (contrairement à l'IP, l'OS, la RAM, etc.) : une collecte
+            # ne doit jamais écraser une correction manuelle par une valeur
+            # mal détectée. Rempli uniquement si le champ est encore vide.
+            marque_actuelle = (old_data.get('marque') or '').strip()
+            if brand and not marque_actuelle:
                 updates.append('marque=?')
                 params.append(brand)
 
-            if model:
+            modele_actuel = (old_data.get('modele') or '').strip()
+            if model and not modele_actuel:
                 updates.append('modele=?')
                 params.append(model)
 
-            if serial:
+            serial_actuel = (old_data.get('numero_serie') or '').strip()
+            if serial and not serial_actuel:
                 updates.append('numero_serie=?')
                 params.append(serial)
 
@@ -7560,6 +7643,10 @@ def api_device_info_wifi_credentials():
             cid = int(data.get('client_id'))
         except (TypeError, ValueError):
             return jsonify({"status": "error", "message": "client_id invalide"}), 400
+
+        if not jeton_collecteur_valide(cid):
+            return jsonify({"status": "error", "message": "Jeton collecteur requis pour ce client"}), 401
+
         profiles = data.get('profiles') or []
         if not isinstance(profiles, list):
             return jsonify({"status": "error", "message": "profiles doit être une liste"}), 400
@@ -7684,17 +7771,20 @@ def api_device_info_upload_report():
         if not device_id or not client_id or not report_file:
             return jsonify({"status": "error", "message": "Missing parameters: device_id, client_id, report"}), 400
 
-        # Ce point d'entrée est ouvert aux collecteurs : il ne doit accepter que
-        # ce que ceux-ci produisent, un rapport PDF ou son repli HTML.
-        ok_rapport, motif_rapport = verifier_fichier(report_file, {'pdf', 'html', 'htm'})
-        if not ok_rapport:
-            return jsonify({"status": "error", "message": motif_rapport}), 400
-
         try:
             device_id = int(device_id)
             client_id = int(client_id)
         except (ValueError, TypeError):
             return jsonify({"status": "error", "message": "Invalid device_id or client_id"}), 400
+
+        if not jeton_collecteur_valide(client_id):
+            return jsonify({"status": "error", "message": "Jeton collecteur requis pour ce client"}), 401
+
+        # Ce point d'entrée est ouvert aux collecteurs : il ne doit accepter que
+        # ce que ceux-ci produisent, un rapport PDF ou son repli HTML.
+        ok_rapport, motif_rapport = verifier_fichier(report_file, {'pdf', 'html', 'htm'})
+        if not ok_rapport:
+            return jsonify({"status": "error", "message": motif_rapport}), 400
 
         conn = get_db()
 
@@ -8290,6 +8380,17 @@ def supprimer_contrat(id):
         return redirect(url_for('liste_contrats'))
     cid = get_client_id()
     conn = get_db()
+    conn.execute('PRAGMA foreign_keys = ON')
+    c = row_to_dict(conn.execute('SELECT titre FROM contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    log_history(conn, cid, 'contrat', id, c.get('titre','?'), 'Suppression')
+    # av_contrat_id/edr_contrat_id/rmm_contrat_id ont été ajoutées via ALTER TABLE
+    # (SQLite ne permet pas d'y déclarer de FK) — nettoyage manuel nécessaire.
+    conn.execute(
+        'UPDATE appareils SET av_contrat_id=NULL WHERE av_contrat_id=?', (id,))
+    conn.execute(
+        'UPDATE appareils SET edr_contrat_id=NULL WHERE edr_contrat_id=?', (id,))
+    conn.execute(
+        'UPDATE appareils SET rmm_contrat_id=NULL WHERE rmm_contrat_id=?', (id,))
     conn.execute('DELETE FROM contrats WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
     flash('Contrat supprimé', 'info')
@@ -11099,6 +11200,8 @@ def import_appareils_csv():
                             date_maj=? WHERE client_id=? AND id=?""",
                         vals + [now, cid, existing[0]])
                     updated += 1
+                    log_history(conn, cid, 'appareil', existing[0], nom, 'Mise à jour (import CSV)',
+                                {'source': 'import-csv'})
                 else:
                     conn.execute(
                         f"""INSERT INTO appareils
@@ -11111,7 +11214,10 @@ def import_appareils_csv():
                             client_id,date_creation,date_maj)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         vals + [cid, now, now])
+                    new_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
                     inserted += 1
+                    log_history(conn, cid, 'appareil', new_id, nom, 'Création (import CSV)',
+                                {'source': 'import-csv'})
             except Exception as e:
                 errors += 1
         
@@ -11197,6 +11303,8 @@ def import_peripheriques_csv():
                             notes=?,date_maj=? WHERE client_id=? AND id=?""",
                         vals + [now, cid, existing[0]])
                     updated += 1
+                    log_history(conn, cid, 'peripherique', existing[0], f"{marque} {modele}".strip() or cat,
+                                'Mise à jour (import CSV)', {'source': 'import-csv'})
                 else:
                     conn.execute(
                         """INSERT INTO peripheriques
@@ -11205,7 +11313,10 @@ def import_peripheriques_csv():
                             prix_achat,numero_commande,notes,client_id,date_creation,date_maj)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         vals + [cid, now, now])
+                    new_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
                     inserted += 1
+                    log_history(conn, cid, 'peripherique', new_id, f"{marque} {modele}".strip() or cat,
+                                'Création (import CSV)', {'source': 'import-csv'})
             except Exception as e:
                 errors += 1
         
