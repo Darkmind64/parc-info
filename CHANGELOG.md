@@ -1,5 +1,44 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.18] - 2026-08-20 🍎
+
+### 🍎 Deux régressions macOS corrigées, signalées en usage réel (Mac Intel)
+
+Aucune des deux ne touchait Windows/PC.
+
+**Corrigé**
+- Synchronisation Turso en échec juste après une mise à jour
+  (`CERTIFICATE_VERIFY_FAILED : unable to get local issuer certificate`,
+  sur tous les push — `user_preferences`, `config`, `historique`,
+  `appareils`). Cause : `launcher.py` pose `SSL_CERT_FILE` avec
+  `os.environ.setdefault()`, en pointant vers le `cacert.pem` de son
+  propre `_MEIPASS` — mais `applique_maj.environnement_propre()` (le
+  correctif 2.18.14 pour `_MEIPASS2`) ne filtrait pas cette variable :
+  le nouveau process héritait donc de la valeur de l'ANCIENNE instance,
+  pointant vers un dossier temporaire supprimé dès qu'elle se termine
+  juste après — `setdefault()` ne corrigeait alors jamais ce chemin
+  devenu invalide. Corrigé aux deux endroits : affectation directe dans
+  `launcher.py` (le chemin recalculé par CE process doit toujours
+  l'emporter), et `SSL_CERT_FILE` ajouté aux variables filtrées lors de
+  la relance.
+- Après une mise à jour, ParcInfo redémarrait sur un port différent de
+  3456 et y restait bloqué en permanence. Cause : le lancement direct
+  macOS démarre volontairement la nouvelle instance AVANT d'arrêter
+  l'ancienne (vérification introduite en 2.18.1, pour éviter qu'une mise
+  à jour ratée ne tue les deux instances à la fois) — l'ancienne garde
+  donc le port 3456 jusqu'à ~12 secondes après le démarrage de la
+  nouvelle. `launcher.get_port()` n'avait aucune patience : port occupé
+  → bascule aussitôt sur un port au hasard, sans jamais y revenir
+  ensuite. Corrigé sans changer le comportement des lancements normaux
+  (deux instances légitimes qui se partagent des ports distincts, cas
+  courant avec Docker/PC/Mac) : la relance après mise à jour se signale
+  désormais elle-même (`PARCINFO_RELANCE_MAJ`), et `get_port()` ne
+  patiente (jusqu'à 15s) que dans ce cas précis.
+
+Les deux corrigés avec un test dédié (`test_launcher_port.py` pour le
+port, assertions supplémentaires dans `test_maj_macos_architecture.py`
+pour les deux).
+
 ## [2.18.17] - 2026-08-19 🎨
 
 ### 🎨 Curseur de luminosité, ligne version corrigée, fiche appareil réparée
