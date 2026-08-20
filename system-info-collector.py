@@ -83,6 +83,17 @@ def main():
                         help="Inclure les mots de passe Wi-Fi enregistrés "
                              "(stockés chiffrés dans Identifiants côté serveur)")
 
+    # Désactivé par défaut : sollicite un service tiers (dnscheck.tools) —
+    # même principe que --test-debit. Résultat brut, non interprété (voir
+    # collector_core.get_dns_check_info).
+    parser.add_argument('--dns-check', action='store_true',
+                        help='Vérifier la configuration DNS (dnscheck.tools)')
+
+    # Désactivé par défaut : sonde le réseau local (découverte UPnP) plutôt
+    # que ce poste lui-même — un choix explicite, comme les deux ci-dessus.
+    parser.add_argument('--router-info', action='store_true',
+                        help='Récupérer les infos de la box internet (UPnP)')
+
     args = parser.parse_args()
     _forcer_sortie_utf8()
 
@@ -98,7 +109,8 @@ def main():
     # Barre de progression : la collecte dure une bonne minute et resterait
     # sinon indiscernable d'un blocage. En mode --quiet, aucun rappel.
     info = collect_system_info(progress=None if args.quiet else console_progress(),
-                               test_debit=args.test_debit)
+                               test_debit=args.test_debit,
+                               verifier_dns=args.dns_check, info_box=args.router_info)
 
     if not args.quiet:
         print()

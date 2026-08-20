@@ -1462,7 +1462,8 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 <!-- ── CONFIGURATION RÉSEAU ─────────────────────────────────────────────── -->
 {% if rapport.default_gateway or rapport.dns_servers or rapport.network_profiles
       or rapport.proxy or rapport.wifi or rapport.latency or rapport.hosts_entries
-      or rapport.port_forwards or rapport.public_ip %}
+      or rapport.port_forwards or rapport.public_ip or rapport.dns_check_reponse
+      or rapport.router_wan_ip or rapport.router_manufacturer or rapport.router_model %}
 <div class="fs-section">
     <h3>■ Configuration &amp; qualité réseau</h3>
     <div class="fs-grid">
@@ -1560,6 +1561,29 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
         </tr>
         {% endfor %}
     </table>
+    {% endif %}
+
+    {% if rapport.dns_check_reponse %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Vérification DNS (dnscheck.tools) — réponse brute du service, via le
+        résolveur {{ rapport.dns_check_resolveur }} configuré sur ce poste ;
+        non interprétée, à lire soi-même
+    </div>
+    <div class="fs-row" style="margin-bottom:.9rem;">
+        <span class="fs-value fs-mono">{{ rapport.dns_check_reponse }}</span>
+    </div>
+    {% endif %}
+
+    {% if rapport.router_wan_ip or rapport.router_manufacturer or rapport.router_model %}
+    <div class="fs-label" style="font-size:.75rem;margin-bottom:.35rem;">
+        Box internet (UPnP) — best-effort, incomplet ou absent selon les box
+    </div>
+    <div style="margin-bottom:.9rem;">
+        {{ row("Fabricant", rapport.router_manufacturer) }}
+        {{ row("Modèle", rapport.router_model) }}
+        {{ row("Nom", rapport.router_name) }}
+        {{ row("IP WAN", rapport.router_wan_ip) }}
+    </div>
     {% endif %}
 
     {% if rapport.latency %}

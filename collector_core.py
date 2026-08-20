@@ -21,6 +21,7 @@ import re
 import shutil
 import socket
 import string
+import struct
 import subprocess
 import sys
 import tempfile
@@ -28,7 +29,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from urllib.error import URLError
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 from urllib.request import Request, urlopen
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     'fetch_clients', 'is_elevated', 'get_mac_address', 'get_all_mac_addresses',
     'discover_parcinfo_mdns',
     'get_wifi_profiles', 'send_wifi_credentials_to_parcinfo',
+    'get_public_ip_info', 'get_dns_check_info', 'get_router_info',
 ]
 
 # Platform detection
@@ -46,7 +48,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.3'
+COLLECTOR_VERSION = '3.4'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -4885,6 +4887,261 @@ def get_public_ip_info():
         return {}
 
 
+# ── Vérification DNS (dnscheck.tools), désactivée par défaut ─────────────────
+# Service pensé pour un navigateur (requêtes DNS spéciales interprétées côté
+# client) : pas d'API JSON documentée. dnscheck.tools/help ne documente en
+# clair que la requête de base — `dig txt test.dnscheck.tools` — les variantes
+# ECS/DNSSEC ne sont pas assez précisément décrites pour en fabriquer un
+# verdict OK/KO fiable ici. Le résultat brut est donc affiché tel quel, à
+# charge du technicien de l'interpréter — mieux vaut ça qu'un faux "validé"
+# sur un point de sécurité DNS.
+DNS_CHECK_HOSTNAME = 'test.dnscheck.tools'
+
+
+def _dns_encoder_nom(nom):
+    """Encode un nom de domaine au format DNS (labels préfixés par leur
+    longueur, terminés par un octet nul)."""
+    encodage = b''
+    for label in nom.strip('.').split('.'):
+        brut = label.encode('ascii', errors='ignore')[:63]
+        encodage += bytes([len(brut)]) + brut
+    return encodage + b'\x00'
+
+
+def _dns_construire_requete_txt(nom):
+    """Construit une requête DNS minimale (question unique, type TXT)."""
+    txn_id = struct.unpack('>H', os.urandom(2))[0]
+    flags = 0x0100  # requête standard, récursion demandée
+    entete = struct.pack('>HHHHHH', txn_id, flags, 1, 0, 0, 0)
+    question = _dns_encoder_nom(nom) + struct.pack('>HH', 16, 1)  # TXT, IN
+    return entete + question, txn_id
+
+
+def _dns_sauter_nom(data, offset):
+    """Avance `offset` au-delà d'un nom DNS, compression (pointeur 0xC0)
+    comprise. Ne résout pas le nom pointé : sert seulement à retrouver les
+    octets qui suivent (type/classe/TTL/longueur/données)."""
+    while offset < len(data):
+        longueur = data[offset]
+        if longueur == 0:
+            return offset + 1
+        if (longueur & 0xC0) == 0xC0:
+            return offset + 2
+        offset += 1 + longueur
+    return offset
+
+
+def _dns_parser_txt(data, txn_id_attendu):
+    """Extrait les chaînes TXT d'une réponse DNS brute. Best-effort : une
+    réponse tronquée ou inattendue renvoie simplement une liste vide plutôt
+    que de lever une exception."""
+    if len(data) < 12:
+        return []
+    id_recu, flags, qdcount, ancount = struct.unpack('>HHHH', data[:8])
+    if id_recu != txn_id_attendu or not (flags & 0x8000):  # bit QR : réponse
+        return []
+    offset = 12
+    for _ in range(qdcount):
+        offset = _dns_sauter_nom(data, offset) + 4
+    resultats = []
+    for _ in range(ancount):
+        offset = _dns_sauter_nom(data, offset)
+        if offset + 10 > len(data):
+            break
+        rtype, _rclass, _ttl, rdlength = struct.unpack('>HHIH', data[offset:offset + 10])
+        offset += 10
+        rdata = data[offset:offset + rdlength]
+        if rtype == 16:  # TXT
+            chaines, pos = [], 0
+            while pos < len(rdata):
+                l = rdata[pos]
+                pos += 1
+                chaines.append(rdata[pos:pos + l].decode('utf-8', errors='replace'))
+                pos += l
+            resultats.append(''.join(chaines))
+        offset += rdlength
+    return resultats
+
+
+def _resolveur_dns_systeme(info):
+    """Premier serveur DNS configuré sur ce poste — c'est LUI que
+    dnscheck.tools observerait depuis un navigateur, pas un résolveur public
+    arbitraire. Déjà collecté sur Windows (_win_network → dns_servers) ;
+    /etc/resolv.conf reste la seule source universelle sans dépendance
+    supplémentaire sur macOS/Linux."""
+    for entree in (info.get('dns_servers') or []):
+        serveurs = entree.get('servers') if isinstance(entree, dict) else None
+        if serveurs:
+            return serveurs[0]
+    if not IS_WINDOWS:
+        try:
+            with open('/etc/resolv.conf', 'r', encoding='utf-8', errors='ignore') as f:
+                for ligne in f:
+                    ligne = ligne.strip()
+                    if ligne.startswith('nameserver'):
+                        parties = ligne.split()
+                        if len(parties) >= 2:
+                            return parties[1]
+        except OSError:
+            pass
+    return None
+
+
+def get_dns_check_info(info):
+    """Requête DNS brute vers test.dnscheck.tools, via le résolveur configuré
+    sur ce poste. Option désactivée par défaut (--dns-check / case à cocher) :
+    sollicite un service tiers, comme --test-debit."""
+    serveur = _resolveur_dns_systeme(info)
+    if not serveur:
+        return {}
+    try:
+        requete, txn_id = _dns_construire_requete_txt(DNS_CHECK_HOSTNAME)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(5)
+            s.sendto(requete, (serveur, 53))
+            data, _adresse = s.recvfrom(4096)
+        chaines = _dns_parser_txt(data, txn_id)
+        if not chaines:
+            return {}
+        return {
+            'dns_check_resolveur': serveur,
+            'dns_check_reponse': ' / '.join(chaines),
+        }
+    except Exception:
+        return {}
+
+
+# ── Infos de la box internet (UPnP/IGD), désactivée par défaut ───────────────
+# Best-effort : beaucoup de box grand public désactivent UPnP, ou ne
+# répondent pas dans le délai imparti — un échec à n'importe quelle étape
+# rend simplement {}, jamais d'exception qui remonterait à la collecte.
+_UPNP_MULTICAST_ADDR = '239.255.255.250'
+_UPNP_MULTICAST_PORT = 1900
+_UPNP_DEVICE_NS = 'urn:schemas-upnp-org:device-1-0'
+
+
+def _upnp_decouvrir_passerelle(timeout=3):
+    """Découverte SSDP : renvoie l'URL de description XML de la passerelle
+    Internet (IGD), ou None si rien ne répond."""
+    import time as _time
+    message = (
+        'M-SEARCH * HTTP/1.1\r\n'
+        'HOST: 239.255.255.250:1900\r\n'
+        'MAN: "ssdp:discover"\r\n'
+        'MX: 2\r\n'
+        'ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n'
+        '\r\n'
+    ).encode('utf-8')
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            s.sendto(message, (_UPNP_MULTICAST_ADDR, _UPNP_MULTICAST_PORT))
+            fin = _time.time() + timeout
+            while _time.time() < fin:
+                try:
+                    data, _adresse = s.recvfrom(4096)
+                except socket.timeout:
+                    break
+                texte = data.decode('utf-8', errors='ignore')
+                for ligne in texte.split('\r\n'):
+                    if ligne.upper().startswith('LOCATION:'):
+                        return ligne.split(':', 1)[1].strip()
+    except Exception:
+        pass
+    return None
+
+
+def _upnp_description(location_url):
+    """Description XML de la passerelle : fabricant/modèle, et l'URL de
+    contrôle du service WAN (IP externe) si présent."""
+    try:
+        requete = Request(location_url, headers={'User-Agent': 'ParcInfo-Collector'})
+        with urlopen(requete, timeout=5) as reponse:
+            xml_brut = reponse.read()
+        racine = ET.fromstring(xml_brut)
+    except Exception:
+        return {}
+
+    ns = {'u': _UPNP_DEVICE_NS}
+
+    def texte(chemin):
+        el = racine.find('.//u:' + chemin, ns)
+        return el.text.strip() if el is not None and el.text else None
+
+    resultat = {
+        'manufacturer': texte('manufacturer'),
+        'model_name': texte('modelName'),
+        'friendly_name': texte('friendlyName'),
+    }
+
+    # Service WAN (IP externe) : cherché parmi tous les services décrits, sous
+    # n'importe quel device imbriqué (WANDevice > WANConnectionDevice).
+    for service in racine.iter('{%s}service' % _UPNP_DEVICE_NS):
+        type_service = service.find('u:serviceType', ns)
+        if type_service is not None and type_service.text and (
+                'WANIPConnection' in type_service.text or 'WANPPPConnection' in type_service.text):
+            control_url = service.find('u:controlURL', ns)
+            if control_url is not None and control_url.text:
+                resultat['_service_type'] = type_service.text.strip()
+                resultat['_control_url'] = urljoin(location_url, control_url.text.strip())
+            break
+
+    return {k: v for k, v in resultat.items() if v}
+
+
+def _upnp_ip_externe(control_url, service_type):
+    """Appel SOAP GetExternalIPAddress sur le service WAN identifié."""
+    corps = (
+        '<?xml version="1.0"?>'
+        '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '
+        's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">'
+        '<s:Body><u:GetExternalIPAddress xmlns:u="%s"/></s:Body></s:Envelope>'
+    ) % service_type
+    entetes = {
+        'Content-Type': 'text/xml; charset="utf-8"',
+        'SOAPAction': '"%s#GetExternalIPAddress"' % service_type,
+        'User-Agent': 'ParcInfo-Collector',
+    }
+    try:
+        requete = Request(control_url, data=corps.encode('utf-8'), headers=entetes, method='POST')
+        with urlopen(requete, timeout=5) as reponse:
+            xml_brut = reponse.read()
+        racine = ET.fromstring(xml_brut)
+        for el in racine.iter():
+            if el.tag.endswith('NewExternalIPAddress') and el.text:
+                return el.text.strip()
+    except Exception:
+        pass
+    return None
+
+
+def get_router_info():
+    """Infos de la box internet via UPnP (IGD) : fabricant, modèle, IP WAN.
+    Option désactivée par défaut (--router-info / case à cocher) : sonde le
+    réseau local, mieux vaut un choix explicite qu'un comportement
+    systématique."""
+    location = _upnp_decouvrir_passerelle()
+    if not location:
+        return {}
+    description = _upnp_description(location)
+    if not description:
+        return {}
+    resultat = {}
+    if description.get('manufacturer'):
+        resultat['router_manufacturer'] = description['manufacturer']
+    if description.get('model_name'):
+        resultat['router_model'] = description['model_name']
+    if description.get('friendly_name'):
+        resultat['router_name'] = description['friendly_name']
+    control_url = description.get('_control_url')
+    service_type = description.get('_service_type')
+    if control_url and service_type:
+        ip_externe = _upnp_ip_externe(control_url, service_type)
+        if ip_externe:
+            resultat['router_wan_ip'] = ip_externe
+    return resultat
+
+
 def _publier(on_data, info):
     """Livre l'état partiel de la collecte, sans jamais l'interrompre.
 
@@ -5948,7 +6205,8 @@ def _meilleure_carte_physique(adapters):
     return candidats[0]
 
 
-def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data=None):
+def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data=None,
+                        verifier_dns=False, info_box=False):
     """Collecte toutes les infos système.
 
     `progress` est un rappel optionnel appelé avec (fraction entre 0 et 1,
@@ -5958,6 +6216,11 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data
     `on_data` reçoit une copie de l'état partiel après chaque étape : l'interface
     graphique remplit ainsi ses onglets au fil de l'eau au lieu de tout afficher
     à la fin.
+
+    `verifier_dns` et `info_box` sont désactivées par défaut : la première
+    sollicite un service tiers (dnscheck.tools), la seconde sonde le réseau
+    local (UPnP) — même principe que `test_debit`, un choix explicite plutôt
+    qu'un comportement systématique.
     """
     _report(progress, 0.02, 'Identification de la machine')
     info = {
@@ -6053,6 +6316,25 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data
     except Exception:
         pass
     _publier(on_data, info)
+
+    # Options désactivées par défaut : sollicitent un service tiers / sondent
+    # le réseau local, un choix explicite plutôt qu'un comportement
+    # systématique — même principe que test_debit.
+    if verifier_dns:
+        _report(progress, 0.905, 'Vérification DNS (dnscheck.tools)')
+        try:
+            info.update(get_dns_check_info(info))
+        except Exception:
+            pass
+        _publier(on_data, info)
+
+    if info_box:
+        _report(progress, 0.91, 'Infos box internet (UPnP)')
+        try:
+            info.update(get_router_info())
+        except Exception:
+            pass
+        _publier(on_data, info)
 
     _report(progress, 0.93, 'Périphériques USB')
     try:
@@ -6383,6 +6665,12 @@ def build_summary_sections(info):
         ('Opérateur (FAI)', info.get('public_ip_isp')),
         ('Suffixes DNS', ', '.join(info.get('dns_suffixes') or []) or None),
         ('Proxy', proxy),
+        ('Résolveur DNS interrogé', info.get('dns_check_resolveur')),
+        ('Vérification DNS (dnscheck.tools)', info.get('dns_check_reponse')),
+        ('Box internet — fabricant', info.get('router_manufacturer')),
+        ('Box internet — modèle', info.get('router_model')),
+        ('Box internet — nom', info.get('router_name')),
+        ('Box internet — IP WAN', info.get('router_wan_ip')),
     ]
     if dns:
         s['listes'].append({'titre': 'Serveurs DNS', 'elements': dns})
@@ -8879,6 +9167,12 @@ def generate_pdf_report(info, client_id=None, client_name=None):
              if proxy.get('server') or proxy.get('auto_config_url') else None),
             ('Réseau Wi-Fi', wifi.get('ssid')),
             ('Signal Wi-Fi', wifi.get('signal')),
+            ('Résolveur DNS interrogé', info.get('dns_check_resolveur')),
+            ('Vérification DNS (dnscheck.tools)', info.get('dns_check_reponse')),
+            ('Box internet — fabricant', info.get('router_manufacturer')),
+            ('Box internet — modèle', info.get('router_model')),
+            ('Box internet — nom', info.get('router_name')),
+            ('Box internet — IP WAN', info.get('router_wan_ip')),
         ], width)
         if table:
             story.append(Paragraph('Configuration réseau', S['h2']))

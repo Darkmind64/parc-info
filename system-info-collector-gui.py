@@ -381,6 +381,21 @@ class CollectorGUI:
             self.root, variable=self.wifi_passwords_var,
             text="Inclure les mots de passe Wi-Fi enregistrés (stockés chiffrés)")
 
+        # Vérification DNS (dnscheck.tools) : décochée par défaut. Sollicite
+        # un service tiers — même principe que le test de débit ci-dessus.
+        self.dns_check_var = tk.BooleanVar(value=False)
+        dns_check_box = ttk.Checkbutton(
+            self.root, variable=self.dns_check_var,
+            text="Vérifier la configuration DNS (dnscheck.tools)")
+
+        # Infos box internet (UPnP) : décochée par défaut. Sonde le réseau
+        # local plutôt que ce poste — un choix explicite, comme les autres
+        # options ci-dessus.
+        self.router_info_var = tk.BooleanVar(value=False)
+        router_info_box = ttk.Checkbutton(
+            self.root, variable=self.router_info_var,
+            text="Récupérer les infos de la box internet (UPnP)")
+
         # Status bar + progression : la collecte dure une bonne minute, une
         # interface figée sans indication passe pour un plantage.
         self.progress_var = tk.DoubleVar(value=0.0)
@@ -398,6 +413,8 @@ class CollectorGUI:
         # de la fenêtre.
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         self.progress_bar.pack(side=tk.BOTTOM, fill=tk.X)
+        router_info_box.pack(side=tk.BOTTOM, anchor=tk.W, padx=12, pady=2)
+        dns_check_box.pack(side=tk.BOTTOM, anchor=tk.W, padx=12, pady=2)
         wifi_check.pack(side=tk.BOTTOM, anchor=tk.W, padx=12, pady=2)
         debit_check.pack(side=tk.BOTTOM, anchor=tk.W, padx=12, pady=2)
         action_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=8)
@@ -536,6 +553,8 @@ class CollectorGUI:
         # La valeur de la case est lue ici, dans la boucle Tk : une variable
         # Tkinter ne se lit pas depuis un autre thread.
         test_debit = self.test_debit_var.get()
+        dns_check = self.dns_check_var.get()
+        router_info = self.router_info_var.get()
 
         def partiel(donnees):
             # Même règle que pour l'avancement : la collecte tourne dans un
@@ -545,7 +564,8 @@ class CollectorGUI:
         def collect():
             try:
                 self.system_info = collect_system_info(
-                    progress=avancement, test_debit=test_debit, on_data=partiel)
+                    progress=avancement, test_debit=test_debit, on_data=partiel,
+                    verifier_dns=dns_check, info_box=router_info)
                 self.root.after(0, self._update_summary)
                 self.root.after(0, lambda: self.progress_var.set(100.0))
                 self.root.after(0, lambda: self.pdf_btn.config(state=tk.NORMAL))

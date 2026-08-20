@@ -212,13 +212,36 @@ avg_ms, max_ms, loss_pct}` · `bandwidth{mbps, downloaded_mb, seconds}`
 `smb_shares[]{name, path, administrative}` (partages exposés) ·
 `mapped_drives[]{letter, path}` (lecteurs mappés depuis d'autres machines) ·
 `hosts_entries[]{ip, hostname, local}` ·
-`port_forwards[]{listen_address, listen_port, connect_address, connect_port}`
+`port_forwards[]{listen_address, listen_port, connect_address, connect_port}` ·
+`dns_check_resolveur`, `dns_check_reponse` (sur demande explicite,
+`--dns-check`) ·
+`router_manufacturer`, `router_model`, `router_name`, `router_wan_ip` (sur
+demande explicite, `--router-info`)
 
-> `hosts_entries`, `public_ip` et `public_ip_isp` sont les seuls champs
-> réseau qui ne sont pas spécifiques à Windows — tous trois appelés depuis
-> `collect_system_info()` plutôt que `_WIN_STEPS`/`get_system_info_windows()`
-> (simple lecture de fichier pour `hosts_entries` ; simple appel HTTPS,
-> `get_public_ip_info()`, pour les deux autres — valable sur les trois OS).
+> `hosts_entries`, `public_ip`, `public_ip_isp` et les champs
+> `dns_check_*`/`router_*` sont les seuls champs réseau qui ne sont pas
+> spécifiques à Windows — tous appelés depuis `collect_system_info()` plutôt
+> que `_WIN_STEPS`/`get_system_info_windows()` (simple lecture de fichier
+> pour `hosts_entries` ; simple appel HTTPS, `get_public_ip_info()`, pour
+> l'IP publique ; requête DNS brute construite à la main,
+> `get_dns_check_info()`, pour la vérification DNS ; découverte UPnP/SSDP,
+> `get_router_info()`, pour la box internet — les quatre valables sur les
+> trois OS).
+>
+> `dns_check_reponse` : contenu brut de la réponse TXT à
+> `test.dnscheck.tools`, interrogé via le résolveur DNS configuré sur ce
+> poste (`dns_check_resolveur`) — pas un résolveur public arbitraire, c'est
+> justement ce que verrait un navigateur sur ce même poste. dnscheck.tools
+> ne documente pas assez précisément l'interprétation de ses variantes
+> (ECS, DNSSEC) pour qu'un verdict OK/KO fabriqué ici soit fiable : la
+> réponse brute est affichée telle quelle, à charge du technicien de la lire.
+>
+> `router_*` : description UPnP (IGD) de la box internet — fabricant,
+> modèle, nom, IP WAN via un appel SOAP `GetExternalIPAddress`. Best-effort :
+> de nombreuses box grand public désactivent UPnP par défaut, ou ne
+> répondent pas à la découverte SSDP ; absence totale de ces champs = box
+> injoignable en UPnP, pas une erreur de collecte.
+>
 > `hosts_entries` filtré : `localhost`, les entrées
 > `ip6-*` que Linux inscrit lui-même, et la propre entrée `<ip loopback>
 > <hostname de la machine>` que Debian/Ubuntu écrivent automatiquement —
