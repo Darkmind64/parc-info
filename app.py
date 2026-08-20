@@ -6683,8 +6683,10 @@ def _sync_collector_peripherals(conn, cid, appareil_id, monitors, printers, usb_
                     (cid, usb_id)).fetchone()
             else:
                 existing = conn.execute(
-                    'SELECT id FROM peripheriques WHERE client_id=? AND source_usb_id=?'
-                    ' AND appareil_id=?', (cid, usb_id, appareil_id)).fetchone()
+                    'SELECT p.id FROM peripheriques p'
+                    ' JOIN peripheriques_appareils pa ON pa.peripherique_id = p.id'
+                    ' WHERE p.client_id=? AND p.source_usb_id=? AND pa.appareil_id=?',
+                    (cid, usb_id, appareil_id)).fetchone()
         if not existing:
             if numero_serie:
                 existing = conn.execute(
@@ -6699,15 +6701,19 @@ def _sync_collector_peripherals(conn, cid, appareil_id, monitors, printers, usb_
             pid = existing[0]
             if usb_id:
                 conn.execute(
-                    'UPDATE peripheriques SET source_usb_id=?, appareil_id=?, date_maj=? WHERE id=?',
-                    (usb_id, appareil_id, now, pid))
+                    'UPDATE peripheriques SET source_usb_id=?, date_maj=? WHERE id=?',
+                    (usb_id, now, pid))
         else:
+            # Le lien à l'appareil vit uniquement dans la table pivot
+            # peripheriques_appareils (ci-dessous), jamais dans la colonne
+            # historique peripheriques.appareil_id — plus lue nulle part,
+            # sa tenir à jour ici ne faisait qu'entretenir un doublon.
             conn.execute(
                 '''INSERT INTO peripheriques
-                   (client_id, appareil_id, utilisateur_id, categorie, marque, modele,
+                   (client_id, utilisateur_id, categorie, marque, modele,
                     numero_serie, description, statut, source_usb_id, date_creation, date_maj)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
-                (cid, appareil_id if usb_id else None, utilisateur_id, categorie, marque,
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+                (cid, utilisateur_id, categorie, marque,
                  modele, numero_serie, description, 'actif', usb_id, now, now))
             pid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
             created += 1
@@ -8132,6 +8138,7 @@ def supprimer_peripherique(id):
         return redirect(url_for('liste_peripheriques'))
     cid = get_client_id()
     conn = get_db()
+    conn.execute('PRAGMA foreign_keys = ON')
     p = row_to_dict(conn.execute('SELECT marque,modele FROM peripheriques WHERE id=?',(id,)).fetchone() or {})
     nom_p = (p.get('marque','') + ' ' + p.get('modele','')).strip() or '?'
     log_history(conn, cid, 'peripherique', id, nom_p, 'Suppression')
@@ -10884,9 +10891,14 @@ _ENTITE_COLS = {
         'av_marque','av_nom','av_date_debut','av_date_fin','av_contrat_id',
         'edr_marque','edr_nom','edr_date_fin','edr_contrat_id',
         'rmm_marque','rmm_nom','rmm_agent_id','rmm_date_fin','rmm_contrat_id'],
+    # appareil_id (colonne historique) volontairement absente : le lien
+    # appareil<->périphérique vit désormais uniquement dans la table pivot
+    # peripheriques_appareils (N:N), jamais écrite par ce formulaire — la
+    # garder ici ne faisait que produire de faux écarts dans l'historique
+    # (champ form « appareil_ids » au pluriel, jamais « appareil_id »).
     'peripherique': ['categorie','marque','modele','numero_serie','description','localisation',
         'statut','date_achat','duree_garantie','date_fin_garantie','fournisseur','prix_achat',
-        'numero_commande','notes','appareil_id','utilisateur_id'],
+        'numero_commande','notes','utilisateur_id'],
     'identifiant': ['categorie','nom','login','mot_de_passe','url','description','notes',
         'date_expiration','wifi_ssid','wifi_securite'],
     'contrat': ['titre','type_contrat','fournisseur','contact_fournisseur','email_fournisseur',
