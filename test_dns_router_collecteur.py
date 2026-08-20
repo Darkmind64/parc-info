@@ -123,7 +123,15 @@ verifier(resultat_complet.get('dns_check_reponse') == 'réponse de test',
          'réponse transmise telle quelle', str(resultat_complet.get('dns_check_reponse')))
 
 print('\n=== 6. get_dns_check_info() : aucun résolveur connu -> dict vide, pas d\'exception ===')
+# {} seul ne suffit pas à isoler ce cas : sur une machine dont /etc/resolv.conf
+# est lisible (le cas de la CI Linux), _resolveur_dns_systeme retrouverait un
+# vrai résolveur et lancerait une vraie requête réseau — le résolveur est
+# donc explicitement neutralisé ici, pour rester indépendant de la machine
+# qui exécute le test (Windows sans /etc/resolv.conf, Linux avec).
+_resolveur_original = CC._resolveur_dns_systeme
+CC._resolveur_dns_systeme = lambda info: None
 verifier(CC.get_dns_check_info({}) == {}, 'aucun serveur DNS connu -> {}')
+CC._resolveur_dns_systeme = _resolveur_original
 
 print('\n=== 7. UPnP : description XML (fabricant/modèle/URL de contrôle) ===')
 XML_DESCRIPTION = b'''<?xml version="1.0"?>
