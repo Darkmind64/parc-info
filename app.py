@@ -2728,11 +2728,16 @@ def _compute_critical_alerts(conn, cid, today):
     """
     alerts = []
 
-    # Expired/expiring warranties
+    # Expired/expiring warranties — même délai configuré (garantie_alerte_jours)
+    # et même drapeau « ignorer cette alerte » que le widget garanties du
+    # dashboard client (_compute_alerts_for_client) : un appareil explicitement
+    # mis en sourdine ne doit pas réapparaître ici.
+    alerte_jours_garantie = int(cfg_get('garantie_alerte_jours', '90'))
     for row in conn.execute(
         "SELECT id, nom_machine, date_fin_garantie FROM appareils "
-        "WHERE client_id=? AND date_fin_garantie!='' AND date_fin_garantie<=?",
-        (cid, (today + timedelta(days=30)).isoformat())).fetchall():
+        "WHERE client_id=? AND date_fin_garantie!='' AND date_fin_garantie<=? "
+        "AND (garantie_alerte_ignoree IS NULL OR garantie_alerte_ignoree=0)",
+        (cid, (today + timedelta(days=alerte_jours_garantie)).isoformat())).fetchall():
         a = row_to_dict(row)
         try:
             df = date.fromisoformat(a['date_fin_garantie'])
@@ -8725,6 +8730,13 @@ def _notify_upcoming_maintenances():
         today = date.today().isoformat()
         in_3_days = (date.today() + timedelta(days=3)).isoformat()
 
+        # NOT EXISTS sans condition de date : une maintenance déjà notifiée une
+        # fois ne doit plus jamais l'être une seconde fois pour la même
+        # occurrence, même si elle reste dans la fenêtre de préavis de 3 jours
+        # plusieurs jours de suite (notification_date >= today se réinitialisait
+        # chaque jour puisque « today » change à chaque exécution — la même
+        # maintenance recevait donc un email par jour pendant 3 jours au lieu
+        # d'un seul).
         maintenances = conn.execute('''
             SELECT m.id, m.date_planifiee, m.type_maintenance, m.description,
                    m.responsable, m.statut, a.nom_machine, p.categorie, p.marque
@@ -8735,10 +8747,10 @@ def _notify_upcoming_maintenances():
               AND m.date_planifiee BETWEEN ? AND ?
               AND NOT EXISTS (
                 SELECT 1 FROM maintenance_notifications
-                WHERE maintenance_id=m.id AND notification_date >= ?
+                WHERE maintenance_id=m.id
               )
             ORDER BY m.date_planifiee
-        ''', (today, in_3_days, today)).fetchall()
+        ''', (today, in_3_days)).fetchall()
 
         for maint in maintenances:
             m = row_to_dict(maint)
@@ -10970,6 +10982,8 @@ def supprimer_entree_historique(hist_id):
     cid = get_client_id()
     if not cid:
         return jsonify({'ok': False, 'message': 'Aucun client actif'}), 400
+    if not can_write(cid):
+        return jsonify({'ok': False, 'message': 'Accès en lecture seule — suppression non autorisée'}), 403
     conn = get_db()
     row = conn.execute('SELECT id FROM historique WHERE id=? AND (client_id=? OR client_id=0)', (hist_id, cid)).fetchone()
     if not row:
@@ -10988,6 +11002,8 @@ def vider_erreurs_historique():
     cid = get_client_id()
     if not cid:
         return jsonify({'ok': False, 'message': 'Aucun client actif'}), 400
+    if not can_write(cid):
+        return jsonify({'ok': False, 'message': 'Accès en lecture seule — suppression non autorisée'}), 403
     conn = get_db()
     # Compte des lignes à supprimer, pour le retourner dans la réponse
     ids = [r[0] for r in conn.execute(
