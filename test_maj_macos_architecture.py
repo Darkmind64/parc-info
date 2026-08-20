@@ -268,6 +268,12 @@ print("\n=== 6. Le lancement direct hérite un environnement nettoyé, pas celui
 # applique_maj.environnement_propre() — jamais repris ici avant ce correctif.
 _ancien_meipass2 = os.environ.get('_MEIPASS2')
 os.environ['_MEIPASS2'] = '/chemin/perime/de/l/ancienne/version'
+# SSL_CERT_FILE n'est pas posé par PyInstaller lui-même, mais par launcher.py
+# à partir de SON _MEIPASS — le même piège d'héritage s'applique : constaté
+# en usage réel (CERTIFICATE_VERIFY_FAILED sur la sync Turso juste après une
+# mise à jour macOS, le cacert.pem de l'ancien _MEIPASS n'existant plus).
+_ancien_ssl_cert_file = os.environ.get('SSL_CERT_FILE')
+os.environ['SSL_CERT_FILE'] = '/chemin/perime/de/l/ancien/cacert.pem'
 
 appels_popen = []
 
@@ -299,6 +305,10 @@ if _ancien_meipass2 is None:
     os.environ.pop('_MEIPASS2', None)
 else:
     os.environ['_MEIPASS2'] = _ancien_meipass2
+if _ancien_ssl_cert_file is None:
+    os.environ.pop('SSL_CERT_FILE', None)
+else:
+    os.environ['SSL_CERT_FILE'] = _ancien_ssl_cert_file
 
 verifier(len(appels_popen) == 1, "le lancement direct a bien été tenté", str(len(appels_popen)))
 if appels_popen:
@@ -306,6 +316,8 @@ if appels_popen:
     verifier(env_transmis is not None, "un environnement explicite est transmis (pas d'héritage tacite)")
     verifier(env_transmis is not None and '_MEIPASS2' not in env_transmis,
              "_MEIPASS2 (repère du lanceur PyInstaller) retiré de l'environnement transmis")
+    verifier(env_transmis is not None and 'SSL_CERT_FILE' not in env_transmis,
+             "SSL_CERT_FILE (pointait vers le cacert.pem de l'ancienne instance) retiré de l'environnement transmis")
     verifier(appels_popen[0].get('cwd') is not None,
              "un répertoire de travail explicite est transmis (pas hérité de l'ancienne instance)")
 

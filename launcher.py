@@ -84,14 +84,23 @@ def _migrer_donnees_macos_si_besoin(logger):
 # SSL_CERT_FILE est lu par ssl.get_default_verify_paths() pour TOUT usage du
 # contexte SSL par défaut du process, donc réglé une fois ici, avant tout
 # import réseau — pas besoin de toucher chaque appelant individuellement.
+# Affectation directe et non setdefault() : après une mise à jour, le nouveau
+# process est lancé avec l'environnement de l'ancien (voir applique_maj.
+# environnement_propre — SSL_CERT_FILE n'y est pas un « repère du lanceur »
+# à filtrer, donc il passe tel quel). Il pointait alors vers le cacert.pem de
+# l'ANCIEN _MEIPASS, un dossier temporaire supprimé dès la sortie de l'ancien
+# process — d'où un CERTIFICATE_VERIFY_FAILED (« unable to get local issuer
+# certificate ») sur la synchronisation Turso juste après une mise à jour
+# macOS, constaté en usage réel. Le chemin recalculé ici, propre à CE
+# process, doit toujours l'emporter sur une valeur héritée.
 if getattr(sys, 'frozen', False):
     _cacert = res('cacert.pem')
     if os.path.exists(_cacert):
-        os.environ.setdefault('SSL_CERT_FILE', _cacert)
+        os.environ['SSL_CERT_FILE'] = _cacert
 else:
     try:
         import certifi
-        os.environ.setdefault('SSL_CERT_FILE', certifi.where())
+        os.environ['SSL_CERT_FILE'] = certifi.where()
     except ImportError:
         pass
 

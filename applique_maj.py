@@ -29,11 +29,20 @@ from datetime import datetime
 
 INDICATEUR = '--appliquer-maj'
 
-#: Variables posées par le lanceur PyInstaller. Un processus lancé depuis
-#: l'application packagée en hérite ; on ne les transmet pas plus loin.
+#: Variables posées par le lanceur PyInstaller (ou dérivées de son propre
+#: _MEIPASS, comme SSL_CERT_FILE dans launcher.py). Un processus lancé depuis
+#: l'application packagée en hérite ; on ne les transmet pas plus loin — le
+#: nouveau process doit les recalculer lui-même. SSL_CERT_FILE en particulier
+#: pointait, une fois hérité, vers le cacert.pem de l'ANCIEN _MEIPASS (dossier
+#: temporaire supprimé dès la sortie de l'ancien process), causant un
+#: CERTIFICATE_VERIFY_FAILED sur la sync Turso juste après une mise à jour
+#: macOS — constaté en usage réel. launcher.py se protège désormais aussi de
+#: son côté (affectation directe plutôt que setdefault), mais autant ne pas
+#: transmettre une valeur qu'on sait fausse.
 _VARIABLES_LANCEUR = (
     '_MEIPASS', '_MEIPASS2', '_PYI_APPLICATION_HOME_DIR',
     '_PYI_ARCHIVE_FILE', '_PYI_PARENT_PROCESS_LEVEL', '_PYI_SPLASH_IPC',
+    'SSL_CERT_FILE',
 )
 
 #: Durée maximale d'attente de la sortie de l'application.
