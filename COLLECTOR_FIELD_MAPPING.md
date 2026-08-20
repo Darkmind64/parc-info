@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.2 · **À jour avec ParcInfo :** 2.18.15
+**Version collecteur :** 3.4 · **À jour avec ParcInfo :** 2.18.19
 
 ---
 

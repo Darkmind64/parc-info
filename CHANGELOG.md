@@ -1,5 +1,34 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.19] - 2026-08-20 📡
+
+### 📡 IP publique par appareil, options DNS/box internet au collecteur, curseur de luminosité corrigé
+
+**Ajouté**
+- IP publique et opérateur (FAI) collectés par appareil (`collector_core.
+  get_public_ip_info()`), distinct du champ site `parc_general.ip_publique`
+  (saisi à la main) : utile pour un poste itinérant dont l'IP publique
+  change selon le lieu de connexion. Toujours resynchronisée à chaque
+  collecte, comme `adresse_ip`. Affichée sur la fiche appareil, la fiche
+  système et le rapport PDF.
+- Vérification DNS (dnscheck.tools), option décochée par défaut (case à
+  cocher / `--dns-check`) : requête DNS construite à la main (aucune
+  dépendance ajoutée), interrogée sur le résolveur réellement configuré
+  sur le poste — pas un résolveur public arbitraire. Résultat affiché
+  **brut**, sans verdict OK/KO fabriqué : dnscheck.tools ne documente pas
+  assez précisément l'interprétation de ses variantes (ECS, DNSSEC) pour
+  qu'un tel verdict soit fiable.
+- Infos de la box internet via découverte UPnP, option décochée par défaut
+  (case à cocher / `--router-info`) : fabricant, modèle, IP WAN — best-effort,
+  beaucoup de box grand public désactivent UPnP par défaut.
+
+**Corrigé**
+- Le curseur de luminosité des textes secondaires (ajouté en 2.18.17) ne
+  persistait pas au changement de page. L'override CSS n'existait que côté
+  JavaScript (prévisualisation en direct pendant qu'on bouge le curseur) —
+  jamais ajouté à la génération du CSS injecté au chargement de chaque page
+  côté serveur, contrairement aux autres préférences (accent, contraste).
+
 ## [2.18.18] - 2026-08-20 🍎
 
 ### 🍎 Deux régressions macOS corrigées, signalées en usage réel (Mac Intel)

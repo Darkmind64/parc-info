@@ -1,8 +1,32 @@
-PARCINFO_VERSION=2.18.18
+PARCINFO_VERSION=2.18.19
 RELEASE_DATE=2026-08-20
-BUILD_NUMBER=2026082001
+BUILD_NUMBER=2026082002
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.19 - IP publique par appareil, options DNS/box internet au collecteur, curseur de luminosité corrigé
+# Trois demandes distinctes.
+# 1) IP publique + opérateur (FAI) collectés par appareil (distinct du
+#    champ site parc_general.ip_publique, saisi à la main) : utile pour
+#    un poste itinérant dont l'IP publique change selon le lieu de
+#    connexion. Toujours resynchronisée à chaque collecte, comme
+#    adresse_ip. Affichée sur la fiche appareil, la fiche système, le
+#    rapport PDF et le résumé du collecteur.
+# 2) Deux nouvelles options du collecteur, décochées par défaut (case à
+#    cocher / --dns-check et --router-info) : vérification DNS via
+#    dnscheck.tools (requête DNS construite à la main, interrogée sur le
+#    résolveur réellement configuré sur le poste — résultat affiché brut,
+#    sans verdict fabriqué faute de documentation suffisante sur
+#    l'interprétation des variantes ECS/DNSSEC) et infos de la box
+#    internet via découverte UPnP (fabricant, modèle, IP WAN — best-effort,
+#    beaucoup de box désactivent UPnP par défaut).
+# 3) Curseur de luminosité des textes secondaires (ajouté en 2.18.17) :
+#    ne persistait pas au changement de page. L'override CSS n'existait
+#    que côté JavaScript, pour la prévisualisation en direct pendant qu'on
+#    bouge le curseur — jamais ajouté à la génération du CSS injecté au
+#    chargement de chaque page côté serveur, contrairement aux autres
+#    préférences (accent, contraste). Corrigé.
+# Date: 20 août 2026
 
 # Version 2.18.18 - Deux régressions macOS trouvées en usage réel après la 2.18.14/2.18.17
 # Signalées coup sur coup sur Mac Intel, aucune des deux sur Windows/PC :
