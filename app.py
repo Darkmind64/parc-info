@@ -10260,18 +10260,37 @@ def _ping_once(ip_str):
     return False
 
 def _ping_worker(item):
-    aid, ip = item
+    """Ping puis, si ça répond, vérifie via ARP que c'est bien NOTRE
+    appareil (par MAC) qui a répondu sur cette IP — pas un autre.
+
+    _appareil_sur_reseau_courant() ne fait que restreindre AUX appareils
+    plausibles (même plage IP) : ça ne suffit pas si deux clients partagent
+    la même plage (192.168.1.0/24 par défaut, très courant), ou si une IP a
+    été redistribuée par DHCP à une autre machine entre deux visites — dans
+    ces cas, l'IP répond mais pour un appareil différent de celui enregistré.
+    La MAC, elle, identifie la machine sans ambiguïté (une même IP ne
+    prouve rien, une même MAC si). `en_ligne=None` = résultat inconclusif
+    (une autre MAC a répondu) : ni « en ligne » ni « hors ligne », le
+    dernier statut connu reste inchangé.
+    """
+    aid, ip, mac_attendu = item
     try:
         en_ligne = _ping_once(ip)
     except Exception:
         en_ligne = False
-    return aid, ip, en_ligne, datetime.now().isoformat()
+    mac_vue = ''
+    if en_ligne:
+        time.sleep(0.5)  # laisser l'OS peupler sa table ARP après le ping
+        mac_vue = _mac_from_arp(ip)
+        if mac_attendu and mac_vue and mac_vue.lower() != mac_attendu.lower():
+            en_ligne = None
+    return aid, ip, en_ligne, mac_vue, datetime.now().isoformat()
 
 def _watchdog_cycle():
     try:
         conn = get_db()
         rows = conn.execute(
-            "SELECT a.id, a.adresse_ip, p.plage_ip_locale "
+            "SELECT a.id, a.adresse_ip, a.adresse_mac, p.plage_ip_locale "
             "FROM appareils a LEFT JOIN parc_general p ON p.client_id = a.client_id "
             "WHERE a.adresse_ip != '' AND a.adresse_ip IS NOT NULL"
         ).fetchall()
@@ -10281,8 +10300,8 @@ def _watchdog_cycle():
     if not rows:
         return
     reseaux_locaux = _reseaux_locaux_actuels()
-    items = [(r[0], r[1]) for r in rows
-            if _appareil_sur_reseau_courant(r[1], r[2], reseaux_locaux)]
+    items = [(r[0], r[1], r[2]) for r in rows
+            if _appareil_sur_reseau_courant(r[1], r[3], reseaux_locaux)]
     # Aucun appareil connu sur le réseau actuel (poste ailleurs que chez un
     # client suivi) : rien à pinger, et surtout rien à écraser en base — mais
     # le cycle a bien eu lieu, l'horodatage ci-dessous avance quand même
@@ -10296,9 +10315,19 @@ def _watchdog_cycle():
                 results.append(res)
         try:
             conn = get_db()
-            for aid, ip, en_ligne, ts in results:
-                conn.execute("UPDATE appareils SET en_ligne=?, dernier_ping=? WHERE id=?",
-                             (1 if en_ligne else 0, ts, aid))
+            for aid, ip, en_ligne, mac_vue, ts in results:
+                if en_ligne is None:
+                    # MAC différente de celle attendue : une autre machine
+                    # répond sur cette IP (chevauchement de plages entre
+                    # clients, ou réattribution DHCP). Inconclusif — on ne
+                    # touche pas au dernier statut connu.
+                    app.logger.debug(
+                        "Watchdog : IP %s répond mais MAC inattendue (appareil #%s) — ignoré", ip, aid)
+                    continue
+                conn.execute(
+                    "UPDATE appareils SET en_ligne=?, dernier_ping=?, "
+                    "adresse_mac=COALESCE(NULLIF(adresse_mac,''),?) WHERE id=?",
+                    (1 if en_ligne else 0, ts, mac_vue, aid))
                 with _ping_cache_lock:
                     _ping_cache[aid] = {'en_ligne': en_ligne, 'ts': ts, 'ip': ip}
             conn.commit(); conn.close()

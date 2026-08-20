@@ -131,5 +131,55 @@ verifier(A._watchdog_state['cycle_count'] == cycle_avant2 + 1,
          "le compteur de cycle avance quand même — la topbar ne doit pas sembler figée")
 verifier(A._watchdog_state['last_cycle'] is not None, "l'horodatage avance aussi")
 
+print('\n=== 5. Deux clients avec la MÊME plage IP : la MAC départage qui répond vraiment ===')
+# Signalé par l'utilisateur : 192.168.1.0/24 (ou toute plage identique par
+# coïncidence) ne suffit PAS à savoir à quel client attribuer une réponse —
+# deux appareils de deux clients différents peuvent porter la même IP dans
+# leurs fiches respectives (chacun sur son propre réseau, jamais vus en
+# même temps). Seule la MAC, vue via ARP sur le réseau où l'on se trouve
+# réellement, départage lequel des deux répond pour de vrai.
+conn = A.get_db()
+conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (3, 'Client Chevauchant A')")
+conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (4, 'Client Chevauchant B')")
+conn.execute("INSERT INTO parc_general (client_id, nom_site, plage_ip_locale) VALUES (3, 'Site', '192.168.50.0/24')")
+conn.execute("INSERT INTO parc_general (client_id, nom_site, plage_ip_locale) VALUES (4, 'Site', '192.168.50.0/24')")
+conn.execute("INSERT INTO appareils (client_id, nom_machine, adresse_ip, adresse_mac, en_ligne, dernier_ping) "
+             "VALUES (3, 'Poste-Reel', '192.168.50.20', 'aa:aa:aa:aa:aa:01', 0, '2026-01-01T00:00:00')")
+conn.execute("INSERT INTO appareils (client_id, nom_machine, adresse_ip, adresse_mac, en_ligne, dernier_ping) "
+             "VALUES (4, 'Poste-Autre-Client', '192.168.50.20', 'bb:bb:bb:bb:bb:02', 0, '2026-01-01T00:00:00')")
+conn.execute("INSERT INTO appareils (client_id, nom_machine, adresse_ip, en_ligne, dernier_ping) "
+             "VALUES (3, 'Poste-Sans-Mac-Connue', '192.168.50.21', 0, '2026-01-01T00:00:00')")
+conn.commit()
+id_reel   = conn.execute("SELECT id FROM appareils WHERE nom_machine='Poste-Reel'").fetchone()[0]
+id_autre  = conn.execute("SELECT id FROM appareils WHERE nom_machine='Poste-Autre-Client'").fetchone()[0]
+id_sans   = conn.execute("SELECT id FROM appareils WHERE nom_machine='Poste-Sans-Mac-Connue'").fetchone()[0]
+conn.close()
+
+A._reseaux_locaux_actuels = lambda: {ipaddress.ip_network('192.168.50.0/24')}
+A._ping_once = lambda ip: ip in ('192.168.50.20', '192.168.50.21')
+# Quelle que soit la fiche interrogée, c'est TOUJOURS la même vraie machine
+# qui répond sur .20 (celle de Client Chevauchant A) — et une machine
+# quelconque, jamais encore vue, sur .21.
+_arp_reponses = {'192.168.50.20': 'aa:aa:aa:aa:aa:01', '192.168.50.21': 'cc:cc:cc:cc:cc:03'}
+A._mac_from_arp = lambda ip: _arp_reponses.get(ip, '')
+_sleep_original2 = A.time.sleep
+A.time.sleep = lambda s: None  # ne pas ralentir le test pour de vrai
+A._watchdog_cycle()
+A.time.sleep = _sleep_original2
+
+conn = A.get_db()
+reel  = conn.execute("SELECT en_ligne, dernier_ping FROM appareils WHERE id=?", (id_reel,)).fetchone()
+autre = conn.execute("SELECT en_ligne, dernier_ping FROM appareils WHERE id=?", (id_autre,)).fetchone()
+sans  = conn.execute("SELECT en_ligne, adresse_mac FROM appareils WHERE id=?", (id_sans,)).fetchone()
+conn.close()
+verifier(reel[0] == 1, "la fiche dont la MAC correspond VRAIMENT est marquée en ligne")
+verifier(autre[0] == 0 and autre[1] == '2026-01-01T00:00:00',
+         "l'autre client (même IP, MAC différente) n'est PAS marqué en ligne à tort — statut inchangé",
+         str(tuple(autre)))
+verifier(sans[0] == 1, "sans MAC connue au départ, le ping seul suffit encore (repli historique)")
+verifier(sans[1] == 'cc:cc:cc:cc:cc:03',
+         "la MAC vue est enregistrée au passage, pour la vérification des prochains cycles",
+         sans[1])
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)
