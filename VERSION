@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.18.20
+PARCINFO_VERSION=2.18.21
 RELEASE_DATE=2026-08-20
-BUILD_NUMBER=2026082003
+BUILD_NUMBER=2026082004
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.21 - 5 correctifs issus de l'audit architecture (scan, collecteur, cascades)
+# Suite à un audit complet de la logique de fonctionnement (obtention des
+# données, recoupement entre rubriques, sélection client), 5 points corrigés.
+# 1) Scan réseau : une modale demande désormais toujours le client cible au
+#    clic sur « Lancer le scan » (aucun client scanné par erreur pour le
+#    mauvais client), pré-cochée uniquement si un seul client correspond
+#    sans ambiguïté au réseau physique actuel du poste ParcInfo — sinon rien
+#    n'est pré-coché. Confirmer bascule automatiquement le client actif si
+#    besoin, puis lance le scan.
+# 2) API collecteur (/api/device-info et consorts) : un client peut
+#    désormais définir son propre jeton dédié (fiche client), en plus du
+#    jeton global existant. Referme la faille où un seul jeton valide
+#    donnait accès à l'inventaire de TOUS les clients — sans rien casser
+#    pour les déploiements existants qui n'utilisent qu'un jeton global
+#    unique, ou aucun jeton du tout.
+# 3) Suppression d'un appareil ou d'un contrat : les tables liées
+#    (périphériques, documents, licences, clés de récupération, maintenances,
+#    baie de brassage, etc.) n'étaient pas nettoyées, laissant des lignes
+#    orphelines s'accumuler silencieusement. Corrigé.
+# 4) Collecteur : marque, modèle et n° de série ne sont plus jamais écrasés
+#    une fois renseignés (une mauvaise détection ne peut plus effacer une
+#    correction manuelle) — IP, adresse MAC, OS, RAM, CPU, stockage, etc.
+#    continuent, eux, à toujours se resynchroniser à chaque collecte comme
+#    avant, puisque ces valeurs peuvent légitimement changer.
+# 5) Import scan réseau et imports CSV (appareils/périphériques) :
+#    créations et mises à jour étaient invisibles dans l'historique
+#    d'audit. Chacune y est désormais journalisée.
+# Date: 20 août 2026
 
 # Version 2.18.20 - Scan réseau plus précis, surveillance ping limitée au bon client
 # Suite à une revue du code de détection matériel réseau, deux volets.

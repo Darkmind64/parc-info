@@ -1,5 +1,67 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.21] - 2026-08-20 🛡️
+
+### 🛡️ 5 correctifs issus de l'audit architecture (scan, collecteur, cascades)
+
+Suite à un audit complet de la logique de fonctionnement (obtention des
+données, recoupement entre rubriques, sélection client, remplissage,
+détection), 5 points concrets corrigés.
+
+**Scan réseau — sélection explicite du client cible**
+
+Le scan pouvait jusqu'ici importer ses résultats dans le mauvais client si
+le sélecteur en barre supérieure n'était pas celui attendu. Une modale
+demande désormais toujours le client cible au clic sur « Lancer le scan » :
+sans client pré-sélectionné, sauf si un seul client correspond sans
+ambiguïté au réseau physique actuel du poste ParcInfo (comparaison à
+`parc_general.plage_ip_locale`, même détection que la surveillance ping
+introduite en 2.18.20) — zéro ou plusieurs correspondances, rien n'est
+pré-coché. Confirmer bascule automatiquement le client actif si besoin,
+puis lance le scan.
+
+**API collecteur — jeton dédié par client**
+
+`/api/device-info` et les endpoints associés ne vérifiaient qu'un jeton
+global unique, sans notion de client : un jeton valide donnait accès en
+écriture à l'inventaire de **tous** les clients, pas seulement celui visé.
+Un client peut désormais définir son propre jeton (fiche client, section
+Sécurité), en plus du jeton global existant qui continue d'agir comme
+passe-partout — sans rien casser pour les déploiements qui n'utilisent
+qu'un jeton global unique, ou aucun jeton du tout.
+
+**Suppression appareil/contrat — fin des lignes orphelines**
+
+Les FOREIGN KEY déclarées dans le schéma (`ON DELETE CASCADE`/`SET NULL`)
+n'étaient jamais appliquées : `PRAGMA foreign_keys` n'était activé que pour
+la suppression d'un client, pas pour un appareil ou un contrat isolé.
+Périphériques, documents, licences, clés de récupération BitLocker,
+maintenances, emplacements de baie de brassage s'accumulaient donc en
+lignes orphelines à chaque suppression. Corrigé : le pragma est désormais
+activé sur ces suppressions aussi, complété d'un nettoyage manuel pour les
+quelques colonnes ajoutées après coup sans FK déclarée (`cles_recuperation`,
+`collectes`, `av_contrat_id`/`edr_contrat_id`/`rmm_contrat_id`).
+
+**Collecteur — marque/modèle/n° série figés une fois renseignés**
+
+Contrairement à l'IP, l'OS, la RAM ou le CPU, la marque, le modèle et le
+numéro de série d'une machine ne changent jamais dans son cycle de vie —
+mais le collecteur les écrasait pourtant à chaque collecte, sans
+vérification. Une détection mal formée (VM, matériel non standard) pouvait
+ainsi effacer silencieusement une correction saisie à la main. Ces trois
+champs ne sont désormais renseignés que s'ils sont encore vides ; tout le
+reste (IP, MAC, OS, RAM, CPU, stockage, antivirus...) continue de se
+resynchroniser à chaque collecte, exactement comme avant.
+
+**Audit trail — imports enfin journalisés**
+
+L'import des résultats de scan réseau et les imports CSV en masse
+(appareils, périphériques) ne laissaient aucune trace dans l'historique :
+un appareil pouvait apparaître ou changer sans qu'on sache jamais dire si
+c'était via ces imports. Chaque création et mise à jour issue de ces trois
+chemins est désormais journalisée, au même titre que la fiche appareil et
+le collecteur.
+
 ## [2.18.20] - 2026-08-20 🔍
 
 ### 🔍 Scan réseau plus précis, surveillance ping limitée au bon client

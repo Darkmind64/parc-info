@@ -1,21 +1,24 @@
 {
-  "version": "2.18.20",
+  "version": "2.18.21",
   "release_date": "2026-08-20T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.20/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.20/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.20/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.20",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.20/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.20/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.20/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.21/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.21/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.21/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.21",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.21/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.21/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.21/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Scan réseau plus précis (WMI persisté, bannières, UPnP et mDNS élargis) et surveillance ping limitée au bon client (réseau courant + vérification MAC)",
+    "new_features": "5 correctifs issus d'un audit architecture complet : modale de sélection client avant chaque scan réseau, jeton collecteur dédié par client, nettoyage des données liées à la suppression d'un appareil/contrat, marque/modèle/n° série figés une fois renseignés, audit trail complet sur les imports",
     "improvements": [
-      "AJOUTÉ: scan réseau plus précis — données WMI enfin enregistrées à l'import, bannières de service sur les ports ouverts, découverte UPnP élargie à tout le segment, mDNS élargi aux imprimantes/Apple/Chromecast/NAS.",
-      "CORRIGÉ: la surveillance ping en tâche de fond marquait à tort « hors ligne » les appareils d'un client dont on avait quitté le réseau physique (poste qui se déplace d'un client à l'autre) — limitée désormais au réseau réellement détecté, avec vérification par adresse MAC pour départager deux clients qui partageraient la même plage IP."
+      "AJOUTÉ: scan réseau — modale de sélection du client cible à chaque clic sur « Lancer le scan », pré-cochée uniquement si un seul client correspond sans ambiguïté au réseau physique actuel (bascule automatique du client actif si besoin).",
+      "AJOUTÉ: API collecteur — jeton dédié optionnel par client, en plus du jeton global existant, pour empêcher qu'un jeton valide pour un client donne accès à tous les autres.",
+      "CORRIGÉ: suppression d'un appareil ou d'un contrat — les données liées (périphériques, documents, licences, clés de récupération, maintenances, baie de brassage...) sont désormais nettoyées au lieu de laisser des lignes orphelines.",
+      "CORRIGÉ: collecteur — marque, modèle et n° de série ne sont plus jamais écrasés une fois renseignés ; IP, MAC, OS, RAM, CPU, stockage restent toujours resynchronisés comme avant.",
+      "CORRIGÉ: import scan réseau et imports CSV (appareils/périphériques) — créations et mises à jour sont désormais journalisées dans l'historique d'audit."
     ]
   },
   "checksums": {
@@ -26,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.20"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.21"
 }
