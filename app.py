@@ -547,7 +547,8 @@ _TYPE_CSS_MAP = {
     'Imprimante': 'imprimante', 'Imprimante multifonction': 'imprimante',
     'Switch': 'switch', 'Switch/AP': 'switch', 'Routeur/Pare-feu': 'routeur',
     'NAS': 'nas', 'Telephone IP': 'tel', 'Tablette': 'tablette',
-    'Camera IP': 'camera', 'Borne Wi-Fi': 'wifi', 'Autre': 'autre',
+    'Camera IP': 'camera', 'Borne Wi-Fi': 'wifi', 'Objet connecté': 'iot',
+    'Autre': 'autre',
 }
 
 @app.template_filter('type_css')
@@ -566,7 +567,7 @@ _TYPE_BADGE_DEFAULTS = {
     'pc': 'PC', 'linux': 'LNX', 'laptop': 'LAP', 'mac': 'MAC',
     'serveur': 'SRV', 'imprimante': 'IMP', 'switch': 'SW', 'routeur': 'RTR',
     'nas': 'NAS', 'tel': 'TEL', 'tablette': 'TAB', 'camera': 'CAM',
-    'wifi': 'WIF', 'autre': 'AUT',
+    'wifi': 'WIF', 'iot': 'IOT', 'autre': 'AUT',
 }
 
 @app.template_filter('type_badge')
@@ -5974,6 +5975,11 @@ def _scan_ports(ip_str):
 _PORTS_BANNIERE_TEXTE = {21, 22, 23, 25, 110, 143}   # saluent en premier, sans requête
 _PORTS_BANNIERE_HTTP  = {80, 8000, 8008, 8080, 8888}
 _PORTS_BANNIERE_HTTPS = {443, 8443}
+# Ports de service serveur — utilisés pour ne retenir "server"/"srv" (mot-clé
+# hostname/bannière trop fréquent sur du matériel non-serveur : "Print
+# Server", "Web Server Login"...) que s'il est corroboré par un vrai service
+# de serveur en écoute, pas la simple présence du mot dans un titre de page.
+_PORTS_SERVEUR = {3306, 1433, 5432, 25, 587, 143, 993, 1521, 27017}
 
 
 def _grab_banniere_texte(ip_str, port, timeout=1.2):
@@ -6062,6 +6068,8 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
         return 'Imprimante'
     if svc == 'smb':
         return 'Serveur'
+    if svc in ('hap', 'shelly', 'esphomelib'):
+        return 'Objet connecté'
 
     v = (vendor or '').lower()
     h = (hostname + " " + vendor + " " + extra_signal).lower()
@@ -6077,6 +6085,25 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
     if any(x in h for x in ['synology','qnap','readynas','truenas','freenas',
                               'terramaster',' nas']):
         return 'NAS'
+
+    # Objets connectés (ESP32/ESP8266, prises/capteurs/relais) : signalé en
+    # usage réel — un ESP32 ou une prise connectée ressortaient comme "PC".
+    # Une liste de mots-clés hostname ne peut pas suivre la myriade de
+    # marques commerciales (Tuya en particulier, revendu en marque blanche
+    # sous des dizaines de noms) — le fabricant MAC officiel de la PUCE
+    # radio (Espressif, très largement majoritaire sur ce segment — Sonoff,
+    # Shelly et Tuya l'utilisent quasiment tous) est un signal bien plus
+    # robuste,
+    # complété par les quelques marques qui déposent leur propre OUI et par
+    # les noms de firmware/marques les plus posés en hostname.
+    if any(x in v for x in ['espressif', 'tuya smart', 'itead', 'allterco robotics',
+                              'shenzhen sonoff', 'particle industries']):
+        return 'Objet connecté'
+    if any(x in h for x in ['tasmota', 'esphome', 'shelly', 'sonoff', 'tuya',
+                              'esp32', 'esp8266',
+                              'smart-plug', 'smart plug', 'smartplug',
+                              'prise-connectee', 'prise connectee']):
+        return 'Objet connecté'
 
     # Mac : le TTL seul ne distingue pas macOS de Linux (les deux à 64 par
     # défaut) — signalé en usage réel, un MacBook ressortait comme "machine
@@ -6117,13 +6144,27 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
                               'grandstream']):
         return 'Switch/AP'
 
-    # Serveur
-    if any(x in h for x in ['server',' srv','exchange','vcenter','esxi',' dc']):
+    # Serveur — mots-clés non ambigus (Exchange/vCenter/ESXi/contrôleur de
+    # domaine) suffisent seuls ; "server"/"srv" nu est trop fréquent dans un
+    # simple titre de page d'admin embarquée ("Print Server", "Web Server
+    # Login" sur des switches/imprimantes bon marché non reconnus plus haut)
+    # pour être pris au mot sans un port de service serveur à l'appui.
+    if any(x in h for x in ['exchange','vcenter','esxi',' dc']):
         return 'Serveur'
-    # PC Windows
+    if any(x in h for x in ['server','srv']) and any(p in ports for p in _PORTS_SERVEUR):
+        return 'Serveur'
+
+    # PC Windows — RDP (3389) n'a pas d'équivalent légitime hors Windows,
+    # signal fort à lui seul.
     if 3389 in ports:
         return 'PC (Windows)'
-    if 135 in ports or 445 in ports:
+    # SMB (135/445) n'est PAS un signal Windows fiable à lui seul : Samba
+    # (Linux) et le partage de fichiers natif de macOS répondent aussi sur
+    # ces ports — signalé en usage réel, un Mac avec le partage de fichiers
+    # activé ressortait comme "PC (Windows)". Le TTL garde la priorité s'il
+    # pointe ailleurs (Apple déjà traité plus haut) ; Windows n'est retenu
+    # via ces ports que faute de meilleur indice.
+    if (135 in ports or 445 in ports) and os_guess not in ('Linux/Unix', 'macOS'):
         return 'PC (Windows)'
     # PC Linux
     if 22 in ports and 80 not in ports and 443 not in ports:
@@ -6132,6 +6173,8 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
     # OS fingerprint
     if os_guess == 'Network':
         return 'Switch/AP'
+    if os_guess == 'macOS':
+        return 'MacBook'
     if os_guess == 'Linux/Unix':
         return 'PC/Serveur (Linux)'
     if os_guess == 'Windows':
@@ -6318,6 +6361,13 @@ _MDNS_TYPES_APPAREILS = [
     '_smb._tcp.local.',            # Partages SMB / NAS
     '_afpovertcp._tcp.local.',     # Partage Apple ancien (Time Capsule, vieux NAS)
     '_device-info._tcp.local.',    # Identification d'appareil Apple (Mac/iPhone)
+    # Objets connectés — quasi tous bâtis sur ESP8266/ESP32, en marque
+    # blanche sous des dizaines de noms commerciaux (Tuya en particulier) :
+    # une liste de mots-clés hostname ne peut pas suivre, mais la plupart
+    # s'annoncent en clair sur l'un de ces trois services mDNS.
+    '_hap._tcp.local.',            # HomeKit (très large : prises, capteurs, ampoules...)
+    '_shelly._tcp.local.',         # Shelly (prises/relais)
+    '_esphomelib._tcp.local.',     # Firmware ESPHome (remplace souvent Tasmota/Tuya d'origine)
 ]
 
 

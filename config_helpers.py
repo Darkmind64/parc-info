@@ -55,7 +55,8 @@ LISTE_DEFAULTS = {
     'types_appareils': [
         'PC', 'PC (Windows)', 'PC/Serveur (Linux)', 'Laptop', 'MacBook',
         'Serveur', 'Imprimante', 'Switch', 'Switch/AP', 'Routeur/Pare-feu',
-        'NAS', 'Telephone IP', 'Tablette', 'Camera IP', 'Borne Wi-Fi', 'Autre'
+        'NAS', 'Telephone IP', 'Tablette', 'Camera IP', 'Borne Wi-Fi',
+        'Objet connecté', 'Autre'
     ],
     'categories_peripheriques': [
         'Ecran', 'Clavier', 'Souris', 'Webcam', 'Casque / Micro', 'Haut-parleurs',
