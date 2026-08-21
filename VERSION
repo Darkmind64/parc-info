@@ -1,10 +1,36 @@
-PARCINFO_VERSION=2.18.23
-RELEASE_DATE=2026-08-20
-BUILD_NUMBER=2026082006
+PARCINFO_VERSION=2.18.24
+RELEASE_DATE=2026-08-21
+BUILD_NUMBER=2026082101
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.18.23 - Identification réseau : SMB n'implique plus Windows, objets connectés reconnus
+# Version 2.18.24 - Hiérarchie de priorité explicite entre les méthodes de détection au scan
+# Suite du signalement selon lequel les méthodes de détection s'écrasaient
+# encore entre elles. _deviner_type() documente désormais explicitement
+# 6 niveaux de confiance (structuré > fabricant MAC > fabricant réseau
+# générique > SNMP actif > ports ambigus > TTL), pour qu'un signal fort ne
+# soit plus jamais écrasé par un signal plus faible arrivé après lui dans
+# le code.
+# 1) SNMP actif (un agent répond en community "public") est désormais un
+#    signal fort à lui seul, vérifié AVANT les heuristiques de port
+#    SMB/22 : un switch/onduleur/imprimante SNMP dont aucun mot-clé
+#    hostname/sysDescr n'a matché par ailleurs ne retombe plus sur "PC
+#    (Windows)" via la seule présence du port 445. RDP (3389) reste
+#    prioritaire même sur SNMP.
+# 2) Raspberry Pi (fabricant MAC officiel) reconnu comme Linux avant les
+#    heuristiques de port — un Pi-hole/Home Assistant avec Samba ou SSH
+#    actif ne devient plus "PC (Windows)" à tort.
+# 3) sysDescr SNMP : mots-clés élargis pour les OS réseau non ambigus
+#    (FortiOS, SonicOS, DD-WRT, OpenWrt, OPNsense) et pour ceux partagés
+#    entre routeurs ET switches chez un même constructeur (JUNOS,
+#    RouterOS, Comware, VRP, ArubaOS), qui retombent sur la catégorie
+#    générique "Switch/AP" plutôt qu'un sous-type deviné à tort.
+# 4) Timeout SNMP porté de 0.5s à 0.8s : plus de marge sur un réseau
+#    chargé ou un agent plus lent à répondre.
+# Recherche complémentaire (fingerprinting SMB2/OS) : jugé insuffisamment
+# fiable pour être exploité proprement (estimation seulement, jamais une
+# identification précise) — non implémenté plutôt que fait à moitié.
+# Date: 21 août 2026
 # Retour d'usage réel après la 2.18.22 : un Mac ressortait comme "PC
 # (Windows)", un switch comme "Serveur", un ESP32/une prise connectée
 # comme "PC". Recherche sur les pratiques de fingerprinting réseau (nmap,

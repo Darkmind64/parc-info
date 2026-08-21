@@ -1,5 +1,48 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.24] - 2026-08-21 📶
+
+### 📶 Hiérarchie de priorité explicite entre les méthodes de détection au scan
+
+Suite du signalement selon lequel les méthodes de détection s'écrasaient
+encore entre elles. `_deviner_type()` documente désormais explicitement
+6 niveaux de confiance (structuré > fabricant MAC > fabricant réseau
+générique > SNMP actif > ports ambigus > TTL), pour qu'un signal fort ne
+soit plus jamais écrasé par un signal plus faible arrivé après lui dans
+le code.
+
+**SNMP actif devient un signal fort à lui seul**
+
+Un agent SNMP qui répond (community « public ») est désormais vérifié
+*avant* les heuristiques de port SMB/22 : un switch, un onduleur ou une
+imprimante SNMP dont aucun mot-clé hostname/sysDescr n'a matché par
+ailleurs ne retombe plus sur « PC (Windows) » via la seule présence du
+port 445 — un PC ou un Mac de bureau n'expose pratiquement jamais SNMP.
+RDP (3389) reste prioritaire même sur SNMP : aucun équivalent légitime
+n'existe hors Windows.
+
+**Raspberry Pi reconnu avant les heuristiques de port**
+
+Un Pi-hole ou un Home Assistant tournant sur Raspberry Pi, avec Samba
+(445) ou SSH (22) actif, ressortait comme « PC (Windows) » par la même
+mécanique — le fabricant MAC officiel (Raspberry Pi Foundation) est
+désormais vérifié en amont.
+
+**sysDescr SNMP : couverture élargie**
+
+Mots-clés ajoutés pour les OS réseau non ambigus (FortiOS, SonicOS,
+DD-WRT, OpenWrt, OPNsense — famille pare-feu/routeur) et pour ceux
+partagés entre routeurs et switches chez un même constructeur (JUNOS,
+RouterOS, Comware, VRP, ArubaOS), qui retombent sur la catégorie
+générique « Switch/AP » plutôt qu'un sous-type deviné à tort. Timeout
+SNMP porté de 0,5 s à 0,8 s pour laisser un peu plus de marge à un agent
+plus lent à répondre.
+
+**Recherche complémentaire** : le fingerprinting SMB2 (dialectes,
+capacités) a été envisagé mais jugé insuffisamment fiable pour être
+exploité proprement — il ne fournit qu'une estimation, jamais une
+identification précise. Non implémenté plutôt que fait à moitié.
+
 ## [2.18.23] - 2026-08-20 🔌
 
 ### 🔌 Identification réseau affinée : SMB, objets connectés (ESP32/Tuya/Shelly)

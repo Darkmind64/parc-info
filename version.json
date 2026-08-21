@@ -1,22 +1,23 @@
 {
-  "version": "2.18.23",
-  "release_date": "2026-08-20T00:00:00.000000",
+  "version": "2.18.24",
+  "release_date": "2026-08-21T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.23",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.23/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.24",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Identification réseau affinée après retour d'usage réel : SMB n'implique plus Windows à tort (Mac/Samba), une nouvelle catégorie « Objet connecté » reconnaît les ESP32/prises connectées via le fabricant de la puce radio, un mot-clé « server » nu n'entraîne plus une fausse détection de serveur",
+    "new_features": "Hiérarchie de priorité explicite entre les méthodes de détection au scan réseau : un agent SNMP qui répond prime désormais sur les heuristiques de port ambiguës (SMB), Raspberry Pi reconnu comme Linux, mots-clés sysDescr élargis (FortiOS, SonicOS, DD-WRT, OpenWrt, JUNOS, RouterOS, Comware, VRP, ArubaOS)",
     "improvements": [
-      "CORRIGÉ: SMB (ports 135/445) n'est plus un signal Windows fiable à lui seul — Samba (Linux) et le partage de fichiers natif de macOS y répondent aussi ; un Mac avec le partage de fichiers activé ressortait comme « PC (Windows) ». Le TTL garde désormais la priorité, RDP (3389) reste un signal fort à lui seul.",
-      "CORRIGÉ: le mot-clé « server »/« srv » nu ne suffit plus seul à conclure « Serveur » — un switch ou une imprimante bon marché non reconnu peut afficher « Print Server » sur sa page d'administration embarquée ; un vrai port de service serveur est désormais exigé à l'appui.",
-      "AJOUTÉ: nouvelle catégorie « Objet connecté » — la quasi-totalité des prises/capteurs/relais grand public (Tuya, Sonoff, Shelly...) sont bâtis sur des puces Espressif (ESP32/ESP8266), reconnues via le fabricant MAC officiel de la puce radio plutôt qu'une liste de marques commerciales condamnée à rater le marché blanche. Complété par les noms de firmware courants en hostname et 3 nouveaux services mDNS (HomeKit, Shelly, ESPHome)."
+      "CORRIGÉ: un agent SNMP qui répond (community « public ») est désormais un signal fort à lui seul, vérifié avant les heuristiques de port SMB/22 — un switch/onduleur/imprimante SNMP dont aucun mot-clé n'a matché par ailleurs ne retombe plus sur « PC (Windows) » via la seule présence du port 445. RDP (3389) reste prioritaire même sur SNMP.",
+      "CORRIGÉ: Raspberry Pi (fabricant MAC officiel) reconnu comme Linux avant les heuristiques de port — un Pi-hole/Home Assistant avec Samba ou SSH actif ne devient plus « PC (Windows) » à tort.",
+      "AJOUTÉ: mots-clés sysDescr SNMP élargis pour les OS réseau non ambigus (FortiOS, SonicOS, DD-WRT, OpenWrt, OPNsense) et pour ceux partagés entre routeurs et switches chez un même constructeur (JUNOS, RouterOS, Comware, VRP, ArubaOS), qui retombent sur une catégorie générique plutôt qu'un sous-type deviné à tort.",
+      "AMÉLIORÉ: timeout SNMP porté de 0.5s à 0.8s, plus de marge sur un réseau chargé ou un agent plus lent à répondre."
     ]
   },
   "checksums": {
@@ -27,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.23"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.24"
 }
