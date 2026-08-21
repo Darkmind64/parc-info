@@ -1,8 +1,35 @@
-PARCINFO_VERSION=2.18.30
+PARCINFO_VERSION=2.18.31
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082107
+BUILD_NUMBER=2026082108
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.31 - Correctif adresse IP macOS + proposition d'élévation GUI (collecteur 3.9)
+# Signalé après la 2.18.30 : le connecteur transmettait bien les données à
+# ParcInfo, mais pas l'adresse IP sur macOS.
+# Cause : get_ip_addresses() utilisait socket.gethostbyname_ex(hostname), peu
+# fiable sur macOS — le hostname y est souvent un nom mDNS en « .local »
+# (Bonjour) que cette résolution classique ne fait pas toujours aboutir, la
+# liste ressortant alors vide SANS lever d'exception (rien qu'un try/except
+# ne pouvait détecter). Corrigé par un repli sur un socket UDP « connecté »
+# à une adresse externe (aucun paquet réellement envoyé — connect() sur UDP
+# ne fait qu'interroger la table de routage) : donne l'IP de l'interface
+# que le système utiliserait réellement pour sortir, fiable sur les trois OS.
+# Demandé dans la foulée : que le collecteur GUI propose de relancer avec
+# les droits administrateur au lancement plutôt que de collecter en
+# silence une fiche incomplète. Ajouté avec une asymétrie assumée entre
+# plateformes :
+# - Windows : relance automatique via ShellExecuteW(..., "runas", ...) sur
+#   confirmation — le code de retour se lit de façon synchrone et fiable
+#   (annulation UAC détectée sans ambiguïté).
+# - macOS/Linux : pas de relance automatique — aucun équivalent fiable à
+#   ShellExecuteW pour relancer un process GUI entier avec élévation ;
+#   une tentative via osascript risquerait de laisser le technicien sans
+#   aucune fenêtre ouverte si l'authentification est annulée, sans moyen
+#   de le détecter avant que le process courant se soit déjà fermé. La
+#   boîte de dialogue affiche donc la commande sudo à lancer soi-même, puis
+#   continue sans élévation — jamais de fenêtre perdue.
+# Date: 21 août 2026
 
 # Version 2.18.30 - Diagnostic macOS étoffé (collecteur 3.8)
 # Demandé après les correctifs des 2.18.28/2.18.29 : étudier ce que la

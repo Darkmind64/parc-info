@@ -1,25 +1,23 @@
 {
-  "version": "2.18.30",
+  "version": "2.18.31",
   "release_date": "2026-08-21T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.30",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.31/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.31/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.31/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.31",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.31/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.31/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.31/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.31/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.31/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Diagnostic macOS étoffé (collecteur 3.8) : posture de sécurité (SIP, Gatekeeper, MDM), sauvegardes Time Machine, plantages/paniques noyau, agents au démarrage, processus les plus gourmands",
+    "new_features": "Correctif adresse IP manquante sur macOS + proposition de relance avec droits administrateur au lancement du collecteur GUI",
     "improvements": [
-      "AJOUTÉ (macOS) : SIP (csrutil), Gatekeeper (spctl) et inscription MDM (profiles status) dans la section Sécurité & conformité.",
-      "AJOUTÉ (macOS) : dernière sauvegarde Time Machine (tmutil) dans les points de restauration, plantages applicatifs et paniques noyau (~/Library/Logs/DiagnosticReports) dans les incidents système, agents/démons au démarrage (LaunchAgents/LaunchDaemons) et processus les plus gourmands CPU/RAM (ps) dans le diagnostic.",
-      "AJOUTÉ (macOS) : liste des SSID Wi-Fi enregistrés (jamais le mot de passe — nécessiterait une invite Trousseau par réseau).",
-      "AMÉLIORÉ (macOS) : version et build système lus via sw_vers (plus fiable que platform.mac_ver(), en retard sur certaines versions macOS récentes), nom marketing macOS ajouté (« macOS Sequoia »), version du firmware (Boot ROM) désormais lue."
+      "CORRIGÉ : sur macOS, l'adresse IP n'était pas transmise à ParcInfo — get_ip_addresses() dépendait d'une résolution DNS du hostname (souvent un nom mDNS en .local) qui échoue silencieusement sur macOS. Repli ajouté sur un socket UDP « connecté » à une adresse externe, fiable sur Windows/macOS/Linux.",
+      "AJOUTÉ : le collecteur GUI détecte l'absence de droits administrateur au lancement et propose de relancer avec — jamais automatique sans confirmation. Sous Windows, relance directe via l'invite UAC standard. Sous macOS/Linux, affiche la commande sudo à lancer soi-même (pas de relance automatique fiable pour une interface graphique complète), puis continue sans élévation."
     ]
   },
   "checksums": {
@@ -30,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.30"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.31"
 }
