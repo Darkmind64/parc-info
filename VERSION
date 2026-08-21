@@ -1,8 +1,41 @@
-PARCINFO_VERSION=2.18.32
+PARCINFO_VERSION=2.18.33
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082109
+BUILD_NUMBER=2026082110
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.33 - Réseau macOS étoffé : passerelle, DNS, proxy, écrans (collecteur 3.11)
+# Signalé après examen d'une vraie fiche système macOS : passerelle par
+# défaut, IP publique, FAI, suffixes DNS et marque/année d'écran manquants
+# ou vides.
+# 1) Passerelle par défaut/DNS/proxy n'avaient tout simplement jamais été
+#    implémentés côté macOS (_win_network() n'a jamais eu d'équivalent) :
+#    default_gateway/gateways via `route -n get default`, dns_servers/
+#    dns_suffixes via `scutil --dns` (tous les blocs resolver, pas
+#    seulement le premier — un VPN/split-DNS peut en ajouter), proxy via
+#    `scutil --proxy`.
+# 2) IP publique/FAI (get_public_ip_info()) sont déjà cross-plateforme
+#    (simple appel HTTPS, sans code spécifique à un OS) — vérifié, aucun
+#    bug trouvé ; une absence isolée est plus probablement un aléa réseau
+#    au moment de la collecte (service tiers ipapi.co, timeout de 6 s) qu'un
+#    manque côté collecteur.
+# 3) Marque/année d'écran : la marque était câblée à vide, jamais tentée.
+#    Devinée depuis le premier mot du nom EDID (souvent « DELL U2720Q »)
+#    contre une petite liste de marques connues — jamais depuis
+#    l'identifiant vendeur EDID brut, dont l'encodage exact est trop
+#    incertain selon la version macOS pour être fiable sans matériel réel.
+#    Année lue quand l'EDID de l'écran externe l'expose. Pas de taille
+#    physique ajoutée : system_profiler ne l'expose pas de façon fiable.
+# 4) Bug de longue date trouvé en chemin et corrigé : `dns_suffixes` est
+#    documenté et rendu partout (fiche, PDF) comme une LISTE, mais
+#    _win_network() y stockait une chaîne déjà jointe par PowerShell —
+#    build_summary_sections() la rejoignait alors CARACTÈRE PAR CARACTÈRE
+#    au lieu de suffixe par suffixe. Resté inaperçu car invisible sur un
+#    poste sans suffixes de recherche configurés (le cas le plus courant).
+#    Reconverti en liste réelle côté Windows, symétrique de macOS ; PDF et
+#    fiche système, qui affichaient jusqu'ici la chaîne déjà jointe telle
+#    quelle, rejoignent désormais eux aussi une vraie liste.
+# Date: 21 août 2026
 
 # Version 2.18.32 - Correctif : commande sudo inutilisable sous App Translocation (collecteur 3.10)
 # Signalé après la 2.18.31 : la commande sudo affichée par la proposition

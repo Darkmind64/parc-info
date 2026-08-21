@@ -1,23 +1,25 @@
 {
-  "version": "2.18.32",
+  "version": "2.18.33",
   "release_date": "2026-08-21T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.32/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.32/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.32/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.32",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.32/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.32/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.32/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.32/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.32/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.33/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.33/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.33/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.33",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.33/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.33/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.33/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.33/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.33/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif : la commande sudo proposée par le collecteur GUI macOS échouait (« command not found ») quand l'app tournait sous App Translocation",
+    "new_features": "Réseau macOS étoffé : passerelle par défaut, DNS, proxy, marque/année d'écran — jusqu'ici manquants dans la fiche système macOS",
     "improvements": [
-      "CORRIGÉ (macOS) : quand l'app n'a jamais été ouverte/déplacée depuis son téléchargement, Gatekeeper l'exécute depuis une copie temporaire en lecture seule (App Translocation) — la commande sudo affichée par la proposition d'élévation pointait vers ce chemin temporaire, inutilisable dans un Terminal séparé. Le collecteur détecte désormais ce cas et affiche à la place la marche à suivre pour lever la translocation (xattr -cr).",
-      "Le README documente la prévention : xattr -cr sur l'app avant le tout premier lancement."
+      "AJOUTÉ (macOS) : passerelle par défaut (route), serveurs DNS et suffixes de recherche (scutil --dns), proxy (scutil --proxy) — jamais implémentés côté macOS jusqu'ici.",
+      "AJOUTÉ (macOS) : marque d'écran devinée depuis le nom EDID (ex. « DELL U2720Q »), année de fabrication quand l'EDID l'expose.",
+      "CORRIGÉ : bug de longue date sur les suffixes DNS — le champ est une liste partout où il est affiché, mais côté Windows était stocké comme une chaîne déjà jointe, rejointe ensuite CARACTÈRE PAR CARACTÈRE dans le résumé. Invisible sur un poste sans suffixes configurés, d'où la découverte tardive.",
+      "IP publique/FAI : déjà cross-plateforme, vérifiés sans bug trouvé — une absence isolée est plus probablement un aléa réseau au moment de la collecte qu'un manque du collecteur."
     ]
   },
   "checksums": {
@@ -28,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.32"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.33"
 }
