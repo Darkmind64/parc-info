@@ -1,8 +1,31 @@
-PARCINFO_VERSION=2.18.25
+PARCINFO_VERSION=2.18.26
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082102
+BUILD_NUMBER=2026082103
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.26 - Collecteur macOS étoffé (v3.5)
+# Le collecteur système macOS était resté bien plus sommaire que la
+# version Windows (35 étapes) : rien sur les imprimantes, les ports en
+# écoute, l'accès distant, les agents de télémaintenance/EDR, ou les
+# mises à jour système disponibles. Rapproché de la richesse Windows avec
+# des données réellement pertinentes sur macOS (pas de TPM/BitLocker/GPO
+# façon Windows, qui n'existent pas sur cet OS) :
+# 1) Imprimantes (lpstat/CUPS), ports TCP en écoute (lsof), accès distant
+#    — Connexion à distance/SSH et Partage d'écran/VNC-ARD — et agents de
+#    télémaintenance/RMM/EDR (AnyDesk, TeamViewer, CrowdStrike,
+#    SentinelOne, Jamf, Kandji...) détectés par recoupement process +
+#    applications installées.
+# 2) Mises à jour système et apps Apple disponibles (softwareupdate -l),
+#    distinct des mises à jour Homebrew déjà détectées par logiciel.
+# 3) Inventaire logiciel enrichi : version et éditeur réels via
+#    system_profiler SPApplicationsDataType, plus seulement le nom.
+# Ces six champs (imprimantes, ports en écoute, accès distant, agents,
+# mises à jour, logiciels) étaient déjà rendus sans condition d'OS par la
+# fiche système et le rapport PDF — aucune modification de template ni de
+# rapport n'a donc été nécessaire, seule la collecte macOS elle-même a été
+# étoffée.
+# Date: 21 août 2026
 
 # Version 2.18.25 - Reprise en profondeur du scan réseau : base OUI, ARP, complétude
 # Refonte demandée pour obtenir une image la plus complète et fiable

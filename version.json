@@ -1,23 +1,25 @@
 {
-  "version": "2.18.25",
+  "version": "2.18.26",
   "release_date": "2026-08-21T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.25",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.26/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.26/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.26/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.26",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.26/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.26/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.26/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Reprise en profondeur du scan réseau : correction d'un bug critique qui empêchait tout exécutable packagé de charger la base OUI complète, téléchargement/mise à jour automatique de cette base, détection ARP des appareils qui bloquent ICMP, découverte mDNS élargie (Matter)",
+    "new_features": "Collecteur macOS étoffé (v3.5) : imprimantes, ports en écoute, accès distant (SSH/Partage d'écran), agents de télémaintenance et EDR, mises à jour système disponibles, logiciels installés avec version/éditeur réels",
     "improvements": [
-      "CORRIGÉ (critique) : le chemin de oui.txt était calculé depuis un dossier d'extraction temporaire en exécutable packagé (PyInstaller --onefile), recréé à chaque lancement — aucun .exe/.app ParcInfo ne pouvait donc jamais charger la base OUI complète (~60 000 fabricants), même en suivant la documentation à la lettre. oui.txt vit désormais dans le même dossier que la base de données.",
-      "AJOUTÉ : téléchargement et mise à jour automatique de la base OUI — au démarrage si absente, rafraîchie automatiquement si elle a plus de 30 jours (utile pour une instance Docker qui tourne en continu), ou à la demande via un bouton « Mettre à jour » sur la page Scan.",
-      "AJOUTÉ : détection ARP des hôtes silencieux — un appareil qui bloque ICMP (pare-feu, très nombreux objets connectés) répond quand même à une résolution ARP pour exister sur le réseau local ; il apparaît désormais dans les résultats (IP, MAC, fabricant) au lieu d'être purement absent.",
-      "AJOUTÉ : découverte mDNS élargie à Matter (standard smart-home unifié) et à la présence générique de poste (_workstation)."
+      "AJOUTÉ (macOS) : inventaire des imprimantes CUPS (`lpstat`), avec détection réseau/USB et imprimante par défaut, comme sur Windows/Linux.",
+      "AJOUTÉ (macOS) : ports TCP en écoute (`lsof`), comme sur Windows/Linux.",
+      "AJOUTÉ (macOS) : détection de l'accès distant — Connexion à distance (SSH) et Partage d'écran (VNC/ARD).",
+      "AJOUTÉ (macOS) : détection des agents de télémaintenance, RMM et EDR (AnyDesk, TeamViewer, CrowdStrike, SentinelOne, Jamf, Kandji…) par recoupement process + applications installées.",
+      "AJOUTÉ (macOS) : mises à jour système et applications Apple disponibles (`softwareupdate -l`), en complément des mises à jour Homebrew déjà détectées par logiciel.",
+      "AMÉLIORÉ (macOS) : l'inventaire logiciel donne désormais la version et l'éditeur réels (`system_profiler SPApplicationsDataType`), plus seulement le nom."
     ]
   },
   "checksums": {
@@ -28,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.25"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.26"
 }
