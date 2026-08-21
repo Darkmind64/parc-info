@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.4 · **À jour avec ParcInfo :** 2.18.19
+**Version collecteur :** 3.5 · **À jour avec ParcInfo :** 2.18.26
 
 ---
 
@@ -187,6 +187,13 @@ temperature_c, read_errors, write_errors}` ·
 ### Impression
 `printers[]{name, driver, port, network, default, shared, virtual}`
 
+> macOS (depuis 3.5) : `lpstat -p`/`lpstat -v` (CUPS) donnent nom, URI du
+> périphérique et imprimante par défaut ; `driver`/`shared` restent vides —
+> CUPS ne les expose pas de façon aussi directe que `Win32_Printer`.
+> `network`/`virtual`/`connection` réutilisent les mêmes helpers que
+> Windows (`printer_connection()`, `is_virtual_printer()`), le préfixe
+> `usb://` d'une URI CUPS matchant déjà leurs règles existantes.
+
 ### Batterie
 `battery` · `battery_charge_percent` · `battery_health_percent` ·
 `battery_wear_percent` · `battery_designed_capacity_mwh` ·
@@ -217,6 +224,9 @@ avg_ms, max_ms, loss_pct}` · `bandwidth{mbps, downloaded_mb, seconds}`
 `--dns-check`) ·
 `router_manufacturer`, `router_model`, `router_name`, `router_wan_ip` (sur
 demande explicite, `--router-info`)
+
+> `listening_ports` (macOS, depuis 3.5) vient de `lsof -iTCP -sTCP:LISTEN`,
+> pendant du `ss -tlnp` déjà utilisé côté Linux.
 
 > `hosts_entries`, `public_ip`, `public_ip_isp` et les champs
 > `dns_check_*`/`router_*` sont les seuls champs réseau qui ne sont pas
@@ -360,6 +370,14 @@ distance, résolu par SID `S-1-5-32-555` — indépendant de la langue) ·
 jamais le secret) · `rdp_logon_history[]{user, ip, when}` (connexions
 entrantes réussies récentes)
 
+> macOS (depuis 3.5, `_mac_remote_access()`) alimente le même
+> `remote_access[]` avec deux entrées : Connexion à distance/SSH
+> (`systemsetup -getremotelogin`) et Partage d'écran/VNC-ARD (`launchctl
+> print system/com.apple.screensharing`). Les deux commandes exigent les
+> privilèges administrateur pour répondre correctement ; sans élévation,
+> le champ reste absent plutôt que faussement « désactivé » — même
+> logique que TPM/BitLocker côté Windows non élevé.
+
 ### Agents de télémaintenance & EDR
 `remote_support_agents[]{marque, nom, service, actif}` (AnyDesk, TeamViewer,
 ScreenConnect, NinjaRMM, Datto RMM, N-able, Atera, Kaseya, Syncro,
@@ -371,6 +389,23 @@ Defender for Endpoint…) · `anydesk_id`
 > services Windows (`Get-CimInstance Win32_Service`) — au mieux, jamais une
 > preuve. L'ID AnyDesk, lui, vient directement de `anydesk.exe --get-id`,
 > un indicateur documenté par l'éditeur.
+
+> macOS (depuis 3.5, `_mac_managed_agents()`) réutilise le même
+> `chercher_agents()` (fonction pure, partagée avec Windows) contre deux
+> sources combinées : les process en cours (`ps -axo comm=`, fiables pour
+> `actif` mais dont le nom de binaire ne porte pas toujours la marque —
+> SentinelOne tourne sous `SentinelAgent`, catalogue macOS dédié
+> `_AGENTS_EDR_MAC`) et les applications installées (`/Applications/*.app`,
+> dont le nom porte généralement la marque mais dont la présence ne prouve
+> pas que l'agent tourne — ces entrées sont posées `actif=False`).
+> S'y ajoute `_AGENTS_RMM_MAC` (Jamf, Kandji, Addigy, Mosyle — MDM/RMM
+> courants en parc Mac professionnel, absents du catalogue Windows).
+> L'ID AnyDesk est lu dans `~/Library/Application Support/AnyDesk/system.conf`
+> (clé `ad.anynet.id`), faute de commande `--get-id` documentée sur macOS.
+> `antivirus` reçoit par défaut `XProtect (intégré macOS)` — toujours
+> présent sur macOS moderne — remplacé si un antivirus grand public connu
+> (Malwarebytes, Sophos, Norton, Avast, Bitdefender) est détecté parmi les
+> mêmes sources.
 
 ### Comptes de messagerie
 `mail_accounts[]{client, email, display_name, protocol, incoming_server,
@@ -484,12 +519,33 @@ user}` · `top_processes_cpu[]{name, cpu_pct, ram_mb}` ·
 `pending_updates[]{title, kb, size_mb, security, severity}` ·
 `pending_updates_security` · `pending_updates_source`
 
+> macOS (depuis 3.5, `_mac_pending_updates()`) alimente le même
+> `pending_updates[]`/`pending_updates_source` via `softwareupdate -l`
+> (mises à jour système + apps Apple — distinct des mises à jour Homebrew
+> par logiciel, voir § Mises à jour logicielles ci-dessous). `kb` reste
+> vide (pas d'équivalent macOS) et `security` reste toujours `False` :
+> `softwareupdate -l` ne distingue pas fiablement une mise à jour de
+> sécurité d'une mise à jour de confort — `pending_updates_security` n'est
+> donc jamais posé sur macOS, jamais un verdict inventé sans preuve fiable
+> (même principe que `dns_check_reponse`). Licences/activation, correctifs
+> déjà installés (`hotfixes`) : pas d'équivalent, macOS n'a ni notion de
+> licence Windows ni de liste de correctifs individuels installés.
+
 ### Comptes & logiciels
 `users[]` (statut + appartenance au groupe Administrateurs) ·
 `users_details[]{name, status, enabled, admin, role, account_type,
 description, password_never_expires, last_logon}` ·
 `installed_software[]{name, version, publisher, install_date, update_status,
 latest_version, update_source}`
+
+> macOS (depuis 3.5) : `version`/`publisher`/`install_date` sont désormais
+> remplis via `system_profiler SPApplicationsDataType -json`, complété par
+> les formules/casks Homebrew (`/usr/local/opt` **et** `/opt/homebrew/opt`
+> — Intel et Apple Silicon, les deux chemins sont tentés faute de savoir
+> lequel est actif) et les paquets `pkgutil` sans bundle `.app`, ces deux
+> derniers restant nom seul comme avant 3.5. `SPApplicationsDataType` est
+> réputé lent (vérifie la signature de chaque application) : timeout de
+> 60 s, best-effort comme le reste du fichier.
 
 #### Mises à jour logicielles (depuis 3.1, tri-état depuis 3.2)
 
@@ -575,11 +631,11 @@ avec un champ inaccessible.
 | Carte mère / châssis | ✅ | — | ✅ (`/sys/class/dmi`) |
 | Barrettes mémoire par slot | ✅ | ✅ | ⚠️ root requis |
 | Écrans | ✅ (EDID) | ✅ | ⚠️ nom du connecteur seul |
-| Imprimantes | ✅ | — | ✅ (CUPS) |
+| Imprimantes | ✅ | ✅ (CUPS, depuis 3.5) | ✅ (CUPS) |
 | Usure disque / SMART détaillé | ✅ | — | ⚠️ type seul (`lsblk`) |
 | Usure batterie | ✅ | ✅ | — |
 | Licences / activation | ✅ | — | — |
-| Correctifs | ✅ | — | — |
+| Correctifs | ✅ | ✅ `softwareupdate -l` (système + apps Apple, depuis 3.5) | — |
 | Chiffrement | ✅ BitLocker | ✅ FileVault | — |
 | Pare-feu | ✅ | ✅ | — |
 | TPM / Secure Boot | ✅ | — | — |
@@ -590,13 +646,13 @@ avec un champ inaccessible.
 | Redirections de port (portproxy) | ✅ | — | — |
 | Réseaux Wi-Fi enregistrés (SSID + mot de passe optionnel) | ✅ | — | — |
 | Stratégies de groupe appliquées | ✅ | — | — |
-| Ports en écoute | ✅ | — | ✅ (`ss`) |
+| Ports en écoute | ✅ | ✅ (`lsof`, depuis 3.5) | ✅ (`ss`) |
 | Comptes locaux | ✅ | ✅ | ✅ |
-| Logiciels (nom+version+éditeur) | ✅ | ⚠️ nom seul | ✅ dpkg/rpm/pacman |
-| Mise à jour logicielle disponible | ✅ winget | ✅ brew | ✅ apt/dnf/pacman |
-| Périphériques USB | ✅ | — | — |
-| Accès distant (RDP/WinRM/SSH/Telnet…) | ✅ | — | — |
-| Agents de télémaintenance & EDR | ✅ | — | — |
+| Logiciels (nom+version+éditeur) | ✅ | ✅ `SPApplicationsDataType` (depuis 3.5, éditeur vide pour les apps non signées — voir note) | ✅ dpkg/rpm/pacman |
+| Mise à jour logicielle disponible | ✅ winget | ✅ brew (par logiciel) + `softwareupdate` (système, depuis 3.5) | ✅ apt/dnf/pacman |
+| Périphériques USB | ✅ | ✅ (`system_profiler SPUSBDataType`) | — |
+| Accès distant (RDP/WinRM/SSH/Telnet…) | ✅ | ⚠️ SSH + Partage d'écran, root requis (depuis 3.5) | — |
+| Agents de télémaintenance & EDR | ✅ | ⚠️ best-effort par nom de process/app, root non requis (depuis 3.5) | — |
 | Comptes de messagerie (Outlook, Thunderbird) | ✅ | — | — |
 | Politique de mot de passe local | ✅ (admin) | — | — |
 | Plan d'alimentation / démarrage rapide | ✅ | — | — |
@@ -700,4 +756,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-12 (v2.9.7)
+**Dernière mise à jour** : 2026-08-21 (v2.18.26 — collecteur 3.5, macOS étoffé)

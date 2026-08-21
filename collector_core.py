@@ -48,7 +48,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.4'
+COLLECTOR_VERSION = '3.5'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -126,6 +126,9 @@ _VIRTUAL_PRINTER_HINTS = (
     'xps document writer', 'print to pdf', 'onenote', 'fax', 'pdf converter',
     'send to microsoft', 'anydesk', 'pdfcreator', 'cutepdf', 'foxit reader pdf',
     'microsoft software printer driver', 'remote desktop easy print',
+    # macOS : CUPS-PDF (module courant d'impression vers fichier) et son
+    # pilote apparaissent sous des noms variables selon l'installation.
+    'cups-pdf', 'pdf writer',
 )
 
 
@@ -3885,6 +3888,42 @@ def _win_remote_access():
     return info
 
 
+def _mac_remote_access():
+    """Connexion à distance (SSH) et Partage d'écran (VNC/ARD) — pendant
+    macOS des accès distants Windows (`_win_remote_access()`), même
+    structure de sortie via `_acces()`.
+
+    Les deux sources exigent les privilèges administrateur pour donner une
+    réponse fiable (`systemsetup` refuse même la lecture sans root ;
+    `launchctl print` sur le domaine système est incomplet sans root) : sans
+    élévation, ces blocs échouent silencieusement et le champ reste absent
+    plutôt que faussement "désactivé" — comme SMART/TPM/BitLocker côté
+    Windows non élevé.
+    """
+    info = {}
+    acces = []
+
+    ssh_actif = None
+    sortie = _run(['systemsetup', '-getremotelogin'], timeout=10)
+    if sortie.strip():
+        ssh_actif = 'on' in sortie.lower()
+        acces.append(_acces('ssh', 'Connexion à distance (SSH)', ssh_actif,
+                            sortie.strip()))
+
+    partage_ecran = None
+    sortie = _run(['launchctl', 'print', 'system/com.apple.screensharing'], timeout=10)
+    if sortie.strip():
+        partage_ecran = 'state = running' in sortie.lower()
+        acces.append(_acces('screen_sharing', "Partage d'écran (VNC/ARD)",
+                            partage_ecran,
+                            'service chargé et actif' if partage_ecran
+                            else 'service non actif'))
+
+    if acces:
+        info['remote_access'] = acces
+    return info
+
+
 def _win_mail_accounts():
     """Comptes de messagerie configurés — paramètres serveur, jamais les mots
     de passe.
@@ -4494,6 +4533,114 @@ def _win_managed_agents():
     anydesk_id = _clean(data.get('AnyDeskId'))
     if anydesk_id and _RE_ANYDESK_ID.match(anydesk_id):
         info['anydesk_id'] = anydesk_id.replace(' ', '')
+
+    return info
+
+
+#: Supplément macOS à `_AGENTS_RMM` : MDM/RMM courants en parc Mac
+#: professionnel, absents des services Windows donc jamais rencontrés côté
+#: `_win_managed_agents()`. Même format (motif, marque, produit), même
+#: recherche par sous-chaîne — au mieux, pas une preuve.
+_AGENTS_RMM_MAC = [
+    ('JamfDaemon', 'Jamf', 'Jamf Pro'),
+    ('JamfAgent', 'Jamf', 'Jamf Pro'),
+    ('jamf', 'Jamf', 'Jamf Pro'),
+    ('Kandji', 'Kandji', 'Kandji'),
+    ('Addigy', 'Addigy', 'Addigy'),
+    ('Mosyle', 'Mosyle', 'Mosyle'),
+]
+#: Antivirus grand public macOS reconnus par nom de process/app — sert à
+#: remplacer la valeur de base `XProtect (intégré macOS)` quand un produit
+#: tiers est réellement présent.
+_AGENTS_AV_MAC = [
+    ('Malwarebytes', 'Malwarebytes', 'Malwarebytes'),
+    ('Sophos', 'Sophos', 'Sophos Endpoint'),
+    ('Norton', 'Gen Digital', 'Norton'),
+    ('avast', 'Gen Digital', 'Avast'),
+    ('bitdefender', 'Bitdefender', 'Bitdefender'),
+]
+#: Supplément EDR macOS : contrairement au `DisplayName` d'un service
+#: Windows, le nom de *process* d'un agent EDR sur macOS ne contient
+#: généralement pas le nom commercial (SentinelOne tourne sous
+#: `SentinelAgent`, CrowdStrike Falcon sous `falconctl`/`falcond`) — ces
+#: motifs ciblent le process directement plutôt que la marque, en
+#: complément de `_AGENTS_EDR` (qui, lui, matche surtout via le nom du
+#: bundle applicatif installé, cherché séparément ci-dessous).
+_AGENTS_EDR_MAC = [
+    ('SentinelAgent', 'SentinelOne', 'SentinelOne Singularity'),
+    ('falconctl', 'CrowdStrike', 'CrowdStrike Falcon'),
+    ('falcond', 'CrowdStrike', 'CrowdStrike Falcon'),
+    ('cbdefense', 'VMware Carbon Black', 'VMware Carbon Black Cloud'),
+]
+
+
+def _mac_managed_agents():
+    """Agents de télémaintenance, RMM, EDR et antivirus tiers détectés —
+    pendant macOS de `_win_managed_agents()`, réutilise le même
+    `chercher_agents()` pur.
+
+    Deux sources combinées, chacune avec sa limite propre :
+    - process en cours (`ps -axo comm=`) : le nom y est fiable pour
+      l'état 'actif', mais c'est le nom du binaire, pas forcément le nom
+      commercial (voir `_AGENTS_EDR_MAC` ci-dessus) ;
+    - applications installées (`/Applications/*.app`) : le nom porte
+      généralement la marque (utile pour matcher les catalogues pensés
+      pour les `DisplayName` Windows), mais rien ne dit que l'agent tourne
+      réellement — ces entrées sont marquées `actif=False` plutôt qu'une
+      valeur inventée.
+
+    Recherche par sous-chaîne dans les deux cas, comme côté Windows : au
+    mieux, jamais une preuve.
+    """
+    info = {}
+    services, vus = [], set()
+
+    sortie = _run(['ps', '-axo', 'comm='], timeout=15)
+    for ligne in sortie.splitlines():
+        nom = os.path.basename(ligne.strip())
+        if nom and nom not in vus:
+            vus.add(nom)
+            services.append({'DisplayName': nom, 'State': 'running'})
+
+    try:
+        result = subprocess.run(['ls', '/Applications'], capture_output=True, text=True, timeout=10)
+        for app in result.stdout.splitlines():
+            if app.endswith('.app'):
+                nom = app[:-4]
+                if nom and nom not in vus:
+                    vus.add(nom)
+                    services.append({'DisplayName': nom, 'State': 'installed'})
+    except Exception:
+        pass
+
+    if not services:
+        return info
+
+    rmm = chercher_agents(services, _AGENTS_RMM + _AGENTS_RMM_MAC)
+    if rmm:
+        info['remote_support_agents'] = rmm
+    edr = chercher_agents(services, _AGENTS_EDR + _AGENTS_EDR_MAC)
+    if edr:
+        info['edr_agents'] = edr
+    av = chercher_agents(services, _AGENTS_AV_MAC)
+    if av:
+        info['antivirus'] = av[0]['nom']
+
+    # Identifiant AnyDesk : lu dans son fichier de configuration, comme
+    # anydesk.exe --get-id sur Windows lit l'ID via l'exécutable. Pas de
+    # commande --get-id équivalente documentée sur macOS.
+    try:
+        conf = os.path.expanduser('~/Library/Application Support/AnyDesk/system.conf')
+        if os.path.isfile(conf):
+            with open(conf, 'r', encoding='utf-8', errors='replace') as f:
+                for ligne in f:
+                    if ligne.startswith('ad.anynet.id='):
+                        valeur = ligne.split('=', 1)[1].strip()
+                        if _RE_ANYDESK_ID.match(valeur):
+                            info['anydesk_id'] = valeur.replace(' ', '')
+                        break
+    except Exception:
+        pass
 
     return info
 
@@ -5192,6 +5339,124 @@ def _mac_profiler_json(datatype, timeout=25):
         return None
 
 
+def _mac_printers():
+    """Imprimantes CUPS — pendant macOS de `_win_inventory()` côté imprimantes.
+
+    `lpstat` ne donne ni pilote ni partage de façon fiable (contrairement à
+    `Win32_Printer` sur Windows) : ces deux champs restent vides/`False`,
+    comme pour l'inventaire Linux existant (`get_system_info_linux`).
+    """
+    info = {}
+    liste = _run(['lpstat', '-p'], timeout=10)
+    if not liste.strip():
+        return info
+
+    default = ''
+    m = re.search(r'system default destination:\s*(\S+)', _run(['lpstat', '-d'], timeout=10))
+    if m:
+        default = m.group(1)
+
+    printers = []
+    for ligne in liste.splitlines():
+        m = re.match(r'^printer\s+(\S+)\s', ligne)
+        if not m:
+            continue
+        name = m.group(1)
+        port = ''
+        info_uri = _run(['lpstat', '-v', name], timeout=10)
+        m_uri = re.search(r'device for %s:\s*(\S+)' % re.escape(name), info_uri)
+        if m_uri:
+            port = m_uri.group(1)
+        network = bool(re.match(r'^(ipp|ipps|https?|dnssd|socket|lpd|smb)://', port, re.IGNORECASE))
+        printers.append({
+            'name': name,
+            'driver': '',
+            'port': port,
+            'network': network,
+            'default': name == default,
+            'shared': False,
+            'virtual': is_virtual_printer(name, '', port),
+            'connection': printer_connection(port, network),
+        })
+    if printers:
+        info['printers'] = printers
+    return info
+
+
+def _mac_listening_ports():
+    """Ports TCP en écoute via `lsof` — pendant macOS de `listening_ports`
+    (Windows : `Get-NetTCPConnection` ; Linux : `ss`)."""
+    info = {}
+    out = _run(['lsof', '-iTCP', '-sTCP:LISTEN', '-n', '-P'], timeout=15)
+    lignes = out.splitlines()
+    if len(lignes) < 2:
+        return info
+
+    ports = {}
+    for ligne in lignes[1:]:
+        colonnes = ligne.split()
+        # COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME — NAME (ex.
+        # "*:445" ou "127.0.0.1:5000") est le 9ᵉ jeton.
+        if len(colonnes) < 9:
+            continue
+        process, adresse = colonnes[0], colonnes[8]
+        if ':' not in adresse:
+            continue
+        try:
+            port = int(adresse.rsplit(':', 1)[1])
+        except ValueError:
+            continue
+        ports.setdefault(port, process)
+    if ports:
+        info['listening_ports'] = [{'port': p, 'process': proc} for p, proc in sorted(ports.items())]
+    return info
+
+
+def _mac_pending_updates():
+    """Mises à jour macOS/Apple disponibles via `softwareupdate -l` —
+    pendant macOS de `pending_updates` (Windows : Microsoft Update).
+
+    Distinct des mises à jour Homebrew par logiciel (`update_status`,
+    `_brew_outdated()`) : ceci couvre le système et les apps Apple, jamais
+    couvertes par `brew`. `softwareupdate -l` ne distingue pas de façon
+    fiable une mise à jour de sécurité d'une mise à jour de confort —
+    `security` reste toujours `False` plutôt qu'un verdict inventé (même
+    principe que `dns_check_reponse`, jamais interprété côté collecteur).
+    Peut prendre du temps (interroge les serveurs Apple) : timeout généreux.
+    """
+    info = {}
+    out = _run(['softwareupdate', '-l'], timeout=90)
+    if 'Title:' not in out:
+        return info
+
+    attente = []
+    for ligne in out.splitlines():
+        if 'Title:' not in ligne:
+            continue
+        m = re.search(
+            r'Title:\s*([^,]+),\s*Version:\s*([^,]+),\s*Size:\s*([\d.]+)\s*([KMG]?)i?B?',
+            ligne)
+        if not m:
+            continue
+        titre, version, taille_brute, unite = m.groups()
+        try:
+            taille = float(taille_brute)
+        except ValueError:
+            taille = 0
+        taille_mo = {'G': taille * 1024, 'M': taille}.get((unite or 'K').upper(), taille / 1024)
+        attente.append({
+            'title': ('%s %s' % (titre.strip(), version.strip())).strip(),
+            'severity': 'Recommandée' if 'recommended: yes' in ligne.lower() else '',
+            'kb': '',
+            'size_mb': round(taille_mo) if taille_mo else None,
+            'security': False,
+        })
+    if attente:
+        info['pending_updates'] = attente
+        info['pending_updates_source'] = 'softwareupdate'
+    return info
+
+
 def get_system_info_mac():
     """Collecte les infos système via system_profiler (macOS)."""
     info = {}
@@ -5331,6 +5596,39 @@ def get_system_info_mac():
                 f"{u} (Actif{', Administrateur' if u in admins else ''})"
                 for u in users if u not in ('daemon', 'nobody', 'root')
             )
+    except Exception:
+        pass
+
+    # ── Imprimantes ────────────────────────────────────────────────────────
+    try:
+        info.update(_mac_printers())
+    except Exception:
+        pass
+
+    # ── Ports TCP en écoute ────────────────────────────────────────────────
+    try:
+        info.update(_mac_listening_ports())
+    except Exception:
+        pass
+
+    # ── Accès distant (SSH, Partage d'écran) ───────────────────────────────
+    try:
+        info.update(_mac_remote_access())
+    except Exception:
+        pass
+
+    # ── Agents de télémaintenance, RMM, EDR, antivirus tiers ───────────────
+    try:
+        info.update(_mac_managed_agents())
+    except Exception:
+        pass
+    # XProtect est intégré à tout macOS moderne : valeur de base tant qu'un
+    # antivirus tiers n'a pas été détecté ci-dessus parmi les process actifs.
+    info.setdefault('antivirus', 'XProtect (intégré macOS)')
+
+    # ── Mises à jour macOS/Apple disponibles ────────────────────────────────
+    try:
+        info.update(_mac_pending_updates())
     except Exception:
         pass
 
@@ -5790,30 +6088,59 @@ def get_installed_software():
             pass
 
     elif IS_MAC:
-        names = set()
-        # /Applications
+        # SPApplicationsDataType donne nom/version/éditeur/date pour toute
+        # application dans /Applications, ~/Applications et les emplacements
+        # système — contrairement à un simple `ls /Applications`, jusqu'ici
+        # la seule source (nom seul, sans version). Réputé lent (vérifie la
+        # signature de chaque app) : timeout généreux, best-effort comme
+        # tout le reste de ce fichier.
         try:
-            result = subprocess.run(['ls', '/Applications'], capture_output=True, text=True, timeout=10)
-            names.update(app.replace('.app', '') for app in result.stdout.split('\n') if app.endswith('.app'))
+            apps = _mac_profiler_json('SPApplicationsDataType', timeout=60) or []
+            for app in apps:
+                name = (app.get('_name') or '').strip()
+                if not name:
+                    continue
+                obtenu = app.get('obtained_from') or ''
+                editeur = {
+                    'apple': 'Apple', 'mac_app_store': 'App Store',
+                    'identified_developer': app.get('signed_by') or 'Développeur identifié',
+                    'unidentified_developer': '',
+                }.get(obtenu, '')
+                date_install = (app.get('lastModified') or app.get('last_modified') or '')
+                software[name] = {
+                    'name': name,
+                    'version': str(app.get('version') or ''),
+                    'publisher': editeur,
+                    'install_date': date_install[:10] if date_install else '',
+                }
         except Exception:
             pass
 
-        # /usr/local/opt (Homebrew)
-        try:
-            result = subprocess.run(['ls', '/usr/local/opt'], capture_output=True, text=True, timeout=10)
-            names.update(pkg for pkg in result.stdout.split('\n') if pkg.strip())
-        except Exception:
-            pass
+        # Homebrew (formules + casks) : les paquets en ligne de commande
+        # n'apparaissent jamais dans SPApplicationsDataType (pas de bundle
+        # .app). Intel installe sous /usr/local, Apple Silicon sous
+        # /opt/homebrew — les deux chemins sont tentés, un seul existera.
+        for prefixe in ('/usr/local/opt', '/opt/homebrew/opt'):
+            try:
+                result = subprocess.run(['ls', prefixe], capture_output=True, text=True, timeout=10)
+                for pkg in result.stdout.split('\n'):
+                    pkg = pkg.strip()
+                    if pkg and pkg not in software:
+                        software[pkg] = {'name': pkg, 'version': '', 'publisher': '', 'install_date': ''}
+            except Exception:
+                pass
 
-        # pkgutil pour les packages installés
+        # pkgutil : installeurs .pkg qui ne créent pas de bundle .app
+        # (souvent des composants système ou des CLI) — nom seul, comme
+        # avant, en complément des deux sources ci-dessus.
         try:
             result = subprocess.run(['pkgutil', '--packages'], capture_output=True, text=True, timeout=15)
-            names.update(line.strip() for line in result.stdout.split('\n') if line.strip())
+            for pkg in result.stdout.split('\n'):
+                pkg = pkg.strip()
+                if pkg and pkg not in software:
+                    software[pkg] = {'name': pkg, 'version': '', 'publisher': '', 'install_date': ''}
         except Exception:
             pass
-
-        for name in names:
-            software[name] = {'name': name, 'version': '', 'publisher': '', 'install_date': ''}
 
     elif IS_LINUX:
         # Debian/Ubuntu (dpkg) - le format query donne aussi version et éditeur
