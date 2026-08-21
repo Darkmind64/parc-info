@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.7 · **À jour avec ParcInfo :** 2.18.29
+**Version collecteur :** 3.8 · **À jour avec ParcInfo :** 2.18.30
 
 ---
 
@@ -123,6 +123,18 @@ Accessible depuis le bouton **🖥 Fiche système** de la fiche appareil.
 `os_install_date` · `registered_owner` · `registered_organization` · `timezone` ·
 `domain` / `workgroup` · `logged_on_user` · `uptime_hours` · `hypervisor_present` ·
 `bios_version` · `bios_manufacturer` · `bios_release_date`
+
+> macOS (depuis 3.8) : `os_version`/`os_build` viennent de `sw_vers`, pas de
+> `platform.mac_ver()` — ce dernier a régulièrement traîné derrière une
+> nouvelle version majeure macOS (Big Sur longtemps rapporté « 10.16 » par
+> certaines versions de Python), alors que `sw_vers` vient directement du
+> système. `os_name` porte en plus le nom marketing (« macOS Sequoia ») via
+> une table de correspondance tenue à la main (`_MACOS_CODENAMES`,
+> `collector_core.py`) — une version plus récente que la dernière mise à
+> jour de cette table retombe simplement sur « macOS » sans nom, jamais une
+> erreur. `bios_version`/`bios_manufacturer` (depuis 3.8) viennent du
+> « Boot ROM Version »/« System Firmware Version » de `SPHardwareDataType`
+> (le libellé a changé selon les générations d'Intel Mac).
 
 ### Carte mère & processeur
 `motherboard{manufacturer, model, version, serial_number}` · `cpu` ·
@@ -278,6 +290,14 @@ demande explicite, `--router-info`)
 tous les profils Wi-Fi enregistrés sur le poste (`netsh wlan export profile`),
 pas seulement celui actuellement connecté (`wifi` ci-dessus).
 
+> macOS (depuis 3.8) : `networksetup -listpreferredwirelessnetworks` donne
+> le SSID de chaque réseau enregistré, **jamais** `authentification`/
+> `chiffrement`/`password` (toujours vides/absents) — ces informations
+> vivent dans le Trousseau, dont la lecture (`security
+> find-generic-password`) déclenche une invite Touch ID/mot de passe PAR
+> RÉSEAU, incompatible avec une collecte automatisée non surveillée.
+> `inclure_mdp` n'a donc aucun effet sur macOS.
+
 > **Seul champ collecté qui ne transite jamais par `system_report`.** Tout le
 > reste de cette page finit, tel quel, dans `rapport_systeme_json` — visible
 > en clair dans la fiche appareil et le PDF. Un mot de passe Wi-Fi ne doit
@@ -310,6 +330,8 @@ pas seulement celui actuellement connecté (`wifi` ci-dessus).
 `firewall[]` / `firewall_profiles[]{name, enabled}` ·
 `bitlocker[]` / `bitlocker_volumes[]{volume, etat, protection, protege}`
 (FileVault sur macOS) · `tpm_present` · `tpm_enabled` · `secure_boot` ·
+`sip_status` · `gatekeeper_status` · `mdm_enrolled` · `mdm_detail` (macOS,
+depuis 3.8) ·
 `local_password_policy{min_length, complexity, history, max_age_days,
 lockout_threshold, lockout_duration_min}` · `security_events[]{compte, type,
 event_id, count, sources[], last_seen}` (échecs d'ouverture de session,
@@ -319,6 +341,18 @@ verrouillages) · `failed_logons` · `account_lockouts` ·
 cleaned}` · `malware_detections_total` ·
 `unsigned_drivers[]{device, version, provider}` ·
 `firewall_rules[]{name, protocol, port, profiles}` · `firewall_rules_total`
+
+> `sip_status`/`gatekeeper_status` (macOS, depuis 3.8) viennent de `csrutil
+> status` (Protection de l'intégrité système) et `spctl --status`
+> (Gatekeeper) — pas des équivalents stricts de TPM/Secure Boot, mais la
+> même famille de question : un technicien qui désactive SIP pour un kext
+> tiers, ou Gatekeeper pour exécuter du logiciel non notarié, laisse ici une
+> trace plutôt que de devoir le redécouvrir en console. `mdm_enrolled`/
+> `mdm_detail` viennent de `profiles status -type enrollment` — à croiser
+> avec `remote_support_agents` (§ Agents de télémaintenance & EDR) : un
+> agent Jamf/Kandji/Mosyle détecté sans inscription MDM correspondante, ou
+> l'inverse, vaut la peine d'être remarqué sur un parc censé être
+> entièrement géré.
 
 > `local_password_policy` se lit via `secedit /export`, dont les clés
 > restent en anglais quelle que soit la langue de Windows — `net accounts`,
@@ -454,6 +488,14 @@ Core/5+, ce dernier via `dotnet --list-runtimes`) · `uac_enabled` ·
 `wsus_server` / `wsus_group` · `time_source` / `time_offset` ·
 `group_policies[]{name, scope, enabled, denied}`
 
+> macOS (depuis 3.8) : `restore_points` reçoit la dernière sauvegarde Time
+> Machine (`tmutil latestbackup` pour la date, `tmutil destinationinfo` pour
+> le nom du disque de destination) plutôt qu'un point de restauration
+> Windows — même champ générique, même question de fond (« ce poste est-il
+> sauvegardé, et depuis quand pas »), pertinente pour la gestion de parc au
+> même titre que la garantie ou les contrats. Une seule entrée (la plus
+> récente), pas l'historique complet des sauvegardes.
+
 > `group_policies` vient de `gpresult /X` (export XML), pas de `gpresult /r`
 > (texte) — même raison que pour les profils Wi-Fi (`_win_wifi_profiles`) :
 > le texte change de libellés selon la langue de Windows, le schéma XML est
@@ -487,6 +529,33 @@ user}` · `top_processes_cpu[]{name, cpu_pct, ram_mb}` ·
 > filtrer. Dix processus par liste (`_win_top_processes(limite=10)`, cinq
 > avant la 3.2).
 >
+> macOS (depuis 3.8, `_mac_top_processes()`) : `ps -Ao comm,%cpu,rss -r`
+> donne `%cpu` déjà instantané côté noyau (pas besoin du double relevé
+> Windows) et `rss` en Ko, converti en Mo — **pas** `%mem`, qui est un
+> pourcentage et aurait rendu `ram_mb` silencieusement incohérent d'un
+> poste à l'autre (4,2 signifiant 4,2 % sur un Mac contre 4,2 Mo sur un PC).
+>
+> `system_incidents` (macOS, depuis 3.8, `_mac_crash_diagnostics()`) :
+> compte les rapports de plantage applicatifs
+> (`~/Library/Logs/DiagnosticReports/*.crash` et `*.ips` — le premier avant
+> macOS Monterey, le second depuis, fusionnés en une seule catégorie « 
+> Plantage application ») et les paniques noyau
+> (`/Library/Logs/DiagnosticReports/*.panic`, catégorie « Panique noyau »,
+> niveau `danger` — l'équivalent le plus proche d'un écran bleu Windows).
+> Fenêtre de 30 jours par défaut. Comptage par lecture de répertoire (nom +
+> date de modification) sans jamais ouvrir le contenu des fichiers : robuste
+> aux changements de format interne entre versions macOS, contrairement à
+> un parsing de leur contenu.
+>
+> `startup_programs` (macOS, depuis 3.8, `_mac_startup_items()`) : LaunchAgents
+> utilisateur (`~/Library/LaunchAgents`) et système
+> (`/Library/LaunchAgents`, `/Library/LaunchDaemons`) — équivalent
+> approximatif des tâches planifiées/programmes de démarrage Windows. Lus
+> directement via `plistlib` (bibliothèque standard), pas en scrapant
+> `launchctl list` : un fichier `.plist` a un format stable, alors que le
+> texte de `launchctl list` change de colonnes selon la version macOS. Les
+> jobs Apple (`/System/Library/Launch*`) sont exclus — même principe que
+> l'exclusion du dossier `\Microsoft\` côté tâches planifiées Windows.
 > `system_incidents` intègre désormais le code STOP (bugcheck) précis d'un
 > écran bleu quand disponible, extrait du `param1` structuré de l'événement
 > 1001 (`Microsoft-Windows-WER-SystemErrorReporting`) plutôt que du texte
@@ -638,13 +707,14 @@ avec un champ inaccessible.
 | Correctifs | ✅ | ✅ `softwareupdate -l` (système + apps Apple, depuis 3.5) | — |
 | Chiffrement | ✅ BitLocker | ✅ FileVault | — |
 | Pare-feu | ✅ | ✅ | — |
-| TPM / Secure Boot | ✅ | — | — |
-| Détections antivirus (Defender) | ✅ | — | — |
+| TPM / Secure Boot | ✅ | ⚠️ équivalents macOS : SIP + Gatekeeper (depuis 3.8, pas les mêmes mécanismes — voir note) | — |
+| Inscription MDM (Jamf, Kandji, Mosyle, ABM…) | — (sans équivalent Windows) | ✅ (depuis 3.8) | — |
+| Détections antivirus (Defender) | ✅ | ⚠️ XProtect toujours signalé, tiers détecté au mieux (voir § Agents) | — |
 | Pilotes non signés | ✅ | — | — |
 | Règles de pare-feu (filtrées, non par défaut) | ✅ | — | — |
 | Redirections du fichier hosts (filtrées) | ✅ | ✅ | ✅ |
 | Redirections de port (portproxy) | ✅ | — | — |
-| Réseaux Wi-Fi enregistrés (SSID + mot de passe optionnel) | ✅ | — | — |
+| Réseaux Wi-Fi enregistrés (SSID + mot de passe optionnel) | ✅ | ⚠️ SSID seul, jamais le mot de passe (depuis 3.8 — voir note) | — |
 | Stratégies de groupe appliquées | ✅ | — | — |
 | Ports en écoute | ✅ | ✅ (`lsof`, depuis 3.5) | ✅ (`ss`) |
 | Comptes locaux | ✅ | ✅ | ✅ |
@@ -655,11 +725,13 @@ avec un champ inaccessible.
 | Agents de télémaintenance & EDR | ✅ | ⚠️ best-effort par nom de process/app, root non requis (depuis 3.5) | — |
 | Comptes de messagerie (Outlook, Thunderbird) | ✅ | — | — |
 | Politique de mot de passe local | ✅ (admin) | — | — |
+| Sauvegardes (Time Machine côté macOS) | — (Windows : `restore_points` = Restauration système) | ✅ (depuis 3.8 — voir note, réutilise `restore_points`) | — |
 | Plan d'alimentation / démarrage rapide | ✅ | — | — |
 | Versions .NET installées | ✅ | — | — |
 | Style de partition / mode de démarrage | ✅ | — | — |
-| Diagnostic (incidents, erreurs, arrêts, tâches, profils…) | ✅ | — | — |
-| Processus les plus gourmands (CPU/RAM, instantané) | ✅ | — | — |
+| Diagnostic — plantages applicatifs & paniques noyau | ✅ (incidents, erreurs, arrêts…) | ✅ (depuis 3.8, réutilise `system_incidents` — voir note) | — |
+| Diagnostic — agents/démons au démarrage | ✅ (`startup_programs`) | ✅ (depuis 3.8, LaunchAgents/LaunchDaemons — voir note) | — |
+| Processus les plus gourmands (CPU/RAM, instantané) | ✅ | ✅ (`ps`, depuis 3.8) | — |
 
 ---
 
@@ -769,4 +841,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-21 (v2.18.29 — collecteur 3.7, correctif envoi de collecte GUI macOS)
+**Dernière mise à jour** : 2026-08-21 (v2.18.30 — collecteur 3.8, diagnostic macOS étoffé : sécurité, sauvegardes, plantages, démarrage)

@@ -853,6 +853,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 <!-- ── SÉCURITÉ ─────────────────────────────────────────────────────────── -->
 {% if rapport.antivirus or rapport.firewall or rapport.bitlocker or rapport.bitlocker_volumes
       or rapport.tpm_present is defined or rapport.secure_boot is defined
+      or rapport.sip_status or rapport.gatekeeper_status or rapport.mdm_enrolled is defined
       or rapport.local_password_policy %}
 <div class="fs-section">
     <h3>■ Sécurité &amp; conformité</h3>
@@ -955,6 +956,26 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
                 <span class="fs-secu-nom">Secure Boot</span>
                 {% if rapport.secure_boot %}<span class="fs-pill fs-ok">Activé</span>
                 {% else %}<span class="fs-pill fs-bad">Désactivé</span>{% endif %}
+            </div>
+            {% endif %}
+            {% if rapport.sip_status %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">SIP</span>
+                <span class="fs-pill {{ 'fs-ok' if rapport.sip_status == 'Activée' else 'fs-warn' }}">
+                    {{ rapport.sip_status }}</span>
+            </div>
+            {% endif %}
+            {% if rapport.gatekeeper_status %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">Gatekeeper</span>
+                <span class="fs-pill {{ 'fs-ok' if rapport.gatekeeper_status == 'Activé' else 'fs-warn' }}">
+                    {{ rapport.gatekeeper_status }}</span>
+            </div>
+            {% endif %}
+            {% if rapport.mdm_enrolled is defined and rapport.mdm_enrolled is not none %}
+            <div class="fs-secu-ligne">
+                <span class="fs-secu-nom">Inscription MDM</span>
+                <span class="fs-pill fs-ok">{{ rapport.mdm_detail or ('Oui' if rapport.mdm_enrolled else 'Non') }}</span>
             </div>
             {% endif %}
         </div>

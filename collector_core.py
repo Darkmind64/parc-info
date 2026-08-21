@@ -17,6 +17,7 @@ import io
 import json
 import os
 import platform
+import plistlib
 import re
 import shutil
 import socket
@@ -48,7 +49,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.7'
+COLLECTOR_VERSION = '3.8'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -85,6 +86,20 @@ LICENSE_STATUS = {
     0: 'Non licencié', 1: 'Activé', 2: 'Délai de grâce initial',
     3: 'Délai de grâce supplémentaire', 4: 'Délai de grâce (non authentique)',
     5: 'Notification', 6: 'Délai de grâce étendu',
+}
+
+# Version macOS → nom marketing. `sw_vers -productVersion` ne donne que le
+# numéro (« 15.5 ») ; Apple n'expose ce nom nulle part de façon
+# programmatique et stable — table tenue à la main, mise à jour à chaque
+# version majeure. Clé = version majeure seule pour Big Sur (11) et après ;
+# (10, mineure) pour les versions 10.x, qui changeaient de nom chaque année
+# sous le même numéro majeur. Une version absente de la table (plus récente
+# que la dernière mise à jour de ce fichier, ou 10.x très ancienne) retombe
+# simplement sur le numéro brut plutôt que d'échouer — voir get_os_info().
+_MACOS_CODENAMES = {
+    26: 'Tahoe', 15: 'Sequoia', 14: 'Sonoma', 13: 'Ventura', 12: 'Monterey',
+    11: 'Big Sur',
+    (10, 15): 'Catalina', (10, 14): 'Mojave', (10, 13): 'High Sierra',
 }
 
 
@@ -1072,9 +1087,24 @@ def get_os_info():
     # Pour macOS
     if IS_MAC:
         try:
-            mac_ver = platform.mac_ver()
-            os_version = mac_ver[0]
+            # `sw_vers`, pas platform.mac_ver() : ce dernier a régulièrement
+            # traîné derrière une nouvelle version majeure macOS (cas connu -
+            # Big Sur longtemps rapporté "10.16" au lieu de "11.x" par
+            # certaines versions de Python), alors que sw_vers vient
+            # directement du système et est toujours à jour à sa sortie.
+            os_version = _run(['sw_vers', '-productVersion'], timeout=5).strip() or platform.mac_ver()[0]
+            build = _run(['sw_vers', '-buildVersion'], timeout=5).strip()
+            if build:
+                extra['os_build'] = build
+
             full_os_name = "macOS"
+            try:
+                major, minor = (int(p) for p in (os_version.split('.') + ['0'])[:2])
+                nom = _MACOS_CODENAMES.get(major) or _MACOS_CODENAMES.get((major, minor))
+                if nom:
+                    full_os_name = f"macOS {nom}"
+            except (ValueError, TypeError):
+                pass
         except Exception:
             pass
 
@@ -3008,13 +3038,50 @@ def _win_wifi_profiles(inclure_mdp=False):
     return profils
 
 
+def _mac_wifi_profiles():
+    """Réseaux Wi-Fi enregistrés (SSID seul) — pendant macOS partiel de
+    `_win_wifi_profiles()`.
+
+    Le mot de passe n'est **jamais** collecté ici, contrairement à Windows :
+    sur macOS il vit dans le Trousseau, protégé par une invite interactive
+    (Touch ID/mot de passe) déclenchée par `security find-generic-password`
+    — obtenir chaque mot de passe demanderait une confirmation utilisateur
+    PAR RÉSEAU, incompatible avec une collecte automatisée. `authentification`
+    et `chiffrement` restent vides pour la même raison : `networksetup` ne
+    les expose pas sans lire le Trousseau.
+    """
+    interface = None
+    ports = _run(['networksetup', '-listallhardwareports'], timeout=10)
+    bloc = ports.split('Hardware Port: ')
+    for section in bloc:
+        if section.startswith('Wi-Fi') or section.startswith('AirPort'):
+            m = re.search(r'Device:\s*(\S+)', section)
+            if m:
+                interface = m.group(1)
+                break
+    if not interface:
+        return []
+
+    out = _run(['networksetup', '-listpreferredwirelessnetworks', interface], timeout=10)
+    lignes = out.splitlines()[1:]  # 1ʳᵉ ligne : "Preferred networks on <if>:"
+    return [{'ssid': l.strip(), 'authentification': '', 'chiffrement': ''}
+            for l in lignes if l.strip()]
+
+
 def get_wifi_profiles(inclure_mdp=False):
     """Point d'entrée public, indépendant de `_WIN_STEPS` (voir _win_wifi_profiles).
 
-    Windows uniquement pour l'instant — pas d'équivalent macOS/Linux implémenté.
+    macOS : liste de SSID uniquement, jamais le mot de passe — voir
+    `_mac_wifi_profiles()`. `inclure_mdp` y est donc sans effet. Linux : pas
+    d'équivalent implémenté.
     """
     if IS_WINDOWS:
         return _win_wifi_profiles(inclure_mdp)
+    if IS_MAC:
+        try:
+            return _mac_wifi_profiles()
+        except Exception:
+            return []
     return []
 
 
@@ -5457,6 +5524,210 @@ def _mac_pending_updates():
     return info
 
 
+def _mac_security_posture():
+    """Protection de l'intégrité système (SIP) et Gatekeeper — posture de
+    sécurité macOS sans équivalent Windows direct, mais du même ordre
+    d'utilité diagnostique que TPM/Secure Boot côté Windows : un technicien
+    qui désactive SIP pour installer un kext tiers, ou Gatekeeper pour
+    exécuter du logiciel non notarié, laisse une trace ici plutôt que de
+    devoir le redécouvrir en console. Rendus comme deux lignes de plus dans
+    la table « Sécurité & conformité » déjà existante — pas de nouvelle
+    section.
+    """
+    info = {}
+    sip = _run(['csrutil', 'status'], timeout=5)
+    if sip.strip():
+        info['sip_status'] = 'Activée' if 'enabled' in sip.lower() else 'Désactivée'
+
+    gk = _run(['spctl', '--status'], timeout=5)
+    if gk.strip():
+        info['gatekeeper_status'] = 'Activé' if 'enabled' in gk.lower() else 'Désactivé'
+
+    return info
+
+
+def _mac_mdm_status():
+    """Inscription MDM (Jamf/Kandji/Mosyle/Apple Business Manager…) —
+    pertinent croisé avec `_mac_managed_agents()` : un agent RMM détecté sans
+    inscription MDM correspondante, ou l'inverse, vaut la peine d'être
+    remarqué sur un parc censé être entièrement géré.
+    """
+    info = {}
+    out = _run(['profiles', 'status', '-type', 'enrollment'], timeout=10)
+    if not out.strip():
+        return info
+    m = re.search(r'MDM enrollment:\s*(.+)', out)
+    if m:
+        detail = m.group(1).strip()
+        info['mdm_enrolled'] = detail.lower().startswith('yes')
+        info['mdm_detail'] = detail
+    return info
+
+
+def _mac_time_machine():
+    """Sauvegardes Time Machine — pendant macOS des points de restauration
+    Windows (`restore_points`, System Restore) : même champ générique
+    réutilisé, même question de fond (« ce poste est-il sauvegardé, et
+    depuis quand pas »), pertinente pour la gestion de parc au même titre
+    que la garantie ou les contrats.
+    """
+    info = {}
+    dest = _run(['tmutil', 'destinationinfo'], timeout=10)
+    m_nom = re.search(r'Name\s*:\s*(.+)', dest)
+    destination = m_nom.group(1).strip() if m_nom else ''
+
+    dernieres = _run(['tmutil', 'latestbackup'], timeout=15)
+    dernieres = dernieres.strip()
+    if dernieres and not dernieres.lower().startswith('no backup'):
+        # tmutil latestbackup renvoie un chemin du type
+        # /Volumes/Backup/Backups.backupdb/MBP/2026-08-20-093000 — la date
+        # est le dernier segment, plus lisible que le chemin complet.
+        horodatage = os.path.basename(dernieres.rstrip('/'))
+        description = ('Sauvegarde Time Machine (%s)' % destination) if destination \
+            else 'Sauvegarde Time Machine'
+        info['restore_points'] = [{'description': description, 'when': horodatage}]
+    return info
+
+
+def _mac_top_processes(limite=10):
+    """Processus les plus gourmands CPU/RAM — pendant macOS de
+    `_win_top_processes()`. Contrairement à Windows, `ps` expose déjà un
+    `%cpu` instantané normalisé par le noyau (moyenné sur son propre
+    intervalle d'échantillonnage interne) : pas besoin du double relevé à
+    600 ms que fait la version Windows pour obtenir un chiffre honnête.
+
+    `rss` (Ko) plutôt que `%mem` : le champ `ram_mb` est déjà documenté et
+    affiché comme une quantité absolue (voir la version Windows,
+    `WorkingSet64`) — y mettre un pourcentage l'aurait rendu silencieusement
+    incohérent d'un poste à l'autre (4,2 signifierait 4,2 % sur un Mac et
+    4,2 Mo sur un PC).
+    """
+    info = {}
+    out = _run(['ps', '-Ao', 'comm,%cpu,rss', '-r'], timeout=10)
+    lignes = [l for l in out.splitlines()[1:] if l.strip()]
+    if not lignes:
+        return info
+
+    def parser(ligne):
+        parts = ligne.split()
+        if len(parts) < 3:
+            return None
+        try:
+            cpu, rss_ko = float(parts[-2]), float(parts[-1])
+        except ValueError:
+            return None
+        nom = os.path.basename(' '.join(parts[:-2]))
+        return {'name': nom, 'cpu_pct': cpu, 'ram_mb': round(rss_ko / 1024, 1)}
+
+    entrees = [e for e in (parser(l) for l in lignes) if e]
+    if entrees:
+        info['top_processes_cpu'] = entrees[:limite]
+        info['top_processes_ram'] = sorted(
+            entrees, key=lambda e: e['ram_mb'], reverse=True)[:limite]
+    return info
+
+
+def _mac_crash_diagnostics(jours=30):
+    """Rapports de plantage applicatifs et paniques noyau — pendant macOS
+    des incidents système Windows (`system_incidents` : écrans bleus,
+    erreurs disque). Comptage par pure lecture de répertoire (mtime), sans
+    dépendre du format interne des fichiers .crash/.ips/.panic — robuste aux
+    changements de format entre versions macOS, contrairement à un parsing
+    de leur contenu.
+    """
+    info = {}
+    limite = datetime.now().timestamp() - jours * 86400
+    incidents = []
+
+    def compter(dossier, motifs, categorie, niveau):
+        # `motifs` : plusieurs extensions pour un même compteur — .crash et
+        # .ips sont tous deux des plantages applicatifs (le premier avant
+        # macOS Monterey, le second depuis), jamais les deux en même temps
+        # sur un poste donné ; les compter à part aurait affiché deux lignes
+        # « Plantage application » redondantes plutôt qu'un total unique.
+        chemin = os.path.expanduser(dossier)
+        if not os.path.isdir(chemin):
+            return
+        fichiers = []
+        try:
+            for nom in os.listdir(chemin):
+                if not nom.endswith(motifs):
+                    continue
+                chemin_complet = os.path.join(chemin, nom)
+                try:
+                    mtime = os.path.getmtime(chemin_complet)
+                except OSError:
+                    continue
+                if mtime >= limite:
+                    fichiers.append((nom, mtime))
+        except OSError:
+            return
+        if fichiers:
+            dernier = max(fichiers, key=lambda f: f[1])
+            incidents.append({
+                'category': categorie,
+                'count': len(fichiers),
+                'last_seen': datetime.fromtimestamp(dernier[1]).strftime('%Y-%m-%d %H:%M'),
+                'message': dernier[0],
+                'level': niveau,
+            })
+
+    compter('~/Library/Logs/DiagnosticReports', ('.ips', '.crash'), 'Plantage application', 'warn')
+    compter('/Library/Logs/DiagnosticReports', ('.panic',), 'Panique noyau', 'danger')
+
+    if incidents:
+        info['system_incidents'] = incidents
+    return info
+
+
+def _mac_startup_items():
+    """Agents et démons au démarrage — pendant macOS des programmes de
+    démarrage Windows (`startup_programs`). Lu directement via `plistlib`
+    (bibliothèque standard) plutôt qu'en scrapant `launchctl list` : un
+    fichier .plist a un format stable et documenté, alors que le texte de
+    `launchctl list` change de colonnes selon la version macOS. Les jobs
+    Apple (`/System/Library/Launch*`) sont exclus — même principe que
+    l'exclusion du dossier `\\Microsoft\\` côté tâches planifiées Windows :
+    plusieurs centaines d'entrées internes au système, aucune valeur de
+    diagnostic pour un parc.
+    """
+    info = {}
+    emplacements = [
+        (os.path.expanduser('~/Library/LaunchAgents'), 'Utilisateur (LaunchAgent)'),
+        ('/Library/LaunchAgents', 'Système (LaunchAgent)'),
+        ('/Library/LaunchDaemons', 'Système (LaunchDaemon)'),
+    ]
+    items = []
+    for dossier, emplacement in emplacements:
+        if not os.path.isdir(dossier):
+            continue
+        try:
+            noms = os.listdir(dossier)
+        except OSError:
+            continue
+        for nom in noms:
+            if not nom.endswith('.plist'):
+                continue
+            chemin = os.path.join(dossier, nom)
+            try:
+                with open(chemin, 'rb') as f:
+                    plist = plistlib.load(f)
+            except Exception:
+                continue
+            label = plist.get('Label') or nom[:-6]
+            commande = plist.get('Program')
+            if not commande:
+                args = plist.get('ProgramArguments')
+                commande = args[0] if isinstance(args, list) and args else ''
+            items.append({
+                'name': label, 'command': commande or '',
+                'location': chemin, 'user': emplacement,
+            })
+    if items:
+        info['startup_programs'] = sorted(items, key=lambda i: i['name'].lower())
+    return info
+
+
 def get_system_info_mac():
     """Collecte les infos système via system_profiler (macOS)."""
     info = {}
@@ -5487,6 +5758,13 @@ def get_system_info_mac():
                     pass
             elif 'Chip:' in line or 'Processor Name:' in line:
                 info['cpu'] = line.split(':', 1)[1].strip()
+            elif 'Boot ROM Version:' in line or 'System Firmware Version:' in line:
+                # Le libellé a changé plusieurs fois selon les générations
+                # d'Intel Mac (EFI classique vs firmware T2) — les deux sont
+                # tentés, le premier trouvé gagne. Rendu via `bios_version`,
+                # champ déjà générique (Windows/Linux), pas de nouveau champ.
+                info.setdefault('bios_version', line.split(':', 1)[1].strip())
+                info.setdefault('bios_manufacturer', 'Apple')
             elif 'Memory:' in line:
                 try:
                     info['ram_gb'] = float(line.split(':', 1)[1].strip().split()[0])
@@ -5629,6 +5907,42 @@ def get_system_info_mac():
     # ── Mises à jour macOS/Apple disponibles ────────────────────────────────
     try:
         info.update(_mac_pending_updates())
+    except Exception:
+        pass
+
+    # ── Posture de sécurité (SIP, Gatekeeper) ───────────────────────────────
+    try:
+        info.update(_mac_security_posture())
+    except Exception:
+        pass
+
+    # ── Inscription MDM ──────────────────────────────────────────────────────
+    try:
+        info.update(_mac_mdm_status())
+    except Exception:
+        pass
+
+    # ── Sauvegardes Time Machine ─────────────────────────────────────────────
+    try:
+        info.update(_mac_time_machine())
+    except Exception:
+        pass
+
+    # ── Processus les plus gourmands CPU/RAM ────────────────────────────────
+    try:
+        info.update(_mac_top_processes())
+    except Exception:
+        pass
+
+    # ── Rapports de plantage & paniques noyau ───────────────────────────────
+    try:
+        info.update(_mac_crash_diagnostics())
+    except Exception:
+        pass
+
+    # ── Agents et démons au démarrage ────────────────────────────────────────
+    try:
+        info.update(_mac_startup_items())
     except Exception:
         pass
 
@@ -7098,6 +7412,11 @@ def build_summary_sections(info):
          if info.get('tpm_present') is not None else None),
         ('Secure Boot', ('Activé' if info['secure_boot'] else 'Désactivé')
          if info.get('secure_boot') is not None else None),
+        ("Protection de l'intégrité système (SIP)", info.get('sip_status')),
+        ('Gatekeeper', info.get('gatekeeper_status')),
+        ('Inscription MDM', info.get('mdm_detail') or
+         ('Oui' if info.get('mdm_enrolled') else 'Non')
+         if info.get('mdm_enrolled') is not None else None),
         ('Mot de passe — longueur mini',
          '%s caractère(s)' % pol['min_length'] if pol.get('min_length') is not None else None),
         ('Mot de passe — complexité',
@@ -8214,6 +8533,16 @@ def _security_html(info):
         items.append(('Secure Boot', 'Activé' if info.get('secure_boot') else 'Désactivé',
                       'ok' if info.get('secure_boot') else 'warn'))
 
+    if info.get('sip_status'):
+        items.append(("Protection de l'intégrité système (SIP)", info['sip_status'],
+                      'ok' if info['sip_status'] == 'Activée' else 'warn'))
+    if info.get('gatekeeper_status'):
+        items.append(('Gatekeeper', info['gatekeeper_status'],
+                      'ok' if info['gatekeeper_status'] == 'Activé' else 'warn'))
+    if info.get('mdm_enrolled') is not None:
+        items.append(('Inscription MDM', info.get('mdm_detail') or
+                      ('Oui' if info['mdm_enrolled'] else 'Non'), 'ok'))
+
     for profile in info.get('firewall', []):
         level = 'danger' if re.search(r'(désactiv|disabled|off)', profile, re.I) else 'ok'
         items.append(('Pare-feu', profile, level))
@@ -9141,6 +9470,15 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         if info.get('secure_boot') is not None:
             sec_rows.append(('Secure Boot', 'Activé' if info.get('secure_boot') else 'Désactivé',
                              'ok' if info.get('secure_boot') else 'warn'))
+        if info.get('sip_status'):
+            sec_rows.append(("Protection de l'intégrité système (SIP)", info['sip_status'],
+                             'ok' if info['sip_status'] == 'Activée' else 'warn'))
+        if info.get('gatekeeper_status'):
+            sec_rows.append(('Gatekeeper', info['gatekeeper_status'],
+                             'ok' if info['gatekeeper_status'] == 'Activé' else 'warn'))
+        if info.get('mdm_enrolled') is not None:
+            sec_rows.append(('Inscription MDM', info.get('mdm_detail') or
+                             ('Oui' if info['mdm_enrolled'] else 'Non'), 'ok'))
         if info.get('firewall_profiles'):
             for prof in info['firewall_profiles']:
                 sec_rows.append(('Pare-feu',
