@@ -6,7 +6,7 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.18.29 ⭐ **Correctif : erreur au moment d'envoyer une collecte depuis le collecteur GUI macOS**  
+**Version** : 2.18.30 ⭐ **Diagnostic macOS étoffé : sécurité, sauvegardes Time Machine, plantages, démarrage**  
 **Dernière mise à jour** : 2026-08-21
 
 ---
@@ -54,10 +54,14 @@ system-info-collector.exe --client-id 5  # Windows
 | OS & Version, Domaine | ✅ | ✅ | ⚠️ |
 | RAM, CPU, CPU Cores, GPU | ✅ | ✅ | ⚠️ |
 | Disques (logiques + SMART/SSD-HDD) | ✅ | ✅ | ⚠️ |
-| BitLocker, Pare-feu, TPM, Secure Boot | ✅ | ❌ | ❌ |
-| Antivirus, Dernière MàJ Windows, Uptime | ✅ | ⚠️ | ⚠️ |
-| Comptes utilisateurs locaux + Administrateurs | ✅ | ❌ | ❌ |
+| Chiffrement (BitLocker / FileVault), Pare-feu | ✅ | ✅ | ❌ |
+| TPM/Secure Boot (Windows) — SIP/Gatekeeper/MDM (macOS) | ✅ | ✅ | ❌ |
+| Antivirus, Dernière MàJ, Uptime | ✅ | ✅ | ⚠️ |
+| Comptes utilisateurs locaux + Administrateurs | ✅ | ✅ | ✅ |
+| Sauvegardes (Restauration système / Time Machine) | ✅ | ✅ | ❌ |
+| Plantages, paniques noyau, agents au démarrage | ✅ | ✅ | ❌ |
 | **Logiciels installés (liste complète, avec version/éditeur/date)** | ✅ | ✅ | ✅ |
+| Voir le détail complet par champ | [COLLECTOR_FIELD_MAPPING.md](COLLECTOR_FIELD_MAPPING.md) | | |
 
 **Workflow Enrichi :**
 1. Collecte système complète (CLI/GUI)
@@ -78,9 +82,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/system-info-collector-gui.exe)
-- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/ParcInfo-Windows.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/ParcInfo-Windows.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -188,25 +192,25 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.18.29
+## 📥 Téléchargements v2.18.30
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger |
 |-----------|----------|
-| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/ParcInfo-Windows.exe) |
-| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/ParcInfo-macOS-ARM.zip) |
-| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/ParcInfo-macOS-Intel.zip) |
-| **Docker** | `docker pull darkmind64/parcinfo:v2.18.29` |
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/ParcInfo-macOS-ARM.zip) |
+| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/ParcInfo-macOS-Intel.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.18.30` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Usage |
 |------|-----------|----------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/system-info-collector-gui.exe) | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/system-info-collector.exe) | Automatisation/scripts |
-| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
-| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.29/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector.exe) | Automatisation/scripts |
+| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
+| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.30/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -227,7 +231,7 @@ python system-info-collector-gui.py
 python system-info-collector.py --client-id 5
 ```
 
-👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.18.29)
+👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.18.30)
 
 ---
 

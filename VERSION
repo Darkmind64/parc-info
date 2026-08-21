@@ -1,8 +1,43 @@
-PARCINFO_VERSION=2.18.29
+PARCINFO_VERSION=2.18.30
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082106
+BUILD_NUMBER=2026082107
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.30 - Diagnostic macOS étoffé (collecteur 3.8)
+# Demandé après les correctifs des 2.18.28/2.18.29 : étudier ce que la
+# collecte macOS Intel pourrait encore gagner à remonter pour le diagnostic,
+# le dépannage et l'enregistrement des caractéristiques machine. La plupart
+# des ajouts réutilisent des champs déjà génériques (rendus sans condition
+# d'OS par la fiche système et le PDF, même principe que les précédentes
+# passes macOS) — trois seulement ont demandé d'ajouter des lignes à des
+# tables existantes.
+# 1) os_name/os_build via sw_vers (plus fiable que platform.mac_ver(), qui a
+#    traîné derrière plusieurs versions majeures macOS) + nom marketing
+#    (« macOS Sequoia ») via une table de correspondance tenue à la main ;
+#    bios_version/bios_manufacturer désormais aussi lus (Boot ROM Version).
+# 2) Nouveaux champs de sécurité/gestion : SIP (csrutil), Gatekeeper
+#    (spctl), inscription MDM (profiles status -type enrollment) — posture
+#    de sécurité macOS sans équivalent Windows direct, mais du même ordre
+#    d'utilité que TPM/Secure Boot.
+# 3) Sauvegardes Time Machine (tmutil) réutilisant restore_points (Windows :
+#    Restauration système) — même question de fond, pertinente pour la
+#    gestion de parc.
+# 4) Diagnostic réutilisant system_incidents (Windows : écrans bleus,
+#    erreurs disque) : plantages applicatifs et paniques noyau, comptés par
+#    lecture de répertoire (~/Library/Logs/DiagnosticReports), jamais par
+#    parsing de contenu — robuste aux changements de format entre versions
+#    macOS.
+# 5) startup_programs réutilisé pour les LaunchAgents/LaunchDaemons (lus via
+#    plistlib, format stable, plutôt qu'en scrapant launchctl list) ;
+#    top_processes_cpu/ram via ps (rss en Ko converti en Mo, PAS %mem — un
+#    bug trouvé et corrigé avant publication : %mem est un pourcentage,
+#    l'utiliser aurait rendu ram_mb silencieusement incohérent d'un poste à
+#    l'autre).
+# 6) SSID Wi-Fi enregistrés (networksetup), jamais le mot de passe : le lire
+#    depuis le Trousseau déclencherait une invite Touch ID/mot de passe PAR
+#    RÉSEAU, incompatible avec une collecte automatisée.
+# Date: 21 août 2026
 
 # Version 2.18.29 - Correctif critique : "Expected str, bytes or os.PathLike object, not NoneType" à l'envoi (macOS)
 # La 2.18.28 avait corrigé le lancement de ParcInfo-Collector.app depuis le
