@@ -6,7 +6,7 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.18.35 ⭐ **Élévation macOS sans ligne de commande (collecteur GUI)**  
+**Version** : 2.18.36 ⭐ **Sortie d'App Translocation sans Terminal (collecteur GUI macOS)**  
 **Dernière mise à jour** : 2026-08-21
 
 ---
@@ -82,9 +82,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/system-info-collector-gui.exe)
-- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/ParcInfo-Windows.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/ParcInfo-Windows.exe)
 
 ### Gestion d'Inventaire
 - ✅ **Appareils** : PC, laptops, serveurs, imprimantes, switches, NAS, etc.
@@ -192,25 +192,25 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.18.35
+## 📥 Téléchargements v2.18.36
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger |
 |-----------|----------|
-| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/ParcInfo-Windows.exe) |
-| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/ParcInfo-macOS-ARM.zip) |
-| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/ParcInfo-macOS-Intel.zip) |
-| **Docker** | `docker pull darkmind64/parcinfo:v2.18.35` |
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/ParcInfo-macOS-ARM.zip) |
+| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/ParcInfo-macOS-Intel.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.18.36` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Usage |
 |------|-----------|----------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/system-info-collector-gui.exe) | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/system-info-collector.exe) | Automatisation/scripts |
-| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
-| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.35/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector.exe) | Automatisation/scripts |
+| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
+| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -231,17 +231,20 @@ python system-info-collector-gui.py
 python system-info-collector.py --client-id 5
 ```
 
-> ⚠️ **macOS : dézippez et retirez la quarantaine avant le premier lancement.**
-> Sans ça, Gatekeeper exécute l'app depuis une copie temporaire en lecture
-> seule (« App Translocation », un chemin du style
-> `/private/var/folders/…/AppTranslocation/…`) — la proposition d'élévation
-> du collecteur GUI affiche alors une commande `sudo` inutilisable, propre à
-> cette session. `xattr -cr` évite le problème dès le départ :
+> ⚠️ **macOS : déplacez l'app hors du dossier de téléchargement avant le
+> premier lancement** (glisser-déposer dans le Finder, vers Applications ou
+> même juste le Bureau — aucune commande à taper). Sans ça, tant qu'elle
+> reste dans son dossier de téléchargement d'origine, Gatekeeper l'exécute
+> depuis une copie temporaire en lecture seule (« App Translocation », un
+> chemin du style `/private/var/folders/…/AppTranslocation/…`) — la
+> proposition d'élévation du collecteur GUI le détecte et l'indique, mais
+> autant l'éviter dès le départ. Pour qui préfère malgré tout le Terminal,
+> `xattr -cr` a le même effet :
 > ```bash
 > xattr -cr ParcInfo-Collector.app   # ou : xattr -cr system-info-collector
 > ```
 
-👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.18.35)
+👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.18.36)
 
 ---
 

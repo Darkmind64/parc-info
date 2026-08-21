@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.13 · **À jour avec ParcInfo :** 2.18.35
+**Version collecteur :** 3.14 · **À jour avec ParcInfo :** 2.18.36
 
 ---
 
@@ -807,18 +807,21 @@ relance automatique sans confirmation explicite du technicien.
   `sudo …` à lancer soi-même dans un terminal, puis la collecte continue
   sans élévation.
 
-> **App Translocation (macOS, corrigé en 3.9) :** si l'app tourne encore
-> sous protection Gatekeeper « App Translocation » (jamais ouverte ni
-> déplacée depuis le téléchargement), `sys.executable`/`argv[0]` reflètent
-> un chemin temporaire en lecture seule
+> **App Translocation (macOS, corrigé en 3.9, message mis à jour en 3.14) :**
+> si l'app tourne encore sous protection Gatekeeper « App Translocation »
+> (jamais déplacée depuis le téléchargement), `sys.executable`/`argv[0]`
+> reflètent un chemin temporaire en lecture seule
 > (`/private/var/folders/…/AppTranslocation/…`), propre à cette session de
-> lancement — inexploitable une fois collé dans un Terminal séparé, et tout
-> aussi inexploitable pour `_relancer_macos_eleve()` (même chemin
-> temporaire). `_proposer_elevation()` détecte ce cas (`/AppTranslocation/`
-> dans le chemin) et affiche à la place la marche à suivre pour lever la
-> translocation (`xattr -cr` sur le vrai chemin de l'app, récupéré en la
-> glissant dans le Terminal) plutôt qu'une commande fausse ou une invite
-> d'authentification qui échouerait silencieusement.
+> lancement — tout aussi inexploitable pour `_relancer_macos_eleve()` que
+> pour une commande `sudo`. `_proposer_elevation()` détecte ce cas
+> (`/AppTranslocation/` dans le chemin) et affiche la marche à suivre pour
+> lever la translocation **sans Terminal** : déplacer l'app avec le Finder
+> (glisser-déposer vers Applications ou le Bureau) suffit — macOS ne la
+> relance plus jamais depuis un emplacement temporaire dès qu'elle a
+> quitté une fois son dossier de téléchargement d'origine. `xattr -cr`
+> reste mentionné en alternative pour qui préfère le Terminal, mais n'est
+> plus présenté comme la seule solution (il ne l'a jamais été — le
+> message d'origine, en 3.9, l'omettait par erreur).
 
 Le collecteur CLI (`system-info-collector.py`) n'a pas cette boîte de
 dialogue — il journalise le même avertissement mais reste non-interactif,
@@ -977,4 +980,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-21 (v2.18.35 — collecteur 3.13, élévation macOS sans ligne de commande)
+**Dernière mise à jour** : 2026-08-21 (v2.18.36 — collecteur 3.14, sortie d'App Translocation sans Terminal)

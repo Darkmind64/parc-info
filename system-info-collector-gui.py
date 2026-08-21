@@ -1054,31 +1054,31 @@ def _proposer_elevation():
             # téléchargée et n'a jamais été ouverte/déplacée depuis — macOS
             # l'exécute alors depuis une copie temporaire en lecture seule à
             # un chemin aléatoire (/private/var/folders/.../AppTranslocation/…)
-            # au lieu de son vrai emplacement. sys.executable/argv[0] reflète
-            # CE chemin temporaire côté process, propre à cette session de
-            # lancement : une commande sudo construite dessus échoue
-            # (« command not found ») une fois collée dans un Terminal
-            # séparé — constaté, pas supposé. Pas de chemin réel exploitable
-            # à afficher depuis l'intérieur du process translocated ;
-            # indiquer comment lever la translocation plutôt qu'une
-            # commande fausse.
+            # au lieu de son vrai emplacement. sys.executable/argv[0]
+            # reflète CE chemin temporaire côté process, propre à cette
+            # session de lancement : inexploitable pour une relance élevée,
+            # que ce soit via une commande sudo ou via osascript. La sortie
+            # de translocation ne demande PAS de Terminal, contrairement à
+            # ce qu'on pourrait croire : déplacer l'app avec le Finder
+            # suffit — macOS ne la relance plus jamais depuis un
+            # emplacement temporaire dès qu'elle a été bougée une fois hors
+            # de son dossier de téléchargement d'origine.
             messagebox.showinfo(
                 "Droits administrateur",
                 "macOS a lancé cette copie depuis un emplacement temporaire "
                 "en lecture seule (protection Gatekeeper « App "
-                "Translocation »), le temps qu'elle n'ait jamais été ouverte "
-                "ni déplacée. Une commande sudo construite depuis cet "
-                "emplacement ne fonctionnerait pas dans un Terminal.\n\n"
-                "Pour lancer avec les droits administrateur :\n"
+                "Translocation »), qui s'applique tant que l'app n'a jamais "
+                "été déplacée depuis son téléchargement.\n\n"
+                "Pas besoin de Terminal pour y remédier :\n"
                 "1. Quittez cette application.\n"
                 "2. Dans le Finder, faites glisser ParcInfo-Collector.app "
-                "vers une fenêtre de Terminal pour en récupérer le chemin "
-                "réel, puis lancez :\n"
-                "   xattr -cr <chemin glissé>\n"
-                "3. Relancez ensuite l'application normalement (double-clic) "
-                "— la translocation ne se reproduira plus, et la prochaine "
-                "proposition d'élévation affichera une commande sudo "
-                "utilisable.\n\n"
+                "vers un autre dossier (par ex. Applications, ou même "
+                "juste le Bureau) — le simple fait de le déplacer suffit, "
+                "aucune commande à taper.\n"
+                "3. Relancez l'application depuis son nouvel emplacement : "
+                "la proposition d'élévation fonctionnera normalement.\n\n"
+                "(Pour qui préfère malgré tout le Terminal : `xattr -cr "
+                "<chemin de l'app>` a le même effet.)\n\n"
                 "La collecte actuelle continue sans élévation en attendant.")
         else:
             try:
