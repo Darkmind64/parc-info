@@ -1,8 +1,30 @@
-PARCINFO_VERSION=2.18.27
+PARCINFO_VERSION=2.18.28
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082104
+BUILD_NUMBER=2026082105
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.28 - Correctif critique : ParcInfo-Collector.app ne se lançait pas sur macOS
+# Signalé par l'utilisateur juste après la 2.18.27 : double-cliquer sur
+# ParcInfo-Collector.app (fraîchement compilé pour macOS Intel) ne faisait
+# STRICTEMENT rien — pas de fenêtre, pas d'icône dans le dock, pas d'erreur.
+# Lancer le binaire directement depuis un terminal fonctionnait parfaitement
+# (connexion serveur, récupération des clients) : le bug n'était donc pas
+# dans la compilation PyInstaller/Rosetta, mais dans le code lui-même.
+# Cause : system-info-collector-gui.py configurait son journal avec un
+# chemin RELATIF (`logging.FileHandler('collector-gui.log')`), résolu contre
+# le répertoire courant au démarrage. Sous Windows, double-cliquer un .exe
+# positionne ce répertoire sur le dossier de l'exe (inscriptible) — sous
+# macOS, Finder/LaunchServices lance l'app avec pour répertoire courant "/"
+# (racine), où un utilisateur normal n'a pas le droit d'écrire. La
+# construction de FileHandler levait donc un PermissionError non rattrapé
+# dès l'import du module — avant même la fenêtre Tk — et l'app (compilée en
+# mode windowed, sans console pour afficher la trace) se fermait aussitôt en
+# silence. Corrigé : chemin absolu (~/.parcinfo-collector-gui.log, à côté du
+# fichier de config qui, lui, utilisait déjà Path.home()), et construction
+# du FileHandler protégée par try/except pour qu'un home dir inaccessible
+# ne bloque plus jamais le lancement, quelle que soit la plateforme.
+# Date: 21 août 2026
 
 # Version 2.18.27 - Collecteur macOS Intel compilé (exécutables GitHub Releases)
 # La 2.18.26 avait étoffé les DONNÉES collectées sur macOS mais laissé de

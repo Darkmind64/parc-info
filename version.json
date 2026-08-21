@@ -1,24 +1,22 @@
 {
-  "version": "2.18.27",
+  "version": "2.18.28",
   "release_date": "2026-08-21T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.27/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.27/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.27/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.27",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.27/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.27/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.27/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.27/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.27/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.28/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.28/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.28/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.28",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.28/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.28/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.28/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.28/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.28/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Collecteur macOS Intel désormais compilé : exécutables CLI et GUI attachés à la release, au même titre que Windows",
+    "new_features": "Correctif critique : ParcInfo-Collector.app (GUI macOS) ne se lançait pas du tout depuis le Finder",
     "improvements": [
-      "AJOUTÉ : le job build-macos-intel (croisement Rosetta, déjà utilisé pour ParcInfo.app) compile désormais aussi le collecteur pour macOS Intel — system-info-collector-macOS-Intel.zip (binaire CLI brut) et system-info-collector-gui-macOS-Intel.zip (ParcInfo-Collector.app).",
-      "Les deux artefacts sont best-effort (continue-on-error) — la GUI dépend d'un empaquetage Tkinter sous Rosetta moins éprouvé — sans jamais bloquer la release des autres plateformes en cas d'échec ponctuel.",
-      "python system-info-collector[-gui].py reste toujours utilisable directement, en secours comme sur macOS Apple Silicon (jamais compilé pour l'instant)."
+      "CORRIGÉ (critique, macOS) : le collecteur GUI configurait son journal avec un chemin RELATIF (collector-gui.log), résolu contre le répertoire courant au démarrage. Sous Windows ce répertoire est celui de l'exe (inscriptible) ; sous macOS, Finder/LaunchServices lance l'app avec pour répertoire courant \"/\", où un utilisateur normal n'a pas le droit d'écrire — l'app plantait donc silencieusement dès l'import du module, avant même la fenêtre Tk, sans aucune trace visible (build windowed, sans console). Corrigé : chemin absolu (~/.parcinfo-collector-gui.log), construction protégée par try/except."
     ]
   },
   "checksums": {
@@ -29,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.27"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.28"
 }
