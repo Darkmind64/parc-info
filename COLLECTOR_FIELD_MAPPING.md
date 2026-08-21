@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.5 · **À jour avec ParcInfo :** 2.18.26
+**Version collecteur :** 3.6 · **À jour avec ParcInfo :** 2.18.28
 
 ---
 
@@ -769,4 +769,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-21 (v2.18.26 — collecteur 3.5, macOS étoffé)
+**Dernière mise à jour** : 2026-08-21 (v2.18.28 — collecteur 3.6, correctif lancement GUI macOS)

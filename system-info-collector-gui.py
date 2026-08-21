@@ -51,13 +51,28 @@ for _flux in (sys.stdout, sys.stderr):
         pass
 
 # Configure logging to file for debugging
+#
+# Chemin ABSOLU, jamais relatif au répertoire courant : celui-ci dépend de
+# comment l'exécutable a été lancé. Double-clic Windows → dossier de l'exe
+# (écriture OK) ; double-clic macOS (Finder/LaunchServices) → "/" (racine),
+# où un utilisateur normal ne peut pas écrire. Avec un chemin relatif, la
+# construction de FileHandler levait un PermissionError non rattrapé au tout
+# premier import du module — avant même la fenêtre Tk — et l'app (build
+# windowed, sans console pour afficher la trace) se fermait silencieusement
+# sans aucune icône dans le dock ni message d'erreur. Reproduit uniquement
+# sur macOS ; lancer le binaire depuis un terminal (CWD = son propre
+# dossier) masquait le bug.
+_log_handlers = [logging.StreamHandler(sys.stdout)]
+try:
+    _log_handlers.append(
+        logging.FileHandler(str(Path.home() / '.parcinfo-collector-gui.log'), mode='a'))
+except Exception:
+    pass  # Console seule : un home dir inaccessible ne doit jamais empêcher le lancement
+
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - [%(levelname)s] %(message)s',
-    handlers=[
-        logging.FileHandler('collector-gui.log', mode='a'),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=_log_handlers,
 )
 logger = logging.getLogger('collector-gui')
 
