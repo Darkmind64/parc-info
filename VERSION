@@ -1,8 +1,28 @@
-PARCINFO_VERSION=2.18.31
+PARCINFO_VERSION=2.18.32
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082108
+BUILD_NUMBER=2026082109
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.32 - Correctif : commande sudo inutilisable sous App Translocation (collecteur 3.10)
+# Signalé après la 2.18.31 : la commande sudo affichée par la proposition
+# d'élévation macOS échouait avec "command not found" une fois collée dans
+# un Terminal.
+# Cause : l'app n'avait jamais été ouverte/déplacée depuis son
+# téléchargement, donc encore sous protection Gatekeeper « App
+# Translocation » — macOS l'exécute dans ce cas depuis une copie temporaire
+# en lecture seule à un chemin aléatoire
+# (/private/var/folders/.../AppTranslocation/...) au lieu de son vrai
+# emplacement. sys.executable/argv[0] reflètent ce chemin temporaire, propre
+# à la session de lancement en cours : la commande sudo construite dessus
+# n'est pas exploitable depuis un Terminal séparé.
+# Corrigé : _proposer_elevation() (system-info-collector-gui.py) détecte
+# désormais ce cas (/AppTranslocation/ dans le chemin) et affiche à la
+# place la marche à suivre pour lever la translocation (xattr -cr sur le
+# vrai chemin de l'app, récupéré en la glissant dans le Terminal) plutôt
+# qu'une commande fausse. Le README documente aussi la prévention (xattr
+# -cr avant le tout premier lancement).
+# Date: 21 août 2026
 
 # Version 2.18.31 - Correctif adresse IP macOS + proposition d'élévation GUI (collecteur 3.9)
 # Signalé après la 2.18.30 : le connecteur transmettait bien les données à
