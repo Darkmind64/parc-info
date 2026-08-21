@@ -49,7 +49,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.10'
+COLLECTOR_VERSION = '3.11'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -2937,9 +2937,16 @@ def _win_network():
             'auto_config_url': auto_config,
         }
 
+    # Bug de longue date corrigé en 3.10 : PowerShell renvoyait déjà une
+    # chaîne jointe (`-join ', '`), mais `dns_suffixes` est documenté et
+    # consommé partout ailleurs (fiche, PDF, macOS depuis 3.10) comme une
+    # LISTE — `build_summary_sections()` faisait `', '.join(dns_suffixes)`
+    # dessus, ce qui rejoignait la chaîne CARACTÈRE PAR CARACTÈRE au lieu de
+    # suffixe par suffixe. Reconverti ici en liste réelle, symétrique du
+    # côté macOS.
     suffixe = _clean(data.get('Suffix'))
     if suffixe:
-        info['dns_suffixes'] = suffixe
+        info['dns_suffixes'] = [s.strip() for s in suffixe.split(',') if s.strip()]
 
     # ── Wi-Fi ──────────────────────────────────────────────────────────────
     sortie = _run(['netsh', 'wlan', 'show', 'interfaces'], timeout=20)
@@ -5549,6 +5556,110 @@ def _mac_pending_updates():
     return info
 
 
+#: Marques d'écran reconnues en préfixe du nom EDID (`_name` de
+#: SPDisplaysDataType, ex. « DELL U2720Q ») — jamais depuis l'ID vendeur EDID
+#: brut : son encodage exact (chaîne déjà résolue vs identifiant à décoder
+#: selon la version macOS) est trop incertain sans matériel réel pour
+#: vérifier, et une marque devinée à tort serait pire qu'un champ vide.
+_MONITOR_BRANDS = (
+    'Apple', 'Dell', 'LG', 'Samsung', 'BenQ', 'Acer', 'ASUS', 'HP',
+    'Lenovo', 'Philips', 'ViewSonic', 'AOC', 'Sony', 'Sceptre', 'MSI',
+    'Gigabyte', 'Eizo', 'NEC', 'Iiyama', 'Huawei', 'Xiaomi', 'Alienware',
+)
+
+
+def _deviner_marque_ecran(nom):
+    """Devine la marque d'un écran depuis son nom EDID (`_name`), qui la
+    porte souvent déjà en préfixe. Écran interne : toujours Apple."""
+    bas = nom.lower()
+    if 'built-in' in bas or 'intégré' in bas or 'liquid retina' in bas:
+        return 'Apple'
+    premier_mot = nom.split()[0] if nom.split() else ''
+    for marque in _MONITOR_BRANDS:
+        if premier_mot.lower() == marque.lower():
+            return marque
+    return ''
+
+
+def _mac_network():
+    """Passerelle par défaut, DNS (serveurs + suffixes de recherche), proxy
+    — pendant macOS de `_win_network()`. Ce sont les réglages qui répondent
+    à « il n'a plus Internet » : un DNS injoignable, une passerelle absente
+    ou un proxy résiduel produisent tous le même symptôme et ne se
+    distinguent qu'ici — même principe que côté Windows.
+    """
+    info = {}
+
+    # ── Passerelle par défaut ────────────────────────────────────────────
+    route = _run(['route', '-n', 'get', 'default'], timeout=10)
+    gw, iface = '', ''
+    for ligne in route.splitlines():
+        ligne = ligne.strip()
+        if ligne.startswith('gateway:'):
+            gw = ligne.split(':', 1)[1].strip()
+        elif ligne.startswith('interface:'):
+            iface = ligne.split(':', 1)[1].strip()
+    if gw:
+        info['default_gateway'] = gw
+        info['gateways'] = [{'address': gw, 'interface': iface}]
+
+    # ── DNS : serveurs + suffixes de recherche ──────────────────────────
+    # `scutil --dns` liste un ou plusieurs blocs "resolver #N" (VPN et
+    # split-DNS en ajoutent, chacun restreint à un domaine particulier) :
+    # plutôt que de ne garder QUE le premier (au risque de rater le bon
+    # bloc selon la configuration), tous les serveurs/domaines de recherche
+    # rencontrés sont repris, dédupliqués en conservant l'ordre —
+    # l'interface retenue est celle du tout premier `if_index` rencontré,
+    # généralement le résolveur principal.
+    dns_out = _run(['scutil', '--dns'], timeout=10)
+    serveurs, suffixes = [], []
+    vus_serveurs, vus_suffixes = set(), set()
+    interface_dns = ''
+    for ligne in dns_out.splitlines():
+        ligne = ligne.strip()
+        m = re.match(r'nameserver\[\d+\]\s*:\s*(\S+)', ligne)
+        if m:
+            if m.group(1) not in vus_serveurs:
+                vus_serveurs.add(m.group(1))
+                serveurs.append(m.group(1))
+            continue
+        m = re.match(r'search domain\[\d+\]\s*:\s*(\S+)', ligne)
+        if m:
+            if m.group(1) not in vus_suffixes:
+                vus_suffixes.add(m.group(1))
+                suffixes.append(m.group(1))
+            continue
+        if not interface_dns:
+            m = re.match(r'if_index\s*:\s*\d+\s*\(([^)]+)\)', ligne)
+            if m:
+                interface_dns = m.group(1)
+    if serveurs:
+        info['dns_servers'] = [{'interface': interface_dns, 'servers': serveurs}]
+    if suffixes:
+        info['dns_suffixes'] = suffixes
+
+    # ── Proxy ────────────────────────────────────────────────────────────
+    proxy_out = _run(['scutil', '--proxy'], timeout=10)
+    champs = {}
+    for ligne in proxy_out.splitlines():
+        if ':' in ligne:
+            cle, _, valeur = ligne.partition(':')
+            champs[cle.strip()] = valeur.strip()
+    serveur = ''
+    if champs.get('HTTPEnable') == '1' and champs.get('HTTPProxy'):
+        serveur = '%s:%s' % (champs['HTTPProxy'], champs.get('HTTPPort', '') or '')
+    auto_config = (champs.get('ProxyAutoConfigURLString', '')
+                   if champs.get('ProxyAutoConfigEnable') == '1' else '')
+    if serveur or auto_config:
+        info['proxy'] = {
+            'enabled': bool(serveur or auto_config),
+            'server': serveur,
+            'auto_config_url': auto_config,
+        }
+
+    return info
+
+
 def _mac_security_posture():
     """Protection de l'intégrité système (SIP) et Gatekeeper — posture de
     sécurité macOS sans équivalent Windows direct, mais du même ordre
@@ -5839,11 +5950,12 @@ def get_system_info_mac():
                 name = screen.get('_name', '')
                 if not name:
                     continue
+                annee = screen.get('_spdisplays_display-year')
                 monitors.append({
-                    'manufacturer': '',
+                    'manufacturer': _deviner_marque_ecran(name),
                     'model': name,
                     'serial_number': screen.get('_spdisplays_display-serial-number', ''),
-                    'year': '',
+                    'year': str(annee) if annee else '',
                 })
         if monitors:
             info['monitors'] = monitors
@@ -5899,6 +6011,12 @@ def get_system_info_mac():
                 f"{u} (Actif{', Administrateur' if u in admins else ''})"
                 for u in users if u not in ('daemon', 'nobody', 'root')
             )
+    except Exception:
+        pass
+
+    # ── Passerelle, DNS, proxy ───────────────────────────────────────────────
+    try:
+        info.update(_mac_network())
     except Exception:
         pass
 
@@ -9851,7 +9969,7 @@ def generate_pdf_report(info, client_id=None, client_name=None):
             ('Passerelle par défaut', info.get('default_gateway')),
             ('IP publique', info.get('public_ip')),
             ('Opérateur (FAI)', info.get('public_ip_isp')),
-            ('Suffixes DNS', info.get('dns_suffixes')),
+            ('Suffixes DNS', ', '.join(info.get('dns_suffixes') or []) or None),
             ('Proxy', ('%s (%s)' % (proxy.get('server') or proxy.get('auto_config_url'),
                                     'actif' if proxy.get('enabled') else 'configuré mais inactif'))
              if proxy.get('server') or proxy.get('auto_config_url') else None),

@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.10 · **À jour avec ParcInfo :** 2.18.32
+**Version collecteur :** 3.11 · **À jour avec ParcInfo :** 2.18.33
 
 ---
 
@@ -206,6 +206,20 @@ temperature_c, read_errors, write_errors}` ·
 > La VRAM est lue dans le registre (`qwMemorySize`) et non via
 > `Win32_VideoController.AdapterRAM`, qui est un int32 signé et déborde au-delà de 4 Go.
 
+> `monitors[].manufacturer` (macOS, depuis 3.10) : deviné depuis le premier
+> mot du nom EDID (`_name` de `SPDisplaysDataType`, souvent « DELL
+> U2720Q ») contre une petite liste de marques connues
+> (`_deviner_marque_ecran()`) — **jamais** depuis l'identifiant vendeur
+> EDID brut, dont l'encodage exact (chaîne déjà résolue ou identifiant à
+> décoder, selon la version macOS) était trop incertain à deviner sans
+> matériel réel pour vérifier ; une marque erronée aurait été pire qu'un
+> champ vide. Écran interne : toujours « Apple ». `year` vient de
+> `_spdisplays_display-year` quand l'EDID de l'écran externe l'expose (pas
+> tous ne le font). Pas de `diagonal_inch` côté macOS : contrairement à
+> Windows (`WmiMonitorBasicDisplayParams`, dimensions physiques en cm),
+> `system_profiler` n'expose pas la taille physique de l'écran de façon
+> fiable dans son JSON.
+
 ### Impression
 `printers[]{name, driver, port, network, default, shared, virtual}`
 
@@ -249,6 +263,29 @@ demande explicite, `--router-info`)
 
 > `listening_ports` (macOS, depuis 3.5) vient de `lsof -iTCP -sTCP:LISTEN`,
 > pendant du `ss -tlnp` déjà utilisé côté Linux.
+
+> macOS (depuis 3.10, `_mac_network()`) alimente `default_gateway`/
+> `gateways` (`route -n get default`), `dns_servers`/`dns_suffixes`
+> (`scutil --dns` — tous les blocs `resolver #N` sont repris, pas
+> seulement le premier, un VPN/split-DNS pouvant en ajouter dont on ne
+> veut pas rater les serveurs) et `proxy` (`scutil --proxy`). Pas
+> d'équivalent macOS ajouté pour `network_profiles` (concept propre à
+> Windows — catégorie réseau Public/Privé/Domaine) ni `wifi` (réseau Wi-Fi
+> actuellement connecté — `system_profiler SPAirPortDataType` existe mais
+> son schéma JSON exact n'a pas pu être vérifié sans matériel réel ; risque
+> de champ silencieusement vide plutôt qu'une régression, mais mieux valait
+> ne rien ajouter que deviner).
+>
+> `dns_suffixes` : bug de longue date corrigé en 3.10 — côté Windows,
+> `_win_network()` stockait déjà une chaîne pré-jointe (`-join ', '`) alors
+> que le champ est documenté et rendu partout ailleurs comme une **liste**
+> (`build_summary_sections()` faisait `', '.join(dns_suffixes)` dessus, ce
+> qui rejoignait la chaîne **caractère par caractère** au lieu de suffixe
+> par suffixe — visible uniquement sur un poste ayant réellement une liste
+> de suffixes de recherche configurée, donc resté longtemps inaperçu).
+> Reconverti en liste réelle côté Windows, symétrique de macOS ; le rendu
+> PDF et la fiche système, qui affichaient jusqu'ici la chaîne déjà jointe
+> sans y toucher, rejoignent désormais eux aussi une vraie liste.
 
 > `hosts_entries`, `public_ip`, `public_ip_isp` et les champs
 > `dns_check_*`/`router_*` sont les seuls champs réseau qui ne sont pas
@@ -753,7 +790,7 @@ cohérent avec son usage scripté (déploiement en masse, `--quiet`).
 | Identification, OS, CPU, RAM, disques | ✅ | ✅ | ✅ |
 | Carte mère / châssis | ✅ | — | ✅ (`/sys/class/dmi`) |
 | Barrettes mémoire par slot | ✅ | ✅ | ⚠️ root requis |
-| Écrans | ✅ (EDID) | ✅ | ⚠️ nom du connecteur seul |
+| Écrans | ✅ (EDID) | ⚠️ marque devinée par heuristique, pas de taille physique (depuis 3.10 — voir note) | ⚠️ nom du connecteur seul |
 | Imprimantes | ✅ | ✅ (CUPS, depuis 3.5) | ✅ (CUPS) |
 | Usure disque / SMART détaillé | ✅ | — | ⚠️ type seul (`lsblk`) |
 | Usure batterie | ✅ | ✅ | — |
@@ -770,6 +807,7 @@ cohérent avec son usage scripté (déploiement en masse, `--quiet`).
 | Redirections de port (portproxy) | ✅ | — | — |
 | Réseaux Wi-Fi enregistrés (SSID + mot de passe optionnel) | ✅ | ⚠️ SSID seul, jamais le mot de passe (depuis 3.8 — voir note) | — |
 | Stratégies de groupe appliquées | ✅ | — | — |
+| Passerelle par défaut, DNS, proxy | ✅ | ✅ (`route`/`scutil`, depuis 3.10 — voir note) | — |
 | Ports en écoute | ✅ | ✅ (`lsof`, depuis 3.5) | ✅ (`ss`) |
 | Comptes locaux | ✅ | ✅ | ✅ |
 | Logiciels (nom+version+éditeur) | ✅ | ✅ `SPApplicationsDataType` (depuis 3.5, éditeur vide pour les apps non signées — voir note) | ✅ dpkg/rpm/pacman |
@@ -895,4 +933,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-21 (v2.18.32 — collecteur 3.10, correctif commande sudo sous App Translocation)
+**Dernière mise à jour** : 2026-08-21 (v2.18.33 — collecteur 3.11, réseau macOS étoffé : passerelle, DNS, proxy, écrans)

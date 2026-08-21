@@ -1492,7 +1492,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {{ row("Passerelle par défaut", rapport.default_gateway) }}
             {{ row("IP publique", rapport.public_ip) }}
             {{ row("Opérateur (FAI)", rapport.public_ip_isp) }}
-            {{ row("Suffixes DNS", rapport.dns_suffixes) }}
+            {{ row("Suffixes DNS", rapport.dns_suffixes | join(', ') if rapport.dns_suffixes else '') }}
             {% if rapport.wifi %}
             {{ row("Réseau Wi-Fi", rapport.wifi.ssid) }}
             {{ row("Signal", rapport.wifi.signal) }}
