@@ -1,8 +1,27 @@
-PARCINFO_VERSION=2.18.35
+PARCINFO_VERSION=2.18.36
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082112
+BUILD_NUMBER=2026082113
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.36 - Sortie d'App Translocation sans Terminal (collecteur 3.14)
+# Question directe après la 2.18.35 : faut-il quand même passer par xattr
+# (donc par le Terminal) pour éviter App Translocation ?
+# Réponse : non — le message affiché par le collecteur GUI dans ce cas ne
+# proposait jusqu'ici QUE la commande xattr -cr, alors qu'une solution
+# purement Finder existe et est même la plus simple : glisser-déposer
+# l'app vers un autre dossier (Applications, Bureau, peu importe). macOS
+# ne déclenche l'App Translocation que pour une app restée dans son
+# dossier de téléchargement d'origine sans jamais avoir été déplacée — le
+# simple fait de la bouger une fois avec le Finder suffit à lever la
+# protection définitivement, sans commande à taper.
+# Message mis à jour en conséquence (README + boîte de dialogue du
+# collecteur GUI) : la méthode Finder est désormais présentée en premier,
+# xattr -cr reste mentionné en alternative pour qui préfère le Terminal.
+# Corrigé au passage : le message citait encore une commande "sudo" à
+# relancer, une référence obsolète depuis le passage à l'authentification
+# via osascript en 2.18.35 (aucun sudo n'est plus jamais affiché).
+# Date: 21 août 2026
 
 # Version 2.18.35 - Élévation macOS sans ligne de commande (collecteur 3.13)
 # Demandé : une façon de lancer le collecteur GUI macOS Intel avec les
