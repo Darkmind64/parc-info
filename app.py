@@ -6045,13 +6045,38 @@ def _grab_bannieres(ip_str, ports_ouverts):
     return {p: b for p, b in resultats.items() if b}
 
 
-def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp_device_type="", mdns_service=""):
+def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="",
+                   upnp_device_type="", mdns_service="", snmp_actif=False):
     """Détermine le type d'équipement depuis le hostname, les ports ouverts, l'OS et le fabricant.
 
+    Plusieurs méthodes de détection (UPnP, mDNS, SNMP, fabricant MAC,
+    hostname, ports ouverts, TTL) alimentent cette fonction avec des
+    niveaux de confiance très différents — l'ordre des vérifications
+    ci-dessous EST la hiérarchie de priorité, du plus fiable au moins
+    fiable, pensée pour qu'un signal fort ne soit jamais écrasé par un
+    signal plus faible arrivé après lui dans le code :
+
+      1. Signaux structurés (deviceType UPnP, service mDNS) — un protocole
+         qui se déclare lui-même ne laisse en général aucun doute.
+      2. Fabricant MAC (préfixe OUI officiel) pour les familles où il est
+         quasi-certain (Apple, puces IoT Espressif) ou les mots-clés de
+         hostname/texte identifiant explicites (imprimante, NAS, routeur,
+         switch, borne WiFi, objet connecté).
+      3. Fabricant réseau reconnu sans indice de sous-type (mieux vaut une
+         catégorie générique correcte qu'une supposition erronée).
+      4. Le seul fait qu'un agent SNMP ait répondu (community "public") :
+         un signal fort à lui seul — un PC/Mac de bureau n'expose
+         pratiquement jamais SNMP — vérifié AVANT les heuristiques de port
+         qui suivent, pour ne jamais se faire écraser par elles.
+      5. Ports/protocoles ambigus (RDP est fiable seul, SMB ne l'est pas :
+         Samba et le partage de fichiers macOS y répondent aussi).
+      6. TTL (os_guess) en tout dernier repli : le signal le plus faible,
+         seulement 3 paliers, incapable à lui seul de distinguer macOS de
+         Linux ou un équipement réseau embarqué d'un serveur.
+
     `extra_signal` regroupe tout texte identifiant supplémentaire (bannières
-    de service, nom UPnP/mDNS) : traité comme le hostname/fabricant, en plus
-    des signaux structurés plus fiables (device_type UPnP, type de service
-    mDNS) vérifiés en premier quand ils sont sans ambiguïté.
+    de service, sysDescr SNMP, nom UPnP/mDNS) : traité comme le hostname/
+    fabricant pour la recherche de mots-clés.
     """
     # Signaux structurés d'abord : un deviceType UPnP ou un type de service
     # mDNS ne laisse en général aucun doute, contrairement à une simple
@@ -6117,11 +6142,27 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
                                       'airport','time capsule','homepod']):
             return 'MacBook'
 
+    # Raspberry Pi / cartes mono-carte Linux : fabricant MAC identifiable,
+    # avant les heuristiques de port plus bas — un Pi fait tourner Samba
+    # (445) ou expose SSH (22) très couramment (Pi-hole, Home Assistant,
+    # NAS DIY...), ce qui le ferait sinon retomber sur "PC (Windows)" via
+    # la seule présence du port SMB.
+    if any(x in v for x in ['raspberry pi']):
+        return 'PC/Serveur (Linux)'
+
     # Équipements réseau — mots-clés explicites d'abord (sans ambiguïté sur
-    # le sous-type), puis fabricants réseau reconnus en repli.
+    # le sous-type), y compris les noms d'OS/firmware que le sysDescr SNMP
+    # renvoie couramment en clair pour la famille pare-feu/routeur (FortiOS,
+    # SonicOS, DD-WRT, OpenWrt, OPNsense — ceux-là ne tournent quasiment
+    # jamais sur un switch), puis fabricants réseau reconnus en repli. Les
+    # OS partagés entre routeurs ET switches chez un même fabricant (JUNOS,
+    # IOS-XE, Comware, RouterOS, VRP...) restent volontairement hors de
+    # cette liste : mieux vaut la catégorie générique "Switch/AP" plus bas
+    # qu'un sous-type deviné à tort.
     if any(x in h for x in ['router',' gw ','gateway','firewall','pfsense',
-                              'fortigate','palo alto','checkpoint','sonicwall',
-                              'watchguard','edgerouter','edgemax']):
+                              'opnsense','fortigate','fortios','palo alto',
+                              'checkpoint','sonicwall','sonicos','watchguard',
+                              'edgerouter','edgemax','dd-wrt','openwrt']):
         return 'Routeur/Pare-feu'
     if any(x in h for x in ['switch',' sw-','usw-','poe switch']):
         return 'Switch'
@@ -6143,6 +6184,13 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
                               'hewlett packard enterprise','draytek','tenda',
                               'grandstream']):
         return 'Switch/AP'
+    # Même repli générique, cette fois via un nom d'OS/firmware réseau vu en
+    # clair (typiquement le sysDescr SNMP) plutôt que le fabricant MAC —
+    # ceux-ci tournent chez un même constructeur aussi bien sur des
+    # routeurs que des switches, volontairement pas classés plus haut.
+    if any(x in h for x in ['junos','ios-xe','comware','routeros','arubaos',
+                              'aos-cx',' vrp ','huawei vrp']):
+        return 'Switch/AP'
 
     # Serveur — mots-clés non ambigus (Exchange/vCenter/ESXi/contrôleur de
     # domaine) suffisent seuls ; "server"/"srv" nu est trop fréquent dans un
@@ -6155,9 +6203,20 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="", upnp
         return 'Serveur'
 
     # PC Windows — RDP (3389) n'a pas d'équivalent légitime hors Windows,
-    # signal fort à lui seul.
+    # signal fort à lui seul, prioritaire même sur SNMP ci-dessous (un
+    # équipement réseau qui répondrait aussi en RDP serait de toute façon
+    # une exception si rare qu'elle ne mérite pas de règle spéciale).
     if 3389 in ports:
         return 'PC (Windows)'
+    # Un agent SNMP qui répond (community "public") est déjà un signal fort
+    # à lui seul : un PC/Mac de bureau n'expose pratiquement jamais SNMP,
+    # contrairement aux ports SMB/22 ci-dessous qui restent ambigus. Vérifié
+    # AVANT ces heuristiques de port pour ne jamais se faire écraser par
+    # elles — un switch/onduleur/imprimante SNMP dont aucun mot-clé
+    # hostname/sysDescr n'a matché plus haut reste malgré tout bien plus
+    # probablement du matériel réseau qu'un PC.
+    if snmp_actif:
+        return 'Switch/AP'
     # SMB (135/445) n'est PAS un signal Windows fiable à lui seul : Samba
     # (Linux) et le partage de fichiers natif de macOS répondent aussi sur
     # ces ports — signalé en usage réel, un Mac avec le partage de fichiers
@@ -6502,7 +6561,7 @@ def _ber_lire_tlv(data, pos):
     return tag, valeur, pos + longueur
 
 
-def _snmp_get(ip_str, oids, communaute='public', timeout=0.5, port=161):
+def _snmp_get(ip_str, oids, communaute='public', timeout=0.8, port=161):
     """GET SNMPv1 minimal. Retourne {oid: texte} pour les OID qui ont répondu
     avec une chaîne (sysDescr/sysName sont toujours des OCTET STRING) — {}
     au moindre souci (agent absent, communauté refusée, timeout, réponse
@@ -6623,6 +6682,7 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
                                upnp_info.get('manufacturer', ''), mdns_info.get('nom', '')]),
         upnp_device_type=upnp_info.get('device_type', ''),
         mdns_service=mdns_info.get('service', ''),
+        snmp_actif=bool(snmp_sysdescr or snmp_sysname),
     )
 
     result = {
