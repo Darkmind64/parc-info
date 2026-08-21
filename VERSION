@@ -1,8 +1,25 @@
-PARCINFO_VERSION=2.18.26
+PARCINFO_VERSION=2.18.27
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082103
+BUILD_NUMBER=2026082104
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.27 - Collecteur macOS Intel compilé (exécutables GitHub Releases)
+# La 2.18.26 avait étoffé les DONNÉES collectées sur macOS mais laissé de
+# côté la distribution : seul Windows avait des exécutables compilés
+# (system-info-collector.exe/-gui.exe) sur la page Releases, un technicien
+# Mac devait lancer `python system-info-collector.py` à la main.
+# Corrigé : le job build-macos-intel (déjà en place pour ParcInfo.app,
+# croisement Rosetta x86_64) construit maintenant aussi system-info-collector
+# (binaire brut, CLI) et ParcInfo-Collector.app (GUI Tkinter) pour macOS
+# Intel, attachés à la release au même titre que les exécutables Windows.
+# Les deux étapes sont marquées best-effort (continue-on-error) — la GUI en
+# particulier dépend d'un empaquetage Tk sous Rosetta moins éprouvé que le
+# reste de la chaîne — et la génération du SHA256SUMS/la liste des fichiers
+# de la release ont été rendues tolérantes à leur absence éventuelle, pour
+# qu'un échec ponctuel de ces deux artefacts ne bloque jamais la release des
+# autres (Windows, macOS ARM, Docker).
+# Date: 21 août 2026
 
 # Version 2.18.26 - Collecteur macOS étoffé (v3.5)
 # Le collecteur système macOS était resté bien plus sommaire que la
