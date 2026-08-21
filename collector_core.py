@@ -49,7 +49,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.9'
+COLLECTOR_VERSION = '3.10'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)

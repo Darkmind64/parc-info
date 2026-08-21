@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.9 · **À jour avec ParcInfo :** 2.18.31
+**Version collecteur :** 3.10 · **À jour avec ParcInfo :** 2.18.32
 
 ---
 
@@ -728,6 +728,18 @@ relance automatique sans confirmation explicite du technicien.
   continue sans élévation : le technicien garde toujours une fenêtre
   utilisable, complète ou non.
 
+> **App Translocation (macOS, corrigé en 3.9) :** si l'app tourne encore
+> sous protection Gatekeeper « App Translocation » (jamais ouverte ni
+> déplacée depuis le téléchargement), `sys.executable`/`argv[0]` reflètent
+> un chemin temporaire en lecture seule
+> (`/private/var/folders/…/AppTranslocation/…`), propre à cette session de
+> lancement — une commande `sudo` construite dessus échoue
+> (« command not found ») une fois collée dans un Terminal séparé, constaté
+> en usage réel. `_proposer_elevation()` détecte ce cas (`/AppTranslocation/`
+> dans le chemin) et affiche à la place la marche à suivre pour lever la
+> translocation (`xattr -cr` sur le vrai chemin de l'app, récupéré en la
+> glissant dans le Terminal) plutôt qu'une commande fausse.
+
 Le collecteur CLI (`system-info-collector.py`) n'a pas cette boîte de
 dialogue — il journalise le même avertissement mais reste non-interactif,
 cohérent avec son usage scripté (déploiement en masse, `--quiet`).
@@ -883,4 +895,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-21 (v2.18.31 — collecteur 3.9, correctif adresse IP macOS + proposition d'élévation GUI)
+**Dernière mise à jour** : 2026-08-21 (v2.18.32 — collecteur 3.10, correctif commande sudo sous App Translocation)

@@ -1024,14 +1024,47 @@ def _proposer_elevation():
         "Cette collecte tourne sans droits administrateur.\n\n%s\n\n"
         "Relancer avec les droits administrateur ?" % manque)
     if relancer:
-        commande = ' '.join(shlex.quote(a) for a in _commande_relance())
-        messagebox.showinfo(
-            "Droits administrateur",
-            "macOS ne permet pas de relancer automatiquement une interface "
-            "graphique avec élévation en toute fiabilité.\n\n"
-            "Pour une collecte complète, ouvrez un Terminal et lancez :\n\n"
-            "sudo %s\n\n"
-            "La collecte actuelle continue sans élévation en attendant." % commande)
+        cmd = _commande_relance()
+        if '/AppTranslocation/' in cmd[0]:
+            # Gatekeeper « App Translocation » : l'app vient d'être
+            # téléchargée et n'a jamais été ouverte/déplacée depuis — macOS
+            # l'exécute alors depuis une copie temporaire en lecture seule à
+            # un chemin aléatoire (/private/var/folders/.../AppTranslocation/…)
+            # au lieu de son vrai emplacement. sys.executable/argv[0] reflète
+            # CE chemin temporaire côté process, propre à cette session de
+            # lancement : une commande sudo construite dessus échoue
+            # (« command not found ») une fois collée dans un Terminal
+            # séparé — constaté, pas supposé. Pas de chemin réel exploitable
+            # à afficher depuis l'intérieur du process translocated ;
+            # indiquer comment lever la translocation plutôt qu'une
+            # commande fausse.
+            messagebox.showinfo(
+                "Droits administrateur",
+                "macOS a lancé cette copie depuis un emplacement temporaire "
+                "en lecture seule (protection Gatekeeper « App "
+                "Translocation »), le temps qu'elle n'ait jamais été ouverte "
+                "ni déplacée. Une commande sudo construite depuis cet "
+                "emplacement ne fonctionnerait pas dans un Terminal.\n\n"
+                "Pour lancer avec les droits administrateur :\n"
+                "1. Quittez cette application.\n"
+                "2. Dans le Finder, faites glisser ParcInfo-Collector.app "
+                "vers une fenêtre de Terminal pour en récupérer le chemin "
+                "réel, puis lancez :\n"
+                "   xattr -cr <chemin glissé>\n"
+                "3. Relancez ensuite l'application normalement (double-clic) "
+                "— la translocation ne se reproduira plus, et la prochaine "
+                "proposition d'élévation affichera une commande sudo "
+                "utilisable.\n\n"
+                "La collecte actuelle continue sans élévation en attendant.")
+        else:
+            commande = ' '.join(shlex.quote(a) for a in cmd)
+            messagebox.showinfo(
+                "Droits administrateur",
+                "macOS ne permet pas de relancer automatiquement une interface "
+                "graphique avec élévation en toute fiabilité.\n\n"
+                "Pour une collecte complète, ouvrez un Terminal et lancez :\n\n"
+                "sudo %s\n\n"
+                "La collecte actuelle continue sans élévation en attendant." % commande)
     else:
         logger.warning("Collecte lancée sans droits administrateur (choix du technicien)")
     return False
