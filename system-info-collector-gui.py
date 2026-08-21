@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import os
+import shlex
 import socket
 import subprocess
 import sys
@@ -954,6 +955,88 @@ class CollectorGUI:
         thread.start()
 
 
+def _commande_relance():
+    """Commande (liste d'arguments) pour relancer ce même collecteur.
+
+    En exécutable PyInstaller, `sys.executable` EST déjà le binaire lancé
+    (`sys.frozen` vrai) : pas besoin d'y ajouter le script. En `python
+    system-info-collector-gui.py`, `sys.executable` est l'interpréteur —
+    il faut alors explicitement rappeler le script (`sys.argv[0]`).
+    """
+    if getattr(sys, 'frozen', False):
+        return [sys.executable] + sys.argv[1:]
+    return [sys.executable, sys.argv[0]] + sys.argv[1:]
+
+
+def _proposer_elevation():
+    """Si le collecteur tourne sans droits administrateur, demande au
+    technicien s'il veut relancer avec — jamais de relance automatique
+    sans confirmation explicite.
+
+    Retourne True si CE process-ci doit se terminer (une relance élevée a
+    été déclenchée avec succès sous Windows), False s'il doit continuer
+    normalement (déjà élevé, refus, ou relance impossible/annulée).
+    """
+    if is_elevated():
+        return False
+
+    manque = ("Certaines informations resteront incomplètes sans les droits "
+              "administrateur : usure SMART des disques, TPM, BitLocker, clé "
+              "OEM (Windows) ; connexion à distance/SIP (macOS).")
+
+    if sys.platform == 'win32':
+        relancer = messagebox.askyesno(
+            "Droits administrateur",
+            "Cette collecte tourne sans droits administrateur.\n\n%s\n\n"
+            "Relancer avec les droits administrateur ?" % manque)
+        if not relancer:
+            logger.warning("Collecte lancée sans droits administrateur (choix du technicien)")
+            return False
+        try:
+            import ctypes
+            cmd = _commande_relance()
+            # ShellExecuteW attend l'exécutable et SES arguments séparément
+            # (pas une seule ligne de commande comme subprocess) — la mise
+            # en forme Windows correcte (guillemets autour des arguments
+            # contenant des espaces) est celle de list2cmdline().
+            parametres = subprocess.list2cmdline(cmd[1:])
+            resultat = ctypes.windll.shell32.ShellExecuteW(
+                None, "runas", cmd[0], parametres, None, 1)
+            # ShellExecuteW renvoie un entier <= 32 en cas d'échec (UAC
+            # annulé par l'utilisateur, ou autre erreur) — jamais
+            # d'exception dans ce cas, il faut lire la valeur de retour.
+            if resultat > 32:
+                return True
+            logger.warning("Relance élevée annulée ou impossible (code %s)", resultat)
+        except Exception as e:
+            logger.warning("Relance élevée impossible : %s", e)
+        return False
+
+    # macOS/Linux : pas d'équivalent fiable au "runas" Windows pour relancer
+    # un processus GUI entier avec élévation sans risquer de laisser le
+    # technicien sans aucune fenêtre ouverte si l'authentification échoue
+    # ou est annulée (contrairement à ShellExecuteW, dont le code de retour
+    # se lit de façon synchrone et fiable). On affiche donc la commande à
+    # lancer soi-même dans un terminal, puis on continue sans élévation —
+    # le technicien garde toujours une collecte utilisable, complète ou non.
+    relancer = messagebox.askyesno(
+        "Droits administrateur",
+        "Cette collecte tourne sans droits administrateur.\n\n%s\n\n"
+        "Relancer avec les droits administrateur ?" % manque)
+    if relancer:
+        commande = ' '.join(shlex.quote(a) for a in _commande_relance())
+        messagebox.showinfo(
+            "Droits administrateur",
+            "macOS ne permet pas de relancer automatiquement une interface "
+            "graphique avec élévation en toute fiabilité.\n\n"
+            "Pour une collecte complète, ouvrez un Terminal et lancez :\n\n"
+            "sudo %s\n\n"
+            "La collecte actuelle continue sans élévation en attendant." % commande)
+    else:
+        logger.warning("Collecte lancée sans droits administrateur (choix du technicien)")
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Collecteur d\'informations système avec interface graphique'
@@ -963,11 +1046,17 @@ def main():
 
     args = parser.parse_args()
 
-    if not is_elevated():
-        logger.warning("Collecteur lancé sans privilèges administrateur - "
-                       "SMART détaillé, TPM, BitLocker et clé OEM peuvent manquer")
-
+    # La proposition d'élévation a besoin d'une racine Tk pour ses boîtes de
+    # dialogue, mais pas encore de la fenêtre principale — cachée le temps
+    # de la décision, pour ne pas afficher un collecteur à moitié construit
+    # derrière la boîte de dialogue.
     root = tk.Tk()
+    root.withdraw()
+    if _proposer_elevation():
+        root.destroy()
+        return
+    root.deiconify()
+
     CollectorGUI(root, args.server)
     root.mainloop()
 

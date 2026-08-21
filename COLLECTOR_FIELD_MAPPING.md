@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.8 · **À jour avec ParcInfo :** 2.18.30
+**Version collecteur :** 3.9 · **À jour avec ParcInfo :** 2.18.31
 
 ---
 
@@ -117,6 +117,16 @@ Accessible depuis le bouton **🖥 Fiche système** de la fiche appareil.
 ### Identification
 `hostname` · `dns_name` · `mac_address` · `ip_addresses` · `brand` · `model` ·
 `serial_number` · `asset_tag` · `chassis_type` / `chassis_code` · `device_type`
+
+> `ip_addresses` (`get_ip_addresses()`, corrigé en 3.9) : `socket.gethostbyname_ex(hostname)`
+> est le moyen habituel, mais peu fiable sur macOS — le hostname y est
+> souvent un nom mDNS en `.local` (Bonjour) que cette résolution classique
+> ne fait pas toujours aboutir, la liste ressortant alors vide **sans lever
+> d'exception** (silencieux : ce n'est pas un cas que `try/except` peut
+> détecter). Repli sur un socket UDP « connecté » à une adresse externe
+> (aucun paquet réellement envoyé — `connect()` sur UDP ne fait
+> qu'interroger la table de routage) : donne l'IP de l'interface que le
+> système utiliserait réellement pour sortir, fiable sur les trois OS.
 
 ### Système
 `os_name` (avec édition) · `os_version` · `os_build` · `architecture` ·
@@ -690,6 +700,38 @@ Le rapport PDF, le résumé console et la fiche système affichent tous un
 avertissement explicite dans ce cas : un champ vide ne doit pas être confondu
 avec un champ inaccessible.
 
+macOS a ses propres sources gated par l'élévation, sans équivalent du champ
+`elevated` détaillé ci-dessus (absence silencieuse, même principe) :
+connexion à distance/SSH (`systemsetup -getremotelogin` refuse la lecture
+sans root) et Partage d'écran (`launchctl print system/…`, incomplet sans
+root) — voir § Accès distant & exposition.
+
+### Proposition d'élévation au lancement (GUI, depuis 3.9)
+
+`system-info-collector-gui.py` détecte l'absence d'élévation dès le
+démarrage et propose une boîte de dialogue (« Relancer avec les droits
+administrateur ? ») avant d'afficher la fenêtre principale — jamais de
+relance automatique sans confirmation explicite du technicien.
+
+- **Windows** : sur confirmation, relance via `ShellExecuteW(..., "runas",
+  ...)` (déclenche l'invite UAC standard) et ferme le process courant. Le
+  code de retour de `ShellExecuteW` se lit de façon synchrone et fiable
+  (`<= 32` = échec/annulation) : pas de zone grise, contrairement à macOS.
+- **macOS/Linux** : pas de relance automatique. Il n'existe pas
+  d'équivalent fiable à `ShellExecuteW` pour relancer un process GUI entier
+  avec élévation — une tentative via `osascript … with administrator
+  privileges` risquerait de laisser le technicien sans aucune fenêtre
+  ouverte si l'authentification est annulée (contrairement à Windows, rien
+  ne permet de détecter cet échec de façon synchrone avant que le process
+  courant ne se soit déjà fermé). La boîte de dialogue affiche donc la
+  commande `sudo …` à lancer soi-même dans un terminal, puis la collecte
+  continue sans élévation : le technicien garde toujours une fenêtre
+  utilisable, complète ou non.
+
+Le collecteur CLI (`system-info-collector.py`) n'a pas cette boîte de
+dialogue — il journalise le même avertissement mais reste non-interactif,
+cohérent avec son usage scripté (déploiement en masse, `--quiet`).
+
 ---
 
 ## 🖥️ Couverture par système
@@ -841,4 +883,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-21 (v2.18.30 — collecteur 3.8, diagnostic macOS étoffé : sécurité, sauvegardes, plantages, démarrage)
+**Dernière mise à jour** : 2026-08-21 (v2.18.31 — collecteur 3.9, correctif adresse IP macOS + proposition d'élévation GUI)

@@ -49,7 +49,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.8'
+COLLECTOR_VERSION = '3.9'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -935,14 +935,39 @@ def get_fqdn():
 
 
 def get_ip_addresses():
-    """Récupère toutes les adresses IP locales."""
+    """Récupère toutes les adresses IP locales.
+
+    `socket.gethostbyname_ex(hostname)` est le moyen habituel, mais peu
+    fiable sur macOS : le hostname y est souvent un nom mDNS en `.local`
+    (Bonjour), que cette résolution classique ne fait pas toujours
+    aboutir — la liste ressort alors vide, silencieusement, sans lever
+    d'exception. Repli sur la technique du socket UDP « connecté » à une
+    adresse externe (aucun paquet réellement envoyé, `connect()` sur UDP ne
+    fait qu'interroger la table de routage) : donne l'IP de l'interface que
+    le système utiliserait réellement pour sortir, fiable sur les trois OS.
+    """
     ips = []
     try:
         hostname = socket.gethostname()
         ips = socket.gethostbyname_ex(hostname)[2]
     except Exception:
         pass
-    return [ip for ip in ips if not ip.startswith('127.')]
+    ips = [ip for ip in ips if not ip.startswith('127.')]
+    if ips:
+        return ips
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(('8.8.8.8', 80))
+            ip = s.getsockname()[0]
+            if ip and not ip.startswith('127.'):
+                return [ip]
+        finally:
+            s.close()
+    except Exception:
+        pass
+    return ips
 
 
 def _hosts_file_path():
