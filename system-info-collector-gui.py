@@ -968,6 +968,30 @@ def _commande_relance():
     return [sys.executable, sys.argv[0]] + sys.argv[1:]
 
 
+def _relancer_macos_eleve(cmd):
+    """Relance ce collecteur avec les droits administrateur via l'invite
+    d'authentification macOS standard (la même que Réglages Système ou une
+    installation de logiciel) — jamais de ligne de commande à taper.
+
+    Fire-and-forget, volontairement : contrairement à Windows
+    (ShellExecuteW, dont le code de retour se lit de façon synchrone et
+    fiable), rien ne permet ici de savoir si l'authentification a réussi
+    sans risquer d'attendre — `do shell script ... with administrator
+    privileges` reste bloqué tant que LE COLLECTEUR ÉLEVÉ tourne, pas
+    seulement le temps de l'authentification. Deviner à partir d'un délai
+    d'attente aurait pu fermer cette fenêtre-ci sur un faux positif (un
+    technicien qui met plus de X secondes à taper son mot de passe, puis
+    annule). Cette fenêtre reste donc toujours ouverte : au pire, une fois
+    authentifié, le technicien se retrouve avec deux fenêtres au lieu
+    d'une — jamais avec aucune.
+    """
+    commande = ' '.join(shlex.quote(a) for a in cmd)
+    script = ('do shell script "%s" with administrator privileges'
+              % commande.replace('\\', '\\\\').replace('"', '\\"'))
+    subprocess.Popen(['osascript', '-e', script],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 def _proposer_elevation():
     """Si le collecteur tourne sans droits administrateur, demande au
     technicien s'il veut relancer avec — jamais de relance automatique
@@ -1057,14 +1081,30 @@ def _proposer_elevation():
                 "utilisable.\n\n"
                 "La collecte actuelle continue sans élévation en attendant.")
         else:
-            commande = ' '.join(shlex.quote(a) for a in cmd)
-            messagebox.showinfo(
-                "Droits administrateur",
-                "macOS ne permet pas de relancer automatiquement une interface "
-                "graphique avec élévation en toute fiabilité.\n\n"
-                "Pour une collecte complète, ouvrez un Terminal et lancez :\n\n"
-                "sudo %s\n\n"
-                "La collecte actuelle continue sans élévation en attendant." % commande)
+            try:
+                _relancer_macos_eleve(cmd)
+                messagebox.showinfo(
+                    "Droits administrateur",
+                    "Une invite d'authentification macOS va s'ouvrir (la même "
+                    "que pour Réglages Système ou l'installation d'un "
+                    "logiciel) — pas de ligne de commande à taper.\n\n"
+                    "Une fois authentifié·e, une nouvelle fenêtre du "
+                    "collecteur démarre avec les droits administrateur.\n\n"
+                    "Cette fenêtre-ci continue sans élévation en attendant : "
+                    "fermez-la une fois la nouvelle ouverte, ou gardez les "
+                    "deux.")
+            except Exception as e:
+                logger.warning("Relance élevée macOS impossible : %s", e)
+                commande = ' '.join(shlex.quote(a) for a in cmd)
+                messagebox.showinfo(
+                    "Droits administrateur",
+                    "Impossible de proposer l'authentification automatique "
+                    "(%s).\n\n"
+                    "Pour une collecte complète, ouvrez un Terminal et "
+                    "lancez :\n\n"
+                    "sudo %s\n\n"
+                    "La collecte actuelle continue sans élévation en "
+                    "attendant." % (e, commande))
     else:
         logger.warning("Collecte lancée sans droits administrateur (choix du technicien)")
     return False

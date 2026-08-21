@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.12 · **À jour avec ParcInfo :** 2.18.34
+**Version collecteur :** 3.13 · **À jour avec ParcInfo :** 2.18.35
 
 ---
 
@@ -789,28 +789,36 @@ relance automatique sans confirmation explicite du technicien.
   ...)` (déclenche l'invite UAC standard) et ferme le process courant. Le
   code de retour de `ShellExecuteW` se lit de façon synchrone et fiable
   (`<= 32` = échec/annulation) : pas de zone grise, contrairement à macOS.
-- **macOS/Linux** : pas de relance automatique. Il n'existe pas
-  d'équivalent fiable à `ShellExecuteW` pour relancer un process GUI entier
-  avec élévation — une tentative via `osascript … with administrator
-  privileges` risquerait de laisser le technicien sans aucune fenêtre
-  ouverte si l'authentification est annulée (contrairement à Windows, rien
-  ne permet de détecter cet échec de façon synchrone avant que le process
-  courant ne se soit déjà fermé). La boîte de dialogue affiche donc la
-  commande `sudo …` à lancer soi-même dans un terminal, puis la collecte
-  continue sans élévation : le technicien garde toujours une fenêtre
-  utilisable, complète ou non.
+- **macOS (depuis 3.13, `_relancer_macos_eleve()`)** : sur confirmation,
+  relance via `osascript -e 'do shell script "…" with administrator
+  privileges'` — déclenche l'invite d'authentification macOS standard (la
+  même que Réglages Système ou l'installation d'un logiciel), sans ligne de
+  commande à taper. **Fire-and-forget, volontairement, et la fenêtre
+  courante n'est jamais fermée automatiquement** : contrairement à
+  `ShellExecuteW`, rien ne permet de savoir si l'authentification a réussi
+  sans risquer d'attendre — la commande `osascript` reste bloquée tant que
+  LE COLLECTEUR ÉLEVÉ tourne, pas seulement le temps de l'authentification.
+  Deviner à partir d'un délai d'attente aurait pu fermer la fenêtre
+  courante sur un faux positif (authentification lente puis annulée). Au
+  pire, le technicien se retrouve avec deux fenêtres ouvertes une fois
+  authentifié — jamais avec aucune.
+- **Linux** : pas d'équivalent standard à `osascript` sur l'ensemble des
+  environnements de bureau. La boîte de dialogue affiche la commande
+  `sudo …` à lancer soi-même dans un terminal, puis la collecte continue
+  sans élévation.
 
 > **App Translocation (macOS, corrigé en 3.9) :** si l'app tourne encore
 > sous protection Gatekeeper « App Translocation » (jamais ouverte ni
 > déplacée depuis le téléchargement), `sys.executable`/`argv[0]` reflètent
 > un chemin temporaire en lecture seule
 > (`/private/var/folders/…/AppTranslocation/…`), propre à cette session de
-> lancement — une commande `sudo` construite dessus échoue
-> (« command not found ») une fois collée dans un Terminal séparé, constaté
-> en usage réel. `_proposer_elevation()` détecte ce cas (`/AppTranslocation/`
+> lancement — inexploitable une fois collé dans un Terminal séparé, et tout
+> aussi inexploitable pour `_relancer_macos_eleve()` (même chemin
+> temporaire). `_proposer_elevation()` détecte ce cas (`/AppTranslocation/`
 > dans le chemin) et affiche à la place la marche à suivre pour lever la
 > translocation (`xattr -cr` sur le vrai chemin de l'app, récupéré en la
-> glissant dans le Terminal) plutôt qu'une commande fausse.
+> glissant dans le Terminal) plutôt qu'une commande fausse ou une invite
+> d'authentification qui échouerait silencieusement.
 
 Le collecteur CLI (`system-info-collector.py`) n'a pas cette boîte de
 dialogue — il journalise le même avertissement mais reste non-interactif,
@@ -969,4 +977,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-21 (v2.18.34 — collecteur 3.12, correctif critique stockage macOS + GPU)
+**Dernière mise à jour** : 2026-08-21 (v2.18.35 — collecteur 3.13, élévation macOS sans ligne de commande)
