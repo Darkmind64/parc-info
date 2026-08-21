@@ -49,7 +49,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.11'
+COLLECTOR_VERSION = '3.12'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -5581,6 +5581,18 @@ def _deviner_marque_ecran(nom):
     return ''
 
 
+def _vram_texte_vers_gb(texte):
+    """Convertit une VRAM textuelle `system_profiler` (« 1536 MB », « 8 GB »)
+    en Go. Retourne None si non reconnu plutôt qu'une valeur inventée."""
+    if not texte:
+        return None
+    m = re.match(r'^([\d.]+)\s*(MB|GB)$', str(texte).strip(), re.IGNORECASE)
+    if not m:
+        return None
+    valeur = float(m.group(1))
+    return round(valeur / 1024, 1) if m.group(2).upper() == 'MB' else round(valeur, 1)
+
+
 def _mac_network():
     """Passerelle par défaut, DNS (serveurs + suffixes de recherche), proxy
     — pendant macOS de `_win_network()`. Ce sont les réglages qui répondent
@@ -5941,12 +5953,29 @@ def get_system_info_mac():
     except Exception:
         pass
 
-    # ── Écrans ─────────────────────────────────────────────────────────────
+    # ── GPU & écrans (un seul appel system_profiler pour les deux) ──────────
+    # Jusqu'à 3.11, aucune collecte GPU n'existait côté macOS — `gpu`/
+    # `gpu_details` restaient toujours absents, contrairement à Windows
+    # (`_win_core()`/`_win_hardware_detail()`).
     try:
         displays = _mac_profiler_json('SPDisplaysDataType') or []
-        monitors = []
-        for gpu in displays:
-            for screen in gpu.get('spdisplays_ndrvs', []) or []:
+        gpus, gpu_details, monitors = [], [], []
+        for carte in displays:
+            nom_gpu = carte.get('_name') or carte.get('sppci_model') or ''
+            if nom_gpu:
+                gpus.append(nom_gpu)
+                # Le libellé de la clé VRAM varie selon le type de GPU
+                # (intégré vs dédié) et la version macOS — les variantes
+                # rencontrées dans la nature sont toutes tentées.
+                vram_brute = (carte.get('spdisplays_vram') or carte.get('spdisplays_vram_shared')
+                              or carte.get('sppci_vram') or '')
+                entree = {'name': nom_gpu, 'driver_version': '', 'driver_date': ''}
+                vram_gb = _vram_texte_vers_gb(vram_brute)
+                if vram_gb is not None:
+                    entree['vram_gb'] = vram_gb
+                gpu_details.append(entree)
+
+            for screen in carte.get('spdisplays_ndrvs', []) or []:
                 name = screen.get('_name', '')
                 if not name:
                     continue
@@ -5957,6 +5986,10 @@ def get_system_info_mac():
                     'serial_number': screen.get('_spdisplays_display-serial-number', ''),
                     'year': str(annee) if annee else '',
                 })
+        if gpus:
+            info['gpu'] = ', '.join(gpus)
+        if gpu_details:
+            info['gpu_details'] = gpu_details
         if monitors:
             info['monitors'] = monitors
     except Exception:
@@ -6126,8 +6159,7 @@ def _unix_disks():
         result = subprocess.run(['df', '-h'], capture_output=True, text=True, timeout=10)
         lines = result.stdout.strip().split('\n')[1:]  # Skip header
         disk_list = []
-        total_disk = 0.0
-        total_free = 0.0
+        total_used = 0.0
         seen = set()
         groupes = {}
         for line in lines:
@@ -6141,17 +6173,25 @@ def _unix_disks():
             seen.add(device)
 
             def to_gb(value):
+                # Bug corrigé en 3.12 : `df -h` BSD (macOS) suffixe les
+                # unités binaires d'un « i » (« 494Gi », « 11Mi »), que
+                # GNU df (Linux) n'ajoute jamais (« 494G », « 11M ») bien
+                # qu'utilisant la même base 1024 — cette fonction ne
+                # reconnaissait que la forme Linux. Sur macOS, AUCUNE ligne
+                # ne matchait jamais : la section stockage entière restait
+                # vide, sans qu'aucune exception ne le signale (une valeur
+                # simplement toujours `None`, silencieusement filtrée par
+                # le `continue` juste en dessous).
                 value = value.strip()
+                m = re.match(r'^([\d.]+)\s*([KMGT])i?B?$', value, re.IGNORECASE)
+                if not m:
+                    return None
                 try:
-                    if value.endswith('T'):
-                        return float(value[:-1]) * 1024
-                    if value.endswith('G'):
-                        return float(value[:-1])
-                    if value.endswith('M'):
-                        return float(value[:-1]) / 1024
+                    nombre = float(m.group(1))
                 except ValueError:
-                    pass
-                return None
+                    return None
+                facteur = {'T': 1024, 'G': 1, 'M': 1 / 1024, 'K': 1 / 1024 / 1024}
+                return nombre * facteur[m.group(2).upper()]
 
             size_gb = to_gb(size_str)
             if size_gb is None:
@@ -6162,25 +6202,44 @@ def _unix_disks():
                 f"{device} — {round(size_gb, 1)} GB total, "
                 f"{round(used_gb, 1)} GB utilisés, {round(free_gb, 1)} GB libres"
             )
-            total_disk += size_gb
-            total_free += free_gb
+            total_used += used_gb
 
             parent = _unix_disk_parent(device)
             groupe = groupes.setdefault(parent, {
                 'number': parent, 'model': '', 'bus': '', 'media_type': '',
                 'health': '', 'op_status': '', 'size_gb': 0.0, 'partitions': [],
             })
-            groupe['size_gb'] = round(groupe['size_gb'] + size_gb, 1)
             groupe['partitions'].append({
                 'letter': device.replace('/dev/', ''), 'type': '', 'total': round(size_gb, 1),
                 'used': round(used_gb, 1), 'free': round(free_gb, 1),
                 'pct': round(used_gb / size_gb * 100) if size_gb else None,
             })
+
+        # Capacité totale/libre : une seule fois par couple (taille, libre)
+        # identique au sein d'un même disque physique, pas la somme brute de
+        # toutes les partitions. Sur macOS/APFS, plusieurs volumes d'un même
+        # conteneur (Système, Données, VM, Preboot...) rapportent TOUS la
+        # même capacité totale et le même espace libre partagé — les
+        # additionner comme des disques distincts gonflait le total d'un
+        # facteur égal au nombre de volumes du conteneur (constaté : ~500 Go
+        # réels comptés jusqu'à 8 fois). `used`, lui, reste sommé sans
+        # dédoublonnage : c'est l'usage propre de CHAQUE volume, une donnée
+        # distincte à chaque ligne, jamais partagée. Sur Linux, où chaque
+        # partition a sa propre taille distincte, le dédoublonnage ne change
+        # rien au comportement existant (chaque partition garde sa taille).
+        total_disk = 0.0
+        total_free = 0.0
+        for groupe in groupes.values():
+            paires = {(p['total'], p['free']) for p in groupe['partitions']}
+            groupe['size_gb'] = round(sum(taille for taille, _ in paires), 1)
+            total_disk += groupe['size_gb']
+            total_free += sum(libre for _, libre in paires)
+
         if disk_list:
             info['disk_drives'] = disk_list
             info['disk_total_gb'] = round(total_disk, 1)
             info['disk_free_gb'] = round(total_free, 1)
-            info['disk_used_gb'] = round(total_disk - total_free, 1)
+            info['disk_used_gb'] = round(total_used, 1)
         if groupes:
             info['disk_layout'] = list(groupes.values())
     except Exception:

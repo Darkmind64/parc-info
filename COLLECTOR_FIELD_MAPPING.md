@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.11 · **À jour avec ParcInfo :** 2.18.33
+**Version collecteur :** 3.12 · **À jour avec ParcInfo :** 2.18.34
 
 ---
 
@@ -177,6 +177,30 @@ temperature_c, read_errors, write_errors}` ·
 > élévation — `bcdedit /enum`, essayé en premier, s'est révélé exiger les
 > droits administrateur même en lecture (constaté, pas supposé).
 
+> **Bug critique corrigé en 3.12 : `_unix_disks()` (macOS/Linux) ne
+> remontait AUCUN disque sur macOS.** Le parseur de taille (`to_gb()`) ne
+> reconnaissait que le format GNU (Linux, « 494G ») — `df -h` BSD (macOS)
+> suffixe les unités binaires d'un « i » (« 494Gi », « 11Mi » — même base
+> 1024, juste un suffixe différent), qu'aucune des trois vérifications
+> `endswith('T'/'G'/'M')` ne matchait jamais. Résultat : `size_gb` valait
+> systématiquement `None` sur macOS, chaque ligne était silencieusement
+> filtrée (`continue`), et la section stockage entière ressortait vide —
+> sans qu'aucune exception ne le signale. Remplacé par une expression
+> régulière tolérant les deux formes (`Gi`/`G`, `Mi`/`M`, `Ti`/`T`, `Ki`/`K`,
+> avec ou sans `B` final).
+>
+> Effet de bord corrigé dans la foulée : `disk_total_gb`/`disk_free_gb`
+> sommaient bêtement TOUTES les lignes `df`. Sur macOS/APFS, plusieurs
+> volumes d'un même conteneur (Système, Données, VM, Preboot, Update,
+> xarts, iSCPreboot, Hardware…) rapportent TOUS la même capacité totale et
+> le même espace libre partagé — un Mac avec ~500 Go de disque physique et
+> 8 volumes dans son conteneur affichait ~2,5 To de « stockage total ».
+> Corrigé : `size_gb`/`free_gb` sont désormais dédupliqués par couple de
+> valeurs identiques au sein d'un même disque physique (`disk_layout`)
+> avant sommation — `used_gb`, propre à chaque volume, reste sommé sans
+> déduplication. Sans effet sur Linux, où chaque partition a déjà sa
+> propre taille distincte.
+
 > `disk_layout` alimente la vue « un disque, ses partitions dedans » de la
 > fiche système (remplace l'ancienne carte à plat qui mélangeait les volumes
 > de tous les disques). Sur Windows, `Get-Disk`/`Get-Partition`/`Get-Volume`
@@ -205,6 +229,17 @@ temperature_c, read_errors, write_errors}` ·
 
 > La VRAM est lue dans le registre (`qwMemorySize`) et non via
 > `Win32_VideoController.AdapterRAM`, qui est un int32 signé et déborde au-delà de 4 Go.
+
+> `gpu`/`gpu_details` (macOS, depuis 3.12) : jusqu'ici totalement absents
+> côté macOS — aucune collecte GPU n'avait jamais été implémentée. Viennent
+> du même appel `system_profiler SPDisplaysDataType` que les écrans
+> ci-dessous (un seul appel pour les deux, pas de requête dupliquée).
+> `driver_version`/`driver_date`/`resolution` restent vides : pas
+> d'équivalent macOS à ces informations pilote Windows. `vram_gb` : le nom
+> de la clé varie selon le type de GPU (intégré/dédié) et la version macOS
+> (`spdisplays_vram`, `spdisplays_vram_shared`, `sppci_vram` observés) — les
+> trois sont tentées, la première trouvée gagne ; absent si aucune ne l'est,
+> plutôt qu'une valeur inventée.
 
 > `monitors[].manufacturer` (macOS, depuis 3.10) : deviné depuis le premier
 > mot du nom EDID (`_name` de `SPDisplaysDataType`, souvent « DELL
@@ -791,6 +826,7 @@ cohérent avec son usage scripté (déploiement en masse, `--quiet`).
 | Carte mère / châssis | ✅ | — | ✅ (`/sys/class/dmi`) |
 | Barrettes mémoire par slot | ✅ | ✅ | ⚠️ root requis |
 | Écrans | ✅ (EDID) | ⚠️ marque devinée par heuristique, pas de taille physique (depuis 3.10 — voir note) | ⚠️ nom du connecteur seul |
+| Carte graphique (GPU) | ✅ | ✅ (depuis 3.12 — voir note, absent avant) | — |
 | Imprimantes | ✅ | ✅ (CUPS, depuis 3.5) | ✅ (CUPS) |
 | Usure disque / SMART détaillé | ✅ | — | ⚠️ type seul (`lsblk`) |
 | Usure batterie | ✅ | ✅ | — |
@@ -933,4 +969,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-21 (v2.18.33 — collecteur 3.11, réseau macOS étoffé : passerelle, DNS, proxy, écrans)
+**Dernière mise à jour** : 2026-08-21 (v2.18.34 — collecteur 3.12, correctif critique stockage macOS + GPU)
