@@ -1,8 +1,27 @@
-PARCINFO_VERSION=2.18.34
+PARCINFO_VERSION=2.18.35
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082111
+BUILD_NUMBER=2026082112
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.35 - Élévation macOS sans ligne de commande (collecteur 3.13)
+# Demandé : une façon de lancer le collecteur GUI macOS Intel avec les
+# droits administrateur sans passer par le Terminal.
+# Jusqu'ici, faute d'équivalent fiable à ShellExecuteW(runas) côté macOS
+# pour relancer tout un process GUI avec élévation, la proposition
+# d'élévation affichait juste la commande sudo à taper soi-même — la
+# préoccupation étant qu'une tentative automatique via `osascript ...
+# with administrator privileges` puisse laisser le technicien sans aucune
+# fenêtre ouverte si l'authentification échouait, sans moyen fiable de le
+# détecter avant que le process courant ne se soit déjà fermé.
+# Résolu autrement : `_relancer_macos_eleve()` déclenche bien l'invite
+# d'authentification macOS standard (la même que Réglages Système ou
+# l'installation d'un logiciel) via osascript, mais en fire-and-forget —
+# la fenêtre courante n'est JAMAIS fermée automatiquement. Au pire, une
+# fois authentifié, le technicien se retrouve avec deux fenêtres ouvertes
+# au lieu d'une ; jamais avec aucune. Toujours pas de ligne de commande à
+# taper : juste le mot de passe/Touch ID dans l'invite système native.
+# Date: 21 août 2026
 
 # Version 2.18.34 - Correctif critique stockage macOS + GPU absent (collecteur 3.12)
 # Signalé : le collecteur macOS Intel ne remontait rien sur le stockage ni
