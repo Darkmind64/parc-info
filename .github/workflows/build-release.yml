@@ -237,6 +237,49 @@ jobs:
           name: ParcInfo-macOS-Intel.zip
           path: dist/ParcInfo-macOS-Intel.zip
 
+      # Le collecteur système n'était jusqu'ici compilé QUE pour Windows — un
+      # technicien sur Mac devait lancer `python system-info-collector.py` à
+      # la main. Même venv x86_64 que ParcInfo ci-dessus, pas de setup Rosetta
+      # séparé. La CLI produit un binaire brut (invoqué avec des arguments,
+      # comme system-info-collector.exe) — PAS le bundle .app que fabrique
+      # aussi collector-cli.spec, pensé pour être lancé depuis le Finder.
+      - name: Build collector CLI with PyInstaller (Intel)
+        continue-on-error: true
+        run: |
+          source venv/bin/activate
+          arch -x86_64 venv/bin/pyinstaller --noconfirm --clean collector-cli.spec
+
+      - name: Zip collector CLI binary (Intel)
+        continue-on-error: true
+        run: cd dist && zip system-info-collector-macOS-Intel.zip system-info-collector
+
+      - name: Upload collector CLI artefact (Intel)
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: system-info-collector-macOS-Intel.zip
+          path: dist/system-info-collector-macOS-Intel.zip
+
+      # La GUI dépend de Tkinter : son empaquetage sous Rosetta (Tcl/Tk
+      # croisé x86_64) est moins éprouvé que le reste de cette chaîne — best
+      # effort, isolé pour ne jamais bloquer ParcInfo ni la CLI ci-dessus.
+      - name: Build collector GUI with PyInstaller (Intel)
+        continue-on-error: true
+        run: |
+          source venv/bin/activate
+          arch -x86_64 venv/bin/pyinstaller --noconfirm --clean collector-gui.spec
+
+      - name: Zip collector GUI .app (Intel)
+        continue-on-error: true
+        run: cd dist && zip -r system-info-collector-gui-macOS-Intel.zip ParcInfo-Collector.app
+
+      - name: Upload collector GUI artefact (Intel)
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: system-info-collector-gui-macOS-Intel.zip
+          path: dist/system-info-collector-gui-macOS-Intel.zip
+
   docker:
     needs: tests
     runs-on: ubuntu-latest
@@ -307,14 +350,43 @@ jobs:
           name: system-info-collector-gui.exe
           path: ./
 
+      # Les deux artefacts ci-dessous viennent des étapes best-effort de
+      # build-macos-intel (continue-on-error) : un échec Tk/Rosetta ponctuel
+      # ne doit ni bloquer ce job ni la release — l'artefact absent, ce
+      # download échoue sans faire échouer le job, et le fichier manque
+      # simplement du SHA256SUMS/de la release ci-dessous.
+      - name: Download collector CLI macOS Intel artifact
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: system-info-collector-macOS-Intel.zip
+          path: ./
+
+      - name: Download collector GUI macOS Intel artifact
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: system-info-collector-gui-macOS-Intel.zip
+          path: ./
+
       # Le programme de mise à jour refuse d'installer un binaire dont il ne peut
       # pas vérifier l'empreinte : sans ce fichier, aucune mise à jour ne passe.
+      # Boucle plutôt qu'un seul appel sha256sum : les deux artefacts macOS Intel
+      # du collecteur (ci-dessus) sont best-effort et peuvent être absents sans
+      # que la release échoue pour autant.
       - name: Empreintes SHA256 des binaires
         run: |
           set -e
-          sha256sum ParcInfo-Windows.exe ParcInfo-macOS-ARM.zip ParcInfo-macOS-Intel.zip \
-                    system-info-collector.exe system-info-collector-gui.exe \
-                    > SHA256SUMS.txt
+          : > SHA256SUMS.txt
+          for f in ParcInfo-Windows.exe ParcInfo-macOS-ARM.zip ParcInfo-macOS-Intel.zip \
+                   system-info-collector.exe system-info-collector-gui.exe \
+                   system-info-collector-macOS-Intel.zip system-info-collector-gui-macOS-Intel.zip; do
+            if [ -f "$f" ]; then
+              sha256sum "$f" >> SHA256SUMS.txt
+            else
+              echo "::warning::$f absent — non inclus dans cette release"
+            fi
+          done
           cat SHA256SUMS.txt
 
       - name: Create Release
@@ -333,10 +405,14 @@ jobs:
             | Docker    | `docker pull darkmind64/parcinfo:${{ github.ref_name }}` |
 
             ### Collecteurs Système
-            | Type | Fichier |
-            |------|---------|
-            | CLI  | `system-info-collector.exe` (console) |
-            | GUI  | `system-info-collector-gui.exe` (interface graphique) |
+            | Type | Plateforme | Fichier |
+            |------|------------|---------|
+            | CLI  | Windows | `system-info-collector.exe` (console) |
+            | GUI  | Windows | `system-info-collector-gui.exe` (interface graphique) |
+            | CLI  | macOS (Intel) | `system-info-collector-macOS-Intel.zip` → dézipper → binaire `system-info-collector` |
+            | GUI  | macOS (Intel) | `system-info-collector-gui-macOS-Intel.zip` → dézipper → `ParcInfo-Collector.app` |
+
+            *(Les deux artefacts macOS ci-dessus sont compilés en best-effort ; s'ils manquent à cette release, lancer `python system-info-collector.py` / `python system-info-collector-gui.py` directement reste toujours possible sur macOS.)*
 
             ### Docker
             ```bash
@@ -357,4 +433,6 @@ jobs:
             ./ParcInfo-macOS-Intel.zip
             ./system-info-collector.exe
             ./system-info-collector-gui.exe
+            ./system-info-collector-macOS-Intel.zip
+            ./system-info-collector-gui-macOS-Intel.zip
             ./SHA256SUMS.txt

@@ -724,6 +724,19 @@ Sélection du client → aperçu des données → envoi → périphériques et r
 
 > Lancer de préférence en administrateur (voir section Privilèges).
 
+### Exécutables compilés
+
+Windows dispose de longue date de `system-info-collector.exe`/`-gui.exe`
+(GitHub Releases). Depuis 3.5, macOS Intel a l'équivalent — construits en
+best-effort par le job `build-macos-intel` (`.github/workflows/build-release.yml`,
+même croisement Rosetta que `ParcInfo-macOS-Intel.zip`) :
+`system-info-collector-macOS-Intel.zip` (binaire brut, en ligne de commande)
+et `system-info-collector-gui-macOS-Intel.zip` (`ParcInfo-Collector.app`).
+S'ils manquent exceptionnellement à une release (échec du croisement Tk pour
+la GUI, notamment), `python system-info-collector[-gui].py` reste toujours
+la solution de repli — c'est d'ailleurs elle qu'utilise directement macOS
+Apple Silicon, jamais compilé pour l'instant.
+
 ---
 
 ## ➕ Ajouter un champ
