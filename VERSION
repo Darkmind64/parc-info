@@ -1,8 +1,30 @@
-PARCINFO_VERSION=2.18.28
+PARCINFO_VERSION=2.18.29
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082105
+BUILD_NUMBER=2026082106
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.29 - Correctif critique : "Expected str, bytes or os.PathLike object, not NoneType" à l'envoi (macOS)
+# La 2.18.28 avait corrigé le lancement de ParcInfo-Collector.app depuis le
+# Finder (chemin de journal relatif). Signalé juste après : l'envoi d'une
+# collecte plantait maintenant avec "Expected str, bytes or os.PathLike
+# object, not NoneType" — même famille de bug, un cran plus loin.
+# Cause : generate_pdf_report()/generate_html_report() (collector_core.py)
+# écrivent le rapport sous un nom de fichier RELATIF (_report_filename()),
+# résolu contre le répertoire courant — "/" sous Finder/LaunchServices macOS,
+# non inscriptible. L'échec d'écriture était déjà rattrapé côté
+# collector_core (retourne `report_file=None`, contenu quand même renvoyé),
+# mais system-info-collector-gui.py appelait ensuite sans garde
+# `Path(report_file).resolve()` pour retenir le chemin du dernier rapport —
+# `Path(None)` lève exactement ce TypeError.
+# Corrigé à la racine : le collecteur GUI se repositionne désormais sur le
+# dossier personnel de l'utilisateur (os.chdir(Path.home())) dès le
+# lancement, avant toute écriture — rend inscriptible tout chemin relatif
+# écrit par la suite, pas seulement celui identifié ici. Garde
+# défensive ajoutée en plus (report_file vérifié avant Path(...)), pour
+# qu'un futur échec d'écriture (disque plein, etc.) dégrade proprement au
+# lieu de planter.
+# Date: 21 août 2026
 
 # Version 2.18.28 - Correctif critique : ParcInfo-Collector.app ne se lançait pas sur macOS
 # Signalé par l'utilisateur juste après la 2.18.27 : double-cliquer sur
