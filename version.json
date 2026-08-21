@@ -1,23 +1,23 @@
 {
-  "version": "2.18.24",
+  "version": "2.18.25",
   "release_date": "2026-08-21T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.24",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/system-info-collector.exe",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.24/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.25",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/system-info-collector.exe",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.25/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Hiérarchie de priorité explicite entre les méthodes de détection au scan réseau : un agent SNMP qui répond prime désormais sur les heuristiques de port ambiguës (SMB), Raspberry Pi reconnu comme Linux, mots-clés sysDescr élargis (FortiOS, SonicOS, DD-WRT, OpenWrt, JUNOS, RouterOS, Comware, VRP, ArubaOS)",
+    "new_features": "Reprise en profondeur du scan réseau : correction d'un bug critique qui empêchait tout exécutable packagé de charger la base OUI complète, téléchargement/mise à jour automatique de cette base, détection ARP des appareils qui bloquent ICMP, découverte mDNS élargie (Matter)",
     "improvements": [
-      "CORRIGÉ: un agent SNMP qui répond (community « public ») est désormais un signal fort à lui seul, vérifié avant les heuristiques de port SMB/22 — un switch/onduleur/imprimante SNMP dont aucun mot-clé n'a matché par ailleurs ne retombe plus sur « PC (Windows) » via la seule présence du port 445. RDP (3389) reste prioritaire même sur SNMP.",
-      "CORRIGÉ: Raspberry Pi (fabricant MAC officiel) reconnu comme Linux avant les heuristiques de port — un Pi-hole/Home Assistant avec Samba ou SSH actif ne devient plus « PC (Windows) » à tort.",
-      "AJOUTÉ: mots-clés sysDescr SNMP élargis pour les OS réseau non ambigus (FortiOS, SonicOS, DD-WRT, OpenWrt, OPNsense) et pour ceux partagés entre routeurs et switches chez un même constructeur (JUNOS, RouterOS, Comware, VRP, ArubaOS), qui retombent sur une catégorie générique plutôt qu'un sous-type deviné à tort.",
-      "AMÉLIORÉ: timeout SNMP porté de 0.5s à 0.8s, plus de marge sur un réseau chargé ou un agent plus lent à répondre."
+      "CORRIGÉ (critique) : le chemin de oui.txt était calculé depuis un dossier d'extraction temporaire en exécutable packagé (PyInstaller --onefile), recréé à chaque lancement — aucun .exe/.app ParcInfo ne pouvait donc jamais charger la base OUI complète (~60 000 fabricants), même en suivant la documentation à la lettre. oui.txt vit désormais dans le même dossier que la base de données.",
+      "AJOUTÉ : téléchargement et mise à jour automatique de la base OUI — au démarrage si absente, rafraîchie automatiquement si elle a plus de 30 jours (utile pour une instance Docker qui tourne en continu), ou à la demande via un bouton « Mettre à jour » sur la page Scan.",
+      "AJOUTÉ : détection ARP des hôtes silencieux — un appareil qui bloque ICMP (pare-feu, très nombreux objets connectés) répond quand même à une résolution ARP pour exister sur le réseau local ; il apparaît désormais dans les résultats (IP, MAC, fabricant) au lieu d'être purement absent.",
+      "AJOUTÉ : découverte mDNS élargie à Matter (standard smart-home unifié) et à la présence générique de poste (_workstation)."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.24"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.25"
 }

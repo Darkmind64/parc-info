@@ -1,5 +1,55 @@
 # CHANGELOG - ParcInfo
 
+## [2.18.25] - 2026-08-21 🗺️
+
+### 🗺️ Reprise en profondeur du scan réseau : base OUI, ARP, complétude
+
+Refonte demandée pour obtenir une image la plus complète et fiable
+possible du réseau, sans identification manuelle par IP/MAC.
+
+**Bug critique : la base OUI complète ne se chargeait jamais en exécutable packagé**
+
+Trouvé en creusant l'imprécision du scan signalée en usage réel : le
+chemin de `oui.txt` était calculé depuis `__file__`, qui pointe en
+exécutable packagé (PyInstaller `--onefile`) vers un dossier d'extraction
+**temporaire recréé à chaque lancement** — jamais le dossier réel de
+l'exe. Aucun `.exe`/`.app` ParcInfo n'a donc jamais pu charger la base OUI
+complète (~60 000 fabricants), même en suivant la documentation à la
+lettre (télécharger `oui.txt`, le placer à côté de l'exe) — replié
+silencieusement, pour toujours, sur les ~930 préfixes embarqués,
+largement insuffisant pour identifier correctement la plupart du matériel
+récent. Corrigé : `oui.txt` vit désormais dans le même dossier que la
+base de données, comme le reste des données persistantes.
+
+**Téléchargement et mise à jour automatique de la base OUI**
+
+- Téléchargement en arrière-plan au démarrage si le fichier est absent,
+  jamais bloquant.
+- Rafraîchissement automatique (cron quotidien) si le fichier a plus de
+  30 jours — nécessaire pour une instance qui tourne en continu (Docker)
+  sans jamais redémarrer.
+- Bouton « 🔄 Mettre à jour » sur la page Scan, avec statut en direct
+  (nombre de préfixes, date de dernière mise à jour).
+- Remplacement atomique du fichier ; un échec réseau ne casse jamais la
+  base déjà chargée.
+
+**Détection ARP des appareils silencieux**
+
+Un appareil qui bloque ICMP (pare-feu, très nombreux objets connectés)
+répond quand même forcément à une résolution ARP pour exister sur le
+réseau local — le scan abandonnait jusqu'ici dès l'échec du ping, ratant
+purement et simplement ces appareils. Ils apparaissent désormais dans les
+résultats (IP, MAC, fabricant) avec un badge 🔇 discret expliquant
+pourquoi peu d'informations sont disponibles, plutôt que d'être
+totalement absents de la liste.
+
+**Découverte mDNS élargie**
+
+Ajout de Matter (`_matter._tcp`/`_matterc._udp` — standard smart-home
+unifié, adoption rapide) et de la présence générique de poste
+(`_workstation._tcp`, capte un nom d'hôte là où NetBIOS/DNS inverse ne
+répondent pas).
+
 ## [2.18.24] - 2026-08-21 📶
 
 ### 📶 Hiérarchie de priorité explicite entre les méthodes de détection au scan

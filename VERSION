@@ -1,10 +1,35 @@
-PARCINFO_VERSION=2.18.24
+PARCINFO_VERSION=2.18.25
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082101
+BUILD_NUMBER=2026082102
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.18.24 - Hiérarchie de priorité explicite entre les méthodes de détection au scan
+# Version 2.18.25 - Reprise en profondeur du scan réseau : base OUI, ARP, complétude
+# Refonte demandée pour obtenir une image la plus complète et fiable
+# possible du réseau, sans identification manuelle par IP/MAC.
+# 1) Bug critique trouvé en creusant l'imprécision du scan : le chemin de
+#    oui.txt était calculé depuis __file__, qui pointe en exécutable
+#    packagé (PyInstaller --onefile) vers un dossier d'extraction
+#    TEMPORAIRE recréé à CHAQUE lancement — jamais le dossier réel de
+#    l'exe. Aucun exécutable packagé (.exe/.app) n'a donc jamais pu
+#    charger la base OUI complète (~60 000 fabricants), même en suivant
+#    la documentation à la lettre — replié silencieusement, pour
+#    toujours, sur les ~930 préfixes embarqués. Corrigé : oui.txt vit
+#    désormais dans le même dossier que la base de données.
+# 2) Téléchargement/mise à jour automatique de la base OUI (demandé
+#    explicitement) : au démarrage si absente, rafraîchie automatiquement
+#    si elle a plus de 30 jours (cron quotidien, utile pour une instance
+#    Docker qui tourne en continu), ou à la demande via un bouton "Mettre
+#    à jour" sur la page Scan.
+# 3) Détection ARP des hôtes silencieux : un appareil qui bloque ICMP
+#    (pare-feu, très nombreux objets connectés) répond quand même
+#    forcément à une résolution ARP pour exister sur le réseau local —
+#    jusqu'ici invisible du scan, qui abandonnait dès l'échec du ping. Il
+#    apparaît désormais avec le peu d'informations disponibles (IP, MAC,
+#    fabricant), marqué "silencieux" plutôt que d'être purement absent.
+# 4) Découverte mDNS élargie à Matter (standard smart-home unifié) et à la
+#    présence générique de poste (_workstation).
+# Date: 21 août 2026
 # Suite du signalement selon lequel les méthodes de détection s'écrasaient
 # encore entre elles. _deviner_type() documente désormais explicitement
 # 6 niveaux de confiance (structuré > fabricant MAC > fabricant réseau
