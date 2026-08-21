@@ -50,6 +50,22 @@ for _flux in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):
         pass
 
+# Même cause que le correctif du journal ci-dessous, mais pour TOUT le reste
+# du module : generate_pdf_report()/generate_html_report() (collector_core.py)
+# écrivent le rapport sous un nom de fichier RELATIF (_report_filename()),
+# résolu contre le répertoire courant. Sous macOS (Finder/LaunchServices), ce
+# répertoire est "/" — non inscriptible par un utilisateur normal. L'écriture
+# échoue alors silencieusement côté collector_core (try/except déjà en
+# place, qui renvoie `None` comme chemin de fichier), mais `Path(None)` plus
+# loin dans ce module levait ensuite un TypeError bien moins parlant que le
+# problème réel. Se repositionner une bonne fois sur le dossier personnel de
+# l'utilisateur, dès le lancement, rend inscriptible tout chemin relatif
+# écrit par la suite — pas seulement celui déjà identifié.
+try:
+    os.chdir(str(Path.home()))
+except Exception:
+    pass
+
 # Configure logging to file for debugging
 #
 # Chemin ABSOLU, jamais relatif au répertoire courant : celui-ci dépend de
@@ -853,10 +869,17 @@ class CollectorGUI:
                 pdf_content, report_file = generate_pdf_report(self.system_info, client_id, client_name)
                 if pdf_content:
                     logger.debug(f"PDF report generated: {report_file} ({len(pdf_content)} bytes)")
-                    # Le bouton « Ouvrir le rapport PDF » rouvrira celui-ci
-                    # plutôt que d'en produire un second, identique.
-                    self.dernier_rapport = str(Path(report_file).resolve())
-                    self.root.after(0, lambda: self.pdf_btn.config(state=tk.NORMAL))
+                    if report_file:
+                        # Le bouton « Ouvrir le rapport PDF » rouvrira celui-ci
+                        # plutôt que d'en produire un second, identique.
+                        self.dernier_rapport = str(Path(report_file).resolve())
+                        self.root.after(0, lambda: self.pdf_btn.config(state=tk.NORMAL))
+                    else:
+                        # Contenu généré mais écriture sur disque impossible
+                        # (répertoire non inscriptible) : l'envoi au serveur
+                        # reste possible, le contenu est déjà en mémoire —
+                        # seul le bouton « Ouvrir » local n'a rien à afficher.
+                        logger.warning("PDF report content generated but no file was written")
                 else:
                     logger.warning("PDF report generation returned no content")
 
