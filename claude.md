@@ -1111,22 +1111,40 @@ Dossier contenant ParcInfo.exe/
 
 **Important** : BD et uploads survivent aux mises à jour de l'exe.
 
-### Télécharger Base IEEE OUI (Fabricants)
+### Base IEEE OUI (Fabricants) — téléchargement automatique
 
-```bash
-# Depuis racine projet
-python download_oui.py
-# → Télécharge depuis https://standards.ieee.org/oui.txt
-# → Sauvegarde : ./oui.txt (5 MB, ~60k fabricants)
+Depuis 2.18.25, ParcInfo télécharge et rafraîchit `oui.txt` lui-même,
+aucune étape manuelle requise :
+- **Au démarrage** : téléchargement en arrière-plan si le fichier est
+  absent (jamais bloquant — le scan reste utilisable entre-temps avec la
+  table embarquée, ~930 préfixes).
+- **Rafraîchissement automatique** : cron quotidien (`app.py`, 03:30) qui
+  retélécharge si le fichier a plus de 30 jours (`_OUI_MAJ_AGE_MAX_JOURS`)
+  — nécessaire pour une instance qui tourne en continu (Docker) sans
+  jamais redémarrer.
+- **À la demande** : bouton « 🔄 Mettre à jour » sur la page Scan (route
+  `POST /api/oui/telecharger`).
 
-# Puis, copier oui.txt dans :
-# - Dev : dossier racine parc_info/
-# - Build : à côté de ParcInfo.exe après build
-```
+Le fichier vit dans `_data_base` (à côté de `parc_info.db`, comme tout le
+reste des données persistantes) — **jamais** un chemin relatif à
+`__file__` : en exécutable packagé (PyInstaller `--onefile`, voir
+`parcinfo.spec`), `__file__` pointe vers un dossier d'extraction
+TEMPORAIRE recréé à chaque lancement, où rien ne survit d'un lancement à
+l'autre. Un bug réel de ce type (chemin `__file__`-relatif) a longtemps
+empêché tout exécutable packagé de charger la base complète, même en
+suivant scrupuleusement l'ancienne procédure manuelle — voir
+`app.py:_oui_path()`.
+
+`download_oui.py` (téléchargement direct en CLI, `python download_oui.py`)
+reste disponible pour un usage hors-app (dev, scripts), mais n'est plus la
+voie normale.
 
 Utilisation dans l'app :
-- Scan réseau détecte MAC → cherche fabricant dans oui.txt
+- Scan réseau détecte MAC → cherche fabricant dans oui.txt via `_oui_vendor()`
 - Affichage amélioré en liste appareils ("Apple Inc.", "Microsoft Corp.", etc)
+- Alimente aussi la classification du type d'appareil au scan
+  (`_deviner_type()`) — Apple, Espressif (objets connectés), fabricants
+  réseau reconnus...
 
 ---
 

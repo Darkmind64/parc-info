@@ -163,16 +163,20 @@
             <button onclick="arreterScan()" class="btn btn-danger btn-sm" style="margin-top:.4rem;width:100%;font-size:.72rem;">■ Arrêter</button>
         </div>
         <!-- Statut base OUI -->
-        <div style="margin-top:.7rem;padding:.5rem .6rem;border-radius:3px;font-size:.7rem;
+        <div id="oui-statut-wrap" style="margin-top:.7rem;padding:.5rem .6rem;border-radius:3px;font-size:.7rem;
             {% if oui_loaded %}background:rgba(0,255,136,.07);border:1px solid rgba(0,255,136,.2);color:var(--accent-green);
             {% else %}background:rgba(255,140,0,.07);border:1px solid rgba(255,140,0,.2);color:var(--accent-orange);{% endif %}">
-            {% if oui_loaded %}
-            ✓ Base OUI chargée ({{ oui_count }} préfixes) — détection fabricants optimale
-            {% else %}
-            ⚠ Base OUI limitée ({{ oui_count }} préfixes embarqués).<br>
-            Pour une détection complète (~60 000 préfixes) :<br>
-            <code style="font-size:.68rem;">python download_oui.py</code> puis redémarrez.
-            {% endif %}
+            <div id="oui-statut-texte" style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;flex-wrap:wrap;">
+                <span>
+                {% if oui_loaded %}
+                ✓ Base OUI chargée ({{ oui_count }} préfixes){% if oui_maj %} — màj {{ oui_maj[:10] }}{% endif %}
+                {% else %}
+                ⚠ Base OUI limitée ({{ oui_count }} préfixes embarqués) — téléchargement en cours ou à lancer
+                {% endif %}
+                </span>
+                <button type="button" class="btn btn-primary btn-sm" style="font-size:.65rem;padding:.2rem .5rem;"
+                        onclick="mettreAJourOui()" id="btn-oui-maj">🔄 Mettre à jour</button>
+            </div>
         </div>
     </div>
 
@@ -301,6 +305,31 @@ function getPlages() {
 }
 
 ajouterPlage('{{ parc_plage or "192.168.1.0/24" }}');
+
+// ── BASE OUI (fabricants) ───────────────────────────────────────────────────
+async function mettreAJourOui() {
+    const btn = document.getElementById('btn-oui-maj');
+    const texte = document.getElementById('oui-statut-texte').querySelector('span');
+    btn.disabled = true;
+    const texteOriginal = texte.textContent;
+    texte.textContent = '⏳ Téléchargement en cours (~5 Mo)...';
+    try {
+        const r = await fetch('/api/oui/telecharger', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) {
+            texte.textContent = `✓ Base OUI à jour (${d.oui_count || d.count || 0} préfixes)`;
+            document.getElementById('oui-statut-wrap').style.background = 'rgba(0,255,136,.07)';
+            document.getElementById('oui-statut-wrap').style.borderColor = 'rgba(0,255,136,.2)';
+            document.getElementById('oui-statut-wrap').style.color = 'var(--accent-green)';
+        } else {
+            texte.textContent = `⚠ Échec du téléchargement (${d.erreur || 'réseau indisponible'})`;
+        }
+    } catch (e) {
+        texte.textContent = '⚠ Échec du téléchargement (connexion indisponible)';
+    } finally {
+        btn.disabled = false;
+    }
+}
 
 // ── SCAN ─────────────────────────────────────────────────────────────────────
 let _scanClientActifId = null;
@@ -473,9 +502,12 @@ function renderTable(results) {
             ? '<span class="new-badge">✦ Nouveau</span>'
             : '<span class="exists-badge">↩ Inventaire</span>';
 
+        const silencieuxBadge = h.silencieux
+            ? ` <span title="Détecté uniquement via sa résolution ARP — l'appareil est présent sur le réseau mais ne répond ni au ping ni aux ports sondés (pare-feu, ICMP bloqué...)" style="font-size:.6rem;color:var(--text-muted);cursor:help;">🔇</span>`
+            : '';
         html += `<tr class="${isNew?'diff-new':''}" data-ip="${h.ip}">
             <td class="td-check"><input type="checkbox" class="chk-host" value="${h.ip}"></td>
-            <td style="font-family:'Share Tech Mono',monospace;font-weight:700;white-space:nowrap;">${h.ip}</td>
+            <td style="font-family:'Share Tech Mono',monospace;font-weight:700;white-space:nowrap;">${h.ip}${silencieuxBadge}</td>
             <td>${escH(nomActuel)?`<div style="font-size:.8rem;">${escH(nomActuel)}</div>`:''}${nomAltLine}${macLine}</td>
             <td style="white-space:nowrap;">${escH(h.type||'—')}</td>
             <td style="font-size:.75rem;white-space:nowrap;" title="${escH(marquePrecise?'Détecté (WMI/UPnP)':'Déduit du préfixe MAC')}">${fabricantCell}</td>

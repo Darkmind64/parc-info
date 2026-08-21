@@ -4013,11 +4013,22 @@ def page_scan():
         _oui_load_full()
     oui_loaded = bool(_OUI_FULL)
     oui_count  = len(_OUI_FULL) if oui_loaded else len(_OUI)
+    oui_maj    = cfg_get('oui_derniere_maj', '')
 
     return render_template('scan_reseau.html', parc=parc, client=client,
                            appareils=appareils, appareils_ips=appareils_ips,
                            parc_plage=parc_plage, oui_loaded=oui_loaded, oui_count=oui_count,
+                           oui_maj=oui_maj,
                            clients=get_clients(), client_actif_id=cid)
+
+@app.route('/api/oui/telecharger', methods=['POST'])
+@login_required
+def api_oui_telecharger():
+    """Télécharge/rafraîchit la base OUI IEEE complète à la demande (bouton
+    "Mettre à jour" de la page Scan) — voir _oui_telecharger()."""
+    resultat = _oui_telecharger(force=True)
+    resultat['oui_count'] = len(_OUI_FULL or {})
+    return jsonify(resultat), (200 if resultat.get('ok') else 502)
 
 # ─── SERVICES ────────────────────────────────────────────────────────────────
 
@@ -5729,11 +5740,28 @@ def _oui_vendor(mac):
 # Cache de la table IEEE complète (None = pas encore tentée, {} = tentée mais vide)
 _OUI_FULL = None
 
+
+def _oui_path():
+    """Emplacement persistant de oui.txt — à côté des autres données
+    persistantes (base, uploads), PAS à côté du code.
+
+    Bug réel trouvé en creusant l'imprécision du scan signalée en usage
+    réel : ce chemin était jusqu'ici calculé depuis __file__, qui pointe en
+    exécutable packagé (PyInstaller --onefile, voir parcinfo.spec) vers un
+    dossier d'extraction TEMPORAIRE recréé à chaque lancement — jamais le
+    dossier réel de l'exe. Résultat : même en suivant la documentation à la
+    lettre (télécharger oui.txt et le placer à côté de ParcInfo.exe), AUCUN
+    exécutable packagé ne parvenait jamais à charger la base complète —
+    silencieusement replié sur les ~930 préfixes embarqués, pour toujours.
+    """
+    return os.path.join(_data_base, 'oui.txt')
+
+
 def _oui_load_full():
     """Charge la base OUI IEEE depuis oui.txt si disponible."""
     global _OUI_FULL
     _OUI_FULL = {}
-    oui_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'oui.txt')
+    oui_path = _oui_path()
     if not os.path.exists(oui_path):
         return
     try:
@@ -5764,6 +5792,59 @@ def _oui_load_full():
     except Exception as e:
         app.logger.warning(f"Could not load oui.txt: {e}")
         _OUI_FULL = {}
+
+
+_OUI_MAJ_AGE_MAX_JOURS = 30  # l'IEEE enregistre de nouveaux préfixes en continu
+
+
+def _oui_telecharger(force=False):
+    """Télécharge (ou met à jour) la base OUI IEEE complète (~60 000
+    préfixes, ~5 Mo) vers le dossier de données persistant.
+
+    `force=False` (démarrage, cron quotidien) : ne retélécharge pas si le
+    fichier existe déjà et date de moins de _OUI_MAJ_AGE_MAX_JOURS — inutile
+    de solliciter le serveur IEEE à chaque démarrage, le scan reste
+    largement fonctionnel entre deux rafraîchissements. `force=True`
+    (bouton "Mettre à jour" de la page Scan) télécharge toujours.
+
+    Best-effort à dessein : toute erreur réseau laisse la base existante
+    (embarquée ou précédemment téléchargée) intacte plutôt que de casser la
+    détection en cours — jamais bloquant pour le scan.
+    """
+    import urllib.request
+    oui_path = _oui_path()
+    if not force and os.path.exists(oui_path):
+        age_jours = (time.time() - os.path.getmtime(oui_path)) / 86400
+        if age_jours < _OUI_MAJ_AGE_MAX_JOURS:
+            return {'ok': True, 'skipped': True, 'raison': 'déjà à jour',
+                    'count': len(_OUI_FULL) if _OUI_FULL else 0}
+
+    tmp_path = oui_path + '.tmp'
+    try:
+        requete = urllib.request.Request(
+            'https://standards-oui.ieee.org/oui/oui.txt',
+            headers={'User-Agent': 'ParcInfo-OUI-Updater'})
+        with urllib.request.urlopen(requete, timeout=30) as reponse:
+            contenu = reponse.read()
+        with open(tmp_path, 'wb') as f:
+            f.write(contenu)
+        os.replace(tmp_path, oui_path)  # remplacement atomique : jamais de fichier à moitié écrit
+        _oui_load_full()
+        try:
+            cfg_set('oui_derniere_maj', datetime.utcnow().isoformat())
+        except Exception:
+            pass
+        logger.info('Base OUI mise à jour : %d préfixes', len(_OUI_FULL or {}))
+        return {'ok': True, 'count': len(_OUI_FULL or {})}
+    except Exception as e:
+        logger.warning('Échec du téléchargement de la base OUI (%s) — base existante conservée', e)
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        return {'ok': False, 'erreur': str(e)}
+
 
 # ── PING & DÉCOUVERTE ────────────────────────────────────────────────────────
 
@@ -6093,7 +6174,7 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="",
         return 'Imprimante'
     if svc == 'smb':
         return 'Serveur'
-    if svc in ('hap', 'shelly', 'esphomelib'):
+    if svc in ('hap', 'shelly', 'esphomelib', 'matter', 'matterc'):
         return 'Objet connecté'
 
     v = (vendor or '').lower()
@@ -6427,6 +6508,10 @@ _MDNS_TYPES_APPAREILS = [
     '_hap._tcp.local.',            # HomeKit (très large : prises, capteurs, ampoules...)
     '_shelly._tcp.local.',         # Shelly (prises/relais)
     '_esphomelib._tcp.local.',     # Firmware ESPHome (remplace souvent Tasmota/Tuya d'origine)
+    '_matter._tcp.local.',         # Matter — standard smart-home unifié (2023+), adoption rapide
+    '_matterc._udp.local.',        # Matter en cours d'appairage (commissionable)
+    '_workstation._tcp.local.',    # Présence générique d'un poste (Linux/macOS/Windows Bonjour) —
+                                    # capte un nom d'hôte là où NetBIOS/DNS inverse ne répondent pas
 ]
 
 
@@ -6627,11 +6712,29 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
     UPnP/mDNS faite UNE fois pour tout le scan (_run_scan), pas par hôte —
     on y cherche simplement l'entrée pour CETTE ip.
     """
-    if not _ping(ip_str):
-        return None
-    # Après ping, laisser l'OS peupler la table ARP
-    # 0.5s est suffisant même sur les réseaux chargés
-    time.sleep(0.5)
+    ping_ok = _ping(ip_str)
+    # Même si le ping échoue (pare-feu, très nombreux objets connectés qui
+    # bloquent ICMP par défaut), l'OS a dû résoudre l'adresse MAC via ARP
+    # pour tenter d'envoyer ce paquet sur le réseau local — un hôte qui
+    # répond à cette résolution existe bel et bien, même silencieux côté
+    # IP. Vérifier la table ARP même après un ping en échec révèle ces
+    # appareils, jusqu'ici invisibles du scan (demandé explicitement : "une
+    # image la plus complète possible du réseau, sans identification
+    # manuelle par IP/MAC"). Un hôte ni pingable ni résolu en ARP est
+    # considéré absent, comme avant.
+    time.sleep(0.4)
+    mac = _mac_from_arp(ip_str)
+    if not ping_ok and not mac:
+        time.sleep(0.4)
+        mac = _mac_from_arp(ip_str)
+        if not mac:
+            return None
+    # Après ping, laisser l'OS finir de peupler la table ARP si le premier
+    # relevé n'a rien donné (hôte qui répond à l'IP mais MAC pas encore en
+    # cache) — 0.5s est suffisant même sur les réseaux chargés.
+    elif not mac:
+        time.sleep(0.5)
+        mac = _mac_from_arp(ip_str)
     # Lancer hostname + NetBIOS + OS + ports en parallèle
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
         f_hostname = ex.submit(_hostname,     ip_str)
@@ -6649,12 +6752,15 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
         except Exception: ports = []
         try: snmp_info = f_snmp.result(timeout=2)
         except Exception: snmp_info = {}
-    # Lire le MAC APRÈS les sondes (table ARP forcément peuplée maintenant)
-    mac = _mac_from_arp(ip_str)
-    # Si toujours vide, deuxième tentative après ping supplémentaire
+    # Toujours pas de MAC malgré les relevés précoces ? Les sondes
+    # ci-dessus (hostname/NetBIOS/ports) ont généré du trafic supplémentaire
+    # qui a pu déclencher la résolution ARP entre-temps — un dernier essai,
+    # jamais un écrasement d'un MAC déjà trouvé.
     if not mac:
-        time.sleep(0.5)
         mac = _mac_from_arp(ip_str)
+        if not mac:
+            time.sleep(0.5)
+            mac = _mac_from_arp(ip_str)
     vendor    = _oui_vendor(mac)
     # Le TTL seul ne distingue pas macOS de Linux (les deux répondent à 64
     # par défaut) — signalé en usage réel : un MacBook ressortait comme
@@ -6695,6 +6801,10 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
         "ports":        ports,
         "os_guess":     os_guess,
         "type":         host_type,
+        # Présent mais ne répond pas à l'IP (pare-feu/ICMP bloqué) : détecté
+        # uniquement via sa résolution ARP — l'appareil existe bel et bien,
+        # simplement silencieux sur les sondes actives (ping/ports).
+        "silencieux":   not ping_ok,
         "en_ligne":     True,
     }
     if bannieres:
@@ -13034,11 +13144,21 @@ if __name__ == '__main__':
     scheduler.add_job(_regenerate_all_maintenance_occurrences, 'cron', hour=2, minute=0)
     # Cron job: notifier maintenances à venir tous les jours à 8h du matin
     scheduler.add_job(_notify_upcoming_maintenances, 'cron', hour=8, minute=0)
+    # Cron job: rafraîchir la base OUI si elle a plus de 30 jours (no-op sinon) —
+    # nécessaire en plus du téléchargement au démarrage pour une instance
+    # qui tourne en continu (Docker) sans jamais redémarrer.
+    scheduler.add_job(lambda: _oui_telecharger(force=False), 'cron', hour=3, minute=30)
     scheduler.start()
-    logger.info("Cron scheduler démarré (régénération à 02:00, notifications à 08:00)")
+    logger.info("Cron scheduler démarré (régénération à 02:00, notifications à 08:00, base OUI à 03:30)")
 
-    # Précharger la base OUI en arrière-plan pour ne pas bloquer le démarrage
-    threading.Thread(target=_oui_load_full, daemon=True).start()
+    # Charger la base OUI en arrière-plan pour ne pas bloquer le démarrage —
+    # et la télécharger automatiquement si elle est absente ou dépassée
+    # (30 jours). Le scan reste utilisable entre-temps avec la table
+    # embarquée (~930 préfixes) ou l'ancienne base déjà chargée.
+    def _oui_demarrage():
+        _oui_load_full()
+        _oui_telecharger(force=False)
+    threading.Thread(target=_oui_demarrage, daemon=True).start()
     # Lancer la synchronisation des uploads (local ↔ Turso)
     start_sync_thread(interval=60)
     # Sauvegarde périodique de la base, avec rotation sur les 3 dernières
