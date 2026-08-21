@@ -1,8 +1,33 @@
-PARCINFO_VERSION=2.18.33
+PARCINFO_VERSION=2.18.34
 RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082110
+BUILD_NUMBER=2026082111
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.34 - Correctif critique stockage macOS + GPU absent (collecteur 3.12)
+# Signalé : le collecteur macOS Intel ne remontait rien sur le stockage ni
+# le GPU.
+# 1) Stockage — bug critique : `_unix_disks()` (partagé macOS/Linux) ne
+#    reconnaissait que le format de taille GNU (Linux, « 494G ») dans son
+#    parseur `to_gb()`. `df -h` BSD (macOS) suffixe les unités binaires
+#    d'un « i » (« 494Gi », « 11Mi » — même base 1024, suffixe différent),
+#    qu'aucune des trois vérifications `endswith('T'/'G'/'M')` ne matchait
+#    jamais. Résultat : `size_gb` valait systématiquement None sur macOS,
+#    chaque ligne était silencieusement filtrée, et la section stockage
+#    entière ressortait vide — sans qu'aucune exception ne le signale.
+#    Remplacé par une expression régulière tolérant les deux formes.
+#    Effet de bord corrigé dans la foulée : disk_total_gb/disk_free_gb
+#    sommaient bêtement TOUTES les lignes df. Sur macOS/APFS, plusieurs
+#    volumes d'un même conteneur (Système, Données, VM, Preboot...)
+#    rapportent TOUS la même capacité totale et le même espace libre
+#    partagé — un Mac de ~500 Go avec 8 volumes dans son conteneur aurait
+#    affiché ~2,5 To de stockage total. Corrigé par déduplication par
+#    couple de valeurs identiques avant sommation, sans effet sur Linux.
+# 2) GPU — absent, pas un bug : aucune collecte n'avait jamais été
+#    implémentée côté macOS. Ajouté (gpu/gpu_details), réutilisant le même
+#    appel system_profiler SPDisplaysDataType que les écrans (un seul
+#    appel pour les deux).
+# Date: 21 août 2026
 
 # Version 2.18.33 - Réseau macOS étoffé : passerelle, DNS, proxy, écrans (collecteur 3.11)
 # Signalé après examen d'une vraie fiche système macOS : passerelle par
