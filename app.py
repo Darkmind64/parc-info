@@ -12243,7 +12243,12 @@ def page_login():
             parsed = urlparse(raw_next)
             next_url = raw_next if (not parsed.netloc and raw_next.startswith('/')) else '/'
             if u.get('must_change_password'):
-                return redirect(url_for('page_profil'))
+                # Le changement de mot de passe forcé reste sur la page bureau
+                # (aucune version mobile de ce formulaire) — mais la destination
+                # d'origine est conservée pour y renvoyer une fois le mot de
+                # passe changé, sinon un login depuis /m atterrissait sur le
+                # bureau sans retour possible vers la version mobile.
+                return redirect(url_for('page_profil', next=next_url))
             return redirect(next_url)
         _record_failed_attempt(ip)
         error = 'Identifiants incorrects'
@@ -12365,23 +12370,27 @@ def page_profil():
             fname = f"logo_user{u['id']}_{int(time.time())}.{ext}"
             logo.save(os.path.join(UPLOAD_FOLDER, fname))
             logo_fichier = fname
+        from urllib.parse import urlparse as _urlparse
+        raw_next = request.form.get('next') or ''
+        _parsed_next = _urlparse(raw_next)
+        next_url = raw_next if (raw_next and not _parsed_next.netloc and raw_next.startswith('/')) else ''
         if pwd:
             if pwd != pwd2:
                 flash('Les mots de passe ne correspondent pas', 'danger')
-                return redirect(url_for('page_profil'))
+                return redirect(url_for('page_profil', next=next_url) if next_url else url_for('page_profil'))
             conn.execute('UPDATE auth_users SET nom=?,prenom=?,email=?,password_hash=?,logo_fichier=?,must_change_password=0,date_maj=? WHERE id=?',
                 (nom, prenom, email, _hash_pwd(pwd), logo_fichier, now, u['id']))
         else:
             if u.get('must_change_password'):
                 flash('Vous devez définir un nouveau mot de passe.', 'danger')
                 conn.close()
-                return redirect(url_for('page_profil'))
+                return redirect(url_for('page_profil', next=next_url) if next_url else url_for('page_profil'))
             conn.execute('UPDATE auth_users SET nom=?,prenom=?,email=?,logo_fichier=?,date_maj=? WHERE id=?',
                 (nom, prenom, email, logo_fichier, now, u['id']))
         conn.commit(); conn.close()
         session['auth_user_nom'] = (prenom + ' ' + nom).strip() or u['login']
         flash('Profil mis à jour', 'success')
-        return redirect(url_for('page_profil'))
+        return redirect(next_url) if next_url else redirect(url_for('page_profil'))
     return render_template('profil.html', u=u,
                            clients=get_clients(), client_actif_id=get_client_id())
 
