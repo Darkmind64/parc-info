@@ -8,6 +8,7 @@
     <!-- Infos personnelles -->
     <div>
         <form method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="next" value="{{ request.args.get('next','') }}">
             <div class="form-section">
                 <div class="form-section-title">&#9632; Identité</div>
                 <div class="form-row cols-2">
