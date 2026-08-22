@@ -24,7 +24,7 @@
     <div class="card-row">
         <div style="min-width:0;">
             <div class="card-title">{{ ct.titre }}</div>
-            <div class="card-sub">{{ ct.fournisseur or '—' }}</div>
+            <div class="card-sub">{{ ct.fournisseur or '—' }}{% if ct.numero_contrat %} · <span class="mono">{{ ct.numero_contrat }}</span>{% endif %}</div>
         </div>
         {% if ct.expire_depasse %}<span class="badge badge-red">Expiré</span>
         {% elif ct.expire_bientot %}<span class="badge badge-orange">{{ ct.jours_restants }} j</span>
@@ -34,6 +34,7 @@
     <div class="card-meta">
         <span class="badge badge-blue">{{ ct.type_contrat or 'Type ?' }}</span>
         {% if ct.date_fin_fmt %}<span class="badge badge-grey">Fin {{ ct.date_fin_fmt }}</span>{% endif %}
+        {% if ct.montant_ht %}<span class="badge badge-grey mono">{{ '%.0f'|format(ct.montant_ht) }} € {{ ct.periodicite or '' }}</span>{% endif %}
     </div>
 </a>
 {% else %}

@@ -82,4 +82,30 @@
 </div>
 {% endif %}
 
+<div class="section-title">Parc en un coup d'œil</div>
+<div class="card kv-list">
+    <div class="kv-row"><span class="k">Appareils en ligne</span><span class="v">{{ stats.nb_en_ligne }} / {{ stats.nb_app_total }}</span></div>
+    <div class="kv-row"><span class="k">Sous garantie</span><span class="v">{{ stats.nb_garantie }} / {{ stats.nb_app_total }}</span></div>
+    <div class="kv-row"><span class="k">Hors service</span><span class="v">{{ stats.nb_hors_service }}</span></div>
+    <div class="kv-row"><span class="k">Périphériques</span><span class="v">{{ stats.nb_periph }} <span style="color:var(--text-muted);">({{ stats.periph_stats.actif }} actifs, {{ stats.periph_stats.stock }} en stock, {{ stats.periph_stats.hs }} HS)</span></span></div>
+    {% if valeur_parc %}
+    <div class="kv-row"><span class="k">Valeur du parc</span><span class="v mono">{{ '%.0f'|format(valeur_parc) }} €</span></div>
+    {% endif %}
+    {% if stats.montant_annuel %}
+    <div class="kv-row"><span class="k">Contrats (montant annuel)</span><span class="v mono">{{ '%.0f'|format(stats.montant_annuel) }} €</span></div>
+    {% endif %}
+</div>
+
+{% if stats.hist_recent %}
+<div class="section-title">Activité récente</div>
+<div class="card kv-list">
+    {% for h in stats.hist_recent %}
+    <div class="kv-row">
+        <span class="k">{{ h.entite_nom }}</span>
+        <span class="v" style="color:var(--text-secondary);">{{ h.action }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% endblock %}
