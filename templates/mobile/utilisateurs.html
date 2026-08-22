@@ -1,0 +1,51 @@
+{% extends "mobile/base.html" %}
+{% block title %}Utilisateurs — {{ client.nom }}{% endblock %}
+{% block content %}
+
+<div class="search-wrap">
+    <input type="search" id="search-input" class="search-input" placeholder="🔍 Rechercher un utilisateur…" autocomplete="off">
+    <div class="chip-row">
+        <span class="chip active" data-filter="">Tous ({{ utilisateurs|length }})</span>
+        {% for s in services %}
+        {% set n = utilisateurs|selectattr('service_id','equalto',s.id)|list|length %}
+        {% if n > 0 %}
+        <span class="chip" data-filter="svc{{ s.id }}">{{ s.nom }} ({{ n }})</span>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<div id="utilisateurs-list">
+{% for u in utilisateurs %}
+<div class="card mobile-item" data-search="{{ (u.prenom or '') ~ ' ' ~ (u.nom or '') ~ ' ' ~ (u.poste or '') ~ ' ' ~ (u.email or '') }}"
+     data-filterval="svc{{ u.service_id or 0 }}">
+    <div class="card-row">
+        <div style="min-width:0;">
+            <div class="card-title">{{ u.prenom }} {{ u.nom }}</div>
+            <div class="card-sub">{{ u.poste or '—' }}{% if u.service_nom %} · {{ u.service_nom }}{% endif %}</div>
+        </div>
+        {% if u.statut == 'actif' %}<span class="badge badge-green">Actif</span>
+        {% else %}<span class="badge badge-grey">{{ u.statut }}</span>{% endif %}
+    </div>
+    {% if u.email or u.telephone or u.login_windows or u.login_mail %}
+    <div class="kv-list" style="margin-top:.5rem;">
+        {% if u.email %}<div class="kv-row"><span class="k">Email</span><span class="v">{{ u.email }}</span></div>{% endif %}
+        {% if u.telephone %}<div class="kv-row"><span class="k">Téléphone</span><span class="v mono">{{ u.telephone }}</span></div>{% endif %}
+        {% if u.login_windows %}<div class="kv-row"><span class="k">Login Windows</span><span class="v mono">{{ u.login_windows }}</span></div>{% endif %}
+        {% if u.login_mail %}<div class="kv-row"><span class="k">Login mail</span><span class="v mono">{{ u.login_mail }}</span></div>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% else %}
+<div class="empty-state"><div class="icon">👤</div>Aucun utilisateur pour ce client.</div>
+{% endfor %}
+</div>
+
+{% if total > utilisateurs|length %}
+<div class="cap-note">{{ utilisateurs|length }} / {{ total }} utilisateurs affichés.</div>
+{% endif %}
+
+{% endblock %}
+{% block scripts %}
+<script>mobileFilterList('search-input', '#utilisateurs-list .mobile-item');</script>
+{% endblock %}

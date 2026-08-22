@@ -1,0 +1,163 @@
+{% extends "mobile/base.html" %}
+{% block title %}{{ appareil.nom_machine }} — {{ client.nom }}{% endblock %}
+{% block content %}
+
+<a class="back-link" href="{{ url_for('mobile_appareils') }}">← Appareils</a>
+
+<div class="detail-head">
+    <h1>{{ appareil.nom_machine }}</h1>
+    <div class="card-meta">
+        <span class="badge badge-blue">{{ appareil.type_appareil or 'Type ?' }}</span>
+        {% if appareil.statut == 'hors_service' %}<span class="badge badge-red">Hors service</span>
+        {% elif appareil.en_ligne %}<span class="badge badge-green">En ligne</span>
+        {% else %}<span class="badge badge-grey">Hors ligne</span>{% endif %}
+    </div>
+</div>
+
+<div class="section-title">Identification</div>
+<div class="card kv-list">
+    <div class="kv-row"><span class="k">Marque / Modèle</span><span class="v">{{ appareil.marque or '—' }} {{ appareil.modele or '' }}</span></div>
+    <div class="kv-row"><span class="k">N° série</span><span class="v mono">{{ appareil.numero_serie or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Adresse IP</span><span class="v mono">{{ appareil.adresse_ip or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Adresse MAC</span><span class="v mono">{{ appareil.adresse_mac or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Utilisateur</span><span class="v">{{ appareil.utilisateur or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Service</span><span class="v">{{ appareil.service or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Localisation</span><span class="v">{{ appareil.localisation or '—' }}</span></div>
+</div>
+
+<div class="section-title">Matériel & OS</div>
+<div class="card kv-list">
+    <div class="kv-row"><span class="k">OS</span><span class="v">{{ appareil.os or '—' }} {{ appareil.version_os or '' }}</span></div>
+    <div class="kv-row"><span class="k">CPU</span><span class="v">{{ appareil.cpu or '—' }}</span></div>
+    <div class="kv-row"><span class="k">RAM</span><span class="v">{{ appareil.ram or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Stockage</span><span class="v">{{ appareil.stockage or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Carte graphique</span><span class="v">{{ appareil.carte_graphique or '—' }}</span></div>
+</div>
+
+<div class="section-title">Garantie & achat</div>
+<div class="card kv-list">
+    <div class="kv-row"><span class="k">Fournisseur</span><span class="v">{{ appareil.fournisseur or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Date d'achat</span><span class="v">{{ appareil.date_achat or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Fin de garantie</span>
+        <span class="v">
+            {{ appareil.date_fin_garantie_fmt or '—' }}
+            {% if appareil.date_fin_garantie %}
+                {% if appareil.garantie_active %}<span class="badge badge-green">OK</span>{% else %}<span class="badge badge-red">Expirée</span>{% endif %}
+            {% endif %}
+        </span>
+    </div>
+</div>
+
+{% if appareil.av_nom or appareil.av_marque or appareil.edr_nom or appareil.rmm_nom %}
+<div class="section-title">Sécurité</div>
+<div class="card kv-list">
+    {% if appareil.av_nom or appareil.av_marque %}
+    <div class="kv-row"><span class="k">Antivirus</span>
+        <span class="v">{{ appareil.av_nom or appareil.av_marque }}
+            {% if appareil.av_status == 'expired' %}<span class="badge badge-red">Expiré</span>
+            {% elif appareil.av_status == 'expiring' %}<span class="badge badge-orange">Bientôt</span>
+            {% elif appareil.av_status == 'active' %}<span class="badge badge-green">OK</span>{% endif %}
+        </span>
+    </div>
+    {% endif %}
+    {% if appareil.edr_nom or appareil.edr_marque %}
+    <div class="kv-row"><span class="k">EDR</span>
+        <span class="v">{{ appareil.edr_nom or appareil.edr_marque }}
+            {% if appareil.edr_status == 'expired' %}<span class="badge badge-red">Expiré</span>
+            {% elif appareil.edr_status == 'expiring' %}<span class="badge badge-orange">Bientôt</span>
+            {% elif appareil.edr_status == 'active' %}<span class="badge badge-green">OK</span>{% endif %}
+        </span>
+    </div>
+    {% endif %}
+    {% if appareil.rmm_nom or appareil.rmm_marque %}
+    <div class="kv-row"><span class="k">RMM</span>
+        <span class="v">{{ appareil.rmm_nom or appareil.rmm_marque }}
+            {% if appareil.rmm_status == 'expired' %}<span class="badge badge-red">Expiré</span>
+            {% elif appareil.rmm_status == 'expiring' %}<span class="badge badge-orange">Bientôt</span>
+            {% elif appareil.rmm_status == 'active' %}<span class="badge badge-green">OK</span>{% endif %}
+        </span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if appareil.user_login or appareil.admin_login or appareil.anydesk_id %}
+<div class="section-title">Accès</div>
+<div class="card kv-list">
+    {% if appareil.user_login %}
+    <div class="kv-row"><span class="k">Login utilisateur</span><span class="v mono">{{ appareil.user_login }}</span></div>
+    {% endif %}
+    {% if appareil.user_password %}
+    <div class="kv-row"><span class="k">Mot de passe</span>
+        <span class="v">
+            <span class="mono mask-dots" id="mask-user-pwd" data-value="{{ appareil.user_password }}" data-revealed="0">••••••••</span>
+            <button type="button" class="reveal-btn" onclick="toggleMask('mask-user-pwd', this)">👁 Afficher</button>
+        </span>
+    </div>
+    {% endif %}
+    {% if appareil.admin_login %}
+    <div class="kv-row"><span class="k">Login admin</span><span class="v mono">{{ appareil.admin_login }}</span></div>
+    {% endif %}
+    {% if appareil.admin_password %}
+    <div class="kv-row"><span class="k">Mot de passe admin</span>
+        <span class="v">
+            <span class="mono mask-dots" id="mask-admin-pwd" data-value="{{ appareil.admin_password }}" data-revealed="0">••••••••</span>
+            <button type="button" class="reveal-btn" onclick="toggleMask('mask-admin-pwd', this)">👁 Afficher</button>
+        </span>
+    </div>
+    {% endif %}
+    {% if appareil.anydesk_id %}
+    <div class="kv-row"><span class="k">AnyDesk ID</span><span class="v mono">{{ appareil.anydesk_id }}</span></div>
+    {% endif %}
+    {% if appareil.anydesk_password %}
+    <div class="kv-row"><span class="k">Mot de passe AnyDesk</span>
+        <span class="v">
+            <span class="mono mask-dots" id="mask-anydesk-pwd" data-value="{{ appareil.anydesk_password }}" data-revealed="0">••••••••</span>
+            <button type="button" class="reveal-btn" onclick="toggleMask('mask-anydesk-pwd', this)">👁 Afficher</button>
+        </span>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if peripheriques %}
+<div class="section-title">Périphériques ({{ peripheriques|length }})</div>
+{% for p in peripheriques %}
+<div class="card">
+    <div class="card-row">
+        <div>
+            <div class="card-title">{{ p.categorie }}</div>
+            <div class="card-sub">{{ p.marque or '' }} {{ p.modele or '' }}</div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if contrats_lies %}
+<div class="section-title">Contrats liés ({{ contrats_lies|length }})</div>
+{% for ct in contrats_lies %}
+<a class="card card-link" href="{{ url_for('mobile_contrat_detail', id=ct.id) }}">
+    <div class="card-row">
+        <div>
+            <div class="card-title">{{ ct.titre }}</div>
+            <div class="card-sub">{{ ct.fournisseur or '' }}</div>
+        </div>
+        {% if ct.expire_depasse %}<span class="badge badge-red">Expiré</span>
+        {% elif ct.expire_bientot %}<span class="badge badge-orange">Bientôt</span>
+        {% else %}<span class="badge badge-green">{{ ct.statut }}</span>{% endif %}
+    </div>
+</a>
+{% endfor %}
+{% endif %}
+
+{% if appareil.notes %}
+<div class="section-title">Notes</div>
+<div class="card" style="white-space:pre-wrap;">{{ appareil.notes }}</div>
+{% endif %}
+
+{% if nb_docs %}
+<div class="cap-note">{{ nb_docs }} document(s) joint(s) — consultables depuis la version bureau.</div>
+{% endif %}
+
+{% endblock %}

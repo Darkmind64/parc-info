@@ -1,0 +1,78 @@
+{% extends "mobile/base.html" %}
+{% block title %}Identifiants — {{ client.nom }}{% endblock %}
+{% block content %}
+
+<div class="search-wrap">
+    <input type="search" id="search-input" class="search-input" placeholder="🔍 Rechercher un identifiant…" autocomplete="off">
+    <div class="chip-row">
+        <span class="chip active" data-filter="">Tous ({{ identifiants|length + wifi_parc|length }})</span>
+        {% for c in categories %}
+        {% set n = identifiants|selectattr('categorie','equalto',c)|list|length %}
+        {% if n > 0 %}
+        <span class="chip" data-filter="{{ c }}">{{ c }} ({{ n }})</span>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<div id="identifiants-list">
+{% for wp in wifi_parc %}
+<div class="card mobile-item" data-search="{{ wp.nom }} wifi" data-filterval="Wi-Fi">
+    <div class="card-row">
+        <div style="min-width:0;">
+            <div class="card-title">📶 {{ wp.nom }}</div>
+            <div class="card-sub">{{ wp.description }}</div>
+        </div>
+        <span class="badge badge-blue">Wi-Fi</span>
+    </div>
+    <div class="kv-list" style="margin-top:.5rem;">
+        <div class="kv-row"><span class="k">SSID</span><span class="v mono">{{ wp.login }}</span></div>
+        <div class="kv-row"><span class="k">Mot de passe</span>
+            <span class="v">
+                <span class="mono mask-dots" id="mask-wifi-{{ loop.index }}" data-value="{{ wp.mot_de_passe }}" data-revealed="0">••••••••</span>
+                <button type="button" class="reveal-btn" onclick="toggleMask('mask-wifi-{{ loop.index }}', this)">👁 Afficher</button>
+            </span>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+{% for i in identifiants %}
+<div class="card mobile-item" data-search="{{ (i.nom or '') ~ ' ' ~ (i.login or '') ~ ' ' ~ (i.description or '') }}" data-filterval="{{ i.categorie }}">
+    <div class="card-row">
+        <div style="min-width:0;">
+            <div class="card-title">{{ i.nom }}</div>
+            <div class="card-sub">{{ i.description or '—' }}</div>
+        </div>
+        {% if i.expire_depasse %}<span class="badge badge-red">Expiré</span>
+        {% elif i.expire_bientot %}<span class="badge badge-orange">Bientôt</span>
+        {% else %}<span class="badge badge-blue">{{ i.categorie or '—' }}</span>{% endif %}
+    </div>
+    <div class="kv-list" style="margin-top:.5rem;">
+        {% if i.login %}<div class="kv-row"><span class="k">Identifiant</span><span class="v mono">{{ i.login }}</span></div>{% endif %}
+        <div class="kv-row"><span class="k">Mot de passe</span>
+            <span class="v">
+                <span class="mono mask-dots" id="mdp-{{ i.id }}" data-revealed="0">••••••••</span>
+                <button type="button" class="reveal-btn" onclick="revealMdp({{ i.id }}, this)">👁 Afficher</button>
+            </span>
+        </div>
+        {% if i.url %}<div class="kv-row"><span class="k">URL</span><span class="v" style="word-break:break-all;">{{ i.url }}</span></div>{% endif %}
+        {% if i.date_expiration_fmt %}<div class="kv-row"><span class="k">Expiration</span><span class="v">{{ i.date_expiration_fmt }}</span></div>{% endif %}
+    </div>
+    {% if i.notes %}<div style="margin-top:.5rem;font-size:.82rem;color:var(--text-secondary);white-space:pre-wrap;">{{ i.notes }}</div>{% endif %}
+</div>
+{% else %}
+{% if not wifi_parc %}
+<div class="empty-state"><div class="icon">🔑</div>Aucun identifiant pour ce client.</div>
+{% endif %}
+{% endfor %}
+</div>
+
+{% if total > identifiants|length %}
+<div class="cap-note">{{ identifiants|length }} / {{ total }} identifiants affichés.</div>
+{% endif %}
+
+{% endblock %}
+{% block scripts %}
+<script>mobileFilterList('search-input', '#identifiants-list .mobile-item');</script>
+{% endblock %}

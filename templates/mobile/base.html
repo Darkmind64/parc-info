@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ParcInfo">
+    <meta name="theme-color" content="#0a0d12">
+    <link rel="manifest" href="{{ url_for('mobile_manifest') }}">
+    <link rel="icon" href="{{ url_for('static', filename='icon.ico') }}" sizes="any">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon_1024.png') }}">
+    <title>{% block title %}ParcInfo{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary:#0a0d12; --bg-secondary:#0f1520; --bg-card:#131c2b;
+            --border:#1e3a5f; --border-glow:#2e6cb0;
+            --accent:#00c9ff; --accent-green:#00ff88; --accent-orange:#ff8c00; --accent-red:#ff3355;
+            --text-primary:#d0e8ff; --text-secondary:#6a8aaa; --text-muted:#3a5570;
+            --topbar-bg:rgba(8,11,16,0.98); --topbar-border:rgba(30,58,95,0.6);
+            --input-bg:#0f1520; --input-border:#1e3a5f;
+            --safe-top:env(safe-area-inset-top,0px); --safe-bottom:env(safe-area-inset-bottom,0px);
+        }
+        body.theme-light {
+            --bg-primary:#f1f5f9; --bg-secondary:#e2e8f0; --bg-card:#ffffff;
+            --border:#cbd5e1; --border-glow:#64748b;
+            --text-primary:#0f172a; --text-secondary:#334155; --text-muted:#64748b;
+            --topbar-bg:rgba(248,250,252,0.98); --topbar-border:rgba(203,213,225,0.9);
+            --input-bg:#ffffff; --input-border:#94a3b8;
+        }
+        * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+        html,body { margin:0; padding:0; }
+        body {
+            background:var(--bg-primary); color:var(--text-primary);
+            font-family:'Exo 2',system-ui,sans-serif;
+            font-size:16px; line-height:1.4;
+            padding-top:calc(52px + var(--safe-top));
+            padding-bottom:calc(64px + var(--safe-bottom));
+            min-height:100vh;
+        }
+        a { color:inherit; text-decoration:none; }
+        .mono { font-family:'Share Tech Mono',monospace; }
+
+        /* ── HEADER ── */
+        header.topbar {
+            position:fixed; top:0; left:0; right:0; z-index:50;
+            padding-top:var(--safe-top);
+            background:var(--topbar-bg); border-bottom:1px solid var(--topbar-border);
+            backdrop-filter:blur(8px);
+        }
+        .topbar-row { display:flex; align-items:center; gap:.6rem; padding:.6rem .9rem; }
+        .topbar-brand { font-family:'Share Tech Mono',monospace; font-weight:700; color:var(--accent); font-size:1.05rem; white-space:nowrap; }
+        .topbar-client { flex:1; min-width:0; }
+        .topbar-client select {
+            width:100%; background:transparent; color:var(--text-primary); border:none;
+            font-size:.85rem; font-weight:600; padding:.2rem 0; -webkit-appearance:none; appearance:none;
+        }
+        .topbar-logout { color:var(--text-muted); font-size:1.2rem; padding:.2rem .3rem; }
+
+        /* ── BOTTOM NAV ── */
+        nav.bottomnav {
+            position:fixed; bottom:0; left:0; right:0; z-index:50;
+            display:flex; background:var(--topbar-bg); border-top:1px solid var(--topbar-border);
+            backdrop-filter:blur(8px);
+            padding-bottom:var(--safe-bottom);
+        }
+        nav.bottomnav a {
+            flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+            gap:.15rem; padding:.5rem 0 .4rem; color:var(--text-muted); font-size:.66rem; font-weight:600;
+        }
+        nav.bottomnav a .icon { font-size:1.3rem; line-height:1; }
+        nav.bottomnav a.active { color:var(--accent); }
+
+        main { padding:.85rem .8rem 1.5rem; max-width:640px; margin:0 auto; }
+
+        /* ── FLASH ── */
+        .alert { padding:.7rem 1rem; border-radius:6px; margin-bottom:.8rem; font-size:.85rem; border-left:3px solid; }
+        .alert-success { background:rgba(0,255,136,.08); border-color:var(--accent-green); color:var(--text-primary); }
+        .alert-danger  { background:rgba(255,51,85,.08); border-color:var(--accent-red); color:var(--text-primary); }
+        .alert-info    { background:rgba(0,201,255,.08); border-color:var(--accent); color:var(--text-primary); }
+
+        /* ── CARDS ── */
+        .card {
+            background:var(--bg-card); border:1px solid var(--border); border-radius:10px;
+            padding:.9rem 1rem; margin-bottom:.7rem;
+        }
+        .card-link { display:block; }
+        .card-title { font-weight:700; font-size:.98rem; color:var(--text-primary); margin-bottom:.15rem; }
+        .card-sub { font-size:.8rem; color:var(--text-secondary); }
+        .card-row { display:flex; align-items:center; justify-content:space-between; gap:.6rem; }
+        .card-meta { display:flex; flex-wrap:wrap; gap:.35rem; margin-top:.5rem; }
+
+        /* ── BADGES ── */
+        .badge {
+            display:inline-flex; align-items:center; gap:.25rem; padding:.18rem .55rem;
+            border-radius:99px; font-size:.68rem; font-weight:700; border:1px solid; white-space:nowrap;
+        }
+        .badge-blue   { background:rgba(0,150,255,.1);  color:#4db8ff; border-color:rgba(0,150,255,.3); }
+        .badge-green  { background:rgba(0,255,136,.1);  color:#3ee8a0; border-color:rgba(0,255,136,.3); }
+        .badge-red    { background:rgba(255,51,85,.1);  color:#ff7a91; border-color:rgba(255,51,85,.3); }
+        .badge-orange { background:rgba(255,140,0,.12); color:#ffab40; border-color:rgba(255,140,0,.35); }
+        .badge-grey   { background:rgba(120,140,160,.12); color:var(--text-secondary); border-color:var(--border); }
+        body.theme-light .badge-blue   { background:rgba(0,120,200,.1); color:#0284c7; border-color:rgba(0,120,200,.25); }
+        body.theme-light .badge-green  { background:rgba(0,150,80,.1);  color:#16a34a; border-color:rgba(0,150,80,.25); }
+        body.theme-light .badge-red    { background:rgba(220,30,60,.1); color:#dc2626; border-color:rgba(220,30,60,.25); }
+        body.theme-light .badge-orange { background:rgba(220,100,0,.1); color:#ea580c; border-color:rgba(220,100,0,.25); }
+
+        /* ── SEARCH / FILTERS ── */
+        .search-wrap { position:sticky; top:calc(52px + var(--safe-top)); z-index:20; background:var(--bg-primary); padding:.1rem 0 .6rem; margin-bottom:.2rem; }
+        .search-input {
+            width:100%; padding:.65rem .9rem; border-radius:10px; border:1px solid var(--input-border);
+            background:var(--input-bg); color:var(--text-primary); font-size:.95rem;
+        }
+        .search-input:focus { outline:none; border-color:var(--accent); }
+        .chip-row { display:flex; gap:.4rem; overflow-x:auto; padding:.5rem 0 .1rem; -webkit-overflow-scrolling:touch; }
+        .chip-row::-webkit-scrollbar { display:none; }
+        .chip {
+            flex:0 0 auto; padding:.35rem .8rem; border-radius:99px; border:1px solid var(--border);
+            background:var(--bg-card); color:var(--text-secondary); font-size:.78rem; font-weight:600; white-space:nowrap;
+        }
+        .chip.active { background:var(--accent); color:#001018; border-color:var(--accent); }
+        select.chip-select {
+            appearance:none; -webkit-appearance:none; padding-right:1.6rem;
+            background-image:linear-gradient(45deg,transparent 50%,var(--text-secondary) 50%),linear-gradient(135deg,var(--text-secondary) 50%,transparent 50%);
+            background-position:calc(100% - 12px) 55%,calc(100% - 7px) 55%; background-size:5px 5px; background-repeat:no-repeat;
+        }
+
+        /* ── EMPTY / LOADING ── */
+        .empty-state { text-align:center; padding:3rem 1rem; color:var(--text-muted); }
+        .empty-state .icon { font-size:2.2rem; margin-bottom:.5rem; }
+        .cap-note { text-align:center; color:var(--text-muted); font-size:.75rem; padding:.6rem 0 .2rem; }
+
+        /* ── DETAIL PAGE ── */
+        .back-link { display:inline-flex; align-items:center; gap:.3rem; color:var(--text-secondary); font-size:.85rem; font-weight:600; margin-bottom:.7rem; }
+        .detail-head { margin-bottom:.9rem; }
+        .detail-head h1 { font-size:1.25rem; margin:0 0 .2rem; }
+        .section-title {
+            font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted);
+            font-weight:700; margin:1.1rem 0 .5rem;
+        }
+        .kv-list { display:flex; flex-direction:column; }
+        .kv-row { display:flex; justify-content:space-between; gap:1rem; padding:.5rem 0; border-bottom:1px solid var(--border); font-size:.88rem; }
+        .kv-row:last-child { border-bottom:none; }
+        .kv-row .k { color:var(--text-secondary); }
+        .kv-row .v { color:var(--text-primary); text-align:right; word-break:break-word; }
+
+        .reveal-btn {
+            background:none; border:1px solid var(--border); color:var(--accent); border-radius:6px;
+            padding:.15rem .5rem; font-size:.72rem; font-weight:700; cursor:pointer;
+        }
+        .mask-dots { letter-spacing:2px; }
+
+        /* ── KPI GRID ── */
+        .kpi-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:.6rem; margin-bottom:.9rem; }
+        .kpi-card { background:var(--bg-card); border:1px solid var(--border); border-radius:10px; padding:.8rem .9rem; }
+        .kpi-value { font-family:'Share Tech Mono',monospace; font-size:1.5rem; color:var(--accent); line-height:1; }
+        .kpi-label { font-size:.72rem; color:var(--text-secondary); margin-top:.25rem; }
+
+        .quick-links { display:grid; grid-template-columns:repeat(2,1fr); gap:.6rem; margin:.9rem 0; }
+        .quick-link { display:flex; align-items:center; gap:.6rem; background:var(--bg-card); border:1px solid var(--border); border-radius:10px; padding:.8rem .9rem; font-weight:700; font-size:.88rem; }
+        .quick-link .icon { font-size:1.3rem; }
+    </style>
+    {{ dynamic_css }}
+    {% block extra_styles %}{% endblock %}
+</head>
+<body class="{{ 'theme-light' if cfg.get('mode') == 'light' else '' }}">
+
+<header class="topbar">
+    <div class="topbar-row">
+        <span class="topbar-brand">ParcInfo</span>
+        <div class="topbar-client">
+            {% if clients and clients|length > 1 %}
+            <select onchange="if(this.value) window.location.href=this.value;">
+                {% for cl in clients %}
+                <option value="{{ url_for('mobile_selectionner_client', id=cl.id) }}" {{ 'selected' if cl.id == client_actif_id else '' }}>{{ cl.nom }}</option>
+                {% endfor %}
+            </select>
+            {% elif client and client.nom %}
+            <span class="mono" style="font-size:.85rem;">{{ client.nom }}</span>
+            {% endif %}
+        </div>
+        <a class="topbar-logout" href="{{ url_for('page_logout') }}" title="Déconnexion" aria-label="Déconnexion">⏻</a>
+    </div>
+</header>
+
+<main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for cat, msg in messages %}
+            <div class="alert alert-{{ 'danger' if cat in ('danger','error') else cat }}">{{ msg }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+</main>
+
+{% set ep = request.endpoint %}
+<nav class="bottomnav">
+    <a href="{{ url_for('mobile_dashboard') }}" class="{{ 'active' if ep == 'mobile_dashboard' else '' }}">
+        <span class="icon">🏠</span><span>Accueil</span>
+    </a>
+    <a href="{{ url_for('mobile_appareils') }}" class="{{ 'active' if ep in ('mobile_appareils','mobile_appareil_detail') else '' }}">
+        <span class="icon">🖥️</span><span>Appareils</span>
+    </a>
+    <a href="{{ url_for('mobile_contrats') }}" class="{{ 'active' if ep in ('mobile_contrats','mobile_contrat_detail') else '' }}">
+        <span class="icon">📄</span><span>Contrats</span>
+    </a>
+    <a href="{{ url_for('mobile_utilisateurs') }}" class="{{ 'active' if ep == 'mobile_utilisateurs' else '' }}">
+        <span class="icon">👤</span><span>Users</span>
+    </a>
+    <a href="{{ url_for('mobile_identifiants') }}" class="{{ 'active' if ep == 'mobile_identifiants' else '' }}">
+        <span class="icon">🔑</span><span>Accès</span>
+    </a>
+</nav>
+
+<script>
+if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register("{{ url_for('mobile_service_worker') }}").catch(function(){});
+}
+
+// Filtrage instantané côté client pour les pages liste (recherche + chips).
+function mobileFilterList(searchInputId, listSelector, statutFilter) {
+    var input = document.getElementById(searchInputId);
+    if (!input) return;
+    function apply() {
+        var q = input.value.trim().toLowerCase();
+        var activeChip = document.querySelector('.chip-row .chip.active');
+        var filterVal = activeChip ? activeChip.dataset.filter || '' : '';
+        document.querySelectorAll(listSelector).forEach(function(card) {
+            var text = (card.dataset.search || '').toLowerCase();
+            var matchesText = !q || text.indexOf(q) !== -1;
+            var matchesFilter = !filterVal || (card.dataset.filterval || '').split('|').indexOf(filterVal) !== -1;
+            card.style.display = (matchesText && matchesFilter) ? '' : 'none';
+        });
+    }
+    input.addEventListener('input', apply);
+    document.querySelectorAll('.chip-row .chip').forEach(function(chip) {
+        chip.addEventListener('click', function() {
+            document.querySelectorAll('.chip-row .chip').forEach(function(c){ c.classList.remove('active'); });
+            chip.classList.add('active');
+            apply();
+        });
+    });
+    apply();
+}
+
+// Révèle un mot de passe d'identifiant via l'endpoint existant (déchiffrement à la demande).
+var _mdpCache = {};
+async function revealMdp(id, btn) {
+    var target = document.getElementById('mdp-' + id);
+    if (!target) return;
+    if (target.dataset.revealed === '1') {
+        target.textContent = '••••••••';
+        target.dataset.revealed = '0';
+        btn.textContent = '👁 Afficher';
+        return;
+    }
+    try {
+        if (_mdpCache[id] === undefined) {
+            var r = await fetch('/api/identifiant/' + id + '/mdp');
+            var d = await r.json();
+            _mdpCache[id] = d.mdp || '';
+        }
+        target.textContent = _mdpCache[id] || '(vide)';
+        target.dataset.revealed = '1';
+        btn.textContent = '🙈 Masquer';
+    } catch (e) {
+        target.textContent = 'Erreur';
+    }
+}
+
+function toggleMask(id, btn) {
+    var target = document.getElementById(id);
+    if (!target) return;
+    var revealed = target.dataset.revealed === '1';
+    target.textContent = revealed ? '••••••••' : target.dataset.value;
+    target.dataset.revealed = revealed ? '0' : '1';
+    btn.textContent = revealed ? '👁 Afficher' : '🙈 Masquer';
+}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

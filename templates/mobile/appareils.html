@@ -1,0 +1,56 @@
+{% extends "mobile/base.html" %}
+{% block title %}Appareils — {{ client.nom }}{% endblock %}
+{% block content %}
+
+<div class="search-wrap">
+    <input type="search" id="search-input" class="search-input" placeholder="🔍 Rechercher un appareil…" autocomplete="off">
+    <div class="chip-row">
+        <span class="chip active" data-filter="">Tous ({{ appareils|length }})</span>
+        {% for t in types_appareils %}
+        {% set n = appareils|selectattr('type_appareil','equalto',t)|list|length %}
+        {% if n > 0 %}
+        <span class="chip" data-filter="{{ t }}">{{ t }} ({{ n }})</span>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<div id="appareils-list">
+{% for a in appareils %}
+<a class="card card-link mobile-item" href="{{ url_for('mobile_appareil_detail', id=a.id) }}"
+   data-search="{{ (a.nom_machine or '') ~ ' ' ~ (a.marque or '') ~ ' ' ~ (a.modele or '') ~ ' ' ~ (a.adresse_ip or '') ~ ' ' ~ (a.numero_serie or '') ~ ' ' ~ (a.utilisateur or '') }}"
+   data-filterval="{{ a.type_appareil }}">
+    <div class="card-row">
+        <div style="min-width:0;">
+            <div class="card-title">{{ a.nom_machine }}</div>
+            <div class="card-sub mono">{{ a.adresse_ip or '—' }}{% if a.utilisateur %} · {{ a.utilisateur }}{% endif %}</div>
+        </div>
+        {% if a.statut == 'hors_service' %}
+        <span class="badge badge-red">HS</span>
+        {% elif a.en_ligne %}
+        <span class="badge badge-green">En ligne</span>
+        {% else %}
+        <span class="badge badge-grey">Hors ligne</span>
+        {% endif %}
+    </div>
+    <div class="card-meta">
+        <span class="badge badge-blue">{{ a.type_appareil or 'Type ?' }}</span>
+        {% if a.garantie_active %}<span class="badge badge-green">Garantie OK</span>
+        {% elif a.date_fin_garantie %}<span class="badge badge-orange">Garantie expirée</span>{% endif %}
+        {% if a.av_status == 'expired' %}<span class="badge badge-red">AV expiré</span>
+        {% elif a.av_status == 'expiring' %}<span class="badge badge-orange">AV bientôt</span>{% endif %}
+    </div>
+</a>
+{% else %}
+<div class="empty-state"><div class="icon">🖥️</div>Aucun appareil pour ce client.</div>
+{% endfor %}
+</div>
+
+{% if total > appareils|length %}
+<div class="cap-note">{{ appareils|length }} / {{ total }} appareils affichés — affinez la recherche pour voir les autres.</div>
+{% endif %}
+
+{% endblock %}
+{% block scripts %}
+<script>mobileFilterList('search-input', '#appareils-list .mobile-item');</script>
+{% endblock %}

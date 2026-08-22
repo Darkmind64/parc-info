@@ -1,0 +1,51 @@
+{% extends "mobile/base.html" %}
+{% block title %}Contrats — {{ client.nom }}{% endblock %}
+{% block content %}
+
+<div class="search-wrap">
+    <input type="search" id="search-input" class="search-input" placeholder="🔍 Rechercher un contrat…" autocomplete="off">
+    <div class="chip-row">
+        <span class="chip active" data-filter="">Tous ({{ contrats|length }})</span>
+        <span class="chip" data-filter="alerte">⚠ À surveiller ({{ contrats|selectattr('expire_bientot')|list|length + contrats|selectattr('expire_depasse')|list|length }})</span>
+        {% for t in types_contrats %}
+        {% set n = contrats|selectattr('type_contrat','equalto',t)|list|length %}
+        {% if n > 0 %}
+        <span class="chip" data-filter="{{ t }}">{{ t }} ({{ n }})</span>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<div id="contrats-list">
+{% for ct in contrats %}
+<a class="card card-link mobile-item" href="{{ url_for('mobile_contrat_detail', id=ct.id) }}"
+   data-search="{{ (ct.titre or '') ~ ' ' ~ (ct.fournisseur or '') ~ ' ' ~ (ct.numero_contrat or '') }}"
+   data-filterval="{{ ct.type_contrat }}{% if ct.expire_bientot or ct.expire_depasse %}|alerte{% endif %}">
+    <div class="card-row">
+        <div style="min-width:0;">
+            <div class="card-title">{{ ct.titre }}</div>
+            <div class="card-sub">{{ ct.fournisseur or '—' }}</div>
+        </div>
+        {% if ct.expire_depasse %}<span class="badge badge-red">Expiré</span>
+        {% elif ct.expire_bientot %}<span class="badge badge-orange">{{ ct.jours_restants }} j</span>
+        {% elif ct.statut == 'actif' %}<span class="badge badge-green">Actif</span>
+        {% else %}<span class="badge badge-grey">{{ ct.statut }}</span>{% endif %}
+    </div>
+    <div class="card-meta">
+        <span class="badge badge-blue">{{ ct.type_contrat or 'Type ?' }}</span>
+        {% if ct.date_fin_fmt %}<span class="badge badge-grey">Fin {{ ct.date_fin_fmt }}</span>{% endif %}
+    </div>
+</a>
+{% else %}
+<div class="empty-state"><div class="icon">📄</div>Aucun contrat pour ce client.</div>
+{% endfor %}
+</div>
+
+{% if total > contrats|length %}
+<div class="cap-note">{{ contrats|length }} / {{ total }} contrats affichés — affinez la recherche pour voir les autres.</div>
+{% endif %}
+
+{% endblock %}
+{% block scripts %}
+<script>mobileFilterList('search-input', '#contrats-list .mobile-item');</script>
+{% endblock %}

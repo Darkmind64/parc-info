@@ -13136,6 +13136,244 @@ def _unregister_mdns(port=3456):
         except Exception as e:
             logger.warning(f"⚠️ mDNS unregistration failed: {e}")
 
+
+# ─── MOBILE (PWA lecture seule) ──────────────────────────────────────────────
+#
+# Interface optimisée smartphone, dédiée à la consultation : aucune route ici
+# n'accepte POST/PUT/DELETE (une seule exception : le changement de client
+# actif, un simple aiguillage de session sans écriture métier). Elle réutilise
+# les mêmes helpers ACL (get_client_id/get_client_access/get_clients) et de
+# formatage (fmt_appareils/fmt_contrat) que les pages bureau pour rester
+# cohérente avec elles sans dupliquer leur logique.
+#
+# Les mots de passe suivent la même politique que le reste de l'app :
+# masqués par défaut, révélés à la demande. Pour les identifiants chiffrés
+# (table `identifiants`), on ne déchiffre jamais côté serveur avant l'appel
+# explicite à /api/identifiant/<id>/mdp (plus strict que la liste bureau, qui
+# déchiffre puis ne les affiche pas). Les mots de passe d'appareil et le Wi-Fi
+# du parc général ne sont pas chiffrés en base (comportement déjà existant
+# côté bureau) : ils sont simplement masqués côté client via JS.
+
+_MOBILE_LIST_CAP = 500
+
+
+@app.route('/m')
+@app.route('/m/')
+@login_required
+def mobile_home():
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    return redirect(url_for('mobile_dashboard'))
+
+
+@app.route('/m/manifest.webmanifest')
+def mobile_manifest():
+    return send_from_directory(
+        os.path.join(app.static_folder, 'mobile'), 'manifest.webmanifest',
+        mimetype='application/manifest+json')
+
+
+@app.route('/m/sw.js')
+def mobile_service_worker():
+    return send_from_directory(
+        os.path.join(app.static_folder, 'mobile'), 'sw.js',
+        mimetype='application/javascript')
+
+
+@app.route('/m/client/<int:id>/selectionner')
+@login_required
+def mobile_selectionner_client(id):
+    if not get_client_access(id):
+        flash('Accès refusé à ce client', 'danger')
+        return redirect(url_for('mobile_dashboard'))
+    session['client_id'] = id
+    return redirect(url_for('mobile_dashboard'))
+
+
+@app.route('/m/dashboard')
+@login_required
+def mobile_dashboard():
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    today = date.today()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    stats = _compute_client_dashboard_stats(conn, cid, today)
+    alerts = _compute_alerts_for_client(conn, cid, today)
+    conn.close()
+    return render_template('mobile/dashboard.html', client=client, clients=get_clients(),
+                           client_actif_id=cid, stats=stats, alerts=alerts)
+
+
+@app.route('/m/appareils')
+@login_required
+def mobile_appareils():
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    rows = conn.execute(
+        f'SELECT {_colonnes_appareils_liste()} FROM appareils a WHERE a.client_id=? '
+        f'ORDER BY a.nom_machine ASC LIMIT ?', (cid, _MOBILE_LIST_CAP)).fetchall()
+    appareils = fmt_appareils([row_to_dict(r) for r in rows])
+    total = conn.execute('SELECT COUNT(*) FROM appareils WHERE client_id=?', (cid,)).fetchone()[0]
+    conn.close()
+    return render_template('mobile/appareils.html', appareils=appareils, client=client,
+                           clients=get_clients(), client_actif_id=cid,
+                           types_appareils=get_liste_cached('types_appareils'),
+                           total=total)
+
+
+@app.route('/m/appareil/<int:id>')
+@login_required
+def mobile_appareil_detail(id):
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    a = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    if not a:
+        conn.close()
+        flash('Appareil introuvable', 'danger')
+        return redirect(url_for('mobile_appareils'))
+    a = fmt_appareils([a])[0]
+    peripheriques = [row_to_dict(r) for r in conn.execute(
+        '''SELECT p.* FROM peripheriques p
+           JOIN peripheriques_appareils pa ON pa.peripherique_id = p.id
+           WHERE pa.appareil_id=? ORDER BY p.categorie''', (id,)).fetchall()]
+    contrats_lies = [fmt_contrat(row_to_dict(r)) for r in conn.execute(
+        '''SELECT c.* FROM contrats c
+           JOIN contrats_appareils ca ON ca.contrat_id=c.id
+           WHERE ca.appareil_id=? ORDER BY c.titre''', (id,)).fetchall()]
+    nb_docs = conn.execute('SELECT COUNT(*) FROM documents_appareils WHERE appareil_id=?', (id,)).fetchone()[0]
+    conn.close()
+    return render_template('mobile/appareil_detail.html', appareil=a, peripheriques=peripheriques,
+                           contrats_lies=contrats_lies, nb_docs=nb_docs,
+                           client=client, clients=get_clients(), client_actif_id=cid)
+
+
+@app.route('/m/contrats')
+@login_required
+def mobile_contrats():
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    rows = conn.execute(
+        'SELECT * FROM contrats WHERE client_id=? ORDER BY date_fin, titre LIMIT ?',
+        (cid, _MOBILE_LIST_CAP)).fetchall()
+    contrats = [fmt_contrat(row_to_dict(r)) for r in rows]
+    total = conn.execute('SELECT COUNT(*) FROM contrats WHERE client_id=?', (cid,)).fetchone()[0]
+    conn.close()
+    return render_template('mobile/contrats.html', contrats=contrats, client=client,
+                           clients=get_clients(), client_actif_id=cid,
+                           types_contrats=get_liste_cached('types_contrats'), total=total)
+
+
+@app.route('/m/contrat/<int:id>')
+@login_required
+def mobile_contrat_detail(id):
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    ct = row_to_dict(conn.execute('SELECT * FROM contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    if not ct:
+        conn.close()
+        flash('Contrat introuvable', 'danger')
+        return redirect(url_for('mobile_contrats'))
+    ct = fmt_contrat(ct)
+    appareils_lies = [row_to_dict(r) for r in conn.execute(
+        'SELECT a.* FROM appareils a JOIN contrats_appareils ca ON a.id=ca.appareil_id WHERE ca.contrat_id=?',
+        (id,)).fetchall()]
+    periph_lies = [row_to_dict(r) for r in conn.execute(
+        'SELECT p.* FROM peripheriques p JOIN contrats_peripheriques cp ON p.id=cp.peripherique_id WHERE cp.contrat_id=?',
+        (id,)).fetchall()]
+    nb_docs = conn.execute('SELECT COUNT(*) FROM documents_contrats WHERE contrat_id=?', (id,)).fetchone()[0]
+    conn.close()
+    return render_template('mobile/contrat_detail.html', contrat=ct, appareils_lies=appareils_lies,
+                           periph_lies=periph_lies, nb_docs=nb_docs,
+                           client=client, clients=get_clients(), client_actif_id=cid)
+
+
+@app.route('/m/utilisateurs')
+@login_required
+def mobile_utilisateurs():
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    users = [row_to_dict(r) for r in conn.execute(
+        '''SELECT u.*, s.nom as service_nom, s.couleur as service_couleur
+           FROM utilisateurs u LEFT JOIN services s ON u.service_id=s.id
+           WHERE u.client_id=? ORDER BY s.nom, u.nom, u.prenom LIMIT ?''',
+        (cid, _MOBILE_LIST_CAP)).fetchall()]
+    services = [row_to_dict(r) for r in conn.execute(
+        'SELECT * FROM services WHERE client_id=? ORDER BY ordre,nom', (cid,)).fetchall()]
+    total = conn.execute('SELECT COUNT(*) FROM utilisateurs WHERE client_id=?', (cid,)).fetchone()[0]
+    conn.close()
+    return render_template('mobile/utilisateurs.html', utilisateurs=users, services=services,
+                           client=client, clients=get_clients(), client_actif_id=cid, total=total)
+
+
+@app.route('/m/identifiants')
+@login_required
+def mobile_identifiants():
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    rows = conn.execute(
+        'SELECT * FROM identifiants WHERE client_id=? ORDER BY categorie, nom LIMIT ?',
+        (cid, _MOBILE_LIST_CAP)).fetchall()
+    # Volontairement PAS de déchiffrement ici : mot_de_passe reste chiffré
+    # dans le contexte du template, révélé uniquement via l'appel AJAX à
+    # /api/identifiant/<id>/mdp (cf. note de section plus haut).
+    ids_ = [row_to_dict(r) for r in rows]
+    for i in ids_:
+        if i.get('date_expiration'):
+            try:
+                d = date.fromisoformat(i['date_expiration'])
+                i['expire_bientot'] = (d - date.today()).days <= 30
+                i['expire_depasse'] = d < date.today()
+                i['date_expiration_fmt'] = d.strftime('%d/%m/%Y')
+            except Exception:
+                i['expire_bientot'] = i['expire_depasse'] = False
+                i['date_expiration_fmt'] = ''
+        else:
+            i['expire_bientot'] = i['expire_depasse'] = False
+            i['date_expiration_fmt'] = ''
+    parc = row_to_dict(conn.execute('SELECT * FROM parc_general WHERE client_id=?', (cid,)).fetchone() or {})
+    total = conn.execute('SELECT COUNT(*) FROM identifiants WHERE client_id=?', (cid,)).fetchone()[0]
+    conn.close()
+    wifi_parc = []
+    if parc.get('wifi_ssid'):
+        wifi_parc.append({
+            'nom': parc['wifi_ssid'] + ' (Parc général)',
+            'login': parc.get('wifi_ssid', ''),
+            'mot_de_passe': parc.get('wifi_password', ''),
+            'description': 'Réseau principal — depuis le Parc général',
+        })
+    if parc.get('wifi_ssid2'):
+        wifi_parc.append({
+            'nom': parc['wifi_ssid2'] + ' (Parc général)',
+            'login': parc.get('wifi_ssid2', ''),
+            'mot_de_passe': parc.get('wifi_password2', ''),
+            'description': 'Réseau invités — depuis le Parc général',
+        })
+    return render_template('mobile/identifiants.html', identifiants=ids_, wifi_parc=wifi_parc, client=client,
+                           clients=get_clients(), client_actif_id=cid,
+                           categories=get_liste_cached('categories_identifiants'), total=total)
+
+
 if __name__ == '__main__':
     init_db()
 

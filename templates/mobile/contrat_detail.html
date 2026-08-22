@@ -1,0 +1,76 @@
+{% extends "mobile/base.html" %}
+{% block title %}{{ contrat.titre }} — {{ client.nom }}{% endblock %}
+{% block content %}
+
+<a class="back-link" href="{{ url_for('mobile_contrats') }}">← Contrats</a>
+
+<div class="detail-head">
+    <h1>{{ contrat.titre }}</h1>
+    <div class="card-meta">
+        <span class="badge badge-blue">{{ contrat.type_contrat or 'Type ?' }}</span>
+        {% if contrat.expire_depasse %}<span class="badge badge-red">Expiré</span>
+        {% elif contrat.expire_bientot %}<span class="badge badge-orange">Expire dans {{ contrat.jours_restants }} j</span>
+        {% elif contrat.statut == 'actif' %}<span class="badge badge-green">Actif</span>
+        {% else %}<span class="badge badge-grey">{{ contrat.statut }}</span>{% endif %}
+    </div>
+</div>
+
+<div class="section-title">Fournisseur</div>
+<div class="card kv-list">
+    <div class="kv-row"><span class="k">Fournisseur</span><span class="v">{{ contrat.fournisseur or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Contact</span><span class="v">{{ contrat.contact_fournisseur or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Email</span><span class="v">{{ contrat.email_fournisseur or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Téléphone</span><span class="v mono">{{ contrat.telephone_fournisseur or '—' }}</span></div>
+    <div class="kv-row"><span class="k">N° contrat</span><span class="v mono">{{ contrat.numero_contrat or '—' }}</span></div>
+</div>
+
+<div class="section-title">Dates & montant</div>
+<div class="card kv-list">
+    <div class="kv-row"><span class="k">Début</span><span class="v">{{ contrat.date_debut_fmt or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Fin</span><span class="v">{{ contrat.date_fin_fmt or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Périodicité</span><span class="v">{{ contrat.periodicite or '—' }}</span></div>
+    <div class="kv-row"><span class="k">Reconduction auto.</span><span class="v">{{ 'Oui' if contrat.reconduction_auto else 'Non' }}</span></div>
+    <div class="kv-row"><span class="k">Préavis</span><span class="v">{{ contrat.preavis_jours or '—' }} j</span></div>
+    <div class="kv-row"><span class="k">Montant HT</span><span class="v mono">{{ '%.2f'|format(contrat.montant_ht) ~ ' €' if contrat.montant_ht else '—' }}</span></div>
+</div>
+
+{% if appareils_lies or periph_lies %}
+<div class="section-title">Matériel lié</div>
+{% for a in appareils_lies %}
+<a class="card card-link" href="{{ url_for('mobile_appareil_detail', id=a.id) }}">
+    <div class="card-row">
+        <div>
+            <div class="card-title">{{ a.nom_machine }}</div>
+            <div class="card-sub mono">{{ a.adresse_ip or '' }}</div>
+        </div>
+        <span class="badge badge-blue">{{ a.type_appareil or '' }}</span>
+    </div>
+</a>
+{% endfor %}
+{% for p in periph_lies %}
+<div class="card">
+    <div class="card-row">
+        <div>
+            <div class="card-title">{{ p.categorie }}</div>
+            <div class="card-sub">{{ p.marque or '' }} {{ p.modele or '' }}</div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if contrat.description %}
+<div class="section-title">Description</div>
+<div class="card" style="white-space:pre-wrap;">{{ contrat.description }}</div>
+{% endif %}
+
+{% if contrat.notes %}
+<div class="section-title">Notes</div>
+<div class="card" style="white-space:pre-wrap;">{{ contrat.notes }}</div>
+{% endif %}
+
+{% if nb_docs %}
+<div class="cap-note">{{ nb_docs }} document(s) joint(s) — consultables depuis la version bureau.</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,85 @@
+{% extends "mobile/base.html" %}
+{% block title %}ParcInfo — {{ client.nom }}{% endblock %}
+{% block content %}
+
+<div class="kpi-grid">
+    <div class="kpi-card">
+        <div class="kpi-value">{{ stats.nb_app_total }}</div>
+        <div class="kpi-label">Appareils · {{ stats.taux_dispo }}% en ligne</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-value">{{ stats.nb_contrats }}</div>
+        <div class="kpi-label">Contrats actifs</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-value">{{ stats.nb_users }}</div>
+        <div class="kpi-label">Utilisateurs</div>
+    </div>
+    <div class="kpi-card">
+        <div class="kpi-value">{{ stats.nb_identifiants }}</div>
+        <div class="kpi-label">Identifiants</div>
+    </div>
+</div>
+
+<div class="quick-links">
+    <a class="quick-link" href="{{ url_for('mobile_appareils') }}"><span class="icon">🖥️</span> Appareils</a>
+    <a class="quick-link" href="{{ url_for('mobile_contrats') }}"><span class="icon">📄</span> Contrats</a>
+    <a class="quick-link" href="{{ url_for('mobile_utilisateurs') }}"><span class="icon">👤</span> Utilisateurs</a>
+    <a class="quick-link" href="{{ url_for('mobile_identifiants') }}"><span class="icon">🔑</span> Identifiants</a>
+</div>
+
+{% if alerts.garanties_alertes or alerts.contrats_alertes or alerts.av_urgents %}
+<div class="section-title">⚠ Alertes</div>
+
+{% for a in alerts.garanties_alertes %}
+<a class="card card-link" href="{{ url_for('mobile_appareil_detail', id=a.id) }}">
+    <div class="card-row">
+        <div>
+            <div class="card-title">{{ a.nom_machine }}</div>
+            <div class="card-sub">Garantie {{ 'expirée le' if a.garantie_jours < 0 else 'expire le' }} {{ a.garantie_fin_fmt }}</div>
+        </div>
+        <span class="badge {{ 'badge-red' if a.garantie_jours < 0 else 'badge-orange' }}">{{ a.garantie_jours }} j</span>
+    </div>
+</a>
+{% endfor %}
+
+{% for ct in alerts.contrats_alertes %}
+<a class="card card-link" href="{{ url_for('mobile_contrat_detail', id=ct.id) }}">
+    <div class="card-row">
+        <div>
+            <div class="card-title">{{ ct.titre }}</div>
+            <div class="card-sub">Contrat {{ 'expiré le' if ct.get('expire_depasse') else 'expire le' }} {{ ct.date_fin_fmt }}</div>
+        </div>
+        <span class="badge {{ 'badge-red' if ct.get('expire_depasse') else 'badge-orange' }}">{{ ct.jours_restants }} j</span>
+    </div>
+</a>
+{% endfor %}
+
+{% for av in alerts.av_urgents %}
+<div class="card">
+    <div class="card-row">
+        <div>
+            <div class="card-title">{{ av.nom_machine }}</div>
+            <div class="card-sub">Antivirus {{ av.av_nom or av.av_marque }} — {{ 'expiré' if av.expire_depasse else 'expire bientôt' }}</div>
+        </div>
+        <span class="badge {{ 'badge-red' if av.expire_depasse else 'badge-orange' }}">AV</span>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="section-title">✓ Aucune alerte</div>
+<div class="card" style="text-align:center;color:var(--text-secondary);">Rien à signaler pour {{ client.nom }}.</div>
+{% endif %}
+
+{% if stats.repartition %}
+<div class="section-title">Répartition du parc</div>
+<div class="card">
+    <div class="kv-list">
+        {% for r in stats.repartition[:8] %}
+        <div class="kv-row"><span class="k">{{ r.type }}</span><span class="v">{{ r.nb }}</span></div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}
