@@ -1,8 +1,20 @@
-PARCINFO_VERSION=2.18.37
+PARCINFO_VERSION=2.18.38
 RELEASE_DATE=2026-08-22
-BUILD_NUMBER=2026082201
+BUILD_NUMBER=2026082202
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.38 - Correctif : connexion depuis l'interface mobile
+# Remonté après test réel sur téléphone : se connecter depuis /m avec un
+# compte dont le mot de passe doit être changé (dont l'admin par défaut)
+# renvoyait vers la page bureau de changement de mot de passe, sans jamais
+# revenir sur mobile ensuite — l'utilisateur se retrouvait sur l'interface
+# bureau (large, non adaptée) en pensant que la version mobile n'avait
+# jamais été appliquée.
+# Correctif : la destination d'origine (next=/m/...) est désormais portée
+# à travers le changement de mot de passe forcé et restituée une fois
+# celui-ci effectué.
+# Date: 22 août 2026
 
 # Version 2.18.37 - Interface mobile de consultation (PWA)
 # Demandé : une version Android/mobile de ParcInfo, orientée consultation
