@@ -1,8 +1,21 @@
-PARCINFO_VERSION=2.18.38
+PARCINFO_VERSION=2.18.39
 RELEASE_DATE=2026-08-22
-BUILD_NUMBER=2026082202
+BUILD_NUMBER=2026082203
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.39 - Correctif : CSS visible en texte brut sur mobile
+# Remonté après test réel sur téléphone : le CSS dynamique (couleurs
+# d'accent personnalisées) apparaissait comme du texte brut sur les pages
+# de l'interface mobile au lieu d'être appliqué.
+# Cause : {{ dynamic_css }} était injecté nu dans <head>, hors de toute
+# balise <style> — la fonction qui le génère ne renvoie que des règles CSS
+# brutes, jamais la balise elle-même. Un navigateur qui rencontre du texte
+# orphelin dans <head> le pousse dans <body> et l'affiche tel quel. Le
+# template bureau enveloppait déjà correctement ce même appel dans
+# <style id="cfg-vars">; le template mobile ne le faisait pas.
+# Correctif : même enveloppe appliquée côté mobile.
+# Date: 22 août 2026
 
 # Version 2.18.38 - Correctif : connexion depuis l'interface mobile
 # Remonté après test réel sur téléphone : se connecter depuis /m avec un

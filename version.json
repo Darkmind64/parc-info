@@ -1,23 +1,23 @@
 {
-  "version": "2.18.38",
+  "version": "2.18.39",
   "release_date": "2026-08-22T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.38/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.38/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.38/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.38",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.38/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.38/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.38/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.38/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.38/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.39/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.39/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.39/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.39",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.39/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.39/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.39/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.39/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.39/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif de connexion pour l'interface mobile (/m) — la version 2.18.37 avait introduit la consultation mobile mais un compte avec mot de passe à changer obligatoirement restait bloqué sur l'interface bureau après connexion",
+    "new_features": "Correctif d'affichage pour l'interface mobile (/m) : le CSS personnalisé (couleurs d'accent, etc.) s'affichait en texte brut sur la page au lieu d'être appliqué",
     "improvements": [
-      "CORRIGÉ : un compte avec mot de passe à changer obligatoirement (dont l'admin par défaut) était redirigé vers la page bureau de changement de mot de passe quelle que soit la destination demandée — un login depuis /m atterrissait donc sur l'interface bureau, sans jamais revenir sur mobile ensuite.",
-      "La destination d'origine (ex. /m/dashboard) est désormais conservée à travers le changement de mot de passe forcé."
+      "CORRIGÉ : le CSS dynamique (couleurs d'accent personnalisées) était injecté hors de toute balise <style> dans l'interface mobile — les navigateurs poussaient ce texte orphelin dans le corps de la page et l'affichaient tel quel au lieu de l'appliquer.",
+      "Le CSS dynamique est désormais correctement enveloppé, comme sur la version bureau."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.38"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.39"
 }
