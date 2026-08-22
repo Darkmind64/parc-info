@@ -23,6 +23,9 @@
     <div class="kv-row"><span class="k">Utilisateur</span><span class="v">{{ appareil.utilisateur or '—' }}</span></div>
     <div class="kv-row"><span class="k">Service</span><span class="v">{{ appareil.service or '—' }}</span></div>
     <div class="kv-row"><span class="k">Localisation</span><span class="v">{{ appareil.localisation or '—' }}</span></div>
+    {% if appareil.dernier_ping_fmt %}
+    <div class="kv-row"><span class="k">Dernier ping</span><span class="v">{{ appareil.dernier_ping_fmt }}</span></div>
+    {% endif %}
 </div>
 
 <div class="section-title">Matériel & OS</div>
@@ -120,6 +123,38 @@
 </div>
 {% endif %}
 
+{% if licences %}
+<div class="section-title">Licences logicielles ({{ licences|length }})</div>
+<div class="card kv-list">
+    {% for l in licences %}
+    <div class="kv-row">
+        <span class="k">{{ l.editeur }}{% if l.produit %} — {{ l.produit }}{% endif %}</span>
+        <span class="v">
+            {% if l.cle_licence %}
+            <span class="mono mask-dots" id="mask-lic-{{ loop.index }}" data-value="{{ l.cle_licence }}" data-revealed="0">••••••••</span>
+            <button type="button" class="reveal-btn" onclick="toggleMask('mask-lic-{{ loop.index }}', this)">👁 Afficher</button>
+            {% else %}—{% endif %}
+        </span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if cles_bitlocker %}
+<div class="section-title">Clés de récupération BitLocker ({{ cles_bitlocker|length }})</div>
+<div class="card kv-list">
+    {% for cle in cles_bitlocker %}
+    <div class="kv-row">
+        <span class="k">Volume {{ cle.volume }}{% if cle.protection %} ({{ cle.protection }}){% endif %}</span>
+        <span class="v">
+            <span class="mono mask-dots" id="blk-{{ loop.index }}" data-revealed="0">••••••-••••••-••••••-••••••-••••••-••••••-••••••-••••••</span>
+            <button type="button" class="reveal-btn" onclick="revealBitlocker({{ appareil.id }}, '{{ cle.volume }}', 'blk-{{ loop.index }}', this)">👁 Afficher</button>
+        </span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% if peripheriques %}
 <div class="section-title">Périphériques ({{ peripheriques|length }})</div>
 {% for p in peripheriques %}
@@ -156,8 +191,19 @@
 <div class="card" style="white-space:pre-wrap;">{{ appareil.notes }}</div>
 {% endif %}
 
-{% if nb_docs %}
-<div class="cap-note">{{ nb_docs }} document(s) joint(s) — consultables depuis la version bureau.</div>
+{% if docs %}
+<div class="section-title">Documents joints ({{ docs|length }})</div>
+{% for d in docs %}
+<a class="card card-link" href="{{ url_for('telecharger_document', id=d.id) }}">
+    <div class="card-row">
+        <div style="min-width:0;">
+            <div class="card-title">{{ d.nom }}</div>
+            <div class="card-sub">{{ d.type_doc or '' }}{% if d.taille_fmt %} · {{ d.taille_fmt }}{% endif %}</div>
+        </div>
+        <span class="badge badge-blue">⬇</span>
+    </div>
+</a>
+{% endfor %}
 {% endif %}
 
 {% endblock %}

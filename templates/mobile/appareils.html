@@ -23,7 +23,12 @@
     <div class="card-row">
         <div style="min-width:0;">
             <div class="card-title">{{ a.nom_machine }}</div>
-            <div class="card-sub mono">{{ a.adresse_ip or '—' }}{% if a.utilisateur %} · {{ a.utilisateur }}{% endif %}</div>
+            <div class="card-sub">
+                {%- if a.marque or a.modele %}{{ a.marque or '' }} {{ a.modele or '' }} · {% endif -%}
+                <span class="mono">{{ a.adresse_ip or '—' }}</span>
+                {%- if a.utilisateur %} · {{ a.utilisateur }}{% endif -%}
+            </div>
+            {% if a.localisation %}<div class="card-sub">📍 {{ a.localisation }}</div>{% endif %}
         </div>
         {% if a.statut == 'hors_service' %}
         <span class="badge badge-red">HS</span>

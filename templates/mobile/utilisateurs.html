@@ -35,6 +35,9 @@
         {% if u.login_mail %}<div class="kv-row"><span class="k">Login mail</span><span class="v mono">{{ u.login_mail }}</span></div>{% endif %}
     </div>
     {% endif %}
+    {% if u.notes %}
+    <div style="margin-top:.5rem;font-size:.82rem;color:var(--text-secondary);white-space:pre-wrap;">{{ u.notes }}</div>
+    {% endif %}
 </div>
 {% else %}
 <div class="empty-state"><div class="icon">👤</div>Aucun utilisateur pour ce client.</div>

@@ -13211,9 +13211,10 @@ def mobile_dashboard():
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
     stats = _compute_client_dashboard_stats(conn, cid, today)
     alerts = _compute_alerts_for_client(conn, cid, today)
+    valeur_parc = sum(a.get('prix_achat') or 0 for a in stats['appareils'])
     conn.close()
     return render_template('mobile/dashboard.html', client=client, clients=get_clients(),
-                           client_actif_id=cid, stats=stats, alerts=alerts)
+                           client_actif_id=cid, stats=stats, alerts=alerts, valeur_parc=valeur_parc)
 
 
 @app.route('/m/appareils')
@@ -13258,10 +13259,24 @@ def mobile_appareil_detail(id):
         '''SELECT c.* FROM contrats c
            JOIN contrats_appareils ca ON ca.contrat_id=c.id
            WHERE ca.appareil_id=? ORDER BY c.titre''', (id,)).fetchall()]
-    nb_docs = conn.execute('SELECT COUNT(*) FROM documents_appareils WHERE appareil_id=?', (id,)).fetchone()[0]
+    docs = [row_to_dict(r) for r in conn.execute(
+        '''SELECT id, nom, description, type_doc, nom_fichier, taille, date_upload
+           FROM documents_appareils WHERE appareil_id=? ORDER BY date_upload DESC''', (id,)).fetchall()]
+    for d in docs:
+        d['taille_fmt'] = human_size(d.get('taille', 0))
+    licences = [row_to_dict(r) for r in conn.execute(
+        '''SELECT editeur, produit, cle_licence FROM licences_appareils
+           WHERE appareil_id=? ORDER BY id''', (id,)).fetchall()]
+    # Les clés BitLocker restent chiffrées ici : seules les métadonnées
+    # (volume, protection) voyagent jusqu'à la page, la valeur ne part que
+    # sur demande via /api/appareil/<id>/cle-bitlocker (déjà auditée).
+    cles_bitlocker = [row_to_dict(r) for r in conn.execute(
+        '''SELECT volume, identifiant, protection, chiffrement FROM cles_recuperation
+           WHERE appareil_id=? AND client_id=? ORDER BY volume''', (id, cid)).fetchall()]
     conn.close()
     return render_template('mobile/appareil_detail.html', appareil=a, peripheriques=peripheriques,
-                           contrats_lies=contrats_lies, nb_docs=nb_docs,
+                           contrats_lies=contrats_lies, docs=docs, licences=licences,
+                           cles_bitlocker=cles_bitlocker,
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 
@@ -13304,10 +13319,17 @@ def mobile_contrat_detail(id):
     periph_lies = [row_to_dict(r) for r in conn.execute(
         'SELECT p.* FROM peripheriques p JOIN contrats_peripheriques cp ON p.id=cp.peripherique_id WHERE cp.contrat_id=?',
         (id,)).fetchall()]
-    nb_docs = conn.execute('SELECT COUNT(*) FROM documents_contrats WHERE contrat_id=?', (id,)).fetchone()[0]
+    docs = [row_to_dict(r) for r in conn.execute(
+        '''SELECT id, nom, description, type_doc, nom_fichier, taille, date_upload
+           FROM documents_contrats WHERE contrat_id=? ORDER BY date_upload DESC''', (id,)).fetchall()]
+    for d in docs:
+        d['taille_fmt'] = human_size(d.get('taille', 0))
+    interventions = [fmt_intervention(row_to_dict(r)) for r in conn.execute(
+        'SELECT * FROM interventions WHERE contrat_id=? AND statut != ? ORDER BY date_intervention DESC LIMIT 10',
+        (id, 'archivee')).fetchall()]
     conn.close()
     return render_template('mobile/contrat_detail.html', contrat=ct, appareils_lies=appareils_lies,
-                           periph_lies=periph_lies, nb_docs=nb_docs,
+                           periph_lies=periph_lies, docs=docs, interventions=interventions,
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 

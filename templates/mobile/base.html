@@ -280,6 +280,33 @@ function toggleMask(id, btn) {
     target.dataset.revealed = revealed ? '0' : '1';
     btn.textContent = revealed ? '👁 Afficher' : '🙈 Masquer';
 }
+
+// Révèle une clé de récupération BitLocker via l'endpoint existant (déchiffrement à
+// la demande, journalisé côté serveur).
+var _bitlockerCache = {};
+async function revealBitlocker(appareilId, volume, elId, btn) {
+    var target = document.getElementById(elId);
+    if (!target) return;
+    if (target.dataset.revealed === '1') {
+        target.textContent = '••••••-••••••-••••••-••••••-••••••-••••••-••••••-••••••';
+        target.dataset.revealed = '0';
+        btn.textContent = '👁 Afficher';
+        return;
+    }
+    var cacheKey = appareilId + ':' + volume;
+    try {
+        if (_bitlockerCache[cacheKey] === undefined) {
+            var r = await fetch('/api/appareil/' + appareilId + '/cle-bitlocker?volume=' + encodeURIComponent(volume));
+            var d = await r.json();
+            _bitlockerCache[cacheKey] = d.cle || '';
+        }
+        target.textContent = _bitlockerCache[cacheKey] || '(vide)';
+        target.dataset.revealed = '1';
+        btn.textContent = '🙈 Masquer';
+    } catch (e) {
+        target.textContent = 'Erreur';
+    }
+}
 </script>
 {% block scripts %}{% endblock %}
 </body>

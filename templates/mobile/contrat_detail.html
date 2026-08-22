@@ -69,8 +69,34 @@
 <div class="card" style="white-space:pre-wrap;">{{ contrat.notes }}</div>
 {% endif %}
 
-{% if nb_docs %}
-<div class="cap-note">{{ nb_docs }} document(s) joint(s) — consultables depuis la version bureau.</div>
+{% if interventions %}
+<div class="section-title">Interventions récentes ({{ interventions|length }})</div>
+{% for i in interventions %}
+<div class="card">
+    <div class="card-row">
+        <div style="min-width:0;">
+            <div class="card-title">{{ i.titre or i.type_intervention or 'Intervention' }}</div>
+            <div class="card-sub">{{ i.date_intervention_fmt }}{% if i.horaire %} · {{ i.horaire }}{% endif %}{% if i.technicien_nom %} · {{ i.technicien_nom }}{% endif %}</div>
+        </div>
+        <span class="badge badge-grey">{{ i.statut_emoji }} {{ i.statut }}</span>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if docs %}
+<div class="section-title">Documents joints ({{ docs|length }})</div>
+{% for d in docs %}
+<a class="card card-link" href="{{ url_for('telecharger_doc_contrat', id=d.id) }}">
+    <div class="card-row">
+        <div style="min-width:0;">
+            <div class="card-title">{{ d.nom }}</div>
+            <div class="card-sub">{{ d.type_doc or '' }}{% if d.taille_fmt %} · {{ d.taille_fmt }}{% endif %}</div>
+        </div>
+        <span class="badge badge-blue">⬇</span>
+    </div>
+</a>
+{% endfor %}
 {% endif %}
 
 {% endblock %}
