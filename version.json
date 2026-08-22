@@ -1,23 +1,23 @@
 {
-  "version": "2.18.36",
-  "release_date": "2026-08-21T00:00:00.000000",
+  "version": "2.18.37",
+  "release_date": "2026-08-22T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.36",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.36/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.37/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.37/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.37/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.37",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.37/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.37/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.37/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.37/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.37/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Sortie d'App Translocation sans Terminal : le collecteur GUI macOS propose désormais de déplacer l'app avec le Finder plutôt que de n'offrir que la commande xattr",
+    "new_features": "Interface mobile de consultation (PWA) : le parc (appareils, contrats, utilisateurs, identifiants) devient consultable depuis un smartphone, en lecture seule, installable sur l'écran d'accueil Android",
     "improvements": [
-      "CORRIGÉ (macOS) : le message affiché quand l'app tourne sous protection Gatekeeper « App Translocation » ne proposait jusqu'ici que la commande Terminal xattr -cr, alors qu'une solution purement Finder existe et est même plus simple — glisser-déposer l'app vers un autre dossier (Applications, Bureau...) suffit à lever la translocation, sans rien taper.",
-      "Corrigé au passage : ce même message citait encore une commande « sudo » à relancer, une référence obsolète depuis le passage à l'authentification via osascript en 2.18.35."
+      "AJOUTÉ : nouvelle interface `/m` optimisée mobile — recherche et filtres instantanés, mots de passe masqués par défaut et révélés à la demande, jamais mis en cache hors ligne.",
+      "AJOUTÉ : manifest + service worker minimal pour installer ParcInfo comme une app sur l'écran d'accueil (mode standalone)."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.36"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.37"
 }

@@ -1,8 +1,26 @@
-PARCINFO_VERSION=2.18.36
-RELEASE_DATE=2026-08-21
-BUILD_NUMBER=2026082113
+PARCINFO_VERSION=2.18.37
+RELEASE_DATE=2026-08-22
+BUILD_NUMBER=2026082201
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.37 - Interface mobile de consultation (PWA)
+# Demandé : une version Android/mobile de ParcInfo, orientée consultation
+# plutôt que modification, avec une ergonomie simple pour un usage au
+# smartphone.
+# Réponse : une nouvelle surface /m, PWA installable sur l'écran d'accueil
+# Android, strictement en lecture seule (aucune route n'accepte
+# POST/PUT/DELETE). Dashboard, appareils, contrats, utilisateurs et
+# identifiants, avec recherche et filtres instantanés côté client. Mêmes
+# ACL et helpers de formatage que la version bureau — aucune règle de
+# sécurité dupliquée ou affaiblie. Les mots de passe restent masqués par
+# défaut ; ceux stockés chiffrés (table identifiants) ne sont déchiffrés
+# qu'à la demande via l'endpoint existant /api/identifiant/<id>/mdp, jamais
+# rendus en clair côté serveur pour la liste — plus strict que la page
+# bureau équivalente. Le service worker ne met en cache que les icônes,
+# jamais les pages ni les données du parc, pour éviter qu'un téléphone
+# partagé ou perdu ne conserve des informations sensibles hors ligne.
+# Date: 22 août 2026
 
 # Version 2.18.36 - Sortie d'App Translocation sans Terminal (collecteur 3.14)
 # Question directe après la 2.18.35 : faut-il quand même passer par xattr
