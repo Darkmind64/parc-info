@@ -163,7 +163,7 @@
         .quick-link { display:flex; align-items:center; gap:.6rem; background:var(--bg-card); border:1px solid var(--border); border-radius:10px; padding:.8rem .9rem; font-weight:700; font-size:.88rem; }
         .quick-link .icon { font-size:1.3rem; }
     </style>
-    {{ dynamic_css }}
+    <style id="cfg-vars">{{ dynamic_css }}</style>
     {% block extra_styles %}{% endblock %}
 </head>
 <body class="{{ 'theme-light' if cfg.get('mode') == 'light' else '' }}">
