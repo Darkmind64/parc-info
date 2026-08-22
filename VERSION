@@ -1,8 +1,25 @@
-PARCINFO_VERSION=2.18.39
+PARCINFO_VERSION=2.18.40
 RELEASE_DATE=2026-08-22
-BUILD_NUMBER=2026082203
+BUILD_NUMBER=2026082204
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.40 - Interface mobile enrichie (documents, licences, BitLocker)
+# Après un premier passage en conditions réelles sur téléphone, complète la
+# consultation mobile avec les données déjà disponibles côté bureau mais
+# absentes de la première version.
+# Dashboard : disponibilité, garanties, périphériques, valeur du parc,
+# activité récente. Appareils : marque/modèle et localisation en liste,
+# dernier ping, licences logicielles (masquées), clés de récupération
+# BitLocker (déchiffrement à la demande, audité comme côté bureau),
+# documents joints réellement téléchargeables (avant : simple compteur
+# renvoyant vers la version bureau). Contrats : montant/numéro en liste,
+# interventions liées et documents téléchargeables en détail. Utilisateurs :
+# notes affichées.
+# Aucune nouvelle action d'écriture — uniquement des lectures
+# supplémentaires, mêmes règles ACL et de masquage des mots de passe que
+# le reste de l'app.
+# Date: 22 août 2026
 
 # Version 2.18.39 - Correctif : CSS visible en texte brut sur mobile
 # Remonté après test réel sur téléphone : le CSS dynamique (couleurs
