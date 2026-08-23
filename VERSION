@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.18.43
+PARCINFO_VERSION=2.18.44
 RELEASE_DATE=2026-08-23
-BUILD_NUMBER=2026082301
+BUILD_NUMBER=2026082302
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.44 - Rattrapage de la documentation décrochée (25+ versions de retard)
+# claude.md, BUILD.md, DOCKERHUB_SETUP.md et IMPLEMENTATION_GUIDE.md étaient
+# tous figés au même horodatage « 2026-08-19 (v2.18.15) », 25+ versions
+# derrière le code réel — constat de l'audit du 2026-08-23.
+# claude.md : documente désormais l'interface mobile PWA (diagramme
+# d'architecture, arborescence templates/mobile + static/mobile, entrée
+# Quick Lookup), absente malgré plusieurs releases dédiées (2.18.37-40) ;
+# le tableau « Hiérarchie Fichiers Clés » ne porte plus de compteurs de
+# lignes figés (dérivés jusqu'à 233 % de la réalité, ex. database.py
+# annoncé « 300+ », en réalité >1000) — remplacé par une invite `wc -l`.
+# BUILD.md : la section OUI Database décrivait encore le téléchargement
+# manuel (python download_oui.py + copie à la main), alors qu'il est
+# automatique depuis la 2.18.25 — réécrite pour refléter le comportement
+# réel.
+# IMPLEMENTATION_GUIDE.md archivé dans docs/archive/ (git mv, historique
+# préservé) : le fichier admettait lui-même avoir divergé de la réalité,
+# affirmait encore que macOS/Linux n'avaient que des scripts Python (faux
+# depuis la 2.18.27), citait des tailles d'exécutables obsolètes. Lien
+# mort retiré de README.md.
+# README.md : paragraphe orphelin sous « Fonctionnalités Principales »
+# (deux lignes vides, pas de sous-titre suite à une suppression
+# antérieure) — a désormais son propre « ### Fiche système enrichie ».
+# CHANGELOG.md : rattrapé de 18 versions (2.18.26 → 2.18.43), en
+# reconvertissant le contenu déjà rédigé dans VERSION plutôt qu'en le
+# réécrivant de zéro.
+# DOCKERHUB_SETUP.md / SYNOLOGY_DEPLOYMENT.md : contenu vérifié toujours
+# exact, seuls les tampons de date étaient à bumper.
+# Date: 23 août 2026
 
 # Version 2.18.43 - Couverture de tests /login + ACL CRUD, 2 correctifs trouvés au passage
 # Chantier suivant de l'audit du 2026-08-23 : le mécanisme d'ACL le plus

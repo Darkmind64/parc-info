@@ -1,24 +1,24 @@
 {
-  "version": "2.18.43",
+  "version": "2.18.44",
   "release_date": "2026-08-23T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.43/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.43/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.43/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.43",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.43/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.43/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.43/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.43/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.43/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.44",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Couverture de tests /login + ACL CRUD, 2 correctifs trouvés au passage",
+    "new_features": "Rattrapage de la documentation décrochée (25+ versions de retard)",
     "improvements": [
-      "TESTS : le mécanisme d'ACL le plus critique du projet (can_write) et le seul point d'entrée non authentifié (/login) n'avaient jusqu'ici aucune couverture de test dédiée — ajout de test_login.py (identifiants corrects/incorrects, compte désactivé, rate-limiting 10/5min, protection open-redirect, timeout de session 8h) et test_acl_crud.py (création/modification/suppression bloquées en lecture seule, autorisées en écriture, pour appareil/contrat/identifiant).",
-      "CORRIGÉ : login.html est une page autonome qui n'affichait jamais les messages flash — le message de timeout de session posé par login_required atterrissait dans le vide. La page reprend désormais le premier message flash comme erreur affichée s'il n'y en a pas déjà une.",
-      "CORRIGÉ (sécurité mineure) : supprimer_identifiant lisait le nom de l'identifiant à journaliser sans filtrer par client_id — la suppression elle-même était déjà bien scopée (sans effet cross-tenant), mais le nom d'un identifiant d'un autre client pouvait fuiter dans l'historique du client actif. Scopé par id ET client_id."
+      "DOCS : claude.md, BUILD.md, DOCKERHUB_SETUP.md et IMPLEMENTATION_GUIDE.md étaient tous figés au même horodatage « 2026-08-19 (v2.18.15) », 25+ versions derrière le code réel. claude.md documente désormais l'interface mobile PWA (absente malgré plusieurs releases dédiées) et ne porte plus de compteurs de lignes figés (dérivés jusqu'à 233 % de la réalité) ; BUILD.md décrit le téléchargement automatique de la base OUI (au lieu de l'ancien procédé manuel) ; IMPLEMENTATION_GUIDE.md, qui admettait lui-même avoir divergé de la réalité, a été archivé dans docs/archive/.",
+      "CORRIGÉ : paragraphe orphelin sous « Fonctionnalités Principales » dans README.md (reste d'une suppression antérieure, sans sous-titre).",
+      "CHANGELOG.md rattrapé de 18 versions (2.18.26 → 2.18.43)."
     ]
   },
   "checksums": {
@@ -29,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.43"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.44"
 }
