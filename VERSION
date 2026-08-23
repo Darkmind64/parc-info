@@ -1,8 +1,30 @@
-PARCINFO_VERSION=2.18.42
+PARCINFO_VERSION=2.18.43
 RELEASE_DATE=2026-08-23
-BUILD_NUMBER=2026082300
+BUILD_NUMBER=2026082301
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.43 - Couverture de tests /login + ACL CRUD, 2 correctifs trouvés au passage
+# Chantier suivant de l'audit du 2026-08-23 : le mécanisme d'ACL le plus
+# critique du projet (can_write) et le seul point d'entrée non authentifié
+# (/login) n'avaient jusqu'ici aucune couverture de test dédiée.
+# Ajout de test_login.py (identifiants corrects/incorrects, compte désactivé,
+# rate-limiting 10 tentatives/5min avec reset après succès, protection
+# open-redirect sur `next`, timeout de session 8h) et test_acl_crud.py (pour
+# appareil/contrat/identifiant : création/modification/suppression bloquées
+# avec un accès lecture seule, autorisées avec un accès écriture).
+# Deux bugs réels trouvés en écrivant ces tests, corrigés au passage :
+# 1) login.html est une page autonome qui n'affichait jamais les messages
+#    flash (get_flashed_messages jamais appelé) — le message de timeout de
+#    session posé par login_required atterrissait dans le vide. page_login()
+#    reprend désormais le premier message flash comme erreur affichée s'il
+#    n'y en a pas déjà une.
+# 2) supprimer_identifiant lisait le nom de l'identifiant à journaliser sans
+#    filtrer par client_id (contrairement à supprimer_contrat) : la
+#    suppression elle-même était déjà bien scopée et donc sans effet
+#    cross-tenant, mais le nom d'un identifiant d'un autre client pouvait
+#    fuiter dans l'historique du client actif. Scopé par id ET client_id.
+# Date: 23 août 2026
 
 # Version 2.18.42 - Correctif faille d'isolation multi-client (IDOR) sur la fiche appareil
 # Trouvé lors d'un audit du projet : editer_appareil et supprimer_appareil ne
