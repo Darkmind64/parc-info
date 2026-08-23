@@ -1,24 +1,22 @@
 {
-  "version": "2.18.46",
+  "version": "2.18.47",
   "release_date": "2026-08-23T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.46/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.46/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.46/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.46",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.46/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.46/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.46/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.46/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.46/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.47",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Repli responsive de la nav (<900px) + correctif JS dupliqué sur la fiche appareil",
+    "new_features": "Retrait de models.py, code mort (audit du 2026-08-23)",
     "improvements": [
-      "UX : en dessous de 900px, la nav (horizontale ou verticale selon la préférence) se replie désormais en tiroir hors-écran au lieu de rester affichée en permanence — bouton hamburger, fermeture par Échap/clic extérieur/sélection d'un lien.",
-      "CORRIGÉ (important) : un {% endblock %} manquant dans form_appareil.html imbriquait par erreur son bloc de scripts à l'intérieur du bloc de contenu, ce qui faisait que Jinja le rendait deux fois — tout le JavaScript de la page Ajouter/Modifier un appareil était déclaré en double (const FormTools, AV_BRAND_MAP...), levant une erreur qui cassait silencieusement le script depuis des dizaines de versions.",
-      "CORRIGÉ : chargerConfig() était appelé avant sa propre définition sur le dashboard, provoquant une erreur à chaque chargement et empêchant la préconfiguration de fonctionner."
+      "NETTOYAGE : suppression de models.py (533 lignes de modèles SQLAlchemy déclaratifs jamais branchés — db.init_app(app) jamais appelé, aucun import models nulle part dans le code). Un schéma dupliqué sans mécanisme pour rester synchronisé avec init_db() ne faisait que dériver en silence et pouvait induire en erreur un futur contributeur. flask-sqlalchemy retiré de requirements.txt (plus aucun autre usage)."
     ]
   },
   "checksums": {
@@ -29,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.46"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.47"
 }

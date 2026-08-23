@@ -1,8 +1,21 @@
-PARCINFO_VERSION=2.18.46
+PARCINFO_VERSION=2.18.47
 RELEASE_DATE=2026-08-23
-BUILD_NUMBER=2026082304
+BUILD_NUMBER=2026082305
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.47 - Retrait de models.py, code mort (audit du 2026-08-23)
+# 533 lignes de modèles SQLAlchemy déclaratifs ajoutées en prévision d'une
+# éventuelle bascule Turso/PostgreSQL, jamais branchées (db.init_app(app)
+# jamais appelé, aucun `import models` nulle part dans le code). Un schéma
+# dupliqué sans mécanisme pour rester synchronisé avec init_db() ne fait
+# que dériver en silence et induire en erreur un futur contributeur qui le
+# prendrait pour une référence à jour.
+# Supprime models.py, retire flask-sqlalchemy de requirements.txt (plus
+# aucun autre usage dans le code), nettoie toutes les références dans
+# claude.md et README.md (diagramme d'architecture, arborescence, tableau
+# des fichiers clés, section "Pourquoi pas d'ORM systématique").
+# Date: 23 août 2026
 
 # Version 2.18.46 - Repli responsive de la nav (<900px) + correctif JS dupliqué sur la fiche appareil
 # Chantier suivant de l'audit du 2026-08-23 : la nav horizontale (et la
