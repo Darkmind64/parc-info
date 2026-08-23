@@ -336,7 +336,7 @@ let _scanClientActifId = null;
 
 async function lancerScan() {
     const plages = getPlages();
-    if (!plages.length) { alert('Entrez au moins une plage IP'); return; }
+    if (!plages.length) { showFlash('Entrez au moins une plage IP', 'info'); return; }
 
     const r = await fetch('/api/scan/client-suggere');
     const d = await r.json();
@@ -358,7 +358,7 @@ function fermerModaleClientScan() {
 
 async function confirmerClientEtScanner() {
     const sel = document.querySelector('input[name="scan-client-choice"]:checked');
-    if (!sel) { alert('Choisissez un client'); return; }
+    if (!sel) { showFlash('Choisissez un client', 'info'); return; }
     const clientId = sel.value;
     fermerModaleClientScan();
 
@@ -375,7 +375,7 @@ async function confirmerClientEtScanner() {
 
 async function demarrerScanReel() {
     const plages = getPlages();
-    if (!plages.length) { alert('Entrez au moins une plage IP'); return; }
+    if (!plages.length) { showFlash('Entrez au moins une plage IP', 'info'); return; }
     document.getElementById('scan-progress-wrap').style.display = '';
     document.getElementById('btn-scan').disabled = true;
     document.getElementById('prog-fill').style.width = '0%';
@@ -391,7 +391,7 @@ async function demarrerScanReel() {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ plage_ip: plages, threads: parseInt(document.getElementById('scan-threads').value) })
     });
-    if (!r.ok) { const e = await r.json(); alert(e.error || 'Erreur'); resetUI(); return; }
+    if (!r.ok) { const e = await r.json(); showFlash(e.error || 'Erreur', 'danger'); resetUI(); return; }
     scanInterval = setInterval(pollStatus, 800);
 }
 
@@ -555,33 +555,34 @@ function selectionnerNouveaux() {
 // ── IMPORT ────────────────────────────────────────────────────────────────────
 async function importerSelection() {
     const selected = Array.from(document.querySelectorAll('.chk-host:checked')).map(c => c.value);
-    if (!selected.length) { alert('Aucun hôte sélectionné'); return; }
+    if (!selected.length) { showFlash('Aucun hôte sélectionné', 'info'); return; }
     const toImport = scanResults.filter(h => selected.includes(h.ip));
     const r = await fetch('/api/scan/importer', {
         method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({appareils: toImport})
     });
     const d = await r.json();
-    let msg = `Import terminé :\n• ${d.importes} ajouté(s)\n• ${d.mis_a_jour||0} mis à jour`;
+    const msgCourt = `Import terminé : ${d.importes} ajouté(s), ${d.mis_a_jour||0} mis à jour`;
     toImport.forEach(h => INVENTAIRE_IPS.add(h.ip));
     renderTable(scanResults);
 
     // Suggestion (jamais imposée) : équipements réseau détectés mais pas
     // encore positionnés dans la baie de brassage — voir _TYPES_SUGGESTION_BAIE
     // côté serveur. La position physique dans le rack reste à saisir, elle
-    // ne peut pas être déduite d'un scan réseau.
+    // ne peut pas être déduite d'un scan réseau. confirm() reste légitime ici
+    // (vraie question oui/non), contrairement à un simple message de statut.
     const suggestions = d.suggestions_baie || [];
     if (suggestions.length) {
         const liste = suggestions.map(s => `• ${s.nom} (${s.type})`).join('\n');
-        msg += `\n\n📡 ${suggestions.length} équipement(s) réseau détecté(s), pas encore ` +
+        const msgConfirm = `${msgCourt}\n\n📡 ${suggestions.length} équipement(s) réseau détecté(s), pas encore ` +
                `positionné(s) dans la baie de brassage :\n${liste}\n\n` +
                `Ouvrir la baie de brassage pour les placer maintenant ?`;
-        if (confirm(msg)) {
+        if (confirm(msgConfirm)) {
             location.href = '/baie';
             return;
         }
     }
-    alert(msg);
+    showFlash(msgCourt, 'success');
 }
 
 // ── STATS + BARGRAPH ──────────────────────────────────────────────────────────

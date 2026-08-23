@@ -1429,7 +1429,7 @@ document.addEventListener('DOMContentLoaded', function() {
   btnConfirmSave.addEventListener('click', function() {
     const name = newTemplateName.value.trim();
     if (!name) {
-      alert('Veuillez entrer un nom pour le modèle');
+      showFlash('Veuillez entrer un nom pour le modèle', 'info');
       return;
     }
 
@@ -1467,7 +1467,7 @@ document.addEventListener('DOMContentLoaded', function() {
     localStorage.setItem('customTemplates', JSON.stringify(customTemplates));
     customTemplateInput.style.display = 'none';
     newTemplateName.value = '';
-    alert(`Modèle "${name}" enregistré!`);
+    showFlash(`Modèle "${name}" enregistré !`, 'success');
     updateTemplateSelect();
   });
 
@@ -1481,7 +1481,7 @@ document.addEventListener('DOMContentLoaded', function() {
   btnLoadTemplate.addEventListener('click', function() {
     const customTemplates = JSON.parse(localStorage.getItem('customTemplates') || '{}');
     if (Object.keys(customTemplates).length === 0) {
-      alert('Aucun modèle personnalisé sauvegardé');
+      showFlash('Aucun modèle personnalisé sauvegardé', 'info');
       return;
     }
 

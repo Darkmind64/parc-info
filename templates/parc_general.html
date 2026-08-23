@@ -20,26 +20,26 @@
         <div class="form-section-title">&#9632; Identification du site</div>
         <div class="form-row cols-2">
             <div class="form-group">
-                <label>Nom du site / Entreprise</label>
-                <input type="text" name="nom_site" value="{{ parc.nom_site or '' }}" placeholder="Ex: ACME Corp - Siège social">
+                <label for="id-nom_site">Nom du site / Entreprise</label>
+                <input id="id-nom_site" type="text" name="nom_site" value="{{ parc.nom_site or '' }}" placeholder="Ex: ACME Corp - Siège social">
             </div>
             <div class="form-group">
-                <label>Adresse</label>
-                <input type="text" name="adresse" value="{{ parc.adresse or '' }}" placeholder="Adresse complète">
+                <label for="id-adresse">Adresse</label>
+                <input id="id-adresse" type="text" name="adresse" value="{{ parc.adresse or '' }}" placeholder="Adresse complète">
             </div>
         </div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Nb. machines déclarées</label>
-                <input type="number" name="nb_machines" value="{{ parc.nb_machines or '' }}" placeholder="0" min="0">
+                <label for="id-nb_machines">Nb. machines déclarées</label>
+                <input id="id-nb_machines" type="number" name="nb_machines" value="{{ parc.nb_machines or '' }}" placeholder="0" min="0">
             </div>
             <div class="form-group">
-                <label>Nb. utilisateurs</label>
-                <input type="number" name="nb_utilisateurs" value="{{ parc.nb_utilisateurs or '' }}" placeholder="0" min="0">
+                <label for="id-nb_utilisateurs">Nb. utilisateurs</label>
+                <input id="id-nb_utilisateurs" type="number" name="nb_utilisateurs" value="{{ parc.nb_utilisateurs or '' }}" placeholder="0" min="0">
             </div>
             <div class="form-group">
-                <label>Domaine Windows</label>
-                <input type="text" name="domaine" value="{{ parc.domaine or '' }}" placeholder="Ex: entreprise.local">
+                <label for="id-domaine">Domaine Windows</label>
+                <input id="id-domaine" type="text" name="domaine" value="{{ parc.domaine or '' }}" placeholder="Ex: entreprise.local">
             </div>
         </div>
     </div>
@@ -49,8 +49,8 @@
         <div class="form-section-title">&#9632; Connexion Internet</div>
         <div class="form-row cols-2">
             <div class="form-group">
-                <label>Type de connexion</label>
-                <select name="type_connexion">
+                <label for="id-type_connexion">Type de connexion</label>
+                <select id="id-type_connexion" name="type_connexion">
                     <option value="">— Sélectionner —</option>
                     {% for t in ['ADSL', 'VDSL', 'Fibre FTTH', 'Fibre FTTO', 'Fibre dédiée', 'SD-WAN', 'SDSL', '4G/5G', 'Liaison louée', 'Satellite'] %}
                     <option value="{{ t }}" {% if parc.type_connexion == t %}selected{% endif %}>{{ t }}</option>
@@ -58,36 +58,36 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Fournisseur (FAI)</label>
-                <input type="text" name="fournisseur_internet" value="{{ parc.fournisseur_internet or '' }}" placeholder="Orange, SFR, Bouygues...">
+                <label for="id-fournisseur_internet">Fournisseur (FAI)</label>
+                <input id="id-fournisseur_internet" type="text" name="fournisseur_internet" value="{{ parc.fournisseur_internet or '' }}" placeholder="Orange, SFR, Bouygues...">
             </div>
         </div>
         <div class="form-row cols-4">
             <div class="form-group">
-                <label>Débit descendant</label>
-                <input type="text" name="debit_descendant" value="{{ parc.debit_descendant or '' }}" placeholder="Ex: 1 Gb/s">
+                <label for="id-debit_descendant">Débit descendant</label>
+                <input id="id-debit_descendant" type="text" name="debit_descendant" value="{{ parc.debit_descendant or '' }}" placeholder="Ex: 1 Gb/s">
             </div>
             <div class="form-group">
-                <label>Débit montant</label>
-                <input type="text" name="debit_montant" value="{{ parc.debit_montant or '' }}" placeholder="Ex: 200 Mb/s">
+                <label for="id-debit_montant">Débit montant</label>
+                <input id="id-debit_montant" type="text" name="debit_montant" value="{{ parc.debit_montant or '' }}" placeholder="Ex: 200 Mb/s">
             </div>
             <div class="form-group">
-                <label>IP Publique</label>
-                <input type="text" name="ip_publique" value="{{ parc.ip_publique or '' }}" placeholder="Ex: 82.64.x.x">
+                <label for="id-ip_publique">IP Publique</label>
+                <input id="id-ip_publique" type="text" name="ip_publique" value="{{ parc.ip_publique or '' }}" placeholder="Ex: 82.64.x.x">
             </div>
             <div class="form-group">
-                <label>Plage IP locale</label>
-                <input type="text" name="plage_ip_locale" value="{{ parc.plage_ip_locale or '192.168.1.0/24' }}" placeholder="192.168.1.0/24">
+                <label for="id-plage_ip_locale">Plage IP locale</label>
+                <input id="id-plage_ip_locale" type="text" name="plage_ip_locale" value="{{ parc.plage_ip_locale or '192.168.1.0/24' }}" placeholder="192.168.1.0/24">
             </div>
         </div>
         <div class="form-row cols-2">
             <div class="form-group">
-                <label>Passerelle par défaut</label>
-                <input type="text" name="passerelle" value="{{ parc.passerelle or '' }}" placeholder="Ex: 192.168.1.1">
+                <label for="id-passerelle">Passerelle par défaut</label>
+                <input id="id-passerelle" type="text" name="passerelle" value="{{ parc.passerelle or '' }}" placeholder="Ex: 192.168.1.1">
             </div>
             <div class="form-group">
-                <label>Serveur(s) DNS</label>
-                <input type="text" name="serveur_dns" value="{{ parc.serveur_dns or '' }}" placeholder="Ex: 8.8.8.8, 1.1.1.1">
+                <label for="id-serveur_dns">Serveur(s) DNS</label>
+                <input id="id-serveur_dns" type="text" name="serveur_dns" value="{{ parc.serveur_dns or '' }}" placeholder="Ex: 8.8.8.8, 1.1.1.1">
             </div>
         </div>
     </div>
@@ -102,56 +102,56 @@
         </div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Marque / Modèle de la baie</label>
-                <input type="text" name="baie_marque" value="{{ parc.baie_marque or '' }}" placeholder="Ex: Legrand, Schneider...">
+                <label for="id-baie_marque">Marque / Modèle de la baie</label>
+                <input id="id-baie_marque" type="text" name="baie_marque" value="{{ parc.baie_marque or '' }}" placeholder="Ex: Legrand, Schneider...">
             </div>
             <div class="form-group">
-                <label>Taille (U)</label>
-                <input type="number" name="baie_nb_u" value="{{ parc.baie_nb_u or '' }}" placeholder="Ex: 12" min="0">
+                <label for="id-baie_nb_u">Taille (U)</label>
+                <input id="id-baie_nb_u" type="number" name="baie_nb_u" value="{{ parc.baie_nb_u or '' }}" placeholder="Ex: 12" min="0">
             </div>
             <div class="form-group">
-                <label>Routeur / Pare-feu</label>
-                <input type="text" name="routeur_marque" value="{{ parc.routeur_marque or '' }}" placeholder="Ex: Cisco RV340, pfSense...">
-            </div>
-        </div>
-        <div class="form-row cols-3">
-            <div class="form-group">
-                <label>Switch (marque/modèle)</label>
-                <input type="text" name="switch_marque" value="{{ parc.switch_marque or '' }}" placeholder="Ex: HP ProCurve 2530">
-            </div>
-            <div class="form-group">
-                <label>Nb. ports switch</label>
-                <input type="number" name="switch_nb_ports" value="{{ parc.switch_nb_ports or '' }}" placeholder="Ex: 24" min="0">
-            </div>
-            <div class="form-group">
-                <label>Nb. unités switch</label>
-                <input type="number" name="switch_nb_unites" value="{{ parc.switch_nb_unites or '' }}" placeholder="Ex: 2" min="0">
+                <label for="id-routeur_marque">Routeur / Pare-feu</label>
+                <input id="id-routeur_marque" type="text" name="routeur_marque" value="{{ parc.routeur_marque or '' }}" placeholder="Ex: Cisco RV340, pfSense...">
             </div>
         </div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Serveur (marque)</label>
-                <input type="text" name="serveur_marque" value="{{ parc.serveur_marque or '' }}" placeholder="Ex: Dell PowerEdge">
+                <label for="id-switch_marque">Switch (marque/modèle)</label>
+                <input id="id-switch_marque" type="text" name="switch_marque" value="{{ parc.switch_marque or '' }}" placeholder="Ex: HP ProCurve 2530">
             </div>
             <div class="form-group">
-                <label>Serveur (modèle)</label>
-                <input type="text" name="serveur_modele" value="{{ parc.serveur_modele or '' }}" placeholder="Ex: R740">
+                <label for="id-switch_nb_ports">Nb. ports switch</label>
+                <input id="id-switch_nb_ports" type="number" name="switch_nb_ports" value="{{ parc.switch_nb_ports or '' }}" placeholder="Ex: 24" min="0">
             </div>
             <div class="form-group">
-                <label>UPS / Onduleur</label>
-                <input type="text" name="ups_marque" value="{{ parc.ups_marque or '' }}" placeholder="Ex: APC Smart-UPS 1500">
+                <label for="id-switch_nb_unites">Nb. unités switch</label>
+                <input id="id-switch_nb_unites" type="number" name="switch_nb_unites" value="{{ parc.switch_nb_unites or '' }}" placeholder="Ex: 2" min="0">
+            </div>
+        </div>
+        <div class="form-row cols-3">
+            <div class="form-group">
+                <label for="id-serveur_marque">Serveur (marque)</label>
+                <input id="id-serveur_marque" type="text" name="serveur_marque" value="{{ parc.serveur_marque or '' }}" placeholder="Ex: Dell PowerEdge">
+            </div>
+            <div class="form-group">
+                <label for="id-serveur_modele">Serveur (modèle)</label>
+                <input id="id-serveur_modele" type="text" name="serveur_modele" value="{{ parc.serveur_modele or '' }}" placeholder="Ex: R740">
+            </div>
+            <div class="form-group">
+                <label for="id-ups_marque">UPS / Onduleur</label>
+                <input id="id-ups_marque" type="text" name="ups_marque" value="{{ parc.ups_marque or '' }}" placeholder="Ex: APC Smart-UPS 1500">
             </div>
         </div>
         <div class="form-row cols-2">
             <div class="form-group">
-                <label>Capacité UPS</label>
-                <input type="text" name="ups_capacite" value="{{ parc.ups_capacite or '' }}" placeholder="Ex: 1500 VA / 900 W">
+                <label for="id-ups_capacite">Capacité UPS</label>
+                <input id="id-ups_capacite" type="text" name="ups_capacite" value="{{ parc.ups_capacite or '' }}" placeholder="Ex: 1500 VA / 900 W">
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label>Autres équipements (patche, NAS, etc.)</label>
-                <textarea name="autres_equipements" placeholder="Décrivez les autres équipements présents dans la baie...">{{ parc.autres_equipements or '' }}</textarea>
+                <label for="id-autres_equipements">Autres équipements (patche, NAS, etc.)</label>
+                <textarea id="id-autres_equipements" name="autres_equipements" placeholder="Décrivez les autres équipements présents dans la baie...">{{ parc.autres_equipements or '' }}</textarea>
             </div>
         </div>
     </div>
@@ -161,8 +161,8 @@
         <div class="form-section-title">&#9632; Logiciels &amp; systèmes</div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>OS principal du parc</label>
-                <select name="os_principal">
+                <label for="id-os_principal">OS principal du parc</label>
+                <select id="id-os_principal" name="os_principal">
                     <option value="">— Sélectionner —</option>
                     {% for os in ['Windows 11', 'Windows 10', 'Windows Server 2022', 'Windows Server 2019', 'Ubuntu', 'Debian', 'macOS', 'Mixte'] %}
                     <option value="{{ os }}" {% if parc.os_principal == os %}selected{% endif %}>{{ os }}</option>
@@ -170,8 +170,8 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Suite bureautique</label>
-                <select name="suite_bureautique">
+                <label for="id-suite_bureautique">Suite bureautique</label>
+                <select id="id-suite_bureautique" name="suite_bureautique">
                     <option value="">— Sélectionner —</option>
                     {% for s in ['Microsoft 365', 'Office 2021', 'Office 2019', 'LibreOffice', 'Google Workspace', 'Autre'] %}
                     <option value="{{ s }}" {% if parc.suite_bureautique == s %}selected{% endif %}>{{ s }}</option>
@@ -179,14 +179,14 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Antivirus / EDR</label>
-                <input type="text" name="antivirus" value="{{ parc.antivirus or '' }}" placeholder="Ex: Bitdefender GravityZone">
+                <label for="id-antivirus">Antivirus / EDR</label>
+                <input id="id-antivirus" type="text" name="antivirus" value="{{ parc.antivirus or '' }}" placeholder="Ex: Bitdefender GravityZone">
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label>Logiciels métier (un par ligne)</label>
-                <textarea name="logiciels_metier" rows="5" placeholder="Sage 100&#10;EBP Compta&#10;Quadratus&#10;...">{{ parc.logiciels_metier or '' }}</textarea>
+                <label for="id-logiciels_metier">Logiciels métier (un par ligne)</label>
+                <textarea id="id-logiciels_metier" name="logiciels_metier" rows="5" placeholder="Sage 100&#10;EBP Compta&#10;Quadratus&#10;...">{{ parc.logiciels_metier or '' }}</textarea>
             </div>
         </div>
     </div>
@@ -204,13 +204,13 @@
                 <div class="form-section-subtitle" style="margin-bottom:.8rem;">Réseau principal</div>
                 <div class="form-row cols-2">
                     <div class="form-group">
-                        <label>SSID (nom du réseau)</label>
-                        <input type="text" name="wifi_ssid" value="{{ parc.wifi_ssid or '' }}"
+                        <label for="id-wifi_ssid">SSID (nom du réseau)</label>
+                        <input id="id-wifi_ssid" type="text" name="wifi_ssid" value="{{ parc.wifi_ssid or '' }}"
                                placeholder="MonReseau" oninput="majQR('qr1')">
                     </div>
                     <div class="form-group">
-                        <label>Sécurité</label>
-                        <select name="wifi_securite" onchange="majQR('qr1')">
+                        <label for="id-wifi_securite">Sécurité</label>
+                        <select id="id-wifi_securite" name="wifi_securite" onchange="majQR('qr1')">
                             {% for s in ['WPA2','WPA3','WPA','WEP','Ouvert'] %}
                             <option value="{{ s }}" {% if (parc.wifi_securite or 'WPA2') == s %}selected{% endif %}>{{ s }}</option>
                             {% endfor %}
@@ -242,13 +242,13 @@
                 <div class="form-section-subtitle" style="margin-bottom:.8rem;">Réseau secondaire / Invités <span style="font-size:.7rem;color:var(--text-muted);font-weight:400;">(optionnel)</span></div>
                 <div class="form-row cols-2">
                     <div class="form-group">
-                        <label>SSID</label>
-                        <input type="text" name="wifi_ssid2" value="{{ parc.wifi_ssid2 or '' }}"
+                        <label for="id-wifi_ssid2">SSID</label>
+                        <input id="id-wifi_ssid2" type="text" name="wifi_ssid2" value="{{ parc.wifi_ssid2 or '' }}"
                                placeholder="MonReseau_Invites" oninput="majQR('qr2')">
                     </div>
                     <div class="form-group">
-                        <label>Sécurité</label>
-                        <select name="wifi_securite2" onchange="majQR('qr2')">
+                        <label for="id-wifi_securite2">Sécurité</label>
+                        <select id="id-wifi_securite2" name="wifi_securite2" onchange="majQR('qr2')">
                             {% for s in ['WPA2','WPA3','WPA','WEP','Ouvert'] %}
                             <option value="{{ s }}" {% if (parc.wifi_securite2 or 'WPA2') == s %}selected{% endif %}>{{ s }}</option>
                             {% endfor %}
@@ -276,8 +276,8 @@
         </div>
 
         <div class="form-group" style="margin-top:1rem;">
-            <label>Notes Wi-Fi</label>
-            <input type="text" name="wifi_notes" value="{{ parc.wifi_notes or '' }}"
+            <label for="id-wifi_notes">Notes Wi-Fi</label>
+            <input id="id-wifi_notes" type="text" name="wifi_notes" value="{{ parc.wifi_notes or '' }}"
                    placeholder="Ex: routeur Zyxel VMG8825, canal 6, portée limitée...">
         </div>
     </div>
@@ -342,8 +342,8 @@
             <input type="hidden" name="scope" id="import-scope-field" value="user">
             <div style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:flex-end;">
                 <div class="form-group" style="margin-bottom:0;flex:1;min-width:200px;">
-                    <label>Fichier de sauvegarde (.json ou .zip)</label>
-                    <input type="file" name="fichier" accept=".json,.zip" required>
+                    <label for="id-fichier">Fichier de sauvegarde (.json ou .zip)</label>
+                    <input id="id-fichier" type="file" name="fichier" accept=".json,.zip" required>
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
                     <label>Mode d'import</label>

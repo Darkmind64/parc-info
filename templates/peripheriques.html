@@ -219,6 +219,7 @@
 <div class="card" style="padding:0;overflow:hidden;">
 {% if peripheriques %}
     {% set ns = namespace(cur_cat='') %}
+    <div class="table-scroll">
     <table id="table-peripheriques">
         <thead>
             <tr>
@@ -341,6 +342,7 @@
         {% endfor %}
         </tbody>
     </table>
+    </div>
 {% else %}
     <div style="text-align:center;padding:3rem;color:var(--text-secondary);">
         Aucun périphérique enregistré.<br><br>

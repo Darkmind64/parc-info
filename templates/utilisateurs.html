@@ -87,6 +87,7 @@ th[data-col]:hover { color: var(--accent) !important; background: rgba(0,201,255
 <div class="card" style="padding:0;overflow:hidden;">
 {% if utilisateurs %}
     {% set ns = namespace(cur_svc='__init__') %}
+    <div class="table-scroll">
     <table id="table-utilisateurs">
         <thead>
             <tr>
@@ -161,6 +162,7 @@ th[data-col]:hover { color: var(--accent) !important; background: rgba(0,201,255
         {% endfor %}
         </tbody>
     </table>
+    </div>
 {% else %}
     <div style="text-align:center;padding:3rem;color:var(--text-secondary);">
         Aucun utilisateur.

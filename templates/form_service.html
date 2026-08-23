@@ -11,8 +11,8 @@
         <div class="form-section-title">&#9632; Informations</div>
         <div class="form-row cols-2">
             <div class="form-group">
-                <label>Nom du service *</label>
-                <input type="text" name="nom" value="{{ service.nom if service else '' }}"
+                <label for="id-nom">Nom du service *</label>
+                <input id="id-nom" type="text" name="nom" value="{{ service.nom if service else '' }}"
                        placeholder="Ex: Comptabilité, Direction, IT..." required>
             </div>
             <div class="form-group">
@@ -25,19 +25,19 @@
         </div>
         <div class="form-row cols-2">
             <div class="form-group">
-                <label>Responsable</label>
-                <input type="text" name="responsable" value="{{ service.responsable if service else '' }}"
+                <label for="id-responsable">Responsable</label>
+                <input id="id-responsable" type="text" name="responsable" value="{{ service.responsable if service else '' }}"
                        placeholder="Nom du responsable de service">
             </div>
             <div class="form-group">
-                <label>Ordre d'affichage</label>
-                <input type="number" name="ordre" value="{{ service.ordre if service else 0 }}" min="0">
+                <label for="id-ordre">Ordre d'affichage</label>
+                <input id="id-ordre" type="number" name="ordre" value="{{ service.ordre if service else 0 }}" min="0">
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label>Description</label>
-                <textarea name="description" rows="2"
+                <label for="id-description">Description</label>
+                <textarea id="id-description" name="description" rows="2"
                           placeholder="Description du rôle de ce service...">{{ service.description if service else '' }}</textarea>
             </div>
         </div>

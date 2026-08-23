@@ -211,6 +211,20 @@ th[data-col].sorted { color: var(--accent); }
 {% endblock %}
 
 {% block content %}
+{# Badge de statut d'agent (AV/EDR/RMM) sur la ligne d'un appareil — un seul
+   endroit à modifier pour les trois agents, au lieu de trois blocs
+   quasi identiques copiés-collés directement dans le tableau. #}
+{% macro badge_agent(status, nom, marque, date_fin, icon, label, offset, show_none, none_types, type_css) -%}
+{%- if status == 'active' -%}
+<span style="margin-left:{{ offset }};font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#00ff8815;color:#00ff88;border:1px solid #00ff8840;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ nom or marque or (label ~ ' actif') }}{% if date_fin %} · Fin : {{ date_fin }}{% endif %}">{{ icon }} {{ label }}</span>
+{%- elif status == 'expiring' -%}
+<span style="margin-left:{{ offset }};font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff8c0018;color:#ff8c00;border:1px solid #ff8c0045;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ nom or marque or label }} — Expire le {{ date_fin }}">{{ icon }} !</span>
+{%- elif status == 'expired' -%}
+<span style="margin-left:{{ offset }};font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff335515;color:#ff3355;border:1px solid #ff335540;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ nom or marque or label }} — Expiré le {{ date_fin }}">{{ icon }} EXP</span>
+{%- elif show_none and type_css in none_types -%}
+<span style="margin-left:{{ offset }};font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#64748b12;color:#64748b;border:1px solid #64748b35;vertical-align:middle;" title="Aucun {{ label|lower }} configuré">{{ icon }}</span>
+{%- endif -%}
+{%- endmacro %}
 <div class="page-header">
     <h1>Inventaire des <span>Appareils</span></h1>
     <p>
@@ -265,6 +279,7 @@ th[data-col].sorted { color: var(--accent); }
 </div>
 
 <div class="card" style="padding:0;overflow:hidden;">
+  <div class="table-scroll">
     <table id="table-appareils">
         <thead>
             <tr>
@@ -302,7 +317,7 @@ th[data-col].sorted { color: var(--accent); }
                      data-loc="{{ a.localisation|e }}"
                      data-av-status="{{ a.av_status }}"
                      data-av-nom="{{ (a.av_nom or a.av_marque or '')|e }}"
-                     data-av-fin="{{ a.av_date_fin_fmt|e }}">{{ a.nom_machine or '—' }}{% if a.av_status == 'active' %}<span style="margin-left:.35rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#00ff8815;color:#00ff88;border:1px solid #00ff8840;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.av_nom or a.av_marque or 'Antivirus actif' }}{% if a.av_date_fin_fmt %} · Fin : {{ a.av_date_fin_fmt }}{% endif %}">🛡 AV</span>{% elif a.av_status == 'expiring' %}<span style="margin-left:.35rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff8c0018;color:#ff8c00;border:1px solid #ff8c0045;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.av_nom or a.av_marque or 'Antivirus' }} — Expire le {{ a.av_date_fin_fmt }}">🛡 !</span>{% elif a.av_status == 'expired' %}<span style="margin-left:.35rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff335515;color:#ff3355;border:1px solid #ff335540;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.av_nom or a.av_marque or 'Antivirus' }} — Expiré le {{ a.av_date_fin_fmt }}">🛡 EXP</span>{% elif a.type_appareil|type_css in ['pc','linux','laptop','mac','serveur','nas'] %}<span style="margin-left:.35rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#64748b12;color:#64748b;border:1px solid #64748b35;vertical-align:middle;" title="Aucun antivirus configuré">🛡</span>{% endif %}{% if a.edr_status == 'active' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#00ff8815;color:#00ff88;border:1px solid #00ff8840;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.edr_nom or a.edr_marque or 'EDR actif' }}{% if a.edr_date_fin_fmt %} · Fin : {{ a.edr_date_fin_fmt }}{% endif %}">🔍 EDR</span>{% elif a.edr_status == 'expiring' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff8c0018;color:#ff8c00;border:1px solid #ff8c0045;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.edr_nom or a.edr_marque or 'EDR' }} — Expire le {{ a.edr_date_fin_fmt }}">🔍 !</span>{% elif a.edr_status == 'expired' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff335515;color:#ff3355;border:1px solid #ff335540;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.edr_nom or a.edr_marque or 'EDR' }} — Expiré le {{ a.edr_date_fin_fmt }}">🔍 EXP</span>{% endif %}{% if a.rmm_status == 'active' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#00b4d815;color:#00b4d8;border:1px solid #00b4d840;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.rmm_nom or a.rmm_marque or 'RMM actif' }}{% if a.rmm_date_fin_fmt %} · Fin : {{ a.rmm_date_fin_fmt }}{% endif %}">📡 RMM</span>{% elif a.rmm_status == 'expiring' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff8c0018;color:#ff8c00;border:1px solid #ff8c0045;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.rmm_nom or a.rmm_marque or 'RMM' }} — Expire le {{ a.rmm_date_fin_fmt }}">📡 !</span>{% elif a.rmm_status == 'expired' %}<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#ff335515;color:#ff3355;border:1px solid #ff335540;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="{{ a.rmm_nom or a.rmm_marque or 'RMM' }} — Expiré le {{ a.rmm_date_fin_fmt }}">📡 EXP</span>{% endif %}</a>
+                     data-av-fin="{{ a.av_date_fin_fmt|e }}">{{ a.nom_machine or '—' }}{{ badge_agent(a.av_status, a.av_nom, a.av_marque, a.av_date_fin_fmt, '🛡', 'AV', '.35rem', true, ['pc','linux','laptop','mac','serveur','nas'], a.type_appareil|type_css) }}{{ badge_agent(a.edr_status, a.edr_nom, a.edr_marque, a.edr_date_fin_fmt, '🔍', 'EDR', '.25rem', false, [], none) }}{{ badge_agent(a.rmm_status, a.rmm_nom, a.rmm_marque, a.rmm_date_fin_fmt, '📡', 'RMM', '.25rem', false, [], none) }}</a>
                 <div style="color:var(--text-secondary);font-size:0.77rem;">
                     {{ a.marque or '' }} {{ a.modele or '' }}
                     {% if a.numero_serie %}<span class="mono" style="font-size:0.7rem;"> · {{ a.numero_serie }}</span>{% endif %}
@@ -437,6 +452,7 @@ th[data-col].sorted { color: var(--accent); }
         {% endfor %}
         </tbody>
     </table>
+  </div>
 </div>
 
 
@@ -698,14 +714,14 @@ function lancerPort(ip, port, deviceId) {
                 const cleanIp = ip.trim();
                 window.location.href = 'mstsc:' + cleanIp;
             } else {
-                alert('⚠ Adresse IP non disponible');
+                showFlash('Adresse IP non disponible', 'danger');
             }
         },
         vnc:       () => window.location.href = 'vnc://'+ip,
         ftp:       () => window.open('ftp://'+ip, '_blank'),
         telnet:    () => window.location.href = 'telnet://'+ip,
         smb:       () => window.open('\\\\'+ip, '_blank') || (window.location.href = 'file://'+ip),
-        print:     () => alert('🖨 Imprimante sur '+ip+'\nAccès via http://'+ip),
+        print:     () => showFlash('🖨 Imprimante sur '+ip+' — accès via http://'+ip, 'info'),
         info:      () => {}
     };
     const fn = actions[d.action];
@@ -951,16 +967,33 @@ const FILTER_STATE = {
 
 function initSortHeaders() {
     const SORT_LABELS = { nom:'Appareil', type:'Type', ip:'IP / Réseau', user:'Utilisateur', garantie:'Garantie', statut:'État' };
+    // Ce tableau ne passe pas par TriTable (tri.js) — il trie côté serveur via
+    // sortBy(col)/rechargement de page — donc les mêmes attributs
+    // d'accessibilité (scope, clavier, aria-sort) sont posés ici plutôt que
+    // délégués au module partagé.
+    document.querySelectorAll('#table-appareils thead th').forEach(th => {
+        if (!th.hasAttribute('scope')) th.setAttribute('scope', 'col');
+    });
     Object.keys(SORT_LABELS).forEach(col => {
         const ind = document.getElementById('si-' + col);
         if (!ind) return;
+        const th = ind.closest('th');
+        if (th && !th.dataset.a11yBound) {
+            th.dataset.a11yBound = '1';
+            th.tabIndex = 0;
+            th.setAttribute('role', 'columnheader');
+            th.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); th.click(); }
+            });
+        }
         if (SORT_STATE.col === col) {
             ind.textContent = SORT_STATE.dir === 'asc' ? ' ↑' : ' ↓';
             ind.style.cssText = 'font-size:.7rem;opacity:1;color:var(--accent);';
-            ind.closest('th').style.color = 'var(--accent)';
+            if (th) { th.style.color = 'var(--accent)'; th.setAttribute('aria-sort', SORT_STATE.dir === 'asc' ? 'ascending' : 'descending'); }
         } else {
             ind.textContent = ' ↕';
             ind.style.cssText = 'font-size:.7rem;opacity:.3;';
+            if (th) th.setAttribute('aria-sort', 'none');
         }
     });
     // Barre de statut de tri

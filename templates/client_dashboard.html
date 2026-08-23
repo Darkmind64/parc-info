@@ -1246,10 +1246,11 @@ async function ignorerGarantie(id, btn) {
             if (strip) strip.remove();
         } else {
             btn.disabled = false;
-            alert(d.error || 'Erreur lors de la mise à jour.');
+            showFlash(d.error || 'Erreur lors de la mise à jour.', 'danger');
         }
     } catch (e) {
         btn.disabled = false;
+        showFlash('Erreur réseau', 'danger');
     }
 }
 

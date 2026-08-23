@@ -67,12 +67,12 @@
         <form method="POST">
             <input type="hidden" name="next" value="{{ next }}">
             <div class="form-group">
-                <label>Identifiant</label>
-                <input type="text" name="login" autofocus autocomplete="username" required>
+                <label for="id-login">Identifiant</label>
+                <input id="id-login" type="text" name="login" autofocus autocomplete="username" required>
             </div>
             <div class="form-group">
-                <label>Mot de passe</label>
-                <input type="password" name="password" autocomplete="current-password" required>
+                <label for="id-password">Mot de passe</label>
+                <input id="id-password" type="password" name="password" autocomplete="current-password" required>
             </div>
             <button type="submit" class="btn-login">→ Connexion</button>
         </form>

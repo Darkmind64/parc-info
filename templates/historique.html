@@ -393,7 +393,7 @@ async function supprimerEntree(id, btn) {
             setTimeout(() => row.remove(), 340);
         } else {
             btn.disabled = false; btn.textContent = '✕';
-            alert(d.message || 'Erreur lors de la suppression');
+            showFlash(d.message || 'Erreur lors de la suppression', 'danger');
         }
     } catch {
         btn.disabled = false; btn.textContent = '✕';

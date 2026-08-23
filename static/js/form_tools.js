@@ -110,7 +110,7 @@ function initDraft(form, draftKey) {
         if (saved) {
             var data = JSON.parse(saved);
             var restored = 0;
-            form.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=checkbox]):not([type=color]), textarea').forEach(function(f) {
+            form.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=checkbox]):not([type=color]):not([type=password]), textarea').forEach(function(f) {
                 if (f.name && data[f.name] !== undefined && !f.value) {
                     f.value = data[f.name]; restored++;
                 }
@@ -133,7 +133,10 @@ function initDraft(form, draftKey) {
 
 function saveDraft(form, key) {
     var data = {};
-    form.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=color]), select, textarea').forEach(function(f) {
+    // Jamais de mot de passe en clair dans localStorage — un identifiant
+    // abandonné en cours de saisie ne doit pas y laisser trace, alors que
+    // crypto_utils.py existe précisément pour ne jamais le stocker en clair.
+    form.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=color]):not([type=password]), select, textarea').forEach(function(f) {
         if (f.name) data[f.name] = f.type === 'checkbox' ? f.checked : f.value;
     });
     try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}

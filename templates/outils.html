@@ -326,7 +326,7 @@ async function ajouterOutil() {
         // Reload page to refresh the grid
         window.location.reload();
     } else {
-        alert(d.error || 'Erreur lors de l\'ajout');
+        showFlash(d.error || 'Erreur lors de l\'ajout', 'danger');
     }
 }
 

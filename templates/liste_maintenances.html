@@ -334,8 +334,8 @@ function confirmerMaintenance(id) {
         headers: { 'X-CSRF-Token': '{{ csrf_token }}', 'Content-Type': 'application/json' }
     })
     .then(r => r.json())
-    .then(data => { if (data.ok) location.reload(); else alert('Erreur : ' + (data.error || '')); })
-    .catch(e => alert('Erreur réseau : ' + e));
+    .then(data => { if (data.ok) location.reload(); else showFlash('Erreur : ' + (data.error || ''), 'danger'); })
+    .catch(e => showFlash('Erreur réseau : ' + e, 'danger'));
 }
 </script>
 {% endblock %}

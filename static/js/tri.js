@@ -29,17 +29,32 @@
         // Décorer les <th>
         const ths = table.querySelectorAll('thead th');
         ths.forEach((th, i) => {
+            // scope=col s'applique à toute cellule d'en-tête de colonne,
+            // triable ou non — un lecteur d'écran en a besoin pour annoncer
+            // l'en-tête pertinent en parcourant une ligne de données.
+            if (!th.hasAttribute('scope')) th.setAttribute('scope', 'col');
             if (skipped.includes(i)) return;
             th.style.cursor = 'pointer';
             th.style.userSelect = 'none';
             th.style.whiteSpace = 'nowrap';
             th.dataset.col = i;
+            th.tabIndex = 0;
+            th.setAttribute('role', 'columnheader');
+            th.setAttribute('aria-sort', 'none');
             const ind = document.createElement('span');
             ind.className = 'sort-ind';
             ind.textContent = ICONS.none;
             ind.style.cssText = 'font-size:.7rem;opacity:.4;margin-left:2px;';
             th.appendChild(ind);
             th.addEventListener('click', () => triColonne(tableId, i, skipped));
+            // Activable au clavier (Entrée/Espace), comme un bouton — un <th>
+            // n'a pas de comportement clavier natif contrairement à <button>.
+            th.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    triColonne(tableId, i, skipped);
+                }
+            });
         });
 
         // Appliquer tri sauvegardé
@@ -132,11 +147,13 @@
                 ind.style.opacity = '1';
                 ind.style.color = 'var(--accent)';
                 th.style.color = 'var(--accent)';
+                th.setAttribute('aria-sort', dir === 'asc' ? 'ascending' : 'descending');
             } else {
                 ind.textContent = ICONS.none;
                 ind.style.opacity = '.3';
                 ind.style.color = '';
                 th.style.color = '';
+                th.setAttribute('aria-sort', 'none');
             }
         });
     }

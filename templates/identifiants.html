@@ -116,6 +116,7 @@ th[data-col]:hover { color:var(--accent) !important; background:rgba(0,201,255,.
 <div class="card" style="padding:0;overflow:hidden;">
 {% if identifiants %}
     {% set ns = namespace(current_cat='') %}
+    <div class="table-scroll">
     <table id="table-identifiants">
         <thead>
             <tr>
@@ -197,6 +198,7 @@ th[data-col]:hover { color:var(--accent) !important; background:rgba(0,201,255,.
         {% endfor %}
         </tbody>
     </table>
+    </div>
 {% else %}
     <div style="text-align:center;padding:3rem;color:var(--text-secondary);">
         Aucun identifiant enregistré. <br><br>

@@ -716,7 +716,7 @@ async function placerEquip() {
     const pos = parseInt(document.getElementById('cfg-pos').value) || 1;
     const col = Math.min(4, Math.max(0, parseInt(document.getElementById('cfg-col').value) || 0));
     const hu  = parseInt(document.getElementById('cfg-hu').value) || 1;
-    if (pos < 1 || pos > nbU) { alert(`Position entre 1 et ${nbU}`); return; }
+    if (pos < 1 || pos > nbU) { showFlash(`Position entre 1 et ${nbU}`, 'info'); return; }
 
     const payload = {
         position: pos, col_index: col, hauteur_u: hu, baie_nom: currentBaie,
@@ -771,7 +771,7 @@ function changerBaie(nom) {
 function ajouterBaie() {
     const nom = prompt('Nom de la nouvelle baie :', 'Baie secondaire');
     if (!nom || !nom.trim()) return;
-    if (baiesList.includes(nom.trim())) { alert('Cette baie existe déjà.'); return; }
+    if (baiesList.includes(nom.trim())) { showFlash('Cette baie existe déjà.', 'info'); return; }
     baiesList.push(nom.trim());
     const sel = document.getElementById('sel-baie');
     const opt = document.createElement('option');

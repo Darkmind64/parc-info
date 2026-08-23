@@ -446,6 +446,19 @@
         .breadcrumb .sep { opacity: .4; }
         .breadcrumb .current { color: var(--text-secondary); }
 
+        /* ── TABLEAUX LARGES : défilement horizontal contenu au conteneur,
+           jamais à la page entière (utilisable dans une .card avec
+           overflow:hidden, qui gère elle-même l'arrondi des coins) ── */
+        .table-scroll { overflow-x: auto; }
+
+        /* ── En-têtes de colonnes triables (tri.js) : rendues focusables au
+           clavier (tabindex=0), il leur faut donc un indicateur de focus
+           visible — un <th> n'en a pas par défaut comme un <button>. ── */
+        thead th:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+        }
+
         /* ── FLASH BANDEAU ── */
         .flash-banner {
             position: fixed; top: 92px; left: 50%; transform: translateX(-50%) translateY(-80px);
@@ -1225,7 +1238,7 @@ function saveViewPreference(key, value) {
         if (clientsGrid) {
             clientsGrid.style.opacity = '1';
         }
-        alert('Erreur lors de la sauvegarde: ' + err.message);
+        showFlash('Erreur lors de la sauvegarde : ' + err.message, 'danger');
     });
 }
 
@@ -1352,22 +1365,38 @@ function togglePwd(btn) {
 }
 
 // ── FLASH BANNER ─────────────────────────────────────────────────────────────
-(function() {
-    if (!window._flashMessages || !window._flashMessages.length) return;
+// showFlash() est la voie normale pour tout message JS destiné à l'utilisateur
+// (succès/erreur d'une requête AJAX, validation avant envoi) — à utiliser à la
+// place d'alert(), qui interrompt la page avec un dialogue natif non stylé.
+function showFlash(msg, cat) {
     const banner = document.getElementById('flash-banner');
-    if (!banner) return;
+    if (!banner) { alert(msg); return; }  // page sans bannière (ex. popup) : repli
     const icons = { success: '✓', danger: '✕', error: '✕', info: 'ℹ' };
-    const m = window._flashMessages[0];
-    const type = m.cat === 'success' ? 'success' : (m.cat === 'danger' ? 'error' : 'info');
-    banner.innerHTML = '<span>' + (icons[m.cat] || 'ℹ') + '</span><span>' + m.msg + '</span>';
+    const type = cat === 'success' ? 'success' : (cat === 'danger' || cat === 'error' ? 'error' : 'info');
+    // textContent, jamais innerHTML : msg peut contenir un message d'erreur
+    // serveur non garanti exempt de caractères spéciaux HTML.
+    banner.textContent = '';
+    const iconSpan = document.createElement('span');
+    iconSpan.textContent = icons[cat] || 'ℹ';
+    const msgSpan = document.createElement('span');
+    msgSpan.textContent = msg;
+    banner.appendChild(iconSpan);
+    banner.appendChild(msgSpan);
     banner.className = 'flash-banner ' + type;
     requestAnimationFrame(() => {
         requestAnimationFrame(() => { banner.classList.add('show'); });
     });
-    setTimeout(() => {
+    clearTimeout(showFlash._t);
+    showFlash._t = setTimeout(() => {
         banner.classList.remove('show');
-        setTimeout(() => { banner.innerHTML = ''; banner.className = 'flash-banner'; }, 400);
+        setTimeout(() => { banner.textContent = ''; banner.className = 'flash-banner'; }, 400);
     }, 3500);
+}
+
+(function() {
+    if (!window._flashMessages || !window._flashMessages.length) return;
+    const m = window._flashMessages[0];
+    showFlash(m.msg, m.cat);
 })();
 
 // ── RECHERCHE GLOBALE ──────────────────────────────────────────────────────────
@@ -3295,10 +3324,9 @@ function restaurerSauvegarde(fichier, quand) {
         body: JSON.stringify({fichier: fichier})
     }).then(r => r.json()).then(d => {
         if (!d.ok) { if (zone) zone.textContent = '✗ ' + (d.error || 'Échec'); return; }
-        alert('Base restaurée depuis ' + d.fichier + '.\n'
-            + 'Sauvegarde de sécurité conservée : ' + (d.filet || 'aucune') + '.\n\n'
-            + 'La page va être rechargée.');
-        location.reload();
+        showFlash('Base restaurée depuis ' + d.fichier + '. Sauvegarde de sécurité conservée : '
+            + (d.filet || 'aucune') + '. Rechargement…', 'success');
+        setTimeout(() => location.reload(), 1500);
     }).catch(() => { if (zone) zone.textContent = '✗ Erreur réseau'; });
 }
 

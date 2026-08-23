@@ -31,15 +31,15 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Nom / Intitulé *</label>
-                <input type="text" name="nom" value="{{ identifiant.nom if identifiant else '' }}"
+                <label for="id-nom">Nom / Intitulé *</label>
+                <input id="id-nom" type="text" name="nom" value="{{ identifiant.nom if identifiant else '' }}"
                        placeholder="Ex: Compte admin routeur, Messagerie direction..." required>
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label>Description</label>
-                <input type="text" name="description" value="{{ identifiant.description if identifiant else '' }}"
+                <label for="id-description">Description</label>
+                <input id="id-description" type="text" name="description" value="{{ identifiant.description if identifiant else '' }}"
                        placeholder="Ex: Compte administrateur principal du routeur Cisco">
             </div>
         </div>
@@ -109,13 +109,13 @@
         </div>
         <div class="form-row cols-2">
             <div class="form-group">
-                <label>URL / Adresse d'accès</label>
-                <input type="text" name="url" value="{{ identifiant.url if identifiant else '' }}"
+                <label for="id-url">URL / Adresse d'accès</label>
+                <input id="id-url" type="text" name="url" value="{{ identifiant.url if identifiant else '' }}"
                        placeholder="Ex: https://192.168.1.1 ou https://webmail.client.fr">
             </div>
             <div class="form-group">
-                <label>Date d'expiration</label>
-                <input type="date" name="date_expiration"
+                <label for="id-date_expiration">Date d'expiration</label>
+                <input id="id-date_expiration" type="date" name="date_expiration"
                        value="{{ identifiant.date_expiration if identifiant else '' }}">
             </div>
         </div>

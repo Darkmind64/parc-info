@@ -20,7 +20,7 @@
 <tr style="border-bottom:1px solid rgba(30,58,95,.3);">
     <td style="padding:.7rem 1rem;">
         {% if usr.logo_fichier %}
-        <img src="/user/logo/{{ usr.logo_fichier }}" style="height:28px;width:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:.5rem;">
+        <img src="/user/logo/{{ usr.logo_fichier }}" alt="" style="height:28px;width:28px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:.5rem;">
         {% endif %}
         <strong>{{ usr.prenom or '' }} {{ usr.nom }}</strong>
         {% if usr.email %}<div style="font-size:.72rem;color:var(--text-muted);">{{ usr.email }}</div>{% endif %}

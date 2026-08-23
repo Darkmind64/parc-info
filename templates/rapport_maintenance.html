@@ -10,16 +10,16 @@
     <form method="GET" id="rapportForm" style="display:grid;gap:1rem;">
         <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:1rem;">
             <div class="form-group">
-                <label>Date début</label>
-                <input type="date" name="date_debut" value="{{ request.args.get('date_debut', '') }}">
+                <label for="id-date_debut">Date début</label>
+                <input id="id-date_debut" type="date" name="date_debut" value="{{ request.args.get('date_debut', '') }}">
             </div>
             <div class="form-group">
-                <label>Date fin</label>
-                <input type="date" name="date_fin" value="{{ request.args.get('date_fin', '') }}">
+                <label for="id-date_fin">Date fin</label>
+                <input id="id-date_fin" type="date" name="date_fin" value="{{ request.args.get('date_fin', '') }}">
             </div>
             <div class="form-group">
-                <label>Type de maintenance</label>
-                <select name="type_maintenance">
+                <label for="id-type_maintenance">Type de maintenance</label>
+                <select id="id-type_maintenance" name="type_maintenance">
                     <option value="">-- Tous --</option>
                     {% for t in types_maintenance %}
                     <option value="{{ t }}" {% if request.args.get('type_maintenance') == t %}selected{% endif %}>{{ t }}</option>
@@ -27,8 +27,8 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Statut</label>
-                <select name="statut">
+                <label for="id-statut">Statut</label>
+                <select id="id-statut" name="statut">
                     <option value="">-- Tous --</option>
                     <option value="programmee" {% if request.args.get('statut') == 'programmee' %}selected{% endif %}>Programmée</option>
                     <option value="realisee" {% if request.args.get('statut') == 'realisee' %}selected{% endif %}>Réalisée</option>

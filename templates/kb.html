@@ -406,7 +406,7 @@ const KB = (() => {
             tags:         document.getElementById('kb-edit-tags').value.trim(),
             categorie_id: parseInt(document.getElementById('kb-edit-cat').value),
         };
-        if (!payload.titre) { alert('Le titre est requis'); return; }
+        if (!payload.titre) { showFlash('Le titre est requis', 'info'); return; }
         let r;
         if (_kbCurrentId) {
             r = await fetch('/api/kb/article/' + _kbCurrentId, {

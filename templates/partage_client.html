@@ -39,8 +39,8 @@
         <form method="POST">
             <input type="hidden" name="action" value="ajouter">
             <div class="form-group">
-                <label>Utilisateur</label>
-                <select name="user_id" required>
+                <label for="id-user_id">Utilisateur</label>
+                <select id="id-user_id" name="user_id" required>
                     <option value="">— Choisir —</option>
                     {% set partage_ids = partages | map(attribute='auth_user_id') | list %}
                     {% for usr in all_users %}
@@ -51,8 +51,8 @@
                 </select>
             </div>
             <div class="form-group">
-                <label>Niveau d'accès</label>
-                <select name="niveau">
+                <label for="id-niveau">Niveau d'accès</label>
+                <select id="id-niveau" name="niveau">
                     <option value="lecture">👁 Lecture seule</option>
                     <option value="ecriture">✏ Lecture / Écriture</option>
                 </select>

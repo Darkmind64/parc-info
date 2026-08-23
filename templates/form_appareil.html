@@ -123,20 +123,20 @@
         <div class="form-section-title">&#9632; Identification</div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Nom de la machine</label>
-                <input type="text" name="nom_machine" value="{{ appareil.nom_machine if appareil else '' }}" placeholder="Ex: PC-DUPONT-01">
+                <label for="id-nom_machine">Nom de la machine</label>
+                <input id="id-nom_machine" type="text" name="nom_machine" value="{{ appareil.nom_machine if appareil else '' }}" placeholder="Ex: PC-DUPONT-01">
             </div>
             <div class="form-group">
-                <label>Type d'appareil</label>
-                <select name="type_appareil">
+                <label for="id-type_appareil">Type d'appareil</label>
+                <select id="id-type_appareil" name="type_appareil">
                     {% for t in types_appareils %}
                     <option value="{{ t }}" {% if appareil and appareil.type_appareil == t %}selected{% endif %}>{{ t }}</option>
                     {% endfor %}
                 </select>
             </div>
             <div class="form-group">
-                <label>Statut</label>
-                <select name="statut">
+                <label for="id-statut">Statut</label>
+                <select id="id-statut" name="statut">
                     <option value="actif" {% if not appareil or appareil.statut == 'actif' %}selected{% endif %}>Actif</option>
                     <option value="inactif" {% if appareil and appareil.statut == 'inactif' %}selected{% endif %}>Inactif</option>
                     <option value="hors_service" {% if appareil and appareil.statut == 'hors_service' %}selected{% endif %}>Hors service</option>
@@ -145,16 +145,16 @@
         </div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Marque</label>
-                <input type="text" name="marque" value="{{ appareil.marque if appareil else '' }}" placeholder="Ex: Dell, HP, Lenovo...">
+                <label for="id-marque">Marque</label>
+                <input id="id-marque" type="text" name="marque" value="{{ appareil.marque if appareil else '' }}" placeholder="Ex: Dell, HP, Lenovo...">
             </div>
             <div class="form-group">
-                <label>Modèle</label>
-                <input type="text" name="modele" value="{{ appareil.modele if appareil else '' }}" placeholder="Ex: OptiPlex 7090">
+                <label for="id-modele">Modèle</label>
+                <input id="id-modele" type="text" name="modele" value="{{ appareil.modele if appareil else '' }}" placeholder="Ex: OptiPlex 7090">
             </div>
             <div class="form-group">
-                <label>Numéro de série</label>
-                <input type="text" name="numero_serie" value="{{ appareil.numero_serie if appareil else '' }}" placeholder="S/N">
+                <label for="id-numero_serie">Numéro de série</label>
+                <input id="id-numero_serie" type="text" name="numero_serie" value="{{ appareil.numero_serie if appareil else '' }}" placeholder="S/N">
             </div>
         </div>
         <div class="form-row cols-3">
@@ -174,12 +174,12 @@
                 </small>
             </div>
             <div class="form-group">
-                <label>Service / Département</label>
-                <input type="text" name="service" value="{{ appareil.service if appareil else '' }}" placeholder="Ex: Comptabilité">
+                <label for="id-service">Service / Département</label>
+                <input id="id-service" type="text" name="service" value="{{ appareil.service if appareil else '' }}" placeholder="Ex: Comptabilité">
             </div>
             <div class="form-group">
-                <label>Localisation / Bureau</label>
-                <input type="text" name="localisation" value="{{ appareil.localisation if appareil else '' }}" placeholder="Ex: Bureau 204">
+                <label for="id-localisation">Localisation / Bureau</label>
+                <input id="id-localisation" type="text" name="localisation" value="{{ appareil.localisation if appareil else '' }}" placeholder="Ex: Bureau 204">
             </div>
         </div>
     </div>
@@ -189,16 +189,16 @@
         <div class="form-section-title">&#9632; Paramètres réseau</div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Adresse IP</label>
-                <input type="text" name="adresse_ip" value="{{ appareil.adresse_ip if appareil else '' }}" placeholder="Ex: 192.168.1.10" class="mono">
+                <label for="id-adresse_ip">Adresse IP</label>
+                <input id="id-adresse_ip" type="text" name="adresse_ip" value="{{ appareil.adresse_ip if appareil else '' }}" placeholder="Ex: 192.168.1.10" class="mono">
             </div>
             <div class="form-group">
-                <label>Adresse MAC</label>
-                <input type="text" name="adresse_mac" value="{{ appareil.adresse_mac if appareil else '' }}" placeholder="Ex: AA:BB:CC:DD:EE:FF" class="mono">
+                <label for="id-adresse_mac">Adresse MAC</label>
+                <input id="id-adresse_mac" type="text" name="adresse_mac" value="{{ appareil.adresse_mac if appareil else '' }}" placeholder="Ex: AA:BB:CC:DD:EE:FF" class="mono">
             </div>
             <div class="form-group">
-                <label>Nom DNS / Hostname</label>
-                <input type="text" name="nom_dns" value="{{ appareil.nom_dns if appareil else '' }}" placeholder="Ex: pc-dupont.local">
+                <label for="id-nom_dns">Nom DNS / Hostname</label>
+                <input id="id-nom_dns" type="text" name="nom_dns" value="{{ appareil.nom_dns if appareil else '' }}" placeholder="Ex: pc-dupont.local">
             </div>
         </div>
         {% if appareil and appareil.ports_ouverts %}
@@ -239,8 +239,8 @@
         <div class="form-section-title">&#9632; Système &amp; matériel</div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Système d'exploitation</label>
-                <input type="text" name="os" list="os-suggestions" value="{{ appareil.os if appareil else '' }}" placeholder="Ex: Windows 11 Pro">
+                <label for="id-os">Système d'exploitation</label>
+                <input id="id-os" type="text" name="os" list="os-suggestions" value="{{ appareil.os if appareil else '' }}" placeholder="Ex: Windows 11 Pro">
                 <datalist id="os-suggestions">
                     {% for os in ['Windows 11 Pro', 'Windows 11 Home', 'Windows 10 Pro', 'Windows 10 Home', 'Windows Server 2022 Standard', 'Windows Server 2019 Standard', 'Windows Server 2016 Standard', 'Ubuntu 22.04', 'Ubuntu 20.04', 'Debian 12', 'Debian 11', 'macOS Sonoma', 'macOS Ventura'] %}
                     <option value="{{ os }}">
@@ -248,12 +248,12 @@
                 </datalist>
             </div>
             <div class="form-group">
-                <label>Version OS</label>
-                <input type="text" name="version_os" value="{{ appareil.version_os if appareil else '' }}" placeholder="Ex: 22H2">
+                <label for="id-version_os">Version OS</label>
+                <input id="id-version_os" type="text" name="version_os" value="{{ appareil.version_os if appareil else '' }}" placeholder="Ex: 22H2">
             </div>
             <div class="form-group">
-                <label>RAM</label>
-                <input type="text" name="ram" list="ram-suggestions" value="{{ appareil.ram if appareil else '' }}" placeholder="Ex: 16 Go">
+                <label for="id-ram">RAM</label>
+                <input id="id-ram" type="text" name="ram" list="ram-suggestions" value="{{ appareil.ram if appareil else '' }}" placeholder="Ex: 16 Go">
                 <datalist id="ram-suggestions">
                     {% for r in ['2 Go', '4 Go', '8 Go', '16 Go', '32 Go', '64 Go', '128 Go'] %}
                     <option value="{{ r }}">
@@ -263,16 +263,16 @@
         </div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Processeur (CPU)</label>
-                <input type="text" name="cpu" value="{{ appareil.cpu if appareil else '' }}" placeholder="Ex: Intel Core i5-12400">
+                <label for="id-cpu">Processeur (CPU)</label>
+                <input id="id-cpu" type="text" name="cpu" value="{{ appareil.cpu if appareil else '' }}" placeholder="Ex: Intel Core i5-12400">
             </div>
             <div class="form-group">
-                <label>Stockage</label>
-                <input type="text" name="stockage" value="{{ appareil.stockage if appareil else '' }}" placeholder="Ex: SSD 512 Go NVMe">
+                <label for="id-stockage">Stockage</label>
+                <input id="id-stockage" type="text" name="stockage" value="{{ appareil.stockage if appareil else '' }}" placeholder="Ex: SSD 512 Go NVMe">
             </div>
             <div class="form-group">
-                <label>Carte graphique (GPU)</label>
-                <input type="text" name="carte_graphique" value="{{ appareil.carte_graphique if appareil else '' }}" placeholder="Ex: NVIDIA RTX 3060, Intel UHD 770">
+                <label for="id-carte_graphique">Carte graphique (GPU)</label>
+                <input id="id-carte_graphique" type="text" name="carte_graphique" value="{{ appareil.carte_graphique if appareil else '' }}" placeholder="Ex: NVIDIA RTX 3060, Intel UHD 770">
             </div>
         </div>
     </div>
@@ -282,30 +282,30 @@
         <div class="form-section-title">&#9632; Achat &amp; Garantie</div>
         <div class="form-row cols-4">
             <div class="form-group">
-                <label>Date d'achat</label>
-                <input type="date" name="date_achat" value="{{ appareil.date_achat if appareil and appareil.date_achat else '' }}">
+                <label for="id-date_achat">Date d'achat</label>
+                <input id="id-date_achat" type="date" name="date_achat" value="{{ appareil.date_achat if appareil and appareil.date_achat else '' }}">
             </div>
             <div class="form-group">
-                <label>Durée garantie (mois)</label>
-                <input type="number" name="duree_garantie" value="{{ appareil.duree_garantie if appareil else '' }}" placeholder="Ex: 36" min="0">
+                <label for="id-duree_garantie">Durée garantie (mois)</label>
+                <input id="id-duree_garantie" type="number" name="duree_garantie" value="{{ appareil.duree_garantie if appareil else '' }}" placeholder="Ex: 36" min="0">
             </div>
             <div class="form-group">
-                <label>Date fin de garantie</label>
-                <input type="date" name="date_fin_garantie" value="{{ appareil.date_fin_garantie if appareil and appareil.date_fin_garantie else '' }}">
+                <label for="id-date_fin_garantie">Date fin de garantie</label>
+                <input id="id-date_fin_garantie" type="date" name="date_fin_garantie" value="{{ appareil.date_fin_garantie if appareil and appareil.date_fin_garantie else '' }}">
             </div>
             <div class="form-group">
-                <label>Prix d'achat (€)</label>
-                <input type="number" name="prix_achat" step="0.01" value="{{ appareil.prix_achat if appareil and appareil.prix_achat else '' }}" placeholder="0.00">
+                <label for="id-prix_achat">Prix d'achat (€)</label>
+                <input id="id-prix_achat" type="number" name="prix_achat" step="0.01" value="{{ appareil.prix_achat if appareil and appareil.prix_achat else '' }}" placeholder="0.00">
             </div>
         </div>
         <div class="form-row cols-2">
             <div class="form-group">
-                <label>Fournisseur / Revendeur</label>
-                <input type="text" name="fournisseur" value="{{ appareil.fournisseur if appareil else '' }}" placeholder="Ex: LDLC, Inmac Wstore...">
+                <label for="id-fournisseur">Fournisseur / Revendeur</label>
+                <input id="id-fournisseur" type="text" name="fournisseur" value="{{ appareil.fournisseur if appareil else '' }}" placeholder="Ex: LDLC, Inmac Wstore...">
             </div>
             <div class="form-group">
-                <label>N° commande / Bon de livraison</label>
-                <input type="text" name="numero_commande" value="{{ appareil.numero_commande if appareil else '' }}" placeholder="Ex: CMD-2024-1234">
+                <label for="id-numero_commande">N° commande / Bon de livraison</label>
+                <input id="id-numero_commande" type="text" name="numero_commande" value="{{ appareil.numero_commande if appareil else '' }}" placeholder="Ex: CMD-2024-1234">
             </div>
         </div>
         <div class="form-row">
@@ -342,8 +342,8 @@
                     </datalist>
                 </div>
                 <div class="form-group">
-                    <label>Produit / Solution</label>
-                    <input type="text" name="av_nom" list="list-noms-av" autocomplete="off"
+                    <label for="id-av_nom">Produit / Solution</label>
+                    <input id="id-av_nom" type="text" name="av_nom" list="list-noms-av" autocomplete="off"
                            value="{{ appareil.av_nom if appareil else '' }}"
                            placeholder="Ex: ESET Endpoint Security…">
                     <datalist id="list-noms-av">
@@ -353,18 +353,18 @@
             </div>
             <div class="form-row cols-3">
                 <div class="form-group">
-                    <label>Date de souscription</label>
-                    <input type="date" name="av_date_debut"
+                    <label for="id-av_date_debut">Date de souscription</label>
+                    <input id="id-av_date_debut" type="date" name="av_date_debut"
                            value="{{ appareil.av_date_debut if appareil and appareil.av_date_debut else '' }}">
                 </div>
                 <div class="form-group">
-                    <label>Date de fin d'abonnement</label>
-                    <input type="date" name="av_date_fin"
+                    <label for="id-av_date_fin">Date de fin d'abonnement</label>
+                    <input id="id-av_date_fin" type="date" name="av_date_fin"
                            value="{{ appareil.av_date_fin if appareil and appareil.av_date_fin else '' }}">
                 </div>
                 <div class="form-group">
-                    <label>Contrat / Abonnement associé</label>
-                    <select name="av_contrat_id">
+                    <label for="id-av_contrat_id">Contrat / Abonnement associé</label>
+                    <select id="id-av_contrat_id" name="av_contrat_id">
                         <option value="">— Aucun —</option>
                         {% for ct in (contrats or []) %}
                         <option value="{{ ct.id }}"
@@ -381,8 +381,8 @@
         <div id="aer-panel-edr" class="aer-panel" style="display:none;">
             <div class="form-row cols-2">
                 <div class="form-group">
-                    <label>Marque</label>
-                    <input type="text" name="edr_marque" list="list-marques-edr" autocomplete="off"
+                    <label for="id-edr_marque">Marque</label>
+                    <input id="id-edr_marque" type="text" name="edr_marque" list="list-marques-edr" autocomplete="off"
                            value="{{ appareil.edr_marque if appareil else '' }}"
                            placeholder="Ex: CrowdStrike, SentinelOne…">
                     <datalist id="list-marques-edr">
@@ -394,8 +394,8 @@
                     </datalist>
                 </div>
                 <div class="form-group">
-                    <label>Produit / Solution</label>
-                    <input type="text" name="edr_nom" list="list-noms-edr" autocomplete="off"
+                    <label for="id-edr_nom">Produit / Solution</label>
+                    <input id="id-edr_nom" type="text" name="edr_nom" list="list-noms-edr" autocomplete="off"
                            value="{{ appareil.edr_nom if appareil else '' }}"
                            placeholder="Ex: Falcon Endpoint, Singularity…">
                     <datalist id="list-noms-edr">
@@ -408,13 +408,13 @@
             </div>
             <div class="form-row cols-3">
                 <div class="form-group">
-                    <label>Date de fin de licence</label>
-                    <input type="date" name="edr_date_fin"
+                    <label for="id-edr_date_fin">Date de fin de licence</label>
+                    <input id="id-edr_date_fin" type="date" name="edr_date_fin"
                            value="{{ appareil.edr_date_fin if appareil and appareil.edr_date_fin else '' }}">
                 </div>
                 <div class="form-group" style="grid-column:span 2;">
-                    <label>Contrat / Abonnement associé</label>
-                    <select name="edr_contrat_id">
+                    <label for="id-edr_contrat_id">Contrat / Abonnement associé</label>
+                    <select id="id-edr_contrat_id" name="edr_contrat_id">
                         <option value="">— Aucun —</option>
                         {% for ct in (contrats or []) %}
                         <option value="{{ ct.id }}"
@@ -431,8 +431,8 @@
         <div id="aer-panel-rmm" class="aer-panel" style="display:none;">
             <div class="form-row cols-2">
                 <div class="form-group">
-                    <label>Marque / Éditeur</label>
-                    <input type="text" name="rmm_marque" list="list-marques-rmm" autocomplete="off"
+                    <label for="id-rmm_marque">Marque / Éditeur</label>
+                    <input id="id-rmm_marque" type="text" name="rmm_marque" list="list-marques-rmm" autocomplete="off"
                            value="{{ appareil.rmm_marque if appareil else '' }}"
                            placeholder="Ex: NinjaRMM, Atera, N-able…">
                     <datalist id="list-marques-rmm">
@@ -443,8 +443,8 @@
                     </datalist>
                 </div>
                 <div class="form-group">
-                    <label>Solution / Agent</label>
-                    <input type="text" name="rmm_nom" list="list-noms-rmm" autocomplete="off"
+                    <label for="id-rmm_nom">Solution / Agent</label>
+                    <input id="id-rmm_nom" type="text" name="rmm_nom" list="list-noms-rmm" autocomplete="off"
                            value="{{ appareil.rmm_nom if appareil else '' }}"
                            placeholder="Ex: NinjaRMM Agent…">
                     <datalist id="list-noms-rmm">
@@ -454,19 +454,19 @@
             </div>
             <div class="form-row cols-3">
                 <div class="form-group">
-                    <label>ID de l'agent</label>
-                    <input type="text" name="rmm_agent_id" autocomplete="off"
+                    <label for="id-rmm_agent_id">ID de l'agent</label>
+                    <input id="id-rmm_agent_id" type="text" name="rmm_agent_id" autocomplete="off"
                            value="{{ appareil.rmm_agent_id if appareil else '' }}"
                            placeholder="Identifiant dans la console RMM">
                 </div>
                 <div class="form-group">
-                    <label>Date de fin de licence</label>
-                    <input type="date" name="rmm_date_fin"
+                    <label for="id-rmm_date_fin">Date de fin de licence</label>
+                    <input id="id-rmm_date_fin" type="date" name="rmm_date_fin"
                            value="{{ appareil.rmm_date_fin if appareil and appareil.rmm_date_fin else '' }}">
                 </div>
                 <div class="form-group">
-                    <label>Contrat associé</label>
-                    <select name="rmm_contrat_id">
+                    <label for="id-rmm_contrat_id">Contrat associé</label>
+                    <select id="id-rmm_contrat_id" name="rmm_contrat_id">
                         <option value="">— Aucun —</option>
                         {% for ct in (contrats or []) %}
                         <option value="{{ ct.id }}"
@@ -488,8 +488,8 @@
         <div class="form-section-subtitle">Compte utilisateur</div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Login utilisateur</label>
-                <input type="text" name="user_login" value="{{ appareil.user_login if appareil else '' }}"
+                <label for="id-user_login">Login utilisateur</label>
+                <input id="id-user_login" type="text" name="user_login" value="{{ appareil.user_login if appareil else '' }}"
                        placeholder="Ex: jdupont" autocomplete="off">
             </div>
             <div class="form-group">
@@ -519,8 +519,8 @@
         <div class="form-section-subtitle" style="margin-top:0.5rem;">Compte administrateur</div>
         <div class="form-row cols-3">
             <div class="form-group">
-                <label>Login administrateur</label>
-                <input type="text" name="admin_login" value="{{ appareil.admin_login if appareil else '' }}"
+                <label for="id-admin_login">Login administrateur</label>
+                <input id="id-admin_login" type="text" name="admin_login" value="{{ appareil.admin_login if appareil else '' }}"
                        placeholder="Ex: Administrator" autocomplete="off">
             </div>
             <div class="form-group">
@@ -590,21 +590,21 @@
             <div class="lic-row">
                 <div class="lic-fields">
                     <div class="form-group">
-                        <label>Éditeur</label>
-                        <input type="text" name="lic_editeur" value="{{ lic.editeur or '' }}" placeholder="Ex : Microsoft, Adobe…">
+                        <label for="id-lic_editeur">Éditeur</label>
+                        <input id="id-lic_editeur" type="text" name="lic_editeur" value="{{ lic.editeur or '' }}" placeholder="Ex : Microsoft, Adobe…">
                     </div>
                     <div class="form-group" style="flex:1.2;">
-                        <label>Produit</label>
-                        <input type="text" name="lic_produit" value="{{ lic.produit or '' }}" placeholder="Ex : Windows 11 Pro">
+                        <label for="id-lic_produit">Produit</label>
+                        <input id="id-lic_produit" type="text" name="lic_produit" value="{{ lic.produit or '' }}" placeholder="Ex : Windows 11 Pro">
                     </div>
                     <div class="form-group" style="flex:1.8;">
-                        <label>Clé de licence</label>
-                        <input type="text" name="lic_cle" value="{{ lic.cle_licence or '' }}"
+                        <label for="id-lic_cle">Clé de licence</label>
+                        <input id="id-lic_cle" type="text" name="lic_cle" value="{{ lic.cle_licence or '' }}"
                                placeholder="XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off" class="lic-cle">
                     </div>
                     <div class="form-group" style="flex:1.3;">
-                        <label>Contrat lié</label>
-                        <select name="lic_contrat_id">
+                        <label for="id-lic_contrat_id">Contrat lié</label>
+                        <select id="id-lic_contrat_id" name="lic_contrat_id">
                             <option value="">— Aucun —</option>
                             {% for ct in (contrats or []) %}
                             <option value="{{ ct.id }}"
@@ -862,12 +862,12 @@
                 <input type="hidden" name="next" value="/appareil/{{ appareil.id }}/editer">
                 <div class="form-row cols-2" style="margin-bottom:.5rem;">
                     <div class="form-group" style="margin-bottom:0;">
-                        <label>Nom du document</label>
-                        <input type="text" name="nom" placeholder="Ex: Facture d'achat, Photo rack...">
+                        <label for="id-nom">Nom du document</label>
+                        <input id="id-nom" type="text" name="nom" placeholder="Ex: Facture d'achat, Photo rack...">
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label>Type</label>
-                        <select name="type_doc">
+                        <label for="id-type_doc">Type</label>
+                        <select id="id-type_doc" name="type_doc">
                             <option value="">— Choisir —</option>
                             <option>Facture</option><option>Bon de commande</option>
                             <option>Contrat</option><option>Photo</option>
@@ -876,8 +876,8 @@
                     </div>
                 </div>
                 <div class="form-group" style="margin-bottom:.5rem;">
-                    <label>Fichier <span style="color:var(--text-muted);font-size:.72rem;">(tous types — max 16 Mo)</span></label>
-                    <input type="file" name="fichier" accept="*" required>
+                    <label for="id-fichier">Fichier <span style="color:var(--text-muted);font-size:.72rem;">(tous types — max 16 Mo)</span></label>
+                    <input id="id-fichier" type="file" name="fichier" accept="*" required>
                 </div>
                 <button type="submit" class="btn btn-success btn-sm">⬆ Envoyer</button>
             </form>
@@ -1110,18 +1110,18 @@ function addLicenceRow(editeur, produit, cle, contratId) {
     row.innerHTML = `
         <div class="lic-fields">
             <div class="form-group" style="margin:0;">
-                <label style="font-size:.72rem;margin-bottom:.2rem;display:block;">Éditeur</label>
-                <input type="text" name="lic_editeur" value="${_licEscHtml(editeur)}"
+                <label for="id-lic_editeur-2" style="font-size:.72rem;margin-bottom:.2rem;display:block;">Éditeur</label>
+                <input id="id-lic_editeur-2" type="text" name="lic_editeur" value="${_licEscHtml(editeur)}"
                        placeholder="Ex : Microsoft, Adobe…" style="margin:0;">
             </div>
             <div class="form-group" style="flex:1.2;margin:0;">
-                <label style="font-size:.72rem;margin-bottom:.2rem;display:block;">Produit</label>
-                <input type="text" name="lic_produit" value="${_licEscHtml(produit)}"
+                <label for="id-lic_produit-2" style="font-size:.72rem;margin-bottom:.2rem;display:block;">Produit</label>
+                <input id="id-lic_produit-2" type="text" name="lic_produit" value="${_licEscHtml(produit)}"
                        placeholder="Ex : Windows 11 Pro" style="margin:0;">
             </div>
             <div class="form-group" style="flex:1.8;margin:0;">
-                <label style="font-size:.72rem;margin-bottom:.2rem;display:block;">Clé de licence</label>
-                <input type="text" name="lic_cle" value="${_licEscHtml(cle)}"
+                <label for="id-lic_cle-2" style="font-size:.72rem;margin-bottom:.2rem;display:block;">Clé de licence</label>
+                <input id="id-lic_cle-2" type="text" name="lic_cle" value="${_licEscHtml(cle)}"
                        placeholder="XXXXX-XXXXX-XXXXX-XXXXX" autocomplete="off"
                        class="lic-cle" style="margin:0;">
             </div>
