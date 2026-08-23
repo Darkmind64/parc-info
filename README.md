@@ -377,7 +377,6 @@ parc_info/
 │   ├── auth_utils.py      ← PBKDF2, CSRF, rate-limit
 │   ├── config_helpers.py  ← Config persistée
 │   ├── client_helpers.py  ← ACL, audit, pagination
-│   ├── models.py          ← SQLAlchemy (optionnel)
 │   ├── requirements.txt   ← Dépendances
 │   └── parcinfo.spec      ← PyInstaller config
 │

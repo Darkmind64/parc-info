@@ -87,7 +87,6 @@
 ├─ database.py        : SQLite + Turso, row_to_dict(), init_db()║
 ├─ config_helpers.py  : cfg_get/cfg_set, listes personnalisées  ║
 ├─ client_helpers.py  : ACL (can_write), audit, pagination      ║
-├─ models.py          : SQLAlchemy ORM (optionnel, coexiste)    ║
 └─ [autres] : launcher.py, convert_discovered_devices.py, etc   ║
 ╚════════════════════════════════════════════════════════════════╝
                               ↓
@@ -166,13 +165,12 @@ parc_info/                           # Répertoire racine
 │  ├─ config_helpers.py              # cfg_get/cfg_set, listes perso (LISTE_DEFAULTS)
 │  ├─ client_helpers.py              # ACL, audit, pagination, formatage
 │  ├─ crypto_utils.py                # Chiffrement des identifiants stockés
-│  ├─ models.py                      # SQLAlchemy ORM (optionnel, coexiste)
 │  ├─ app_update_routes.py           # Routes API pour la bannière de mise à jour
 │  ├─ uploads_sync.py                # Synchronisation locale ↔ Turso des pièces jointes
 │  ├─ convert_discovered_devices.py  # Utilitaire import réseau
 │  ├─ download_oui.py                # Télécharge base IEEE OUI (fabricants)
 │  ├─ verifier_version.py            # Vérifie la cohérence des 5 sources de version
-│  └─ requirements.txt                # flask, werkzeug, flask-sqlalchemy
+│  └─ requirements.txt                # flask, werkzeug, apscheduler…
 │
 ├─ 🔁 Mise à jour (sous-système autonome, depuis 2.9.2)
 │  ├─ update_checker.py              # Interroge version.json, vérifie SHA256
@@ -299,7 +297,7 @@ que de se fier à une intuition ou à un chiffre daté :
 ```bash
 wc -l app.py collector_core.py launcher.py applique_maj.py update_checker.py \
       update_notifier.py database.py auth_utils.py config_helpers.py \
-      client_helpers.py models.py
+      client_helpers.py
 ```
 
 | Fichier | Responsabilité |
@@ -314,7 +312,6 @@ wc -l app.py collector_core.py launcher.py applique_maj.py update_checker.py \
 | auth_utils.py | Auth PBKDF2, CSRF, rate-limit, validation |
 | config_helpers.py | Config persistée, listes perso (LISTE_DEFAULTS) |
 | client_helpers.py | ACL, audit, pagination, formatage |
-| models.py | Modèles SQLAlchemy — présents dans le dépôt mais non importés par app.py à ce jour (`grep -n "import models" app.py`) ; ne pas supposer qu'ils reflètent le schéma réel, `init_db()` fait foi |
 
 ---
 
@@ -1053,7 +1050,7 @@ source venv/bin/activate  # Linux/macOS
 venv\Scripts\activate     # Windows
 
 # 3. Installer dépendances (voir requirements.txt pour la liste complète :
-# flask, werkzeug, flask-sqlalchemy, apscheduler, reportlab, cryptography,
+# flask, werkzeug, apscheduler, reportlab, cryptography,
 # flask-compress, qrcode, gunicorn, zeroconf, certifi)
 pip install -r requirements.txt
 
@@ -1449,9 +1446,13 @@ SQLite brut + `sqlite3` pour :
 - ✅ Transparence → SQL visible
 - ✅ Poids → pas de dépendance supplémentaire
 
-SQLAlchemy (`models.py`) optionnel pour :
-- Projets futurs avec Turso/PostgreSQL
-- Coexistence peaceful avec SQL brut
+Un miroir SQLAlchemy déclaratif (`models.py`) avait été ajouté en prévision
+d'une éventuelle bascule Turso/PostgreSQL, mais n'a jamais été branché
+(`db.init_app(app)` jamais appelé) et a fini par être supprimé (audit du
+2026-08-23) : un schéma dupliqué sans mécanisme pour rester synchronisé
+avec `init_db()` ne fait que dériver en silence et induire en erreur —
+mieux vaut le réintroduire pour de vrai le jour où un besoin concret
+apparaît que de le garder comme code mort entre-temps.
 
 ### Pourquoi Multi-Client Strict ?
 
