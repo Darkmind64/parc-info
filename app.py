@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, make_response, send_file, abort
+from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, make_response, send_file, abort, get_flashed_messages
 from werkzeug.utils import secure_filename
 from datetime import datetime, date, timedelta, timezone
 import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time, io, colorsys
@@ -4540,7 +4540,11 @@ def supprimer_identifiant(id):
         return redirect(url_for('liste_identifiants'))
     cid = get_client_id()
     conn = get_db()
-    idn = row_to_dict(conn.execute('SELECT nom FROM identifiants WHERE id=?',(id,)).fetchone() or {})
+    # Sans le filtre client_id, cette lecture pouvait révéler le nom d'un
+    # identifiant appartenant à un autre client dans l'historique du client
+    # actif (le DELETE ci-dessous, lui, était déjà correctement scopé — rien
+    # n'était donc réellement supprimé, seul le nom fuitait dans le journal).
+    idn = row_to_dict(conn.execute('SELECT nom FROM identifiants WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     log_history(conn, cid, 'identifiant', id, idn.get('nom','?'), 'Suppression')
     conn.execute('DELETE FROM identifiants WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
@@ -12268,6 +12272,14 @@ def page_login():
             return redirect(next_url)
         _record_failed_attempt(ip)
         error = 'Identifiants incorrects'
+    if error is None:
+        # login.html est une page autonome (pas d'extends base.html) : elle
+        # n'affiche jamais get_flashed_messages(). Des messages utiles
+        # (timeout de session dans login_required, redirections diverses)
+        # étaient donc flashés puis silencieusement perdus.
+        _flashes = get_flashed_messages()
+        if _flashes:
+            error = _flashes[0]
     return render_template('login.html', error=error,
                            next=request.args.get('next',''))
 
