@@ -3724,6 +3724,15 @@ def nouvel_appareil():
 def editer_appareil(id):
     cid = get_client_id()
     conn = get_db()
+    # Vérification d'appartenance AVANT toute lecture/écriture — sans elle, un
+    # utilisateur avec un accès écriture sur un seul client pouvait éditer/
+    # supprimer les appareils de n'importe quel autre client en changeant
+    # juste l'id dans l'URL (aucune des requêtes ci-dessous ne filtrait par
+    # client_id). Voir le même correctif sur supprimer_appareil ci-dessous.
+    if not conn.execute('SELECT 1 FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone():
+        conn.close()
+        flash('Appareil introuvable', 'danger')
+        return redirect(url_for('liste_appareils'))
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
     if request.method == 'POST':
         if not can_write():
@@ -3740,8 +3749,8 @@ def editer_appareil(id):
             for e in errs: flash(e, 'danger')
             return redirect(request.url)
         now = datetime.utcnow().isoformat()
-        _old = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=?', (id,)).fetchone() or {})
-        vals = _extract_form(request.form) + (now, id)
+        _old = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        vals = _extract_form(request.form) + (now, id, cid)
         conn.execute('''UPDATE appareils SET nom_machine=?,type_appareil=?,marque=?,modele=?,numero_serie=?,
             adresse_ip=?,adresse_mac=?,nom_dns=?,utilisateur=?,service=?,localisation=?,date_achat=?,
             duree_garantie=?,date_fin_garantie=?,fournisseur=?,prix_achat=?,numero_commande=?,os=?,
@@ -3750,7 +3759,7 @@ def editer_appareil(id):
             av_marque=?,av_nom=?,av_date_debut=?,av_date_fin=?,av_contrat_id=?,
             edr_marque=?,edr_nom=?,edr_date_fin=?,edr_contrat_id=?,
             rmm_marque=?,rmm_nom=?,rmm_agent_id=?,rmm_date_fin=?,rmm_contrat_id=?,
-            logiciels=?,garantie_alerte_ignoree=?,date_maj=? WHERE id=?''', vals)
+            logiciels=?,garantie_alerte_ignoree=?,date_maj=? WHERE id=? AND client_id=?''', vals)
         nom = request.form.get('nom_machine','') or f'Appareil #{id}'
         _cols_a = _ENTITE_COLS['appareil']
         _details_a = _diff_json({k: str(_old.get(k,'') or '') for k in _cols_a},
@@ -3763,7 +3772,7 @@ def editer_appareil(id):
         conn.commit(); conn.close()
         flash('Appareil mis à jour', 'success')
         return redirect(url_for('liste_appareils'))
-    a = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=?', (id,)).fetchone() or {})
+    a = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     docs = [row_to_dict(r) for r in conn.execute(
         'SELECT id, appareil_id, client_id, nom, description, type_doc, nom_fichier, taille, date_upload, sync_status FROM documents_appareils WHERE appareil_id=? ORDER BY date_upload DESC', (id,)).fetchall()]
     for d in docs:
@@ -3819,13 +3828,20 @@ def supprimer_appareil(id):
     cid = get_client_id()
     conn = get_db()
     conn.execute('PRAGMA foreign_keys = ON')
-    a = row_to_dict(conn.execute('SELECT nom_machine FROM appareils WHERE id=?',(id,)).fetchone() or {})
+    # id seul ne suffit pas : sans le filtre client_id, un utilisateur avec un
+    # accès écriture sur un seul client pouvait supprimer l'appareil de
+    # n'importe quel autre client en changeant l'id dans l'URL.
+    a = row_to_dict(conn.execute('SELECT nom_machine FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    if not a:
+        conn.close()
+        flash('Appareil introuvable', 'danger')
+        return redirect(url_for('liste_appareils'))
     log_history(conn, cid, 'appareil', id, a.get('nom_machine','?'), 'Suppression')
     # Tables sans FK déclarée (ajoutées via ALTER TABLE) — non couvertes par le
     # PRAGMA ci-dessus, nettoyage manuel nécessaire pour éviter les orphelins.
-    conn.execute('DELETE FROM cles_recuperation WHERE appareil_id=?', (id,))
-    conn.execute('DELETE FROM collectes WHERE appareil_id=?', (id,))
-    conn.execute('DELETE FROM appareils WHERE id=?', (id,))
+    conn.execute('DELETE FROM cles_recuperation WHERE appareil_id=? AND client_id=?', (id, cid))
+    conn.execute('DELETE FROM collectes WHERE appareil_id=? AND client_id=?', (id, cid))
+    conn.execute('DELETE FROM appareils WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
     flash('Appareil supprimé', 'info')
     return redirect(url_for('liste_appareils'))
