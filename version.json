@@ -1,23 +1,23 @@
 {
-  "version": "2.18.41",
-  "release_date": "2026-08-22T00:00:00.000000",
+  "version": "2.18.42",
+  "release_date": "2026-08-23T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.41",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.42/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.42/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.42/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.42",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.42/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.42/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.42/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.42/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.42/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif nom DNS fantaisiste sur macOS + doublons de stockage APFS restants",
+    "new_features": "Correctif faille d'isolation multi-client (IDOR) sur la fiche appareil",
     "improvements": [
-      "CORRIGÉ (macOS) : le nom DNS remonté était parfois une chaîne incompréhensible du type « 1.0.0.0.[...]0.0.ip6.arpa » — socket.getfqdn() est notoirement peu fiable sur macOS et pouvait retomber sur la représentation PTR du bouclage IPv6 (::1) au lieu du vrai nom de machine. Remplacé par scutil --get LocalHostName, qui lit le nom Bonjour configuré localement sans passer par une résolution réseau.",
-      "CORRIGÉ (macOS) : même après le correctif du total de stockage gonflé (2.18.34), chaque volume de service macOS/APFS (Preboot, VM, Update, xarts, iSCPreboot, Hardware — présents sur tout Mac moderne) restait affiché individuellement, donnant l'illusion de 6 à 8 disques quasi identiques. Ces volumes sont désormais exclus de l'affichage et du total ; seuls les deux volumes où vit réellement le contenu de la machine restent visibles."
+      "CORRIGÉ (sécurité) : les routes d'édition et de suppression d'un appareil ne filtraient les requêtes SQL que par leur id, jamais par client_id, contrairement à toutes les routes CRUD comparables (contrats, documents, BitLocker). Un utilisateur disposant d'un accès en écriture sur un seul client pouvait donc consulter, modifier ou supprimer l'appareil de n'importe quel autre client en devinant/incrémentant l'id dans l'URL. Trouvé lors d'un audit du projet, corrigé en scopant toutes les lectures/écritures par client_id, avec un test de non-régression permanent.",
+      "CI : la liste de tests de la chaîne de publication était figée à la main et avait fini par oublier 12 fichiers de test sur 31 — dont celui qui vérifie justement l'application des droits d'accès (can_write()). Remplacée par une découverte automatique de tout fichier test_*.py, pour qu'un nouveau test ajouté au dépôt tourne systématiquement avant toute publication."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.41"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.42"
 }
