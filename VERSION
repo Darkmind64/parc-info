@@ -1,8 +1,43 @@
-PARCINFO_VERSION=2.18.44
+PARCINFO_VERSION=2.18.45
 RELEASE_DATE=2026-08-23
-BUILD_NUMBER=2026082302
+BUILD_NUMBER=2026082303
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.45 - Accessibilité + frictions UX (audit du 2026-08-23)
+# Mot de passe en clair dans localStorage, alert() natifs, tableaux non
+# scrollables, badges dupliqués, labels non liés, tri au clavier.
+# SÉCURITÉ : form_tools.js sauvegardait tous les champs de formulaire dans
+# localStorage pour l'autosave de brouillon, y compris les mots de passe
+# (form_identifiant.html). Les champs type=password sont désormais exclus
+# — vérifié en navigateur réel : le mot de passe tapé n'apparaît plus
+# jamais dans localStorage.
+# UX : nouveau showFlash(msg, cat) réutilisable dans base.html (textContent,
+# jamais innerHTML — pas de risque XSS). Les 25 alert() restants (sur 26 —
+# le dernier reste dans popup_identifiant.html, une popup autonome sans
+# base.html) convertis. L'import CSV (liste_tools.js) avait un bug plus
+# profond que la simple absence de vérification de r.ok : la route répond
+# toujours par flash()+redirect, fetch() recevait donc toujours un
+# 200-après-redirection ET consommait le message flash avant la navigation
+# manuelle suivante — succès ET échec s'affichaient sans aucun message.
+# Corrigé par une vraie soumission de formulaire.
+# Tableaux larges (appareils/périphériques/identifiants/utilisateurs)
+# enveloppés dans .table-scroll — défilement contenu au tableau plutôt qu'à
+# toute la page.
+# Dédup : macro Jinja badge_agent() pour les pastilles AV/EDR/RMM de
+# liste_appareils.html, à la place de ~1900 caractères de markup répété 3x
+# — rendu vérifié identique en navigateur sur les 3 états.
+# ACCESSIBILITÉ : 189 <label> liés à leur champ par for/id (script écrit
+# pour ce chantier — a cassé 189 balises en supprimant leur '>' de
+# fermeture à la première tentative, repéré avant tout test navigateur,
+# corrigé, re-vérifié par compilation Jinja + suite de tests + inspection
+# DOM réelle). 2 <img> sans alt corrigées. scope=col + navigation clavier
+# (Entrée/Espace) + aria-sort sur les en-têtes triables, dans tri.js
+# (module partagé) et dans liste_appareils.html (tri côté serveur,
+# mécanisme séparé) — testé par dispatch d'événement clavier réel.
+# Non traité volontairement : repli responsive de la nav horizontale
+# (<900px), laissé pour un chantier séparé.
+# Date: 23 août 2026
 
 # Version 2.18.44 - Rattrapage de la documentation décrochée (25+ versions de retard)
 # claude.md, BUILD.md, DOCKERHUB_SETUP.md et IMPLEMENTATION_GUIDE.md étaient

@@ -1,24 +1,26 @@
 {
-  "version": "2.18.44",
+  "version": "2.18.45",
   "release_date": "2026-08-23T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.44",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.44/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.45/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.45/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.45/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.45",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.45/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.45/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.45/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.45/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.45/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Rattrapage de la documentation décrochée (25+ versions de retard)",
+    "new_features": "Accessibilité + frictions UX (mot de passe en localStorage, alert(), tableaux, labels)",
     "improvements": [
-      "DOCS : claude.md, BUILD.md, DOCKERHUB_SETUP.md et IMPLEMENTATION_GUIDE.md étaient tous figés au même horodatage « 2026-08-19 (v2.18.15) », 25+ versions derrière le code réel. claude.md documente désormais l'interface mobile PWA (absente malgré plusieurs releases dédiées) et ne porte plus de compteurs de lignes figés (dérivés jusqu'à 233 % de la réalité) ; BUILD.md décrit le téléchargement automatique de la base OUI (au lieu de l'ancien procédé manuel) ; IMPLEMENTATION_GUIDE.md, qui admettait lui-même avoir divergé de la réalité, a été archivé dans docs/archive/.",
-      "CORRIGÉ : paragraphe orphelin sous « Fonctionnalités Principales » dans README.md (reste d'une suppression antérieure, sans sous-titre).",
-      "CHANGELOG.md rattrapé de 18 versions (2.18.26 → 2.18.43)."
+      "CORRIGÉ (sécurité) : form_tools.js sauvegardait tous les champs de formulaire dans localStorage pour l'autosave de brouillon, y compris les mots de passe (form_identifiant.html). Les champs type=password sont désormais exclus.",
+      "UX : les 25 alert() natifs restants (sur 26) sont remplacés par la bannière flash existante (showFlash()), désormais réutilisable depuis n'importe quel script — cohérence visuelle, plus de dialogue navigateur brut.",
+      "CORRIGÉ : l'import CSV (appareils/périphériques) pouvait échouer silencieusement — la route répond par flash()+redirect, et le fetch() utilisé jusqu'ici consommait le message avant que la page ne se recharge, masquant succès comme échec. Remplacé par une vraie soumission de formulaire.",
+      "UX : les tableaux larges (appareils, périphériques, identifiants, utilisateurs) défilent maintenant horizontalement dans leur propre conteneur au lieu de forcer un défilement de toute la page.",
+      "ACCESSIBILITÉ : 189 champs de formulaire liés à leur <label> (for/id), navigation clavier (Entrée/Espace) et aria-sort ajoutés sur les en-têtes de colonnes triables, scope=col sur les tableaux, alt manquants corrigés."
     ]
   },
   "checksums": {
@@ -29,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.44"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.45"
 }
