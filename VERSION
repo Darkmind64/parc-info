@@ -1,8 +1,32 @@
-PARCINFO_VERSION=2.18.40
+PARCINFO_VERSION=2.18.41
 RELEASE_DATE=2026-08-22
-BUILD_NUMBER=2026082204
+BUILD_NUMBER=2026082205
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.41 - Correctif nom DNS macOS + doublons stockage APFS (collecteur 3.15)
+# Signalé sur une vraie fiche système macOS, deux problèmes distincts.
+# 1) Nom DNS fantaisiste : get_fqdn() utilisait socket.getfqdn(), notoirement
+#    peu fiable sur macOS — il déclenche gethostbyaddr(gethostname()), et
+#    quand cette résolution retombe sur le bouclage IPv6 (::1) sans
+#    enregistrement PTR configuré, certains résolveurs renvoient tel quel
+#    le nom de la requête plutôt qu'une erreur. Constaté : dns_name valait
+#    "1.0.0.0.[...]0.0.ip6.arpa" (la représentation PTR standard de ::1) au
+#    lieu du vrai nom de machine. Remplacé sur macOS par `scutil --get
+#    LocalHostName` (+ suffixe .local) : lit directement le nom Bonjour
+#    configuré localement, sans passer par une résolution réseau.
+# 2) Stockage qui semblait "multiplié" : même après le correctif critique de
+#    la 2.18.34 (qui avait réglé le total gonflé), chaque volume de service
+#    macOS/APFS (Preboot, VM, Update, xarts, iSCPreboot, Hardware — présents
+#    sur tout Mac moderne) restait affiché individuellement, donnant
+#    l'illusion visuelle de 6 à 8 "disques" quasi identiques là où il n'y en
+#    a physiquement qu'un, chacun rapportant à `df` la même capacité totale
+#    que le conteneur partagé. Ces points de montage sont désormais exclus
+#    de l'affichage ET du total — seuls `/` (Système) et
+#    `/System/Volumes/Data` restent, les deux volumes où vit réellement le
+#    contenu de la machine. Sans effet sur Linux (mêmes points de montage
+#    jamais produits par un système de fichiers non-APFS).
+# Date: 22 août 2026
 
 # Version 2.18.40 - Interface mobile enrichie (documents, licences, BitLocker)
 # Après un premier passage en conditions réelles sur téléphone, complète la

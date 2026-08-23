@@ -1,24 +1,23 @@
 {
-  "version": "2.18.40",
+  "version": "2.18.41",
   "release_date": "2026-08-22T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.40/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.40/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.40/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.40",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.40/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.40/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.40/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.40/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.40/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.41",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.41/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Interface mobile enrichie : documents joints téléchargeables, licences logicielles, clés de récupération BitLocker et interventions liées, désormais consultables depuis /m",
+    "new_features": "Correctif nom DNS fantaisiste sur macOS + doublons de stockage APFS restants",
     "improvements": [
-      "AJOUTÉ (mobile) : dashboard complété (disponibilité, garanties, périphériques, valeur du parc, activité récente).",
-      "AJOUTÉ (mobile) : fiche appareil — marque/modèle et localisation en liste, dernier ping, licences logicielles (masquées), clés BitLocker (déchiffrement à la demande, audité), documents joints réellement téléchargeables.",
-      "AJOUTÉ (mobile) : fiche contrat — montant/numéro en liste, interventions liées et documents téléchargeables en détail. Utilisateurs : notes affichées."
+      "CORRIGÉ (macOS) : le nom DNS remonté était parfois une chaîne incompréhensible du type « 1.0.0.0.[...]0.0.ip6.arpa » — socket.getfqdn() est notoirement peu fiable sur macOS et pouvait retomber sur la représentation PTR du bouclage IPv6 (::1) au lieu du vrai nom de machine. Remplacé par scutil --get LocalHostName, qui lit le nom Bonjour configuré localement sans passer par une résolution réseau.",
+      "CORRIGÉ (macOS) : même après le correctif du total de stockage gonflé (2.18.34), chaque volume de service macOS/APFS (Preboot, VM, Update, xarts, iSCPreboot, Hardware — présents sur tout Mac moderne) restait affiché individuellement, donnant l'illusion de 6 à 8 disques quasi identiques. Ces volumes sont désormais exclus de l'affichage et du total ; seuls les deux volumes où vit réellement le contenu de la machine restent visibles."
     ]
   },
   "checksums": {
@@ -29,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.40"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.41"
 }
