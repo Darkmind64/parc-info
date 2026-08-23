@@ -13,13 +13,13 @@ Application web **Python/Flask** pour la gestion d'inventaire informatique avec 
 
 ## ✨ Fonctionnalités Principales
 
+### Fiche système enrichie
 
-
-La fiche système affiche maintenant la vraie icône de chaque application
-(navigateur, mail, types de fichiers), extraite directement de son
-exécutable. Le statut de mise à jour logicielle distingue désormais « à jour
-confirmé » de « non vérifiable » au lieu d'un simple silence pour les deux.
-Voir le [CHANGELOG](CHANGELOG.md).
+La fiche système affiche la vraie icône de chaque application (navigateur,
+mail, types de fichiers), extraite directement de son exécutable. Le statut
+de mise à jour logicielle distingue « à jour confirmé » de « non
+vérifiable » au lieu d'un simple silence pour les deux. Voir le
+[CHANGELOG](CHANGELOG.md).
 
 ### Rapports graphiques + inventaire USB automatique
 
@@ -79,7 +79,7 @@ system-info-collector.exe --client-id 5  # Windows
 - ✅ Rapport PDF préserve 100% des données collectées
 - ✅ Correspondance champs documentée (COLLECTOR_FIELD_MAPPING.md)
 
-👉 **[Voir le guide complet](IMPLEMENTATION_GUIDE.md)** | **[Correspondance champs](COLLECTOR_FIELD_MAPPING.md)**
+👉 **[Correspondance champs, détail par système d'exploitation](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
 - [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.43/system-info-collector.exe)

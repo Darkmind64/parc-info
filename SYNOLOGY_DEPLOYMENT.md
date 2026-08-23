@@ -1,7 +1,7 @@
 # 🐳 Guide de Déploiement ParcInfo sur Synology DS1522+
 
-**Version** : 2.18.15
-**Dernière mise à jour** : 2026-08-19
+**Version** : 2.18.43
+**Dernière mise à jour** : 2026-08-23
 
 ## 📋 Table des matières
 

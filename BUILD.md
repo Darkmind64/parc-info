@@ -348,22 +348,23 @@ MAC: 00:50:F2:xx:xx:xx → Microsoft
 MAC: 08:00:27:xx:xx:xx → Oracle VirtualBox
 ```
 
-### Setup
+### Setup — automatique depuis la 2.18.25
 
+Aucune étape manuelle requise pour un exécutable compilé : `oui.txt` se
+télécharge tout seul en arrière-plan au premier démarrage s'il est absent
+(jamais bloquant — la table embarquée d'environ 930 préfixes reste
+utilisable entre-temps), se rafraîchit automatiquement s'il a plus de 30
+jours (cron quotidien), et un bouton « 🔄 Mettre à jour » sur la page Scan
+permet un rafraîchissement à la demande. Le fichier vit dans `_data_base`
+(à côté de `parc_info.db`), jamais dans un chemin relatif à `__file__` —
+voir `app.py:_oui_path()` et `claude.md` § Base IEEE OUI pour le détail et
+le bug historique que ce choix corrige.
+
+`download_oui.py` (téléchargement direct en CLI) reste disponible pour un
+usage hors-app (dev, scripts), mais n'est plus la voie normale :
 ```bash
-# Télécharger (60k fabricants, ~5 MB)
 python download_oui.py
-# → Crée oui.txt
-
-# Copier à côté du binaire
-
-# Windows
-move oui.txt C:\Program Files\ParcInfo\
-
-# macOS
-cp oui.txt ~/Downloads/  (si ParcInfo.exe là)
-# ou
-cp oui.txt /Applications/ParcInfo.app/Contents/MacOS/
+# → Crée oui.txt dans le répertoire courant
 ```
 
 ### Vérification
@@ -371,7 +372,8 @@ cp oui.txt /Applications/ParcInfo.app/Contents/MacOS/
 Dans app Web :
 - Scan réseau → Découvrir appareils
 - Devrait voir fabricants (ex. "Apple Inc.", "Intel Corp.")
-- Si absent → oui.txt pas trouvé
+- Si absent → voir les logs du téléchargement en arrière-plan, ou cliquer
+  « 🔄 Mettre à jour » sur la page Scan
 
 ---
 
@@ -473,4 +475,4 @@ gère le téléchargement, la vérification d'empreinte et le remplacement
 
 ---
 
-**ParcInfo Build Guide** — mis à jour 2026-08-19 (v2.18.15)
+**ParcInfo Build Guide** — mis à jour 2026-08-23 (v2.18.43)

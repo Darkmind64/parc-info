@@ -1,6 +1,6 @@
 # ParcInfo — Guide de Développement Claude 🚀
 
-**Dernière mise à jour** : 2026-08-19
+**Dernière mise à jour** : 2026-08-23
 
 ## 📋 Aperçu Exécutif
 
@@ -16,6 +16,10 @@
   d'authentification optionnel
 - ✅ **Synchronisation multi-instance** : base locale + Turso en tâche de fond
   (Docker/PC/Mac peuvent partager le même parc)
+- ✅ **Interface mobile (PWA)** : consultation en lecture seule sur `/m`
+  (dashboard, appareils, contrats, utilisateurs, identifiants), installable
+  sur écran d'accueil, mots de passe révélés à la demande sans mise en cache
+  hors ligne
 - ✅ **Étiquettes QR** : génération de labels imprimables (AVERY J8159)
 - ✅ **Portabilité** : exécutable autonome (.exe/.app) avec BD locale
 - ✅ **Audit trail** : historique complet de chaque modification
@@ -70,7 +74,7 @@
 ╚════════════════════════════════════════════════════════════════╝
                               ↓
 ╔════════════════════════════════════════════════════════════════╗
-║ FLASK APP (app.py) — ~11 600 lignes                            ║
+║ FLASK APP (app.py) — ~13 500 lignes                            ║
 ║ • Routeurs @app.route() (login, CRUD appareils, scan, etc)    ║
 ║ • Middlewares : CSRF, auth, error handlers                    ║
 ║ • Filtres Jinja2 : formatage ports, périphériques, types      ║
@@ -97,7 +101,10 @@
 │  ├─ detail_*.html → fiche individuelle                        ║
 │  ├─ admin_*.html → pages d'administration                     ║
 │  └─ login.html, 404.html, 500.html                            ║
-└─ static/js/ (vanilla JS — tri, formulaires, AJAX)             ║
+├─ static/js/ (vanilla JS — tri, formulaires, AJAX)             ║
+├─ templates/mobile/ (PWA, lecture seule, routes /m/*) :        ║
+│  dashboard, appareils, contrats, utilisateurs, identifiants   ║
+└─ static/mobile/ (manifest.webmanifest + sw.js, installable)   ║
 ╚════════════════════════════════════════════════════════════════╝
                               ↓
 ╔════════════════════════════════════════════════════════════════╗
@@ -245,9 +252,17 @@ parc_info/                           # Répertoire racine
 │     ├─ Profil Utilisateur
 │     │  └─ profil.html              # Profil connecté + prefs
 │     │
-│     └─ Clients & Configuration
-│        ├─ clients.html             # Gestion clients
-│        └─ form_client.html         # Form CRUD
+│     ├─ Clients & Configuration
+│     │  ├─ clients.html             # Gestion clients
+│     │  └─ form_client.html         # Form CRUD
+│     │
+│     └─ mobile/ (PWA, lecture seule — routes /m/*)
+│        ├─ base.html                # Layout mobile (nav basse, safe-area)
+│        ├─ dashboard.html           # Stats + alertes du client actif
+│        ├─ appareils.html, appareil_detail.html
+│        ├─ contrats.html, contrat_detail.html
+│        ├─ utilisateurs.html        # Liste utilisateurs finaux
+│        └─ identifiants.html        # Mots de passe révélés à la demande
 │
 ├─ 🎨 Ressources Statiques
 │  └─ static/
@@ -255,6 +270,10 @@ parc_info/                           # Répertoire racine
 │     │  ├─ form_tools.js            # Utilitaires formulaires (CSRF, validation)
 │     │  ├─ liste_tools.js           # Filtrage/tri listes, pagination AJAX
 │     │  └─ tri.js                   # Tri colonne (header cliquables)
+│     │
+│     ├─ mobile/
+│     │  ├─ manifest.webmanifest     # Métadonnées PWA (installable)
+│     │  └─ sw.js                    # Service worker (cache statique)
 │     │
 │     ├─ [css/ — optionnel]          # Styles CSS personnalisés
 │     ├─ [images/ — optionnel]       # Images/icônes personnalisées
@@ -271,23 +290,31 @@ parc_info/                           # Répertoire racine
 
 ### Hiérarchie Fichiers Clés
 
-| Fichier | Lignes | Responsabilité |
-|---------|--------|-----------------|
-| app.py | ~11 600 | Routeurs Flask, middlewares, filtres Jinja2, init_db() |
-| collector_core.py | ~7 700 | Toute la logique de collecte (35 étapes Windows), rapports PDF/HTML |
-| launcher.py | ~215 | Point entrée PyInstaller, mode_mise_a_jour() en premier, port libre, browser auto |
-| applique_maj.py | ~260 | Le nouvel exe se recopie lui-même sur l'ancien, vérifie l'empreinte |
-| update_checker.py | ~615 | Interroge version.json, SHA256, téléchargement reprenable |
-| update_notifier.py | ~315 | Bannière UI, fil de fond, nettoyage des reliquats de mise à jour |
-| database.py | 300+ | Connexion SQLite/Turso, helpers SQL |
-| auth_utils.py | ~165 | Auth PBKDF2, CSRF, rate-limit, validation |
-| config_helpers.py | 200+ | Config persistée, listes perso (LISTE_DEFAULTS) |
-| client_helpers.py | 300+ | ACL, audit, pagination, formatage |
-| models.py | 200+ | Modèles SQLAlchemy (optionnel) |
+Volontairement sans colonne « Lignes » : un chiffre figé dans ce document a
+déjà dérivé de 41 à 233 % de la réalité en une vingtaine de versions (cas
+constaté : database.py annoncé « 300+ », en réalité passé à plus de 1 000).
+Avant d'intervenir sur l'un de ces fichiers, mesurer sa taille réelle plutôt
+que de se fier à une intuition ou à un chiffre daté :
 
-> `app.py` et `collector_core.py` ont beaucoup grossi depuis la dernière
-> révision de ce document : ne pas se fier à une intuition de taille avant
-> d'y intervenir — `wc -l` d'abord.
+```bash
+wc -l app.py collector_core.py launcher.py applique_maj.py update_checker.py \
+      update_notifier.py database.py auth_utils.py config_helpers.py \
+      client_helpers.py models.py
+```
+
+| Fichier | Responsabilité |
+|---------|-----------------|
+| app.py | Routeurs Flask, middlewares, filtres Jinja2, init_db() — le plus gros fichier du projet |
+| collector_core.py | Toute la logique de collecte (35 étapes Windows + équivalents macOS/Linux), rapports PDF/HTML |
+| launcher.py | Point entrée PyInstaller, mode_mise_a_jour() en premier, port libre, browser auto |
+| applique_maj.py | Le nouvel exe se recopie lui-même sur l'ancien, vérifie l'empreinte |
+| update_checker.py | Interroge version.json, SHA256, téléchargement reprenable |
+| update_notifier.py | Bannière UI, fil de fond, nettoyage des reliquats de mise à jour |
+| database.py | Connexion SQLite/Turso, helpers SQL, moteur de synchronisation |
+| auth_utils.py | Auth PBKDF2, CSRF, rate-limit, validation |
+| config_helpers.py | Config persistée, listes perso (LISTE_DEFAULTS) |
+| client_helpers.py | ACL, audit, pagination, formatage |
+| models.py | Modèles SQLAlchemy — présents dans le dépôt mais non importés par app.py à ce jour (`grep -n "import models" app.py`) ; ne pas supposer qu'ils reflètent le schéma réel, `init_db()` fait foi |
 
 ---
 
@@ -1563,6 +1590,7 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 | Toucher au mécanisme de mise à jour | applique_maj.py / update_checker.py | `def appliquer` / `def _install_windows` / `def _install_macos` |
 | Arrêter/redémarrer ParcInfo depuis l'app | launcher.py / app.py | `def quitter_application` / `def redemarrer_application` / route `/apropos` |
 | Build macOS Intel (croisement Rosetta) | .github/workflows/build-macos-intel.yml | job répliqué dans build-release.yml (`build-macos-intel`) |
+| Toucher à l'interface mobile (PWA) | app.py / templates/mobile/ | routes `/m/*` (`grep -n "@app.route('/m"`), lecture seule uniquement |
 
 ---
 
@@ -1580,6 +1608,6 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 
 ---
 
-**Dernier update** : 2026-08-19 (v2.18.15)
+**Dernier update** : 2026-08-23 (v2.18.43)
 **Mainteneur** : ParcInfo Team
 **License** : Voir LICENSE
