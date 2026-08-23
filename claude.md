@@ -1590,7 +1590,7 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 | Préremplir un champ de la fiche appareil depuis la collecte | app.py | `def champs_deduits_du_collecteur` |
 | Toucher au mécanisme de mise à jour | applique_maj.py / update_checker.py | `def appliquer` / `def _install_windows` / `def _install_macos` |
 | Arrêter/redémarrer ParcInfo depuis l'app | launcher.py / app.py | `def quitter_application` / `def redemarrer_application` / route `/apropos` |
-| Build macOS Intel (croisement Rosetta) | .github/workflows/build-macos-intel.yml | job répliqué dans build-release.yml (`build-macos-intel`) |
+| Build macOS Intel (croisement Rosetta) | .github/actions/setup-macos-intel-env/ + .github/actions/build-macos-intel-spec/ | actions composites partagées par build-macos-intel.yml et build-release.yml (`build-macos-intel`) — plus de duplication depuis l'audit du 2026-08-23 |
 | Toucher à l'interface mobile (PWA) | app.py / templates/mobile/ | routes `/m/*` (`grep -n "@app.route('/m"`), lecture seule uniquement |
 
 ---

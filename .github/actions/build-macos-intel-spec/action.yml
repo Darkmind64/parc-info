@@ -1,0 +1,58 @@
+name: 'Build a PyInstaller spec for macOS Intel'
+description: >
+  Compile un .spec PyInstaller donné avec TARGET_ARCH=x86_64 sous Rosetta,
+  zippe le résultat et le publie comme artefact du workflow. Suppose que
+  setup-macos-intel-env a déjà tourné dans le même job (venv x86_64 prêt
+  dans ./venv).
+
+inputs:
+  spec-file:
+    description: 'Fichier .spec à compiler (ex : parcinfo.spec)'
+    required: true
+  bundle-path:
+    description: 'Chemin sous dist/ à zipper (ex : ParcInfo.app, system-info-collector)'
+    required: true
+  zip-name:
+    description: 'Nom du fichier zip produit (créé dans dist/)'
+    required: true
+  artifact-name:
+    description: "Nom de l'artefact GitHub Actions"
+    required: true
+  recursive-zip:
+    description: "'true' pour un bundle .app (zip -r), 'false' pour un binaire brut"
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Build ${{ inputs.spec-file }} with PyInstaller (Intel)
+      shell: bash
+      run: |
+        source venv/bin/activate
+        # Utilise le vrai spec du projet, pas un appel PyInstaller ad hoc : c'est
+        # la seule recette qui embarque templates/, static/, version.json et les
+        # imports cachés (apscheduler, zeroconf, pystray...) dont l'app a besoin
+        # pour tourner réellement — un `pyinstaller app.py` nu produirait un
+        # bundle qui plante direct en TemplateNotFound. Le spec lit déjà
+        # TARGET_ARCH pour exactement ce cas.
+        TARGET_ARCH=x86_64 arch -x86_64 venv/bin/pyinstaller --noconfirm --clean "${{ inputs.spec-file }}"
+
+    - name: Zip ${{ inputs.bundle-path }}
+      shell: bash
+      run: |
+        cd dist
+        if [ "${{ inputs.recursive-zip }}" = "true" ]; then
+          zip -r "${{ inputs.zip-name }}" "${{ inputs.bundle-path }}"
+        else
+          zip "${{ inputs.zip-name }}" "${{ inputs.bundle-path }}"
+        fi
+
+    # Version épinglée en dur (v7) car une composite action ne peut pas
+    # interpoler une expression dans `uses:` — seul `with:` le permet. À tenir
+    # manuellement à jour avec le reste du pipeline (build-release.yml).
+    - name: Upload ${{ inputs.artifact-name }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: dist/${{ inputs.zip-name }}

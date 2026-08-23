@@ -1,0 +1,108 @@
+name: 'Setup macOS Intel (Rosetta) build environment'
+description: >
+  Prépare un venv Python x86_64 sous Rosetta pour compiler des binaires
+  Intel sur les runners macos-latest (Apple Silicon par défaut). Centralise
+  les contournements nécessaires — auparavant dupliqués à l'identique dans
+  build-macos-intel.yml ET build-release.yml, avec un vrai risque de
+  divergence entre les deux copies (signalé dans claude.md avant cette
+  extraction). Suppose que le dépôt est déjà checkouté par l'appelant.
+  Laisse un venv activable (`source venv/bin/activate`) prêt pour
+  build-macos-intel-spec.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Python 3.11
+      uses: actions/setup-python@v7
+      with:
+        # Même version que `tests`/`build` dans build-release.yml. app.py utilise
+        # la syntaxe `X | None` qui n'est évaluée qu'à l'exécution sur 3.10+ —
+        # le /usr/bin/python3 embarqué par macOS (Xcode Command Line Tools) est en
+        # 3.9 et plantait au lancement avec "TypeError: unsupported operand
+        # type(s) for |: 'type' and 'NoneType'" la seule fois où ceci est passé
+        # en production sans ce test de bout en bout (l'étape de vérification
+        # d'architecture ci-dessous ne contrôle que les .so compilés, pas la
+        # version de l'interpréteur lui-même).
+        python-version: '3.11'
+
+    - name: Install Rosetta (when runner is Apple Silicon)
+      shell: bash
+      run: |
+        if [[ "$(uname -m)" == "arm64" ]]; then
+          sudo softwareupdate --install-rosetta --agree-to-license || true
+        fi
+
+    - name: Create and use an x86_64 Python virtualenv, install deps and PyInstaller
+      shell: bash
+      run: |
+        # Crée un venv x86_64 pour que le binaire produit soit compatible Intel
+        # une fois compilé sous Rosetta.
+        #
+        # Les runners macos-latest sont désormais Apple Silicon. `arch -x86_64`
+        # sur cette seule ligne force uniquement le *fichier interpréteur* du
+        # venv à être la tranche x86_64 — ça ne se propage PAS aux commandes
+        # suivantes. Après `source venv/bin/activate`, invoquer `pip`/`python`
+        # nu les exécute sous l'architecture native du shell (arm64) : chaque
+        # roue avec une extension compilée (Pillow, cryptography...)
+        # s'installerait silencieusement en arm64 seul dans ce venv censé être
+        # x86_64. Chaque appel python/pip ci-dessous est donc préfixé
+        # individuellement par `arch -x86_64`, sinon le décalage réapparaît.
+        #
+        # L'installeur macOS officiel de python.org (celui que récupère
+        # setup-python) est universal2 (arm64+x86_64 dans un seul binaire)
+        # depuis 3.9.1, donc `arch -x86_64` sur python3.11 ici sélectionne la
+        # tranche Intel de la même façon qu'il le fait déjà sur le Python du
+        # système.
+        arch -x86_64 python3.11 -m venv venv
+        source venv/bin/activate
+        arch -x86_64 python -m pip install --upgrade pip setuptools wheel
+        # pystray n'est pas dans requirements.txt (build-only, pour l'icône de
+        # notification optionnelle) — même trio que BUILD.md/parcinfo.spec.
+        arch -x86_64 python -m pip install pyinstaller pillow pystray
+        if [ -f requirements.txt ]; then arch -x86_64 python -m pip install -r requirements.txt; fi
+        # L'extension Rust de cryptography atterrit quand même en arm64 malgré
+        # le forçage au niveau processus ci-dessus (la détection de tag de
+        # plateforme de pip sous Rosetta se trompe spécifiquement pour ce
+        # paquet) — on force le tag de roue explicitement plutôt que de
+        # compter sur la détection d'architecture à l'exécution. --platform
+        # exige --only-binary=:all: (pas de build source) ET --target (pip
+        # refuse les options spécifiques à une plateforme sur une installation
+        # normale en place) ; --python-version/--abi/--implementation sont
+        # déduits de l'interpréteur (x86_64) en cours d'exécution. Désinstalle
+        # d'abord pour que --target ne laisse pas de dist-info/RECORD
+        # obsolète du build arm64 traîner à côté des nouveaux fichiers.
+        arch -x86_64 python -m pip uninstall -y cryptography
+        SITE_PACKAGES=$(arch -x86_64 python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+        arch -x86_64 python -m pip install --no-deps --only-binary=:all: \
+            --platform macosx_10_12_x86_64 --platform macosx_11_0_x86_64 --platform macosx_12_0_x86_64 \
+            --target "$SITE_PACKAGES" \
+            cryptography
+
+    - name: Verify installed wheels are actually x86_64
+      shell: bash
+      run: |
+        # Échoue vite (secondes, pas minutes dans le build PyInstaller) si
+        # l'extension compilée d'une dépendance est encore la mauvaise tranche.
+        source venv/bin/activate
+        bad=0
+        while IFS= read -r -d '' so; do
+          got=$(lipo -archs "$so" 2>/dev/null || file -b "$so")
+          case "$got" in
+            *x86_64*) ;;
+            *) echo "ARCH MISMATCH: $so -> $got"; bad=1 ;;
+          esac
+        done < <(find venv/lib -name '*.so' -print0)
+        exit $bad
+
+    - name: Sanity-check app.py actually imports on this Python
+      shell: bash
+      run: |
+        # L'étape de vérification d'architecture ci-dessus ne contrôle que les
+        # .so compilés, pas la version de l'interpréteur — elle n'aurait pas
+        # attrapé app.py utilisant la syntaxe `X | None` (évaluée à
+        # l'exécution, Python 3.10+ seulement) sous un interpréteur trop
+        # ancien. Import direct plutôt que de l'apprendre via un technicien
+        # qui lance l'.app compilée.
+        source venv/bin/activate
+        DATA_DIR=$(mktemp -d) RUNNING_IN_DOCKER=1 PARCINFO_BACKUP=0 \
+            arch -x86_64 python -c "import app" && echo "app.py imports cleanly"

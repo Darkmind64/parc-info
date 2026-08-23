@@ -12,106 +12,18 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Python 3.11
-        uses: actions/setup-python@v7
+      - name: Setup macOS Intel build environment
+        uses: ./.github/actions/setup-macos-intel-env
+
+      - name: Build, zip and upload ParcInfo.app
+        uses: ./.github/actions/build-macos-intel-spec
         with:
-          # Same version as every other build/test job in this pipeline. app.py uses
-          # `X | None` syntax that only evaluates at runtime on 3.10+ — macOS's bundled
-          # /usr/bin/python3 (Xcode Command Line Tools) is 3.9 and crashed on launch with
-          # "TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'" the one
-          # time this went untested end-to-end (the arch-verify step only checks compiled
-          # .so files, not the interpreter's own version).
-          python-version: '3.11'
-
-      - name: Install Rosetta (when runner is Apple Silicon)
-        run: |
-          if [[ "$(uname -m)" == "arm64" ]]; then
-            sudo softwareupdate --install-rosetta --agree-to-license || true
-          fi
-
-      - name: Create and use an x86_64 Python virtualenv, install deps and PyInstaller
-        run: |
-          # Create an x86_64 venv so resulting binary is Intel-compatible when built under Rosetta.
-          #
-          # macos-latest runners are Apple Silicon now. `arch -x86_64` here only forces the venv's
-          # *interpreter file* to be the x86_64 slice — it does NOT carry over to later commands.
-          # `source venv/bin/activate` then invoking bare `pip`/`python` runs them under the shell's
-          # native arch (arm64), so every wheel with a compiled extension (Pillow, cryptography...)
-          # was silently installed arm64-only inside this supposedly-x86_64 venv. Every `python`/`pip`
-          # call below must be prefixed with `arch -x86_64` individually, or the mismatch resurfaces.
-          #
-          # python.org's official macOS installer (what setup-python fetches) has been universal2
-          # (arm64+x86_64 in one binary) since 3.9.1, so `arch -x86_64` on python3.11 here selects
-          # the Intel slice the same way it already does on the system's own Python.
-          arch -x86_64 python3.11 -m venv venv
-          source venv/bin/activate
-          arch -x86_64 python -m pip install --upgrade pip setuptools wheel
-          # pystray isn't in requirements.txt (build-only, for the optional tray icon) —
-          # same trio BUILD.md/build-release.yml install before running parcinfo.spec.
-          arch -x86_64 python -m pip install pyinstaller pillow pystray
-          if [ -f requirements.txt ]; then arch -x86_64 python -m pip install -r requirements.txt; fi
-          # cryptography's Rust extension still lands arm64 even with the process-level
-          # forcing above (pip's own platform-tag detection under Rosetta picks the wrong
-          # one for this package specifically) — force the wheel tag explicitly instead of
-          # relying on runtime arch detection. --platform requires --only-binary=:all: (no
-          # source build) AND --target (pip refuses platform-specific options on a normal
-          # in-place install); --python-version/--abi/--implementation are inferred from the
-          # running (x86_64) interpreter. Uninstall first so --target doesn't leave stale
-          # dist-info/RECORD metadata from the arm64 build sitting alongside the new files.
-          arch -x86_64 python -m pip uninstall -y cryptography
-          SITE_PACKAGES=$(arch -x86_64 python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
-          arch -x86_64 python -m pip install --no-deps --only-binary=:all: \
-              --platform macosx_10_12_x86_64 --platform macosx_11_0_x86_64 --platform macosx_12_0_x86_64 \
-              --target "$SITE_PACKAGES" \
-              cryptography
-
-      - name: Verify installed wheels are actually x86_64
-        run: |
-          # Fails fast (seconds, not minutes into the PyInstaller build) if a dependency's
-          # compiled extension is still the wrong slice.
-          source venv/bin/activate
-          bad=0
-          while IFS= read -r -d '' so; do
-            got=$(lipo -archs "$so" 2>/dev/null || file -b "$so")
-            case "$got" in
-              *x86_64*) ;;
-              *) echo "ARCH MISMATCH: $so -> $got"; bad=1 ;;
-            esac
-          done < <(find venv/lib -name '*.so' -print0)
-          exit $bad
-
-      - name: Sanity-check app.py actually imports on this Python
-        run: |
-          # The arch-verify step above only checks compiled .so files, not the
-          # interpreter's own version — it would not have caught app.py using
-          # `X | None` syntax (runtime-evaluated, Python 3.10+ only) under a
-          # too-old interpreter. Import directly instead of waiting to find out
-          # from a user running the built .app.
-          source venv/bin/activate
-          DATA_DIR=$(mktemp -d) RUNNING_IN_DOCKER=1 PARCINFO_BACKUP=0 \
-              arch -x86_64 python -c "import app" && echo "app.py imports cleanly"
-
-      - name: Build .app with PyInstaller (Intel)
-        run: |
-          source venv/bin/activate
-          # Use the project's real spec, not an ad-hoc PyInstaller invocation: it's the
-          # only recipe that bundles templates/, static/, version.json, and the hidden
-          # imports (apscheduler, zeroconf, pystray...) the app needs to actually run —
-          # a bare `pyinstaller app.py` produces a bundle that launches straight into a
-          # TemplateNotFound crash. The spec already reads TARGET_ARCH for exactly this.
-          TARGET_ARCH=x86_64 arch -x86_64 venv/bin/pyinstaller --noconfirm --clean parcinfo.spec
+          spec-file: parcinfo.spec
+          bundle-path: ParcInfo.app
+          zip-name: ParcInfo-macOS-Intel.zip
+          artifact-name: ParcInfo-macOS-Intel.zip
 
       - name: List produced artifacts
-        run: |
-          ls -la dist || true
-
-      - name: Zip .app
-        run: cd dist && zip -r ParcInfo-macOS-Intel.zip ParcInfo.app
-
-      - name: Upload mac .app artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ParcInfo-macOS-Intel.zip
-          path: dist/ParcInfo-macOS-Intel.zip
+        run: ls -la dist || true

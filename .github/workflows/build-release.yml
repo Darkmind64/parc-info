@@ -153,141 +153,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Python 3.11
-        uses: actions/setup-python@v7
+      - name: Setup macOS Intel build environment
+        uses: ./.github/actions/setup-macos-intel-env
+
+      - name: Build, zip and upload ParcInfo.app
+        uses: ./.github/actions/build-macos-intel-spec
         with:
-          # Same version as `tests` and `build` above. app.py uses `X | None` syntax
-          # that only evaluates at runtime on 3.10+ — macOS's bundled /usr/bin/python3
-          # (Xcode Command Line Tools) is 3.9 and crashed on launch with "TypeError:
-          # unsupported operand type(s) for |: 'type' and 'NoneType'" the one time this
-          # went untested end-to-end (the arch-verify step below only checks compiled
-          # .so files, not the interpreter's own version).
-          python-version: '3.11'
-
-      - name: Install Rosetta (when runner is Apple Silicon)
-        run: |
-          if [[ "$(uname -m)" == "arm64" ]]; then
-            sudo softwareupdate --install-rosetta --agree-to-license || true
-          fi
-
-      - name: Create and use an x86_64 Python virtualenv, install deps
-        run: |
-          # `arch -x86_64` on the venv-creation line only forces the venv's own
-          # interpreter file to be the x86_64 slice — it does NOT carry over to
-          # later commands. Invoking bare `pip`/`python` after `source
-          # venv/bin/activate` runs them under the runner's native arch (arm64),
-          # so every wheel with a compiled extension (Pillow, cryptography...)
-          # would silently install arm64-only inside this supposedly-x86_64 venv.
-          # Every python/pip call below is prefixed with `arch -x86_64` individually.
-          #
-          # python.org's official macOS installer (what setup-python fetches) has been
-          # universal2 (arm64+x86_64 in one binary) since 3.9.1, so `arch -x86_64` on
-          # python3.11 here selects the Intel slice the same way it already does on the
-          # system's own Python.
-          arch -x86_64 python3.11 -m venv venv
-          source venv/bin/activate
-          arch -x86_64 python -m pip install --upgrade pip setuptools wheel
-          arch -x86_64 python -m pip install pyinstaller pillow pystray
-          arch -x86_64 python -m pip install -r requirements.txt
-          # cryptography's Rust extension still lands arm64 even with the process-level
-          # forcing above (pip's own platform-tag detection under Rosetta picks the wrong
-          # one for this package specifically) — force the wheel tag explicitly instead of
-          # relying on runtime arch detection. --platform requires --only-binary=:all: (no
-          # source build) AND --target (pip refuses platform-specific options on a normal
-          # in-place install). Uninstall first so --target doesn't leave stale dist-info/
-          # RECORD metadata from the arm64 build sitting alongside the new files.
-          arch -x86_64 python -m pip uninstall -y cryptography
-          SITE_PACKAGES=$(arch -x86_64 python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
-          arch -x86_64 python -m pip install --no-deps --only-binary=:all: \
-              --platform macosx_10_12_x86_64 --platform macosx_11_0_x86_64 --platform macosx_12_0_x86_64 \
-              --target "$SITE_PACKAGES" \
-              cryptography
-
-      - name: Verify installed wheels are actually x86_64
-        run: |
-          # Fails fast (seconds, not minutes into the PyInstaller build) if a
-          # dependency's compiled extension is still the wrong slice.
-          source venv/bin/activate
-          bad=0
-          while IFS= read -r -d '' so; do
-            got=$(lipo -archs "$so" 2>/dev/null || file -b "$so")
-            case "$got" in
-              *x86_64*) ;;
-              *) echo "ARCH MISMATCH: $so -> $got"; bad=1 ;;
-            esac
-          done < <(find venv/lib -name '*.so' -print0)
-          exit $bad
-
-      - name: Sanity-check app.py actually imports on this Python
-        run: |
-          # The arch-verify step above only checks compiled .so files, not the
-          # interpreter's own version — it would not have caught app.py using
-          # `X | None` syntax (runtime-evaluated, Python 3.10+ only) under a
-          # too-old interpreter. Import directly instead of waiting to find out
-          # from a user running the built .app.
-          source venv/bin/activate
-          DATA_DIR=$(mktemp -d) RUNNING_IN_DOCKER=1 PARCINFO_BACKUP=0 \
-              arch -x86_64 python -c "import app" && echo "app.py imports cleanly"
-
-      - name: Build .app with PyInstaller (Intel)
-        run: |
-          source venv/bin/activate
-          # parcinfo.spec already reads TARGET_ARCH for exactly this — cross-arch
-          # building without it means reimplementing packaging (data files, hidden
-          # imports, bundle metadata) ad hoc.
-          TARGET_ARCH=x86_64 arch -x86_64 venv/bin/pyinstaller --noconfirm --clean parcinfo.spec
-
-      - name: Zip .app
-        run: cd dist && zip -r ParcInfo-macOS-Intel.zip ParcInfo.app
-
-      - name: Upload artefact
-        uses: actions/upload-artifact@v7
-        with:
-          name: ParcInfo-macOS-Intel.zip
-          path: dist/ParcInfo-macOS-Intel.zip
+          spec-file: parcinfo.spec
+          bundle-path: ParcInfo.app
+          zip-name: ParcInfo-macOS-Intel.zip
+          artifact-name: ParcInfo-macOS-Intel.zip
 
       # Le collecteur système n'était jusqu'ici compilé QUE pour Windows — un
       # technicien sur Mac devait lancer `python system-info-collector.py` à
-      # la main. Même venv x86_64 que ParcInfo ci-dessus, pas de setup Rosetta
-      # séparé. La CLI produit un binaire brut (invoqué avec des arguments,
-      # comme system-info-collector.exe) — PAS le bundle .app que fabrique
-      # aussi collector-cli.spec, pensé pour être lancé depuis le Finder.
-      - name: Build collector CLI with PyInstaller (Intel)
+      # la main. Même venv x86_64 que ParcInfo ci-dessus (setup-macos-intel-env
+      # ne tourne qu'une fois par job). La CLI produit un binaire brut (invoqué
+      # avec des arguments, comme system-info-collector.exe) — PAS le bundle
+      # .app que fabrique aussi collector-cli.spec, pensé pour être lancé
+      # depuis le Finder.
+      - name: Build, zip and upload collector CLI (Intel)
         continue-on-error: true
-        run: |
-          source venv/bin/activate
-          arch -x86_64 venv/bin/pyinstaller --noconfirm --clean collector-cli.spec
-
-      - name: Zip collector CLI binary (Intel)
-        continue-on-error: true
-        run: cd dist && zip system-info-collector-macOS-Intel.zip system-info-collector
-
-      - name: Upload collector CLI artefact (Intel)
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: ./.github/actions/build-macos-intel-spec
         with:
-          name: system-info-collector-macOS-Intel.zip
-          path: dist/system-info-collector-macOS-Intel.zip
+          spec-file: collector-cli.spec
+          bundle-path: system-info-collector
+          zip-name: system-info-collector-macOS-Intel.zip
+          artifact-name: system-info-collector-macOS-Intel.zip
+          recursive-zip: 'false'
 
       # La GUI dépend de Tkinter : son empaquetage sous Rosetta (Tcl/Tk
       # croisé x86_64) est moins éprouvé que le reste de cette chaîne — best
       # effort, isolé pour ne jamais bloquer ParcInfo ni la CLI ci-dessus.
-      - name: Build collector GUI with PyInstaller (Intel)
+      - name: Build, zip and upload collector GUI (Intel)
         continue-on-error: true
-        run: |
-          source venv/bin/activate
-          arch -x86_64 venv/bin/pyinstaller --noconfirm --clean collector-gui.spec
-
-      - name: Zip collector GUI .app (Intel)
-        continue-on-error: true
-        run: cd dist && zip -r system-info-collector-gui-macOS-Intel.zip ParcInfo-Collector.app
-
-      - name: Upload collector GUI artefact (Intel)
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
+        uses: ./.github/actions/build-macos-intel-spec
         with:
-          name: system-info-collector-gui-macOS-Intel.zip
-          path: dist/system-info-collector-gui-macOS-Intel.zip
+          spec-file: collector-gui.spec
+          bundle-path: ParcInfo-Collector.app
+          zip-name: system-info-collector-gui-macOS-Intel.zip
+          artifact-name: system-info-collector-gui-macOS-Intel.zip
 
   docker:
     needs: tests
