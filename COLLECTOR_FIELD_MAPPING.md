@@ -8,7 +8,7 @@ donnée atterrit côté serveur.
 **Généré par :** `collector_core.py` (logique partagée)
 → `system-info-collector.py` (CLI) et `system-info-collector-gui.py` (GUI)
 
-**Version collecteur :** 3.14 · **À jour avec ParcInfo :** 2.18.36
+**Version collecteur :** 3.15 · **À jour avec ParcInfo :** 2.18.37
 
 ---
 
@@ -128,6 +128,19 @@ Accessible depuis le bouton **🖥 Fiche système** de la fiche appareil.
 > qu'interroger la table de routage) : donne l'IP de l'interface que le
 > système utiliserait réellement pour sortir, fiable sur les trois OS.
 
+> `dns_name` (`get_fqdn()`, corrigé en 3.15) : `socket.getfqdn()` est
+> notoirement peu fiable sur macOS — il déclenche
+> `gethostbyaddr(gethostname())`, et quand cette résolution retombe sur le
+> bouclage IPv6 (`::1`) sans enregistrement PTR configuré, certains
+> résolveurs renvoient tel quel le nom de la requête plutôt qu'une erreur :
+> constaté en usage réel, `dns_name` valait
+> `1.0.0.0.[…]0.0.ip6.arpa` (la représentation PTR standard de `::1`) au
+> lieu du vrai nom de la machine. Remplacé sur macOS par `scutil --get
+> LocalHostName` (+ suffixe `.local`) : lit directement le nom Bonjour
+> configuré localement, sans passer par une résolution réseau — rien à
+> confondre avec une adresse de bouclage. Repli sur `hostname` (déjà
+> qualifié `.local` sur macOS) si `scutil` échoue.
+
 ### Système
 `os_name` (avec édition) · `os_version` · `os_build` · `architecture` ·
 `os_install_date` · `registered_owner` · `registered_organization` · `timezone` ·
@@ -200,6 +213,16 @@ temperature_c, read_errors, write_errors}` ·
 > avant sommation — `used_gb`, propre à chaque volume, reste sommé sans
 > déduplication. Sans effet sur Linux, où chaque partition a déjà sa
 > propre taille distincte.
+>
+> Signalé après coup (toujours en usage réel) : même dédupliqués, les
+> volumes de service macOS/APFS (Preboot, VM, Update, xarts, iSCPreboot,
+> Hardware, Recovery — présents sur tout Mac moderne) restaient tous
+> listés dans `disk_drives`/`disk_layout`, donnant l'illusion visuelle de
+> 6 à 8 « disques » quasi identiques là où il n'y en a physiquement qu'un.
+> Corrigé en 3.15 : ces points de montage (`_MACOS_VOLUMES_INTERNES`) sont
+> désormais exclus de l'affichage ET du total — seuls `/` (Système) et
+> `/System/Volumes/Data` restent, les deux volumes où vit réellement le
+> contenu de la machine.
 
 > `disk_layout` alimente la vue « un disque, ses partitions dedans » de la
 > fiche système (remplace l'ancienne carte à plat qui mélangeait les volumes
@@ -980,4 +1003,4 @@ n'est rendu que d'un seul côté (fiche ou PDF).
 
 ---
 
-**Dernière mise à jour** : 2026-08-21 (v2.18.36 — collecteur 3.14, sortie d'App Translocation sans Terminal)
+**Dernière mise à jour** : 2026-08-21 (v2.18.37 — collecteur 3.15, correctif nom DNS macOS + doublons stockage APFS)

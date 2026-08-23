@@ -49,7 +49,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.14'
+COLLECTOR_VERSION = '3.15'
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -925,6 +925,26 @@ def get_hostname():
 
 def get_fqdn():
     """Nom DNS complet de la machine (alimente la colonne nom_dns de ParcInfo)."""
+    if IS_MAC:
+        # socket.getfqdn() est notoirement peu fiable sur macOS : il
+        # déclenche gethostbyaddr(gethostname()), et quand cette résolution
+        # retombe sur le bouclage IPv6 (::1) sans enregistrement PTR
+        # configuré, certains résolveurs renvoient tel quel le nom de la
+        # requête plutôt qu'une erreur — donnant un « nom DNS » du genre
+        # « 1.0.0.0.[...]0.0.ip6.arpa » (constaté en usage réel, pas
+        # supposé). `scutil --get LocalHostName` lit directement le nom
+        # Bonjour configuré localement, sans passer par une résolution
+        # réseau : rien à confondre avec une adresse de bouclage.
+        try:
+            nom = _run(['scutil', '--get', 'LocalHostName'], timeout=5).strip()
+            if nom:
+                return nom if nom.endswith('.local') else nom + '.local'
+        except Exception:
+            pass
+        # Repli : gethostname() inclut déjà généralement le suffixe .local
+        # sur macOS — getfqdn() n'y apporte ici aucune valeur fiable de plus.
+        hote = get_hostname()
+        return hote if hote and '.' in hote else ''
     try:
         fqdn = socket.getfqdn()
         # getfqdn() retombe sur le hostname court quand la résolution échoue :
@@ -6145,6 +6165,20 @@ def _unix_disk_parent(device):
     return m.group(1) if m else nom
 
 
+#: Points de montage des volumes de service APFS présents sur tout Mac
+#: moderne (depuis Catalina), qu'aucun technicien ne voudrait voir listés
+#: comme des « disques » à part entière dans un inventaire — chacun
+#: rapporte à `df` la capacité totale du conteneur partagé, comme si
+#: c'était son propre disque physique. `/` (Système) et
+#: `/System/Volumes/Data` restent affichés : ce sont les deux volumes où
+#: vit réellement le contenu de la machine.
+_MACOS_VOLUMES_INTERNES = {
+    '/System/Volumes/VM', '/System/Volumes/Preboot', '/System/Volumes/Update',
+    '/System/Volumes/xarts', '/System/Volumes/iSCPreboot',
+    '/System/Volumes/Hardware', '/System/Volumes/Recovery',
+}
+
+
 def _unix_disks():
     """Disques via df (commun macOS / Linux).
 
@@ -6167,8 +6201,22 @@ def _unix_disks():
             if len(parts) < 4:
                 continue
             device, size_str, used_str, avail_str = parts[0], parts[1], parts[2], parts[3]
+            mount = parts[-1] if len(parts) > 4 else ''
             # Les pseudo-systèmes de fichiers gonflent artificiellement le total
             if not device.startswith('/dev/') or device in seen:
+                continue
+            # Volumes internes macOS/APFS (constaté, pas supposé) : System,
+            # Preboot, VM, Update, xarts, iSCPreboot, Hardware, Recovery
+            # existent sur TOUT Mac moderne, chacun rapportant à `df` la
+            # capacité totale du conteneur partagé comme si c'était son
+            # propre disque — sur la fiche système, cela donnait l'illusion
+            # de 6 à 8 « disques » de taille quasi identique là où il n'y en
+            # a physiquement qu'un. Ni de vrais volumes utilisateur, ni des
+            # partitions système au sens où un technicien voudrait les
+            # inventorier (contrairement à `/` et `/System/Volumes/Data`,
+            # conservés) : exclus de l'affichage ET du total, comme les
+            # pseudo-systèmes de fichiers ci-dessus.
+            if mount in _MACOS_VOLUMES_INTERNES:
                 continue
             seen.add(device)
 
