@@ -1,8 +1,31 @@
-PARCINFO_VERSION=2.18.47
+PARCINFO_VERSION=2.18.48
 RELEASE_DATE=2026-08-23
-BUILD_NUMBER=2026082305
+BUILD_NUMBER=2026082306
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.48 - Déduplication du job build-macos-intel (audit du 2026-08-23)
+# Chantier suivant de l'audit du 2026-08-23 : le job build-macos-intel était
+# dupliqué à l'identique dans .github/workflows/build-macos-intel.yml ET
+# dans le job du même nom de build-release.yml — ~120 lignes de venv
+# Rosetta x86_64/forçage cryptography/vérification d'architecture
+# partagées, avec un vrai risque de divergence entre les deux copies déjà
+# signalé par l'audit et par claude.md lui-même.
+# Extrait en deux actions composites réutilisables :
+# - .github/actions/setup-macos-intel-env : préparation de l'environnement
+#   (venv Rosetta x86_64, dépendances, forçage cryptography, vérification
+#   .so, sanity-check import app).
+# - .github/actions/build-macos-intel-spec : build/zip/upload paramétré
+#   par .spec (spec-file, bundle-path, zip-name, artifact-name,
+#   recursive-zip).
+# build-macos-intel.yml passe de 118 à 27 lignes ; le job build-macos-intel
+# de build-release.yml de 146 à ~50 lignes (appelle les mêmes actions 3
+# fois : parcinfo.spec, collector-cli.spec, collector-gui.spec). Sémantique
+# préservée à l'identique : needs: tests, continue-on-error (job et par
+# étape), timeout-minutes: 20, noms d'artefacts croisés avec le job
+# release. Validé par parsing YAML sur les 4 fichiers + revue manuelle
+# (aucun outil actionlint disponible dans cette session).
+# Date: 23 août 2026
 
 # Version 2.18.47 - Retrait de models.py, code mort (audit du 2026-08-23)
 # 533 lignes de modèles SQLAlchemy déclaratifs ajoutées en prévision d'une

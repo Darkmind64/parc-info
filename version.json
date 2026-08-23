@@ -1,22 +1,22 @@
 {
-  "version": "2.18.47",
+  "version": "2.18.48",
   "release_date": "2026-08-23T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.47",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.47/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.48",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Retrait de models.py, code mort (audit du 2026-08-23)",
+    "new_features": "Déduplication du job build-macos-intel (audit du 2026-08-23)",
     "improvements": [
-      "NETTOYAGE : suppression de models.py (533 lignes de modèles SQLAlchemy déclaratifs jamais branchés — db.init_app(app) jamais appelé, aucun import models nulle part dans le code). Un schéma dupliqué sans mécanisme pour rester synchronisé avec init_db() ne faisait que dériver en silence et pouvait induire en erreur un futur contributeur. flask-sqlalchemy retiré de requirements.txt (plus aucun autre usage)."
+      "CI : le job build-macos-intel, dupliqué à l'identique dans build-macos-intel.yml et build-release.yml (~120 lignes de venv Rosetta/cryptography partagées, risque réel de divergence), extrait en deux actions composites réutilisables (.github/actions/setup-macos-intel-env, .github/actions/build-macos-intel-spec). Les deux workflows appellent désormais ces actions au lieu de dupliquer les étapes inline."
     ]
   },
   "checksums": {
@@ -27,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.47"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.48"
 }
