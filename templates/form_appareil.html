@@ -893,6 +893,7 @@
         <a href="/historique?entite=appareil" style="font-size:.72rem;color:var(--text-muted);text-decoration:none;display:inline-block;margin-top:.5rem;">Voir tout le journal →</a>
     </div>
     {% endif %}
+{% endblock %}
 
 {% block extra_scripts %}
 <script>
@@ -1241,6 +1242,4 @@ document.addEventListener('DOMContentLoaded', function() {
     switchAerTab(autoTab, document.getElementById('aer-tab-'+autoTab));
 });
 </script>
-{% endblock %}
-
 {% endblock %}

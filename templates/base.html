@@ -732,6 +732,118 @@
             .grid-2,.grid-3,.grid-4 { grid-template-columns:1fr; }
             .form-row.cols-2,.form-row.cols-3,.form-row.cols-4 { grid-template-columns:1fr; }
         }
+
+        /* ══════════════════════════════════════════════════════════════
+           NAV MOBILE (< 900px) — repli en tiroir hors-écran, réutilisant
+           le style déjà écrit pour body.nav-left (colonne verticale,
+           groupes cliquables) plutôt qu'une nouvelle nav. S'applique que
+           l'utilisateur ait choisi la nav horizontale ou verticale dans
+           ses préférences : aucune des deux ne tient à l'affichage
+           permanent sur un écran étroit.
+           ══════════════════════════════════════════════════════════════ */
+        .nav-hamburger {
+            display: none;
+            background: none; border: 1px solid var(--border); border-radius: 4px;
+            color: var(--text-secondary); font-size: 1.05rem; line-height: 1;
+            width: 34px; height: 30px; align-items: center; justify-content: center;
+            cursor: pointer; flex-shrink: 0; transition: all .2s;
+        }
+        .nav-hamburger:hover, .nav-hamburger:focus-visible {
+            color: var(--accent); border-color: var(--accent);
+        }
+        .nav-backdrop {
+            display: none;
+            position: fixed; inset: 0; z-index: 290;
+            background: rgba(0,4,10,.6);
+            opacity: 0; transition: opacity .25s ease;
+        }
+        body.nav-mobile-open .nav-backdrop { display: block; opacity: 1; }
+
+        @media (max-width: 900px) {
+            .nav-hamburger { display: flex; }
+
+            body nav {
+                position: fixed !important; left: 0 !important; top: 0 !important; bottom: 0 !important;
+                width: 260px !important; max-width: 82vw; height: 100vh !important;
+                flex-direction: column !important; align-items: stretch !important;
+                padding: 0 !important; gap: 0 !important; z-index: 300 !important;
+                border-right: 1px solid var(--border); border-bottom: none !important;
+                overflow-y: auto; overflow-x: hidden;
+                transform: translateX(-100%);
+                transition: transform .25s ease;
+            }
+            body.nav-mobile-open nav { transform: translateX(0); }
+
+            body .client-bar, body main, body #update-notification-container {
+                margin-left: 0 !important;
+            }
+
+            body nav .nav-brand {
+                padding: .9rem 1.1rem .5rem; font-size: 1rem;
+                flex-shrink: 0; letter-spacing: 3px;
+                display: flex; align-items: center; gap: .5rem;
+            }
+            body nav .nav-version-group {
+                margin: 0 0 .3rem; padding: .35rem 1.15rem;
+                width: 100%; box-sizing: border-box; justify-content: space-between;
+                border-bottom: 1px solid var(--border); border-radius: 0;
+                flex-shrink: 0;
+            }
+            body nav .nav-version-group .nav-version { width: auto; padding: 0; margin: 0; border-bottom: none; }
+            body nav .nav-version-group .nav-version-info { height: auto; }
+
+            body nav #nav-search-wrap {
+                width: 100%; box-sizing: border-box; margin: 0 0 .3rem !important;
+                padding: 0 1.1rem .5rem; flex-shrink: 0;
+            }
+            body nav #nav-search-wrap #global-search-input { width: 100%; }
+            body nav #search-results { left: 1.1rem !important; right: 1.1rem !important; }
+
+            body nav > a:not(.nav-brand) {
+                padding: .62rem 1.1rem; width: 100%; box-sizing: border-box;
+                display: flex; align-items: center; gap: .55rem;
+                font-size: .83rem; border-bottom: 1px solid var(--border);
+                height: auto;
+            }
+            body nav > a:not(.nav-brand):hover, body nav > a:not(.nav-brand).active {
+                background: rgba(0,201,255,.07); color: var(--accent);
+            }
+            body nav .nav-sep { display: none; }
+            body nav .nav-spacer { flex: 1; min-height: 1rem; }
+            body nav .nav-client-badge {
+                display: block; padding: .7rem 1rem;
+                border-top: 1px solid var(--border); font-size: .72rem;
+                border-radius: 0; border-left: none; border-right: none; border-bottom: none;
+                margin: 0;
+            }
+
+            body nav .nav-group {
+                display: block !important; position: static !important;
+                flex-shrink: 0; border-bottom: 1px solid var(--border);
+            }
+            body nav .nav-group-btn {
+                width: 100%; padding: .62rem 1.1rem;
+                font-size: .83rem; text-align: left;
+                display: flex !important; align-items: center; gap: .5rem;
+                height: auto; border-radius: 0;
+            }
+            body nav .nav-group-btn .arr { margin-left: auto; transition: transform .2s; }
+            body nav .nav-dropdown {
+                display: none !important; position: static !important;
+                top: unset !important; left: unset !important; z-index: unset !important;
+                box-shadow: none !important; border: none !important; border-top: none !important;
+                border-radius: 0 !important; background: rgba(0,0,0,.18);
+                min-width: unset !important; width: 100% !important;
+            }
+            body nav .nav-group.open > .nav-dropdown { display: block !important; }
+            body nav .nav-group.open .nav-group-btn .arr { transform: rotate(180deg); }
+            body nav .nav-dropdown a {
+                padding: .5rem 1.1rem .5rem 2rem;
+                font-size: .8rem; border-bottom: 1px solid rgba(255,255,255,.04);
+            }
+            body nav .nav-dropdown a:last-child { border-bottom: none; }
+            body.theme-light nav .nav-dropdown { background: rgba(0,0,0,.04); }
+        }
     </style>
     {% block extra_styles %}{% endblock %}
     <style>
@@ -758,6 +870,8 @@
 
 <!-- TOPBAR CLIENT (liste déroulante) -->
 <div class="client-bar">
+    <button type="button" class="nav-hamburger" id="nav-hamburger" onclick="toggleMobileNav()"
+            aria-label="Ouvrir le menu de navigation" aria-expanded="false" aria-controls="main-nav">☰</button>
     <span class="client-bar-label">Client :</span>
     <div class="client-select-wrap">
         {% set active_cl = clients | selectattr('id','eq', client_actif_id) | first | default(None) %}
@@ -821,7 +935,7 @@
 {% set inv_active = ep in ['liste_appareils','nouvel_appareil','editer_appareil','liste_peripheriques','nouveau_peripherique','editer_peripherique','parc_general','baie_brassage','page_scan','liste_plans','editer_plan'] %}
 {% set contrats_active = ep in ['liste_contrats','nouveau_contrat','editer_contrat','detail_contrat'] %}
 {% set secu_active = ep in ['liste_identifiants','nouvel_identifiant','editer_identifiant','liste_utilisateurs','nouvel_utilisateur','editer_utilisateur','droits_utilisateur'] %}
-<nav>
+<nav id="main-nav">
     <a href="/" class="nav-brand">PARCINFO</a>
     <div class="nav-version-group">
         {% if app_version %}
@@ -835,7 +949,7 @@
     </div>
 
     <!-- SEARCH BAR -->
-    <div style="display:flex;align-items:center;margin-left:1rem;margin-right:1rem;flex:0 0 auto;">
+    <div id="nav-search-wrap" style="display:flex;align-items:center;margin-left:1rem;margin-right:1rem;flex:0 0 auto;">
         <input type="text" id="global-search-input" placeholder="Rechercher..."
             style="width:180px;padding:.4rem .6rem;background:var(--input-bg);border:1px solid var(--input-border);
                    border-radius:3px;color:var(--text-primary);font-size:.75rem;font-family:'Share Tech Mono',monospace;
@@ -983,6 +1097,7 @@
     </span>
     {% endif %}
 </nav>
+<div class="nav-backdrop" id="nav-backdrop" onclick="closeMobileNav()"></div>
 
 <!-- Flash banners (injectées par JS depuis data) -->
 <div class="flash-banner" id="flash-banner"></div>
@@ -1907,9 +2022,46 @@ function initNavVertical() {
     });
 }
 
-// Initialisation au chargement selon le mode courant
+// Initialisation au chargement selon le mode courant. Toujours appelé
+// (pas seulement en body.nav-left) : les groupes cliquables sont aussi
+// nécessaires au tiroir de nav mobile (< 900px), quel que soit le mode nav
+// choisi par l'utilisateur — idempotent (dataset.vnavInit), sans effet en
+// nav horizontale desktop où seul le survol CSS est utilisé.
 document.addEventListener('DOMContentLoaded', function() {
-    if (document.body.classList.contains('nav-left')) initNavVertical();
+    initNavVertical();
+});
+
+/* ── NAV MOBILE (tiroir hors-écran, < 900px) ──────────────────────────── */
+function openMobileNav() {
+    document.body.classList.add('nav-mobile-open');
+    const btn = document.getElementById('nav-hamburger');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+}
+function closeMobileNav() {
+    document.body.classList.remove('nav-mobile-open');
+    const btn = document.getElementById('nav-hamburger');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+function toggleMobileNav() {
+    if (document.body.classList.contains('nav-mobile-open')) closeMobileNav();
+    else openMobileNav();
+}
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.body.classList.contains('nav-mobile-open')) closeMobileNav();
+});
+// Choisir un lien ferme le tiroir — sinon il reste ouvert sur la page
+// suivante, masquant son contenu au chargement.
+document.addEventListener('click', function(e) {
+    if (!document.body.classList.contains('nav-mobile-open')) return;
+    const nav = document.getElementById('main-nav');
+    if (nav && e.target.closest('nav a') && nav.contains(e.target)) closeMobileNav();
+});
+// Un agrandissement de fenêtre au-delà du seuil mobile doit fermer le
+// tiroir : sinon body.nav-mobile-open reste actif et nav.style laisse un
+// vestige de transform en repassant sous 900px plus tard le temps d'un
+// redimensionnement (rare en usage réel, fréquent en test navigateur).
+window.addEventListener('resize', function() {
+    if (window.innerWidth > 900) closeMobileNav();
 });
 
 const PERIPH_LABELS = {

@@ -1256,9 +1256,16 @@ async function ignorerGarantie(id, btn) {
 
 // ── PRÉ-CHARGER LA CONFIGURATION AU DÉMARRAGE ─────────────────────────────────
 // Cela s'assure que cfgData est rempli avant que l'utilisateur n'interact avec les widgets
-chargerConfig().catch(err => {
-    console.error('Failed to load config on page startup:', err);
-    // Si le chargement échoue, cfgData reste {}, ce qui est un fallback acceptable
+// Différé à DOMContentLoaded : chargerConfig() est défini dans un <script> de
+// base.html qui apparaît PLUS LOIN dans la page que ce bloc extra_scripts —
+// appelé immédiatement ici, ça levait "chargerConfig is not defined" à chaque
+// chargement du dashboard (la fonction n'existait pas encore dans le scope
+// global au moment où ce script s'exécutait).
+document.addEventListener('DOMContentLoaded', function() {
+    chargerConfig().catch(err => {
+        console.error('Failed to load config on page startup:', err);
+        // Si le chargement échoue, cfgData reste {}, ce qui est un fallback acceptable
+    });
 });
 </script>
 {% endblock %}
