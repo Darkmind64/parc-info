@@ -871,7 +871,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Pas de TriTable.init — le tri est côté serveur
-    ListeTools.init('table-appareils', { storageKey:'appareils', exportName:'appareils', skipExportCols:[0,8,9], exportUrl:'/appareils/export.csv', importUrl:'/appareils/import' });
+    ListeTools.init('table-appareils', { storageKey:'appareils', exportName:'appareils', skipExportCols:[0,8,9], exportUrl:'/appareils/export.csv', exportUrlXlsx:'/appareils/export.xlsx', importUrl:'/appareils/import' });
     initSortHeaders();
     restoreFilterUI();
 });

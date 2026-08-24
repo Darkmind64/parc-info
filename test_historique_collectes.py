@@ -21,7 +21,7 @@ import json
 import os
 import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -76,7 +76,7 @@ verifier(suivies >= 3, 'relevés marqués pour la synchronisation', '%d' % suivi
 
 print('\n=== 3. L\'historique est borné ===')
 conn = A.get_db()
-base = datetime.utcnow() - timedelta(days=200)
+base = A._utcnow() - timedelta(days=200)
 for i in range(A.COLLECTES_CONSERVEES + 15):
     quand = (base + timedelta(days=i)).isoformat(timespec='seconds')
     conn.execute(
@@ -98,7 +98,7 @@ print('\n=== 4. Tendance du disque ===')
 def releves_synthetiques(depart_libre, par_jour, jours, pas=7):
     """Relevés espacés de `pas` jours, l'espace libre variant de `par_jour`."""
     sortie = []
-    origine = datetime.utcnow() - timedelta(days=jours)
+    origine = A._utcnow() - timedelta(days=jours)
     for j in range(0, jours + 1, pas):
         sortie.append({'horodatage': (origine + timedelta(days=j)).isoformat(timespec='seconds'),
                        'disque_libre_go': depart_libre + par_jour * j})

@@ -127,6 +127,7 @@
             <button type="button" class="btn btn-primary" onclick="applyFilters()">Filtrer</button>
             <a href="/maintenances" class="btn btn-secondary">✕ Réinitialiser</a>
             <a href="/maintenances/export.csv?{{ request.query_string.decode() }}" class="btn btn-secondary" style="margin-left:auto;">📥 Export CSV</a>
+            <a href="/maintenances/export.xlsx?{{ request.query_string.decode() }}" class="btn btn-secondary">📊 Export Excel</a>
         </div>
     </form>
 </div>

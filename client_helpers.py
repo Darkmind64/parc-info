@@ -2,11 +2,17 @@
 client_helpers.py — Accès clients, pagination, audit, formatage.
 """
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 from flask import session
 
 logger = logging.getLogger('parcinfo')
+
+
+def _utcnow() -> datetime:
+    """Équivalent de _utcnow() (dépréciée depuis 3.12), même valeur
+    naïve en UTC — voir app.py pour le même helper."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 # ─── UTILITAIRES INTERNES ──────────────────────────────────────────────────────
@@ -237,7 +243,7 @@ def log_history(conn, client_id, entite, entite_id, entite_nom, action, details=
         '''INSERT INTO historique (client_id,entite,entite_id,entite_nom,action,date_action,details)
            VALUES (?,?,?,?,?,?,?)''',
         (client_id, entite, entite_id, str(entite_nom), action,
-         datetime.utcnow().isoformat(), str(details)))
+         _utcnow().isoformat(), str(details)))
     # Nettoyage automatique selon le paramètre de rétention
     try:
         from config_helpers import cfg_get

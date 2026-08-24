@@ -3,11 +3,18 @@ database.py — Connexion SQLite / Turso et utilitaires bas niveau.
 DATABASE et UPLOAD_FOLDER sont initialisés par app.py au démarrage.
 """
 import sqlite3, threading, json as _json, urllib.request, urllib.error, base64, http.client
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 # Chemins configurés au démarrage par app.py (ou le launcher)
 DATABASE:     str = ''
 UPLOAD_FOLDER: str = ''
+
+
+def _utcnow() -> datetime:
+    """Équivalent de datetime.utcnow() (dépréciée depuis 3.12), même valeur
+    naïve en UTC — voir app.py pour le même helper."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 # Garde anti-récursion pour get_db() ↔ cfg_get()
 _tl = threading.local()
@@ -480,9 +487,8 @@ def log_maj_event(machine: str, version_avant: str, version_apres: str,
     """
     try:
         import socket as _socket
-        from datetime import datetime as _dt
         machine = machine or _socket.gethostname()
-        horodatage = _dt.utcnow().isoformat(timespec='seconds')
+        horodatage = _utcnow().isoformat(timespec='seconds')
         # La clé mêle machine et version : rejouer le même démarrage ne crée pas
         # de doublon, et deux machines mises à jour en même temps ne se
         # chevauchent pas — ce qu'un identifiant auto-incrémenté ne garantit pas
@@ -532,13 +538,12 @@ def log_sync_event(event_type: str, statut: str, resume: str, details: dict = No
     Conserve seulement les 500 entrées les plus récentes (purge automatique).
     """
     try:
-        from datetime import datetime as _dt
         conn = _local_db()
         creer_journal_synchronisation(conn)
         details_json = _json.dumps(details, ensure_ascii=False) if details else ''
         conn.execute(
             "INSERT INTO journal_synchronisation (horodatage, type, statut, resume, details) VALUES (?,?,?,?,?)",
-            (_dt.utcnow().isoformat(), event_type, statut, resume, details_json)
+            (_utcnow().isoformat(), event_type, statut, resume, details_json)
         )
         conn.execute(
             "DELETE FROM journal_synchronisation WHERE id NOT IN "

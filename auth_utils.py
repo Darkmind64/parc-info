@@ -3,11 +3,17 @@ auth_utils.py — Authentification, CSRF, rate-limiting, validation serveur.
 """
 import re, hashlib, secrets, threading, logging, time
 from functools import wraps
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask import session, redirect, url_for, request, abort
 
 logger = logging.getLogger('parcinfo')
+
+
+def _utcnow() -> datetime:
+    """Équivalent de _utcnow() (dépréciée depuis 3.12), même valeur
+    naïve en UTC — voir app.py pour le même helper."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 # ─── HACHAGE ──────────────────────────────────────────────────────────────────
 
@@ -54,7 +60,7 @@ def login_required(f):
         login_time = session.get('login_time')
         if login_time:
             try:
-                elapsed = datetime.utcnow() - datetime.fromisoformat(login_time)
+                elapsed = _utcnow() - datetime.fromisoformat(login_time)
                 if elapsed > timedelta(hours=SESSION_TIMEOUT_HOURS):
                     session.clear()
                     from flask import flash

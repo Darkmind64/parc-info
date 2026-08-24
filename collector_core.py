@@ -28,7 +28,7 @@ import sys
 import tempfile
 import uuid
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.error import URLError
 from urllib.parse import quote, urljoin
 from urllib.request import Request, urlopen
@@ -50,6 +50,12 @@ IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
 COLLECTOR_VERSION = '3.15'
+
+
+def _utcnow() -> datetime:
+    """Équivalent de _utcnow() (dépréciée depuis 3.12), même valeur
+    naïve en UTC — voir app.py pour le même helper."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 # ════════════════════════════════════════════════════════════════════════════
 # TABLES DE CORRESPONDANCE (codes SMBIOS / WMI → libellés lisibles)
@@ -1519,7 +1525,7 @@ def hardware_age_years(bios_date):
         return None
     try:
         annee, mois, jour = (int(x) for x in m.groups())
-        delta = datetime.utcnow() - datetime(annee, mois, jour)
+        delta = _utcnow() - datetime(annee, mois, jour)
         return round(delta.days / 365.25, 1)
     except (ValueError, OverflowError):
         return None
@@ -3416,7 +3422,7 @@ def _win_malware_detections(jours=365, limite=100):
 
     catalogue = {t.get('ThreatID'): _clean(t.get('ThreatName'))
                 for t in _as_list(data.get('T')) if t.get('ThreatID') is not None}
-    limite_date = (datetime.utcnow() - timedelta(days=jours)).strftime('%Y-%m-%d %H:%M')
+    limite_date = (_utcnow() - timedelta(days=jours)).strftime('%Y-%m-%d %H:%M')
 
     detections = []
     for d in _as_list(data.get('D')):
@@ -3723,7 +3729,7 @@ def support_windows(build, aujourdhui=None):
         echeance = datetime.strptime(fin, '%Y-%m-%d')
     except ValueError:
         return None
-    reference = aujourdhui or datetime.utcnow()
+    reference = aujourdhui or _utcnow()
     jours = (echeance - reference).days
     return {
         'version': libelle,
@@ -7116,7 +7122,7 @@ def collect_system_info(progress=None, test_debit=False, url_debit=None, on_data
     _report(progress, 0.02, 'Identification de la machine')
     info = {
         'collector_version': COLLECTOR_VERSION,
-        'timestamp': datetime.utcnow().isoformat(),
+        'timestamp': _utcnow().isoformat(),
         'elevated': is_elevated(),
         'mac_address': get_mac_address(),
         'hostname': get_hostname(),
@@ -8107,7 +8113,7 @@ def build_summary_lines(info):
 
 def _report_filename(info, extension):
     """Nom de fichier normalisé : system-info-report_HOST_MAC_HORODATAGE.ext."""
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = _utcnow().strftime("%Y%m%d_%H%M%S")
     hostname = info.get('hostname', 'unknown')
     mac = (info.get('mac_address') or 'unknown').replace(':', '').replace('/', '')[:8]
     return f"system-info-report_{hostname}_{mac}_{timestamp}.{extension}"
@@ -8543,7 +8549,7 @@ def _esc(value):
 
 
 def _report_filename(info, extension):
-    timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+    timestamp = _utcnow().strftime('%Y%m%d_%H%M%S')
     hostname = re.sub(r'[^A-Za-z0-9_.-]', '_', info.get('hostname') or 'unknown')
     mac = re.sub(r'[^0-9A-Fa-f]', '', info.get('mac_address') or '')[:8] or 'nomac'
     return f'system-info-report_{hostname}_{mac}_{timestamp}.{extension}'
@@ -9032,7 +9038,7 @@ def generate_html_report(info, client_id=None, client_name=None):
         '<div class="section"><h2>Logiciels installés'
         f'<span class="count">{len(software)}</span></h2>{_software_html(software)}</div>')
 
-    generated = datetime.utcnow().strftime('%d/%m/%Y à %H:%M:%S UTC')
+    generated = _utcnow().strftime('%d/%m/%Y à %H:%M:%S UTC')
     cible = client_name or (f'ID {client_id}' if client_id else 'non spécifié')
 
     html = f"""<!DOCTYPE html>
@@ -9443,7 +9449,7 @@ def generate_pdf_report(info, client_id=None, client_name=None):
         story = []
 
         # ── Bandeau de titre ─────────────────────────────────────────────────
-        generated = datetime.utcnow().strftime('%d/%m/%Y à %H:%M:%S UTC')
+        generated = _utcnow().strftime('%d/%m/%Y à %H:%M:%S UTC')
         cible = client_name or (f'ID {client_id}' if client_id else 'non spécifié')
         header_txt = (
             f"{_pdf_escape(info.get('brand'))} {_pdf_escape(info.get('model'))} — "

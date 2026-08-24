@@ -22,7 +22,7 @@ import io
 import os
 import sys
 import tempfile
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -56,7 +56,7 @@ conn.execute("INSERT OR IGNORE INTO clients (id, nom, auth_user_id) VALUES (1, '
 # effectivement accès (proprietaire OU partagé) — sans ce partage, un simple
 # 'user' sans aucun client n'aurait jamais de client_id actif du tout.
 conn.execute("INSERT OR IGNORE INTO client_partages (client_id, auth_user_id, niveau, date_partage) "
-             "VALUES (1, 2, 'lecture', ?)", (datetime.utcnow().isoformat(),))
+             "VALUES (1, 2, 'lecture', ?)", (A._utcnow().isoformat(),))
 conn.commit()
 conn.close()
 

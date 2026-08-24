@@ -11,6 +11,7 @@ const ListeTools = (() => {
             exportName:     opts.exportName     || tableId,
             skipExportCols: opts.skipExportCols || [],
             exportUrl:      opts.exportUrl      || null,
+            exportUrlXlsx:  opts.exportUrlXlsx  || null,
             importUrl:      opts.importUrl      || null,
         };
 
@@ -68,6 +69,17 @@ const ListeTools = (() => {
             expBtn.onclick = () => ListeTools.exportCSV(tableId);
         }
         right.appendChild(expBtn);
+
+        // Export Excel (optionnel — seulement si une route serveur est fournie,
+        // pas de fallback client-side comme pour le CSV)
+        if (s.cfg.exportUrlXlsx) {
+            const expXlsxBtn = document.createElement('button');
+            expXlsxBtn.className = 'lt-btn';
+            expXlsxBtn.title = 'Exporter en Excel depuis la base de données (toutes les colonnes)';
+            expXlsxBtn.innerHTML = '📊 Excel';
+            expXlsxBtn.onclick = () => { window.location.href = s.cfg.exportUrlXlsx; };
+            right.appendChild(expXlsxBtn);
+        }
 
         // Import
         if (s.cfg.importUrl) {

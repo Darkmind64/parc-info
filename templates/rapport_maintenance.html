@@ -91,6 +91,8 @@
     <button onclick="window.print()" class="btn btn-secondary">🖨️ Imprimer</button>
     <a href="/maintenances/export.csv?date_debut={{ request.args.get('date_debut', '') }}&date_fin={{ request.args.get('date_fin', '') }}&type_maintenance={{ request.args.get('type_maintenance', '') }}&statut={{ request.args.get('statut', '') }}&clients_filter={{ request.args.get('clients_filter', 'current') }}"
        class="btn btn-secondary">📥 Export CSV</a>
+    <a href="/maintenances/export.xlsx?date_debut={{ request.args.get('date_debut', '') }}&date_fin={{ request.args.get('date_fin', '') }}&type_maintenance={{ request.args.get('type_maintenance', '') }}&statut={{ request.args.get('statut', '') }}&clients_filter={{ request.args.get('clients_filter', 'current') }}"
+       class="btn btn-secondary">📊 Export Excel</a>
     {% endif %}
 </div>
 

@@ -456,7 +456,7 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.setItem(_PERIPH_FILTER_KEY, toSave.toString());
     }
 
-    ListeTools.init('table-peripheriques', { storageKey:'periph', exportName:'peripheriques', skipExportCols:[0,9], exportUrl:'/peripheriques/export.csv', importUrl:'/peripheriques/import' });
+    ListeTools.init('table-peripheriques', { storageKey:'periph', exportName:'peripheriques', skipExportCols:[0,9], exportUrl:'/peripheriques/export.csv', exportUrlXlsx:'/peripheriques/export.xlsx', importUrl:'/peripheriques/import' });
     initSortHeadersP();
     restoreFilterUIP();
 });

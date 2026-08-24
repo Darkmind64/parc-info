@@ -25,7 +25,7 @@ import io
 import os
 import sys
 import tempfile
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -140,7 +140,7 @@ client = nouveau_client()
 with client.session_transaction() as s:
     s['auth_user_id'] = 1
     s['auth_user_role'] = 'user'
-    s['login_time'] = (datetime.utcnow() - timedelta(hours=9)).isoformat()
+    s['login_time'] = (A._utcnow() - timedelta(hours=9)).isoformat()
 r = client.get('/apropos', follow_redirects=True)
 with client.session_transaction() as s:
     verifier(not s.get('auth_user_id'), "une session de plus de 8h est invalidée à la requête suivante")
@@ -150,7 +150,7 @@ client2 = nouveau_client()
 with client2.session_transaction() as s:
     s['auth_user_id'] = 1
     s['auth_user_role'] = 'user'
-    s['login_time'] = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    s['login_time'] = (A._utcnow() - timedelta(hours=1)).isoformat()
 r2 = client2.get('/apropos')
 with client2.session_transaction() as s:
     verifier(s.get('auth_user_id') == 1, "une session récente (moins de 8h) reste valide")

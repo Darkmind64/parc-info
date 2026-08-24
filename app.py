@@ -15,6 +15,14 @@ try:
 except ImportError:
     REPORTLAB_AVAILABLE = False
 
+
+def _utcnow() -> datetime:
+    """Équivalent de _utcnow() (dépréciée depuis 3.12) : même valeur
+    naïve en UTC, obtenue via l'API timezone-aware recommandée. Les horodatages
+    stockés en base restent ainsi inchangés (pas de suffixe +00:00)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 # ─── mDNS SUPPORT (parcinfo.local) ────────────────────────────────────────────
 try:
     from zeroconf import ServiceInfo, Zeroconf
@@ -763,7 +771,7 @@ def _build_crypto_shared(cursor=None):
         else:
             # Première instance → générer la clé et l'écrire dans Turso
             key = secrets.token_hex(32)
-            now = datetime.utcnow().isoformat()
+            now = _utcnow().isoformat()
             turso.execute(
                 "INSERT OR REPLACE INTO config (cle, valeur, date_maj) VALUES (?, ?, ?)",
                 ('crypto_key', key, now)
@@ -1367,9 +1375,8 @@ def init_db():
     # Compte admin par defaut + rattachement des clients existants
     admin = c.execute("SELECT id FROM auth_users WHERE login='admin'").fetchone()
     if not admin:
-        from datetime import datetime as _dt
         pwd_hash = _hash_pwd('admin')
-        now2 = _dt.utcnow().isoformat()
+        now2 = _utcnow().isoformat()
         c.execute("INSERT INTO auth_users (login,password_hash,nom,prenom,role,actif,must_change_password,date_creation,date_maj) VALUES (?,?,?,?,?,1,1,?,?)",
                   ('admin', pwd_hash, 'Administrateur', '', 'admin', now2, now2))
     c.execute("UPDATE clients SET auth_user_id=(SELECT id FROM auth_users WHERE login='admin') WHERE auth_user_id IS NULL")
@@ -1594,14 +1601,14 @@ def init_db():
 
     if 'client_id' not in cols_parc:
         # Créer client par défaut et migrer les données
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         c.execute("INSERT INTO clients (nom, date_creation, date_maj) VALUES ('Client par défaut', ?, ?)", (now, now))
         default_cid = c.lastrowid
         c.execute(f'ALTER TABLE parc_general ADD COLUMN client_id INTEGER DEFAULT {default_cid}')
         c.execute('UPDATE parc_general SET client_id=?', (default_cid,))
 
     if 'client_id' not in cols_app:
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         cid = conn.execute('SELECT id FROM clients ORDER BY id LIMIT 1').fetchone()
         if cid:
             c.execute(f"ALTER TABLE appareils ADD COLUMN client_id INTEGER DEFAULT {cid['id']}")
@@ -1789,7 +1796,7 @@ def init_db():
             import secrets as _secrets
             _id_offset = _secrets.randbits(48)
             c.execute("INSERT OR REPLACE INTO config (cle, valeur, date_maj) VALUES ('_sync_id_offset', ?, ?)",
-                      (str(_id_offset), datetime.utcnow().isoformat()))
+                      (str(_id_offset), _utcnow().isoformat()))
 
         for _tbl, _pk in _TRACKED_JOURNAL.items():
             if _pk != 'id':
@@ -1831,7 +1838,7 @@ def init_db():
 
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         c.execute("INSERT INTO clients (nom, date_creation, date_maj) VALUES ('Mon Client', ?, ?)", (now, now))
         cid = c.lastrowid
         c.execute("INSERT INTO parc_general (client_id, nom_site, date_maj) VALUES (?, 'Mon Parc Informatique', ?)", (cid, now))
@@ -1887,7 +1894,7 @@ def creer_sauvegarde(raison='automatique'):
         return (None, 'une sauvegarde est déjà en cours')
     try:
         os.makedirs(BACKUP_DIR, exist_ok=True)
-        horodatage = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
+        horodatage = _utcnow().strftime('%Y%m%d_%H%M%S')
         destination = os.path.join(BACKUP_DIR, f'parc_info_{horodatage}.db')
         # L'horodatage est à la seconde : deux sauvegardes rapprochées portaient
         # le même nom et la seconde écrasait la première. C'était grave au moment
@@ -2438,7 +2445,7 @@ def api_outils_ajouter():
     ordre = conn.execute('SELECT COALESCE(MAX(ordre),0)+1 FROM outils').fetchone()[0]
     conn.execute('INSERT INTO outils (nom,url,description,categorie,icone,ordre,date_maj) VALUES (?,?,?,?,?,?,?)',
         (nom, url, d.get('description',''), d.get('categorie','Général'),
-         d.get('icone','🔧'), ordre, datetime.utcnow().isoformat()))
+         d.get('icone','🔧'), ordre, _utcnow().isoformat()))
     conn.commit()
     outils = [row_to_dict(r) for r in conn.execute(
         "SELECT * FROM outils ORDER BY categorie, ordre, nom").fetchall()]
@@ -2479,7 +2486,7 @@ def liste_clients():
 def nouveau_client():
     if request.method == 'POST':
         f = request.form
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         uid = session.get('auth_user_id')
         conn = get_db()
         c = conn.execute(
@@ -2506,7 +2513,7 @@ def editer_client(id):
             WHERE id=?''', (f.get('nom',''), f.get('contact',''), f.get('telephone',''),
              f.get('email',''), f.get('adresse',''), f.get('notes',''),
              f.get('couleur','#00c9ff'), f.get('collecteur_token','').strip(),
-             datetime.utcnow().isoformat(), id))
+             _utcnow().isoformat(), id))
         conn.commit(); conn.close()
         flash('Client mis à jour', 'success')
         return redirect(url_for('liste_clients'))
@@ -3407,10 +3414,10 @@ def parc_general():
                 f.get('wifi_ssid',''), f.get('wifi_password',''), f.get('wifi_securite','WPA2'),
                 f.get('wifi_ssid2',''), f.get('wifi_password2',''), f.get('wifi_securite2','WPA2'),
                 f.get('wifi_notes',''),
-                datetime.utcnow().isoformat(), cid))
+                _utcnow().isoformat(), cid))
         else:
             conn.execute('''INSERT INTO parc_general (client_id,nom_site,plage_ip_locale,date_maj) VALUES (?,?,?,?)''',
-                         (cid, f.get('nom_site',''), f.get('plage_ip_locale','192.168.1.0/24'), datetime.utcnow().isoformat()))
+                         (cid, f.get('nom_site',''), f.get('plage_ip_locale','192.168.1.0/24'), _utcnow().isoformat()))
         conn.commit(); conn.close()
         flash('Informations du parc sauvegardées', 'success')
         return redirect(url_for('parc_general'))
@@ -3628,7 +3635,7 @@ def _save_licences(conn, appareil_id, cid, form):
     produits    = form.getlist('lic_produit')
     cles        = form.getlist('lic_cle')
     contrat_ids = form.getlist('lic_contrat_id')
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     for i, editeur in enumerate(editeurs):
         editeur  = editeur.strip()
         produit  = produits[i].strip()  if i < len(produits)    else ''
@@ -3679,7 +3686,7 @@ def nouvel_appareil():
         if errs:
             for e in errs: flash(e, 'danger')
             return redirect(request.url)
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         vals = (cid,) + _extract_form(request.form) + (now, now)
         conn = get_db()
         conn.execute('''INSERT INTO appareils (client_id,nom_machine,type_appareil,marque,modele,numero_serie,
@@ -3748,7 +3755,7 @@ def editer_appareil(id):
         if errs:
             for e in errs: flash(e, 'danger')
             return redirect(request.url)
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         _old = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
         vals = _extract_form(request.form) + (now, id, cid)
         conn.execute('''UPDATE appareils SET nom_machine=?,type_appareil=?,marque=?,modele=?,numero_serie=?,
@@ -3930,7 +3937,7 @@ def nouveau_plan():
     cid = get_client_id()
     nom = (request.form.get('nom') or '').strip() or 'Nouveau plan'
     desc = request.form.get('description', '')
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     conn = get_db()
     conn.execute(
         "INSERT INTO plans (client_id,nom,description,contenu,date_creation,date_maj) VALUES (?,?,?,?,?,?)",
@@ -3977,7 +3984,7 @@ def api_plan_save(id):
     data = request.get_json(force=True, silent=True) or {}
     contenu = json.dumps(data.get('contenu', {'elements': []}), ensure_ascii=False)
     nom = (data.get('nom') or '').strip()
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     conn = get_db()
     if nom:
         conn.execute('UPDATE plans SET contenu=?,nom=?,date_maj=? WHERE id=? AND client_id=?',
@@ -4076,7 +4083,7 @@ def nouveau_service():
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
     conn.close()
     if request.method == 'POST':
-        f = request.form; now = datetime.utcnow().isoformat()
+        f = request.form; now = _utcnow().isoformat()
         conn = get_db()
         conn.execute('INSERT INTO services (client_id,nom,description,responsable,couleur,ordre,date_creation,date_maj) VALUES (?,?,?,?,?,?,?,?)',
             (cid, f.get('nom',''), f.get('description',''), f.get('responsable',''),
@@ -4097,7 +4104,7 @@ def editer_service(id):
     conn = get_db()
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
     if request.method == 'POST':
-        f = request.form; now = datetime.utcnow().isoformat()
+        f = request.form; now = _utcnow().isoformat()
         conn.execute('UPDATE services SET nom=?,description=?,responsable=?,couleur=?,ordre=?,date_maj=? WHERE id=? AND client_id=?',
             (f.get('nom',''), f.get('description',''), f.get('responsable',''),
              f.get('couleur','#6a8aaa'), int(f.get('ordre',0) or 0), now, id, cid))
@@ -4152,7 +4159,7 @@ def liste_types_droits():
 def api_creer_type_droit():
     cid = get_client_id()
     f = request.json or {}
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     conn = get_db()
     c = conn.execute('INSERT INTO types_droits (client_id,categorie,nom,description,icone,ordre) VALUES (?,?,?,?,?,?)',
         (cid, f.get('categorie','Autre'), f.get('nom',''), f.get('description',''),
@@ -4221,7 +4228,7 @@ def nouvel_utilisateur():
         'SELECT * FROM services WHERE client_id=? ORDER BY ordre,nom', (cid,)).fetchall()]
     conn.close()
     if request.method == 'POST':
-        f = request.form; now = datetime.utcnow().isoformat()
+        f = request.form; now = _utcnow().isoformat()
         svc_id = int(f.get('service_id') or 0) or None
         conn = get_db()
         c = conn.execute('''INSERT INTO utilisateurs (client_id,service_id,prenom,nom,poste,email,
@@ -4251,7 +4258,7 @@ def editer_utilisateur(id):
     services = [row_to_dict(r) for r in conn.execute(
         'SELECT * FROM services WHERE client_id=? ORDER BY ordre,nom', (cid,)).fetchall()]
     if request.method == 'POST':
-        f = request.form; now = datetime.utcnow().isoformat()
+        f = request.form; now = _utcnow().isoformat()
         _old = row_to_dict(conn.execute('SELECT * FROM utilisateurs WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
         svc_id = int(f.get('service_id') or 0) or None
         conn.execute('''UPDATE utilisateurs SET service_id=?,prenom=?,nom=?,poste=?,email=?,
@@ -4319,7 +4326,7 @@ def api_ajouter_droit():
     cid = get_client_id()
     f = request.json or {}
     uid = f.get('utilisateur_id')
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     conn = get_db()
     c = conn.execute('''INSERT INTO droits_utilisateurs
         (utilisateur_id, client_id, categorie, type_droit_id, nom_droit, valeur, niveau, notes, date_attribution)
@@ -4450,7 +4457,7 @@ def nouvel_identifiant():
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
     conn.close()
     if request.method == 'POST':
-        f = request.form; now = datetime.utcnow().isoformat()
+        f = request.form; now = _utcnow().isoformat()
         errs = validate_form([
             ('nom',            'str',   True),
             ('url',            'url',   False),
@@ -4492,7 +4499,7 @@ def editer_identifiant(id):
     conn = get_db()
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
     if request.method == 'POST':
-        f = request.form; now = datetime.utcnow().isoformat()
+        f = request.form; now = _utcnow().isoformat()
         errs = validate_form([
             ('nom',            'str',   True),
             ('url',            'url',   False),
@@ -5067,7 +5074,7 @@ def api_garantie_ignorer(id):
     if not can_write():
         return jsonify({'error': 'Accès en lecture seule'}), 403
     ignorer = (request.json or {}).get('ignorer', True)
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     conn = get_db()
     conn.execute('UPDATE appareils SET garantie_alerte_ignoree=?, date_maj=? WHERE id=?',
                  (1 if ignorer else 0, now, id))
@@ -5273,7 +5280,7 @@ def api_baie_ajouter_slot():
         (cid, pos, col, f.get('hauteur_u', 1),
          f.get('appareil_id') or None, f.get('nom_custom', ''),
          f.get('type_equipement', ''), f.get('couleur', '#1e3a5f'),
-         f.get('description', ''), baie_nom, datetime.utcnow().isoformat()))
+         f.get('description', ''), baie_nom, _utcnow().isoformat()))
     conn.commit()
     sid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     slot = row_to_dict(conn.execute(
@@ -5296,7 +5303,7 @@ def api_baie_slot(id):
         nom_custom=?,type_equipement=?,couleur=?,description=?,date_maj=? WHERE id=? AND client_id=?''',
         (f.get('position',1), f.get('hauteur_u',1), f.get('appareil_id') or None,
          f.get('nom_custom',''), f.get('type_equipement',''),
-         f.get('couleur','#1e3a5f'), f.get('description',''), datetime.utcnow().isoformat(), id, cid))
+         f.get('couleur','#1e3a5f'), f.get('description',''), _utcnow().isoformat(), id, cid))
     conn.commit()
     slot = row_to_dict(conn.execute(
         '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne
@@ -5851,7 +5858,7 @@ def _oui_telecharger(force=False):
         os.replace(tmp_path, oui_path)  # remplacement atomique : jamais de fichier à moitié écrit
         _oui_load_full()
         try:
-            cfg_set('oui_derniere_maj', datetime.utcnow().isoformat())
+            cfg_set('oui_derniere_maj', _utcnow().isoformat())
         except Exception:
             pass
         logger.info('Base OUI mise à jour : %d préfixes', len(_OUI_FULL or {}))
@@ -7022,7 +7029,7 @@ _TYPES_SUGGESTION_BAIE = {'Switch', 'Routeur/Pare-feu', 'Switch/AP', 'NAS'}
 def importer_scan():
     cid = get_client_id()
     items = request.json.get('appareils', [])
-    conn = get_db(); now = datetime.utcnow().isoformat()
+    conn = get_db(); now = _utcnow().isoformat()
     importes = 0; mis_a_jour = 0
     suggestions_baie = []
     for item in items:
@@ -7106,7 +7113,7 @@ def _sync_collector_peripherals(conn, cid, appareil_id, monitors, printers, usb_
     Retourne le nombre de périphériques réellement créés.
     """
     created = 0
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
 
     _row_user = conn.execute(
         'SELECT utilisateur FROM appareils WHERE id=?', (appareil_id,)).fetchone()
@@ -7254,7 +7261,7 @@ def _enregistrer_collecte(conn, client_id, appareil_id, data):
             else:
                 empreintes.append('%s|' % logiciel)
 
-        maintenant = datetime.utcnow()
+        maintenant = _utcnow()
         horodatage = maintenant.isoformat(timespec='seconds')
         # La clé descend à la microseconde alors que l'horodatage affiché reste
         # à la seconde : deux collectes rapprochées auraient porté la même clé,
@@ -7300,7 +7307,7 @@ def _enregistrer_cles_bitlocker(conn, client_id, appareil_id, cles):
     if not cles:
         return 0
     crypto = _get_crypto_shared()
-    horodatage = datetime.utcnow().isoformat(timespec='seconds')
+    horodatage = _utcnow().isoformat(timespec='seconds')
     enregistrees = 0
     for entree in cles:
         if not isinstance(entree, dict):
@@ -7565,7 +7572,7 @@ def completer_fiches_existantes():
             completes += 1
 
         conn.commit()
-        cfg_set(_CLE_RATTRAPAGE_FICHES, datetime.utcnow().isoformat(timespec='seconds'))
+        cfg_set(_CLE_RATTRAPAGE_FICHES, _utcnow().isoformat(timespec='seconds'))
         if completes:
             logger.info('Fiches appareils complétées depuis les collectes déjà reçues : %d',
                         completes)
@@ -7732,7 +7739,7 @@ def api_device_info():
                 # Créer le client s'il n'existe pas
                 conn_fall.execute(
                     'INSERT INTO clients (nom, contact, email, date_creation, date_maj) VALUES (?,?,?,?,?)',
-                    ('Découverte réseau', 'auto', 'auto@parcinfo.local', datetime.utcnow().isoformat(), datetime.utcnow().isoformat())
+                    ('Découverte réseau', 'auto', 'auto@parcinfo.local', _utcnow().isoformat(), _utcnow().isoformat())
                 )
                 conn_fall.commit()
                 cid = conn_fall.execute('SELECT last_insert_rowid()').fetchone()[0]
@@ -7812,7 +7819,7 @@ def api_device_info():
             except (TypeError, ValueError):
                 app.logger.warning("system_report non sérialisable - ignoré")
 
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         conn = get_db()
 
         # Stratégie de matching :
@@ -8170,7 +8177,7 @@ def api_clients_public():
             conn = get_db()
             conn.execute(
                 "INSERT INTO clients (nom, date_creation, date_maj) VALUES (?, ?, ?)",
-                ("Client par défaut", datetime.utcnow().isoformat(), datetime.utcnow().isoformat())
+                ("Client par défaut", _utcnow().isoformat(), _utcnow().isoformat())
             )
             conn.commit()
             new_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
@@ -8288,7 +8295,7 @@ def api_device_info_upload_report():
         # Insérer le document dans la table documents_appareils
         # (contenu_blob conservé en plus du fichier : l'aperçu reste instantané sur
         # cette machine, et le fichier disque alimente la synchronisation)
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         try:
             conn.execute('''
                 INSERT INTO documents_appareils
@@ -10526,6 +10533,70 @@ def export_maintenances_csv():
     return response
 
 
+@app.route('/maintenances/export.xlsx')
+@login_required
+def export_maintenances_xlsx():
+    cid = get_client_id()
+    filtre_date_debut = request.args.get('date_debut', '')
+    filtre_date_fin = request.args.get('date_fin', '')
+    filtre_type = request.args.get('type_maintenance', '')
+    filtre_statut = request.args.get('statut', '')
+    clients_filter = request.args.get('clients_filter', 'current')
+
+    if clients_filter == 'all':
+        client_ids = [c['id'] for c in get_clients()]
+    else:
+        client_ids = [cid]
+
+    conn = get_db()
+    query = '''SELECT m.*, a.nom_machine AS appareil_nom, p.marque AS peripherique_marque, p.modele AS peripherique_modele
+               FROM maintenances m
+               LEFT JOIN appareils a ON m.appareil_id = a.id
+               LEFT JOIN peripheriques p ON m.peripherique_id = p.id
+               WHERE m.client_id IN ({})'''.format(','.join(['?'] * len(client_ids)))
+    params = client_ids[:]
+    if filtre_date_debut:
+        query += ' AND m.date_planifiee >= ?'
+        params.append(filtre_date_debut)
+    if filtre_date_fin:
+        query += ' AND m.date_planifiee <= ?'
+        params.append(filtre_date_fin)
+    if filtre_type:
+        query += ' AND m.type_maintenance = ?'
+        params.append(filtre_type)
+    if filtre_statut:
+        query += ' AND m.statut = ?'
+        params.append(filtre_statut)
+    query += ' ORDER BY m.date_planifiee DESC'
+
+    maintenances = [row_to_dict(r) for r in conn.execute(query, params).fetchall()]
+    conn.close()
+
+    lignes = []
+    for m in maintenances:
+        app_name, periph_name = '', ''
+        if m.get('appareil_id'):
+            c2 = get_db()
+            a = c2.execute('SELECT nom_machine FROM appareils WHERE id=?', (m['appareil_id'],)).fetchone()
+            if a: app_name = a[0]
+            c2.close()
+        if m.get('peripherique_id'):
+            c2 = get_db()
+            p = c2.execute('SELECT categorie, marque FROM peripheriques WHERE id=?', (m['peripherique_id'],)).fetchone()
+            if p: periph_name = f"{p[0]} {p[1]}"
+            c2.close()
+        lignes.append([
+            m.get('date_planifiee', ''), app_name, periph_name, m.get('type_maintenance', ''),
+            m.get('description', ''), m.get('responsable', ''), m.get('statut', ''),
+            m.get('date_realisee', ''), m.get('notes', ''),
+        ])
+
+    headers = ['Date planifiée', 'Appareil', 'Périphérique', 'Type', 'Description',
+               'Responsable', 'Statut', 'Date réalisée', 'Notes']
+    filename = f'maintenances_{cid}_{date.today().isoformat()}.xlsx'
+    return _xlsx_response(headers, lignes, filename, 'Maintenances')
+
+
 # --- LISTES PERSONNALISABLES -------------------------------------------------
 
 def _liste_est_initialisee(conn, nom: str) -> bool:
@@ -10709,7 +10780,7 @@ def api_services_ajouter():
     if not cid: return jsonify({'error': 'no client'}), 400
     nom = (request.json or {}).get('nom', '').strip()
     if not nom: return jsonify({'error': 'Nom vide'}), 400
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     conn = get_db()
     try:
         conn.execute('INSERT INTO services (client_id,nom,couleur,ordre,date_creation,date_maj) VALUES (?,?,?,?,?,?)',
@@ -11019,7 +11090,7 @@ def _sync_licences_from_collector(conn, client_id, appareil_id, licences):
         if cle:
             existantes.add(cle)
 
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     ajoutees = 0
     for lic in licences[:50]:
         if not isinstance(lic, dict):
@@ -11068,7 +11139,7 @@ def _sync_wifi_credentials_from_collector(conn, client_id, profiles):
             existants[ssid] = row[0]
 
     crypto = _get_crypto_shared()
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     crees = maj = 0
 
     for profil in profiles[:100]:
@@ -11195,7 +11266,7 @@ def _propager_utilisateur_aux_peripheriques(conn, appareil_id, client_id,
         ' WHERE p.client_id=? AND (p.appareil_id=? OR pa.appareil_id=?)',
         (client_id, appareil_id, appareil_id)).fetchall()
 
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     touches = 0
     for pid, courant in rows:
         if courant is None or (ancien_id is not None and courant == ancien_id):
@@ -11241,7 +11312,7 @@ def _sync_appareil_to_periph(conn, appareil_id, client_id):
     categorie = _APPAREIL_PERIPH_MAP.get(a.get('type_appareil', ''))
     if not categorie:
         return
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     # Chercher via table pivot
     existing = conn.execute(
         'SELECT p.id FROM peripheriques p'
@@ -11451,7 +11522,7 @@ def annuler_historique(hist_id):
     if not cols:
         flash('Aucune donnée à restaurer', 'warning')
         conn.close(); return redirect(url_for('page_historique'))
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     set_clause = ', '.join(f'"{c}"=?' for c in cols) + ', date_maj=?'
     vals = [avant[c] for c in cols] + [now, h['entite_id'], cid]
     conn.execute(f'UPDATE {table} SET {set_clause} WHERE id=? AND client_id=?', vals)
@@ -11562,6 +11633,40 @@ COLS_PERIPHERIQUES = [
     'prix_achat','numero_commande','notes','date_creation','date_maj',
 ]
 
+def _xlsx_response(headers, rows, filename, sheet_name='Export'):
+    """Construit un classeur Excel (.xlsx) à partir d'en-têtes + lignes et le
+    retourne en pièce jointe. Même forme de données que les exports CSV
+    existants (liste de colonnes, lignes itérables) pour rester cohérent."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name[:31] or 'Export'  # 31 car. max imposé par Excel
+    ws.append(list(headers))
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    ws.freeze_panes = 'A2'
+
+    largeurs = [len(str(h)) for h in headers]
+    for row in rows:
+        values = [v if v is not None else '' for v in row]
+        ws.append(values)
+        for i, v in enumerate(values):
+            largeurs[i] = max(largeurs[i], min(len(str(v)), 60))
+    for i, largeur in enumerate(largeurs, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = largeur + 2
+
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return app.response_class(
+        buf.getvalue(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename={filename}'})
+
+
 # ─── EXPORT CSV APPAREILS ────────────────────────────────────────────────────
 
 @app.route('/appareils/export.csv')
@@ -11585,6 +11690,18 @@ def export_appareils_csv():
         headers={'Content-Disposition': 'attachment; filename=appareils_export.csv'})
     return resp
 
+@app.route('/appareils/export.xlsx')
+@login_required
+def export_appareils_xlsx():
+    cid = get_client_id()
+    if not cid: return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    rows = conn.execute(
+        f"SELECT {','.join(COLS_APPAREILS)} FROM appareils WHERE client_id=? ORDER BY nom_machine",
+        (cid,)).fetchall()
+    conn.close()
+    return _xlsx_response(COLS_APPAREILS, rows, 'appareils_export.xlsx', 'Appareils')
+
 # ─── EXPORT CSV PÉRIPHÉRIQUES ────────────────────────────────────────────────
 
 @app.route('/peripheriques/export.csv')
@@ -11607,6 +11724,18 @@ def export_peripheriques_csv():
         mimetype='text/csv; charset=utf-8',
         headers={'Content-Disposition': 'attachment; filename=peripheriques_export.csv'})
     return resp
+
+@app.route('/peripheriques/export.xlsx')
+@login_required
+def export_peripheriques_xlsx():
+    cid = get_client_id()
+    if not cid: return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    rows = conn.execute(
+        f"SELECT {','.join(COLS_PERIPHERIQUES)} FROM peripheriques WHERE client_id=? ORDER BY categorie,marque,modele",
+        (cid,)).fetchall()
+    conn.close()
+    return _xlsx_response(COLS_PERIPHERIQUES, rows, 'peripheriques_export.xlsx', 'Périphériques')
 
 # ─── IMPORT CSV APPAREILS ────────────────────────────────────────────────────
 
@@ -11638,7 +11767,7 @@ def import_appareils_csv():
             flash(f'Colonnes manquantes : {", ".join(missing)}. Utilisez le CSV exporté comme modèle.', 'danger')
             return redirect(url_for('liste_appareils'))
         
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         conn = get_db()
         inserted = updated = errors = 0
         
@@ -11755,7 +11884,7 @@ def import_peripheriques_csv():
             flash('Colonne "categorie" manquante. Utilisez le CSV exporté comme modèle.', 'danger')
             return redirect(url_for('liste_peripheriques'))
         
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         conn = get_db()
         inserted = updated = errors = 0
         
@@ -11880,7 +12009,7 @@ def api_kb_article(id):
 @login_required
 def api_kb_create_article():
     f = request.json or {}
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     conn = get_db()
     conn.execute('INSERT INTO kb_articles (categorie_id,titre,contenu,tags,date_creation,date_maj) VALUES (?,?,?,?,?,?)',
         (f.get('categorie_id'), f.get('titre',''), f.get('contenu',''), f.get('tags',''), now, now))
@@ -11894,7 +12023,7 @@ def api_kb_create_article():
 @login_required
 def api_kb_update_article(id):
     f = request.json or {}
-    now = datetime.utcnow().isoformat()
+    now = _utcnow().isoformat()
     conn = get_db()
     conn.execute('UPDATE kb_articles SET categorie_id=?,titre=?,contenu=?,tags=?,date_maj=? WHERE id=?',
         (f.get('categorie_id'), f.get('titre',''), f.get('contenu',''), f.get('tags',''), now, id))
@@ -11980,7 +12109,7 @@ def _build_export(conn, client_ids, uid, scope_label):
     if not client_ids:
         client_ids = [-1]
     all_tables = set(_all_user_tables(conn))
-    data = {'_version':3, '_exported_at':datetime.utcnow().isoformat(),
+    data = {'_version':3, '_exported_at':_utcnow().isoformat(),
             '_app':'ParcInfo', '_scope':scope_label, 'tables':{}}
 
     ph = ','.join(['?' for _ in client_ids])
@@ -12257,7 +12386,7 @@ def page_login():
             session['auth_user_id'] = u['id']
             session['auth_user_nom'] = (u.get('prenom','') + ' ' + u.get('nom','')).strip() or u['login']
             session['auth_user_role'] = u.get('role','user')
-            session['login_time'] = datetime.utcnow().isoformat()
+            session['login_time'] = _utcnow().isoformat()
             from urllib.parse import urlparse
             raw_next = request.form.get('next') or request.args.get('next') or '/'
             parsed = urlparse(raw_next)
@@ -12378,7 +12507,7 @@ def page_profil():
             for e in errs: flash(e, 'danger')
             return redirect(url_for('page_profil'))
         conn = get_db()
-        now  = datetime.utcnow().isoformat()
+        now  = _utcnow().isoformat()
         nom  = request.form.get('nom','').strip()
         prenom = request.form.get('prenom','').strip()
         email  = request.form.get('email','').strip()
@@ -12464,7 +12593,7 @@ def admin_nouvel_utilisateur():
             conn.close()
             flash('Ce login est déjà utilisé', 'danger')
             return redirect(request.url)
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         conn.execute('INSERT INTO auth_users (login,password_hash,nom,prenom,email,role,actif,date_creation,date_maj) VALUES (?,?,?,?,?,?,1,?,?)',
             (login, _hash_pwd(pwd), nom, prenom, email, role, now, now))
         conn.commit(); conn.close()
@@ -12489,7 +12618,7 @@ def admin_editer_utilisateur(uid):
         if errs:
             for e in errs: flash(e, 'danger')
             return redirect(request.url)
-        now  = datetime.utcnow().isoformat()
+        now  = _utcnow().isoformat()
         nom    = request.form.get('nom','').strip()
         prenom = request.form.get('prenom','').strip()
         email  = request.form.get('email','').strip()
@@ -12574,7 +12703,7 @@ def partager_client(cid):
         (u['id'],)).fetchall()]
     if request.method == 'POST':
         action = request.form.get('action')
-        now = datetime.utcnow().isoformat()
+        now = _utcnow().isoformat()
         if action == 'ajouter':
             target_uid = request.form.get('user_id')
             niveau     = request.form.get('niveau','lecture')
@@ -13093,7 +13222,7 @@ def qrcode_generate():
     # Return PDF
     return send_file(io.BytesIO(pdf_bytes), mimetype='application/pdf',
                      as_attachment=True,
-                     download_name=f'label_{asset_id}_{datetime.utcnow().strftime("%Y%m%d")}.pdf')
+                     download_name=f'label_{asset_id}_{_utcnow().strftime("%Y%m%d")}.pdf')
 
 
 # ─── MDNS REGISTRATION ────────────────────────────────────────────────────────
