@@ -276,7 +276,7 @@
                     {% if p.appareils_lies %}
                     <div style="display:flex;flex-wrap:wrap;gap:.25rem;">
                     {% for a in p.appareils_lies %}
-                    <span class="badge type-{{ a.type_appareil|type_css }}" style="font-size:.6rem;">{{ a.nom_machine }}</span>
+                    <a href="/appareil/{{ a.id }}/editer" class="badge type-{{ a.type_appareil|type_css }}" style="font-size:.6rem;text-decoration:none;">{{ a.nom_machine }}</a>
                     {% endfor %}
                     </div>
                     {% else %}

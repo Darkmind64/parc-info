@@ -1,24 +1,24 @@
 {
-  "version": "2.18.56",
+  "version": "2.18.57",
   "release_date": "2026-08-24T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.56/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.56/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.56/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.56",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.56/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.56/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.56/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.56/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.56/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.57",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Identifiants nominatifs + périphériques dans la baie de brassage",
+    "new_features": "Badges de navigation cliquables (périphériques attachés, interventions)",
     "improvements": [
-      "identifiants.utilisateur_id : un identifiant peut désormais être rattaché à une personne (boîte mail perso, VPN nominatif) en plus d'un appareil/périphérique — section « Identifiants liés » sur la fiche utilisateur.",
-      "baie_slots.peripherique_id : un emplacement de baie peut désormais référencer un vrai périphérique (onduleur, panneau de brassage), pas seulement un appareil ou une étiquette texte libre.",
-      "Nettoyage à la suppression : les colonnes ajoutées par ALTER TABLE (sans FK déclarée) sur ce chantier et le précédent laissaient des références orphelines à la suppression d'un appareil/périphérique/utilisateur/service — corrigé."
+      "Inventaire périphériques : les badges d'appareil de la colonne « Attaché à » pointent désormais vers la fiche appareil concernée (auparavant simple texte non cliquable).",
+      "Liste des interventions : le badge « Contrat » pointe désormais vers la fiche du contrat lié.",
+      "Audit complet des 27 templates utilisant des badges pour repérer les références d'entité non cliquables — les autres badges déjà cliquables (droits utilisateur, identifiants, contrats, interventions détail) ont été vérifiés conformes."
     ]
   },
   "checksums": {
@@ -29,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.56"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.57"
 }

@@ -1,8 +1,29 @@
-PARCINFO_VERSION=2.18.56
+PARCINFO_VERSION=2.18.57
 RELEASE_DATE=2026-08-24
-BUILD_NUMBER=2026082408
+BUILD_NUMBER=2026082409
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.57 - Badges de navigation cliquables
+# Audit systématique des 27 templates utilisant des badges pour repérer les
+# badges affichant une référence à une autre entité (appareil, contrat...)
+# sans lien vers sa fiche, à la suite d'un signalement sur l'inventaire des
+# périphériques.
+# Inventaire périphériques : les badges d'appareil de la colonne « Attaché
+# à » (p.appareils_lies) pointent désormais vers /appareil/<id>/editer, au
+# lieu d'un simple <span> non cliquable.
+# Liste des interventions : le badge « 📋 Contrat » pointe désormais vers
+# /contrat/<id> — la fiche détail d'intervention faisait déjà ce lien, la
+# liste seule y manquait.
+# Reste vérifié conforme sans modification : droits_utilisateur.html,
+# identifiants.html, detail_contrat.html, detail_intervention.html,
+# historique.html et les templates mobile/* (chaque carte est déjà un lien
+# englobant). Une piste plus lourde identifiée mais non retenue : les
+# compteurs d'appareils/périphériques de la liste des contrats
+# nécessiteraient un nouveau filtre backend (?contrat=<id>) inexistant à ce
+# jour sur /appareils et /peripheriques, contrairement au filtre
+# ?peripherique=<id> déjà présent sur /contrats.
+# Date: 24 août 2026
 
 # Version 2.18.56 - Identifiants nominatifs + périphériques dans la baie de brassage
 # identifiants.utilisateur_id : un identifiant peut désormais être rattaché
