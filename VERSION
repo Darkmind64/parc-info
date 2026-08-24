@@ -1,8 +1,26 @@
-PARCINFO_VERSION=2.18.50
+PARCINFO_VERSION=2.18.51
 RELEASE_DATE=2026-08-24
-BUILD_NUMBER=2026082402
+BUILD_NUMBER=2026082403
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.51 - Fil d'Ariane généralisé + cohérence taille/style/couleurs
+# Le fil d'Ariane générique ne couvrait que 15 routes de création/édition et
+# ignorait le paramètre « Afficher le fil d'Ariane » ; il couvre désormais
+# ~45 routes (quasi toutes les pages listes/formulaires/détail) et respecte
+# le paramètre. Le fil d'Ariane bricolé du dashboard (inline, dans une
+# taille/couleur différentes du composant central) est supprimé.
+# Audit des templates contre le design system de base.html (variables CSS
+# --text-*/--accent-*, classe .mono) : couleurs de KPI codées en dur
+# harmonisées dans historique_maintenance.html/rapport_maintenance.html
+# (incohérence inter-pages réelle corrigée sur le statut « Réalisées »,
+# vert sur l'une, bleu sur l'autre), badge IP de scan_reseau.html, tailles
+# de police divergentes unifiées pour des composants jumeaux
+# (plan_editeur.html, form_contrat.html/form_intervention.html,
+# documents_appareil.html, journal_synchronisation.html), notes d'aide de
+# formulaire, et fiche_systeme.html qui utilisait Consolas au lieu de la
+# police mono du site sur 5 classes.
+# Date: 24 août 2026
 
 # Version 2.18.50 - Historique des collectes limité à 5 + rétention par durée des journaux
 # Fiche système : le tableau « Évolution » affiche les 5 dernières collectes
