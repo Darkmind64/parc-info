@@ -175,7 +175,12 @@
             </div>
             <div class="form-group">
                 <label for="id-service">Service / Département</label>
-                <input id="id-service" type="text" name="service" value="{{ appareil.service if appareil else '' }}" placeholder="Ex: Comptabilité">
+                <input id="id-service" type="text" name="service" value="{{ appareil.service if appareil else '' }}" placeholder="Ex: Comptabilité" list="datalist-services" autocomplete="off">
+                <datalist id="datalist-services">
+                    {% for nom in services_noms %}
+                    <option value="{{ nom }}">
+                    {% endfor %}
+                </datalist>
             </div>
             <div class="form-group">
                 <label for="id-localisation">Localisation / Bureau</label>
@@ -907,10 +912,14 @@ async function loadContrats() {
     }
     el.innerHTML = items.map(ct => {
         const col = ct.expire_depasse ? 'var(--accent-red)' : ct.expire_bientot ? 'var(--accent-orange)' : 'var(--accent-green)';
+        const roles = (ct.roles || []).map(r =>
+            `<span style="font-size:.62rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-muted);border:1px solid var(--border);border-radius:3px;padding:1px 5px;">${r}</span>`
+        ).join(' ');
         return `<div style="display:flex;align-items:center;gap:.7rem;padding:.4rem .6rem;border-bottom:1px solid rgba(30,58,95,.3);font-size:.85rem;">
             <span style="color:${col};">●</span>
             <div style="flex:1;"><strong>${ct.titre}</strong>
                 <span style="color:var(--text-secondary);font-size:.75rem;"> — ${ct.fournisseur||''}</span>
+                ${roles ? `<div style="margin-top:.25rem;display:flex;gap:.3rem;flex-wrap:wrap;">${roles}</div>` : ''}
                 ${ct.date_fin_fmt ? `<div style="font-size:.72rem;color:var(--text-muted);">Fin : ${ct.date_fin_fmt}</div>` : ''}
             </div>
             <a href="/contrat/${ct.id}" style="color:var(--accent);font-size:.75rem;">Voir</a>

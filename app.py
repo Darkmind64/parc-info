@@ -3707,6 +3707,7 @@ def nouvel_appareil():
         "SELECT id,titre,fournisseur,statut FROM contrats WHERE client_id=? ORDER BY titre", (cid,)).fetchall()]
     lm_list = _get_logiciels_metier_list(conn, cid)
     utilisateurs_noms, utilisateurs_variantes = _utilisateurs_pour_formulaire(conn, cid)
+    services_noms = _services_pour_formulaire(conn, cid)
     conn.close()
     if request.method == 'POST':
         if not can_write():
@@ -3760,6 +3761,7 @@ def nouvel_appareil():
                            licences=[],
                            utilisateurs_noms=utilisateurs_noms,
                            utilisateurs_variantes=utilisateurs_variantes,
+                           services_noms=services_noms,
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/appareil/<int:id>/editer', methods=['GET','POST'])
@@ -3823,6 +3825,7 @@ def editer_appareil(id):
     contrats = [row_to_dict(r) for r in conn.execute(
         "SELECT id,titre,fournisseur,statut FROM contrats WHERE client_id=? ORDER BY titre", (cid,)).fetchall()]
     utilisateurs_noms, utilisateurs_variantes = _utilisateurs_pour_formulaire(conn, cid)
+    services_noms = _services_pour_formulaire(conn, cid)
     licences = [row_to_dict(r) for r in conn.execute(
         'SELECT * FROM licences_appareils WHERE appareil_id=? ORDER BY id', (id,)).fetchall()]
     lm_list = _get_logiciels_metier_list(conn, cid)
@@ -3846,6 +3849,7 @@ def editer_appareil(id):
                            cles_bitlocker=cles_bitlocker,
                            utilisateurs_noms=utilisateurs_noms,
                            utilisateurs_variantes=utilisateurs_variantes,
+                           services_noms=services_noms,
                            types_appareils=get_liste_cached('types_appareils'),
                            marques_av=get_liste('marques_antivirus'),
                            noms_av=get_liste('noms_antivirus'),
@@ -9016,16 +9020,53 @@ def telecharger_doc_contrat(id):
     # Fallback: servir depuis fichier local
     return send_from_directory(UPLOAD_FOLDER, doc['nom_fichier'], as_attachment=True, download_name=doc['nom'])
 
+def _contrats_appareil(conn, app_id, cid):
+    """Tous les contrats liés à un appareil, quel que soit le mécanisme de
+    liaison : la table pivot contrats_appareils (rattachement général) ET
+    les colonnes dédiées av_contrat_id/edr_contrat_id/rmm_contrat_id
+    (contrat spécifique à l'antivirus/EDR/RMM) — ces dernières n'étaient
+    jusqu'ici jamais reprises ici, un contrat antivirus pouvait donc être
+    invisible dans « Contrats liés » tant qu'il n'était pas *aussi* ajouté
+    manuellement au pivot. Chaque contrat ressort avec la liste des rôles
+    par lesquels il est rattaché (peut en cumuler plusieurs)."""
+    entrees = {}
+    for row in conn.execute(
+            'SELECT c.* FROM contrats c JOIN contrats_appareils ca ON c.id=ca.contrat_id '
+            'WHERE ca.appareil_id=? AND c.client_id=?', (app_id, cid)).fetchall():
+        d = row_to_dict(row)
+        entrees[d['id']] = {'contrat': d, 'roles': ['Général']}
+
+    appareil = row_to_dict(conn.execute(
+        'SELECT av_contrat_id, edr_contrat_id, rmm_contrat_id FROM appareils WHERE id=? AND client_id=?',
+        (app_id, cid)).fetchone() or {})
+    for colonne, role in (('av_contrat_id', 'Antivirus'), ('edr_contrat_id', 'EDR'), ('rmm_contrat_id', 'RMM')):
+        contrat_id = appareil.get(colonne)
+        if not contrat_id:
+            continue
+        if contrat_id in entrees:
+            entrees[contrat_id]['roles'].append(role)
+        else:
+            row = conn.execute('SELECT * FROM contrats WHERE id=? AND client_id=?', (contrat_id, cid)).fetchone()
+            if row:
+                entrees[contrat_id] = {'contrat': row_to_dict(row), 'roles': [role]}
+
+    resultat = []
+    for entree in entrees.values():
+        d = fmt_contrat(entree['contrat'])
+        d['roles'] = entree['roles']
+        resultat.append(d)
+    resultat.sort(key=lambda d: d.get('titre') or '')
+    return resultat
+
+
 @app.route('/api/contrats/appareil/<int:app_id>')
 @login_required
 def api_contrats_appareil(app_id):
     cid = get_client_id()
     conn = get_db()
-    rows = [row_to_dict(r) for r in conn.execute(
-        'SELECT c.* FROM contrats c JOIN contrats_appareils ca ON c.id=ca.contrat_id WHERE ca.appareil_id=? AND c.client_id=?',
-        (app_id, cid)).fetchall()]
+    resultat = _contrats_appareil(conn, app_id, cid)
     conn.close()
-    return jsonify([fmt_contrat(r) for r in rows])
+    return jsonify(resultat)
 
 @app.route('/api/contrats/peripherique/<int:per_id>')
 @login_required
@@ -11255,6 +11296,17 @@ def _utilisateurs_pour_formulaire(conn, client_id):
             if v:
                 variantes.add(v)
     return noms, sorted(variantes)
+
+
+def _services_pour_formulaire(conn, client_id):
+    """Noms des services du client, pour le datalist du champ « Service /
+    Département » de la fiche appareil — même mécanique que le datalist
+    utilisateurs juste à côté : `appareils.service` reste un champ texte
+    libre (pas de service_id), mais suggérer les services déjà créés évite
+    qu'un même service se retrouve orthographié de plusieurs façons."""
+    rows = conn.execute(
+        "SELECT nom FROM services WHERE client_id=? ORDER BY ordre, nom", (client_id,)).fetchall()
+    return [r[0] for r in rows if r[0]]
 
 
 def _resolve_utilisateur_id(conn, client_id, texte):
