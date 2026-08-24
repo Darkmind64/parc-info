@@ -1,23 +1,24 @@
 {
-  "version": "2.18.53",
+  "version": "2.18.54",
   "release_date": "2026-08-24T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.53/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.53/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.53/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.53",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.53/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.53/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.53/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.53/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.53/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.54/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.54/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.54/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.54",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.54/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.54/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.54/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.54/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.54/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Contrats liés d'un appareil complets (antivirus/EDR/RMM) + suggestions de service",
+    "new_features": "Identifiants reliés aux appareils/périphériques + détection de conflit de mot de passe",
     "improvements": [
-      "Le panneau « Contrats liés » de la fiche appareil n'affichait que les contrats rattachés via le pivot général — un contrat lié uniquement via av_contrat_id/edr_contrat_id/rmm_contrat_id (antivirus, EDR, RMM) restait invisible. Les deux mécanismes sont désormais fusionnés, avec un badge de rôle par contrat.",
-      "Le champ Service de la fiche appareil propose désormais un datalist alimenté par la table services, même mécanique que le champ Utilisateur juste à côté."
+      "Un identifiant peut désormais être rattaché à un appareil ou un périphérique précis, au lieu de rester un silo déconnecté des champs user_login/user_password/admin_login/admin_password déjà présents sur la fiche appareil.",
+      "Nouvelle section « Identifiants liés » sur la fiche appareil, avec alerte si le mot de passe d'un identifiant lié diffère de celui saisi directement sur la fiche (même login).",
+      "La liste des identifiants affiche désormais l'équipement lié, cliquable vers sa fiche."
     ]
   },
   "checksums": {
@@ -28,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.53"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.54"
 }

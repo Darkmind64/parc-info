@@ -1,8 +1,21 @@
-PARCINFO_VERSION=2.18.53
+PARCINFO_VERSION=2.18.54
 RELEASE_DATE=2026-08-24
-BUILD_NUMBER=2026082405
+BUILD_NUMBER=2026082406
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.54 - Identifiants reliés aux appareils/périphériques + détection de conflit
+# Un identifiant peut désormais être rattaché à un appareil ou un
+# périphérique précis (identifiants.appareil_id/peripherique_id, nullable),
+# au lieu de rester un silo déconnecté des champs user_login/user_password/
+# admin_login/admin_password déjà présents sur la fiche appareil.
+# Nouvelle section « Identifiants liés » sur la fiche appareil, mot de passe
+# révélé à la demande (réutilise l'endpoint existant, jamais exposé en
+# clair dans la liste), avec alerte si le mot de passe d'un identifiant lié
+# diffère de celui saisi directement sur la fiche (même login).
+# La liste des identifiants affiche désormais l'équipement lié, cliquable
+# vers sa fiche.
+# Date: 24 août 2026
 
 # Version 2.18.53 - Contrats liés d'un appareil complets + suggestions de service
 # Le panneau « Contrats liés » de la fiche appareil n'affichait que les
