@@ -1,8 +1,17 @@
-PARCINFO_VERSION=2.18.51
+PARCINFO_VERSION=2.18.52
 RELEASE_DATE=2026-08-24
-BUILD_NUMBER=2026082403
+BUILD_NUMBER=2026082404
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.52 - Suggestions depuis l'inventaire dans Parc Général
+# Switch, Routeur/Pare-feu, Serveur (marque+modèle) et UPS/Onduleur dans
+# Parc Général proposent désormais un datalist alimenté par les appareils/
+# périphériques déjà saisis pour le client du type correspondant, tout en
+# restant de simples champs texte libres — la saisie manuelle reste
+# toujours possible. Nouvelle classe .form-hint dans base.html pour le
+# texte d'aide, au lieu d'un style inline de plus.
+# Date: 24 août 2026
 
 # Version 2.18.51 - Fil d'Ariane généralisé + cohérence taille/style/couleurs
 # Le fil d'Ariane générique ne couvrait que 15 routes de création/édition et

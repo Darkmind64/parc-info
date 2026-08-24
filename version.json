@@ -1,23 +1,22 @@
 {
-  "version": "2.18.51",
+  "version": "2.18.52",
   "release_date": "2026-08-24T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.51/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.51/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.51/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.51",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.51/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.51/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.51/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.51/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.51/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.52/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.52/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.52/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.52",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.52/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.52/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.52/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.52/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.52/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Fil d'Ariane généralisé + cohérence taille/style/couleurs entre templates",
+    "new_features": "Suggestions depuis l'inventaire (Switch, Routeur, Serveur, UPS) dans Parc Général",
     "improvements": [
-      "Le fil d'Ariane générique ne couvrait que 15 routes de création/édition et ignorait le paramètre « Afficher le fil d'Ariane » ; il couvre désormais ~45 routes et respecte le paramètre. Le fil d'Ariane bricolé du dashboard, dans une taille/couleur différentes du composant central, est supprimé.",
-      "Audit des templates contre le design system : couleurs de KPI codées en dur harmonisées (avec une vraie incohérence inter-pages corrigée sur le statut « Réalisées »), tailles de police divergentes unifiées pour plusieurs composants jumeaux, et fiche_systeme.html qui utilisait une police mono différente du reste du site sur 5 classes."
+      "Switch, Routeur/Pare-feu, Serveur (marque+modèle) et UPS/Onduleur dans Parc Général proposent désormais un datalist alimenté par les appareils/périphériques déjà saisis pour le client du type correspondant, tout en restant de simples champs texte libres — la saisie manuelle reste toujours possible."
     ]
   },
   "checksums": {
@@ -28,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.51"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.52"
 }
