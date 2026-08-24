@@ -700,6 +700,13 @@
         <div id="contrats-app-list"><div style="color:var(--text-muted);font-size:.82rem;">Chargement...</div></div>
         <a href="/contrat/nouveau" class="btn btn-primary btn-sm" style="margin-top:.6rem;">+ Associer à un contrat</a>
     </div>
+
+    <!-- IDENTIFIANTS LIES -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Identifiants liés</div>
+        <div id="identifiants-app-list"><div style="color:var(--text-muted);font-size:.82rem;">Chargement...</div></div>
+        <a href="/identifiant/nouveau" class="btn btn-primary btn-sm" style="margin-top:.6rem;">+ Ajouter un identifiant</a>
+    </div>
     {% endif %}
 
 
@@ -927,6 +934,56 @@ async function loadContrats() {
     }).join('');
 }
 loadContrats();
+{% endif %}
+
+{% if appareil and appareil.id %}
+const _identMdpCache = {};
+async function _identGetMdp(id) {
+    if (_identMdpCache[id] !== undefined) return _identMdpCache[id];
+    const r = await fetch('/api/identifiant/' + id + '/mdp');
+    const d = await r.json();
+    _identMdpCache[id] = d.mdp || '';
+    return _identMdpCache[id];
+}
+async function _identToggleMdp(id, btn) {
+    const span = document.getElementById('ident-pwd-' + id);
+    if (span.dataset.shown === '1') {
+        span.textContent = '••••••••';
+        span.dataset.shown = '0';
+        btn.textContent = '👁';
+    } else {
+        span.textContent = await _identGetMdp(id) || '(vide)';
+        span.dataset.shown = '1';
+        btn.textContent = '🙈';
+    }
+}
+async function loadIdentifiants() {
+    const r = await fetch('/api/identifiants/appareil/{{ appareil.id }}');
+    const items = await r.json();
+    const el = document.getElementById('identifiants-app-list');
+    if (!items.length) {
+        el.innerHTML = '<span style="color:var(--text-muted);font-size:.82rem;">Aucun identifiant lié</span>'; return;
+    }
+    el.innerHTML = items.map(id_ => `
+        <div style="padding:.4rem .6rem;border-bottom:1px solid rgba(30,58,95,.3);font-size:.85rem;">
+            <div style="display:flex;align-items:center;gap:.7rem;">
+                <div style="flex:1;">
+                    <strong>${escHtml(id_.nom)}</strong>
+                    <span style="color:var(--text-secondary);font-size:.75rem;"> — ${escHtml(id_.categorie)}</span>
+                    ${id_.login ? `<div style="font-size:.75rem;color:var(--text-muted);">
+                        Login : <span class="mono">${escHtml(id_.login)}</span> ·
+                        MDP : <span id="ident-pwd-${id_.id}" class="mono" data-shown="0">••••••••</span>
+                        <button type="button" onclick="_identToggleMdp(${id_.id}, this)" style="border:none;background:transparent;color:var(--accent);cursor:pointer;">👁</button>
+                    </div>` : ''}
+                </div>
+                <a href="/identifiant/${id_.id}/editer" style="color:var(--accent);font-size:.75rem;">Voir</a>
+            </div>
+            ${id_.conflit ? `<div style="margin-top:.3rem;font-size:.72rem;color:var(--accent-orange);">
+                ⚠ Diffère du champ « ${escHtml(id_.conflit)} » saisi directement sur cette fiche — lequel est à jour ?
+            </div>` : ''}
+        </div>`).join('');
+}
+loadIdentifiants();
 {% endif %}
 
 {% if appareil and appareil.id %}

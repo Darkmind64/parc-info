@@ -139,6 +139,11 @@ th[data-col]:hover { color:var(--accent) !important; background:rgba(0,201,255,.
                 <td data-sort="{{ ident.nom or '' }}">
                     <div style="font-weight:600;">{{ ident.nom or '—' }}</div>
                     {% if ident.description %}<div style="color:var(--text-secondary);font-size:0.78rem;">{{ ident.description }}</div>{% endif %}
+                    {% if ident.appareil_id and ident.lie_appareil_nom %}
+                    <a href="/appareil/{{ ident.appareil_id }}/editer" class="form-hint" style="display:inline-block;text-decoration:none;">🖥 {{ ident.lie_appareil_nom }}</a>
+                    {% elif ident.peripherique_id and ident.lie_periph_marque %}
+                    <a href="/peripherique/{{ ident.peripherique_id }}/editer" class="form-hint" style="display:inline-block;text-decoration:none;">🖱 {{ ident.lie_periph_categorie }} — {{ ident.lie_periph_marque }} {{ ident.lie_periph_modele }}</a>
+                    {% endif %}
                 </td>
                 <td data-sort="{{ ident.categorie or '' }}">
                     <span class="badge badge-blue" style="font-size:.62rem;">{{ ident.categorie or '—' }}</span>

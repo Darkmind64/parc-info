@@ -108,6 +108,28 @@ def make_appareil(conn):
     return _make
 
 
+@pytest.fixture
+def make_identifiant(conn):
+    """Factory : crée un identifiant pour un client donné et retourne son id.
+    Le mot de passe, s'il est fourni en clair, est chiffré comme le ferait
+    la vraie route de sauvegarde — nécessaire pour tester la détection de
+    conflit dans _identifiants_appareil(), qui déchiffre côté serveur."""
+    def _make(client_id, nom=None, mot_de_passe=None, **extra):
+        nom = nom or _unique('Identifiant ')
+        cols = ['client_id', 'nom'] + list(extra.keys())
+        vals = [client_id, nom] + list(extra.values())
+        if mot_de_passe is not None:
+            crypto = flask_app_module._get_crypto_shared()
+            cols.append('mot_de_passe')
+            vals.append(crypto.encrypt(mot_de_passe) if mot_de_passe else '')
+        placeholders = ','.join('?' * len(cols))
+        cur = conn.execute(
+            f"INSERT INTO identifiants ({','.join(cols)}) VALUES ({placeholders})", vals)
+        conn.commit()
+        return cur.lastrowid
+    return _make
+
+
 def login_session(client, auth_user_id, client_id=None):
     """Authentifie le test_client par manipulation directe de session,
     comme test_remplissage_fiche.py — équivalent à un /login réussi mais

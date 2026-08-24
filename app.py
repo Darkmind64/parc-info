@@ -834,6 +834,18 @@ def init_db():
             c.execute(f"ALTER TABLE identifiants ADD COLUMN {col} TEXT DEFAULT {defval}")
         except: pass
 
+    # Lien optionnel vers un appareil/périphérique (migration) — audit du
+    # 2026-08-24 : jusqu'ici un identifiant n'était jamais rattaché à un
+    # équipement précis (juste un nom/description en texte libre), alors que
+    # la fiche appareil a ses propres champs user_login/user_password/
+    # admin_login/admin_password. Deux silos de credentials pour une même
+    # machine, sans le moindre rapprochement. NULL par défaut : ne change
+    # rien pour les identifiants déjà saisis.
+    for col in ('appareil_id', 'peripherique_id'):
+        try:
+            c.execute(f"ALTER TABLE identifiants ADD COLUMN {col} INTEGER")
+        except: pass
+
     # Ajouter "Wi-Fi" à la liste des catégories d'identifiants si absente
     try:
         nb = c.execute("SELECT COUNT(*) FROM config_listes WHERE nom_liste='categories_identifiants' AND valeur='Wi-Fi'").fetchone()[0]
@@ -4417,10 +4429,16 @@ def liste_identifiants():
     if not cid: return redirect(url_for('nouveau_client'))
     page = request.args.get('page', 1, type=int)
     filtre_cat = request.args.get('cat', '')
+    _q_base = ('SELECT i.*, a.nom_machine AS lie_appareil_nom, '
+               'p.categorie AS lie_periph_categorie, p.marque AS lie_periph_marque, p.modele AS lie_periph_modele '
+               'FROM identifiants i '
+               'LEFT JOIN appareils a ON a.id = i.appareil_id '
+               'LEFT JOIN peripheriques p ON p.id = i.peripherique_id '
+               'WHERE i.client_id=?')
     if filtre_cat:
-        q, params = 'SELECT * FROM identifiants WHERE client_id=? AND categorie=? ORDER BY categorie,nom', (cid, filtre_cat)
+        q, params = _q_base + ' AND i.categorie=? ORDER BY i.categorie, i.nom', (cid, filtre_cat)
     else:
-        q, params = 'SELECT * FROM identifiants WHERE client_id=? ORDER BY categorie,nom', (cid,)
+        q, params = _q_base + ' ORDER BY i.categorie, i.nom', (cid,)
     rows, pagination = paginate(q, params, page)
     ids_ = [row_to_dict(r) for r in rows]
     conn = get_db()
@@ -4495,6 +4513,10 @@ def nouvel_identifiant():
     if not cid: return redirect(url_for('nouveau_client'))
     conn = get_db()
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    appareils_liste = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine FROM appareils WHERE client_id=? ORDER BY nom_machine', (cid,)).fetchall()]
+    peripheriques_liste = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, categorie, marque, modele FROM peripheriques WHERE client_id=? ORDER BY categorie, marque', (cid,)).fetchall()]
     conn.close()
     if request.method == 'POST':
         f = request.form; now = _utcnow().isoformat()
@@ -4510,14 +4532,18 @@ def nouvel_identifiant():
         # ✅ Chiffrer le mot de passe avant stockage
         crypto = _get_crypto_shared()
         mdp_chiffre = crypto.encrypt(f.get('mot_de_passe','')) if f.get('mot_de_passe') else ''
+        appareil_id = int(f['appareil_id']) if f.get('appareil_id') else None
+        peripherique_id = int(f['peripherique_id']) if f.get('peripherique_id') else None
         conn.execute('''INSERT INTO identifiants (client_id,categorie,nom,login,mot_de_passe,url,
-            description,notes,date_expiration,wifi_ssid,wifi_securite,date_creation,date_maj)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            description,notes,date_expiration,wifi_ssid,wifi_securite,appareil_id,peripherique_id,
+            date_creation,date_maj)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (cid, f.get('categorie',''), f.get('nom',''), f.get('login',''), mdp_chiffre,
              f.get('url',''), f.get('description',''), f.get('notes',''),
              f.get('date_expiration',''),
              f.get('wifi_ssid','') if f.get('categorie') == 'Wi-Fi' else '',
              f.get('wifi_securite','WPA2') if f.get('categorie') == 'Wi-Fi' else '',
+             appareil_id, peripherique_id,
              now, now))
         new_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
         nom = request.form.get('nom','') or 'Nouvel identifiant'
@@ -4526,6 +4552,7 @@ def nouvel_identifiant():
         flash('Identifiant ajouté', 'success')
         return redirect(url_for('liste_identifiants'))
     return render_template('form_identifiant.html', identifiant=None, action='Ajouter',
+                           appareils_liste=appareils_liste, peripheriques_liste=peripheriques_liste,
                            client=client, clients=get_clients(), client_actif_id=cid,
                            categories=get_liste_cached('categories_identifiants'))
 
@@ -4552,14 +4579,18 @@ def editer_identifiant(id):
         # ✅ Chiffrer le mot de passe avant mise à jour
         crypto = _get_crypto_shared()
         mdp_chiffre = crypto.encrypt(f.get('mot_de_passe','')) if f.get('mot_de_passe') else ''
+        appareil_id = int(f['appareil_id']) if f.get('appareil_id') else None
+        peripherique_id = int(f['peripherique_id']) if f.get('peripherique_id') else None
         conn.execute('''UPDATE identifiants SET categorie=?,nom=?,login=?,mot_de_passe=?,url=?,
-            description=?,notes=?,date_expiration=?,wifi_ssid=?,wifi_securite=?,date_maj=?
+            description=?,notes=?,date_expiration=?,wifi_ssid=?,wifi_securite=?,
+            appareil_id=?,peripherique_id=?,date_maj=?
             WHERE id=? AND client_id=?''',
             (f.get('categorie',''), f.get('nom',''), f.get('login',''), mdp_chiffre,
              f.get('url',''), f.get('description',''), f.get('notes',''),
              f.get('date_expiration',''),
              f.get('wifi_ssid','') if f.get('categorie') == 'Wi-Fi' else '',
              f.get('wifi_securite','WPA2') if f.get('categorie') == 'Wi-Fi' else '',
+             appareil_id, peripherique_id,
              now, id, cid))
         nom = request.form.get('nom','') or f'Identifiant #{id}'
         _cols_i = _ENTITE_COLS['identifiant']
@@ -4570,12 +4601,17 @@ def editer_identifiant(id):
         flash('Identifiant mis à jour', 'success')
         return redirect(url_for('liste_identifiants'))
     ident = row_to_dict(conn.execute('SELECT * FROM identifiants WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    appareils_liste = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine FROM appareils WHERE client_id=? ORDER BY nom_machine', (cid,)).fetchall()]
+    peripheriques_liste = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, categorie, marque, modele FROM peripheriques WHERE client_id=? ORDER BY categorie, marque', (cid,)).fetchall()]
     conn.close()
     # ✅ Déchiffrer le mot de passe pour l'affichage
     if ident and ident.get('mot_de_passe'):
         crypto = _get_crypto_shared()
         ident['mot_de_passe'] = crypto.decrypt(ident['mot_de_passe']) or ident['mot_de_passe']
     return render_template('form_identifiant.html', identifiant=ident, action='Modifier',
+                           appareils_liste=appareils_liste, peripheriques_liste=peripheriques_liste,
                            client=client, clients=get_clients(), client_actif_id=cid,
                            categories=get_liste_cached('categories_identifiants'))
 
@@ -9068,6 +9104,50 @@ def api_contrats_appareil(app_id):
     conn.close()
     return jsonify(resultat)
 
+
+def _identifiants_appareil(conn, app_id, cid):
+    """Identifiants explicitement rattachés à cet appareil (identifiants.appareil_id),
+    avec détection d'un éventuel conflit face aux champs rapides de la fiche
+    (user_login/user_password, admin_login/admin_password) : deux silos de
+    credentials pour la même machine, sans rapprochement jusqu'ici (audit du
+    2026-08-24). Le mot de passe n'est jamais renvoyé ici — seul un
+    booléen/label de conflit l'est ; la valeur en clair reste réservée au
+    déchiffrement à la demande (/api/identifiant/<id>/mdp), comme partout
+    ailleurs dans l'app."""
+    appareil = row_to_dict(conn.execute(
+        'SELECT user_login, user_password, admin_login, admin_password '
+        'FROM appareils WHERE id=? AND client_id=?', (app_id, cid)).fetchone() or {})
+    crypto = _get_crypto_shared()
+    resultat = []
+    for row in conn.execute(
+            'SELECT * FROM identifiants WHERE appareil_id=? AND client_id=? ORDER BY categorie, nom',
+            (app_id, cid)).fetchall():
+        d = row_to_dict(row)
+        mdp_dechiffre = crypto.decrypt(d['mot_de_passe']) if d.get('mot_de_passe') else ''
+        conflit = None
+        for prefixe, label in (('user', 'Login utilisateur'), ('admin', 'Login administrateur')):
+            login_rapide = (appareil.get(f'{prefixe}_login') or '').strip()
+            pwd_rapide = appareil.get(f'{prefixe}_password') or ''
+            if login_rapide and d.get('login') and login_rapide.lower() == d['login'].strip().lower():
+                if pwd_rapide and mdp_dechiffre and pwd_rapide != mdp_dechiffre:
+                    conflit = label
+                break
+        resultat.append({
+            'id': d['id'], 'nom': d['nom'], 'categorie': d['categorie'],
+            'login': d['login'], 'conflit': conflit,
+        })
+    return resultat
+
+
+@app.route('/api/identifiants/appareil/<int:app_id>')
+@login_required
+def api_identifiants_appareil(app_id):
+    cid = get_client_id()
+    conn = get_db()
+    resultat = _identifiants_appareil(conn, app_id, cid)
+    conn.close()
+    return jsonify(resultat)
+
 @app.route('/api/contrats/peripherique/<int:per_id>')
 @login_required
 def api_contrats_peripherique(per_id):
@@ -11510,6 +11590,7 @@ _HIST_LABELS = {
     'anydesk_id':'AnyDesk ID','anydesk_password':'AnyDesk MDP',
     'categorie':'Catégorie','description':'Description',
     'appareil_id':'Appareil attaché','utilisateur_id':'Utilisateur attaché',
+    'peripherique_id':'Périphérique attaché',
     'nom':'Nom','login':'Login','mot_de_passe':'Mot de passe','url':'URL',
     'date_expiration':'Expiration','wifi_ssid':'SSID Wi-Fi','wifi_securite':'Sécurité Wi-Fi',
     'titre':'Titre','type_contrat':'Type contrat','contact_fournisseur':'Contact',
@@ -11541,7 +11622,7 @@ _ENTITE_COLS = {
         'statut','date_achat','duree_garantie','date_fin_garantie','fournisseur','prix_achat',
         'numero_commande','notes','utilisateur_id'],
     'identifiant': ['categorie','nom','login','mot_de_passe','url','description','notes',
-        'date_expiration','wifi_ssid','wifi_securite'],
+        'date_expiration','wifi_ssid','wifi_securite','appareil_id','peripherique_id'],
     'contrat': ['titre','type_contrat','fournisseur','contact_fournisseur','email_fournisseur',
         'telephone_fournisseur','numero_contrat','date_debut','date_fin','reconduction_auto',
         'preavis_jours','montant_ht','periodicite','description','notes','statut'],
