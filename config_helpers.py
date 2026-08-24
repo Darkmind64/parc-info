@@ -240,6 +240,14 @@ CFG_DEFAULTS = {
     'garantie_alerte_jours': '90',
     'lignes_par_page': '50',
     'historique_max_lignes': '500',
+    # Rétention par durée (jours) — en complément des plafonds par nombre de
+    # lignes ci-dessus/ci-dessous : 0 = désactivée (seul le plafond en lignes
+    # s'applique). Purge paresseuse, faite à chaque nouvelle écriture dans le
+    # journal concerné — pas de tâche planifiée séparée.
+    'historique_max_jours': '0',
+    'collectes_max_jours': '0',
+    'journal_maj_max_jours': '0',
+    'journal_sync_max_jours': '0',
     'afficher_dernier_ping': '1',
     'afficher_mac': '1',
     'date_format': 'dd/mm/yyyy',

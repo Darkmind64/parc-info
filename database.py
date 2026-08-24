@@ -3,7 +3,7 @@ database.py — Connexion SQLite / Turso et utilitaires bas niveau.
 DATABASE et UPLOAD_FOLDER sont initialisés par app.py au démarrage.
 """
 import sqlite3, threading, json as _json, urllib.request, urllib.error, base64, http.client
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 # Chemins configurés au démarrage par app.py (ou le launcher)
@@ -508,6 +508,11 @@ def log_maj_event(machine: str, version_avant: str, version_apres: str,
             "DELETE FROM journal_maj WHERE cle NOT IN "
             "(SELECT cle FROM journal_maj ORDER BY horodatage DESC LIMIT 300)"
         )
+        from config_helpers import cfg_get
+        max_j = int(cfg_get('journal_maj_max_jours') or 0)
+        if max_j > 0:
+            limite = (_utcnow() - timedelta(days=max_j)).isoformat(timespec='seconds')
+            conn.execute("DELETE FROM journal_maj WHERE horodatage < ?", (limite,))
         conn.commit()
         conn.close()
     except Exception:
@@ -535,7 +540,8 @@ def log_sync_event(event_type: str, statut: str, resume: str, details: dict = No
 
     event_type : 'db_sync' (réplication des lignes) ou 'fichiers' (push/pull des BLOBs)
     statut     : 'succes' | 'erreur' | 'partiel'
-    Conserve seulement les 500 entrées les plus récentes (purge automatique).
+    Conserve au plus les 500 entrées les plus récentes, et purge en plus tout
+    ce qui dépasse journal_sync_max_jours si ce paramètre est activé (> 0).
     """
     try:
         conn = _local_db()
@@ -549,6 +555,11 @@ def log_sync_event(event_type: str, statut: str, resume: str, details: dict = No
             "DELETE FROM journal_synchronisation WHERE id NOT IN "
             "(SELECT id FROM journal_synchronisation ORDER BY id DESC LIMIT 500)"
         )
+        from config_helpers import cfg_get
+        max_j = int(cfg_get('journal_sync_max_jours') or 0)
+        if max_j > 0:
+            limite = (_utcnow() - timedelta(days=max_j)).isoformat()
+            conn.execute("DELETE FROM journal_synchronisation WHERE horodatage < ?", (limite,))
         conn.commit()
         conn.close()
     except Exception:

@@ -3141,10 +3141,6 @@ function rendreConfig() {
         <input type="checkbox" data-cfg="afficher_dernier_ping" ${g('afficher_dernier_ping')==='0'?'':'checked'} class="cfg-check">
     </div>
     <div class="cfg-row">
-        <label class="cfg-label">Rétention journal (lignes max)</label>
-        <input type="number" data-cfg="historique_max_lignes" value="${g('historique_max_lignes')||'500'}" min="50" max="10000" step="50" class="cfg-input cfg-input-sm">
-    </div>
-    <div class="cfg-row">
         <label class="cfg-label">Afficher le fil d'Ariane</label>
         <input type="checkbox" data-cfg="show_breadcrumb" ${g('show_breadcrumb')==='0'?'':'checked'} class="cfg-check">
     </div>
@@ -3155,6 +3151,37 @@ function rendreConfig() {
     <div class="cfg-row">
         <label class="cfg-label">Demander confirmation avant de changer de client</label>
         <input type="checkbox" data-cfg="confirm_client_switch" ${g('confirm_client_switch')==='0'?'':'checked'} class="cfg-check">
+    </div>
+</div>
+
+<!-- ══ 2A. JOURNAUX & RÉTENTION ══ -->
+<div class="cfg-section">
+    <div class="cfg-section-title">🗄 Journaux &amp; rétention</div>
+    <div style="font-size:.75rem;color:var(--text-muted);margin-bottom:1rem;">
+        💡 Chaque journal est purgé au fil de l'eau, à chaque nouvelle entrée —
+        pas de tâche planifiée séparée. Une durée à 0 désactive la purge par
+        durée pour ce journal (seul le plafond en lignes, s'il existe, continue
+        à s'appliquer).
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Journal d'audit — lignes max</label>
+        <input type="number" data-cfg="historique_max_lignes" value="${g('historique_max_lignes')||'500'}" min="50" max="10000" step="50" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Journal d'audit — durée (jours, 0=illimité)</label>
+        <input type="number" data-cfg="historique_max_jours" value="${g('historique_max_jours')||'0'}" min="0" max="3650" step="1" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Historique des collectes — durée (jours, 0=illimité)</label>
+        <input type="number" data-cfg="collectes_max_jours" value="${g('collectes_max_jours')||'0'}" min="0" max="3650" step="1" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Journal de mise à jour — durée (jours, 0=illimité)</label>
+        <input type="number" data-cfg="journal_maj_max_jours" value="${g('journal_maj_max_jours')||'0'}" min="0" max="3650" step="1" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Journal de synchronisation — durée (jours, 0=illimité)</label>
+        <input type="number" data-cfg="journal_sync_max_jours" value="${g('journal_sync_max_jours')||'0'}" min="0" max="3650" step="1" class="cfg-input cfg-input-sm">
     </div>
 </div>
 

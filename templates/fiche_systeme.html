@@ -248,7 +248,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     <table class="fs-table">
         <tr><th>Collecte</th><th>Espace libre</th><th style="width:45%;"></th>
             <th>Logiciels</th></tr>
-        {% for r in historique.releves[:12] %}
+        {% for r in historique.releves[:5] %}
         <tr>
             <td class="fs-mono">{{ r.horodatage[:16]|replace('T', ' ') }}</td>
             <td class="fs-mono">{{ r.disque_libre_go or '—' }}{{ ' Go' if r.disque_libre_go }}</td>

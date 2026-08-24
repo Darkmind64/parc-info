@@ -244,7 +244,7 @@ def log_history(conn, client_id, entite, entite_id, entite_nom, action, details=
            VALUES (?,?,?,?,?,?,?)''',
         (client_id, entite, entite_id, str(entite_nom), action,
          _utcnow().isoformat(), str(details)))
-    # Nettoyage automatique selon le paramètre de rétention
+    # Nettoyage automatique selon les paramètres de rétention (lignes ET/OU durée)
     try:
         from config_helpers import cfg_get
         max_l = int(cfg_get('historique_max_lignes') or 500)
@@ -253,6 +253,12 @@ def log_history(conn, client_id, entite, entite_id, entite_nom, action, details=
                 '''DELETE FROM historique WHERE client_id=? AND id NOT IN (
                    SELECT id FROM historique WHERE client_id=? ORDER BY id DESC LIMIT ?)''',
                 (client_id, client_id, max_l))
+        max_j = int(cfg_get('historique_max_jours') or 0)
+        if max_j > 0:
+            limite = (_utcnow() - timedelta(days=max_j)).isoformat()
+            conn.execute(
+                'DELETE FROM historique WHERE client_id=? AND date_action < ?',
+                (client_id, limite))
     except Exception as e:
         logger.error(f'Erreur nettoyage historique pour client {client_id}: {e}', exc_info=True)
 

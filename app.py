@@ -7289,6 +7289,11 @@ def _enregistrer_collecte(conn, client_id, appareil_id, data):
                (SELECT cle FROM collectes WHERE appareil_id=?
                 ORDER BY horodatage DESC LIMIT ?)''',
             (appareil_id, appareil_id, COLLECTES_CONSERVEES))
+        max_j = int(cfg_get('collectes_max_jours') or 0)
+        if max_j > 0:
+            limite = (maintenant - timedelta(days=max_j)).isoformat(timespec='seconds')
+            conn.execute('DELETE FROM collectes WHERE appareil_id=? AND horodatage < ?',
+                        (appareil_id, limite))
         return True
     except Exception:
         # L'historique est un confort : son échec ne doit pas faire perdre la
