@@ -50,11 +50,13 @@
         <div class="svc-meta">
             {% if svc.responsable %}Responsable : {{ svc.responsable }} · {% endif %}
             <span style="color:{{ svc.couleur or '#6a8aaa' }}">{{ svc.nb_users }} utilisateur(s) actif(s)</span>
+            · <span style="color:{{ svc.couleur or '#6a8aaa' }}">{{ svc.nb_appareils }} appareil(s)</span>
             {% if svc.description %} · {{ svc.description }}{% endif %}
         </div>
     </div>
     <div style="display:flex;gap:0.5rem;flex-shrink:0;">
         <a href="/utilisateurs?service={{ svc.id }}" class="btn btn-primary btn-sm">👥 Voir</a>
+        <a href="/appareils?service={{ svc.id }}" class="btn btn-primary btn-sm">🖥 Voir</a>
         <a href="/service/{{ svc.id }}/editer" class="btn btn-primary btn-sm">✏</a>
         {% if svc.nb_users == 0 %}
         <form method="POST" action="/service/{{ svc.id }}/supprimer"

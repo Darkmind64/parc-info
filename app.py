@@ -938,6 +938,39 @@ def init_db():
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE,
         FOREIGN KEY(service_id) REFERENCES services(id) ON DELETE SET NULL)''')
 
+    # Lien optionnel vers service/utilisateur sur appareils (migration) —
+    # audit du 2026-08-24 : appareils.service et appareils.utilisateur
+    # restaient du texte libre, sans le moindre lien vers les tables
+    # services/utilisateurs (qui ont, elles, une vraie fiche structurée),
+    # contrairement à peripheriques.utilisateur_id qui pointe déjà
+    # proprement vers utilisateurs. Colonnes ajoutées en plus du texte
+    # existant (rien ne casse), rattachées une fois ici par rapprochement de
+    # nom (comme peripheriques_appareils l'a fait en son temps pour
+    # appareil_id), puis tenues à jour à chaque sauvegarde de la fiche
+    # appareil (voir editer_appareil/nouvel_appareil).
+    for col in ('service_id', 'utilisateur_id'):
+        try:
+            c.execute(f"ALTER TABLE appareils ADD COLUMN {col} INTEGER")
+        except: pass
+    try:
+        a_rattacher = c.execute(
+            "SELECT id, client_id, service, utilisateur FROM appareils WHERE "
+            "(service_id IS NULL AND service IS NOT NULL AND service!='') OR "
+            "(utilisateur_id IS NULL AND utilisateur IS NOT NULL AND utilisateur!='')"
+        ).fetchall()
+        for aid, aclient, service_txt, user_txt in a_rattacher:
+            svc_id = _resolve_service_id(conn, aclient, service_txt) if service_txt else None
+            usr_id = _resolve_utilisateur_id(conn, aclient, user_txt) if user_txt else None
+            if svc_id or usr_id:
+                c.execute(
+                    'UPDATE appareils SET service_id=COALESCE(service_id,?), '
+                    'utilisateur_id=COALESCE(utilisateur_id,?) WHERE id=?',
+                    (svc_id, usr_id, aid))
+        if a_rattacher:
+            conn.commit()
+    except Exception:
+        pass
+
     # TABLE TYPES_DROITS (référentiel configurable par client)
     c.execute('''CREATE TABLE IF NOT EXISTS types_droits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3618,6 +3651,7 @@ def liste_appareils():
     f_types   = request.args.getlist('type')
     f_statut  = request.args.get('statut', '')
     f_av      = request.args.get('av', '')
+    f_service = request.args.get('service', '')
 
     order_expr = _APP_SORT_COLS.get(sort_col, 'ip_sort_key(a.adresse_ip)')
     direction  = 'DESC' if sort_dir == 'desc' else 'ASC'
@@ -3637,6 +3671,10 @@ def liste_appareils():
     if f_statut:
         q += ' AND a.statut=?'
         params.append(f_statut)
+
+    if f_service:
+        q += ' AND a.service_id=?'
+        params.append(int(f_service))
 
     # Filtre antivirus (reconstruit la logique de fmt_appareils)
     if f_av == 'none':
@@ -3671,10 +3709,17 @@ def liste_appareils():
         })
     for a in appareils:
         a['peripheriques'] = periph_by_app.get(a['id'], [])
+    service_filtre_nom = None
+    if f_service:
+        conn2 = get_db()
+        row = conn2.execute('SELECT nom FROM services WHERE id=? AND client_id=?', (f_service, cid)).fetchone()
+        conn2.close()
+        service_filtre_nom = row[0] if row else None
     return render_template('liste_appareils.html', appareils=appareils, client=client,
                            clients=get_clients(), client_actif_id=cid, pagination=pagination,
                            sort_col=sort_col, sort_dir=sort_dir,
-                           f_types=f_types, f_statut=f_statut, f_av=f_av)
+                           f_types=f_types, f_statut=f_statut, f_av=f_av,
+                           f_service=f_service, service_filtre_nom=service_filtre_nom)
 
 def _save_licences(conn, appareil_id, cid, form):
     """Supprime puis réinsère les licences d'un appareil depuis les données du formulaire."""
@@ -3738,6 +3783,8 @@ def nouvel_appareil():
         now = _utcnow().isoformat()
         vals = (cid,) + _extract_form(request.form) + (now, now)
         conn = get_db()
+        svc_id = _resolve_service_id(conn, cid, request.form.get('service', ''))
+        usr_id = _resolve_utilisateur_id(conn, cid, request.form.get('utilisateur', ''))
         conn.execute('''INSERT INTO appareils (client_id,nom_machine,type_appareil,marque,modele,numero_serie,
             adresse_ip,adresse_mac,nom_dns,utilisateur,service,localisation,date_achat,duree_garantie,
             date_fin_garantie,fournisseur,prix_achat,numero_commande,os,version_os,ram,cpu,stockage,carte_graphique,
@@ -3745,8 +3792,9 @@ def nouvel_appareil():
             av_marque,av_nom,av_date_debut,av_date_fin,av_contrat_id,
             edr_marque,edr_nom,edr_date_fin,edr_contrat_id,
             rmm_marque,rmm_nom,rmm_agent_id,rmm_date_fin,rmm_contrat_id,
-            logiciels,garantie_alerte_ignoree,date_creation,date_maj)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''', vals)
+            logiciels,garantie_alerte_ignoree,date_creation,date_maj,service_id,utilisateur_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            vals + (svc_id, usr_id))
         new_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
         _save_licences(conn, new_id, cid, request.form)
         log_history(conn, cid, 'appareil', new_id, request.form.get('nom_machine','') or 'Nouvel appareil', 'Création')
@@ -3807,7 +3855,9 @@ def editer_appareil(id):
             return redirect(request.url)
         now = _utcnow().isoformat()
         _old = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
-        vals = _extract_form(request.form) + (now, id, cid)
+        svc_id = _resolve_service_id(conn, cid, request.form.get('service', ''))
+        usr_id = _resolve_utilisateur_id(conn, cid, request.form.get('utilisateur', ''))
+        vals = _extract_form(request.form) + (now, svc_id, usr_id, id, cid)
         conn.execute('''UPDATE appareils SET nom_machine=?,type_appareil=?,marque=?,modele=?,numero_serie=?,
             adresse_ip=?,adresse_mac=?,nom_dns=?,utilisateur=?,service=?,localisation=?,date_achat=?,
             duree_garantie=?,date_fin_garantie=?,fournisseur=?,prix_achat=?,numero_commande=?,os=?,
@@ -3816,7 +3866,8 @@ def editer_appareil(id):
             av_marque=?,av_nom=?,av_date_debut=?,av_date_fin=?,av_contrat_id=?,
             edr_marque=?,edr_nom=?,edr_date_fin=?,edr_contrat_id=?,
             rmm_marque=?,rmm_nom=?,rmm_agent_id=?,rmm_date_fin=?,rmm_contrat_id=?,
-            logiciels=?,garantie_alerte_ignoree=?,date_maj=? WHERE id=? AND client_id=?''', vals)
+            logiciels=?,garantie_alerte_ignoree=?,date_maj=?,service_id=?,utilisateur_id=?
+            WHERE id=? AND client_id=?''', vals)
         nom = request.form.get('nom_machine','') or f'Appareil #{id}'
         _cols_a = _ENTITE_COLS['appareil']
         _details_a = _diff_json({k: str(_old.get(k,'') or '') for k in _cols_a},
@@ -4119,6 +4170,8 @@ def liste_services():
     for s in services:
         s['nb_users'] = conn.execute(
             'SELECT COUNT(*) FROM utilisateurs WHERE service_id=? AND statut="actif"', (s['id'],)).fetchone()[0]
+        s['nb_appareils'] = conn.execute(
+            'SELECT COUNT(*) FROM appareils WHERE service_id=?', (s['id'],)).fetchone()[0]
     conn.close()
     return render_template('services.html', services=services, client=client,
                            clients=get_clients(), client_actif_id=cid)
@@ -4360,6 +4413,9 @@ def droits_utilisateur(id):
         'SELECT d.*, t.icone, t.categorie as t_categorie FROM droits_utilisateurs d LEFT JOIN types_droits t ON d.type_droit_id=t.id WHERE d.utilisateur_id=? ORDER BY d.categorie, d.nom_droit',
         (id,)).fetchall()]
     types = get_types_droits(cid)
+    appareils_affectes = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine, type_appareil FROM appareils WHERE utilisateur_id=? AND client_id=? ORDER BY nom_machine',
+        (id, cid)).fetchall()]
     conn.close()
     # Grouper par catégorie
     cats = {}
@@ -4368,7 +4424,7 @@ def droits_utilisateur(id):
         cats.setdefault(cat, []).append(d)
     nb_droits_total = sum(len(v) for v in cats.values())
     return render_template('droits_utilisateur.html', utilisateur=u, droits_par_cat=cats,
-                           nb_droits_total=nb_droits_total,
+                           nb_droits_total=nb_droits_total, appareils_affectes=appareils_affectes,
                            types=types, categories_droits=CATEGORIES_DROITS,
                            client=client, clients=get_clients(), client_actif_id=cid)
 
@@ -11418,6 +11474,20 @@ def _resolve_utilisateur_id(conn, client_id, texte):
     return None
 
 
+def _resolve_service_id(conn, client_id, texte):
+    """Retrouve le service correspondant au texte libre de la fiche appareil
+    (appareils.service) — même principe que _resolve_utilisateur_id
+    ci-dessus, en plus simple (pas de variantes prénom/nom à essayer)."""
+    cible = _normalize_name(texte)
+    if not cible:
+        return None
+    rows = conn.execute('SELECT id, nom FROM services WHERE client_id=?', (client_id,)).fetchall()
+    for sid, nom in rows:
+        if _normalize_name(nom) == cible:
+            return sid
+    return None
+
+
 def _propager_utilisateur_aux_peripheriques(conn, appareil_id, client_id,
                                             ancien_texte, nouveau_texte):
     """Reporte l'utilisateur de la fiche appareil sur ses périphériques.
@@ -11613,6 +11683,11 @@ _ENTITE_COLS = {
         'av_marque','av_nom','av_date_debut','av_date_fin','av_contrat_id',
         'edr_marque','edr_nom','edr_date_fin','edr_contrat_id',
         'rmm_marque','rmm_nom','rmm_agent_id','rmm_date_fin','rmm_contrat_id'],
+    # service_id/utilisateur_id (sur appareils) volontairement absents ici
+    # pour la même raison qu'appareil_id ci-dessous : ce sont des colonnes
+    # dérivées, recalculées automatiquement depuis service/utilisateur (déjà
+    # suivis) à chaque sauvegarde — les garder ferait doublonner le même
+    # changement dans l'historique.
     # appareil_id (colonne historique) volontairement absente : le lien
     # appareil<->périphérique vit désormais uniquement dans la table pivot
     # peripheriques_appareils (N:N), jamais écrite par ce formulaire — la

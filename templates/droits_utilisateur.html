@@ -71,6 +71,14 @@
             {% if utilisateur.login_windows %}<span class="mono" style="font-size:0.78rem;">🪟 {{ utilisateur.login_windows }}</span>{% endif %}
             {% if utilisateur.login_mail %}<span class="mono" style="font-size:0.78rem;">📧 <a href="mailto:{{ utilisateur.login_mail }}" style="color:inherit;">{{ utilisateur.login_mail }}</a></span>{% endif %}
         </div>
+        {% if appareils_affectes %}
+        <div style="margin-top:0.5rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;">
+            <span class="form-hint" style="margin-top:0;">🖥 Appareils affectés :</span>
+            {% for a in appareils_affectes %}
+            <a href="/appareil/{{ a.id }}/editer" class="badge badge-blue" style="font-size:.68rem;text-decoration:none;">{{ a.nom_machine }}</a>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
     <div style="display:flex;flex-direction:column;gap:0.5rem;flex-shrink:0;">
         <a href="/utilisateur/{{ utilisateur.id }}/editer" class="btn btn-primary btn-sm">✏ Modifier</a>

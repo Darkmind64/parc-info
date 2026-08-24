@@ -232,6 +232,12 @@ th[data-col].sorted { color: var(--accent); }
         — {{ pagination.total }} appareil(s) enregistré(s)
         {% if pagination.pages > 1 %}<span style="color:var(--text-muted);font-size:.8rem;"> — page {{ pagination.page }}/{{ pagination.pages }}</span>{% endif %}
     </p>
+    {% if f_service and service_filtre_nom %}
+    <div class="form-hint" style="margin-top:.3rem;">
+        Filtré par service : <strong style="color:var(--text-secondary);">{{ service_filtre_nom }}</strong>
+        — <a href="/appareils" style="color:var(--accent);">✕ retirer le filtre</a>
+    </div>
+    {% endif %}
 </div>
 
 <div class="actions-row">
