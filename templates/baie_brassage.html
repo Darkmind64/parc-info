@@ -306,6 +306,19 @@
                 </select>
             </div>
             <div class="form-group" style="margin-bottom:.6rem;">
+                <label>Associer à un périphérique</label>
+                <select id="cfg-periph" onchange="autoRemplirPeriph()">
+                    <option value="">— Aucun / saisie libre —</option>
+                    {% for p in peripheriques %}
+                    <option value="{{ p.id }}" data-nom="{{ p.categorie }} {{ p.marque }} {{ p.modele }}"
+                            data-type="{{ p.categorie }}">
+                        {{ p.categorie }} — {{ p.marque }} {{ p.modele }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <div class="form-hint">Onduleur, panneau de brassage… un slot n'est lié qu'à un seul équipement à la fois.</div>
+            </div>
+            <div class="form-group" style="margin-bottom:.6rem;">
                 <label>Nom personnalisé</label>
                 <input type="text" id="cfg-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
             </div>
@@ -368,6 +381,19 @@ const TYPE_COLORS = {
     'Serveur':'#3b1a8a','Switch':'#0a4a5a','Routeur/Pare-feu':'#5a0a0a','NAS':'#0a3a1a',
     'UPS':'#5a3a00','Patch Panel':'#1a2535','PDU':'#3a0a5a','Borne WiFi':'#0a1a4a',
 };
+// Rapprochement indicatif catégorie périphérique -> type de baie, pour
+// pré-remplir #cfg-type quand on associe un périphérique (l'utilisateur
+// garde la main pour corriger).
+const PERIPH_TYPE_MAP = { 'Onduleur / UPS': 'UPS', 'Multiprise parafoudre': 'PDU' };
+
+// Nom affiché pour un slot, quel que soit son mode de liaison
+// (appareil, périphérique, ou étiquette libre) — un seul endroit à mettre
+// à jour pour les 4 vues qui l'affichent (grille, tooltip, recherche, liste).
+function nomEquipementSlot(s) {
+    if (s.nom_machine) return s.nom_machine;
+    if (s.p_marque || s.p_modele || s.p_categorie) return [s.p_categorie, s.p_marque, s.p_modele].filter(Boolean).join(' ');
+    return s.nom_custom || s.type_equipement || '';
+}
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 async function init() {
@@ -523,7 +549,7 @@ function makeOccupiedCell(s, u, col) {
     if (tcss) cell.classList.add('cell-' + tcss);
 
     const ledCls = s.appareil_id ? (s.en_ligne ? 'led-on' : 'led-off') : 'led-none';
-    const nom = escH(s.nom_machine || s.nom_custom || s.type_equipement || '—');
+    const nom = escH(nomEquipementSlot(s) || '—');
     const ip  = s.adresse_ip || '';
 
     cell.innerHTML = `
@@ -603,7 +629,7 @@ async function deplacerSlot(id, newPos, newCol) {
 // ── TOOLTIP ───────────────────────────────────────────────────────────────────
 function afficherTooltip(e, s) {
     const t = document.getElementById('rack-tooltip');
-    const nom = s.nom_machine || s.nom_custom || s.type_equipement || '—';
+    const nom = nomEquipementSlot(s) || '—';
     const statut = s.appareil_id
         ? (s.en_ligne ? '🟢 En ligne' : '🔴 Hors ligne')
         : '⚪ Non pingable';
@@ -640,7 +666,8 @@ function rechercherEquip(q) {
         const sk  = key(parseInt(cell.dataset.pos), parseInt(cell.dataset.col));
         const s   = slots[sk] || Object.values(slots).find(x => x.id === id);
         if (!s) return;
-        const txt = [s.nom_machine, s.nom_custom, s.type_equipement, s.adresse_ip, s.description].join(' ').toLowerCase();
+        const txt = [s.nom_machine, s.nom_custom, s.type_equipement, s.adresse_ip, s.description,
+                     s.p_categorie, s.p_marque, s.p_modele].join(' ').toLowerCase();
         if (txt.includes(q)) cell.classList.add('highlighted');
     });
 }
@@ -654,7 +681,7 @@ function renderList() {
         return;
     }
     wrap.innerHTML = sorted.map(s => {
-        const nom = escH(s.nom_machine || s.nom_custom || s.type_equipement || '?');
+        const nom = escH(nomEquipementSlot(s) || '?');
         const led = s.appareil_id ? (s.en_ligne ? '#22c55e' : '#dc2626') : '#374151';
         return `<div class="equip-row" onclick="surbrillanceEquip(${s.position},${s.col_index||0})">
             <div class="equip-pos">U${s.position}${s.col_index?'·C'+s.col_index:''}</div>
@@ -687,10 +714,11 @@ function selectSlot(s, cell) {
     document.getElementById('cfg-col').value   = s.col_index || 0;
     document.getElementById('cfg-hu').value    = s.hauteur_u || 1;
     document.getElementById('cfg-type').value  = s.type_equipement || '';
-    document.getElementById('cfg-nom').value   = s.nom_custom || s.nom_machine || '';
+    document.getElementById('cfg-nom').value   = nomEquipementSlot(s) || '';
     document.getElementById('cfg-desc').value  = s.description || '';
     document.getElementById('cfg-couleur').value = s.couleur || '#1e3a5f';
-    if (s.appareil_id) document.getElementById('cfg-app').value = s.appareil_id;
+    document.getElementById('cfg-app').value    = s.appareil_id || '';
+    document.getElementById('cfg-periph').value = s.peripherique_id || '';
     showTab('tab-add');
 }
 
@@ -702,8 +730,19 @@ function autoRemplir() {
     const sel = document.getElementById('cfg-app');
     const opt = sel.options[sel.selectedIndex];
     if (opt.value) {
+        document.getElementById('cfg-periph').value = ''; // un slot = un seul équipement
         document.getElementById('cfg-nom').value  = opt.dataset.nom || '';
         document.getElementById('cfg-type').value = opt.dataset.type || '';
+        couleurAuto();
+    }
+}
+function autoRemplirPeriph() {
+    const sel = document.getElementById('cfg-periph');
+    const opt = sel.options[sel.selectedIndex];
+    if (opt.value) {
+        document.getElementById('cfg-app').value = ''; // un slot = un seul équipement
+        document.getElementById('cfg-nom').value  = opt.dataset.nom || '';
+        document.getElementById('cfg-type').value = PERIPH_TYPE_MAP[opt.dataset.type] || '';
         couleurAuto();
     }
 }
@@ -724,7 +763,8 @@ async function placerEquip() {
         nom_custom:  document.getElementById('cfg-nom').value.trim(),
         description: document.getElementById('cfg-desc').value.trim(),
         couleur:     document.getElementById('cfg-couleur').value,
-        appareil_id: document.getElementById('cfg-app').value ? parseInt(document.getElementById('cfg-app').value) : null
+        appareil_id: document.getElementById('cfg-app').value ? parseInt(document.getElementById('cfg-app').value) : null,
+        peripherique_id: document.getElementById('cfg-periph').value ? parseInt(document.getElementById('cfg-periph').value) : null
     };
 
     const r = await fetch('/api/baie/slot', {

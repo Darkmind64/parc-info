@@ -86,6 +86,28 @@
     </div>
 </div>
 
+{% if identifiants_lies %}
+<div class="form-section">
+    <div class="form-section-title">&#9632; Identifiants liés</div>
+    {% for ident in identifiants_lies %}
+    <div style="display:flex;align-items:center;gap:.7rem;padding:.4rem .6rem;border-bottom:1px solid rgba(30,58,95,.3);font-size:.85rem;">
+        <div style="flex:1;">
+            <strong>{{ ident.nom }}</strong>
+            <span style="color:var(--text-secondary);font-size:.75rem;"> — {{ ident.categorie }}</span>
+            {% if ident.login %}
+            <div style="font-size:.75rem;color:var(--text-muted);">
+                Login : <span class="mono">{{ ident.login }}</span> ·
+                MDP : <span id="ident-pwd-{{ ident.id }}" class="mono" data-shown="0">••••••••</span>
+                <button type="button" onclick="_identToggleMdp({{ ident.id }}, this)" style="border:none;background:transparent;color:var(--accent);cursor:pointer;">👁</button>
+            </div>
+            {% endif %}
+        </div>
+        <a href="/identifiant/{{ ident.id }}/editer" style="color:var(--accent);font-size:.75rem;">Voir</a>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 <div class="layout-split">
     <!-- DROITS EXISTANTS -->
     <div>
@@ -194,6 +216,29 @@
 const UID = {{ utilisateur.id }};
 const TYPES = {{ types | tojson }};
 let nbDroits = {{ nb_droits_total }};
+
+{% if identifiants_lies %}
+const _identMdpCache = {};
+async function _identGetMdp(id) {
+    if (_identMdpCache[id] !== undefined) return _identMdpCache[id];
+    const r = await fetch('/api/identifiant/' + id + '/mdp');
+    const d = await r.json();
+    _identMdpCache[id] = d.mdp || '';
+    return _identMdpCache[id];
+}
+async function _identToggleMdp(id, btn) {
+    const span = document.getElementById('ident-pwd-' + id);
+    if (span.dataset.shown === '1') {
+        span.textContent = '••••••••';
+        span.dataset.shown = '0';
+        btn.textContent = '👁';
+    } else {
+        span.textContent = await _identGetMdp(id) || '(vide)';
+        span.dataset.shown = '1';
+        btn.textContent = '🙈';
+    }
+}
+{% endif %}
 
 function filtrerTypes() {
     const cat = document.getElementById('new-cat').value;

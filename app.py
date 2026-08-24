@@ -834,14 +834,17 @@ def init_db():
             c.execute(f"ALTER TABLE identifiants ADD COLUMN {col} TEXT DEFAULT {defval}")
         except: pass
 
-    # Lien optionnel vers un appareil/périphérique (migration) — audit du
-    # 2026-08-24 : jusqu'ici un identifiant n'était jamais rattaché à un
-    # équipement précis (juste un nom/description en texte libre), alors que
-    # la fiche appareil a ses propres champs user_login/user_password/
+    # Lien optionnel vers un appareil/périphérique/utilisateur (migration) —
+    # audit du 2026-08-24 : jusqu'ici un identifiant n'était jamais rattaché
+    # à une entité précise (juste un nom/description en texte libre), alors
+    # que la fiche appareil a ses propres champs user_login/user_password/
     # admin_login/admin_password. Deux silos de credentials pour une même
-    # machine, sans le moindre rapprochement. NULL par défaut : ne change
-    # rien pour les identifiants déjà saisis.
-    for col in ('appareil_id', 'peripherique_id'):
+    # machine, sans le moindre rapprochement. utilisateur_id ajouté dans un
+    # second temps (audit du même jour) : un identifiant nominatif (boîte
+    # mail personnelle, VPN nominatif) n'appartient à aucune machine, juste
+    # à une personne. NULL par défaut : ne change rien aux identifiants déjà
+    # saisis.
+    for col in ('appareil_id', 'peripherique_id', 'utilisateur_id'):
         try:
             c.execute(f"ALTER TABLE identifiants ADD COLUMN {col} INTEGER")
         except: pass
@@ -1664,6 +1667,16 @@ def init_db():
         try:
             c.execute(f"ALTER TABLE baie_slots ADD COLUMN {col_add} TEXT DEFAULT {defval}")
         except: pass
+
+    # Lien optionnel vers un périphérique (migration) — audit du 2026-08-24 :
+    # un emplacement de baie ne pouvait être associé qu'à un appareil ; un
+    # onduleur/UPS ou un panneau de brassage — pourtant des catégories
+    # périphérique existantes, typiquement montés en baie — ne pouvaient être
+    # qu'une étiquette texte libre (nom_custom/type_equipement), jamais liés
+    # à leur vraie fiche.
+    try:
+        c.execute("ALTER TABLE baie_slots ADD COLUMN peripherique_id INTEGER")
+    except: pass
 
     # (ancienne migration col_index conservée pour compatibilité)
     cols_baie = [r[1] for r in conn.execute('PRAGMA table_info(baie_slots)').fetchall()]
@@ -3951,6 +3964,7 @@ def supprimer_appareil(id):
     # PRAGMA ci-dessus, nettoyage manuel nécessaire pour éviter les orphelins.
     conn.execute('DELETE FROM cles_recuperation WHERE appareil_id=? AND client_id=?', (id, cid))
     conn.execute('DELETE FROM collectes WHERE appareil_id=? AND client_id=?', (id, cid))
+    conn.execute('UPDATE identifiants SET appareil_id=NULL WHERE appareil_id=? AND client_id=?', (id, cid))
     conn.execute('DELETE FROM appareils WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
     flash('Appareil supprimé', 'info')
@@ -4229,6 +4243,9 @@ def supprimer_service(id):
         return redirect(url_for('index'))
     cid = get_client_id()
     conn = get_db()
+    # appareils.service_id : colonne ajoutée via ALTER TABLE, sans FK
+    # déclarée — nettoyage manuel pour éviter les orphelins.
+    conn.execute('UPDATE appareils SET service_id=NULL WHERE service_id=? AND client_id=?', (id, cid))
     conn.execute('DELETE FROM services WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
     flash('Service supprimé', 'info')
@@ -4395,6 +4412,16 @@ def supprimer_utilisateur(id):
     u = row_to_dict(conn.execute('SELECT prenom,nom FROM utilisateurs WHERE id=?',(id,)).fetchone() or {})
     nom = (u.get('prenom','') + ' ' + u.get('nom','')).strip() or '?'
     log_history(conn, cid, 'utilisateur', id, nom, 'Suppression')
+    # appareils.utilisateur_id / identifiants.utilisateur_id : colonnes
+    # ajoutées via ALTER TABLE, sans FK déclarée — nettoyage manuel pour
+    # éviter les orphelins (même pattern que supprimer_appareil/
+    # supprimer_peripherique ci-dessus). peripheriques.utilisateur_id a une
+    # FK déclarée à l'origine mais son ON DELETE SET NULL ne s'applique que
+    # si PRAGMA foreign_keys=ON — jamais activé sur cette connexion jusqu'ici
+    # — donc traité manuellement aussi, par prudence.
+    conn.execute('UPDATE appareils SET utilisateur_id=NULL WHERE utilisateur_id=? AND client_id=?', (id, cid))
+    conn.execute('UPDATE identifiants SET utilisateur_id=NULL WHERE utilisateur_id=? AND client_id=?', (id, cid))
+    conn.execute('UPDATE peripheriques SET utilisateur_id=NULL WHERE utilisateur_id=? AND client_id=?', (id, cid))
     conn.execute('DELETE FROM utilisateurs WHERE id=?', (id,))
     conn.commit(); conn.close()
     flash('Utilisateur supprimé', 'info')
@@ -4416,6 +4443,9 @@ def droits_utilisateur(id):
     appareils_affectes = [row_to_dict(r) for r in conn.execute(
         'SELECT id, nom_machine, type_appareil FROM appareils WHERE utilisateur_id=? AND client_id=? ORDER BY nom_machine',
         (id, cid)).fetchall()]
+    identifiants_lies = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom, categorie, login FROM identifiants WHERE utilisateur_id=? AND client_id=? ORDER BY nom',
+        (id, cid)).fetchall()]
     conn.close()
     # Grouper par catégorie
     cats = {}
@@ -4425,6 +4455,7 @@ def droits_utilisateur(id):
     nb_droits_total = sum(len(v) for v in cats.values())
     return render_template('droits_utilisateur.html', utilisateur=u, droits_par_cat=cats,
                            nb_droits_total=nb_droits_total, appareils_affectes=appareils_affectes,
+                           identifiants_lies=identifiants_lies,
                            types=types, categories_droits=CATEGORIES_DROITS,
                            client=client, clients=get_clients(), client_actif_id=cid)
 
@@ -4486,10 +4517,12 @@ def liste_identifiants():
     page = request.args.get('page', 1, type=int)
     filtre_cat = request.args.get('cat', '')
     _q_base = ('SELECT i.*, a.nom_machine AS lie_appareil_nom, '
-               'p.categorie AS lie_periph_categorie, p.marque AS lie_periph_marque, p.modele AS lie_periph_modele '
+               'p.categorie AS lie_periph_categorie, p.marque AS lie_periph_marque, p.modele AS lie_periph_modele, '
+               'u.prenom AS lie_util_prenom, u.nom AS lie_util_nom '
                'FROM identifiants i '
                'LEFT JOIN appareils a ON a.id = i.appareil_id '
                'LEFT JOIN peripheriques p ON p.id = i.peripherique_id '
+               'LEFT JOIN utilisateurs u ON u.id = i.utilisateur_id '
                'WHERE i.client_id=?')
     if filtre_cat:
         q, params = _q_base + ' AND i.categorie=? ORDER BY i.categorie, i.nom', (cid, filtre_cat)
@@ -4573,6 +4606,8 @@ def nouvel_identifiant():
         'SELECT id, nom_machine FROM appareils WHERE client_id=? ORDER BY nom_machine', (cid,)).fetchall()]
     peripheriques_liste = [row_to_dict(r) for r in conn.execute(
         'SELECT id, categorie, marque, modele FROM peripheriques WHERE client_id=? ORDER BY categorie, marque', (cid,)).fetchall()]
+    utilisateurs_liste = [row_to_dict(r) for r in conn.execute(
+        "SELECT id, prenom, nom FROM utilisateurs WHERE client_id=? AND statut='actif' ORDER BY nom", (cid,)).fetchall()]
     conn.close()
     if request.method == 'POST':
         f = request.form; now = _utcnow().isoformat()
@@ -4590,16 +4625,17 @@ def nouvel_identifiant():
         mdp_chiffre = crypto.encrypt(f.get('mot_de_passe','')) if f.get('mot_de_passe') else ''
         appareil_id = int(f['appareil_id']) if f.get('appareil_id') else None
         peripherique_id = int(f['peripherique_id']) if f.get('peripherique_id') else None
+        utilisateur_id = int(f['utilisateur_id']) if f.get('utilisateur_id') else None
         conn.execute('''INSERT INTO identifiants (client_id,categorie,nom,login,mot_de_passe,url,
             description,notes,date_expiration,wifi_ssid,wifi_securite,appareil_id,peripherique_id,
-            date_creation,date_maj)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            utilisateur_id,date_creation,date_maj)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
             (cid, f.get('categorie',''), f.get('nom',''), f.get('login',''), mdp_chiffre,
              f.get('url',''), f.get('description',''), f.get('notes',''),
              f.get('date_expiration',''),
              f.get('wifi_ssid','') if f.get('categorie') == 'Wi-Fi' else '',
              f.get('wifi_securite','WPA2') if f.get('categorie') == 'Wi-Fi' else '',
-             appareil_id, peripherique_id,
+             appareil_id, peripherique_id, utilisateur_id,
              now, now))
         new_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
         nom = request.form.get('nom','') or 'Nouvel identifiant'
@@ -4609,6 +4645,7 @@ def nouvel_identifiant():
         return redirect(url_for('liste_identifiants'))
     return render_template('form_identifiant.html', identifiant=None, action='Ajouter',
                            appareils_liste=appareils_liste, peripheriques_liste=peripheriques_liste,
+                           utilisateurs_liste=utilisateurs_liste,
                            client=client, clients=get_clients(), client_actif_id=cid,
                            categories=get_liste_cached('categories_identifiants'))
 
@@ -4637,16 +4674,17 @@ def editer_identifiant(id):
         mdp_chiffre = crypto.encrypt(f.get('mot_de_passe','')) if f.get('mot_de_passe') else ''
         appareil_id = int(f['appareil_id']) if f.get('appareil_id') else None
         peripherique_id = int(f['peripherique_id']) if f.get('peripherique_id') else None
+        utilisateur_id = int(f['utilisateur_id']) if f.get('utilisateur_id') else None
         conn.execute('''UPDATE identifiants SET categorie=?,nom=?,login=?,mot_de_passe=?,url=?,
             description=?,notes=?,date_expiration=?,wifi_ssid=?,wifi_securite=?,
-            appareil_id=?,peripherique_id=?,date_maj=?
+            appareil_id=?,peripherique_id=?,utilisateur_id=?,date_maj=?
             WHERE id=? AND client_id=?''',
             (f.get('categorie',''), f.get('nom',''), f.get('login',''), mdp_chiffre,
              f.get('url',''), f.get('description',''), f.get('notes',''),
              f.get('date_expiration',''),
              f.get('wifi_ssid','') if f.get('categorie') == 'Wi-Fi' else '',
              f.get('wifi_securite','WPA2') if f.get('categorie') == 'Wi-Fi' else '',
-             appareil_id, peripherique_id,
+             appareil_id, peripherique_id, utilisateur_id,
              now, id, cid))
         nom = request.form.get('nom','') or f'Identifiant #{id}'
         _cols_i = _ENTITE_COLS['identifiant']
@@ -4661,6 +4699,8 @@ def editer_identifiant(id):
         'SELECT id, nom_machine FROM appareils WHERE client_id=? ORDER BY nom_machine', (cid,)).fetchall()]
     peripheriques_liste = [row_to_dict(r) for r in conn.execute(
         'SELECT id, categorie, marque, modele FROM peripheriques WHERE client_id=? ORDER BY categorie, marque', (cid,)).fetchall()]
+    utilisateurs_liste = [row_to_dict(r) for r in conn.execute(
+        "SELECT id, prenom, nom FROM utilisateurs WHERE client_id=? AND statut='actif' ORDER BY nom", (cid,)).fetchall()]
     conn.close()
     # ✅ Déchiffrer le mot de passe pour l'affichage
     if ident and ident.get('mot_de_passe'):
@@ -4668,6 +4708,7 @@ def editer_identifiant(id):
         ident['mot_de_passe'] = crypto.decrypt(ident['mot_de_passe']) or ident['mot_de_passe']
     return render_template('form_identifiant.html', identifiant=ident, action='Modifier',
                            appareils_liste=appareils_liste, peripheriques_liste=peripheriques_liste,
+                           utilisateurs_liste=utilisateurs_liste,
                            client=client, clients=get_clients(), client_actif_id=cid,
                            categories=get_liste_cached('categories_identifiants'))
 
@@ -5376,12 +5417,19 @@ def baie_brassage():
     nb_u = parc.get('baie_nb_u', 12) or 12
     # Récupérer les slots existants
     slots_db = [row_to_dict(r) for r in conn.execute(
-        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.modele, a.en_ligne
+        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.modele, a.en_ligne,
+                  p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
            FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
+                             LEFT JOIN peripheriques p ON s.peripherique_id=p.id
            WHERE s.client_id=? ORDER BY s.position''', (cid,)).fetchall()]
     # Appareils disponibles pour association
     appareils = [row_to_dict(r) for r in conn.execute(
         'SELECT id,nom_machine,type_appareil,adresse_ip,marque,modele FROM appareils WHERE client_id=? ORDER BY nom_machine',
+        (cid,)).fetchall()]
+    # Périphériques disponibles pour association (onduleurs, panneaux de
+    # brassage… typiquement montés en baie mais jusqu'ici jamais liables)
+    peripheriques = [row_to_dict(r) for r in conn.execute(
+        'SELECT id,categorie,marque,modele FROM peripheriques WHERE client_id=? ORDER BY categorie,marque',
         (cid,)).fetchall()]
     photos = [row_to_dict(r) for r in conn.execute(
         'SELECT * FROM baie_photos WHERE client_id=? ORDER BY date_upload DESC', (cid,)).fetchall()]
@@ -5393,6 +5441,7 @@ def baie_brassage():
         slots_map[key] = s
     return render_template('baie_brassage.html', parc=parc, client=client, nb_u=nb_u,
                            slots_map=slots_map, slots_db=slots_db, appareils=appareils,
+                           peripheriques=peripheriques,
                            photos=photos, clients=get_clients(), client_actif_id=cid)
 
 @app.route('/api/baie/slot', methods=['POST'])
@@ -5407,17 +5456,19 @@ def api_baie_ajouter_slot():
     conn.execute('DELETE FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col))
     baie_nom = f.get('baie_nom', 'Baie principale')
     conn.execute('''INSERT INTO baie_slots
-        (client_id,position,col_index,hauteur_u,appareil_id,nom_custom,type_equipement,couleur,description,baie_nom,date_maj)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+        (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,date_maj)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
         (cid, pos, col, f.get('hauteur_u', 1),
-         f.get('appareil_id') or None, f.get('nom_custom', ''),
+         f.get('appareil_id') or None, f.get('peripherique_id') or None, f.get('nom_custom', ''),
          f.get('type_equipement', ''), f.get('couleur', '#1e3a5f'),
          f.get('description', ''), baie_nom, _utcnow().isoformat()))
     conn.commit()
     sid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     slot = row_to_dict(conn.execute(
-        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne
-           FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id WHERE s.id=?''', (sid,)).fetchone() or {})
+        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne,
+                  p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
+           FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
+                             LEFT JOIN peripheriques p ON s.peripherique_id=p.id WHERE s.id=?''', (sid,)).fetchone() or {})
     conn.close()
     return jsonify(slot)
 
@@ -5431,15 +5482,17 @@ def api_baie_slot(id):
         conn.commit(); conn.close()
         return jsonify({'ok': True})
     f = request.json or {}
-    conn.execute('''UPDATE baie_slots SET position=?,hauteur_u=?,appareil_id=?,
+    conn.execute('''UPDATE baie_slots SET position=?,hauteur_u=?,appareil_id=?,peripherique_id=?,
         nom_custom=?,type_equipement=?,couleur=?,description=?,date_maj=? WHERE id=? AND client_id=?''',
-        (f.get('position',1), f.get('hauteur_u',1), f.get('appareil_id') or None,
+        (f.get('position',1), f.get('hauteur_u',1), f.get('appareil_id') or None, f.get('peripherique_id') or None,
          f.get('nom_custom',''), f.get('type_equipement',''),
          f.get('couleur','#1e3a5f'), f.get('description',''), _utcnow().isoformat(), id, cid))
     conn.commit()
     slot = row_to_dict(conn.execute(
-        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne
-           FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id WHERE s.id=?''', (id,)).fetchone() or {})
+        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne,
+                  p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
+           FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
+                             LEFT JOIN peripheriques p ON s.peripherique_id=p.id WHERE s.id=?''', (id,)).fetchone() or {})
     conn.close()
     return jsonify(slot)
 
@@ -5459,8 +5512,10 @@ def api_baie_deplacer_slot(id):
                  (new_pos, new_col, id, cid))
     conn.commit()
     slot = row_to_dict(conn.execute(
-        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne
-           FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id WHERE s.id=?''', (id,)).fetchone() or {})
+        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne,
+                  p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
+           FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
+                             LEFT JOIN peripheriques p ON s.peripherique_id=p.id WHERE s.id=?''', (id,)).fetchone() or {})
     conn.close()
     return jsonify(slot)
 
@@ -5471,8 +5526,10 @@ def api_baie_slots():
     baie_nom = request.args.get('baie', 'Baie principale')
     conn = get_db()
     slots = [row_to_dict(r) for r in conn.execute(
-        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.modele, a.en_ligne, a.ports_ouverts
+        '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.modele, a.en_ligne, a.ports_ouverts,
+                  p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
            FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
+                             LEFT JOIN peripheriques p ON s.peripherique_id=p.id
            WHERE s.client_id=? AND (s.baie_nom=? OR (s.baie_nom IS NULL AND ?='Baie principale'))
            ORDER BY s.position, s.col_index''', (cid, baie_nom, baie_nom)).fetchall()]
     parc = row_to_dict(conn.execute('SELECT baie_nb_u, switch_nb_unites FROM parc_general WHERE client_id=?', (cid,)).fetchone() or {})
@@ -8735,6 +8792,10 @@ def supprimer_peripherique(id):
     p = row_to_dict(conn.execute('SELECT marque,modele FROM peripheriques WHERE id=?',(id,)).fetchone() or {})
     nom_p = (p.get('marque','') + ' ' + p.get('modele','')).strip() or '?'
     log_history(conn, cid, 'peripherique', id, nom_p, 'Suppression')
+    # Tables sans FK déclarée (ajoutées via ALTER TABLE) — non couvertes par le
+    # PRAGMA ci-dessus, nettoyage manuel nécessaire pour éviter les orphelins.
+    conn.execute('UPDATE identifiants SET peripherique_id=NULL WHERE peripherique_id=? AND client_id=?', (id, cid))
+    conn.execute('UPDATE baie_slots SET peripherique_id=NULL WHERE peripherique_id=? AND client_id=?', (id, cid))
     conn.execute('DELETE FROM peripheriques WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
     flash('Peripherique supprime', 'info')
@@ -11697,7 +11758,7 @@ _ENTITE_COLS = {
         'statut','date_achat','duree_garantie','date_fin_garantie','fournisseur','prix_achat',
         'numero_commande','notes','utilisateur_id'],
     'identifiant': ['categorie','nom','login','mot_de_passe','url','description','notes',
-        'date_expiration','wifi_ssid','wifi_securite','appareil_id','peripherique_id'],
+        'date_expiration','wifi_ssid','wifi_securite','appareil_id','peripherique_id','utilisateur_id'],
     'contrat': ['titre','type_contrat','fournisseur','contact_fournisseur','email_fournisseur',
         'telephone_fournisseur','numero_contrat','date_debut','date_fin','reconduction_auto',
         'preavis_jours','montant_ht','periodicite','description','notes','statut'],

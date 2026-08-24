@@ -143,6 +143,8 @@ th[data-col]:hover { color:var(--accent) !important; background:rgba(0,201,255,.
                     <a href="/appareil/{{ ident.appareil_id }}/editer" class="form-hint" style="display:inline-block;text-decoration:none;">🖥 {{ ident.lie_appareil_nom }}</a>
                     {% elif ident.peripherique_id and ident.lie_periph_marque %}
                     <a href="/peripherique/{{ ident.peripherique_id }}/editer" class="form-hint" style="display:inline-block;text-decoration:none;">🖱 {{ ident.lie_periph_categorie }} — {{ ident.lie_periph_marque }} {{ ident.lie_periph_modele }}</a>
+                    {% elif ident.utilisateur_id and ident.lie_util_nom %}
+                    <a href="/utilisateur/{{ ident.utilisateur_id }}/droits" class="form-hint" style="display:inline-block;text-decoration:none;">👤 {{ ident.lie_util_prenom }} {{ ident.lie_util_nom }}</a>
                     {% endif %}
                 </td>
                 <td data-sort="{{ ident.categorie or '' }}">
