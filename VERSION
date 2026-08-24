@@ -1,8 +1,21 @@
-PARCINFO_VERSION=2.18.54
+PARCINFO_VERSION=2.18.55
 RELEASE_DATE=2026-08-24
-BUILD_NUMBER=2026082406
+BUILD_NUMBER=2026082407
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.55 - Appareils reliés aux services/utilisateurs via de vraies clés étrangères
+# appareils.service_id / utilisateur_id (nullable, en plus des colonnes
+# texte service/utilisateur existantes) : jusqu'ici aucun lien structurel
+# vers les tables services/utilisateurs, contrairement à
+# peripheriques.utilisateur_id qui pointe déjà proprement vers
+# utilisateurs. Rattachement automatique par rapprochement de nom au
+# démarrage pour les appareils déjà saisis, puis tenu à jour à chaque
+# sauvegarde de la fiche appareil.
+# La page Services affiche désormais le nombre d'appareils par service,
+# avec un lien de filtrage (/appareils?service=<id>). La fiche utilisateur
+# liste ses appareils affectés, cliquables.
+# Date: 24 août 2026
 
 # Version 2.18.54 - Identifiants reliés aux appareils/périphériques + détection de conflit
 # Un identifiant peut désormais être rattaché à un appareil ou un
