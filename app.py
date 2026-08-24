@@ -3377,6 +3377,18 @@ def client_dashboard_view(cid):
     # Afficher le dashboard du client
     return single_client_dashboard(cid)
 
+def _marque_modele_combos(rows):
+    """Combine marque+modèle en une seule chaîne par ligne, dédoublonnée et
+    triée — pour peupler un datalist de suggestions depuis l'inventaire réel
+    (appareils/périphériques) plutôt qu'une liste de marques figée."""
+    vals = set()
+    for marque, modele in rows:
+        combo = ' '.join(p for p in (marque or '', modele or '') if p).strip()
+        if combo:
+            vals.add(combo)
+    return sorted(vals)
+
+
 @app.route('/parc', methods=['GET','POST'])
 @login_required
 def parc_general():
@@ -3428,9 +3440,33 @@ def parc_general():
     # jamais positionnés dans la baie) sans dupliquer la donnée.
     baie_nb_slots_occupes = conn.execute(
         "SELECT COUNT(*) FROM baie_slots WHERE client_id=?", (cid,)).fetchone()[0]
+
+    # Suggestions issues de l'inventaire réel (appareils/périphériques déjà
+    # saisis pour ce client) : proposées dans un datalist à côté de chaque
+    # champ concerné, sans jamais empêcher la saisie manuelle.
+    switch_suggestions = _marque_modele_combos(conn.execute(
+        "SELECT marque, modele FROM appareils WHERE client_id=? AND type_appareil IN ('Switch','Switch/AP')",
+        (cid,)).fetchall())
+    routeur_suggestions = _marque_modele_combos(conn.execute(
+        "SELECT marque, modele FROM appareils WHERE client_id=? AND type_appareil='Routeur/Pare-feu'",
+        (cid,)).fetchall())
+    ups_suggestions = _marque_modele_combos(conn.execute(
+        "SELECT marque, modele FROM peripheriques WHERE client_id=? AND categorie='Onduleur / UPS'",
+        (cid,)).fetchall())
+    serveur_marques = sorted({r[0] for r in conn.execute(
+        "SELECT DISTINCT marque FROM appareils WHERE client_id=? AND type_appareil='Serveur' AND marque!=''",
+        (cid,)).fetchall()})
+    serveur_modeles = sorted({r[0] for r in conn.execute(
+        "SELECT DISTINCT modele FROM appareils WHERE client_id=? AND type_appareil='Serveur' AND modele!=''",
+        (cid,)).fetchall()})
     conn.close()
     return render_template('parc_general.html', parc=parc, client=client,
                            baie_nb_slots_occupes=baie_nb_slots_occupes,
+                           switch_suggestions=switch_suggestions,
+                           routeur_suggestions=routeur_suggestions,
+                           ups_suggestions=ups_suggestions,
+                           serveur_marques=serveur_marques,
+                           serveur_modeles=serveur_modeles,
                            clients=get_clients(), client_actif_id=cid)
 
 # ─── ROUTES API PRESTATAIRES ─────────────────────────────────────────────────────

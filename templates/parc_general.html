@@ -111,13 +111,21 @@
             </div>
             <div class="form-group">
                 <label for="id-routeur_marque">Routeur / Pare-feu</label>
-                <input id="id-routeur_marque" type="text" name="routeur_marque" value="{{ parc.routeur_marque or '' }}" placeholder="Ex: Cisco RV340, pfSense...">
+                <input id="id-routeur_marque" type="text" name="routeur_marque" value="{{ parc.routeur_marque or '' }}" placeholder="Ex: Cisco RV340, pfSense..." list="datalist-routeur" autocomplete="off">
+                <datalist id="datalist-routeur">
+                    {% for o in routeur_suggestions %}<option value="{{ o }}">{% endfor %}
+                </datalist>
+                {% if routeur_suggestions %}<div class="form-hint">Depuis l'inventaire : {{ routeur_suggestions|length }} routeur(s)/pare-feu déjà saisi(s) — cliquez dans le champ pour choisir, ou tapez une référence.</div>{% endif %}
             </div>
         </div>
         <div class="form-row cols-3">
             <div class="form-group">
                 <label for="id-switch_marque">Switch (marque/modèle)</label>
-                <input id="id-switch_marque" type="text" name="switch_marque" value="{{ parc.switch_marque or '' }}" placeholder="Ex: HP ProCurve 2530">
+                <input id="id-switch_marque" type="text" name="switch_marque" value="{{ parc.switch_marque or '' }}" placeholder="Ex: HP ProCurve 2530" list="datalist-switch" autocomplete="off">
+                <datalist id="datalist-switch">
+                    {% for o in switch_suggestions %}<option value="{{ o }}">{% endfor %}
+                </datalist>
+                {% if switch_suggestions %}<div class="form-hint">Depuis l'inventaire : {{ switch_suggestions|length }} switch(s) déjà saisi(s) — cliquez dans le champ pour choisir, ou tapez une référence.</div>{% endif %}
             </div>
             <div class="form-group">
                 <label for="id-switch_nb_ports">Nb. ports switch</label>
@@ -131,15 +139,27 @@
         <div class="form-row cols-3">
             <div class="form-group">
                 <label for="id-serveur_marque">Serveur (marque)</label>
-                <input id="id-serveur_marque" type="text" name="serveur_marque" value="{{ parc.serveur_marque or '' }}" placeholder="Ex: Dell PowerEdge">
+                <input id="id-serveur_marque" type="text" name="serveur_marque" value="{{ parc.serveur_marque or '' }}" placeholder="Ex: Dell PowerEdge" list="datalist-serveur-marque" autocomplete="off">
+                <datalist id="datalist-serveur-marque">
+                    {% for o in serveur_marques %}<option value="{{ o }}">{% endfor %}
+                </datalist>
+                {% if serveur_marques %}<div class="form-hint">Depuis l'inventaire : {{ serveur_marques|length }} marque(s) de serveur déjà saisie(s).</div>{% endif %}
             </div>
             <div class="form-group">
                 <label for="id-serveur_modele">Serveur (modèle)</label>
-                <input id="id-serveur_modele" type="text" name="serveur_modele" value="{{ parc.serveur_modele or '' }}" placeholder="Ex: R740">
+                <input id="id-serveur_modele" type="text" name="serveur_modele" value="{{ parc.serveur_modele or '' }}" placeholder="Ex: R740" list="datalist-serveur-modele" autocomplete="off">
+                <datalist id="datalist-serveur-modele">
+                    {% for o in serveur_modeles %}<option value="{{ o }}">{% endfor %}
+                </datalist>
+                {% if serveur_modeles %}<div class="form-hint">Depuis l'inventaire : {{ serveur_modeles|length }} modèle(s) de serveur déjà saisi(s).</div>{% endif %}
             </div>
             <div class="form-group">
                 <label for="id-ups_marque">UPS / Onduleur</label>
-                <input id="id-ups_marque" type="text" name="ups_marque" value="{{ parc.ups_marque or '' }}" placeholder="Ex: APC Smart-UPS 1500">
+                <input id="id-ups_marque" type="text" name="ups_marque" value="{{ parc.ups_marque or '' }}" placeholder="Ex: APC Smart-UPS 1500" list="datalist-ups" autocomplete="off">
+                <datalist id="datalist-ups">
+                    {% for o in ups_suggestions %}<option value="{{ o }}">{% endfor %}
+                </datalist>
+                {% if ups_suggestions %}<div class="form-hint">Depuis l'inventaire : {{ ups_suggestions|length }} onduleur(s) déjà saisi(s) — cliquez dans le champ pour choisir, ou tapez une référence.</div>{% endif %}
             </div>
         </div>
         <div class="form-row cols-2">
