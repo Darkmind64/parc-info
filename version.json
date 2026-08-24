@@ -1,22 +1,24 @@
 {
-  "version": "2.18.48",
-  "release_date": "2026-08-23T00:00:00.000000",
+  "version": "2.18.49",
+  "release_date": "2026-08-24T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.48",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.48/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.49",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Déduplication du job build-macos-intel (audit du 2026-08-23)",
+    "new_features": "Export Excel (appareils/périphériques/maintenances) + suite de tests pytest",
     "improvements": [
-      "CI : le job build-macos-intel, dupliqué à l'identique dans build-macos-intel.yml et build-release.yml (~120 lignes de venv Rosetta/cryptography partagées, risque réel de divergence), extrait en deux actions composites réutilisables (.github/actions/setup-macos-intel-env, .github/actions/build-macos-intel-spec). Les deux workflows appellent désormais ces actions au lieu de dupliquer les étapes inline."
+      "Export .xlsx pour les appareils, périphériques et maintenances, en miroir des exports CSV existants (bouton Excel à côté de chaque bouton CSV : dashboard client, listes, rapport de maintenance).",
+      "Nouvelle suite de tests pytest (tests/) couvrant l'authentification, le rate-limiting, le CSRF, l'isolation multi-client (ACL) et l'historique par appareil.",
+      "Remplacement de datetime.utcnow() (dépréciée depuis Python 3.12) par un équivalent non dépréciable dans app.py, database.py, auth_utils.py, client_helpers.py, collector_core.py et les scripts de test existants — même valeur naïve en UTC, aucun changement de format des horodatages stockés."
     ]
   },
   "checksums": {
@@ -27,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.48"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.49"
 }

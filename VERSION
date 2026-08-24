@@ -1,8 +1,23 @@
-PARCINFO_VERSION=2.18.48
-RELEASE_DATE=2026-08-23
-BUILD_NUMBER=2026082306
+PARCINFO_VERSION=2.18.49
+RELEASE_DATE=2026-08-24
+BUILD_NUMBER=2026082401
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.49 - Export Excel, suite de tests pytest, correctif datetime.utcnow()
+# Export .xlsx pour appareils, périphériques et maintenances, en miroir des
+# exports CSV existants (bouton Excel à côté de chaque bouton CSV : dashboard
+# client, listes, rapport de maintenance).
+# Nouvelle suite de tests pytest (tests/) couvrant l'authentification, le
+# rate-limiting, le CSRF, l'isolation multi-client (ACL) et l'historique par
+# appareil (déjà existant — icônes, diff, annulation — mais jusqu'ici sans
+# aucune couverture de test).
+# datetime.utcnow() (dépréciée depuis Python 3.12) remplacée par un helper
+# _utcnow() équivalent (datetime.now(timezone.utc).replace(tzinfo=None)) dans
+# app.py, database.py, auth_utils.py, client_helpers.py, collector_core.py et
+# les scripts de test existants — même valeur naïve en UTC, aucun changement
+# de format des horodatages stockés en base.
+# Date: 24 août 2026
 
 # Version 2.18.48 - Déduplication du job build-macos-intel (audit du 2026-08-23)
 # Chantier suivant de l'audit du 2026-08-23 : le job build-macos-intel était
