@@ -1,8 +1,23 @@
-PARCINFO_VERSION=2.18.55
+PARCINFO_VERSION=2.18.56
 RELEASE_DATE=2026-08-24
-BUILD_NUMBER=2026082407
+BUILD_NUMBER=2026082408
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.56 - Identifiants nominatifs + périphériques dans la baie de brassage
+# identifiants.utilisateur_id : un identifiant peut désormais être rattaché
+# à une personne (boîte mail perso, VPN nominatif) en plus d'un appareil/
+# périphérique — section « Identifiants liés » sur la fiche utilisateur,
+# mot de passe révélé à la demande.
+# baie_slots.peripherique_id : un emplacement de baie peut désormais
+# référencer un vrai périphérique (onduleur, panneau de brassage), pas
+# seulement un appareil ou une étiquette texte libre — nouveau sélecteur
+# dans l'éditeur visuel, exclusif avec le sélecteur appareil.
+# Nettoyage à la suppression : les colonnes ajoutées par ALTER TABLE (sans
+# FK déclarée) sur ce chantier et le précédent laissaient des références
+# orphelines à la suppression d'un appareil/périphérique/utilisateur/
+# service — corrigé pour les 4 routes concernées.
+# Date: 24 août 2026
 
 # Version 2.18.55 - Appareils reliés aux services/utilisateurs via de vraies clés étrangères
 # appareils.service_id / utilisateur_id (nullable, en plus des colonnes
