@@ -732,17 +732,6 @@
 {% endblock %}
 
 {% block content %}
-<!-- BREADCRUMB (conditional on cfg.show_breadcrumb) -->
-{% if cfg.get('show_breadcrumb') == '1' %}
-<div style="margin-bottom:1rem;font-size:.75rem;color:var(--text-secondary);">
-    <a href="/" style="color:var(--accent);text-decoration:none;">Accueil</a>
-    <span> / </span>
-    <a href="/" style="color:var(--accent);text-decoration:none;">Clients</a>
-    <span> / </span>
-    <span style="color:var(--text-primary);">{{ client.nom }}</span>
-</div>
-{% endif %}
-
 <!-- PAGE HEADER -->
 <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;">
     <div>

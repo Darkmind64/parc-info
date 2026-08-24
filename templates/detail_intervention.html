@@ -123,7 +123,7 @@
                 <a href="/appareil/{{ a.id }}/editer" class="badge badge-blue" style="display: inline-flex; flex-direction: column; padding: .5rem .7rem; font-size: .75rem; text-decoration: none; cursor: pointer; transition: all .15s;">
                     <strong>{{ a.nom_machine }}</strong>
                     <span style="font-size: .7rem; opacity: .8;">{{ a.type_appareil }}</span>
-                    {% if a.adresse_ip %}<span style="font-family: monospace; font-size: .7rem; opacity: .8;">{{ a.adresse_ip }}</span>{% endif %}
+                    {% if a.adresse_ip %}<span style="font-family: 'Share Tech Mono', monospace; font-size: .7rem; opacity: .8;">{{ a.adresse_ip }}</span>{% endif %}
                 </a>
             {% endfor %}
             </div>

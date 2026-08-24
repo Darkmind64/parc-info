@@ -64,21 +64,21 @@
 <!-- Résumé/Statistiques -->
 {% if maintenances %}
 <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:1rem;margin:2rem 0;">
-    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid #00ff88;border-radius:.3rem;">
+    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid var(--accent);border-radius:.3rem;">
         <div style="font-size:.85rem;color:var(--text-secondary);">Total opérations</div>
-        <div style="font-size:2rem;font-weight:700;color:#00ff88;">{{ stats.total }}</div>
+        <div style="font-size:2rem;font-weight:700;color:var(--accent);">{{ stats.total }}</div>
     </div>
-    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid #00c9ff;border-radius:.3rem;">
+    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid var(--accent-green);border-radius:.3rem;">
         <div style="font-size:.85rem;color:var(--text-secondary);">Réalisées</div>
-        <div style="font-size:2rem;font-weight:700;color:#00c9ff;">{{ stats.realisees }}</div>
+        <div style="font-size:2rem;font-weight:700;color:var(--accent-green);">{{ stats.realisees }}</div>
     </div>
-    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid #ff8c00;border-radius:.3rem;">
+    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid var(--accent-orange);border-radius:.3rem;">
         <div style="font-size:.85rem;color:var(--text-secondary);">En attente</div>
-        <div style="font-size:2rem;font-weight:700;color:#ff8c00;">{{ stats.attente }}</div>
+        <div style="font-size:2rem;font-weight:700;color:var(--accent-orange);">{{ stats.attente }}</div>
     </div>
-    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid #ffaa00;border-radius:.3rem;">
+    <div style="padding:1rem;background:var(--bg-secondary);border-left:4px solid var(--accent-red);border-radius:.3rem;">
         <div style="font-size:.85rem;color:var(--text-secondary);">Reportées</div>
-        <div style="font-size:2rem;font-weight:700;color:#ffaa00;">{{ stats.reportees }}</div>
+        <div style="font-size:2rem;font-weight:700;color:var(--accent-red);">{{ stats.reportees }}</div>
     </div>
 </div>
 {% endif %}

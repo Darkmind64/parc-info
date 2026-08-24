@@ -1135,28 +1135,31 @@ window._flashMessages = [
         {% set _ = bc.append(('Inventaire', None)) %}
         {% set _ = bc.append(('Appareils', '/appareils')) %}
         {% set _ = bc.append(('Ajouter' if ep == 'nouvel_appareil' else 'Modifier', None)) %}
+    {% elif ep == 'liste_appareils' %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Appareils', None)) %}
+    {% elif ep == 'documents_appareil' %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Appareils', '/appareils')) %}
+        {% set _ = bc.append(('Documents', None)) %}
+    {% elif ep == 'fiche_systeme_appareil' %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Appareils', '/appareils')) %}
+        {% set _ = bc.append(('Fiche système', None)) %}
     {% elif ep in ['nouveau_peripherique','editer_peripherique'] %}
         {% set _ = bc.append(('Inventaire', None)) %}
         {% set _ = bc.append(('Périphériques', '/peripheriques')) %}
         {% set _ = bc.append(('Ajouter' if ep == 'nouveau_peripherique' else 'Modifier', None)) %}
-    {% elif ep in ['nouveau_contrat','editer_contrat'] %}
-        {% set _ = bc.append(('Contrats', '/contrats')) %}
-        {% set _ = bc.append(('Ajouter' if ep == 'nouveau_contrat' else 'Modifier', None)) %}
-    {% elif ep == 'detail_contrat' %}
-        {% set _ = bc.append(('Contrats', '/contrats')) %}
-        {% set _ = bc.append(('Détail', None)) %}
-    {% elif ep in ['nouvel_identifiant','editer_identifiant'] %}
-        {% set _ = bc.append(('Accès', None)) %}
-        {% set _ = bc.append(('Identifiants', '/identifiants')) %}
-        {% set _ = bc.append(('Ajouter' if ep == 'nouvel_identifiant' else 'Modifier', None)) %}
-    {% elif ep in ['nouvel_utilisateur','editer_utilisateur'] %}
-        {% set _ = bc.append(('Accès', None)) %}
-        {% set _ = bc.append(('Utilisateurs', '/utilisateurs')) %}
-        {% set _ = bc.append(('Ajouter' if ep == 'nouvel_utilisateur' else 'Modifier', None)) %}
-    {% elif ep == 'droits_utilisateur' %}
-        {% set _ = bc.append(('Accès', None)) %}
-        {% set _ = bc.append(('Utilisateurs', '/utilisateurs')) %}
-        {% set _ = bc.append(('Droits', None)) %}
+    {% elif ep == 'liste_peripheriques' %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Périphériques', None)) %}
+    {% elif ep in ['liste_plans','editer_plan'] %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Plans', '/plans' if ep == 'editer_plan' else None)) %}
+        {% if ep == 'editer_plan' %}{% set _ = bc.append(('Éditeur', None)) %}{% endif %}
+    {% elif ep == 'qrcode_labels' %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Étiquettes QR', None)) %}
     {% elif ep == 'parc_general' %}
         {% set _ = bc.append(('Inventaire', None)) %}
         {% set _ = bc.append(('Parc général', None)) %}
@@ -1166,8 +1169,73 @@ window._flashMessages = [
     {% elif ep == 'page_scan' %}
         {% set _ = bc.append(('Inventaire', None)) %}
         {% set _ = bc.append(('Scan réseau', None)) %}
+    {% elif ep in ['nouveau_contrat','editer_contrat'] %}
+        {% set _ = bc.append(('Contrats', '/contrats')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouveau_contrat' else 'Modifier', None)) %}
+    {% elif ep == 'detail_contrat' %}
+        {% set _ = bc.append(('Contrats', '/contrats')) %}
+        {% set _ = bc.append(('Détail', None)) %}
+    {% elif ep == 'liste_contrats' %}
+        {% set _ = bc.append(('Contrats', None)) %}
+    {% elif ep == 'liste_interventions' %}
+        {% set _ = bc.append(('Interventions', None)) %}
+    {% elif ep in ['nouveau_intervention','detail_intervention','editer_intervention'] %}
+        {% set _ = bc.append(('Interventions', '/interventions')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouveau_intervention' else 'Détail' if ep == 'detail_intervention' else 'Modifier', None)) %}
+    {% elif ep == 'liste_maintenances' %}
+        {% set _ = bc.append(('Maintenance', None)) %}
+    {% elif ep in ['nouveau_maintenance','editer_maintenance'] %}
+        {% set _ = bc.append(('Maintenance', '/maintenances')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouveau_maintenance' else 'Modifier', None)) %}
+    {% elif ep == 'rapport_maintenances' %}
+        {% set _ = bc.append(('Maintenance', '/maintenances')) %}
+        {% set _ = bc.append(('Rapport', None)) %}
+    {% elif ep == 'historique_maintenance' %}
+        {% set _ = bc.append(('Maintenance', '/maintenances')) %}
+        {% set _ = bc.append(('Historique', None)) %}
+    {% elif ep in ['nouvel_identifiant','editer_identifiant'] %}
+        {% set _ = bc.append(('Accès', None)) %}
+        {% set _ = bc.append(('Identifiants', '/identifiants')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouvel_identifiant' else 'Modifier', None)) %}
+    {% elif ep == 'liste_identifiants' %}
+        {% set _ = bc.append(('Accès', None)) %}
+        {% set _ = bc.append(('Identifiants', None)) %}
+    {% elif ep in ['nouvel_utilisateur','editer_utilisateur'] %}
+        {% set _ = bc.append(('Accès', None)) %}
+        {% set _ = bc.append(('Utilisateurs', '/utilisateurs')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouvel_utilisateur' else 'Modifier', None)) %}
+    {% elif ep == 'droits_utilisateur' %}
+        {% set _ = bc.append(('Accès', None)) %}
+        {% set _ = bc.append(('Utilisateurs', '/utilisateurs')) %}
+        {% set _ = bc.append(('Droits', None)) %}
+    {% elif ep == 'liste_utilisateurs' %}
+        {% set _ = bc.append(('Accès', None)) %}
+        {% set _ = bc.append(('Utilisateurs', None)) %}
+    {% elif ep == 'liste_services' %}
+        {% set _ = bc.append(('Services', None)) %}
+    {% elif ep == 'page_historique' %}
+        {% set _ = bc.append(('Journal', None)) %}
+    {% elif ep == 'page_kb' %}
+        {% set _ = bc.append(('Base de connaissances', None)) %}
+    {% elif ep == 'page_outils' %}
+        {% set _ = bc.append(('Outils', None)) %}
+    {% elif ep in ['admin_utilisateurs','admin_nouvel_utilisateur','admin_editer_utilisateur'] %}
+        {% set _ = bc.append(('Administration', None)) %}
+        {% set _ = bc.append(('Utilisateurs', '/admin/utilisateurs' if ep != 'admin_utilisateurs' else None)) %}
+        {% if ep == 'admin_nouvel_utilisateur' %}{% set _ = bc.append(('Ajouter', None)) %}
+        {% elif ep == 'admin_editer_utilisateur' %}{% set _ = bc.append(('Modifier', None)) %}{% endif %}
+    {% elif ep == 'admin_email_config' %}
+        {% set _ = bc.append(('Administration', None)) %}
+        {% set _ = bc.append(('Configuration Email', None)) %}
+    {% elif ep == 'liste_clients' %}
+        {% set _ = bc.append(('Clients', None)) %}
+    {% elif ep in ['nouveau_client','editer_client'] %}
+        {% set _ = bc.append(('Clients', '/clients')) %}
+        {% set _ = bc.append(('Ajouter' if ep == 'nouveau_client' else 'Modifier', None)) %}
+    {% elif ep == 'page_profil' %}
+        {% set _ = bc.append(('Mon profil', None)) %}
     {% endif %}
-    {% if bc %}
+    {% if bc and cfg.get('show_breadcrumb', '1') != '0' %}
     <div class="breadcrumb">
         <a href="/">🏠</a>
         {% for label, url in bc %}

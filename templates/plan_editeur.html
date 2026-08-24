@@ -1800,7 +1800,7 @@ class PlanEditor {
             html += row('Couleur', swatchPicker('color', el.color || '#00c9ff'));
             html += row('Style', inputSel('style', el.style||'solid', [['solid','━ Plein'],['dashed','╌ Tirets'],['dotted','··· Points'],['double','═ Double']]));
             html += row('Flèches', inputSel('arrowStyle', el.arrowStyle||'arrow', [['none','Aucune'],['arrow','→ Simple'],['bidirectional','↔ Double']]));
-            html += row('Épaisseur', `<div style="display:flex;align-items:center;gap:6px;"><input type="range" class="prop-input" data-prop="thickness" min="1" max="10" value="${el.thickness||2}" style="flex:1;padding:0;height:18px;cursor:pointer;"><span style="font-size:.75rem;color:var(--text-secondary);min-width:18px;">${el.thickness||2}</span></div>`);
+            html += row('Épaisseur', `<div style="display:flex;align-items:center;gap:6px;"><input type="range" class="prop-input" data-prop="thickness" min="1" max="10" value="${el.thickness||2}" style="flex:1;padding:0;height:18px;cursor:pointer;"><span style="font-size:.72rem;color:var(--text-secondary);min-width:18px;">${el.thickness||2}</span></div>`);
         }
 
         html += `<button class="prop-del-btn" id="prop-del-btn">Supprimer</button>`;
