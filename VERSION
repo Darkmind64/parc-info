@@ -1,8 +1,19 @@
-PARCINFO_VERSION=2.18.49
+PARCINFO_VERSION=2.18.50
 RELEASE_DATE=2026-08-24
-BUILD_NUMBER=2026082401
+BUILD_NUMBER=2026082402
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.50 - Historique des collectes limité à 5 + rétention par durée des journaux
+# Fiche système : le tableau « Évolution » affiche les 5 dernières collectes
+# au lieu de 12.
+# Nouveau paramétrage « Journaux & rétention » : une durée de conservation en
+# jours, en complément des plafonds en lignes déjà existants, pour le journal
+# d'audit, l'historique des collectes, le journal de mise à jour et le
+# journal de synchronisation. Purge paresseuse à chaque écriture (pas de
+# tâche planifiée séparée), désactivée par défaut (0 = comportement
+# inchangé, seul le plafond en lignes s'applique).
+# Date: 24 août 2026
 
 # Version 2.18.49 - Export Excel, suite de tests pytest, correctif datetime.utcnow()
 # Export .xlsx pour appareils, périphériques et maintenances, en miroir des

@@ -1,24 +1,23 @@
 {
-  "version": "2.18.49",
+  "version": "2.18.50",
   "release_date": "2026-08-24T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.49",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.49/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.50/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.50/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.50/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.50",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.50/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.50/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.50/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.50/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.50/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Export Excel (appareils/périphériques/maintenances) + suite de tests pytest",
+    "new_features": "Historique des collectes limité à 5 dans la fiche système + rétention par durée des journaux",
     "improvements": [
-      "Export .xlsx pour les appareils, périphériques et maintenances, en miroir des exports CSV existants (bouton Excel à côté de chaque bouton CSV : dashboard client, listes, rapport de maintenance).",
-      "Nouvelle suite de tests pytest (tests/) couvrant l'authentification, le rate-limiting, le CSRF, l'isolation multi-client (ACL) et l'historique par appareil.",
-      "Remplacement de datetime.utcnow() (dépréciée depuis Python 3.12) par un équivalent non dépréciable dans app.py, database.py, auth_utils.py, client_helpers.py, collector_core.py et les scripts de test existants — même valeur naïve en UTC, aucun changement de format des horodatages stockés."
+      "Fiche système : le tableau « Évolution » affiche les 5 dernières collectes au lieu de 12.",
+      "Nouveau paramétrage « Journaux & rétention » : une durée de conservation en jours, en complément des plafonds en lignes déjà existants, pour le journal d'audit, l'historique des collectes, le journal de mise à jour et le journal de synchronisation. Purge paresseuse à chaque écriture, désactivée par défaut (0 = comportement inchangé)."
     ]
   },
   "checksums": {
@@ -29,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.49"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.50"
 }
