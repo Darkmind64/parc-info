@@ -1,8 +1,21 @@
-PARCINFO_VERSION=2.18.52
+PARCINFO_VERSION=2.18.53
 RELEASE_DATE=2026-08-24
-BUILD_NUMBER=2026082404
+BUILD_NUMBER=2026082405
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.53 - Contrats liés d'un appareil complets + suggestions de service
+# Le panneau « Contrats liés » de la fiche appareil n'affichait que les
+# contrats rattachés via le pivot contrats_appareils. Un contrat lié
+# uniquement via av_contrat_id/edr_contrat_id/rmm_contrat_id (antivirus,
+# EDR, RMM) restait invisible tant qu'il n'était pas aussi ajouté
+# manuellement au pivot — malgré le nettoyage à la suppression qui, lui,
+# gérait déjà ces 3 colonnes. Les deux mécanismes sont désormais fusionnés
+# dans _contrats_appareil(), avec un badge de rôle par contrat (Général/
+# Antivirus/EDR/RMM, cumulables).
+# Champ Service de la fiche appareil : ajout d'un datalist alimenté par la
+# table services, même mécanique que le champ Utilisateur juste à côté.
+# Date: 24 août 2026
 
 # Version 2.18.52 - Suggestions depuis l'inventaire dans Parc Général
 # Switch, Routeur/Pare-feu, Serveur (marque+modèle) et UPS/Onduleur dans
