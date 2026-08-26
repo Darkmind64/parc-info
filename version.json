@@ -1,24 +1,24 @@
 {
-  "version": "2.18.57",
-  "release_date": "2026-08-24T00:00:00.000000",
+  "version": "2.18.58",
+  "release_date": "2026-08-26T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.57",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.57/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.58/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.58/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.58/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.58",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.58/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.58/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.58/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.58/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.58/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Badges de navigation cliquables (périphériques attachés, interventions)",
+    "new_features": "Correctif : colonnes manquantes (identifiants.wifi_ssid, baie_slots.date_maj) sur une installation neuve",
     "improvements": [
-      "Inventaire périphériques : les badges d'appareil de la colonne « Attaché à » pointent désormais vers la fiche appareil concernée (auparavant simple texte non cliquable).",
-      "Liste des interventions : le badge « Contrat » pointe désormais vers la fiche du contrat lié.",
-      "Audit complet des 27 templates utilisant des badges pour repérer les références d'entité non cliquables — les autres badges déjà cliquables (droits utilisateur, identifiants, contrats, interventions détail) ont été vérifiés conformes."
+      "Bug critique trouvé suite à un signalement d'erreur de synchronisation sur une installation neuve : deux migrations ALTER TABLE (colonnes wifi_ssid/wifi_securite/appareil_id/peripherique_id/utilisateur_id sur identifiants, date_maj sur baie_slots) s'exécutaient AVANT le CREATE TABLE IF NOT EXISTS de leur propre table dans init_db(). Sur une base déjà existante (mise à jour), le ALTER réussissait normalement — le bug ne se manifestait donc que sur une toute nouvelle installation, jamais repéré jusqu'ici en testant uniquement des mises à jour.",
+      "Sur une installation neuve, ces colonnes n'étaient jamais créées : la table naissait directement sans elles via CREATE TABLE, qui ne s'exécute qu'une fois. La synchronisation avec une base distante échouait alors avec « table identifiants has no column named wifi_ssid » / « table baie_slots has no column named date_maj ».",
+      "Corrigé en repositionnant chaque migration juste après le CREATE TABLE de sa table. Vérifié sur une base entièrement neuve : les 7 colonnes concernées sont désormais bien présentes dès le premier lancement."
     ]
   },
   "checksums": {
@@ -29,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.57"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.58"
 }

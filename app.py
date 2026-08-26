@@ -825,30 +825,6 @@ def init_db():
         suite_bureautique TEXT DEFAULT '', notes TEXT DEFAULT '', date_maj TEXT DEFAULT '',
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
 
-    # Colonnes WiFi dans identifiants (migration)
-    for col, defval in [
-        ('wifi_ssid',     "''"),
-        ('wifi_securite', "'WPA2'"),
-    ]:
-        try:
-            c.execute(f"ALTER TABLE identifiants ADD COLUMN {col} TEXT DEFAULT {defval}")
-        except: pass
-
-    # Lien optionnel vers un appareil/périphérique/utilisateur (migration) —
-    # audit du 2026-08-24 : jusqu'ici un identifiant n'était jamais rattaché
-    # à une entité précise (juste un nom/description en texte libre), alors
-    # que la fiche appareil a ses propres champs user_login/user_password/
-    # admin_login/admin_password. Deux silos de credentials pour une même
-    # machine, sans le moindre rapprochement. utilisateur_id ajouté dans un
-    # second temps (audit du même jour) : un identifiant nominatif (boîte
-    # mail personnelle, VPN nominatif) n'appartient à aucune machine, juste
-    # à une personne. NULL par défaut : ne change rien aux identifiants déjà
-    # saisis.
-    for col in ('appareil_id', 'peripherique_id', 'utilisateur_id'):
-        try:
-            c.execute(f"ALTER TABLE identifiants ADD COLUMN {col} INTEGER")
-        except: pass
-
     # Ajouter "Wi-Fi" à la liste des catégories d'identifiants si absente
     try:
         nb = c.execute("SELECT COUNT(*) FROM config_listes WHERE nom_liste='categories_identifiants' AND valeur='Wi-Fi'").fetchone()[0]
@@ -908,6 +884,30 @@ def init_db():
         date_creation TEXT DEFAULT '',
         date_maj TEXT DEFAULT '',
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+
+    # Colonnes WiFi dans identifiants (migration)
+    for col, defval in [
+        ('wifi_ssid',     "''"),
+        ('wifi_securite', "'WPA2'"),
+    ]:
+        try:
+            c.execute(f"ALTER TABLE identifiants ADD COLUMN {col} TEXT DEFAULT {defval}")
+        except: pass
+
+    # Lien optionnel vers un appareil/périphérique/utilisateur (migration) —
+    # audit du 2026-08-24 : jusqu'ici un identifiant n'était jamais rattaché
+    # à une entité précise (juste un nom/description en texte libre), alors
+    # que la fiche appareil a ses propres champs user_login/user_password/
+    # admin_login/admin_password. Deux silos de credentials pour une même
+    # machine, sans le moindre rapprochement. utilisateur_id ajouté dans un
+    # second temps (audit du même jour) : un identifiant nominatif (boîte
+    # mail personnelle, VPN nominatif) n'appartient à aucune machine, juste
+    # à une personne. NULL par défaut : ne change rien aux identifiants déjà
+    # saisis.
+    for col in ('appareil_id', 'peripherique_id', 'utilisateur_id'):
+        try:
+            c.execute(f"ALTER TABLE identifiants ADD COLUMN {col} INTEGER")
+        except: pass
 
     # TABLE SERVICES
     c.execute('''CREATE TABLE IF NOT EXISTS services (
@@ -1581,12 +1581,13 @@ def init_db():
         except Exception:
             pass
 
-    # Migration : date_maj sur outils et baie_slots (pour sync bidirectionnelle)
-    for _tbl in ('outils', 'baie_slots'):
-        try:
-            c.execute(f"ALTER TABLE {_tbl} ADD COLUMN date_maj TEXT DEFAULT ''")
-        except Exception:
-            pass
+    # Migration : date_maj sur outils (pour sync bidirectionnelle) — baie_slots
+    # n'existe pas encore à ce stade sur une installation neuve, sa colonne
+    # date_maj est ajoutée juste après sa CREATE TABLE, plus bas.
+    try:
+        c.execute("ALTER TABLE outils ADD COLUMN date_maj TEXT DEFAULT ''")
+    except Exception:
+        pass
 
     # TABLE BAIE DE BRASSAGE — SLOTS
     c.execute('''CREATE TABLE IF NOT EXISTS baie_slots (
@@ -1662,8 +1663,8 @@ def init_db():
             c.execute(f"ALTER TABLE appareils ADD COLUMN client_id INTEGER DEFAULT {cid['id']}")
             c.execute('UPDATE appareils SET client_id=?', (cid['id'],))
 
-    # Migration : col_index + baie_nom dans baie_slots
-    for col_add, defval in [('col_index','0'), ('baie_nom',"'Baie principale'")]:
+    # Migration : col_index + baie_nom + date_maj (sync bidirectionnelle) dans baie_slots
+    for col_add, defval in [('col_index','0'), ('baie_nom',"'Baie principale'"), ('date_maj', "''")]:
         try:
             c.execute(f"ALTER TABLE baie_slots ADD COLUMN {col_add} TEXT DEFAULT {defval}")
         except: pass

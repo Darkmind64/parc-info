@@ -1,8 +1,32 @@
-PARCINFO_VERSION=2.18.57
-RELEASE_DATE=2026-08-24
-BUILD_NUMBER=2026082409
+PARCINFO_VERSION=2.18.58
+RELEASE_DATE=2026-08-26
+BUILD_NUMBER=2026082601
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.58 - Correctif critique : colonnes manquantes sur une installation neuve
+# Signalé par l'utilisateur juste après une nouvelle installation : erreur de
+# synchronisation "pull identifiants: table identifiants has no column named
+# wifi_ssid" et "pull baie_slots: table baie_slots has no column named
+# date_maj".
+# Cause : dans init_db(), deux blocs de migration (ALTER TABLE ADD COLUMN)
+# s'exécutaient AVANT le CREATE TABLE IF NOT EXISTS de leur propre table —
+# colonnes wifi_ssid/wifi_securite/appareil_id/peripherique_id/utilisateur_id
+# sur identifiants (ajoutées lors de l'audit du 2026-08-24), colonne date_maj
+# sur baie_slots (ajoutée pour la sync bidirectionnelle). Sur une base déjà
+# existante (mise à jour depuis une version antérieure), la table existait
+# déjà à ce stade et le ALTER réussissait normalement — le bug ne pouvait
+# donc jamais se manifester en testant uniquement des mises à jour, seule
+# une toute nouvelle installation le révèle : la table naît directement sans
+# ces colonnes via CREATE TABLE, qui ne s'exécute qu'une fois et ignore les
+# ALTER passés avant lui pour une table qui n'existait pas encore.
+# Corrigé en repositionnant chaque migration juste après le CREATE TABLE de
+# sa table (identifiants : ligne ~910 ; baie_slots : fusionnée dans la
+# migration col_index/baie_nom déjà correctement placée après sa CREATE
+# TABLE). Vérifié sur une base entièrement neuve (DATA_DIR vide, init_db()
+# unique) : les 7 colonnes concernées sont désormais bien présentes dès le
+# premier lancement. Suite de tests pytest (60 tests) toujours verte.
+# Date: 26 août 2026
 
 # Version 2.18.57 - Badges de navigation cliquables
 # Audit systématique des 27 templates utilisant des badges pour repérer les
