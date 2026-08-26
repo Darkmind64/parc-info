@@ -18,7 +18,7 @@
 
 {% block content %}
 <div class="page-header">
-    <h1>{{ action }} un <span>Contrat</span></h1>
+    <h1>{% if action == 'Nouveau' %}Nouveau <span>contrat</span>{% else %}Modifier le <span>contrat</span>{% endif %}</h1>
     <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span></p>
 </div>
 
@@ -181,7 +181,7 @@
     </div>
 
     <div style="display:flex;gap:1rem;flex-wrap:wrap;">
-        <button type="submit" class="btn btn-success">&#10003; {{ action }} le contrat</button>
+        <button type="submit" class="btn btn-success">&#10003; {% if action == 'Nouveau' %}Nouveau contrat{% else %}Modifier le contrat{% endif %}</button>
         <a href="/contrats" class="btn btn-primary">← Retour</a>
     </div>
 </form>

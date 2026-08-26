@@ -42,6 +42,18 @@
 .rack-cell.highlighted  { border-color:#fbbf24!important; background:rgba(251,191,36,.1)!important; }
 .rack-cell.dragging     { opacity:.4; }
 
+/* Élément avec ports : la ligne d'infos passe en en-tête fixe, les ports se
+   répartissent dans le reste de la hauteur disponible — laquelle dépend de
+   hauteur_u (voir la poignée de redimensionnement ci-dessus) : plus
+   l'élément est grand, plus la grille de ports a de place pour s'organiser
+   en plusieurs rangées lisibles. */
+.rack-cell.has-ports { flex-direction:column; align-items:stretch; padding:2px 6px; }
+.cell-row   { display:flex; align-items:center; flex-shrink:0; height:15px; }
+.cell-ports {
+    display:flex; flex-wrap:wrap; align-content:flex-start; gap:1px;
+    overflow:hidden; flex:1; padding-top:2px;
+}
+
 /* Equipment type colors */
 .cell-srv   { background:rgba(124,58,237,.12)!important; border-color:rgba(124,58,237,.45)!important; }
 .cell-sw    { background:rgba(8,145,178,.12)!important;  border-color:rgba(8,145,178,.45)!important; }
@@ -60,11 +72,34 @@
 .cell-name { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     color:#d0e4f7; font-size:.72rem; font-weight:600; letter-spacing:.15px; }
 .cell-ip   { font-size:.6rem; color:#4a6a8a; flex-shrink:0; margin-left:4px; }
+.cell-desc { color:#4a6a8a; font-weight:400; }
 .cell-del  {
-    background:none; border:none; color:#1e293b; cursor:pointer; font-size:.6rem;
-    padding:0 2px; flex-shrink:0; transition:color .12s; line-height:1;
+    /* #64748b (slate) plutôt que var(--text-muted) : ce dernier (#3a5570)
+       reste trop proche du fond très sombre de la baie (#0d1520) — bouton
+       quasi invisible hors survol, signalé en usage réel. */
+    background:none; border:none; color:#64748b; cursor:pointer; font-size:.6rem;
+    padding:0 2px; flex-shrink:0; transition:all .12s; line-height:1; border-radius:2px;
 }
-.cell-del:hover { color:#ef4444; }
+.cell-del:hover { color:var(--accent-red); background:rgba(255,51,85,.15); }
+
+.cell-resize {
+    position:absolute; left:0; right:0; bottom:-2px; height:5px; cursor:ns-resize; z-index:6;
+}
+.cell-resize:hover, .cell-resize.resizing { background:rgba(0,201,255,.35); }
+
+/* Un port RJ45 dans la grille d'un élément réseau — numéroté, coloré selon
+   sa cible (couleur type/catégorie déjà configurée ailleurs dans l'app, ou
+   gris neutre si non affecté), surligné au clic sur tout port lié à la même
+   cible (voir surbrillerPortsLies()). */
+.port {
+    width:14px; height:14px; min-width:14px; border-radius:2px;
+    font-size:.44rem; line-height:14px; text-align:center; font-weight:700;
+    color:#0a0e14; cursor:pointer; flex-shrink:0; background:#334155;
+    transition:transform .1s, box-shadow .1s; user-select:none;
+}
+.port:hover        { transform:scale(1.25); z-index:3; position:relative; }
+.port.port-libre    { color:#64748b; background:#1a2530; }
+.port.port-highlight { box-shadow:0 0 0 2px #fff, 0 0 6px #fff; transform:scale(1.2); z-index:4; position:relative; }
 
 .rack-footer {
     background:#0d1520; padding:.4rem 1.2rem; border-top:2px solid #2a3a4a;
@@ -180,6 +215,7 @@
                         <option value="Baie principale">Baie principale</option>
                     </select>
                     <button class="btn btn-primary btn-sm" onclick="ajouterBaie()" title="Nouvelle baie">+</button>
+                    <button class="btn btn-danger btn-sm" onclick="supprimerBaie()" title="Supprimer cette baie">🗑</button>
                 </div>
                 <span style="font-family:'Rajdhani',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);">
                     &#9632; Vue de face — <span id="lbl-u">{{ nb_u }}</span>U
@@ -326,7 +362,19 @@
                 <label>Description / note</label>
                 <input type="text" id="cfg-desc" placeholder="Ex: Ports 1-24 bureau...">
             </div>
+            <div class="form-group" style="margin-bottom:.8rem;">
+                <label>Nombre de ports (Ethernet)</label>
+                <input type="number" id="cfg-nb-ports" min="0" max="48" value="0"
+                       style="font-family:'Share Tech Mono',monospace;">
+                <div class="form-hint">0 = pas de ports affichés. 48 maximum.</div>
+            </div>
             <button onclick="placerEquip()" class="btn btn-success" style="width:100%;">✓ Placer l'équipement</button>
+
+            <!-- ÉDITEUR DE PORTS — un slot déjà enregistré, avec au moins un port -->
+            <div id="ports-editor" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
+                <div class="form-section-title" style="margin-bottom:.6rem;">&#9632; Ports</div>
+                <div id="ports-editor-list" style="display:flex;flex-direction:column;gap:.4rem;max-height:340px;overflow-y:auto;"></div>
+            </div>
         </div>
 
         <!-- ONGLET LISTE -->
@@ -393,6 +441,22 @@ function nomEquipementSlot(s) {
     if (s.nom_machine) return s.nom_machine;
     if (s.p_marque || s.p_modele || s.p_categorie) return [s.p_categorie, s.p_marque, s.p_modele].filter(Boolean).join(' ');
     return s.nom_custom || s.type_equipement || '';
+}
+
+// Libellé complet d'un slot pour les vues qui doivent tout montrer (grille,
+// tooltip, liste) : combine le nom personnalisé ET l'identité de
+// l'équipement lié, sans que l'un masque l'autre — contrairement à
+// nomEquipementSlot() ci-dessus (dérivé seul, qui ne sert plus qu'à
+// préremplir le champ d'édition « Nom personnalisé »). Signalé en usage
+// réel : un nom personnalisé saisi sur un slot déjà lié à un appareil/
+// périphérique disparaissait entièrement, nomEquipementSlot() donnant
+// toujours la priorité au nom dérivé.
+function libelleComplet(s) {
+    const derive = nomEquipementSlot(s);
+    if (s.nom_custom && s.nom_custom.trim() && s.nom_custom !== derive) {
+        return `${s.nom_custom} — ${derive}`;
+    }
+    return derive || '—';
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
@@ -549,17 +613,72 @@ function makeOccupiedCell(s, u, col) {
     if (tcss) cell.classList.add('cell-' + tcss);
 
     const ledCls = s.appareil_id ? (s.en_ligne ? 'led-on' : 'led-off') : 'led-none';
-    const nom = escH(nomEquipementSlot(s) || '—');
-    const ip  = s.adresse_ip || '';
+    const nom  = escH(libelleComplet(s));
+    const desc = s.description ? escH(s.description) : '';
+    const ip   = s.adresse_ip || '';
+    const ports = s.ports || [];
+    if (ports.length) cell.classList.add('has-ports');
 
-    cell.innerHTML = `
-        <span class="cell-led ${ledCls}"></span>
-        <span class="cell-name">${nom}</span>
-        ${ip ? `<span class="cell-ip">${escH(ip)}</span>` : ''}
-        <button class="cell-del" onclick="event.stopPropagation();delSlot(${s.id})" title="Retirer">✕</button>`;
+    const ligneInfo = `
+        <div class="cell-row">
+            <span class="cell-led ${ledCls}"></span>
+            <span class="cell-name">${nom}${desc ? `<span class="cell-desc"> — ${desc}</span>` : ''}</span>
+            ${ip ? `<span class="cell-ip">${escH(ip)}</span>` : ''}
+            <button class="cell-del" onclick="event.stopPropagation();delSlot(${s.id})" title="Retirer">✕</button>
+        </div>`;
+
+    cell.innerHTML = ligneInfo
+        + (ports.length ? `<div class="cell-ports">${ports.map(portHTML).join('')}</div>` : '')
+        + `<div class="cell-resize" title="Redimensionner (glisser)"></div>`;
+
+    // Ports : clic = surbrillance de tout port lié à la même cible, survol =
+    // infobulle sur la cible. stopPropagation partout pour ne pas aussi
+    // déclencher le clic de la cellule (sélection de l'élément lui-même).
+    cell.querySelectorAll('.port').forEach((el, i) => {
+        const p = ports[i];
+        el.addEventListener('click', e => { e.stopPropagation(); surbrillerPortsLies(cleCiblePort(p)); });
+        el.addEventListener('mouseenter', e => { e.stopPropagation(); afficherTooltipPort(e, p, nom); });
+        el.addEventListener('mousemove',  e => { e.stopPropagation(); const t = document.getElementById('rack-tooltip'); if(t.classList.contains('show')) positionnerTooltip(e); });
+        el.addEventListener('mouseleave', e => { e.stopPropagation(); masquerTooltip(); });
+    });
 
     // Click → pré-remplir formulaire
     cell.addEventListener('click', () => selectSlot(s, cell));
+
+    // Redimensionnement à la souris : glisser la poignée du bas change
+    // hauteur_u par pas de 1U. draggable est désactivé le temps du geste —
+    // sinon le navigateur démarre un déplacement natif (dragstart) dès que
+    // la souris bouge dans un élément draggable, même sur cette poignée.
+    const poignee = cell.querySelector('.cell-resize');
+    poignee.addEventListener('mousedown', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        cell.draggable = false;
+        poignee.classList.add('resizing');
+        const startY = e.clientY;
+        const startHu = s.hauteur_u || 1;
+        const maxHu = Math.min(8, nbU - s.position + 1);
+
+        const calculerNouvelleHu = clientY => {
+            const deltaU = Math.round((clientY - startY) / U_H);
+            return Math.min(maxHu, Math.max(1, startHu + deltaU));
+        };
+        const onMove = ev => {
+            const nv = calculerNouvelleHu(ev.clientY);
+            cell.style.height = (nv * U_H + (nv - 1)) + 'px';
+        };
+        const onUp = async ev => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            poignee.classList.remove('resizing');
+            cell.draggable = true;
+            const nv = calculerNouvelleHu(ev.clientY);
+            if (nv !== startHu) await redimensionnerSlot(s, nv);
+            else renderRack();
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
 
     // Tooltip au survol
     cell.addEventListener('mouseenter', e => afficherTooltip(e, s));
@@ -589,8 +708,11 @@ function makeEmptyCell(u, col, fullWidth) {
         : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">C${col}</span>`;
 
     cell.addEventListener('click', () => {
+        document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
         document.getElementById('cfg-pos').value = u;
         document.getElementById('cfg-col').value = col;
+        document.getElementById('cfg-nb-ports').value = 0;
+        document.getElementById('ports-editor').style.display = 'none';
         showTab('tab-add');
     });
     cell.addEventListener('mouseenter', () => cell.classList.add('drag-over'));
@@ -626,10 +748,29 @@ async function deplacerSlot(id, newPos, newCol) {
     renderRack(); renderList();
 }
 
+// ── REDIMENSIONNEMENT (glisser la poignée du bas) ──────────────────────────────
+async function redimensionnerSlot(s, nouvelleHu) {
+    // PUT (pas POST /api/baie/slot, qui ré-insère avec un nouvel id) pour
+    // garder le même id de slot — tous les champs sont renvoyés tels quels,
+    // seule hauteur_u change : la route PUT écrase l'ensemble de la ligne.
+    const r = await fetch(`/api/baie/slot/${s.id}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+            position: s.position, hauteur_u: nouvelleHu,
+            appareil_id: s.appareil_id || null, peripherique_id: s.peripherique_id || null,
+            nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
+            couleur: s.couleur || '#1e3a5f', description: s.description || ''
+        })
+    });
+    const updated = await r.json();
+    slots[key(updated.position, updated.col_index || 0)] = updated;
+    renderRack(); renderList();
+}
+
 // ── TOOLTIP ───────────────────────────────────────────────────────────────────
 function afficherTooltip(e, s) {
     const t = document.getElementById('rack-tooltip');
-    const nom = nomEquipementSlot(s) || '—';
+    const nom = libelleComplet(s);
     const statut = s.appareil_id
         ? (s.en_ligne ? '🟢 En ligne' : '🔴 Hors ligne')
         : '⚪ Non pingable';
@@ -651,6 +792,56 @@ function positionnerTooltip(e) {
 }
 function masquerTooltip() {
     document.getElementById('rack-tooltip').classList.remove('show');
+}
+
+// ── PORTS ─────────────────────────────────────────────────────────────────────
+function portHTML(p) {
+    const libre = !p.appareil_id && !p.peripherique_id && !p.usage_libre;
+    const style = libre ? '' : `background:${p.couleur};`;
+    return `<span class="port${libre ? ' port-libre' : ''}" style="${style}" data-cle="${escH(cleCiblePort(p))}">${p.numero}</span>`;
+}
+
+// Clé identifiant la cible d'un port — même cible = même clé, quel que soit
+// le port/slot qui la porte. Vide (jamais surlignable) pour un port libre.
+function cleCiblePort(p) {
+    if (p.appareil_id) return 'a:' + p.appareil_id;
+    if (p.peripherique_id) return 'p:' + p.peripherique_id;
+    if (p.usage_libre) return 'u:' + p.usage_libre.trim().toLowerCase();
+    return '';
+}
+
+let _cleSurbrillance = null;
+
+// Clic sur un port : met en évidence, dans TOUTE la baie affichée, tous les
+// ports pointant vers la même cible (même appareil/périphérique/usage) —
+// repérer les liaisons entre appareils sans avoir à comparer les infobulles
+// une par une. Un second clic sur la même cible enlève la surbrillance.
+function surbrillerPortsLies(cle) {
+    document.querySelectorAll('.port.port-highlight').forEach(el => el.classList.remove('port-highlight'));
+    if (!cle || cle === _cleSurbrillance) { _cleSurbrillance = null; return; }
+    _cleSurbrillance = cle;
+    document.querySelectorAll('.port').forEach(el => {
+        if (el.dataset.cle === cle) el.classList.add('port-highlight');
+    });
+}
+
+function afficherTooltipPort(e, p, nomSlot) {
+    const t = document.getElementById('rack-tooltip');
+    const cible = p.nom_cible || '';
+    let html = `<div class="tip-title">Port ${p.numero}${cible ? ' — ' + escH(cible) : ''}</div>`;
+    html += `<div class="tip-row"><span class="tip-key">Élément</span><span class="tip-val">${escH(nomSlot)}</span></div>`;
+    if (p.appareil_id) {
+        html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${p.en_ligne ? '🟢 En ligne' : '🔴 Hors ligne'}</span></div>`;
+    } else if (p.peripherique_id) {
+        html += `<div class="tip-row"><span class="tip-key">Type</span><span class="tip-val">Périphérique</span></div>`;
+    } else if (p.usage_libre) {
+        html += `<div class="tip-row"><span class="tip-key">Usage</span><span class="tip-val">${escH(p.usage_libre)}</span></div>`;
+    } else {
+        html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);">Port libre — non affecté</span></div>`;
+    }
+    t.innerHTML = html;
+    t.classList.add('show');
+    positionnerTooltip(e);
 }
 
 // ── RECHERCHE ─────────────────────────────────────────────────────────────────
@@ -681,7 +872,7 @@ function renderList() {
         return;
     }
     wrap.innerHTML = sorted.map(s => {
-        const nom = escH(nomEquipementSlot(s) || '?');
+        const nom = escH(libelleComplet(s));
         const led = s.appareil_id ? (s.en_ligne ? '#22c55e' : '#dc2626') : '#374151';
         return `<div class="equip-row" onclick="surbrillanceEquip(${s.position},${s.col_index||0})">
             <div class="equip-pos">U${s.position}${s.col_index?'·C'+s.col_index:''}</div>
@@ -719,7 +910,75 @@ function selectSlot(s, cell) {
     document.getElementById('cfg-couleur').value = s.couleur || '#1e3a5f';
     document.getElementById('cfg-app').value    = s.appareil_id || '';
     document.getElementById('cfg-periph').value = s.peripherique_id || '';
+    document.getElementById('cfg-nb-ports').value = s.nb_ports || 0;
     showTab('tab-add');
+    afficherEditeurPorts(s);
+}
+
+// ── ÉDITEUR DE PORTS ─────────────────────────────────────────────────────────
+function afficherEditeurPorts(s) {
+    const wrap = document.getElementById('ports-editor');
+    const list = document.getElementById('ports-editor-list');
+    const ports = s.ports || [];
+    if (!s.id || !ports.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
+    wrap.style.display = 'block';
+    list.innerHTML = ports.map(p => portEditorRowHTML(s.id, p)).join('');
+}
+
+function optionsAppareilsPeriph(valeurActuelle) {
+    const appOpts = Array.from(document.getElementById('cfg-app').options).slice(1).map(o =>
+        `<option value="a:${o.value}"${valeurActuelle==='a:'+o.value?' selected':''}>🖥 ${escH(o.textContent.trim())}</option>`).join('');
+    const perOpts = Array.from(document.getElementById('cfg-periph').options).slice(1).map(o =>
+        `<option value="p:${o.value}"${valeurActuelle==='p:'+o.value?' selected':''}>🖱 ${escH(o.textContent.trim())}</option>`).join('');
+    return appOpts + perOpts;
+}
+
+function portEditorRowHTML(slotId, p) {
+    const valeur = p.appareil_id ? 'a:'+p.appareil_id : (p.peripherique_id ? 'p:'+p.peripherique_id : (p.usage_libre ? 'u' : ''));
+    return `
+    <div style="display:flex;gap:.3rem;align-items:center;">
+        <span style="width:28px;flex-shrink:0;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--text-muted);">#${p.numero}</span>
+        <select data-slot="${slotId}" data-numero="${p.numero}" onchange="changerPort(this)" style="flex:1.4;font-size:.7rem;padding:.2rem .3rem;margin:0;">
+            <option value=""${valeur===''?' selected':''}>— Libre —</option>
+            <option value="u"${valeur==='u'?' selected':''}>✎ Usage personnalisé…</option>
+            ${optionsAppareilsPeriph(valeur)}
+        </select>
+        <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
+               value="${escH(p.usage_libre||'')}" placeholder="Téléphonie, alarme..."
+               style="flex:1;font-size:.7rem;padding:.2rem .3rem;margin:0;${valeur==='u'?'':'display:none;'}"
+               onchange="changerPortUsage(this)">
+    </div>`;
+}
+
+async function changerPort(sel) {
+    const slotId = sel.dataset.slot, numero = sel.dataset.numero;
+    const v = sel.value;
+    const usageInput = sel.nextElementSibling;
+    const estUsage = v === 'u';
+    usageInput.style.display = estUsage ? '' : 'none';
+    const payload = { appareil_id: null, peripherique_id: null, usage_libre: '' };
+    if (v.startsWith('a:')) payload.appareil_id = parseInt(v.slice(2));
+    else if (v.startsWith('p:')) payload.peripherique_id = parseInt(v.slice(2));
+    else if (estUsage) payload.usage_libre = usageInput.value.trim();
+    await enregistrerPort(slotId, numero, payload);
+}
+
+async function changerPortUsage(input) {
+    await enregistrerPort(input.dataset.slot, input.dataset.numero,
+        { appareil_id: null, peripherique_id: null, usage_libre: input.value.trim() });
+}
+
+async function enregistrerPort(slotId, numero, payload) {
+    const r = await fetch(`/api/baie/slot/${slotId}/port/${numero}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    const port = await r.json();
+    const s = Object.values(slots).find(x => x.id == slotId);
+    if (s && s.ports) {
+        const idx = s.ports.findIndex(p => p.numero == numero);
+        if (idx >= 0) s.ports[idx] = port;
+    }
+    renderRack();
 }
 
 // ── ACTIONS ──────────────────────────────────────────────────────────────────
@@ -757,6 +1016,8 @@ async function placerEquip() {
     const hu  = parseInt(document.getElementById('cfg-hu').value) || 1;
     if (pos < 1 || pos > nbU) { showFlash(`Position entre 1 et ${nbU}`, 'info'); return; }
 
+    const nbPorts = Math.min(48, Math.max(0, parseInt(document.getElementById('cfg-nb-ports').value) || 0));
+
     const payload = {
         position: pos, col_index: col, hauteur_u: hu, baie_nom: currentBaie,
         type_equipement: document.getElementById('cfg-type').value,
@@ -764,7 +1025,8 @@ async function placerEquip() {
         description: document.getElementById('cfg-desc').value.trim(),
         couleur:     document.getElementById('cfg-couleur').value,
         appareil_id: document.getElementById('cfg-app').value ? parseInt(document.getElementById('cfg-app').value) : null,
-        peripherique_id: document.getElementById('cfg-periph').value ? parseInt(document.getElementById('cfg-periph').value) : null
+        peripherique_id: document.getElementById('cfg-periph').value ? parseInt(document.getElementById('cfg-periph').value) : null,
+        nb_ports: nbPorts
     };
 
     const r = await fetch('/api/baie/slot', {
@@ -774,6 +1036,7 @@ async function placerEquip() {
     slots[key(s.position, s.col_index||0)] = s;
     if ((s.col_index||0) + 1 > nbCols) nbCols = (s.col_index||0) + 1;
     renderRack(); renderList();
+    afficherEditeurPorts(s);
 }
 
 async function delSlot(id) {
@@ -819,6 +1082,19 @@ function ajouterBaie() {
     sel.appendChild(opt);
     sel.value = nom.trim();
     chargerBaie(nom.trim());
+}
+
+async function supprimerBaie() {
+    if (!confirm(`Supprimer la baie "${currentBaie}" et tout son contenu (${Object.keys(slots).length} emplacement(s)) ? Cette action est irréversible.`)) return;
+    await fetch('/api/baie?baie=' + encodeURIComponent(currentBaie), { method: 'DELETE' });
+    baiesList = baiesList.filter(b => b !== currentBaie);
+    // Toujours au moins une baie disponible dans la liste, même vide — elle
+    // sera recréée implicitement dès qu'un équipement y sera placé (voir
+    // ajouterBaie() : une baie n'existe qu'en tant que valeur de
+    // baie_slots.baie_nom, jamais comme une ligne dédiée).
+    if (!baiesList.length) baiesList.push('Baie principale');
+    const prochaine = baiesList.includes('Baie principale') ? 'Baie principale' : baiesList[0];
+    await chargerBaie(prochaine);
 }
 
 // ── EXPORT IMAGE ──────────────────────────────────────────────────────────────

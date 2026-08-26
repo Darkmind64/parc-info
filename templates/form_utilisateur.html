@@ -3,7 +3,7 @@
 
 {% block content %}
 <div class="page-header">
-    <h1>{{ action }} un <span>Utilisateur</span></h1>
+    <h1>{% if action == 'Nouveau' %}Nouvel <span>utilisateur</span>{% else %}Modifier l'<span>utilisateur</span>{% endif %}</h1>
     <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span></p>
 </div>
 
@@ -85,7 +85,7 @@
     </div>
 
     <div style="display:flex;gap:1rem;">
-        <button type="submit" class="btn btn-success">&#10003; {{ action }} l'utilisateur</button>
+        <button type="submit" class="btn btn-success">&#10003; {% if action == 'Nouveau' %}Nouvel utilisateur{% else %}Modifier l'utilisateur{% endif %}</button>
         <a href="/utilisateurs" class="btn btn-primary">← Retour</a>
     </div>
 </form>

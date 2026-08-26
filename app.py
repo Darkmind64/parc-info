@@ -149,6 +149,21 @@ def _load_app_version():
         logging.getLogger('parcinfo').warning(f'version.json introuvable dans {_resource_base}: {e}')
         return ''
 APP_VERSION = _load_app_version()
+
+def _load_collector_downloads():
+    """Liens de téléchargement du collecteur (menu Inventaire), lus depuis
+    version.json — même fichier et mêmes règles de résolution de chemin que
+    _load_app_version() ci-dessus. Chaque publication de release régénère ce
+    fichier avec des URLs pointant vers CETTE version (voir version.json et
+    verifier_version.py) : ces liens suivent donc automatiquement la version
+    de l'exécutable en cours, sans jamais nécessiter de mise à jour manuelle."""
+    try:
+        _vf = os.path.join(_resource_base, 'version.json')
+        with open(_vf, 'r', encoding='utf-8') as _f:
+            return json.load(_f).get('downloads', {})
+    except Exception:
+        return {}
+COLLECTOR_DOWNLOADS = _load_collector_downloads()
 _APP_DEMARRAGE = time.time()  # pour l'uptime affiché sur /apropos
 
 # ─── HELPER: Retry pour requêtes DB verrouillées ─────────────────────────────
@@ -465,6 +480,11 @@ def _generate_dynamic_css(auth_user_id=None):
 @app.context_processor
 def inject_csrf_token():
     return dict(csrf_token=_get_csrf_token())
+
+
+@app.context_processor
+def inject_collector_downloads():
+    return dict(collector_downloads=COLLECTOR_DOWNLOADS)
 
 
 @app.context_processor
@@ -1678,6 +1698,33 @@ def init_db():
     try:
         c.execute("ALTER TABLE baie_slots ADD COLUMN peripherique_id INTEGER")
     except: pass
+
+    # Ports (RJ45) d'un élément réseau de la baie — demandé : compter et
+    # numéroter les ports d'un switch/patch panel, lier chacun à un appareil/
+    # périphérique existant ou à un usage libre (téléphonie, alarme...).
+    try:
+        c.execute("ALTER TABLE baie_slots ADD COLUMN nb_ports INTEGER DEFAULT 0")
+    except: pass
+
+    # TABLE PORTS DE BAIE — un port par numéro, par slot. FOREIGN KEY sur
+    # slot_id sans ON DELETE CASCADE (SQLite ne l'applique de toute façon que
+    # si PRAGMA foreign_keys=ON est actif sur LA connexion courante, pas
+    # garanti partout dans ce fichier) : le nettoyage à la suppression d'un
+    # slot est fait explicitement (voir api_baie_slot, branche DELETE), même
+    # pattern que pour appareils/peripheriques/utilisateurs ailleurs dans
+    # init_db().
+    c.execute('''CREATE TABLE IF NOT EXISTS baie_slot_ports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slot_id INTEGER NOT NULL,
+        numero INTEGER NOT NULL,
+        appareil_id INTEGER,
+        peripherique_id INTEGER,
+        usage_libre TEXT DEFAULT '',
+        date_maj TEXT DEFAULT '',
+        FOREIGN KEY(slot_id) REFERENCES baie_slots(id),
+        FOREIGN KEY(appareil_id) REFERENCES appareils(id),
+        FOREIGN KEY(peripherique_id) REFERENCES peripheriques(id),
+        UNIQUE(slot_id, numero))''')
 
     # (ancienne migration col_index conservée pour compatibilité)
     cols_baie = [r[1] for r in conn.execute('PRAGMA table_info(baie_slots)').fetchall()]
@@ -3913,6 +3960,15 @@ def editer_appareil(id):
         'SELECT volume, identifiant, protection, chiffrement, date_maj '
         'FROM cles_recuperation WHERE appareil_id=? AND client_id=? ORDER BY volume',
         (id, cid)).fetchall()]
+    # Demandé : retrouver depuis la fiche appareil les ports de baie qui le
+    # référencent (un appareil peut être câblé sur plusieurs ports — deux
+    # cartes réseau, une carte de gestion...).
+    ports_baie = [row_to_dict(r) for r in conn.execute(
+        '''SELECT bp.numero, bs.id AS slot_id, bs.baie_nom, bs.position,
+                  bs.nom_custom, bs.type_equipement
+           FROM baie_slot_ports bp JOIN baie_slots bs ON bp.slot_id=bs.id
+           WHERE bp.appareil_id=? AND bs.client_id=?
+           ORDER BY bs.baie_nom, bs.position, bp.numero''', (id, cid)).fetchall()]
     conn.close()
     try:
         sw_sel = json.loads(a.get('logiciels') or '[]')
@@ -3924,6 +3980,7 @@ def editer_appareil(id):
 
     return render_template('form_appareil.html', appareil=a, documents=docs, action='Modifier',
                            cles_bitlocker=cles_bitlocker,
+                           ports_baie=ports_baie,
                            utilisateurs_noms=utilisateurs_noms,
                            utilisateurs_variantes=utilisateurs_variantes,
                            services_noms=services_noms,
@@ -3966,6 +4023,8 @@ def supprimer_appareil(id):
     conn.execute('DELETE FROM cles_recuperation WHERE appareil_id=? AND client_id=?', (id, cid))
     conn.execute('DELETE FROM collectes WHERE appareil_id=? AND client_id=?', (id, cid))
     conn.execute('UPDATE identifiants SET appareil_id=NULL WHERE appareil_id=? AND client_id=?', (id, cid))
+    conn.execute('''UPDATE baie_slot_ports SET appareil_id=NULL WHERE appareil_id=? AND slot_id IN
+        (SELECT id FROM baie_slots WHERE client_id=?)''', (id, cid))
     conn.execute('DELETE FROM appareils WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
     flash('Appareil supprimé', 'info')
@@ -5445,6 +5504,65 @@ def baie_brassage():
                            peripheriques=peripheriques,
                            photos=photos, clients=get_clients(), client_actif_id=cid)
 
+def _couleur_port(appareil_type=None, periph_categorie=None, usage_libre=None):
+    """Couleur d'un port selon ce qu'il vaut : même palette configurable que
+    les badges de type d'appareil/catégorie de périphérique ailleurs dans
+    l'app (type_color_*/periph_color_*, réglages utilisateur) — un port lié
+    à un serveur prend la même couleur que partout ailleurs où ce type est
+    représenté, pas une couleur inventée pour l'occasion."""
+    if appareil_type:
+        return cfg_get('type_color_' + type_css_filter(appareil_type), '#94a3b8')
+    if periph_categorie:
+        return cfg_get('periph_color_' + periph_color_key_filter(periph_categorie), '#94a3b8')
+    if usage_libre:
+        return '#f59e0b'
+    return '#334155'
+
+def _ports_avec_details(conn, slot_id):
+    """Ports d'un slot, enrichis du nom et de la couleur de leur cible."""
+    rows = conn.execute(
+        '''SELECT bp.numero, bp.appareil_id, bp.peripherique_id, bp.usage_libre,
+                  a.nom_machine, a.type_appareil, a.en_ligne,
+                  p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
+           FROM baie_slot_ports bp
+           LEFT JOIN appareils a ON bp.appareil_id=a.id
+           LEFT JOIN peripheriques p ON bp.peripherique_id=p.id
+           WHERE bp.slot_id=? ORDER BY bp.numero''', (slot_id,)).fetchall()
+    ports = []
+    for r in rows:
+        d = row_to_dict(r)
+        if d['appareil_id']:
+            nom = d['nom_machine'] or ('Appareil #%d' % d['appareil_id'])
+        elif d['peripherique_id']:
+            nom = ' '.join(filter(None, [d['p_categorie'], d['p_marque'], d['p_modele']])) or ('Périphérique #%d' % d['peripherique_id'])
+        else:
+            nom = d['usage_libre'] or ''
+        d['nom_cible'] = nom
+        d['couleur'] = _couleur_port(d.get('type_appareil'), d.get('p_categorie'), d.get('usage_libre'))
+        ports.append(d)
+    return ports
+
+def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None):
+    """Ajuste les lignes baie_slot_ports d'un slot à nb_ports (0-48) : crée
+    les numéros manquants, retire ceux au-delà. ports_existants (dict
+    numero -> (appareil_id, peripherique_id, usage_libre)), s'il est fourni,
+    permet de reporter les liaisons d'un ancien slot remplacé au même
+    emplacement (voir api_baie_ajouter_slot) au lieu de les perdre."""
+    nb_ports = min(48, max(0, int(nb_ports or 0)))
+    now = _utcnow().isoformat()
+    if ports_existants is None:
+        conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=? AND numero>?', (slot_id, nb_ports))
+        deja = {r[0] for r in conn.execute('SELECT numero FROM baie_slot_ports WHERE slot_id=?', (slot_id,)).fetchall()}
+        for numero in range(1, nb_ports + 1):
+            if numero not in deja:
+                conn.execute('INSERT INTO baie_slot_ports (slot_id,numero,date_maj) VALUES (?,?,?)', (slot_id, numero, now))
+    else:
+        for numero in range(1, nb_ports + 1):
+            ap, pe, us = ports_existants.get(numero, (None, None, ''))
+            conn.execute('''INSERT INTO baie_slot_ports (slot_id,numero,appareil_id,peripherique_id,usage_libre,date_maj)
+                VALUES (?,?,?,?,?,?)''', (slot_id, numero, ap, pe, us, now))
+    return nb_ports
+
 @app.route('/api/baie/slot', methods=['POST'])
 @login_required
 def api_baie_ajouter_slot():
@@ -5453,23 +5571,37 @@ def api_baie_ajouter_slot():
     conn = get_db()
     pos = f.get('position', 1)
     col = f.get('col_index', 0)
-    # Supprimer l'ancien slot à cette position+col si existe
+    # Supprimer l'ancien slot à cette position+col si existe — en conservant
+    # ses liaisons de ports (placerEquip() ré-envoie systématiquement un
+    # POST, y compris pour éditer un slot existant : sans ce report, chaque
+    # modification via le panneau "Placer l'équipement" effacerait tous les
+    # ports déjà affectés).
+    ancien = conn.execute('SELECT id FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col)).fetchone()
+    anciens_ports = None
+    if ancien:
+        anciens_ports = {r[0]: (r[1], r[2], r[3]) for r in conn.execute(
+            'SELECT numero, appareil_id, peripherique_id, usage_libre FROM baie_slot_ports WHERE slot_id=?', (ancien[0],)).fetchall()}
+        conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=?', (ancien[0],))
     conn.execute('DELETE FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col))
     baie_nom = f.get('baie_nom', 'Baie principale')
     conn.execute('''INSERT INTO baie_slots
-        (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,date_maj)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,nb_ports,date_maj)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (cid, pos, col, f.get('hauteur_u', 1),
          f.get('appareil_id') or None, f.get('peripherique_id') or None, f.get('nom_custom', ''),
          f.get('type_equipement', ''), f.get('couleur', '#1e3a5f'),
-         f.get('description', ''), baie_nom, _utcnow().isoformat()))
+         f.get('description', ''), baie_nom, 0, _utcnow().isoformat()))
     conn.commit()
     sid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+    nb_ports = _reconcilier_ports(conn, sid, f.get('nb_ports', 0), anciens_ports)
+    conn.execute('UPDATE baie_slots SET nb_ports=? WHERE id=?', (nb_ports, sid))
+    conn.commit()
     slot = row_to_dict(conn.execute(
         '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne,
                   p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
            FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
                              LEFT JOIN peripheriques p ON s.peripherique_id=p.id WHERE s.id=?''', (sid,)).fetchone() or {})
+    slot['ports'] = _ports_avec_details(conn, sid)
     conn.close()
     return jsonify(slot)
 
@@ -5479,23 +5611,52 @@ def api_baie_slot(id):
     cid = get_client_id()
     conn = get_db()
     if request.method == 'DELETE':
+        conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=?', (id,))
         conn.execute('DELETE FROM baie_slots WHERE id=? AND client_id=?', (id, cid))
         conn.commit(); conn.close()
         return jsonify({'ok': True})
     f = request.json or {}
+    nb_ports = min(48, max(0, int(f.get('nb_ports', 0) or 0)))
     conn.execute('''UPDATE baie_slots SET position=?,hauteur_u=?,appareil_id=?,peripherique_id=?,
-        nom_custom=?,type_equipement=?,couleur=?,description=?,date_maj=? WHERE id=? AND client_id=?''',
+        nom_custom=?,type_equipement=?,couleur=?,description=?,nb_ports=?,date_maj=? WHERE id=? AND client_id=?''',
         (f.get('position',1), f.get('hauteur_u',1), f.get('appareil_id') or None, f.get('peripherique_id') or None,
          f.get('nom_custom',''), f.get('type_equipement',''),
-         f.get('couleur','#1e3a5f'), f.get('description',''), _utcnow().isoformat(), id, cid))
+         f.get('couleur','#1e3a5f'), f.get('description',''), nb_ports, _utcnow().isoformat(), id, cid))
+    _reconcilier_ports(conn, id, nb_ports)
     conn.commit()
     slot = row_to_dict(conn.execute(
         '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne,
                   p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
            FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
                              LEFT JOIN peripheriques p ON s.peripherique_id=p.id WHERE s.id=?''', (id,)).fetchone() or {})
+    slot['ports'] = _ports_avec_details(conn, id)
     conn.close()
     return jsonify(slot)
+
+@app.route('/api/baie/slot/<int:slot_id>/port/<int:numero>', methods=['PUT'])
+@login_required
+def api_baie_port(slot_id, numero):
+    """Lie un port à un appareil, un périphérique, ou un usage libre —
+    mutuellement exclusifs, comme pour un slot entier (un port = une seule
+    cible à la fois)."""
+    cid = get_client_id()
+    conn = get_db()
+    slot = conn.execute('SELECT id FROM baie_slots WHERE id=? AND client_id=?', (slot_id, cid)).fetchone()
+    if not slot:
+        conn.close()
+        return jsonify({'error': 'Slot introuvable'}), 404
+    f = request.json or {}
+    appareil_id = f.get('appareil_id') or None
+    peripherique_id = f.get('peripherique_id') or None
+    usage_libre = f.get('usage_libre', '').strip() if not (appareil_id or peripherique_id) else ''
+    conn.execute('''UPDATE baie_slot_ports SET appareil_id=?,peripherique_id=?,usage_libre=?,date_maj=?
+        WHERE slot_id=? AND numero=?''',
+        (appareil_id, peripherique_id, usage_libre, _utcnow().isoformat(), slot_id, numero))
+    conn.commit()
+    ports = _ports_avec_details(conn, slot_id)
+    conn.close()
+    port = next((p for p in ports if p['numero'] == numero), None)
+    return jsonify(port or {'error': 'Port introuvable'}), (200 if port else 404)
 
 @app.route('/api/baie/slot/<int:id>/deplacer', methods=['POST'])
 @login_required
@@ -5506,7 +5667,12 @@ def api_baie_deplacer_slot(id):
     new_pos = f.get('position', 1)
     new_col = f.get('col_index', 0)
     conn = get_db()
-    # Supprimer l'éventuel occupant de la destination
+    # Supprimer l'éventuel occupant de la destination (et ses ports — c'est
+    # le slot déplacé, avec son propre id et ses propres ports intacts, qui
+    # prend cette place)
+    conn.execute('''DELETE FROM baie_slot_ports WHERE slot_id IN
+        (SELECT id FROM baie_slots WHERE client_id=? AND position=? AND col_index=? AND id!=?)''',
+        (cid, new_pos, new_col, id))
     conn.execute('DELETE FROM baie_slots WHERE client_id=? AND position=? AND col_index=? AND id!=?',
                  (cid, new_pos, new_col, id))
     conn.execute('UPDATE baie_slots SET position=?, col_index=? WHERE id=? AND client_id=?',
@@ -5517,8 +5683,34 @@ def api_baie_deplacer_slot(id):
                   p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
            FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
                              LEFT JOIN peripheriques p ON s.peripherique_id=p.id WHERE s.id=?''', (id,)).fetchone() or {})
+    slot['ports'] = _ports_avec_details(conn, id)
     conn.close()
     return jsonify(slot)
+
+@app.route('/api/baie', methods=['DELETE'])
+@login_required
+def api_baie_supprimer():
+    """Supprime une baie entière (tous ses emplacements) — pas un simple
+    « vider » côté client (toutVider(), qui garde la baie mais efface son
+    contenu) : ici la baie elle-même disparaît. Une baie n'existe
+    qu'implicitement, comme valeur distincte de baie_slots.baie_nom (voir
+    api_baie_slots ci-dessous) — la supprimer revient donc à supprimer tous
+    les emplacements qui portent ce nom, y compris les emplacements
+    "historiques" sans baie_nom explicite (NULL, traité comme 'Baie
+    principale' partout ailleurs dans ce fichier)."""
+    cid = get_client_id()
+    baie_nom = request.args.get('baie', 'Baie principale')
+    conn = get_db()
+    if baie_nom == 'Baie principale':
+        conn.execute('''DELETE FROM baie_slot_ports WHERE slot_id IN
+            (SELECT id FROM baie_slots WHERE client_id=? AND (baie_nom=? OR baie_nom IS NULL))''', (cid, baie_nom))
+        conn.execute("DELETE FROM baie_slots WHERE client_id=? AND (baie_nom=? OR baie_nom IS NULL)", (cid, baie_nom))
+    else:
+        conn.execute('''DELETE FROM baie_slot_ports WHERE slot_id IN
+            (SELECT id FROM baie_slots WHERE client_id=? AND baie_nom=?)''', (cid, baie_nom))
+        conn.execute('DELETE FROM baie_slots WHERE client_id=? AND baie_nom=?', (cid, baie_nom))
+    conn.commit(); conn.close()
+    return jsonify({'ok': True})
 
 @app.route('/api/baie/slots')
 @login_required
@@ -5533,6 +5725,9 @@ def api_baie_slots():
                              LEFT JOIN peripheriques p ON s.peripherique_id=p.id
            WHERE s.client_id=? AND (s.baie_nom=? OR (s.baie_nom IS NULL AND ?='Baie principale'))
            ORDER BY s.position, s.col_index''', (cid, baie_nom, baie_nom)).fetchall()]
+    for s in slots:
+        if s.get('nb_ports'):
+            s['ports'] = _ports_avec_details(conn, s['id'])
     parc = row_to_dict(conn.execute('SELECT baie_nb_u, switch_nb_unites FROM parc_general WHERE client_id=?', (cid,)).fetchone() or {})
     # Liste des baies existantes
     baies = [r[0] for r in conn.execute(
@@ -8800,12 +8995,20 @@ def editer_peripherique(id):
         'WHERE ip.peripherique_id=? AND i.statut != ? ORDER BY i.date_intervention DESC LIMIT 10',
         (id, 'archivee')).fetchall()]
 
+    ports_baie = [row_to_dict(r) for r in conn.execute(
+        '''SELECT bp.numero, bs.id AS slot_id, bs.baie_nom, bs.position,
+                  bs.nom_custom, bs.type_equipement
+           FROM baie_slot_ports bp JOIN baie_slots bs ON bp.slot_id=bs.id
+           WHERE bp.peripherique_id=? AND bs.client_id=?
+           ORDER BY bs.baie_nom, bs.position, bp.numero''', (id, cid)).fetchall()]
+
     conn.close()
     return render_template('form_peripherique.html', peripherique=p, documents=docs_per, action='Modifier',
                            appareils=appareils, utilisateurs=utilisateurs,
                            client=client, clients=get_clients(), client_actif_id=cid,
                            categories=get_liste_cached('categories_peripheriques'), pre_appareil_id='',
-                           linked_app_ids=linked_app_ids, interventions=interventions)
+                           linked_app_ids=linked_app_ids, interventions=interventions,
+                           ports_baie=ports_baie)
 
 @app.route('/peripherique/<int:id>/supprimer', methods=['POST'])
 @login_required
@@ -8823,6 +9026,8 @@ def supprimer_peripherique(id):
     # PRAGMA ci-dessus, nettoyage manuel nécessaire pour éviter les orphelins.
     conn.execute('UPDATE identifiants SET peripherique_id=NULL WHERE peripherique_id=? AND client_id=?', (id, cid))
     conn.execute('UPDATE baie_slots SET peripherique_id=NULL WHERE peripherique_id=? AND client_id=?', (id, cid))
+    conn.execute('''UPDATE baie_slot_ports SET peripherique_id=NULL WHERE peripherique_id=? AND slot_id IN
+        (SELECT id FROM baie_slots WHERE client_id=?)''', (id, cid))
     conn.execute('DELETE FROM peripheriques WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
     flash('Peripherique supprime', 'info')

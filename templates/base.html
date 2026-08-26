@@ -996,6 +996,16 @@
             <a href="/qrcode-labels" {% if ep == 'qrcode_labels' %}class="active"{% endif %}>
                 <span class="nd-icon">📋</span> Étiquettes QR
             </a>
+            {% if collector_downloads.get('collector_gui') %}
+            <a href="{{ collector_downloads['collector_gui'] }}" target="_blank" rel="noopener">
+                <span class="nd-icon">⬇</span> Collecteur — Windows
+            </a>
+            {% endif %}
+            {% if collector_downloads.get('collector_gui_macos_intel') %}
+            <a href="{{ collector_downloads['collector_gui_macos_intel'] }}" target="_blank" rel="noopener">
+                <span class="nd-icon">⬇</span> Collecteur — macOS Intel
+            </a>
+            {% endif %}
         </div>
     </div>
 

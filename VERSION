@@ -1,8 +1,59 @@
-PARCINFO_VERSION=2.18.61
+PARCINFO_VERSION=2.18.62
 RELEASE_DATE=2026-08-26
-BUILD_NUMBER=2026082604
+BUILD_NUMBER=2026082605
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.62 - Ports de baie de brassage + redimensionnement + corrections d'interface
+# Quatre chantiers distincts, signalés séparément.
+#
+# 1) Baie de brassage — redimensionnement à la souris : une poignée en bas
+# de chaque élément permet de glisser pour changer hauteur_u par pas de 1U
+# (jusqu'à 8U, sans dépasser le haut de la baie). Le déplacement par
+# glisser-déposer existant reste intact — draggable désactivé le temps du
+# geste de redimensionnement, sinon le navigateur démarrait un déplacement
+# natif dès que la souris bougeait dans la poignée.
+#
+# 2) Baie de brassage — ports Ethernet : chaque élément (switch, patch
+# panel...) peut désormais avoir jusqu'à 48 ports, numérotés, affichés
+# directement à l'intérieur de l'élément (pas dans un panneau séparé —
+# rendu possible par le redimensionnement du point 1, un élément à
+# beaucoup de ports peut être agrandi pour leur faire de la place). Chaque
+# port se lie à un appareil, un périphérique, ou un usage personnalisé
+# (texte libre : téléphonie, alarme, domotique...), un seul à la fois.
+# Couleur du port = celle déjà configurée pour le type d'appareil/catégorie
+# de périphérique lié (même palette que partout ailleurs dans l'app,
+# réglages utilisateur compris), ambre pour un usage personnalisé, gris
+# neutre si libre. Survol = infobulle sur la cible. Clic sur un port = met
+# en évidence, dans toute la baie affichée, tous les ports pointant vers la
+# même cible — repérer les liaisons entre appareils sans comparer les
+# infobulles une par une.
+# Nouvelle table baie_slot_ports (numero, appareil_id, peripherique_id,
+# usage_libre par slot). Nettoyage à la suppression géré à tous les
+# niveaux : port, slot entier, baie complète, appareil, périphérique — un
+# port jamais laissé orphelin. Report des liaisons de port préservé quand
+# un slot est remplacé à la même position (POST /api/baie/slot, utilisé à
+# chaque édition via le panneau "Placer l'équipement", pas seulement à la
+# création) — sans quoi chaque modification d'un champ du slot aurait
+# effacé tous les ports déjà affectés.
+# Nouvelle section "Câblage — Baie de brassage" sur la fiche appareil et la
+# fiche périphérique : retrouver depuis l'appareil/périphérique lui-même à
+# quel port de quelle baie il est câblé.
+#
+# 3) Menu Inventaire — liens de téléchargement du collecteur (Windows,
+# macOS Intel), lus depuis version.json (déjà régénéré à chaque release) :
+# toujours à jour avec la version en cours, sans code à retoucher à chaque
+# nouvelle version.
+#
+# 4) Correctif texte signalé sur la page Nouveau client : "Nouveau un
+# client"/"Nouveau le client" au lieu de "Nouveau client" (action='Nouveau'
+# suivi d'un article inséré à tort — "Nouveau" est un adjectif, pas un
+# verbe, il ne prend pas d'article). Même bug trouvé et corrigé sur 3
+# autres formulaires utilisant le même modèle (service, utilisateur,
+# contrat) ; les formulaires utilisant action='Ajouter'/'Créer' (appareil,
+# identifiant, périphérique, maintenance) n'ont pas ce problème, ces verbes
+# prenant naturellement un article.
+# Date: 26 août 2026
 
 # Version 2.18.61 - Correctif CI : la 2.18.60 n'avait jamais publié de release
 # Le tag v2.18.60 n'avait jamais produit de release publiée : le job "tests"

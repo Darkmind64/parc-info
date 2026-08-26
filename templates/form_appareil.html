@@ -707,6 +707,21 @@
         <div id="identifiants-app-list"><div style="color:var(--text-muted);font-size:.82rem;">Chargement...</div></div>
         <a href="/identifiant/nouveau" class="btn btn-primary btn-sm" style="margin-top:.6rem;">+ Ajouter un identifiant</a>
     </div>
+
+    <!-- PORTS DE BAIE LIES -->
+    {% if ports_baie %}
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Câblage — Baie de brassage</div>
+        <div style="display:flex;flex-direction:column;gap:.4rem;">
+        {% for p in ports_baie %}
+            <a href="/baie" style="display:flex;justify-content:space-between;align-items:center;padding:.4rem .6rem;background:var(--bg-secondary);border-radius:4px;text-decoration:none;color:var(--text-primary);font-size:.82rem;">
+                <span>🔌 Port {{ p.numero }} — {{ p.nom_custom or p.type_equipement or 'Élément #' ~ p.slot_id }}</span>
+                <span style="color:var(--text-muted);font-size:.75rem;">{{ p.baie_nom or 'Baie principale' }} · U{{ p.position }}</span>
+            </a>
+        {% endfor %}
+        </div>
+    </div>
+    {% endif %}
     {% endif %}
 
 

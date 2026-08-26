@@ -1,23 +1,25 @@
 {
-  "version": "2.18.61",
+  "version": "2.18.62",
   "release_date": "2026-08-26T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.61",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.62",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif CI : v2.18.60 n'avait jamais publié de release (test_parite_rapports.py en échec)",
+    "new_features": "Ports de baie de brassage (RJ45, liaison appareil/périphérique/usage) + redimensionnement à la souris + liens de téléchargement du collecteur + corrections d'interface",
     "improvements": [
-      "Le contenu fonctionnel est celui de la 2.18.60 (découverte réseau du collecteur, ports 3456/5010, nommage par machine) — cette version corrige uniquement un faux positif de test_parite_rapports.py qui empêchait la publication de la release précédente.",
-      "test_parite_rapports.py balaie collector_core.py par une heuristique de position (variables nommées « info » après le marqueur « # RAPPORT PDF ») pour vérifier la parité entre la fiche système et le rapport PDF. La nouvelle fonction de découverte réseau utilisait par coïncidence une variable locale « info » pour des données sans rapport (identité du serveur ParcInfo découvert, pas un champ collecté sur l'appareil) — renommée pour lever le faux positif."
+      "Baie de brassage : redimensionnement d'un élément à la souris (glisser une poignée, par pas de 1U).",
+      "Baie de brassage : chaque élément réseau peut désormais avoir jusqu'à 48 ports Ethernet, numérotés, affichés directement dans l'élément, colorés selon la cible liée (appareil/périphérique/usage personnalisé). Clic sur un port = surbrillance de tous les ports liés à la même cible dans la baie. Nouvelle section « Câblage — Baie de brassage » sur la fiche appareil/périphérique.",
+      "Menu Inventaire : liens de téléchargement du collecteur (Windows, macOS Intel), toujours à jour avec la version en cours.",
+      "Correctif texte : « Nouveau un client »/« Nouveau le client » et variantes similaires (service, utilisateur, contrat) corrigés en « Nouveau client », etc."
     ]
   },
   "checksums": {
@@ -28,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.61"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.62"
 }
