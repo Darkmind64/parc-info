@@ -1,8 +1,35 @@
-PARCINFO_VERSION=2.18.59
+PARCINFO_VERSION=2.18.60
 RELEASE_DATE=2026-08-26
-BUILD_NUMBER=2026082602
+BUILD_NUMBER=2026082603
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.60 - Découverte réseau du collecteur (ports 3456/5010, nommage par machine)
+# Demandé : que le collecteur détecte toutes les instances ParcInfo du réseau
+# local (ports 3456 ET 5010, pas seulement 3456) et propose de choisir celle
+# vers laquelle synchroniser, désignée par le nom de la machine qui l'héberge.
+# Le scan réseau du collecteur GUI existait déjà (bouton « Scan Réseau »,
+# mDNS + balayage de sous-réseau en repli) mais avait deux manques réels :
+# port 3456 uniquement (jamais 5010, le port hôte publié par
+# docker-compose.yml pour une instance conteneurisée — précisément le cas où
+# le repli par balayage est nécessaire, puisque mDNS ne traverse
+# généralement pas le réseau « bridge » de Docker), et les instances
+# trouvées par balayage (pas par mDNS) n'étaient identifiées que par leur
+# IP nue, aucune route serveur ne renvoyant le hostname en dehors du TXT
+# record mDNS.
+# Nouvelle route serveur publique GET /api/instance-info (hostname/version/
+# docker, sans authentification — même niveau d'exposition que le TXT
+# record mDNS qu'elle complète). scan_network_for_parcinfo() déplacé du
+# collecteur GUI vers collector_core.py (partagé, disponible pour un futur
+# usage CLI) et réécrit : scanne 3456 et 5010, parallélisé
+# (ThreadPoolExecutor, 64 workers — un /24 sur deux ports en séquentiel
+# aurait pris plusieurs minutes), interroge /api/instance-info sur chaque
+# port ouvert confirmé ParcInfo pour l'étiqueter par hostname comme une
+# instance trouvée par mDNS.
+# Portée limitée au collecteur GUI (le CLI garde son usage scripté actuel,
+# --server explicite ou mDNS silencieux — un picker interactif n'a pas sa
+# place dans un usage automatisé). Collecteur 3.16.
+# Date: 26 août 2026
 
 # Version 2.18.59 - Redémarrage propre après mise à jour + fermeture accessible à tous
 # Signalé par l'utilisateur : après une mise à jour (Windows comme macOS), un

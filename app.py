@@ -8340,6 +8340,32 @@ def api_device_info_wifi_credentials():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route('/api/instance-info', methods=['GET'])
+def api_instance_info():
+    """
+    Endpoint PUBLIC (aucune authentification) pour identifier cette instance.
+
+    Utilisé par le collecteur pour étiqueter les instances trouvées lors
+    d'un balayage réseau (port 3456/5010) par le nom de la machine qui les
+    héberge, plutôt que par leur seule adresse IP — le TXT record mDNS
+    (_register_mdns ci-dessous) expose déjà les mêmes informations sans
+    authentification à quiconque écoute sur le réseau, mais mDNS ne
+    traverse pas le réseau "bridge" de Docker : une instance conteneurisée
+    (typiquement exposée sur le port 5010, voir docker-compose.yml) n'est
+    alors visible qu'via un balayage de ports direct, qui a besoin de cette
+    route pour obtenir un nom lisible plutôt que l'IP nue.
+    """
+    try:
+        hostname = socket.gethostname()
+    except Exception:
+        hostname = ''
+    return jsonify({
+        'hostname': hostname,
+        'version': APP_VERSION,
+        'docker': bool(os.environ.get('RUNNING_IN_DOCKER')),
+    }), 200
+
+
 @app.route('/api/clients-public', methods=['GET'])
 def api_clients_public():
     """

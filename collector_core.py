@@ -13,6 +13,7 @@ PowerShell sur Windows, outils système sur macOS et Linux). reportlab n'est
 nécessaire que pour le rapport PDF, avec repli automatique sur HTML.
 """
 
+import concurrent.futures
 import io
 import json
 import os
@@ -39,7 +40,7 @@ __all__ = [
     'generate_pdf_report', 'generate_html_report',
     'get_api_payload', 'send_to_parcinfo', 'upload_report_to_parcinfo',
     'fetch_clients', 'is_elevated', 'get_mac_address', 'get_all_mac_addresses',
-    'discover_parcinfo_mdns',
+    'discover_parcinfo_mdns', 'scan_network_for_parcinfo', 'get_local_network_range',
     'get_wifi_profiles', 'send_wifi_credentials_to_parcinfo',
     'get_public_ip_info', 'get_dns_check_info', 'get_router_info',
 ]
@@ -49,7 +50,7 @@ IS_WINDOWS = sys.platform == 'win32'
 IS_MAC = sys.platform == 'darwin'
 IS_LINUX = sys.platform == 'linux'
 
-COLLECTOR_VERSION = '3.15'
+COLLECTOR_VERSION = '3.16'
 
 
 def _utcnow() -> datetime:
@@ -10850,3 +10851,145 @@ def discover_parcinfo_mdns(timeout=3):
         except Exception:
             pass
     return list(trouves.values())
+
+
+#: Ports ParcInfo sondés lors d'un balayage de sous-réseau. 3456 est le port
+#: natif par défaut ; 5010 est le port hôte publié par docker-compose.yml
+#: pour une instance conteneurisée (docker-compose.yml: "5010:3456") — le
+#: seul moyen de la détecter, puisque le réseau "bridge" de Docker (mode par
+#: défaut) ne relaie généralement pas le multicast mDNS que discover_
+#: parcinfo_mdns() utilise.
+SCAN_PORTS = (3456, 5010)
+
+
+def get_local_network_range():
+    """Détermine la plage de réseau local (ex: 192.168.1.0/24)."""
+    try:
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+
+        octets = local_ip.split('.')
+        if len(octets) == 4:
+            return '.'.join(octets[:3]), local_ip
+    except Exception:
+        pass
+    return None, None
+
+
+def _compter_clients(server_url, timeout):
+    """Nombre de clients visibles sur une instance — confirme au passage que
+    c'est bien du ParcInfo (l'endpoint existe et répond en JSON), pas un
+    service HTTP quelconque tombé sur le même port. None si injoignable ou
+    protégé par un jeton collecteur (pas encore saisi à ce stade du flux)."""
+    try:
+        with urlopen('%s/api/clients-public' % server_url, timeout=timeout) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            if isinstance(data, list):
+                return len(data)
+            if isinstance(data, dict):
+                return len((data.get('clients') or []))
+            return 0
+    except Exception:
+        return None
+
+
+def _instance_info(server_url, timeout):
+    """Interroge /api/instance-info (hostname/version/docker) pour étiqueter
+    une instance trouvée par balayage direct plutôt que par mDNS — seul ce
+    dernier expose ces informations sans passer par une requête HTTP dédiée
+    (TXT record). None si injoignable, pas du JSON, ou serveur antérieur à
+    l'ajout de cette route (endpoint absent, 404) : le hostname reste alors
+    inconnu et l'appelant retombe sur l'IP comme libellé."""
+    try:
+        with urlopen('%s/api/instance-info' % server_url, timeout=timeout) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            if isinstance(data, dict) and 'hostname' in data:
+                return data
+    except Exception:
+        pass
+    return None
+
+
+def scan_network_for_parcinfo(timeout=2, progress_callback=None):
+    """
+    Découvre les instances ParcInfo sur le réseau local — d'abord par mDNS
+    (rapide, donne le port réel, pas seulement le 3456 par défaut, et le
+    hostname directement via le TXT record), puis par balayage du
+    sous-réseau en repli pour ce que le mDNS ne trouve pas (typiquement une
+    instance Docker en réseau « bridge », voir SCAN_PORTS ci-dessus).
+
+    Le balayage de repli sonde chaque hôte du /24 sur SCAN_PORTS en
+    parallèle (ThreadPoolExecutor) — indispensable : à un hôte par seconde en
+    séquentiel, un /24 sur deux ports prendrait plusieurs minutes. Un port
+    ouvert confirmé ParcInfo (_compter_clients) est ensuite interrogé via
+    /api/instance-info pour en obtenir le hostname, comme pour une instance
+    trouvée par mDNS — sans quoi seule l'IP nue l'identifierait.
+
+    Retourne une liste de serveurs trouvés, dédupliqués par URL :
+    [{"url", "ip", "clients", "nom", "version", "docker"}, ...]
+    """
+    servers = {}
+
+    if progress_callback:
+        progress_callback("Recherche via mDNS...")
+    try:
+        for trouve in discover_parcinfo_mdns(timeout=3):
+            entree = dict(trouve)
+            compte = _compter_clients(entree['url'], timeout)
+            entree['clients'] = compte if compte is not None else 0
+            servers[entree['url']] = entree
+    except Exception:
+        pass
+
+    base, local_ip = get_local_network_range()
+    if not base:
+        return list(servers.values())
+
+    candidats = [ip for ip in
+                 ('%s.%d' % (base, i) for i in range(1, 255))
+                 if ip != local_ip]
+
+    def sonder(ip):
+        trouvailles = []
+        for port in SCAN_PORTS:
+            server_url = 'http://%s:%d' % (ip, port)
+            if server_url in servers:
+                continue  # déjà trouvé par mDNS, inutile de le sonder deux fois
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                ouvert = sock.connect_ex((ip, port)) == 0
+                sock.close()
+            except Exception:
+                ouvert = False
+            if not ouvert:
+                continue
+            clients_count = _compter_clients(server_url, timeout)
+            if clients_count is None:
+                continue  # port ouvert mais pas un ParcInfo (ou jeton requis)
+            info = _instance_info(server_url, timeout) or {}
+            trouvailles.append({
+                'url': server_url, 'ip': ip, 'clients': clients_count,
+                'nom': info.get('hostname') or ip,
+                'version': info.get('version') or '',
+                'docker': bool(info.get('docker')),
+            })
+        return trouvailles
+
+    if progress_callback:
+        progress_callback('Balayage de %s.0/24 (ports %s)...'
+                          % (base, '/'.join(str(p) for p in SCAN_PORTS)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
+        futures = {executor.submit(sonder, ip): ip for ip in candidats}
+        termines = 0
+        for future in concurrent.futures.as_completed(futures):
+            termines += 1
+            if progress_callback and termines % 25 == 0:
+                progress_callback('Balayage… %d/%d hôtes vérifiés' % (termines, len(candidats)))
+            try:
+                for entree in future.result():
+                    servers.setdefault(entree['url'], entree)
+            except Exception:
+                continue
+
+    return list(servers.values())
