@@ -12771,7 +12771,7 @@ def apropos():
     return render_template(
         'apropos.html',
         mode=mode,
-        peut_arreter=est_frozen and bool(user) and user.get('role') == 'admin',
+        peut_arreter=est_frozen and bool(user),
         turso_actif=turso_actif, sync_state=sync_state,
         host=request.host, url_racine=request.url_root,
         uptime_fmt=uptime_fmt,
@@ -12781,9 +12781,14 @@ def apropos():
 @app.route('/apropos/quitter', methods=['POST'])
 @login_required
 def apropos_quitter():
+    # Ouvert à tout compte connecté, pas seulement admin : sur un poste local
+    # (exécutable portable), c'est souvent le seul moyen de fermer proprement
+    # l'application — pas d'icône de barre système sur macOS (désactivée,
+    # voir launcher.run_systray), pas toujours d'icône dans le Dock non plus
+    # (signalé en usage réel, macOS Intel). L'auteur est tracé.
     user = get_auth_user()
-    if not (user and user.get('role') == 'admin'):
-        return jsonify({'ok': False, 'error': 'Réservé aux administrateurs'}), 403
+    if not user:
+        return jsonify({'ok': False, 'error': 'Non authentifié'}), 403
     if _mode_execution() not in ('windows', 'macos'):
         return jsonify({'ok': False, 'error': "Indisponible hors exécutable (Docker/sources)"}), 400
     logger.info("Arrêt de ParcInfo demandé par %s", user['login'])
@@ -12795,9 +12800,10 @@ def apropos_quitter():
 @app.route('/apropos/redemarrer', methods=['POST'])
 @login_required
 def apropos_redemarrer():
+    # Voir apropos_quitter ci-dessus : ouvert à tout compte connecté.
     user = get_auth_user()
-    if not (user and user.get('role') == 'admin'):
-        return jsonify({'ok': False, 'error': 'Réservé aux administrateurs'}), 403
+    if not user:
+        return jsonify({'ok': False, 'error': 'Non authentifié'}), 403
     if _mode_execution() not in ('windows', 'macos'):
         return jsonify({'ok': False, 'error': "Indisponible hors exécutable (Docker/sources)"}), 400
     logger.info("Redémarrage de ParcInfo demandé par %s", user['login'])

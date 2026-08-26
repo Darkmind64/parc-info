@@ -1,8 +1,38 @@
-PARCINFO_VERSION=2.18.58
+PARCINFO_VERSION=2.18.59
 RELEASE_DATE=2026-08-26
-BUILD_NUMBER=2026082601
+BUILD_NUMBER=2026082602
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.59 - Redémarrage propre après mise à jour + fermeture accessible à tous
+# Signalé par l'utilisateur : après une mise à jour (Windows comme macOS), un
+# nouvel onglet de navigateur s'ouvrait sur la nouvelle version tandis que
+# l'ancien onglet — resté sur la bannière de mise à jour — n'était jamais
+# fermé ni rechargé, laissant un onglet périmé à fermer soi-même.
+# Cause : launcher.py ouvrait systématiquement un onglet au démarrage, y
+# compris lors de la relance automatique déclenchée par une mise à jour, et
+# le JS de la bannière se contentait d'un message passif ("rechargez la page
+# dans quelques secondes"), jamais suivi d'action — pire, en cas de coupure
+# réseau pendant le redémarrage, il abandonnait le suivi pendant 15 minutes.
+# Corrigé : un signal (PARCINFO_APRES_MAJ), posé par les deux mécanismes de
+# relance de mise à jour (applique_maj._relancer côté Windows,
+# update_checker._install_macos côté macOS), indique à launcher.py qu'il
+# s'agit d'un redémarrage de mise à jour — aucun nouvel onglet n'est alors
+# ouvert. L'onglet existant sonde activement le retour du serveur (toutes
+# les 1,5 s) puis se recharge automatiquement dès que la nouvelle version
+# répond. Filet de sécurité ajouté côté Windows (PARCINFO_RELANCE_MAJ, déjà
+# utilisé sur macOS) pour que la nouvelle instance reprenne bien le même
+# port que l'ancienne — condition nécessaire pour que l'onglet existant
+# retrouve le bon serveur.
+# Signalé dans la foulée : sur macOS, où aucune icône de barre système n'est
+# disponible (désactivée pour incompatibilité AppKit) et où l'icône du Dock
+# peut manquer après une mise à jour (relance directe de l'exécutable,
+# contournement nécessaire d'un bug réel de translocation Gatekeeper), le
+# seul moyen de fermer proprement l'application — le bouton "Quitter" de la
+# page À propos — était réservé aux comptes administrateur. Sur un poste
+# local à un seul utilisateur, un compte non-admin n'avait alors aucun
+# moyen simple de quitter l'application. Ouvert à tout compte connecté.
+# Date: 26 août 2026
 
 # Version 2.18.58 - Correctif critique : colonnes manquantes sur une installation neuve
 # Signalé par l'utilisateur juste après une nouvelle installation : erreur de

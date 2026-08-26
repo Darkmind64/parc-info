@@ -108,16 +108,21 @@ else:
 def get_port(preferred=3456):
     """Essaie le port préféré (3456), sinon un port libre.
 
-    PARCINFO_RELANCE_MAJ (posé uniquement par la relance macOS après mise à
-    jour, voir update_checker._install_macos) : l'ancienne instance garde
-    volontairement le port préféré le temps de sa propre vérification avant
-    de s'arrêter (jusqu'à ~12 s, voir _install_macos) — sans patience ici,
-    la nouvelle version basculait aussitôt sur un port au hasard et y
-    restait bloquée pour le reste de son exécution, l'ancienne n'étant
-    plus là ensuite pour le libérer une seconde fois. Signalé en usage réel
-    (macOS Intel). Un lancement normal, lui, bascule tout de suite comme
-    avant — utile quand plusieurs instances légitimes (Docker/PC/Mac)
-    tournent en parallèle et se partagent volontairement des ports distincts.
+    PARCINFO_RELANCE_MAJ (posé par la relance après mise à jour, voir
+    update_checker._install_macos et applique_maj._relancer) : l'ancienne
+    instance garde volontairement le port préféré le temps de sa propre
+    vérification avant de s'arrêter (jusqu'à ~12 s, voir _install_macos) —
+    sans patience ici, la nouvelle version basculait aussitôt sur un port au
+    hasard et y restait bloquée pour le reste de son exécution, l'ancienne
+    n'étant plus là ensuite pour le libérer une seconde fois. Signalé en
+    usage réel (macOS Intel) ; posé aussi côté Windows depuis que la relance
+    de mise à jour ne rouvre plus systématiquement un onglet de navigateur
+    (PARCINFO_APRES_MAJ, voir main() plus bas) — sans ce filet, un
+    changement de port entre les deux instances laisserait l'onglet resté
+    ouvert incapable de jamais retrouver le nouveau serveur. Un lancement
+    normal, lui, bascule tout de suite comme avant — utile quand plusieurs
+    instances légitimes (Docker/PC/Mac) tournent en parallèle et se
+    partagent volontairement des ports distincts.
     """
     tentatives = 30 if os.environ.get('PARCINFO_RELANCE_MAJ') else 1
     for i in range(tentatives):
@@ -320,11 +325,17 @@ def main():
     # Initialiser la DB (utilise maintenant les chemins inicializados)
     flask_app.init_db()
 
-    # Ouvrir le navigateur après démarrage de Flask
-    def open_browser():
-        time.sleep(1.8)
-        webbrowser.open(url)
-    threading.Thread(target=open_browser, daemon=True).start()
+    # Ouvrir le navigateur après démarrage de Flask — sauf s'il s'agit d'une
+    # relance de mise à jour (PARCINFO_APRES_MAJ, posé par applique_maj._relancer
+    # et update_checker._install_macos) : l'onglet resté ouvert sur la bannière
+    # de mise à jour se recharge alors de lui-même une fois ce nouveau serveur
+    # prêt (voir static/js/update_notifier.js) — ouvrir un second onglet en plus
+    # ne ferait que laisser le premier, périmé, traîner sans être fermé.
+    if not os.environ.get('PARCINFO_APRES_MAJ'):
+        def open_browser():
+            time.sleep(1.8)
+            webbrowser.open(url)
+        threading.Thread(target=open_browser, daemon=True).start()
 
     # Systray (optionnel — désactivé sur macOS)
     threading.Thread(target=run_systray, args=(url, logger), daemon=True).start()

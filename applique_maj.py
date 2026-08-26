@@ -38,15 +38,16 @@ INDICATEUR = '--appliquer-maj'
 #: CERTIFICATE_VERIFY_FAILED sur la sync Turso juste après une mise à jour
 #: macOS — constaté en usage réel. launcher.py se protège désormais aussi de
 #: son côté (affectation directe plutôt que setdefault), mais autant ne pas
-#: transmettre une valeur qu'on sait fausse. PARCINFO_RELANCE_MAJ, lui, n'a
-#: de sens que pour LE lancement direct qui l'a posé (voir
-#: update_checker._install_macos et launcher.get_port) — ne doit pas se
-#: propager tel quel si ce même process relance à son tour une génération
-#: suivante (celle-ci le repose explicitement si besoin).
+#: transmettre une valeur qu'on sait fausse. PARCINFO_RELANCE_MAJ et
+#: PARCINFO_APRES_MAJ, eux, n'ont de sens que pour LE lancement direct qui
+#: les a posés (voir update_checker._install_macos, _relancer ci-dessous et
+#: launcher.get_port/main) — ne doivent pas se propager tel quel si ce même
+#: process relance à son tour une génération suivante (celle-ci les repose
+#: explicitement si besoin).
 _VARIABLES_LANCEUR = (
     '_MEIPASS', '_MEIPASS2', '_PYI_APPLICATION_HOME_DIR',
     '_PYI_ARCHIVE_FILE', '_PYI_PARENT_PROCESS_LEVEL', '_PYI_SPLASH_IPC',
-    'SSL_CERT_FILE', 'PARCINFO_RELANCE_MAJ',
+    'SSL_CERT_FILE', 'PARCINFO_RELANCE_MAJ', 'PARCINFO_APRES_MAJ',
 )
 
 #: Durée maximale d'attente de la sortie de l'application.
@@ -223,11 +224,25 @@ def appliquer(arguments):
 
 
 def _relancer(cible, tracer):
-    """Relance l'application, dans un environnement propre."""
+    """Relance l'application, dans un environnement propre.
+
+    PARCINFO_APRES_MAJ signale à launcher.py qu'il s'agit d'une relance de
+    mise à jour, pas d'un premier lancement : inutile d'ouvrir un nouvel
+    onglet de navigateur, l'onglet déjà ouvert sur la bannière de mise à
+    jour se recharge de lui-même une fois le nouveau serveur prêt (voir
+    static/js/update_notifier.js). PARCINFO_RELANCE_MAJ (déjà utilisé côté
+    macOS, voir update_checker._install_macos) donne ici à get_port() la
+    même patience à reprendre le port préféré — nécessaire maintenant qu'on
+    ne compte plus sur un nouvel onglet pour rattraper un port différent si
+    l'ancien processus tenait encore la place un court instant.
+    """
+    env = environnement_propre()
+    env['PARCINFO_APRES_MAJ'] = '1'
+    env['PARCINFO_RELANCE_MAJ'] = '1'
     try:
         subprocess.Popen(
             [cible], cwd=os.path.dirname(cible) or None,
-            env=environnement_propre(), close_fds=True,
+            env=env, close_fds=True,
             creationflags=getattr(subprocess, 'DETACHED_PROCESS', 0))
         tracer('application relancée')
     except Exception as e:

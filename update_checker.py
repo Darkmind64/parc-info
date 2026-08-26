@@ -516,8 +516,15 @@ class UpdateChecker:
             # signal, la nouvelle bascule aussitôt sur un port au hasard et y
             # reste bloquée pour le reste de son exécution. Signalé en usage
             # réel (macOS Intel).
+            # PARCINFO_APRES_MAJ : signale à launcher.py qu'il s'agit d'une
+            # relance de mise à jour, pas d'un premier lancement — inutile
+            # d'ouvrir un nouvel onglet de navigateur en plus de celui déjà
+            # ouvert sur la bannière de mise à jour, qui se recharge de
+            # lui-même une fois ce nouveau serveur prêt (voir
+            # static/js/update_notifier.js).
             env_relance = applique_maj.environnement_propre()
             env_relance['PARCINFO_RELANCE_MAJ'] = '1'
+            env_relance['PARCINFO_APRES_MAJ'] = '1'
             processus = subprocess.Popen(
                 [str(executable_cible)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

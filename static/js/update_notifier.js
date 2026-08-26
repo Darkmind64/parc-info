@@ -108,7 +108,7 @@
             html = '<div style="' + styleBandeau('var(--accent-green)') + '">'
                  + '<strong>✓ Version ' + echapper(etat.version_disponible) + ' installée</strong>'
                  + '<span style="color:var(--text-secondary);">'
-                 + 'ParcInfo redémarre — rechargez la page dans quelques secondes.</span>'
+                 + 'ParcInfo redémarre — cette page se rechargera automatiquement.</span>'
                  + '</div>';
         } else if (etat.phase === 'erreur' && etat.erreur) {
             html = '<div style="' + styleBandeau('var(--accent-red)') + '">'
@@ -255,18 +255,62 @@
         etatCourant = etat;
         majPastille(etat);
         rendre(etat);
+        if (etat.phase === 'pret') {
+            // Le serveur actuel va s'arrêter d'un instant à l'autre pour
+            // laisser la place au nouveau (voir UpdateNotifier._arreter_pour_
+            // redemarrage côté Python) — inutile de continuer à l'interroger,
+            // on bascule sur l'attente active du redémarrage.
+            surveillerRedemarrage();
+            return;
+        }
         // Pendant une installation, on suit de près ; sinon on se fait oublier.
         var actif = etat.phase === 'telechargement' || etat.phase === 'installation';
         planifier(actif ? INTERVALLE_TRAVAIL : INTERVALLE_NORMAL);
     }
 
     function interroger() {
+        var enCoursAvant = etatCourant
+            && (etatCourant.phase === 'installation' || etatCourant.phase === 'pret');
         fetch('/api/updates/status', { credentials: 'same-origin' })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (etat) {
                 if (etat) { appliquer(etat); } else { planifier(INTERVALLE_NORMAL); }
             })
-            .catch(function () { planifier(INTERVALLE_NORMAL); });
+            .catch(function () {
+                if (enCoursAvant) {
+                    // La requête échoue probablement parce que le serveur vient
+                    // de s'arrêter pour redémarrer sur la nouvelle version —
+                    // pas la peine d'attendre 15 minutes pour le redécouvrir.
+                    surveillerRedemarrage();
+                } else {
+                    planifier(INTERVALLE_NORMAL);
+                }
+            });
+    }
+
+    // ── Attente active du redémarrage (après une mise à jour) ─────────────────
+    //
+    // launcher.py n'ouvre pas de nouvel onglet quand il redémarre pour une mise
+    // à jour (PARCINFO_APRES_MAJ) : c'est cet onglet-ci, déjà ouvert sur la
+    // bannière, qui doit se recharger de lui-même une fois le nouveau serveur
+    // prêt — sans ça l'utilisateur se retrouve avec un onglet mort à fermer à
+    // la main, et potentiellement un second onglet en plus si jamais le port
+    // change entre les deux instances.
+
+    var redemarrageEnCours = false;
+
+    function surveillerRedemarrage() {
+        if (redemarrageEnCours) { return; }
+        redemarrageEnCours = true;
+        if (minuteur) { clearTimeout(minuteur); }
+        var essai = function () {
+            fetch(window.location.href, { cache: 'no-store', credentials: 'same-origin' })
+                .then(function (r) {
+                    if (r.ok) { window.location.reload(); } else { setTimeout(essai, 1500); }
+                })
+                .catch(function () { setTimeout(essai, 1500); });
+        };
+        setTimeout(essai, 1500);
     }
 
     function afficherRefus(message) {
