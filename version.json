@@ -1,24 +1,23 @@
 {
-  "version": "2.18.60",
+  "version": "2.18.61",
   "release_date": "2026-08-26T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.60/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.60/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.60/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.60",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.60/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.60/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.60/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.60/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.60/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.61",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.61/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Découverte réseau du collecteur GUI : ports 3456 et 5010, instances nommées par machine (collecteur 3.16)",
+    "new_features": "Correctif CI : v2.18.60 n'avait jamais publié de release (test_parite_rapports.py en échec)",
     "improvements": [
-      "Le scan réseau du collecteur GUI (bouton « Scan Réseau ») sonde désormais aussi le port 5010 (port hôte publié par docker-compose.yml pour une instance conteneurisée), en plus du port 3456 natif.",
-      "Nouvelle route serveur publique /api/instance-info (hostname/version/docker, sans authentification) : les instances trouvées par balayage direct — typiquement Docker, où mDNS ne passe pas le réseau bridge — sont désormais nommées par la machine qui les héberge, plus seulement par leur IP.",
-      "Le balayage de sous-réseau est désormais parallélisé (auparavant séquentiel, plusieurs minutes pour un seul port sur un /24) — nettement plus rapide avec les deux ports à sonder."
+      "Le contenu fonctionnel est celui de la 2.18.60 (découverte réseau du collecteur, ports 3456/5010, nommage par machine) — cette version corrige uniquement un faux positif de test_parite_rapports.py qui empêchait la publication de la release précédente.",
+      "test_parite_rapports.py balaie collector_core.py par une heuristique de position (variables nommées « info » après le marqueur « # RAPPORT PDF ») pour vérifier la parité entre la fiche système et le rapport PDF. La nouvelle fonction de découverte réseau utilisait par coïncidence une variable locale « info » pour des données sans rapport (identité du serveur ParcInfo découvert, pas un champ collecté sur l'appareil) — renommée pour lever le faux positif."
     ]
   },
   "checksums": {
@@ -29,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.60"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.61"
 }

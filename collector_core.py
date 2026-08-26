@@ -10967,12 +10967,18 @@ def scan_network_for_parcinfo(timeout=2, progress_callback=None):
             clients_count = _compter_clients(server_url, timeout)
             if clients_count is None:
                 continue  # port ouvert mais pas un ParcInfo (ou jeton requis)
-            info = _instance_info(server_url, timeout) or {}
+            # Nommée "identite" et non "info" : test_parite_rapports.py balaie
+            # tout `info.get('...')` situé après le marqueur "# RAPPORT PDF"
+            # de ce fichier pour vérifier la parité fiche/PDF — une variable
+            # nommée "info" ici serait faussement prise pour un champ collecté
+            # côté appareil (hostname/version/docker n'ont rien à voir avec la
+            # fiche système, ce sont ceux du SERVEUR ParcInfo découvert).
+            identite = _instance_info(server_url, timeout) or {}
             trouvailles.append({
                 'url': server_url, 'ip': ip, 'clients': clients_count,
-                'nom': info.get('hostname') or ip,
-                'version': info.get('version') or '',
-                'docker': bool(info.get('docker')),
+                'nom': identite.get('hostname') or ip,
+                'version': identite.get('version') or '',
+                'docker': bool(identite.get('docker')),
             })
         return trouvailles
 

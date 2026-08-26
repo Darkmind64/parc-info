@@ -1,8 +1,24 @@
-PARCINFO_VERSION=2.18.60
+PARCINFO_VERSION=2.18.61
 RELEASE_DATE=2026-08-26
-BUILD_NUMBER=2026082603
+BUILD_NUMBER=2026082604
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.61 - Correctif CI : la 2.18.60 n'avait jamais publié de release
+# Le tag v2.18.60 n'avait jamais produit de release publiée : le job "tests"
+# de build-release.yml échouait sur test_parite_rapports.py, qui compare par
+# une heuristique de position les clés lues par la fiche système et par le
+# rapport PDF (balayage de collector_core.py après le marqueur « # RAPPORT
+# PDF », toute variable locale nommée `info.get('...')` y est considérée
+# comme un champ de rapport). La nouvelle fonction de découverte réseau du
+# collecteur (2.18.60) utilisait par coïncidence une variable locale `info`
+# pour des données sans rapport avec la fiche système — l'identité du
+# SERVEUR ParcInfo découvert (hostname/version/docker), pas un champ
+# collecté sur l'appareil de l'utilisateur. Renommée en `identite` : le test
+# repasse, sans changement de comportement.
+# Aucun autre changement fonctionnel par rapport à la 2.18.60 (contenu
+# décrit ci-dessous, jamais réellement publié).
+# Date: 26 août 2026
 
 # Version 2.18.60 - Découverte réseau du collecteur (ports 3456/5010, nommage par machine)
 # Demandé : que le collecteur détecte toutes les instances ParcInfo du réseau
