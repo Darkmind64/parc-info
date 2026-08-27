@@ -1,25 +1,24 @@
 {
-  "version": "2.18.62",
-  "release_date": "2026-08-26T00:00:00.000000",
+  "version": "2.18.63",
+  "release_date": "2026-08-27T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.62",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.62/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.63/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.63/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.63/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.63",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.63/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.63/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.63/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.63/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.63/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Ports de baie de brassage (RJ45, liaison appareil/périphérique/usage) + redimensionnement à la souris + liens de téléchargement du collecteur + corrections d'interface",
+    "new_features": "Baie de brassage : ports agrandis avec ping en direct, élément Bandeau RJ (dispatch prises murales) et liaison port-à-port à la souris (câblage switch/routeur)",
     "improvements": [
-      "Baie de brassage : redimensionnement d'un élément à la souris (glisser une poignée, par pas de 1U).",
-      "Baie de brassage : chaque élément réseau peut désormais avoir jusqu'à 48 ports Ethernet, numérotés, affichés directement dans l'élément, colorés selon la cible liée (appareil/périphérique/usage personnalisé). Clic sur un port = surbrillance de tous les ports liés à la même cible dans la baie. Nouvelle section « Câblage — Baie de brassage » sur la fiche appareil/périphérique.",
-      "Menu Inventaire : liens de téléchargement du collecteur (Windows, macOS Intel), toujours à jour avec la version en cours.",
-      "Correctif texte : « Nouveau un client »/« Nouveau le client » et variantes similaires (service, utilisateur, contrat) corrigés en « Nouveau client », etc."
+      "Baie de brassage : ports Ethernet affichés bien plus grands (grille 24 colonnes, 80% de la largeur de l'élément), bouton « 📡 Ping » qui teste tous les appareils reliés et affiche un voyant vert sur chaque port qui répond.",
+      "Baie de brassage : nouvel élément « Bandeau RJ » (1U, 24 ports) pour représenter le dispatch vers les prises réseau murales, chaque port assignable à une pièce du site (autocomplete sur les localisations existantes).",
+      "Baie de brassage : liaison port-à-port (câblage physique switch<->routeur, etc.) — bouton « 🔗 Lier des ports », clic sur deux ports successifs pour les relier ; survol ou clic sur un port lié met en évidence les deux ports du câble et indique le lien dans la bulle."
     ]
   },
   "checksums": {
@@ -30,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.62"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.63"
 }

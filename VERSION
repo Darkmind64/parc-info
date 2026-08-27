@@ -1,8 +1,36 @@
-PARCINFO_VERSION=2.18.62
-RELEASE_DATE=2026-08-26
-BUILD_NUMBER=2026082605
+PARCINFO_VERSION=2.18.63
+RELEASE_DATE=2026-08-27
+BUILD_NUMBER=2026082701
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.63 - Baie de brassage : ports agrandis + ping, Bandeau RJ, liaison port-à-port
+# Trois chantiers sur la baie de brassage, dans la continuité de la 2.18.62.
+#
+# 1) Ports agrandis + ping : les ports Ethernet d'un élément s'affichent
+# désormais sur une grille de 24 colonnes tenant 80% de la largeur de
+# l'élément (justifiée à gauche), largement plus lisibles qu'avant. Un
+# bouton « 📡 Ping » dans la partie droite restante teste tous les appareils
+# distincts reliés aux ports de l'élément et affiche un voyant vert en haut
+# à gauche du port si l'appareil répond.
+#
+# 2) Élément Bandeau RJ : nouveau type d'élément (1U, 24 ports par défaut,
+# bouton dédié « + Bandeau RJ ») pour représenter le dispatch vers les
+# prises réseau murales. Chaque port s'assigne à une pièce du site (réutilise
+# le champ usage_libre existant, pas de nouvelle colonne), avec autocomplete
+# sur les localisations déjà utilisées par les appareils/périphériques, et
+# libellés contextuels (« Pièce » au lieu de « Usage » sur ce type d'élément).
+#
+# 3) Liaison port-à-port : bouton « 🔗 Lier des ports » puis clic successif
+# sur deux ports pour les relier (câblage physique switch<->routeur, etc.).
+# Le lien est bidirectionnel (chaque port référence l'autre) et coloré
+# distinctement (indigo). Survol ou clic sur un port lié met en évidence les
+# deux ports du câble dans toute la baie et indique le lien dans la bulle
+# (« Relié à Port X — Nom élément »). Toute réaffectation d'un port lié
+# (appareil, périphérique, usage, ou remise à « Libre ») détache proprement
+# le partenaire ; la suppression d'un élément, la réduction de son nombre de
+# ports, ou son remplacement à la même position (édition via le panneau)
+# ne laissent jamais un lien pointer vers un port qui n'existe plus.
 
 # Version 2.18.62 - Ports de baie de brassage + redimensionnement + corrections d'interface
 # Quatre chantiers distincts, signalés séparément.

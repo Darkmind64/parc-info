@@ -5,7 +5,9 @@ Couvre : création des N lignes de port à la pose d'un élément, liaison
 d'un port à un appareil/périphérique/usage libre, couleur résolue côté
 serveur, report des liaisons quand un slot est remplacé à la même position
 (POST /api/baie/slot), nettoyage à la suppression (slot entier, appareil,
-périphérique).
+périphérique), et le lien port-à-port (câblage physique switch<->routeur,
+etc.) : création bidirectionnelle, détachement à la réassignation ou à la
+suppression, report au remplacement d'un slot à la même position.
 """
 import json
 
@@ -164,6 +166,168 @@ def test_suppression_appareil_libere_le_port_sans_supprimer_le_slot(client, make
     port = conn.execute(
         'SELECT appareil_id FROM baie_slot_ports WHERE slot_id=? AND numero=1', (slot['id'],)).fetchone()
     assert port[0] is None, "le port aurait dû être libéré, pas laissé orphelin"
+
+
+def test_lien_port_a_port_bidirectionnel(client, make_client, make_user):
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+
+    sw = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale',
+        'type_equipement': 'Switch', 'nom_custom': 'Switch A', 'nb_ports': 24,
+    }).get_json()
+    rt = client.post('/api/baie/slot', json={
+        'position': 2, 'col_index': 0, 'baie_nom': 'Baie principale',
+        'type_equipement': 'Routeur', 'nom_custom': 'Routeur B', 'nb_ports': 4,
+    }).get_json()
+
+    r = client.post('/api/baie/lien-port', json={
+        'slot1_id': sw['id'], 'numero1': 12, 'slot2_id': rt['id'], 'numero2': 1,
+    })
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data['port1']['lie_slot_id'] == rt['id']
+    assert data['port1']['lie_port_numero'] == 1
+    assert data['port1']['nom_cible'] == 'Port 1 — Routeur B'
+    assert data['port2']['lie_slot_id'] == sw['id']
+    assert data['port2']['lie_port_numero'] == 12
+    assert data['port2']['nom_cible'] == 'Port 12 — Switch A'
+    # Couleur dédiée au lien port-à-port, distincte du port libre/usage.
+    assert data['port1']['couleur'] == data['port2']['couleur'] == '#818cf8'
+
+
+def test_lien_port_refuse_meme_port(client, make_client, make_user):
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+    sw = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale', 'nb_ports': 4,
+    }).get_json()
+    r = client.post('/api/baie/lien-port', json={
+        'slot1_id': sw['id'], 'numero1': 1, 'slot2_id': sw['id'], 'numero2': 1,
+    })
+    assert r.status_code == 400
+
+
+def test_lien_port_detache_a_la_reassignation(client, make_client, make_user, make_appareil):
+    """Réaffecter un port lié (appareil, ou « — Libre — ») doit détacher
+    automatiquement le partenaire, sans le laisser pointer dans le vide."""
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+    app_id = make_appareil(cid, nom_machine='PC-CABLE')
+
+    sw = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale', 'nb_ports': 4,
+    }).get_json()
+    rt = client.post('/api/baie/slot', json={
+        'position': 2, 'col_index': 0, 'baie_nom': 'Baie principale', 'nb_ports': 4,
+    }).get_json()
+    client.post('/api/baie/lien-port', json={
+        'slot1_id': sw['id'], 'numero1': 1, 'slot2_id': rt['id'], 'numero2': 1,
+    })
+
+    r = client.put(f"/api/baie/slot/{sw['id']}/port/1", json={'appareil_id': app_id})
+    port1 = r.get_json()
+    assert port1['appareil_id'] == app_id
+    assert port1['lie_slot_id'] is None
+
+    r2 = client.put(f"/api/baie/slot/{rt['id']}/port/1", json={})
+    port2 = r2.get_json()
+    # Le port en face doit avoir été détaché par la réaffectation du premier,
+    # PAS par cet appel — mais on vérifie ici l'état final des deux côtés.
+    assert port2['lie_slot_id'] is None
+    assert port2['appareil_id'] is None
+
+
+def test_lien_port_detache_a_la_suppression_slot(client, make_client, make_user, conn):
+    """Supprimer un des deux éléments liés doit libérer le port restant côté
+    survivant (pas de lien à sens unique vers un slot qui n'existe plus)."""
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+
+    sw = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale', 'nb_ports': 24,
+    }).get_json()
+    rt = client.post('/api/baie/slot', json={
+        'position': 2, 'col_index': 0, 'baie_nom': 'Baie principale', 'nb_ports': 4,
+    }).get_json()
+    client.post('/api/baie/lien-port', json={
+        'slot1_id': sw['id'], 'numero1': 12, 'slot2_id': rt['id'], 'numero2': 1,
+    })
+
+    r = client.delete(f"/api/baie/slot/{rt['id']}")
+    assert r.status_code == 200
+
+    row = conn.execute(
+        'SELECT lie_slot_id, lie_port_numero FROM baie_slot_ports WHERE slot_id=? AND numero=12',
+        (sw['id'],)).fetchone()
+    assert row[0] is None and row[1] is None
+
+
+def test_lien_port_detache_a_la_reduction_nb_ports(client, make_client, make_user, conn):
+    """Réduire nb_ports (PUT /api/baie/slot/<id>) en dessous du numéro d'un
+    port lié doit détacher le partenaire avant de supprimer la ligne."""
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+
+    sw = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale', 'nb_ports': 24,
+    }).get_json()
+    rt = client.post('/api/baie/slot', json={
+        'position': 2, 'col_index': 0, 'baie_nom': 'Baie principale', 'nb_ports': 4,
+    }).get_json()
+    client.post('/api/baie/lien-port', json={
+        'slot1_id': sw['id'], 'numero1': 20, 'slot2_id': rt['id'], 'numero2': 1,
+    })
+
+    r = client.put(f"/api/baie/slot/{sw['id']}", json={'nb_ports': 8})
+    assert r.status_code == 200
+
+    row = conn.execute(
+        'SELECT lie_slot_id, lie_port_numero FROM baie_slot_ports WHERE slot_id=? AND numero=1',
+        (rt['id'],)).fetchone()
+    assert row[0] is None and row[1] is None
+
+
+def test_lien_port_reporte_au_remplacement_meme_position(client, make_client, make_user):
+    """Comme pour appareil/peripherique/usage_libre : re-poser un slot à la
+    même position (édition via le panneau) doit reporter son lien de port
+    vers le NOUVEL id, dans les deux sens (slot édité et son partenaire)."""
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+
+    sw1 = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale',
+        'type_equipement': 'Switch', 'nb_ports': 24,
+    }).get_json()
+    rt = client.post('/api/baie/slot', json={
+        'position': 2, 'col_index': 0, 'baie_nom': 'Baie principale', 'nb_ports': 4,
+    }).get_json()
+    client.post('/api/baie/lien-port', json={
+        'slot1_id': sw1['id'], 'numero1': 12, 'slot2_id': rt['id'], 'numero2': 1,
+    })
+
+    # Re-pose à la même position (édition via le panneau, comme placerEquip()).
+    sw2 = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale',
+        'type_equipement': 'Switch', 'nom_custom': 'SW-RENOMME', 'nb_ports': 24,
+    }).get_json()
+    assert sw2['id'] != sw1['id']
+
+    port12 = next(p for p in sw2['ports'] if p['numero'] == 12)
+    assert port12['lie_slot_id'] == rt['id']
+    assert port12['lie_port_numero'] == 1
+
+    rt_ports = client.get(f"/api/baie/slots?baie=Baie%20principale").get_json()['slots']
+    rt_row = next(s for s in rt_ports if s['id'] == rt['id'])
+    port1 = next(p for p in rt_row['ports'] if p['numero'] == 1)
+    assert port1['lie_slot_id'] == sw2['id'], "le partenaire doit suivre vers le NOUVEL id"
+    assert port1['lie_port_numero'] == 12
 
 
 def test_reverse_lookup_sur_fiche_appareil(client, make_client, make_user, make_appareil):
