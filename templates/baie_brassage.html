@@ -47,19 +47,22 @@
    hauteur_u (voir la poignée de redimensionnement ci-dessus) : plus
    l'élément est grand, plus la grille de ports a de place pour s'organiser
    en plusieurs rangées lisibles.
-   Grille à 24 colonnes fixes (2 rangées de 24 = 48, le maximum) occupant
-   ~80% de la largeur, justifiée à gauche — les 20% restants à droite sont
-   réservés au bouton de ping (voir .cell-ping-zone). */
+   Taille de port FIXE (24×22px) — colonnes en repeat(auto-fill, ...) plutôt
+   qu'un nombre de colonnes fixe à largeur variable (1fr) : un élément
+   redimensionné plus étroit (largeur_u < 10, ou plusieurs éléments côte à
+   côte) doit garder des ports de la même taille et simplement en tenir
+   moins par rangée (repli automatique sur plusieurs lignes), jamais des
+   ports rétrécis pour tous tenir sur une seule rangée. */
 .rack-cell.has-ports { flex-direction:column; align-items:stretch; padding:3px 6px; }
 .cell-row   { display:flex; align-items:center; flex-shrink:0; height:16px; }
 .cell-ports-wrap {
     display:flex; align-items:flex-start; gap:.4rem; flex:1; overflow:hidden; padding-top:3px;
 }
 .cell-ports {
-    display:grid; grid-template-columns:repeat(24, 1fr); gap:2px;
-    width:80%; align-content:flex-start; overflow:hidden;
+    display:grid; grid-template-columns:repeat(auto-fill, 24px); gap:2px;
+    flex:1; min-width:0; align-content:flex-start; overflow:hidden;
 }
-.cell-ping-zone { width:20%; flex-shrink:0; display:flex; justify-content:flex-end; }
+.cell-ping-zone { flex-shrink:0; display:flex; justify-content:flex-end; }
 
 /* Equipment type colors */
 .cell-srv   { background:rgba(124,58,237,.12)!important; border-color:rgba(124,58,237,.45)!important; }
@@ -95,12 +98,21 @@
 }
 .cell-resize:hover, .cell-resize.resizing { background:rgba(0,201,255,.35); }
 
+/* Poignée de redimensionnement en LARGEUR — bord droit de l'élément, glisser
+   pour changer largeur_u par pas de 1/10 de la largeur du rack (voir
+   redimensionnerLargeurSlot()). Même logique que .cell-resize (hauteur),
+   orientée horizontalement. */
+.cell-resize-w {
+    position:absolute; top:0; bottom:0; right:-2px; width:5px; cursor:ew-resize; z-index:6;
+}
+.cell-resize-w:hover, .cell-resize-w.resizing { background:rgba(0,201,255,.35); }
+
 /* Un port RJ45 dans la grille d'un élément réseau — numéroté, coloré selon
    sa cible (couleur type/catégorie déjà configurée ailleurs dans l'app, ou
    gris neutre si non affecté), surligné au clic sur tout port lié à la même
    cible (voir surbrillerPortsLies()). */
 .port {
-    position:relative; height:22px; border-radius:3px;
+    position:relative; width:24px; height:22px; border-radius:3px;
     font-size:.6rem; line-height:22px; text-align:center; font-weight:700;
     color:#0a0e14; cursor:pointer; background:#334155;
     transition:transform .1s, box-shadow .1s; user-select:none;
@@ -116,8 +128,9 @@
 /* Voyant de ping — coin supérieur gauche du port, visible seulement après un
    ping positif (classe port-online posée par pingerPortsElement()). */
 .port-led {
-    position:absolute; top:1px; left:1px; width:5px; height:5px; border-radius:50%;
-    background:#22c55e; box-shadow:0 0 3px #22c55e; display:none;
+    position:absolute; top:1px; left:1px; width:6px; height:6px; border-radius:50%;
+    background:#22c55e; border:1px solid #000;
+    box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #22c55e; display:none; z-index:2;
 }
 .port.port-online .port-led { display:block; }
 
@@ -344,6 +357,15 @@
                     <input type="number" id="cfg-col" min="0" max="4" value="0"
                            style="font-family:'Share Tech Mono',monospace;" title="0 = pleine largeur, 1-4 = côte à côte">
                 </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label>Largeur</label>
+                    <select id="cfg-largeur" title="Se règle aussi en glissant le bord droit de l'élément dans la baie">
+                        <option value="">Auto (partage égal)</option>
+                        {% for i in range(1,11) %}<option value="{{ i }}">{{ i }}/10</option>{% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row cols-2" style="margin-bottom:.6rem;">
                 <div class="form-group" style="margin-bottom:0;">
                     <label>Couleur</label>
                     <input type="color" id="cfg-couleur" value="#1e3a5f">
@@ -593,6 +615,14 @@ function renderRack() {
         row.className = 'rack-row';
         row.style.height = U_H + 'px';
 
+        // rowSlots : les slots RÉELLEMENT occupés de cette rangée (ni spacer
+        // ni case vide) — sert après coup à calculer si un reliquat de
+        // largeur (élément(s) redimensionné(s) en dessous de 10/10, sans
+        // voisin "auto" pour absorber le reste) doit être matérialisé en
+        // case vide cliquable (voir largeurRemainder ci-dessous).
+        const rowSlots = [];
+        let hasAuto = false; // au moins un slot/case sans largeur_u explicite
+
         if (activeCols === 1) {
             const sk = key(u, 0);
             if (spannedBy[sk]) {
@@ -600,11 +630,16 @@ function renderRack() {
                 const ph = document.createElement('div');
                 ph.style.cssText = `flex:1;height:${U_H}px;`;
                 row.appendChild(ph);
+                hasAuto = true;
             } else if (originSlot[sk]) {
                 totalOccupied++;
-                row.appendChild(makeOccupiedCell(originSlot[sk], u, 0));
+                const s = originSlot[sk];
+                rowSlots.push(s);
+                if (!s.largeur_u) hasAuto = true;
+                row.appendChild(makeOccupiedCell(s, u, 0));
             } else {
                 row.appendChild(makeEmptyCell(u, 0, true));
+                hasAuto = true;
             }
         } else {
             for (let col = 0; col < activeCols; col++) {
@@ -613,12 +648,35 @@ function renderRack() {
                     const ph = document.createElement('div');
                     ph.style.cssText = `flex:1;height:${U_H}px;`;
                     row.appendChild(ph);
+                    hasAuto = true;
                 } else if (originSlot[sk]) {
                     totalOccupied++;
-                    row.appendChild(makeOccupiedCell(originSlot[sk], u, col));
+                    const s = originSlot[sk];
+                    rowSlots.push(s);
+                    if (!s.largeur_u) hasAuto = true;
+                    row.appendChild(makeOccupiedCell(s, u, col));
                 } else {
                     row.appendChild(makeEmptyCell(u, col, false));
+                    hasAuto = true;
                 }
+            }
+        }
+
+        // Reliquat de largeur : si tous les éléments de la rangée ont une
+        // largeur_u explicite et que leur somme n'atteint pas 10/10, rien
+        // dans la rangée ne peut naturellement s'étirer (flex:1) pour
+        // combler le reste — sans quoi cet espace resterait juste vide et
+        // non cliquable. On matérialise le reliquat en case vide normale,
+        // sur la prochaine colonne libre (0-4), pour pouvoir y placer un
+        // autre équipement.
+        if (!hasAuto && rowSlots.length) {
+            const sommeDixiemes = rowSlots.reduce((t, s) => t + (s.largeur_u || 10), 0);
+            if (sommeDixiemes < 10 && activeCols < MAX_COLS) {
+                const ph = makeEmptyCell(u, activeCols, false);
+                ph.classList.add('remainder');
+                ph.style.flex = `0 0 ${(10 - sommeDixiemes) * 10}%`;
+                ph.style.maxWidth = `${(10 - sommeDixiemes) * 10}%`;
+                row.appendChild(ph);
             }
         }
         rows.appendChild(row);
@@ -645,6 +703,15 @@ function makeOccupiedCell(s, u, col) {
         cell.style.zIndex     = '2';
     } else {
         cell.style.height = U_H + 'px';
+    }
+
+    // Largeur explicite (glisser la poignée de droite, ou champ "Largeur"
+    // du panneau) — en dixièmes de la largeur du rack. Sans ça (largeur_u
+    // null), la cellule garde le comportement historique flex:1 (partage
+    // égal automatique avec ses voisines de rangée).
+    if (s.largeur_u) {
+        cell.style.flex     = `0 0 ${s.largeur_u * 10}%`;
+        cell.style.maxWidth = `${s.largeur_u * 10}%`;
     }
 
     const tcss = TYPE_CSS[s.type_equipement] || '';
@@ -674,7 +741,8 @@ function makeOccupiedCell(s, u, col) {
         </div>` : '';
 
     cell.innerHTML = ligneInfo + zonePorts
-        + `<div class="cell-resize" title="Redimensionner (glisser)"></div>`;
+        + `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`
+        + `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`;
 
     // Ports : clic = surbrillance de tout port lié à la même cible (ou, en
     // mode "Lier des ports", sélection du 1er/2e port à câbler ensemble),
@@ -749,6 +817,46 @@ function makeOccupiedCell(s, u, col) {
         document.addEventListener('mouseup', onUp);
     });
 
+    // Redimensionnement en LARGEUR à la souris : glisser la poignée de
+    // droite change largeur_u par pas de 1/10 de la largeur du rack. Le
+    // point de départ se base sur la largeur RENDUE actuelle de la cellule
+    // (pas sur largeur_u, qui peut être null/"auto") pour que le premier
+    // mouvement de souris parte de ce que l'utilisateur voit déjà, même
+    // pour un élément jamais redimensionné explicitement.
+    const poigneeW = cell.querySelector('.cell-resize-w');
+    poigneeW.addEventListener('mousedown', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        cell.draggable = false;
+        poigneeW.classList.add('resizing');
+        const row = cell.parentElement;
+        const rowWidth = row.getBoundingClientRect().width;
+        const tenthPx = rowWidth / 10;
+        const startX = e.clientX;
+        const startLargeur = Math.max(1, Math.min(10, Math.round(cell.getBoundingClientRect().width / tenthPx)));
+
+        const calculerNouvelleLargeur = clientX => {
+            const delta = Math.round((clientX - startX) / tenthPx);
+            return Math.min(10, Math.max(1, startLargeur + delta));
+        };
+        const onMove = ev => {
+            const nv = calculerNouvelleLargeur(ev.clientX);
+            cell.style.flex = `0 0 ${nv * 10}%`;
+            cell.style.maxWidth = `${nv * 10}%`;
+        };
+        const onUp = async ev => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            poigneeW.classList.remove('resizing');
+            cell.draggable = true;
+            const nv = calculerNouvelleLargeur(ev.clientX);
+            if (nv !== (s.largeur_u || startLargeur)) await redimensionnerLargeurSlot(s, nv);
+            else renderRack();
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+
     // Tooltip au survol
     cell.addEventListener('mouseenter', e => afficherTooltip(e, s));
     cell.addEventListener('mousemove',  e => { const t = document.getElementById('rack-tooltip'); if(t.classList.contains('show')) positionnerTooltip(e); });
@@ -780,6 +888,7 @@ function makeEmptyCell(u, col, fullWidth) {
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
         document.getElementById('cfg-pos').value = u;
         document.getElementById('cfg-col').value = col;
+        document.getElementById('cfg-largeur').value = '';
         document.getElementById('cfg-nb-ports').value = 0;
         document.getElementById('ports-editor').style.display = 'none';
         showTab('tab-add');
@@ -820,15 +929,38 @@ async function deplacerSlot(id, newPos, newCol) {
 // ── REDIMENSIONNEMENT (glisser la poignée du bas) ──────────────────────────────
 async function redimensionnerSlot(s, nouvelleHu) {
     // PUT (pas POST /api/baie/slot, qui ré-insère avec un nouvel id) pour
-    // garder le même id de slot — tous les champs sont renvoyés tels quels,
-    // seule hauteur_u change : la route PUT écrase l'ensemble de la ligne.
+    // garder le même id de slot — tous les champs sont renvoyés tels quels
+    // (nb_ports et largeur_u compris : les omettre les remettrait à 0/auto à
+    // chaque redimensionnement en hauteur, effaçant silencieusement les
+    // ports déjà affectés et toute largeur déjà choisie), seule hauteur_u
+    // change : la route PUT écrase l'ensemble de la ligne.
     const r = await fetch(`/api/baie/slot/${s.id}`, {
         method: 'PUT', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
             position: s.position, hauteur_u: nouvelleHu,
             appareil_id: s.appareil_id || null, peripherique_id: s.peripherique_id || null,
             nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
-            couleur: s.couleur || '#1e3a5f', description: s.description || ''
+            couleur: s.couleur || '#1e3a5f', description: s.description || '',
+            nb_ports: s.nb_ports || 0, largeur_u: s.largeur_u || null
+        })
+    });
+    const updated = await r.json();
+    slots[key(updated.position, updated.col_index || 0)] = updated;
+    renderRack(); renderList();
+}
+
+// ── REDIMENSIONNEMENT EN LARGEUR (glisser la poignée de droite) ────────────────
+// Même route PUT que redimensionnerSlot() (hauteur), même précaution : tous
+// les champs sont renvoyés pour ne rien effacer, seule largeur_u change.
+async function redimensionnerLargeurSlot(s, nouvelleLargeur) {
+    const r = await fetch(`/api/baie/slot/${s.id}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+            position: s.position, hauteur_u: s.hauteur_u || 1,
+            appareil_id: s.appareil_id || null, peripherique_id: s.peripherique_id || null,
+            nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
+            couleur: s.couleur || '#1e3a5f', description: s.description || '',
+            nb_ports: s.nb_ports || 0, largeur_u: nouvelleLargeur
         })
     });
     const updated = await r.json();
@@ -847,7 +979,7 @@ function afficherTooltip(e, s) {
     if (s.type_equipement) html += `<div class="tip-row"><span class="tip-key">Type</span><span class="tip-val">${escH(s.type_equipement)}</span></div>`;
     if (s.adresse_ip)     html += `<div class="tip-row"><span class="tip-key">IP</span><span class="tip-val">${escH(s.adresse_ip)}</span></div>`;
     html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${statut}</span></div>`;
-    html += `<div class="tip-row"><span class="tip-key">Position</span><span class="tip-val">U${s.position} · C${s.col_index||0} · ${s.hauteur_u||1}U</span></div>`;
+    html += `<div class="tip-row"><span class="tip-key">Position</span><span class="tip-val">U${s.position} · C${s.col_index||0} · ${s.hauteur_u||1}U${s.largeur_u ? ' · '+s.largeur_u+'/10' : ''}</span></div>`;
     if (s.description)    html += `<div class="tip-row"><span class="tip-key">Note</span><span class="tip-val">${escH(s.description)}</span></div>`;
     t.innerHTML = html;
     t.classList.add('show');
@@ -1008,14 +1140,28 @@ async function pingerPortsElement(cell, ports) {
     const texteInitial = btn.textContent;
     btn.textContent = '⏳ Ping…';
     try {
+        // On force id=<celui demandé> sur chaque résultat (au lieu de faire
+        // confiance à ce que le serveur renvoie) : une erreur 400 "Appareil
+        // sans IP" répond quand même avec un JSON valide (sans champ id), ce
+        // qui faisait échouer silencieusement le rapprochement avec le port
+        // — aucun voyant ne s'allumait ni ne s'éteignait, sans le moindre
+        // message pour expliquer pourquoi.
         const resultats = await Promise.all(cibles.map(id =>
-            fetch(`/api/ping/appareil/${id}`).then(r => r.json()).catch(() => ({id, en_ligne: false}))));
+            fetch(`/api/ping/appareil/${id}`)
+                .then(r => r.json().then(j => ({...j, id, ok: r.ok})))
+                .catch(() => ({id, en_ligne: false, ok: false}))));
+        let sansIp = 0;
         resultats.forEach(res => {
+            if (!res.ok) sansIp++;
             ports.forEach(p => { if (p.appareil_id === res.id) p.en_ligne = !!res.en_ligne; });
             cell.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
                 el.classList.toggle('port-online', !!res.en_ligne);
             });
         });
+        const nbOnline = resultats.filter(r => r.ok && r.en_ligne).length;
+        let msg = `Ping terminé : ${nbOnline}/${cibles.length} appareil(s) en ligne.`;
+        if (sansIp) msg += ` ${sansIp} sans IP renseignée (ignoré${sansIp > 1 ? 's' : ''}).`;
+        showFlash(msg, nbOnline ? 'success' : 'info');
     } finally {
         btn.disabled = false;
         btn.textContent = texteInitial;
@@ -1081,6 +1227,7 @@ function selectSlot(s, cell) {
     cell.classList.add('selected');
     document.getElementById('cfg-pos').value   = s.position;
     document.getElementById('cfg-col').value   = s.col_index || 0;
+    document.getElementById('cfg-largeur').value = s.largeur_u || '';
     document.getElementById('cfg-hu').value    = s.hauteur_u || 1;
     document.getElementById('cfg-type').value  = s.type_equipement || '';
     document.getElementById('cfg-nom').value   = nomEquipementSlot(s) || '';
@@ -1212,6 +1359,7 @@ function ajouterBandeauRJ() {
     document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
     document.getElementById('cfg-hu').value = 1;
     document.getElementById('cfg-col').value = 0;
+    document.getElementById('cfg-largeur').value = '';
     document.getElementById('cfg-type').value = 'Bandeau RJ';
     document.getElementById('cfg-nom').value = 'Bandeau RJ';
     document.getElementById('cfg-desc').value = '';
@@ -1231,6 +1379,7 @@ async function placerEquip() {
     if (pos < 1 || pos > nbU) { showFlash(`Position entre 1 et ${nbU}`, 'info'); return; }
 
     const nbPorts = Math.min(48, Math.max(0, parseInt(document.getElementById('cfg-nb-ports').value) || 0));
+    const largeurVal = document.getElementById('cfg-largeur').value;
 
     const payload = {
         position: pos, col_index: col, hauteur_u: hu, baie_nom: currentBaie,
@@ -1240,7 +1389,8 @@ async function placerEquip() {
         couleur:     document.getElementById('cfg-couleur').value,
         appareil_id: document.getElementById('cfg-app').value ? parseInt(document.getElementById('cfg-app').value) : null,
         peripherique_id: document.getElementById('cfg-periph').value ? parseInt(document.getElementById('cfg-periph').value) : null,
-        nb_ports: nbPorts
+        nb_ports: nbPorts,
+        largeur_u: largeurVal ? parseInt(largeurVal) : null
     };
 
     const r = await fetch('/api/baie/slot', {

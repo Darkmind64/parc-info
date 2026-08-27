@@ -1,8 +1,35 @@
-PARCINFO_VERSION=2.18.63
+PARCINFO_VERSION=2.18.64
 RELEASE_DATE=2026-08-27
-BUILD_NUMBER=2026082701
+BUILD_NUMBER=2026082702
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.64 - Baie de brassage : ports à taille fixe + redimensionnement en largeur
+# Suite directe de la 2.18.63, deux correctifs/ajouts sur le même sujet.
+#
+# 1) Ports à taille fixe : un élément qui n'occupe qu'une partie de la
+# largeur de la baie (plusieurs éléments côte à côte, ou un élément
+# redimensionné — voir point 2) affichait des ports de plus en plus petits,
+# la grille de ports étant dimensionnée en fractions (1fr) de la largeur du
+# conteneur. Les ports ont maintenant une taille fixe (24×22px) ; la grille
+# (repeat(auto-fill, ...)) replie automatiquement sur plusieurs lignes selon
+# la place disponible, sans jamais rétrécir un port.
+#
+# 2) Redimensionnement en largeur à la souris : nouvelle poignée sur le
+# bord droit de chaque élément (comme la poignée de hauteur existante),
+# glisser pour changer sa largeur par pas de 1/10 de la largeur du rack
+# (nouvelle colonne baie_slots.largeur_u, 1-10, NULL par défaut = partage
+# égal automatique — comportement historique inchangé pour tout élément
+# jamais redimensionné explicitement, aucune migration de données
+# nécessaire). Quand la largeur libérée n'a pas de voisin pour l'absorber,
+# elle devient une case vide cliquable pour placer un autre équipement à
+# côté, qui prend alors automatiquement le reste de la largeur.
+#
+# Correctif au passage : redimensionner un élément en HAUTEUR (poignée du
+# bas) pouvait silencieusement effacer tous ses ports déjà affectés — le
+# client ne renvoyait pas nb_ports dans la requête de mise à jour, que le
+# serveur traitait alors comme 0. Le client renvoie désormais tous les
+# champs (ports et largeur compris) à chaque redimensionnement.
 
 # Version 2.18.63 - Baie de brassage : ports agrandis + ping, Bandeau RJ, liaison port-à-port
 # Trois chantiers sur la baie de brassage, dans la continuité de la 2.18.62.

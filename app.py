@@ -1736,6 +1736,20 @@ def init_db():
             c.execute(f"ALTER TABLE baie_slot_ports ADD COLUMN {col_add} {defval}")
         except: pass
 
+    # Largeur d'un élément de baie, en dixièmes de la largeur du rack (1-10) —
+    # demandé : redimensionner un élément en largeur à la souris, sur une
+    # grille de 10 positions. NULL (pas juste 10) est le défaut délibéré :
+    # ça signifie "jamais redimensionné, garder le partage égal automatique
+    # entre éléments côte à côte" (comportement historique, calculé par
+    # renderRack() côté client) — mettre 10 par défaut casserait l'affichage
+    # existant de deux/trois éléments déjà placés côte à côte via col_index
+    # (10+10 > 10 en tenants littéraux). Une valeur n'apparaît ici qu'après
+    # un glisser explicite de la poignée de largeur (voir
+    # redimensionnerLargeurSlot() dans baie_brassage.html).
+    try:
+        c.execute("ALTER TABLE baie_slots ADD COLUMN largeur_u INTEGER")
+    except: pass
+
     # (ancienne migration col_index conservée pour compatibilité)
     cols_baie = [r[1] for r in conn.execute('PRAGMA table_info(baie_slots)').fetchall()]
     if 'col_index' not in cols_baie:
@@ -5620,6 +5634,17 @@ def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None):
                 VALUES (?,?,?,?,?,?,?,?)''', (slot_id, numero, ap, pe, us, lsid, lnum, now))
     return nb_ports
 
+def _clamp_largeur_u(v):
+    """1-10 (dixièmes de la largeur du rack) ou None ("jamais redimensionné,
+    partage égal automatique" — voir la migration largeur_u dans init_db())."""
+    if v in (None, '', 0, '0'):
+        return None
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return min(10, max(1, n))
+
 @app.route('/api/baie/slot', methods=['POST'])
 @login_required
 def api_baie_ajouter_slot():
@@ -5649,12 +5674,12 @@ def api_baie_ajouter_slot():
     conn.execute('DELETE FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col))
     baie_nom = f.get('baie_nom', 'Baie principale')
     conn.execute('''INSERT INTO baie_slots
-        (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,nb_ports,date_maj)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,nb_ports,largeur_u,date_maj)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (cid, pos, col, f.get('hauteur_u', 1),
          f.get('appareil_id') or None, f.get('peripherique_id') or None, f.get('nom_custom', ''),
          f.get('type_equipement', ''), f.get('couleur', '#1e3a5f'),
-         f.get('description', ''), baie_nom, 0, _utcnow().isoformat()))
+         f.get('description', ''), baie_nom, 0, _clamp_largeur_u(f.get('largeur_u')), _utcnow().isoformat()))
     conn.commit()
     sid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     nb_ports = _reconcilier_ports(conn, sid, f.get('nb_ports', 0), anciens_ports)
@@ -5689,10 +5714,11 @@ def api_baie_slot(id):
     f = request.json or {}
     nb_ports = min(48, max(0, int(f.get('nb_ports', 0) or 0)))
     conn.execute('''UPDATE baie_slots SET position=?,hauteur_u=?,appareil_id=?,peripherique_id=?,
-        nom_custom=?,type_equipement=?,couleur=?,description=?,nb_ports=?,date_maj=? WHERE id=? AND client_id=?''',
+        nom_custom=?,type_equipement=?,couleur=?,description=?,nb_ports=?,largeur_u=?,date_maj=? WHERE id=? AND client_id=?''',
         (f.get('position',1), f.get('hauteur_u',1), f.get('appareil_id') or None, f.get('peripherique_id') or None,
          f.get('nom_custom',''), f.get('type_equipement',''),
-         f.get('couleur','#1e3a5f'), f.get('description',''), nb_ports, _utcnow().isoformat(), id, cid))
+         f.get('couleur','#1e3a5f'), f.get('description',''), nb_ports, _clamp_largeur_u(f.get('largeur_u')),
+         _utcnow().isoformat(), id, cid))
     _reconcilier_ports(conn, id, nb_ports)
     conn.commit()
     slot = row_to_dict(conn.execute(
