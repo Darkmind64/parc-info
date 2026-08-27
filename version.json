@@ -1,28 +1,24 @@
 {
-  "version": "2.18.65",
+  "version": "2.18.66",
   "release_date": "2026-08-27T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.65/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.65/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.65/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.65",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.65/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.65/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.65/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.65/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.65/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.66/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.66/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.66/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.66",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.66/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.66/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.66/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.66/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.66/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Ping/scan réseau nettement plus rapide + baie de brassage : câblage représenté visuellement, traçage de bout en bout (pièce -> câble -> appareil), ping global, liste de câblage imprimable/CSV, vue mobile, historique",
+    "new_features": "Baie de brassage : voyants de ping corrigés (couleur vive, vert/rouge selon la réponse) et ping automatique à intervalle réglable",
     "improvements": [
-      "Ping et scan réseau : fallback TCP sondé en parallèle au lieu d'un port après l'autre — le pire cas (hôte injoignable) passait jusqu'à 8s par appareil, borné maintenant au temps d'un seul port.",
-      "Baie de brassage : indicateur de progression du ping (X/Y) affiché en direct à côté du nom de l'élément.",
-      "Baie de brassage : chaque câblage port-à-port est représenté par une courbe reliant les deux ports, avec auto-arrangement pour rester lisible ; couleurs de port assombries (moins flashy), éclaircies au survol (port ET câble).",
-      "Baie de brassage : traçage complet pièce -> port de bandeau -> câble -> élément -> appareil dans la bulle d'un port, avec alerte si l'appareil au bout de la chaîne est hors ligne (câble coloré en avertissement).",
-      "Baie de brassage : bouton « Ping toute la baie » (tous les appareils reliés à un port, en un clic) et « Liste de câblage » (page imprimable + export CSV de tous les liens port-à-port).",
-      "Baie de brassage : étiquette de câble (couleur/longueur) et pièce du site éditables sur un port câblé, indépendamment l'une de l'autre.",
-      "Baie de brassage : recherche étendue au contenu des ports (pièce, usage, cible câblée), historique des modifications, et nouvelle consultation mobile en lecture seule (/m/baie)."
+      "Baie de brassage : correctif d'affichage — les voyants de ping des ports apparaissaient ternes (assombris par erreur en même temps que le port), ils sont maintenant pleinement vifs.",
+      "Baie de brassage : le voyant de ping est désormais rouge en cas de non-réponse (auparavant simplement invisible), vert en cas de réponse, et reflète dès le chargement de la page le dernier statut connu — pas seulement après un clic sur Ping.",
+      "Baie de brassage : ping automatique de toute la baie à intervalle réglable (5, 10, 20, 30, 60 ou 300 secondes), désactivé par défaut, préférence mémorisée par navigateur."
     ]
   },
   "checksums": {
@@ -33,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.65"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.66"
 }

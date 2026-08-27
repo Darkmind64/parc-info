@@ -68,6 +68,32 @@ def test_lier_port_a_un_appareil_resout_couleur_type(client, make_client, make_u
     assert port['couleur'] != '#334155'
 
 
+def test_port_expose_dernier_ping_pour_distinguer_jamais_pingue_de_hors_ligne(
+        client, make_client, make_user, make_appareil, conn):
+    """dernier_ping ('' si jamais pingé) permet au client de savoir s'il faut
+    afficher un voyant du tout — en_ligne vaut 0 par défaut en base, donc à
+    lui seul indiscernable d'un appareil réellement hors ligne."""
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+    app_id = make_appareil(cid, nom_machine='PC-JAMAIS-PINGUE')
+
+    slot = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale', 'nb_ports': 2,
+    }).get_json()
+    port = client.put(f"/api/baie/slot/{slot['id']}/port/1", json={'appareil_id': app_id}).get_json()
+    assert port['dernier_ping'] == ''
+    assert port['en_ligne'] == 0
+
+    conn.execute("UPDATE appareils SET en_ligne=1, dernier_ping=? WHERE id=?", ('2026-01-01T00:00:00', app_id))
+    conn.commit()
+    ports = client.get('/api/baie/slots?baie=Baie%20principale').get_json()['slots']
+    slot_row = next(s for s in ports if s['id'] == slot['id'])
+    port1 = next(p for p in slot_row['ports'] if p['numero'] == 1)
+    assert port1['dernier_ping'] == '2026-01-01T00:00:00'
+    assert port1['en_ligne'] == 1
+
+
 def test_lier_port_a_usage_libre(client, make_client, make_user):
     uid, _, _ = make_user()
     cid = make_client(auth_user_id=uid)

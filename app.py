@@ -5586,7 +5586,7 @@ def _ports_avec_details(conn, slot_id):
     rows = conn.execute(
         '''SELECT bp.slot_id, bp.numero, bp.appareil_id, bp.peripherique_id, bp.usage_libre,
                   bp.lie_slot_id, bp.lie_port_numero, bp.piece, bp.cable_couleur, bp.cable_longueur,
-                  a.nom_machine, a.type_appareil, a.en_ligne,
+                  a.nom_machine, a.type_appareil, a.en_ligne, a.dernier_ping,
                   p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
            FROM baie_slot_ports bp
            LEFT JOIN appareils a ON bp.appareil_id=a.id

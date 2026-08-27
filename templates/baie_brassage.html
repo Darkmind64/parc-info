@@ -131,36 +131,47 @@
    sa cible (couleur type/catégorie déjà configurée ailleurs dans l'app, ou
    gris neutre si non affecté), surligné au clic sur tout port lié à la même
    cible (voir surbrillerPortsLies()). Couleur assombrie par défaut (moins
-   flashy) via filter — la teinte reste celle configurée ailleurs dans
-   l'app (type d'appareil, catégorie périphérique...), seule sa luminosité
-   change ici, donc rien à toucher côté serveur. .port-libre est déjà un
-   gris neutre volontairement discret : ne pas l'assombrir davantage. */
+   flashy) via un voile sombre en overlay (box-shadow inset) — PAS un
+   filter : un filter CSS sur .port rastérise tout le sous-arbre AVANT
+   composition, donc assombrissait aussi .port-led (le voyant de ping),
+   qui doit au contraire rester vif quelle que soit la couleur du port en
+   dessous (signalé en usage réel : voyants ternes, illisibles). L'overlay
+   inset, lui, ne peint que le fond du port ; .port-led (position absolute,
+   peint par-dessus) n'est jamais affecté. La teinte reste celle configurée
+   ailleurs dans l'app (type d'appareil, catégorie périphérique...), seule
+   sa luminosité change ici, donc rien à toucher côté serveur. .port-libre
+   est déjà un gris neutre volontairement discret : ne pas l'assombrir
+   davantage. */
 .port {
     position:relative; width:24px; height:22px; border-radius:3px;
     font-size:.6rem; line-height:22px; text-align:center; font-weight:700;
     color:#0a0e14; cursor:pointer; background:#334155;
-    transition:transform .1s, box-shadow .1s, filter .15s; user-select:none;
+    transition:transform .1s, box-shadow .15s; user-select:none;
 }
-.port:not(.port-libre) { filter:brightness(.72) saturate(.85); }
+.port:not(.port-libre) { box-shadow:inset 0 0 0 999px rgba(8,10,16,.38); }
 .port:hover        { transform:scale(1.15); z-index:3; position:relative; }
 .port:not(.port-libre):hover,
 .port:not(.port-libre).port-highlight,
-.port:not(.port-libre).port-hover-link { filter:brightness(1.08) saturate(1); }
+.port:not(.port-libre).port-hover-link { box-shadow:inset 0 0 0 999px rgba(8,10,16,0); }
 .port.port-libre    { color:#64748b; background:#1a2530; }
 .port.port-highlight,
-.port.port-hover-link { box-shadow:0 0 0 2px #fff, 0 0 6px #fff; transform:scale(1.12); z-index:4; position:relative; }
+.port.port-hover-link { box-shadow:inset 0 0 0 999px rgba(8,10,16,0), 0 0 0 2px #fff, 0 0 6px #fff; transform:scale(1.12); z-index:4; position:relative; }
 /* Mode "Lier des ports" : premier port cliqué, en attente du second. */
 .port.port-pending { outline:2px dashed #fbbf24; outline-offset:1px; }
 #btn-mode-lien.active { background:var(--accent); color:#001018; border-color:var(--accent); }
 
-/* Voyant de ping — coin supérieur gauche du port, visible seulement après un
-   ping positif (classe port-online posée par pingerPortsElement()). */
+/* Voyant de ping — coin supérieur gauche du port, visible seulement une fois
+   un ping tenté (au chargement si un statut est déjà connu côté serveur —
+   voir portHTML() — ou après un clic sur "Ping" / "Ping toute la baie").
+   Vert si l'appareil a répondu, rouge sinon — jusqu'ici un échec laissait
+   simplement le voyant invisible, aucune façon de distinguer "jamais
+   pingé" de "hors ligne". */
 .port-led {
     position:absolute; top:1px; left:1px; width:6px; height:6px; border-radius:50%;
-    background:#22c55e; border:1px solid #000;
-    box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #22c55e; display:none; z-index:2;
+    border:1px solid #000; display:none; z-index:2;
 }
-.port.port-online .port-led { display:block; }
+.port.port-ping-ok .port-led   { display:block; background:#22c55e; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #22c55e; }
+.port.port-ping-fail .port-led { display:block; background:#ef4444; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #ef4444; }
 
 .cell-ping-btn {
     background:none; border:1px solid #334155; color:#64748b; cursor:pointer;
@@ -294,6 +305,15 @@
                 <button onclick="ajouterBandeauRJ()" class="btn btn-primary btn-sm" title="Pré-remplit le formulaire : 1U, 24 ports — reste à choisir la position et valider">+ Bandeau RJ</button>
                 <button id="btn-mode-lien" onclick="toggleModeLien()" class="btn btn-primary btn-sm" title="Cliquer sur deux ports successivement pour les relier (câblage physique)">🔗 Lier des ports</button>
                 <button id="btn-ping-baie" onclick="pingerToutelaBaie()" class="btn btn-primary btn-sm" title="Pinger tous les appareils reliés à un port de cette baie">📡 Ping toute la baie</button>
+                <select id="sel-ping-auto" onchange="changerPingAuto(this)" class="btn btn-primary btn-sm" style="padding-right:1.2rem;" title="Ping automatique de toute la baie à intervalle régulier">
+                    <option value="0">Ping auto : désactivé</option>
+                    <option value="5000">Ping auto : 5 s</option>
+                    <option value="10000">Ping auto : 10 s</option>
+                    <option value="20000">Ping auto : 20 s</option>
+                    <option value="30000">Ping auto : 30 s</option>
+                    <option value="60000">Ping auto : 60 s</option>
+                    <option value="300000">Ping auto : 300 s</option>
+                </select>
                 <span id="ping-baie-progress" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--accent);"></span>
                 <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste imprimable/CSV de tous les liens port-à-port">🔌 Liste de câblage</a>
                 <button onclick="changerU(-1)" class="btn btn-primary btn-sm">− 1U</button>
@@ -556,6 +576,7 @@ async function init() {
     await chargerBaie('Baie principale');
     // Calcul des proportions après chargement initial
     setTimeout(() => calcUH(true), 50);
+    initPingAuto();
     // Recalcul si la fenêtre est redimensionnée — calcUH() ne redessine
     // (renderRack, donc renderCableLinks) que si U_H a réellement changé ;
     // un changement de largeur SANS changement de U_H (ex: la fenêtre
@@ -1106,7 +1127,12 @@ function portHTML(p) {
     // d'un port réellement inutilisé.
     const libre = !p.appareil_id && !p.peripherique_id && !p.usage_libre && !p.lie_slot_id;
     const style = libre ? '' : `background:${p.couleur};`;
-    return `<span class="port${libre ? ' port-libre' : ''}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${p.appareil_id || ''}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
+    // Voyant initial reflétant le dernier ping connu (watchdog en tâche de
+    // fond ou ping manuel précédent) — dernier_ping vide = jamais pingé,
+    // aucun voyant (en_ligne vaut 0 par défaut en base, indiscernable d'un
+    // vrai échec sans ce champ) ; sinon vert/rouge selon en_ligne.
+    const classePing = (p.appareil_id && p.dernier_ping) ? (p.en_ligne ? ' port-ping-ok' : ' port-ping-fail') : '';
+    return `<span class="port${libre ? ' port-libre' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${p.appareil_id || ''}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
         <span class="port-led"></span>${p.numero}</span>`;
 }
 
@@ -1287,10 +1313,17 @@ async function pingerPortsElement(cell, ports) {
                 .then(res => {
                     if (!res.ok) sansIp++;
                     if (res.ok && res.en_ligne) nbOnline++;
-                    ports.forEach(p => { if (p.appareil_id === res.id) p.en_ligne = !!res.en_ligne; });
-                    cell.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
-                        el.classList.toggle('port-online', !!res.en_ligne);
+                    ports.forEach(p => {
+                        if (p.appareil_id !== res.id) return;
+                        p.en_ligne = !!res.en_ligne;
+                        if (res.ok) p.dernier_ping = new Date().toISOString(); // marque "pingé" pour les re-rendus suivants
                     });
+                    if (res.ok) {
+                        cell.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
+                            el.classList.remove('port-ping-ok', 'port-ping-fail');
+                            el.classList.add(res.en_ligne ? 'port-ping-ok' : 'port-ping-fail');
+                        });
+                    }
                     fait++; majProgress();
                 })));
         let msg = `Ping terminé : ${nbOnline}/${cibles.length} appareil(s) en ligne.`;
@@ -1308,15 +1341,19 @@ async function pingerPortsElement(cell, ports) {
 // l'ensemble des appareils reliés à un port, tous éléments confondus, pas
 // un seul à la fois. Un même appareil relié à plusieurs ports (deux cartes
 // réseau) n'est pingé qu'une fois ; ses voyants sont tous mis à jour.
-async function pingerToutelaBaie() {
+// manuel=false (cycles du ping automatique, voir plus bas) : pas de
+// message de fin ni de changement de texte du bouton à chaque cycle —
+// seule la progression et les voyants avancent, pour ne pas spammer
+// l'utilisateur toutes les 5 à 300 secondes.
+async function pingerToutelaBaie(manuel = true) {
     const btn = document.getElementById('btn-ping-baie');
     const progressEl = document.getElementById('ping-baie-progress');
     const cibles = [...new Set(Object.values(slots).flatMap(s => (s.ports || [])
         .filter(p => p.appareil_id).map(p => p.appareil_id)))];
-    if (!cibles.length) { showFlash('Aucun appareil relié à un port dans cette baie.', 'info'); return; }
-    btn.disabled = true;
+    if (!cibles.length) { if (manuel) showFlash('Aucun appareil relié à un port dans cette baie.', 'info'); return; }
+    if (manuel) { btn.disabled = true; }
     const texteInitial = btn.textContent;
-    btn.textContent = '⏳ Ping…';
+    if (manuel) btn.textContent = '⏳ Ping…';
     let fait = 0;
     const majProgress = () => { progressEl.textContent = `📡 ${fait}/${cibles.length}`; };
     progressEl.style.display = ''; majProgress();
@@ -1330,21 +1367,55 @@ async function pingerToutelaBaie() {
                     if (!res.ok) sansIp++;
                     if (res.ok && res.en_ligne) nbOnline++;
                     Object.values(slots).forEach(s => (s.ports || []).forEach(p => {
-                        if (p.appareil_id === res.id) p.en_ligne = !!res.en_ligne;
+                        if (p.appareil_id !== res.id) return;
+                        p.en_ligne = !!res.en_ligne;
+                        if (res.ok) p.dernier_ping = new Date().toISOString();
                     }));
-                    document.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
-                        el.classList.toggle('port-online', !!res.en_ligne);
-                    });
+                    if (res.ok) {
+                        document.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
+                            el.classList.remove('port-ping-ok', 'port-ping-fail');
+                            el.classList.add(res.en_ligne ? 'port-ping-ok' : 'port-ping-fail');
+                        });
+                    }
                     fait++; majProgress();
                 })));
-        let msg = `Ping de la baie terminé : ${nbOnline}/${cibles.length} appareil(s) en ligne.`;
-        if (sansIp) msg += ` ${sansIp} sans IP renseignée (ignoré${sansIp > 1 ? 's' : ''}).`;
-        showFlash(msg, nbOnline ? 'success' : 'info');
+        if (manuel) {
+            let msg = `Ping de la baie terminé : ${nbOnline}/${cibles.length} appareil(s) en ligne.`;
+            if (sansIp) msg += ` ${sansIp} sans IP renseignée (ignoré${sansIp > 1 ? 's' : ''}).`;
+            showFlash(msg, nbOnline ? 'success' : 'info');
+        }
     } finally {
-        btn.disabled = false;
-        btn.textContent = texteInitial;
+        if (manuel) { btn.disabled = false; btn.textContent = texteInitial; }
         progressEl.style.display = 'none';
     }
+}
+
+// ── PING AUTOMATIQUE ─────────────────────────────────────────────────────────
+// Relance pingerToutelaBaie(false) à intervalle régulier tant que l'option
+// est activée. Préférence mémorisée en local (par appareil/navigateur, pas
+// partagée entre techniciens) — un simple confort d'affichage, pas une
+// donnée métier, localStorage suffit largement (voir le sélecteur
+// "Ping auto" dans la barre d'outils).
+let _autoPingTimer = null;
+
+function demarrerPingAuto(ms) {
+    if (_autoPingTimer) clearInterval(_autoPingTimer);
+    _autoPingTimer = ms > 0 ? setInterval(() => pingerToutelaBaie(false), ms) : null;
+}
+
+function changerPingAuto(sel) {
+    const ms = parseInt(sel.value) || 0;
+    try { localStorage.setItem('baie_ping_auto_ms', String(ms)); } catch (e) {}
+    demarrerPingAuto(ms);
+}
+
+function initPingAuto() {
+    const sel = document.getElementById('sel-ping-auto');
+    if (!sel) return;
+    let ms = 0;
+    try { ms = parseInt(localStorage.getItem('baie_ping_auto_ms')) || 0; } catch (e) {}
+    sel.value = String(ms);
+    demarrerPingAuto(ms);
 }
 
 // ── RECHERCHE ─────────────────────────────────────────────────────────────────

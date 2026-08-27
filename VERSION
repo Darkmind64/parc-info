@@ -1,8 +1,34 @@
-PARCINFO_VERSION=2.18.65
+PARCINFO_VERSION=2.18.66
 RELEASE_DATE=2026-08-27
-BUILD_NUMBER=2026082703
+BUILD_NUMBER=2026082704
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.66 - Baie de brassage : voyants de ping corrigés + ping automatique
+# Deux correctifs/ajouts sur le même sujet, signalés séparément.
+#
+# 1) Voyants de ping ternes : le fond d'un port est assombri (moins flashy,
+# voir la 2.18.65) via un filter CSS — un filter rastérise tout le
+# sous-arbre AVANT composition, donc assombrissait aussi le voyant de ping
+# (enfant du port), qui doit rester vif quelle que soit la couleur du port
+# en dessous. Remplacé par un voile sombre en overlay (box-shadow inset),
+# qui ne peint que le fond du port ; le voyant, peint par-dessus, n'est
+# plus affecté.
+#
+# 2) Voyant rouge en cas de non-réponse : jusqu'ici un échec de ping
+# laissait simplement le voyant invisible, aucun moyen de distinguer
+# visuellement "jamais pingé" de "hors ligne". Vert si l'appareil répond,
+# rouge sinon — et le voyant reflète désormais le dernier statut connu dès
+# le chargement de la page (watchdog en tâche de fond compris), pas
+# seulement après un clic sur Ping. Nouveau champ dernier_ping exposé par
+# l'API pour distinguer ces deux cas (en_ligne vaut 0 par défaut en base,
+# à lui seul indiscernable d'un vrai échec).
+#
+# 3) Ping automatique : sélecteur dans la barre d'outils de la baie
+# (désactivé / 5 / 10 / 20 / 30 / 60 / 300 secondes), relance "Ping toute
+# la baie" à intervalle régulier sans message de fin à chaque cycle (pour
+# ne pas spammer). Préférence mémorisée par navigateur (localStorage),
+# restaurée au rechargement de la page.
 
 # Version 2.18.65 - Ping/scan plus rapide + baie de brassage : câblage visuel, traçage, audit, mobile
 # Trois chantiers distincts.
