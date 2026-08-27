@@ -75,6 +75,11 @@
    permanence. */
 .rack-cell.empty { background:transparent; border-color:transparent; }
 .rack-cell.empty:hover  { border-color:var(--accent); background:rgba(0,201,255,.06); box-shadow:0 0 0 1px var(--accent) inset; }
+/* Repère "aimant" : matérialise la colonne EXACTE visée par le curseur à
+   l'intérieur d'une case vide qui couvre plusieurs colonnes — recalculé en
+   JS (majMarqueur) à chaque déplacement de souris/glisser, jamais figé sur
+   le début de la case. Masqué par défaut, affiché via style.display. */
+.cell-magnet { position:absolute; top:0; bottom:0; display:none; background:rgba(0,201,255,.22); border-left:1px solid var(--accent); border-right:1px solid var(--accent); pointer-events:none; }
 .rack-cell.drag-over    { border-color:rgba(0,201,255,.8)!important; background:rgba(0,201,255,.1)!important; box-shadow:0 0 8px rgba(0,201,255,.5)!important; }
 .rack-cell.selected     { border-color:var(--accent)!important; box-shadow:0 0 8px rgba(0,201,255,.3); }
 .rack-cell.highlighted  { border-color:#fbbf24!important; background:rgba(251,191,36,.1)!important; }
@@ -112,6 +117,45 @@
 .cell-bandeau { background:rgba(20,184,166,.12)!important; border-color:rgba(20,184,166,.45)!important; }
 .cell-pdu   { background:rgba(168,85,247,.12)!important; border-color:rgba(168,85,247,.45)!important; }
 .cell-ap    { background:rgba(37,99,235,.12)!important;  border-color:rgba(37,99,235,.45)!important; }
+
+/* Étagère : pas un élément actif comme les autres (serveur, switch...) —
+   une fine plaque PHYSIQUE qui s'insère ENTRE deux unités plutôt que d'en
+   occuper une comme un boîtier, sur laquelle on POSE des appareils, lesquels
+   restent des éléments à part entière placés normalement dans la rangée du
+   dessus (aucun lien technique entre l'étagère et ce qu'elle porte).
+   Rangée réduite à sa hauteur réelle (SHELF_H, voir renderRack()) dans le
+   cas normal : les rangées voisines se resserrent d'elles-mêmes autour
+   d'elle, exactement l'effet "les unités s'espacent légèrement pour la
+   laisser s'insérer" demandé — .cell-etagere-compacte remplit alors
+   directement toute la cellule (déjà fine). Repli .cell-etagere-pleine
+   (rangée non réductible, voir estTabletteSeule) : ancien rendu, fine
+   plaque posée en bas d'une rangée sinon transparente, hauteur U_H
+   conservée pour ne jamais désaligner un élément qui la traverse. */
+.cell-etagere-compacte {
+    background:repeating-linear-gradient(135deg, #6b4a26, #6b4a26 5px, #7d5730 5px, #7d5730 10px)!important;
+    border-top:1px solid rgba(255,255,255,.14)!important;
+    border-bottom:2px solid #2e1c08!important;
+    border-left:none!important; border-right:none!important;
+    box-shadow:0 3px 5px rgba(0,0,0,.5);
+}
+.cell-etagere-compacte .cell-row  { height:auto; line-height:1.1; }
+.cell-etagere-compacte .cell-led  { display:none; }
+.cell-etagere-compacte .cell-name { color:#f2d9b8; font-size:.56rem; text-shadow:0 1px 1px rgba(0,0,0,.6); }
+.cell-etagere-compacte .cell-desc { color:#c9a875; }
+.cell-etagere-compacte .cell-del  { font-size:.52rem; }
+
+.cell-etagere-pleine { background:transparent!important; border-color:transparent!important; align-items:flex-end!important; padding:0!important; }
+.cell-etagere-pleine:hover { background:rgba(180,120,60,.08)!important; }
+.cell-etagere-pleine .cell-row {
+    width:100%; height:11px; flex-shrink:0; padding:0 6px; margin:0;
+    background:repeating-linear-gradient(135deg, #6b4a26, #6b4a26 5px, #7d5730 5px, #7d5730 10px);
+    border-top:1px solid rgba(255,255,255,.14);
+    border-bottom:2px solid #2e1c08;
+    box-shadow:0 3px 5px rgba(0,0,0,.5);
+}
+.cell-etagere-pleine .cell-led  { display:none; }
+.cell-etagere-pleine .cell-name { color:#f2d9b8; font-size:.6rem; text-shadow:0 1px 1px rgba(0,0,0,.6); }
+.cell-etagere-pleine .cell-desc { color:#c9a875; }
 
 .cell-led { width:6px; height:6px; border-radius:50%; flex-shrink:0; margin-right:5px; box-shadow:0 0 4px currentColor; }
 .led-on   { background:#22c55e; color:#22c55e; }
@@ -188,6 +232,7 @@
 /* Mode "Lier des ports" : premier port cliqué, en attente du second. */
 .port.port-pending { outline:2px dashed #fbbf24; outline-offset:1px; }
 #btn-mode-lien.active { background:var(--accent); color:#001018; border-color:var(--accent); }
+#btn-verrou.active { background:#7c2d12; color:#fed7aa; border-color:#c2410c; }
 
 /* Voyant de ping — coin supérieur gauche du port, visible seulement une fois
    un ping tenté (au chargement si un statut est déjà connu côté serveur —
@@ -201,6 +246,19 @@
 }
 .port.port-ping-ok .port-led   { display:block; background:#22c55e; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #22c55e; }
 .port.port-ping-fail .port-led { display:block; background:#ef4444; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #ef4444; }
+
+/* Détacher un lien port-à-port (câblage) — coin haut-droit, visible
+   seulement au survol d'un port câblé (voir delierPort()). Manquait une
+   action directe pour ça : jusqu'ici, la seule façon était de rouvrir
+   l'éditeur de ports et choisir "— Libre —" dans le menu déroulant, jamais
+   évident à trouver en partant du câble affiché dans le rack. */
+.port-unlink {
+    display:none; position:absolute; top:-4px; right:-4px; width:12px; height:12px;
+    border-radius:50%; background:#dc2626; color:#fff; font-size:8px; font-weight:700;
+    line-height:12px; text-align:center; z-index:5; box-shadow:0 0 0 1px rgba(0,0,0,.6);
+}
+.port.port-lie:hover .port-unlink { display:block; }
+.port-unlink:hover { background:#ff3355; transform:scale(1.2); }
 
 .cell-ping-btn {
     background:none; border:1px solid #334155; color:#64748b; cursor:pointer;
@@ -305,8 +363,8 @@
         · {{ parc.baie_marque or 'Baie' }}{% if parc.baie_nb_u %} · {{ parc.baie_nb_u }}U{% endif %}</p>
     </div>
     <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.4rem;">
-        <button class="btn btn-primary btn-sm" onclick="exportRack()" title="Exporter en image PNG">📷 Exporter</button>
-        <a href="/parc" class="btn btn-primary btn-sm">✏ Config baie</a>
+        <button class="btn btn-primary btn-sm" onclick="exportRack()" title="Exporter en image PNG">📷</button>
+        <a href="/parc" class="btn btn-primary btn-sm" title="Configuration de la baie (parc général)">✏</a>
     </div>
 </div>
 
@@ -332,22 +390,25 @@
             </div>
             <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;">
                 <button onclick="ajouterBandeauRJ()" class="btn btn-primary btn-sm" title="Pré-remplit le formulaire : 1U, 24 ports — reste à choisir la position et valider">+ Bandeau RJ</button>
-                <button id="btn-mode-lien" onclick="toggleModeLien()" class="btn btn-primary btn-sm" title="Cliquer sur deux ports successivement pour les relier (câblage physique)">🔗 Lier des ports</button>
-                <button id="btn-ping-baie" onclick="pingerToutelaBaie()" class="btn btn-primary btn-sm" title="Pinger tous les appareils reliés à un port de cette baie">📡 Ping toute la baie</button>
-                <select id="sel-ping-auto" onchange="changerPingAuto(this)" class="btn btn-primary btn-sm" style="width:180px;flex:0 0 auto;padding-right:1.2rem;" title="Ping automatique de toute la baie à intervalle régulier">
-                    <option value="0">Ping auto : désactivé</option>
-                    <option value="5000">Ping auto : 5 s</option>
-                    <option value="10000">Ping auto : 10 s</option>
-                    <option value="20000">Ping auto : 20 s</option>
-                    <option value="30000">Ping auto : 30 s</option>
-                    <option value="60000">Ping auto : 60 s</option>
-                    <option value="300000">Ping auto : 300 s</option>
+                <button onclick="ajouterEtagere()" class="btn btn-primary btn-sm" title="Une tablette physique (1U, pleine largeur) — les appareils posés dessus se placent ensuite normalement, dans la rangée juste au-dessus">+ Étagère</button>
+                <button id="btn-mode-lien" onclick="toggleModeLien()" class="btn btn-primary btn-sm" title="Lier deux ports : cliquer sur deux ports successivement pour les relier (câblage physique)">🔗 Lier</button>
+                <button id="btn-ping-baie" onclick="pingerToutelaBaie()" class="btn btn-primary btn-sm" title="Pinger tous les appareils reliés à un port de cette baie">📡</button>
+                <select id="sel-ping-auto" onchange="changerPingAuto(this)" class="btn btn-primary btn-sm" style="width:auto;flex:0 0 auto;padding-right:1.2rem;" title="Ping automatique de toute la baie à intervalle régulier">
+                    <option value="0">🔁 désactivé</option>
+                    <option value="5000">🔁 5 s</option>
+                    <option value="10000">🔁 10 s</option>
+                    <option value="20000">🔁 20 s</option>
+                    <option value="30000">🔁 30 s</option>
+                    <option value="60000">🔁 60 s</option>
+                    <option value="300000">🔁 300 s</option>
                 </select>
                 <span id="ping-baie-progress" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--accent);"></span>
-                <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste imprimable/CSV de tous les liens port-à-port">🔌 Liste de câblage</a>
-                <button onclick="changerU(-1)" class="btn btn-primary btn-sm">− 1U</button>
-                <button onclick="changerU(1)"  class="btn btn-primary btn-sm">+ 1U</button>
-                <button onclick="toutVider()"  class="btn btn-danger btn-sm">✕ Vider</button>
+                <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌</a>
+                <button onclick="changerU(-1)" class="btn btn-primary btn-sm" title="Réduire la baie d'1U">− U</button>
+                <button onclick="changerU(1)"  class="btn btn-primary btn-sm" title="Agrandir la baie d'1U">+ U</button>
+                <button id="btn-verrou" onclick="toggleVerrouBaie()" class="btn btn-primary btn-sm"
+                        title="Verrouiller la baie : bloque le glisser-déposer et le redimensionnement (évite un déplacement accidentel) — préférence locale à ce navigateur, pas partagée avec les autres utilisateurs">🔓</button>
+                <button onclick="toutVider()"  class="btn btn-danger btn-sm" title="Vider : retire tous les équipements de cette baie">✕ Vider</button>
             </div>
         </div>
 
@@ -458,7 +519,7 @@
                     <option>Serveur</option><option>Switch</option>
                     <option>Routeur/Pare-feu</option><option>NAS</option>
                     <option>UPS</option><option>Patch Panel</option>
-                    <option>Bandeau RJ</option>
+                    <option>Bandeau RJ</option><option>Étagère</option>
                     <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
                 </select>
             </div>
@@ -495,17 +556,23 @@
                 <label>Description / note</label>
                 <input type="text" id="cfg-desc" placeholder="Ex: Ports 1-24 bureau...">
             </div>
-            <div class="form-group" style="margin-bottom:.8rem;">
-                <label>Nombre de ports (Ethernet)</label>
+            <div class="form-group" id="grp-nb-ports" style="margin-bottom:.8rem;">
+                <label id="lbl-nb-ports">Nombre de ports (Ethernet)</label>
                 <input type="number" id="cfg-nb-ports" min="0" max="48" value="0"
                        style="font-family:'Share Tech Mono',monospace;">
-                <div class="form-hint">0 = pas de ports affichés. 48 maximum.</div>
+                <div class="form-hint" id="hint-nb-ports">0 = pas de ports affichés. 48 maximum.</div>
+            </div>
+            <!-- Étagère : pas de ports/emplacements — c'est une tablette
+                 physique, pas un élément réseau. Les appareils posés dessus
+                 se placent normalement (rangée du dessus), pas via ce champ. -->
+            <div class="form-hint" id="hint-etagere" style="display:none;margin:-.4rem 0 .8rem;">
+                Une étagère est une tablette : posez les appareils dessus en les plaçant normalement, dans la rangée juste au-dessus.
             </div>
             <button onclick="placerEquip()" class="btn btn-success" style="width:100%;">✓ Placer l'équipement</button>
 
             <!-- ÉDITEUR DE PORTS — un slot déjà enregistré, avec au moins un port -->
             <div id="ports-editor" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
-                <div class="form-section-title" style="margin-bottom:.6rem;">&#9632; Ports</div>
+                <div class="form-section-title" id="lbl-ports-editor" style="margin-bottom:.6rem;">&#9632; Ports</div>
                 <div id="ports-editor-list" style="display:flex;flex-direction:column;gap:.4rem;max-height:340px;overflow-y:auto;"></div>
             </div>
         </div>
@@ -544,6 +611,22 @@ let nbCols = 1;
 let slots  = {};  // key "pos-col" → slot
 let currentBaie = 'Baie principale';
 let baiesList   = ['Baie principale'];
+// Verrouillage : préférence LOCALE à ce navigateur (localStorage, comme
+// baie_ping_auto_ms) — pas un champ serveur partagé entre utilisateurs.
+// Bloque le glisser-déposer et le redimensionnement (les deux seuls gestes
+// sans confirmation, donc les plus exposés à un déplacement accidentel) ;
+// n'empêche ni la sélection/édition via le formulaire, ni la suppression
+// (déjà protégée par un confirm()), ni l'ajout de nouveaux éléments.
+let baieVerrouillee = false;
+// Slot actuellement affiché dans le panneau d'édition (voir selectSlot()) —
+// permet à enregistrerPort()/delierPort() de rafraîchir l'éditeur de ports
+// ouvert après une modification qui recharge toute la baie, sans quoi il
+// resterait affiché avec des données périmées (ex : un port qu'on vient de
+// détacher montrerait encore l'option "🔗 relié" désactivée).
+let selectedSlotId = null;
+function slotActuel() {
+    return selectedSlotId ? Object.values(slots).find(x => x.id === selectedSlotId) : null;
+}
 const MAX_COLS = 5;
 // U_H : calculé dynamiquement pour respecter le ratio 19" × 1,75" par U
 // (1 U = 1,75 pouce ; largeur rack = 19 pouces → ratio = 1,75/19 ≈ 0,0921)
@@ -563,11 +646,11 @@ function calcUH(rerender) {
 
 const TYPE_CSS = {
     'Serveur':'srv','Switch':'sw','Routeur/Pare-feu':'fw','NAS':'nas',
-    'UPS':'ups','Patch Panel':'patch','Bandeau RJ':'bandeau','PDU':'pdu','Borne WiFi':'ap',
+    'UPS':'ups','Patch Panel':'patch','Bandeau RJ':'bandeau','Étagère':'etagere','PDU':'pdu','Borne WiFi':'ap',
 };
 const TYPE_COLORS = {
     'Serveur':'#3b1a8a','Switch':'#0a4a5a','Routeur/Pare-feu':'#5a0a0a','NAS':'#0a3a1a',
-    'UPS':'#5a3a00','Patch Panel':'#1a2535','Bandeau RJ':'#0a3a3a','PDU':'#3a0a5a','Borne WiFi':'#0a1a4a',
+    'UPS':'#5a3a00','Patch Panel':'#1a2535','Bandeau RJ':'#0a3a3a','Étagère':'#4a2e10','PDU':'#3a0a5a','Borne WiFi':'#0a1a4a',
 };
 // Rapprochement indicatif catégorie périphérique -> type de baie, pour
 // pré-remplir #cfg-type quand on associe un périphérique (l'utilisateur
@@ -648,12 +731,48 @@ async function chargerBaie(baieNom) {
         document.getElementById('lbl-u').textContent = nbU;
         document.getElementById('cfg-pos').max = nbU;
     }
+    chargerVerrouBaie();
     renderRack();
     renderList();
 }
 
 function key(pos, col) { return `${pos}-${col}`; }
 function escH(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── VERROUILLAGE ─────────────────────────────────────────────────────────────
+// Une clé par baie (currentBaie) : verrouiller "Baie principale" ne doit
+// pas verrouiller une autre baie du même client.
+function _cleVerrouBaie() { return 'baie_verrou_' + currentBaie; }
+
+function chargerVerrouBaie() {
+    let v = false;
+    try { v = localStorage.getItem(_cleVerrouBaie()) === '1'; } catch (e) {}
+    baieVerrouillee = v;
+    majBoutonVerrou();
+}
+
+function majBoutonVerrou() {
+    const btn = document.getElementById('btn-verrou');
+    if (!btn) return;
+    btn.classList.toggle('active', baieVerrouillee);
+    // Icône seule (cadenas ouvert/fermé, déjà univoque) + style actif —
+    // le détail complet reste dans le title, comme les autres boutons
+    // compactés de cette barre d'outils.
+    btn.textContent = baieVerrouillee ? '🔒' : '🔓';
+    btn.title = baieVerrouillee
+        ? 'Baie verrouillée : glisser-déposer et redimensionnement bloqués (préférence locale à ce navigateur) — cliquer pour déverrouiller'
+        : 'Verrouiller la baie : bloque le glisser-déposer et le redimensionnement (évite un déplacement accidentel) — préférence locale à ce navigateur, pas partagée avec les autres utilisateurs';
+}
+
+function toggleVerrouBaie() {
+    baieVerrouillee = !baieVerrouillee;
+    try { localStorage.setItem(_cleVerrouBaie(), baieVerrouillee ? '1' : '0'); } catch (e) {}
+    majBoutonVerrou();
+    renderRack();
+    showFlash(baieVerrouillee
+        ? 'Baie verrouillée : glisser-déposer et redimensionnement bloqués sur ce navigateur.'
+        : 'Baie déverrouillée.', 'info');
+}
 
 // ── RENDER RACK ───────────────────────────────────────────────────────────────
 function renderRack() {
@@ -678,7 +797,7 @@ function renderRack() {
     // qui déborde, signalé en usage réel).
     const originesParU = {}, debordeParU = {};
     Object.values(slots).forEach(s => {
-        const pos = s.position, hu = s.hauteur_u || 1;
+        const pos = s.position, hu = (s.type_equipement === 'Étagère') ? 1 : (s.hauteur_u || 1);
         (originesParU[pos] = originesParU[pos] || []).push(s);
         for (let du = 1; du < hu; du++) {
             const u2 = pos + du;
@@ -686,18 +805,40 @@ function renderRack() {
         }
     });
 
+    // Hauteur d'une rangée "tablette d'étagère" : nettement plus fine
+    // qu'une rangée normale — une étagère n'est pas un élément comme les
+    // autres mais une plaque PHYSIQUE fine qui s'insère entre deux unités,
+    // pas un boîtier occupant tout un U (voir SHELF_H ci-dessous).
+    const SHELF_H = Math.max(9, Math.round(U_H * 0.28));
+
     let totalOccupied = 0;
 
     for (let u = 1; u <= nbU; u++) {
+        const origines = originesParU[u] || [];
+        const debordent = debordeParU[u] || [];
+        // Rangée réductible à une fine tablette UNIQUEMENT si elle ne
+        // contient RIEN d'autre qu'une étagère (seule occupante, rien ne
+        // déborde dedans depuis une rangée du dessus) — condition
+        // nécessaire pour ne jamais désaligner un élément haut de plusieurs
+        // U qui la traverserait : sa hauteur CSS est un multiple fixe de
+        // U_H, calculée en supposant que CHAQUE rangée traversée fait U_H.
+        // Dès qu'un doute existe, repli sûr : la rangée garde sa hauteur
+        // U_H normale (l'étagère s'y rend alors comme avant — fine plaque
+        // posée en bas d'une rangée pleine hauteur, sinon transparente).
+        const estTabletteSeule = origines.length === 1
+            && origines[0].type_equipement === 'Étagère'
+            && debordent.length === 0;
+        const rowH = estTabletteSeule ? SHELF_H : U_H;
+
         const nd = document.createElement('div');
         nd.className = 'rack-num';
-        nd.style.height = U_H + 'px';
+        nd.style.height = rowH + 'px';
         nd.textContent = u;
         nums.appendChild(nd);
 
         const row = document.createElement('div');
         row.className = 'rack-row';
-        row.style.height = U_H + 'px';
+        row.style.height = rowH + 'px';
 
         // Plages de colonnes (0-9) déjà couvertes à cette rangée, par une
         // origine réelle ou un débordement venu d'au-dessus — le
@@ -705,14 +846,14 @@ function renderRack() {
         // grise n'est donc jamais rendue sous un élément qui déborde depuis
         // une rangée du dessus (demandé explicitement).
         const couvert = [];
-        (originesParU[u] || []).forEach(s => {
+        origines.forEach(s => {
             const debut = Math.min(9, Math.max(0, s.col_index || 0));
             const largeur = Math.min(10 - debut, Math.max(1, s.largeur_u || 10));
             couvert.push({debut, fin: debut + largeur - 1});
             totalOccupied++;
-            row.appendChild(makeOccupiedCell(s, u, debut, largeur));
+            row.appendChild(makeOccupiedCell(s, u, debut, largeur, rowH));
         });
-        (debordeParU[u] || []).forEach(s => {
+        debordent.forEach(s => {
             const debut = Math.min(9, Math.max(0, s.col_index || 0));
             const largeur = Math.min(10 - debut, Math.max(1, s.largeur_u || 10));
             couvert.push({debut, fin: debut + largeur - 1});
@@ -721,10 +862,10 @@ function renderRack() {
         couvert.sort((a, b) => a.debut - b.debut);
         let curseur = 0;
         couvert.forEach(c => {
-            if (c.debut > curseur) row.appendChild(makeEmptyCell(u, curseur, c.debut - curseur));
+            if (c.debut > curseur) row.appendChild(makeEmptyCell(u, curseur, c.debut - curseur, rowH));
             curseur = Math.max(curseur, c.fin + 1);
         });
-        if (curseur < 10) row.appendChild(makeEmptyCell(u, curseur, 10 - curseur));
+        if (curseur < 10) row.appendChild(makeEmptyCell(u, curseur, 10 - curseur, rowH));
 
         rows.appendChild(row);
     }
@@ -793,20 +934,28 @@ function renderCableLinks() {
 }
 
 // ── CELL BUILDERS ─────────────────────────────────────────────────────────────
-function makeOccupiedCell(s, u, debut, largeur) {
+function makeOccupiedCell(s, u, debut, largeur, rowH) {
     const cell = document.createElement('div');
     cell.className = 'rack-cell occupied';
     cell.dataset.pos = u;
     cell.dataset.col = debut;
     cell.dataset.id  = s.id;
 
-    const hu = s.hauteur_u || 1;
+    const estEtagere = s.type_equipement === 'Étagère';
+    // Une étagère est toujours 1U conceptuellement (pas de notion de
+    // "2U de tablette" — voir cfg-hu désactivé côté formulaire pour ce
+    // type) : forcé ici aussi, en défense, quelle que soit la valeur
+    // réellement stockée (donnée héritée d'avant ce correctif, ou API
+    // appelée directement) — sinon le calcul de hauteur ci-dessous
+    // suppose à tort que CHAQUE rangée traversée fait U_H, alors qu'une
+    // rangée de tablette peut être bien plus fine (voir SHELF_H).
+    const hu = estEtagere ? 1 : (s.hauteur_u || 1);
     if (hu > 1) {
         cell.style.height     = (hu * U_H + (hu - 1)) + 'px';
         cell.style.position   = 'relative';
         cell.style.zIndex     = '2';
     } else {
-        cell.style.height = U_H + 'px';
+        cell.style.height = (rowH || U_H) + 'px';
     }
 
     // Position/largeur dans la grille à 10 colonnes du rack — debut (0-9)
@@ -819,6 +968,12 @@ function makeOccupiedCell(s, u, debut, largeur) {
 
     const tcss = TYPE_CSS[s.type_equipement] || '';
     if (tcss) cell.classList.add('cell-' + tcss);
+    // Rangée effectivement réduite (rowH < U_H, voir renderRack) : rendu
+    // compact, la plaque tôlée remplit directement toute la cellule. Sinon
+    // (repli de sécurité — un autre élément partage la rangée ou déborde
+    // dedans, hauteur U_H normale conservée) : ancien rendu, fine plaque
+    // posée en bas d'une rangée sinon transparente.
+    if (estEtagere) cell.classList.add((rowH && rowH < U_H) ? 'cell-etagere-compacte' : 'cell-etagere-pleine');
 
     const ledCls = s.appareil_id ? (s.en_ligne ? 'led-on' : 'led-off') : 'led-none';
     const nom  = escH(libelleComplet(s));
@@ -840,14 +995,19 @@ function makeOccupiedCell(s, u, debut, largeur) {
         <div class="cell-ports-wrap">
             <div class="cell-ports">${ports.map(portHTML).join('')}</div>
             <div class="cell-ping-zone">
-                <button class="cell-ping-btn" title="Pinger les appareils reliés aux ports">📡 Ping</button>
+                <button class="cell-ping-btn" title="Pinger les appareils reliés aux ports">📡</button>
             </div>
         </div>` : '';
 
+    // Une étagère n'a pas de hauteur ajustable (toujours 1U conceptuel, voir
+    // plus haut) : ni poignée de hauteur ni poignée diagonale (qui touche
+    // aussi la hauteur) — seule la largeur reste ajustable, une tablette
+    // pouvant très bien ne pas couvrir toute la baie. Baie verrouillée :
+    // aucune poignée de redimensionnement du tout (voir toggleVerrouBaie).
     cell.innerHTML = ligneInfo + zonePorts
-        + `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`
-        + `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`
-        + `<div class="cell-resize-corner" title="Redimensionner en hauteur et largeur (glisser en diagonale)"></div>`;
+        + (estEtagere || baieVerrouillee ? '' : `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`)
+        + (baieVerrouillee ? '' : `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`)
+        + (estEtagere || baieVerrouillee ? '' : `<div class="cell-resize-corner" title="Redimensionner en hauteur et largeur (glisser en diagonale)"></div>`);
 
     // Ports : clic = surbrillance de tout port lié à la même cible (ou, en
     // mode "Lier des ports", sélection du 1er/2e port à câbler ensemble),
@@ -860,6 +1020,14 @@ function makeOccupiedCell(s, u, debut, largeur) {
             e.stopPropagation();
             if (modeLien) { gererClicLienPort(s, p, el); }
             else { surbrillerPortsLies(cleCiblePort(p)); }
+        });
+        // Badge ✕ (voir portHTML) — présent uniquement sur un port câblé.
+        // stopPropagation pour ne déclencher ni la surbrillance ni le mode
+        // lien du port lui-même, seulement le détachement.
+        const badge = el.querySelector('.port-unlink');
+        if (badge) badge.addEventListener('click', e => {
+            e.stopPropagation();
+            delierPort(s.id, p.numero, p.nom_cible);
         });
         el.addEventListener('mouseenter', e => {
             e.stopPropagation();
@@ -895,8 +1063,10 @@ function makeOccupiedCell(s, u, debut, largeur) {
     // hauteur_u par pas de 1U. draggable est désactivé le temps du geste —
     // sinon le navigateur démarre un déplacement natif (dragstart) dès que
     // la souris bouge dans un élément draggable, même sur cette poignée.
+    // Absente pour une étagère (voir plus haut, jamais rendue dans le HTML
+    // pour ce type) : querySelector renvoie alors null, d'où ce garde-fou.
     const poignee = cell.querySelector('.cell-resize');
-    poignee.addEventListener('mousedown', e => {
+    if (poignee) poignee.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
         cell.draggable = false;
@@ -930,8 +1100,10 @@ function makeOccupiedCell(s, u, debut, largeur) {
     // Redimensionnement en LARGEUR à la souris : glisser la poignée de
     // droite change largeur_u par pas de 1/10 de la largeur du rack, borné
     // pour ne jamais dépasser le bord droit de la grille (10 - debut).
+    // Absente si la baie est verrouillée (jamais rendue dans le HTML, voir
+    // plus haut) — même garde-fou que .cell-resize/.cell-resize-corner.
     const poigneeW = cell.querySelector('.cell-resize-w');
-    poigneeW.addEventListener('mousedown', e => {
+    if (poigneeW) poigneeW.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
         cell.draggable = false;
@@ -967,8 +1139,9 @@ function makeOccupiedCell(s, u, debut, largeur) {
     // Redimensionnement DIAGONAL (coin bas-droit) : hauteur ET largeur en un
     // seul geste — un seul appel réseau à la fin plutôt que deux
     // redimensionnements successifs qui pourraient se marcher dessus.
+    // Absente pour une étagère, même raison que .cell-resize plus haut.
     const poigneeC = cell.querySelector('.cell-resize-corner');
-    poigneeC.addEventListener('mousedown', e => {
+    if (poigneeC) poigneeC.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
         cell.draggable = false;
@@ -1009,8 +1182,10 @@ function makeOccupiedCell(s, u, debut, largeur) {
     cell.addEventListener('mousemove',  e => { const t = document.getElementById('rack-tooltip'); if(t.classList.contains('show')) positionnerTooltip(e); });
     cell.addEventListener('mouseleave', () => masquerTooltip());
 
-    // Drag & drop
-    cell.draggable = true;
+    // Drag & drop — désactivé si la baie est verrouillée (voir
+    // toggleVerrouBaie) : le navigateur ne déclenche alors jamais dragstart,
+    // donc rien de plus à bloquer côté cases vides (dropzones).
+    cell.draggable = !baieVerrouillee;
     cell.addEventListener('dragstart', e => {
         e.dataTransfer.setData('text/plain', JSON.stringify({id: s.id, pos: u, col: debut}));
         cell.classList.add('dragging');
@@ -1021,40 +1196,81 @@ function makeOccupiedCell(s, u, debut, largeur) {
     return cell;
 }
 
-function makeEmptyCell(u, debut, largeur) {
+function makeEmptyCell(u, debut, largeur, rowH) {
     const cell = document.createElement('div');
     cell.className = 'rack-cell empty';
-    cell.style.height = U_H + 'px';
+    cell.style.height = (rowH || U_H) + 'px';
     cell.style.gridColumn = `${debut + 1} / span ${largeur}`;
     cell.dataset.pos = u;
     cell.dataset.col = debut;
-    cell.innerHTML = largeur >= 10
+    cell.innerHTML = (largeur >= 10
         ? `<span style="color:#1a2a3a;font-size:.52rem;user-select:none;">U${u}</span>`
-        : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">C${debut}</span>`;
+        : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">C${debut}</span>`)
+        + `<div class="cell-magnet"></div>`;
 
-    // Pré-remplit position ET largeur pour reprendre EXACTEMENT l'espace
-    // libre cliqué (l'utilisateur peut toujours ajuster ensuite) — plus
-    // besoin de deviner la bonne colonne/largeur à la main.
-    cell.addEventListener('click', () => {
+    // Grille de positionnement INVISIBLE : cette case vide peut couvrir tout
+    // un espace libre contigu d'un coup (plusieurs colonnes) — plutôt que
+    // de toujours reprendre sa colonne de départ fixe (debut), la colonne
+    // réellement visée est recalculée en direct depuis la position du
+    // curseur, avec un repère net (cell-magnet) qui la matérialise au
+    // survol ou pendant un glisser. Un élément moins large que la baie se
+    // positionne ainsi PRÉCISÉMENT n'importe où dans l'espace libre — pas
+    // seulement à l'origine du plus grand espace disponible, ce qui
+    // empêchait jusqu'ici de le placer où on le voulait vraiment.
+    function colonneVisee(clientX) {
+        const row = cell.parentElement;
+        const r = row.getBoundingClientRect();
+        const tenthPx = r.width / 10;
+        const col = Math.floor((clientX - r.left) / tenthPx);
+        return Math.min(debut + largeur - 1, Math.max(debut, col));
+    }
+    function majMarqueur(clientX) {
+        const col = colonneVisee(clientX);
+        const m = cell.querySelector('.cell-magnet');
+        if (!m) return;
+        m.style.left = ((col - debut) / largeur * 100) + '%';
+        m.style.width = (100 / largeur) + '%';
+        m.style.display = 'block';
+    }
+    function masquerMarqueur() {
+        const m = cell.querySelector('.cell-magnet');
+        if (m) m.style.display = 'none';
+    }
+
+    // Pré-remplit position ET largeur pour reprendre l'espace libre depuis
+    // la colonne visée jusqu'à la fin de l'espace disponible (l'utilisateur
+    // peut toujours ajuster ensuite).
+    cell.addEventListener('click', e => {
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
+        const col = colonneVisee(e.clientX);
         document.getElementById('cfg-pos').value = u;
-        document.getElementById('cfg-col').value = debut;
-        document.getElementById('cfg-largeur').value = String(largeur);
+        document.getElementById('cfg-col').value = col;
+        document.getElementById('cfg-largeur').value = String(debut + largeur - col);
         document.getElementById('cfg-nb-ports').value = 0;
         document.getElementById('ports-editor').style.display = 'none';
         showTab('tab-add');
     });
-    cell.addEventListener('mouseenter', () => cell.classList.add('drag-over'));
-    cell.addEventListener('mouseleave', () => cell.classList.remove('drag-over'));
+    cell.addEventListener('mouseenter', e => { cell.classList.add('drag-over'); majMarqueur(e.clientX); });
+    cell.addEventListener('mousemove', e => { majMarqueur(e.clientX); });
+    cell.addEventListener('mouseleave', () => { cell.classList.remove('drag-over'); masquerMarqueur(); });
 
-    // Drop target
-    cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('drag-over'); });
-    cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
+    // Drop target — même repère magnétique pendant le glisser (dragover
+    // est le pendant de mousemove pour un glisser HTML5 natif).
+    cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('drag-over'); majMarqueur(e.clientX); });
+    cell.addEventListener('dragleave', () => { cell.classList.remove('drag-over'); masquerMarqueur(); });
     cell.addEventListener('drop', async e => {
         e.preventDefault();
         cell.classList.remove('drag-over');
+        masquerMarqueur();
+        // Repli défensif : draggable=false sur les cellules occupées
+        // empêche déjà tout dragstart quand la baie est verrouillée (voir
+        // toggleVerrouBaie), donc cette branche ne devrait jamais s'exécuter
+        // dans ce cas — gardée quand même au cas où un glisser aurait pu
+        // démarrer autrement.
+        if (baieVerrouillee) return;
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        await deplacerSlot(data.id, u, debut);
+        const col = colonneVisee(e.clientX);
+        await deplacerSlot(data.id, u, col);
     });
 
     return cell;
@@ -1067,9 +1283,14 @@ async function deplacerSlot(id, newPos, newCol) {
         body: JSON.stringify({position: newPos, col_index: newCol})
     });
     const slot = await r.json();
-    // Rebuild slots map
+    // Rebuild slots map — à partir de la réponse SERVEUR (slot.position/
+    // col_index), pas des newPos/newCol demandés : le serveur peut avoir
+    // recalé la colonne pour que le slot (avec sa largeur propre) ne
+    // déborde pas de la grille à 10 colonnes (voir _clamp dans
+    // api_baie_deplacer_slot) — utiliser les valeurs demandées ici aurait
+    // indexé le slot au mauvais endroit dans la carte côté client.
     Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
-    const nk = key(newPos, newCol);
+    const nk = key(slot.position, slot.col_index || 0);
     // Remove any existing at destination
     Object.keys(slots).forEach(k => { if (k === nk) delete slots[k]; });
     slots[nk] = slot;
@@ -1180,8 +1401,14 @@ function portHTML(p) {
     // aucun voyant (en_ligne vaut 0 par défaut en base, indiscernable d'un
     // vrai échec sans ce champ) ; sinon vert/rouge selon en_ligne.
     const classePing = (p.appareil_id && p.dernier_ping) ? (p.en_ligne ? ' port-ping-ok' : ' port-ping-fail') : '';
-    return `<span class="port${libre ? ' port-libre' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${p.appareil_id || ''}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
-        <span class="port-led"></span>${p.numero}</span>`;
+    // Badge de détachement (✕ rouge, coin haut-droit) — uniquement pour un
+    // port câblé à un autre (lie_slot_id) : révélé au survol par CSS
+    // (.port.port-lie:hover .port-unlink), cliqué via delierPort() branché
+    // plus bas dans makeOccupiedCell (même boucle que les autres écouteurs
+    // de port, pas besoin de data-attributes supplémentaires ici).
+    const badgeLien = p.lie_slot_id ? `<span class="port-unlink" title="Détacher ce lien">✕</span>` : '';
+    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${p.appareil_id || ''}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
+        <span class="port-led"></span>${badgeLien}${p.numero}</span>`;
 }
 
 // Clé identifiant la cible d'un port — même cible = même clé, quel que soit
@@ -1231,7 +1458,7 @@ function desactiverModeLien() {
     premierPortLien = null;
     const btn = document.getElementById('btn-mode-lien');
     btn.classList.remove('active');
-    btn.textContent = '🔗 Lier des ports';
+    btn.textContent = '🔗 Lier';
 }
 
 function toggleModeLien() {
@@ -1246,9 +1473,18 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && modeLien) desactiverModeLien();
 });
 
+// Vrai si un port porte déjà quelque chose — appareil, périphérique, usage
+// libre OU un autre lien — donc si le lier maintenant écraserait
+// silencieusement cette affectation (voir api_baie_lien_port : la route
+// écrase sans prévenir). Sert à avertir avant de créer un lien, pas
+// seulement avant d'en supprimer un.
+function portDejaOccupe(p) {
+    return !!(p.appareil_id || p.peripherique_id || p.usage_libre || p.lie_slot_id);
+}
+
 async function gererClicLienPort(s, p, el) {
     if (!premierPortLien) {
-        premierPortLien = { slotId: s.id, numero: p.numero, el };
+        premierPortLien = { slotId: s.id, numero: p.numero, el, port: p };
         el.classList.add('port-pending');
         document.getElementById('btn-mode-lien').textContent = '🔗 Cliquez sur le 2e port… (Échap pour annuler)';
         return;
@@ -1258,6 +1494,17 @@ async function gererClicLienPort(s, p, el) {
         premierPortLien.el.classList.remove('port-pending');
         premierPortLien = null;
         document.getElementById('btn-mode-lien').textContent = '🔗 Cliquez sur le 1er port… (Échap pour annuler)';
+        return;
+    }
+    // Avertir avant d'écraser silencieusement une affectation déjà en place
+    // sur L'UN OU L'AUTRE port (appareil/périphérique/usage libre/autre
+    // lien) — jusqu'ici, cliquer deux ports déjà occupés en mode "Lier"
+    // remplaçait tout sans prévenir.
+    const occupes = [];
+    if (portDejaOccupe(premierPortLien.port)) occupes.push(`port ${premierPortLien.port.numero} (${premierPortLien.port.nom_cible || 'occupé'})`);
+    if (portDejaOccupe(p)) occupes.push(`port ${p.numero} (${p.nom_cible || 'occupé'})`);
+    if (occupes.length && !confirm(`Ce lien remplacera l'affectation actuelle de ${occupes.join(' et ')}. Continuer ?`)) {
+        desactiverModeLien();
         return;
     }
     const payload = {
@@ -1529,6 +1776,7 @@ function surbrillanceEquip(pos, col) {
 function selectSlot(s, cell) {
     document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
     cell.classList.add('selected');
+    selectedSlotId = s.id;
     document.getElementById('cfg-pos').value   = s.position;
     document.getElementById('cfg-col').value   = s.col_index || 0;
     document.getElementById('cfg-largeur').value = s.largeur_u || 10;
@@ -1540,6 +1788,7 @@ function selectSlot(s, cell) {
     document.getElementById('cfg-app').value    = s.appareil_id || '';
     document.getElementById('cfg-periph').value = s.peripherique_id || '';
     document.getElementById('cfg-nb-ports').value = s.nb_ports || 0;
+    majLabelEmplacements();
     showTab('tab-add');
     afficherEditeurPorts(s);
 }
@@ -1679,16 +1928,31 @@ async function changerCableLabel(input) {
 }
 
 async function enregistrerPort(slotId, numero, payload) {
-    const r = await fetch(`/api/baie/slot/${slotId}/port/${numero}`, {
+    await fetch(`/api/baie/slot/${slotId}/port/${numero}`, {
         method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
     });
-    const port = await r.json();
-    const s = Object.values(slots).find(x => x.id == slotId);
-    if (s && s.ports) {
-        const idx = s.ports.findIndex(p => p.numero == numero);
-        if (idx >= 0) s.ports[idx] = port;
-    }
-    renderRack();
+    // Recharge toute la baie plutôt que de ne patcher QUE ce port en local :
+    // ce port pouvait être câblé à un autre (lie_slot_id) — le changer ici
+    // détache aussi AUTOMATIQUEMENT son partenaire côté serveur (voir
+    // api_baie_port) sans que la réponse de CET appel en dise quoi que ce
+    // soit ; sans ce rechargement, le port partenaire restait affiché
+    // "relié" avec des données périmées (couleur, infobulle) jusqu'à sa
+    // propre sélection — la ligne de câble disparaissait bien, pas lui.
+    await chargerBaie(currentBaie);
+    const cur = slotActuel();
+    if (cur) afficherEditeurPorts(cur);
+}
+
+// Détacher un lien port-à-port (câblage) directement depuis le port affiché
+// dans le rack — jusqu'ici, la seule façon était de rouvrir l'éditeur de
+// ports de l'élément et choisir "— Libre —", jamais évident à trouver en
+// partant du câble visible. Même route que "— Libre —" (voir
+// api_baie_port : cible_fournie devient vraie dès que usage_libre est
+// présent dans le payload, même vide) — détache aussi le partenaire
+// automatiquement, des deux côtés.
+async function delierPort(slotId, numero, nomCible) {
+    if (!confirm(`Détacher le lien vers ${nomCible || 'cet élément'} ?`)) return;
+    await enregistrerPort(slotId, numero, { appareil_id: null, peripherique_id: null, usage_libre: '' });
 }
 
 // ── ACTIONS ──────────────────────────────────────────────────────────────────
@@ -1718,6 +1982,7 @@ function autoRemplirPeriph() {
 function couleurAuto() {
     const t = document.getElementById('cfg-type').value;
     document.getElementById('cfg-couleur').value = TYPE_COLORS[t] || '#1e3a5f';
+    majLabelEmplacements();
 }
 
 // Raccourci "+ Bandeau RJ" : pré-remplit le formulaire Placer pour un
@@ -1727,6 +1992,7 @@ function couleurAuto() {
 // site, pas le bandeau lui-même.
 function ajouterBandeauRJ() {
     document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
+    selectedSlotId = null;
     document.getElementById('cfg-hu').value = 1;
     document.getElementById('cfg-col').value = 0;
     document.getElementById('cfg-largeur').value = '10';
@@ -1738,8 +2004,59 @@ function ajouterBandeauRJ() {
     document.getElementById('cfg-nb-ports').value = 24;
     document.getElementById('ports-editor').style.display = 'none';
     couleurAuto();
+    majLabelEmplacements();
     showTab('tab-add');
     document.getElementById('cfg-pos').focus();
+}
+
+// Raccourci "+ Étagère" : pré-remplit le formulaire Placer pour une
+// étagère pleine tôle (1U par défaut, ajustable comme tout élément) — reste
+// à choisir la position et valider. Pas un élément réseau : ni ports ni
+// appareil associé, juste une tablette PHYSIQUE (voir .cell-etagere en CSS,
+// rendue en fine plaque en bas de sa rangée plutôt qu'en boîtier plein).
+// Les appareils qu'elle porte restent des éléments normaux, à placer dans
+// la rangée du dessus avec la grille magnétique habituelle — aucune
+// association technique entre l'étagère et ce qu'elle porte, exactement
+// comme dans un vrai rack.
+function ajouterEtagere() {
+    document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
+    selectedSlotId = null;
+    document.getElementById('cfg-hu').value = 1;
+    document.getElementById('cfg-col').value = 0;
+    document.getElementById('cfg-largeur').value = '10';
+    document.getElementById('cfg-type').value = 'Étagère';
+    document.getElementById('cfg-nom').value = 'Étagère';
+    document.getElementById('cfg-desc').value = '';
+    document.getElementById('cfg-app').value = '';
+    document.getElementById('cfg-periph').value = '';
+    document.getElementById('cfg-nb-ports').value = 0;
+    document.getElementById('ports-editor').style.display = 'none';
+    couleurAuto();
+    majLabelEmplacements();
+    showTab('tab-add');
+    document.getElementById('cfg-pos').focus();
+}
+
+function majLabelEmplacements() {
+    // Une étagère est une tablette PHYSIQUE, pas un élément réseau : pas de
+    // ports/emplacements pour elle — les appareils qu'elle porte sont des
+    // éléments normaux, placés dans la rangée du dessus (voir cell-etagere
+    // en CSS pour le rendu en fine plaque plutôt qu'en boîtier). Le champ
+    // est masqué et forcé à 0 plutôt que simplement renommé, pour ne pas
+    // laisser croire qu'on peut encore l'utiliser pour ce type.
+    const estEtagere = document.getElementById('cfg-type').value === 'Étagère';
+    document.getElementById('grp-nb-ports').style.display = estEtagere ? 'none' : '';
+    document.getElementById('hint-etagere').style.display = estEtagere ? '' : 'none';
+    if (estEtagere) document.getElementById('cfg-nb-ports').value = '0';
+
+    // Une étagère est toujours 1U conceptuel — pas de "tablette 2U", voir
+    // makeOccupiedCell (hu forcé à 1 pour ce type de toute façon en
+    // défense) : autant l'exposer clairement dans le formulaire plutôt que
+    // de laisser une valeur choisie ici sans effet visuel réel.
+    const cfgHu = document.getElementById('cfg-hu');
+    cfgHu.disabled = estEtagere;
+    cfgHu.title = estEtagere ? 'Une étagère est toujours 1U (fine tablette, pas de hauteur ajustable)' : '';
+    if (estEtagere) cfgHu.value = '1';
 }
 
 async function placerEquip() {
@@ -1777,6 +2094,7 @@ async function delSlot(id) {
     if (!confirm('Retirer cet équipement de la baie ?')) return;
     await fetch('/api/baie/slot/' + id, { method:'DELETE' });
     Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
+    if (selectedSlotId === id) selectedSlotId = null;
     nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1), 1);
     renderRack(); renderList();
 }

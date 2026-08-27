@@ -151,3 +151,27 @@ def test_largeur_u_plafonnee_par_col_index_a_la_modification(client, make_client
     updated = r.get_json()
     assert updated['col_index'] == 7, "col_index n'est pas censé changer via cette route"
     assert updated['largeur_u'] == 3, "10 - col_index(7) = 3, la largeur demandée (8) doit être plafonnée"
+
+
+def test_deplacer_slot_plafonne_col_index_selon_largeur_existante(client, make_client, make_user):
+    """POST /api/baie/slot/<id>/deplacer (drag & drop) ne reçoit ni ne
+    modifie largeur_u — mais la nouvelle col_index doit rester compatible
+    avec la largeur DÉJÀ choisie du slot, sinon le déplacement ferait
+    déborder un élément large vers la fin de la grille à 10 colonnes (ex :
+    un élément 4/10 déposé en colonne 9 depuis la grille magnétique)."""
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+
+    slot = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'largeur_u': 4, 'baie_nom': 'Baie principale',
+    }).get_json()
+    assert slot['largeur_u'] == 4
+
+    r = client.post(f"/api/baie/slot/{slot['id']}/deplacer", json={
+        'position': 2, 'col_index': 9,
+    })
+    updated = r.get_json()
+    assert updated['position'] == 2
+    assert updated['col_index'] == 6, "10 - largeur_u(4) = 6, la colonne visée (9) doit être plafonnée"
+    assert updated['largeur_u'] == 4, "la largeur ne doit pas changer lors d'un simple déplacement"

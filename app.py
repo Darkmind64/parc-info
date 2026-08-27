@@ -1837,6 +1837,16 @@ def init_db():
         'config_listes': 'id', 'user_preferences': 'id',
         'documents_interventions': 'id', 'interventions_appareils': 'id',
         'interventions_peripheriques': 'id', 'maintenance_notifications': 'id',
+        # baie_slot_ports : signalé en usage réel — le positionnement des
+        # éléments de la baie (table baie_slots, suivie ci-dessus) se
+        # synchronisait bien entre instances, mais pas leurs ports/câblage
+        # (numéro, appareil/périphérique associé, usage libre, pièce, lien
+        # port-à-port lie_slot_id/lie_port_numero) : cette table entière
+        # avait été oubliée de _TRACKED_JOURNAL depuis sa création. Voir
+        # rattraper_sync_baie_slot_ports() plus bas pour le rattrapage des
+        # ports déjà créés avant ce correctif (ajouter le trigger ici ne
+        # journalise que les écritures FUTURES).
+        'baie_slot_ports': 'id',
         # Tables à clé texte (pas de colonne 'id')
         'config': 'cle', 'journal_maj': 'cle', 'collectes': 'cle',
         'cles_recuperation': 'cle',
@@ -5936,6 +5946,13 @@ def api_baie_deplacer_slot(id):
     new_pos = f.get('position', 1)
     new_col = _clamp_col_index(f.get('col_index', 0))
     conn = get_db()
+    # La largeur du slot déplacé ne change pas ici (seule sa position
+    # bouge) — mais new_col doit rester compatible avec elle, sans quoi le
+    # slot déborderait de la grille à 10 colonnes (voir _clamp_largeur_u).
+    largeur_actuelle = conn.execute(
+        'SELECT largeur_u FROM baie_slots WHERE id=? AND client_id=?', (id, cid)).fetchone()
+    largeur_actuelle = (largeur_actuelle[0] if largeur_actuelle else None) or 10
+    new_col = min(new_col, max(0, 10 - largeur_actuelle))
     # Supprimer l'éventuel occupant de la destination (et ses ports — c'est
     # le slot déplacé, avec son propre id et ses propres ports intacts, qui
     # prend cette place)
@@ -8358,6 +8375,52 @@ def completer_fiches_existantes():
         return completes
     except Exception:
         logger.exception('Rattrapage des fiches appareils (sans conséquence)')
+        return 0
+    finally:
+        conn.close()
+
+
+#: Marqueur de rattrapage, pour ne le faire qu'une fois par base — voir
+#: _TRACKED_JOURNAL['baie_slot_ports'] ci-dessus : le trigger de
+#: journalisation ne couvre que les écritures futures, il ne journalise pas
+#: rétroactivement les ports déjà créés avant ce correctif. Sans ce
+#: rattrapage, un port/câblage créé avant la mise à jour resterait invisible
+#: sur les autres instances jusqu'à sa prochaine modification manuelle.
+_CLE_RATTRAPAGE_BAIE_PORTS = '_baie_slot_ports_journalises_v1'
+_rattrapage_baie_ports_fait = False
+
+
+def rattraper_sync_baie_slot_ports():
+    """Journalise (une seule fois) les baie_slot_ports déjà en base comme
+    autant d'INSERT — permet à la sync bidirectionnelle existante de les
+    propager vers Turso puis vers les autres instances au prochain cycle,
+    sans mécanisme de sync séparé."""
+    global _rattrapage_baie_ports_fait
+    if _rattrapage_baie_ports_fait:
+        return 0
+    _rattrapage_baie_ports_fait = True
+
+    conn = get_db()
+    try:
+        if (cfg_get(_CLE_RATTRAPAGE_BAIE_PORTS, '') or '').strip():
+            return 0
+
+        ids = [r[0] for r in conn.execute('SELECT id FROM baie_slot_ports').fetchall()]
+        now = _utcnow().isoformat()
+        for rid in ids:
+            conn.execute(
+                "DELETE FROM _sync_journal WHERE tbl='baie_slot_ports' AND record_id=? AND action='INSERT'",
+                (rid,))
+            conn.execute(
+                "INSERT INTO _sync_journal (tbl, record_id, action, timestamp) VALUES ('baie_slot_ports', ?, 'INSERT', ?)",
+                (rid, now))
+        conn.commit()
+        cfg_set(_CLE_RATTRAPAGE_BAIE_PORTS, _utcnow().isoformat(timespec='seconds'))
+        if ids:
+            logger.info('Rattrapage sync baie_slot_ports : %d port(s) journalisé(s)', len(ids))
+        return len(ids)
+    except Exception:
+        logger.exception('Rattrapage sync baie_slot_ports (sans conséquence)')
         return 0
     finally:
         conn.close()

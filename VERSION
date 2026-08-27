@@ -1,8 +1,46 @@
-PARCINFO_VERSION=2.18.68
+PARCINFO_VERSION=2.18.69
 RELEASE_DATE=2026-08-27
-BUILD_NUMBER=2026082706
+BUILD_NUMBER=2026082707
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.69 - Baie de brassage : positionnement magnétique précis, étagère repensée, synchronisation des ports corrigée
+# Trois tours de retours consécutifs sur le même écran, tous traités ici.
+#
+# 1) La grille de positionnement était révélée au survol depuis la 2.18.68,
+# mais restait statique : cliquer ou déposer n'importe où dans une case
+# libre visait toujours son point de départ fixe, jamais l'endroit
+# réellement cliqué. Recalculée en direct depuis la position du curseur
+# (clic ET glisser-déposer), avec un repère visuel qui suit la souris — un
+# élément moins large que la baie se positionne désormais précisément
+# n'importe où dans l'espace libre.
+#
+# 2) Étagère repensée : ce n'est plus un élément « boîte » avec des
+# ports/emplacements internes (comme un patch panel), mais une fine
+# tablette PHYSIQUE — rendue sur une hauteur de rangée réduite, les
+# rangées voisines se resserrant d'elles-mêmes autour d'elle — sur
+# laquelle les appareils se posent normalement, dans la rangée du dessus,
+# sans aucun lien technique avec elle. Repli automatique en hauteur pleine
+# si un autre élément la traverse depuis au-dessus, pour ne jamais
+# désaligner la baie.
+#
+# 3) Synchronisation multi-instance corrigée : les ports et le câblage de
+# la baie (table baie_slot_ports — numéro, appareil/périphérique associé,
+# usage libre, lien port-à-port) n'étaient jamais journalisés pour la
+# sync, contrairement au positionnement des éléments (baie_slots). Un
+# rattrapage automatique, au premier démarrage après cette mise à jour,
+# journalise rétroactivement les ports déjà créés pour qu'ils se
+# propagent au prochain cycle de synchronisation.
+#
+# Plus, dans la foulée : verrouillage de baie (bloque glisser-déposer et
+# redimensionnement, préférence locale au navigateur) ; bouton pour
+# détacher un lien port-à-port directement depuis le port affiché (✕ au
+# survol, jusqu'ici seul un détour par l'éditeur de ports le permettait) ;
+# confirmation avant qu'un nouveau lien n'écrase silencieusement une
+# affectation de port existante ; barre d'outils de la baie compactée
+# (icônes + info-bulles) ; port partenaire d'un lien rafraîchi
+# correctement après une modification (restait affiché avec des données
+# périmées auparavant).
 
 # Version 2.18.68 - Baie de brassage : sélecteur ping auto redimensionné, cases vides discrètes
 # Deux correctifs visuels sur le même écran, signalés séparément.

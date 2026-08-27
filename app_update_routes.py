@@ -84,3 +84,12 @@ def register_update_routes(app):
             completer_fiches_existantes()
         except Exception:
             pass
+        # Rattrapage sync baie_slot_ports (ports/câblage de baie créés avant
+        # ce correctif, jamais journalisés) — même raison d'être ici que
+        # ci-dessus : init_db() s'exécute avant que la fonction ne soit
+        # définie.
+        try:
+            from app import rattraper_sync_baie_slot_ports
+            rattraper_sync_baie_slot_ports()
+        except Exception:
+            pass
