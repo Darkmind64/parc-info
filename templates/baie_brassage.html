@@ -65,8 +65,17 @@
     font-family:'Share Tech Mono',monospace; font-size:.65rem; transition:all .12s;
     position:relative; min-width:0; box-sizing:border-box;
 }
-.rack-cell.empty:hover  { border-color:#2a4a6a; background:#101820; }
-.rack-cell.drag-over    { border-color:rgba(0,201,255,.8)!important; background:rgba(0,201,255,.1)!important; }
+/* Case vide : pas de "plaque grise" visible au repos (fond/bordure
+   transparents, se fond dans le rack) — gênant visuellement autour d'un
+   élément haut de plusieurs U et étroit, qui laisse plusieurs cases vides
+   sur les rangées qu'il traverse. Reste pleinement cliquable/receveuse de
+   glisser-déposer ; seul le SURVOL (ou le survol pendant un glisser)
+   révèle un repère "aimanté" sur la case exacte visée, qui fait alors
+   office de grille — visible seulement quand on interagit, pas en
+   permanence. */
+.rack-cell.empty { background:transparent; border-color:transparent; }
+.rack-cell.empty:hover  { border-color:var(--accent); background:rgba(0,201,255,.06); box-shadow:0 0 0 1px var(--accent) inset; }
+.rack-cell.drag-over    { border-color:rgba(0,201,255,.8)!important; background:rgba(0,201,255,.1)!important; box-shadow:0 0 8px rgba(0,201,255,.5)!important; }
 .rack-cell.selected     { border-color:var(--accent)!important; box-shadow:0 0 8px rgba(0,201,255,.3); }
 .rack-cell.highlighted  { border-color:#fbbf24!important; background:rgba(251,191,36,.1)!important; }
 .rack-cell.dragging     { opacity:.4; }
@@ -325,7 +334,7 @@
                 <button onclick="ajouterBandeauRJ()" class="btn btn-primary btn-sm" title="Pré-remplit le formulaire : 1U, 24 ports — reste à choisir la position et valider">+ Bandeau RJ</button>
                 <button id="btn-mode-lien" onclick="toggleModeLien()" class="btn btn-primary btn-sm" title="Cliquer sur deux ports successivement pour les relier (câblage physique)">🔗 Lier des ports</button>
                 <button id="btn-ping-baie" onclick="pingerToutelaBaie()" class="btn btn-primary btn-sm" title="Pinger tous les appareils reliés à un port de cette baie">📡 Ping toute la baie</button>
-                <select id="sel-ping-auto" onchange="changerPingAuto(this)" class="btn btn-primary btn-sm" style="padding-right:1.2rem;" title="Ping automatique de toute la baie à intervalle régulier">
+                <select id="sel-ping-auto" onchange="changerPingAuto(this)" class="btn btn-primary btn-sm" style="width:180px;flex:0 0 auto;padding-right:1.2rem;" title="Ping automatique de toute la baie à intervalle régulier">
                     <option value="0">Ping auto : désactivé</option>
                     <option value="5000">Ping auto : 5 s</option>
                     <option value="10000">Ping auto : 10 s</option>

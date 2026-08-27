@@ -1,26 +1,23 @@
 {
-  "version": "2.18.67",
+  "version": "2.18.68",
   "release_date": "2026-08-27T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.67/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.67/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.67/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.67",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.67/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.67/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.67/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.67/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.67/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.68/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.68/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.68/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.68",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.68/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.68/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.68/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.68/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.68/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : nouvelle grille à 10 colonnes pour le positionnement des éléments, corrige le désalignement d'un élément à la fois partiel en largeur et haut de plusieurs U, poignée de redimensionnement diagonale",
+    "new_features": "Baie de brassage : sélecteur de ping automatique redimensionné, cases vides retirées visuellement (positionnement magnétique au survol/glisser)",
     "improvements": [
-      "Baie de brassage : refonte du positionnement horizontal en grille CSS à 10 colonnes fixes — corrige un désalignement des rangées sous un élément à la fois partiel en largeur ET haut de plusieurs U (l'ancien modèle en tranches perdait sa largeur réelle sur les rangées qu'il traversait).",
-      "Baie de brassage : un élément peut désormais être placé à n'importe laquelle des 10 positions en largeur (colonne 0-9, plus seulement 0-4).",
-      "Baie de brassage : plus aucune case vide dessinée sous un élément qui déborde sur plusieurs U depuis une rangée du dessus.",
-      "Baie de brassage : nouvelle poignée de redimensionnement en coin (diagonale) — hauteur et largeur en un seul geste, en plus des poignées existantes.",
-      "Baie de brassage : garde-fou colonne + largeur ne dépassant plus la grille (plafonné automatiquement)."
+      "Baie de brassage : le sélecteur « Ping auto » ne s'étirait plus sur toute la largeur de la baie, désormais ajusté à la largeur de son texte.",
+      "Baie de brassage : les cases vides (« plaques grises ») ne s'affichent plus en permanence — transparentes au repos, elles restent pleinement cliquables/receveuses de glisser-déposer et se signalent par un repère net (bordure/lueur) uniquement au survol ou pendant un glisser, particulièrement utile autour d'un élément haut de plusieurs U et étroit."
     ]
   },
   "checksums": {
@@ -31,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.67"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.68"
 }

@@ -1,8 +1,27 @@
-PARCINFO_VERSION=2.18.67
+PARCINFO_VERSION=2.18.68
 RELEASE_DATE=2026-08-27
-BUILD_NUMBER=2026082705
+BUILD_NUMBER=2026082706
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.68 - Baie de brassage : sélecteur ping auto redimensionné, cases vides discrètes
+# Deux correctifs visuels sur le même écran, signalés séparément.
+#
+# 1) Le sélecteur « Ping auto » ajouté en 2.18.66 s'étirait sur toute la
+# largeur de la baie (héritait de la règle globale select{width:100%} de
+# l'app) — largeur fixée pour ne plus dépasser celle de son texte le plus
+# long.
+#
+# 2) Cases vides ("plaques grises") : gênantes visuellement autour d'un
+# élément à la fois partiel en largeur et haut de plusieurs U, qui en
+# laisse plusieurs sur les rangées qu'il traverse (voir la grille à 10
+# colonnes de la 2.18.67). Elles n'affichent plus de fond/bordure au
+# repos — transparentes, fondues dans la baie — tout en restant
+# pleinement cliquables et receveuses de glisser-déposer : un repère net
+# (bordure et lueur accent) ne se révèle plus qu'au survol ou pendant un
+# glisser, sur la case exactement visée — la grille de positionnement
+# devient ainsi "magnétique" (elle s'aimante sur la case ciblée) plutôt
+# que statiquement omniprésente.
 
 # Version 2.18.67 - Baie de brassage : grille à 10 colonnes, corrige le désalignement largeur/hauteur
 # Refonte du positionnement horizontal des éléments de la baie.
