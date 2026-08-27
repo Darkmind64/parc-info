@@ -1,8 +1,64 @@
-PARCINFO_VERSION=2.18.64
+PARCINFO_VERSION=2.18.65
 RELEASE_DATE=2026-08-27
-BUILD_NUMBER=2026082702
+BUILD_NUMBER=2026082703
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.65 - Ping/scan plus rapide + baie de brassage : câblage visuel, traçage, audit, mobile
+# Trois chantiers distincts.
+#
+# 1) Ping et scan réseau plus rapides : le fallback TCP (utilisé quand
+# l'ICMP échoue — pare-feu Windows par défaut) sondait les ports UN PAR UN,
+# chacun jusqu'à son propre timeout — jusqu'à 8s par appareil pour le
+# bouton Ping de la baie, ~5s par adresse pour le scan réseau, l'essentiel
+# du temps d'un scan /24 rien que pour les adresses inutilisées. Les ports
+# sont désormais sondés en parallèle (nouveau helper _tcp_probe_rapide),
+# retour dès qu'un port répond sans attendre les autres threads (piège
+# découvert en cours de route : un ThreadPoolExecutor utilisé en context
+# manager bloque en sortie tant que tous les threads n'ont pas fini — fixé
+# via shutdown(wait=False)). Timeouts resserrés au passage. Un indicateur
+# de progression (X/Y) du ping s'affiche désormais en direct à côté du nom
+# de chaque élément de la baie.
+#
+# 2) Baie de brassage — câblage rendu visuellement : chaque lien port-à-port
+# (câblage physique switch<->routeur, bandeau<->switch...) est désormais
+# représenté par une courbe reliant les deux ports concernés, par-dessus la
+# grille, avec un auto-arrangement simple (bombée vers le côté le moins
+# proche du bord, légèrement variée d'un câble à l'autre pour ne pas
+# superposer deux liens proches) — pas de vrai routeur de chemins, mais
+# largement suffisant pour rester lisible. Couleur sombre par défaut,
+# éclaircie au survol de l'un des deux ports connectés, comme les ports
+# eux-mêmes : les couleurs de port (tous types confondus, pas seulement les
+# liens) sont désormais assombries au repos (moins flashy) et éclaircies au
+# survol/à la sélection, via un simple filtre CSS — la teinte configurée
+# ailleurs dans l'app (type d'appareil, catégorie périphérique) n'est pas
+# touchée, seule sa luminosité change ici. Correctif au passage : un port
+# câblé à un autre tombait par erreur dans la classe "libre" (gris neutre)
+# au rendu, sa couleur de lien dédiée n'était jamais appliquée visuellement.
+#
+# 3) Baie de brassage — six ajouts supplémentaires demandés ensemble :
+#   - Traçage de bout en bout : pièce du site -> port de bandeau RJ ->
+#     câble -> élément -> appareil, lisible d'un coup dans la bulle d'un
+#     port, avec alerte (câble coloré en avertissement) si l'appareil au
+#     bout de la chaîne est hors ligne. `piece` (pièce desservie) et
+#     l'étiquette de câble (couleur/longueur) sont des métadonnées
+#     indépendantes de la cible d'un port — jamais effacées par un
+#     changement d'appareil/périphérique/usage/lien, contrairement à
+#     l'ancien design qui réutilisait usage_libre (perdu dès qu'un port de
+#     bandeau était câblé).
+#   - Bouton "Ping toute la baie" (tous les appareils reliés à un port de
+#     la baie affichée, en un clic, même mécanique de progression en
+#     direct que le ping par élément).
+#   - Liste de câblage imprimable (/baie/cablage) + export CSV
+#     (/baie/cablage.csv) : chaque lien port-à-port sur une ligne, dédoublonné.
+#   - Historique des modifications de la baie (placement, déplacement,
+#     redimensionnement, câblage, suppression) — jusqu'ici aucune trace
+#     n'était gardée, contrairement au reste de l'application.
+#   - Recherche étendue au contenu des ports (pièce, usage, cible câblée),
+#     pas seulement à l'élément lui-même.
+#   - Nouvelle consultation mobile en lecture seule (/m/baie, onglet dédié
+#     dans la navigation basse) : c'est justement l'écran qu'un technicien
+#     veut voir depuis son téléphone, debout devant l'armoire.
 
 # Version 2.18.64 - Baie de brassage : ports à taille fixe + redimensionnement en largeur
 # Suite directe de la 2.18.63, deux correctifs/ajouts sur le même sujet.

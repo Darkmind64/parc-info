@@ -19,8 +19,25 @@
     font-family:'Share Tech Mono',monospace; font-size:.7rem; letter-spacing:2px;
     color:#4a6a8a; text-transform:uppercase; border-radius:5px 5px 0 0;
 }
-.rack-body { padding:8px 10px 8px 8px; display:flex; gap:6px; }
+.rack-body { padding:8px 10px 8px 8px; display:flex; gap:6px; position:relative; }
 .rack-numbers { display:flex; flex-direction:column; width:24px; flex-shrink:0; }
+
+/* Câblage — courbes reliant deux ports câblés ensemble (voir
+   renderCableLinks()), en overlay par-dessus la grille. Couleur sombre par
+   défaut pour ne pas distraire, légèrement éclaircie au survol d'un des
+   deux ports (voir le data-cle partagé avec .port, même mécanisme que la
+   surbrillance croisée existante). */
+#cable-overlay { position:absolute; top:0; left:0; pointer-events:none; }
+.cable-link {
+    fill:none; stroke:#565c8f; stroke-width:2px; opacity:.55;
+    transition:stroke .15s ease, opacity .15s ease, stroke-width .15s ease;
+}
+.cable-link.cable-hover { stroke:#a9addf; opacity:.95; stroke-width:2.5px; }
+/* Câble menant, un cran plus loin, à un appareil hors ligne (cible_hors_ligne
+   côté serveur) — amber/rouge assourdi plutôt que le indigo neutre, toujours
+   éclairci au survol comme un câble normal. */
+.cable-link.cable-warning { stroke:#8a4a3a; opacity:.65; }
+.cable-link.cable-warning.cable-hover { stroke:#e0785a; opacity:1; }
 .rack-num {
     display:flex; align-items:center; justify-content:flex-end;
     font-family:'Share Tech Mono',monospace; font-size:.58rem;
@@ -84,6 +101,9 @@
     color:#d0e4f7; font-size:.72rem; font-weight:600; letter-spacing:.15px; }
 .cell-ip   { font-size:.6rem; color:#4a6a8a; flex-shrink:0; margin-left:4px; }
 .cell-desc { color:#4a6a8a; font-weight:400; }
+/* Progression du ping en cours (voir pingerPortsElement()) — affichée après
+   le nom de l'élément, masquée en dehors d'un ping actif. */
+.cell-ping-progress { font-size:.6rem; color:var(--accent); flex-shrink:0; margin-left:6px; font-family:'Share Tech Mono',monospace; }
 .cell-del  {
     /* #64748b (slate) plutôt que var(--text-muted) : ce dernier (#3a5570)
        reste trop proche du fond très sombre de la baie (#0d1520) — bouton
@@ -110,14 +130,22 @@
 /* Un port RJ45 dans la grille d'un élément réseau — numéroté, coloré selon
    sa cible (couleur type/catégorie déjà configurée ailleurs dans l'app, ou
    gris neutre si non affecté), surligné au clic sur tout port lié à la même
-   cible (voir surbrillerPortsLies()). */
+   cible (voir surbrillerPortsLies()). Couleur assombrie par défaut (moins
+   flashy) via filter — la teinte reste celle configurée ailleurs dans
+   l'app (type d'appareil, catégorie périphérique...), seule sa luminosité
+   change ici, donc rien à toucher côté serveur. .port-libre est déjà un
+   gris neutre volontairement discret : ne pas l'assombrir davantage. */
 .port {
     position:relative; width:24px; height:22px; border-radius:3px;
     font-size:.6rem; line-height:22px; text-align:center; font-weight:700;
     color:#0a0e14; cursor:pointer; background:#334155;
-    transition:transform .1s, box-shadow .1s; user-select:none;
+    transition:transform .1s, box-shadow .1s, filter .15s; user-select:none;
 }
+.port:not(.port-libre) { filter:brightness(.72) saturate(.85); }
 .port:hover        { transform:scale(1.15); z-index:3; position:relative; }
+.port:not(.port-libre):hover,
+.port:not(.port-libre).port-highlight,
+.port:not(.port-libre).port-hover-link { filter:brightness(1.08) saturate(1); }
 .port.port-libre    { color:#64748b; background:#1a2530; }
 .port.port-highlight,
 .port.port-hover-link { box-shadow:0 0 0 2px #fff, 0 0 6px #fff; transform:scale(1.12); z-index:4; position:relative; }
@@ -262,9 +290,12 @@
                     &#9632; Vue de face — <span id="lbl-u">{{ nb_u }}</span>U
                 </span>
             </div>
-            <div style="display:flex;gap:.4rem;flex-wrap:wrap;">
+            <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;">
                 <button onclick="ajouterBandeauRJ()" class="btn btn-primary btn-sm" title="Pré-remplit le formulaire : 1U, 24 ports — reste à choisir la position et valider">+ Bandeau RJ</button>
                 <button id="btn-mode-lien" onclick="toggleModeLien()" class="btn btn-primary btn-sm" title="Cliquer sur deux ports successivement pour les relier (câblage physique)">🔗 Lier des ports</button>
+                <button id="btn-ping-baie" onclick="pingerToutelaBaie()" class="btn btn-primary btn-sm" title="Pinger tous les appareils reliés à un port de cette baie">📡 Ping toute la baie</button>
+                <span id="ping-baie-progress" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--accent);"></span>
+                <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste imprimable/CSV de tous les liens port-à-port">🔌 Liste de câblage</a>
                 <button onclick="changerU(-1)" class="btn btn-primary btn-sm">− 1U</button>
                 <button onclick="changerU(1)"  class="btn btn-primary btn-sm">+ 1U</button>
                 <button onclick="toutVider()"  class="btn btn-danger btn-sm">✕ Vider</button>
@@ -281,9 +312,10 @@
         <!-- RACK -->
         <div class="rack-outer" id="rack-outer">
             <div class="rack-header" id="rack-hdr">{{ parc.baie_marque or 'RACK' }} — {{ nb_u }}U</div>
-            <div class="rack-body">
+            <div class="rack-body" id="rack-body">
                 <div class="rack-numbers" id="rack-nums"></div>
                 <div class="rack-rows"   id="rack-rows"></div>
+                <svg id="cable-overlay"></svg>
             </div>
             <div class="rack-footer" id="rack-footer">—</div>
         </div>
@@ -524,11 +556,15 @@ async function init() {
     await chargerBaie('Baie principale');
     // Calcul des proportions après chargement initial
     setTimeout(() => calcUH(true), 50);
-    // Recalcul si la fenêtre est redimensionnée
+    // Recalcul si la fenêtre est redimensionnée — calcUH() ne redessine
+    // (renderRack, donc renderCableLinks) que si U_H a réellement changé ;
+    // un changement de largeur SANS changement de U_H (ex: la fenêtre
+    // s'élargit d'un rien) laisserait sinon les courbes de câblage
+    // désalignées, la largeur du rack ayant bougé sans redessin.
     let _resizeTimer;
     window.addEventListener('resize', () => {
         clearTimeout(_resizeTimer);
-        _resizeTimer = setTimeout(() => calcUH(false), 150);
+        _resizeTimer = setTimeout(() => { calcUH(false); renderCableLinks(); }, 150);
     });
 }
 
@@ -685,6 +721,64 @@ function renderRack() {
     const libre = nbU - totalOccupied;
     document.getElementById('rack-footer').textContent =
         `${totalOccupied} équipement(s) · ${libre} U libre(s)`;
+
+    renderCableLinks();
+}
+
+// ── CÂBLAGE (lignes port-à-port) ────────────────────────────────────────────
+// Dessine une courbe pour chaque lien port-à-port visible dans la baie
+// actuelle, par-dessus la grille. Auto-arrangement volontairement simple
+// (courbe bombée vers le côté le moins proche du bord du rack, légèrement
+// variée d'un lien à l'autre pour ne pas superposer exactement deux câbles
+// proches) plutôt qu'un vrai routeur de chemins : largement suffisant pour
+// rester lisible avec le nombre de liens généralement en jeu dans une baie,
+// et ça évite un algorithme de routage à part entière pour un gain de
+// lisibilité marginal au-delà de quelques dizaines de câbles.
+// Reprend le data-cle déjà posé sur .port par cleCiblePort() (clé
+// symétrique "l:slotA:numA|slotB:numB") : les deux ports d'un même câble
+// partagent exactement la même valeur, donc les regrouper suffit à
+// retrouver chaque paire sans revenir aux données brutes des slots.
+function renderCableLinks() {
+    const svg = document.getElementById('cable-overlay');
+    const body = document.getElementById('rack-body');
+    if (!svg || !body) return;
+    const rect = body.getBoundingClientRect();
+    svg.setAttribute('width', rect.width);
+    svg.setAttribute('height', rect.height);
+    svg.style.width = rect.width + 'px';
+    svg.style.height = rect.height + 'px';
+    svg.innerHTML = '';
+
+    const groupes = {};
+    document.querySelectorAll('.port[data-cle^="l:"]').forEach(el => {
+        const cle = el.dataset.cle;
+        (groupes[cle] = groupes[cle] || []).push(el);
+    });
+
+    let idx = 0;
+    Object.values(groupes).forEach(els => {
+        if (els.length !== 2) return; // lien incomplet (ne devrait pas arriver) : rien à dessiner
+        const [a, b] = els;
+        const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+        const x1 = ra.left + ra.width / 2 - rect.left, y1 = ra.top + ra.height / 2 - rect.top;
+        const x2 = rb.left + rb.width / 2 - rect.left, y2 = rb.top + rb.height / 2 - rect.top;
+        // Bombe vers la gauche si l'un des deux ports est déjà près du bord
+        // droit (évite que la courbe ne sorte du cadre visible) ; sinon vers
+        // la droite, le cas le plus courant.
+        const versLaGauche = Math.max(x1, x2) > rect.width * 0.72;
+        const sens = versLaGauche ? -1 : 1;
+        const bombe = (Math.max(28, Math.min(90, Math.abs(y2 - y1) * 0.35)) + (idx % 3) * 12) * sens;
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', `M ${x1} ${y1} C ${x1 + bombe} ${y1}, ${x2 + bombe} ${y2}, ${x2} ${y2}`);
+        // Avertissement si l'appareil au bout de la chaîne (un cran plus loin
+        // que le port en face, voir cible_hors_ligne côté serveur) est hors
+        // ligne — porté par l'UN OU L'AUTRE port du couple.
+        const horsLigne = a.dataset.horsLigne === '1' || b.dataset.horsLigne === '1';
+        path.setAttribute('class', horsLigne ? 'cable-link cable-warning' : 'cable-link');
+        path.dataset.cle = els[0].dataset.cle;
+        svg.appendChild(path);
+        idx++;
+    });
 }
 
 // ── CELL BUILDERS ─────────────────────────────────────────────────────────────
@@ -728,6 +822,7 @@ function makeOccupiedCell(s, u, col) {
         <div class="cell-row">
             <span class="cell-led ${ledCls}"></span>
             <span class="cell-name">${nom}${desc ? `<span class="cell-desc"> — ${desc}</span>` : ''}</span>
+            <span class="cell-ping-progress" style="display:none;"></span>
             ${ip ? `<span class="cell-ip">${escH(ip)}</span>` : ''}
             <button class="cell-del" onclick="event.stopPropagation();delSlot(${s.id})" title="Retirer">✕</button>
         </div>`;
@@ -760,8 +855,11 @@ function makeOccupiedCell(s, u, col) {
             e.stopPropagation();
             afficherTooltipPort(e, p, nom, s.type_equipement === 'Bandeau RJ');
             if (p.lie_slot_id) {
-                document.querySelectorAll(`.port[data-cle="${escH(cleCiblePort(p))}"]`)
+                const cle = cleCiblePort(p);
+                document.querySelectorAll(`.port[data-cle="${escH(cle)}"]`)
                     .forEach(pel => pel.classList.add('port-hover-link'));
+                const ligne = document.querySelector(`.cable-link[data-cle="${escH(cle)}"]`);
+                if (ligne) ligne.classList.add('cable-hover');
             }
         });
         el.addEventListener('mousemove',  e => { e.stopPropagation(); const t = document.getElementById('rack-tooltip'); if(t.classList.contains('show')) positionnerTooltip(e); });
@@ -769,6 +867,7 @@ function makeOccupiedCell(s, u, col) {
             e.stopPropagation();
             masquerTooltip();
             document.querySelectorAll('.port-hover-link').forEach(pel => pel.classList.remove('port-hover-link'));
+            document.querySelectorAll('.cable-link.cable-hover').forEach(l => l.classList.remove('cable-hover'));
         });
     });
 
@@ -803,6 +902,7 @@ function makeOccupiedCell(s, u, col) {
         const onMove = ev => {
             const nv = calculerNouvelleHu(ev.clientY);
             cell.style.height = (nv * U_H + (nv - 1)) + 'px';
+            renderCableLinks(); // suit les ports en direct pendant le geste
         };
         const onUp = async ev => {
             document.removeEventListener('mousemove', onMove);
@@ -843,6 +943,7 @@ function makeOccupiedCell(s, u, col) {
             const nv = calculerNouvelleLargeur(ev.clientX);
             cell.style.flex = `0 0 ${nv * 10}%`;
             cell.style.maxWidth = `${nv * 10}%`;
+            renderCableLinks(); // suit les ports en direct pendant le geste
         };
         const onUp = async ev => {
             document.removeEventListener('mousemove', onMove);
@@ -997,9 +1098,15 @@ function masquerTooltip() {
 
 // ── PORTS ─────────────────────────────────────────────────────────────────────
 function portHTML(p) {
-    const libre = !p.appareil_id && !p.peripherique_id && !p.usage_libre;
+    // Un port câblé à un autre (lie_slot_id) n'a ni appareil_id, ni
+    // peripherique_id, ni usage_libre — sans ce cas, il retombait ici dans
+    // "libre" (classe port-libre, gris neutre) malgré sa couleur de lien
+    // dédiée déjà résolue côté serveur (_couleur_port), qui n'était alors
+    // jamais appliquée : un port câblé restait visuellement indiscernable
+    // d'un port réellement inutilisé.
+    const libre = !p.appareil_id && !p.peripherique_id && !p.usage_libre && !p.lie_slot_id;
     const style = libre ? '' : `background:${p.couleur};`;
-    return `<span class="port${libre ? ' port-libre' : ''}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${p.appareil_id || ''}">
+    return `<span class="port${libre ? ' port-libre' : ''}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${p.appareil_id || ''}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
         <span class="port-led"></span>${p.numero}</span>`;
 }
 
@@ -1026,11 +1133,14 @@ let _cleSurbrillance = null;
 // une par une. Un second clic sur la même cible enlève la surbrillance.
 function surbrillerPortsLies(cle) {
     document.querySelectorAll('.port.port-highlight').forEach(el => el.classList.remove('port-highlight'));
+    document.querySelectorAll('.cable-link.cable-hover').forEach(el => el.classList.remove('cable-hover'));
     if (!cle || cle === _cleSurbrillance) { _cleSurbrillance = null; return; }
     _cleSurbrillance = cle;
     document.querySelectorAll('.port').forEach(el => {
         if (el.dataset.cle === cle) el.classList.add('port-highlight');
     });
+    const ligne = document.querySelector(`.cable-link[data-cle="${escH(cle)}"]`);
+    if (ligne) ligne.classList.add('cable-hover');
 }
 
 // ── LIER DEUX PORTS (câblage physique) ─────────────────────────────────────────
@@ -1114,11 +1224,27 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau) {
     } else if (p.peripherique_id) {
         html += `<div class="tip-row"><span class="tip-key">Type</span><span class="tip-val">Périphérique</span></div>`;
     } else if (p.lie_slot_id) {
-        html += `<div class="tip-row"><span class="tip-key">Relié à</span><span class="tip-val">${escH(p.nom_cible)}</span></div>`;
+        // Chaîne complète : le lien lui-même, puis — un cran plus loin — ce
+        // que le port en face porte comme cible directe (déjà résolu côté
+        // serveur, voir cible_finale dans _ports_avec_details), avec une
+        // alerte si cet appareil au bout de la chaîne est hors ligne.
+        let val = escH(p.nom_cible);
+        if (p.cible_finale) val += ` → ${escH(p.cible_finale)}`;
+        if (p.cible_hors_ligne) val += ' <span style="color:var(--accent-red,#ff3355);">⚠️ hors ligne</span>';
+        html += `<div class="tip-row"><span class="tip-key">Relié à</span><span class="tip-val">${val}</span></div>`;
     } else if (p.usage_libre) {
         html += `<div class="tip-row"><span class="tip-key">${estBandeau ? 'Pièce' : 'Usage'}</span><span class="tip-val">${escH(p.usage_libre)}</span></div>`;
     } else {
         html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);">Port libre — non affecté</span></div>`;
+    }
+    // Pièce du site (bandeau RJ) — indépendante de la cible ci-dessus,
+    // affichée dans tous les cas où elle est renseignée (y compris un port
+    // déjà câblé, voir la migration piece dans init_db()).
+    if (p.piece) {
+        html += `<div class="tip-row"><span class="tip-key">Pièce</span><span class="tip-val">🚪 ${escH(p.piece)}</span></div>`;
+    }
+    if (p.cable_couleur || p.cable_longueur) {
+        html += `<div class="tip-row"><span class="tip-key">Câble</span><span class="tip-val">${[p.cable_couleur, p.cable_longueur].filter(Boolean).map(escH).join(' · ')}</span></div>`;
     }
     t.innerHTML = html;
     t.classList.add('show');
@@ -1134,11 +1260,15 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau) {
 // pas d'adresse IP dans ce schéma, un usage personnalisé encore moins.
 async function pingerPortsElement(cell, ports) {
     const btn = cell.querySelector('.cell-ping-btn');
+    const progressEl = cell.querySelector('.cell-ping-progress');
     const cibles = [...new Set(ports.filter(p => p.appareil_id).map(p => p.appareil_id))];
     if (!cibles.length) { showFlash('Aucun appareil relié à un port de cet élément.', 'info'); return; }
     btn.disabled = true;
     const texteInitial = btn.textContent;
     btn.textContent = '⏳ Ping…';
+    let fait = 0;
+    const majProgress = () => { if (progressEl) progressEl.textContent = `📡 ${fait}/${cibles.length}`; };
+    if (progressEl) { progressEl.style.display = ''; majProgress(); }
     try {
         // On force id=<celui demandé> sur chaque résultat (au lieu de faire
         // confiance à ce que le serveur renvoie) : une erreur 400 "Appareil
@@ -1146,25 +1276,74 @@ async function pingerPortsElement(cell, ports) {
         // qui faisait échouer silencieusement le rapprochement avec le port
         // — aucun voyant ne s'allumait ni ne s'éteignait, sans le moindre
         // message pour expliquer pourquoi.
-        const resultats = await Promise.all(cibles.map(id =>
+        // Chaque ping met à jour SON port dès qu'il répond (pas d'attente du
+        // lot entier) : la progression et les voyants avancent au fur et à
+        // mesure plutôt qu'en un seul bloc à la toute fin.
+        let sansIp = 0, nbOnline = 0;
+        await Promise.all(cibles.map(id =>
             fetch(`/api/ping/appareil/${id}`)
                 .then(r => r.json().then(j => ({...j, id, ok: r.ok})))
-                .catch(() => ({id, en_ligne: false, ok: false}))));
-        let sansIp = 0;
-        resultats.forEach(res => {
-            if (!res.ok) sansIp++;
-            ports.forEach(p => { if (p.appareil_id === res.id) p.en_ligne = !!res.en_ligne; });
-            cell.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
-                el.classList.toggle('port-online', !!res.en_ligne);
-            });
-        });
-        const nbOnline = resultats.filter(r => r.ok && r.en_ligne).length;
+                .catch(() => ({id, en_ligne: false, ok: false}))
+                .then(res => {
+                    if (!res.ok) sansIp++;
+                    if (res.ok && res.en_ligne) nbOnline++;
+                    ports.forEach(p => { if (p.appareil_id === res.id) p.en_ligne = !!res.en_ligne; });
+                    cell.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
+                        el.classList.toggle('port-online', !!res.en_ligne);
+                    });
+                    fait++; majProgress();
+                })));
         let msg = `Ping terminé : ${nbOnline}/${cibles.length} appareil(s) en ligne.`;
         if (sansIp) msg += ` ${sansIp} sans IP renseignée (ignoré${sansIp > 1 ? 's' : ''}).`;
         showFlash(msg, nbOnline ? 'success' : 'info');
     } finally {
         btn.disabled = false;
         btn.textContent = texteInitial;
+        if (progressEl) progressEl.style.display = 'none';
+    }
+}
+
+// Ping de TOUTE la baie affichée en un clic — même mécanique que
+// pingerPortsElement() (parallèle, progression en direct) mais sur
+// l'ensemble des appareils reliés à un port, tous éléments confondus, pas
+// un seul à la fois. Un même appareil relié à plusieurs ports (deux cartes
+// réseau) n'est pingé qu'une fois ; ses voyants sont tous mis à jour.
+async function pingerToutelaBaie() {
+    const btn = document.getElementById('btn-ping-baie');
+    const progressEl = document.getElementById('ping-baie-progress');
+    const cibles = [...new Set(Object.values(slots).flatMap(s => (s.ports || [])
+        .filter(p => p.appareil_id).map(p => p.appareil_id)))];
+    if (!cibles.length) { showFlash('Aucun appareil relié à un port dans cette baie.', 'info'); return; }
+    btn.disabled = true;
+    const texteInitial = btn.textContent;
+    btn.textContent = '⏳ Ping…';
+    let fait = 0;
+    const majProgress = () => { progressEl.textContent = `📡 ${fait}/${cibles.length}`; };
+    progressEl.style.display = ''; majProgress();
+    try {
+        let sansIp = 0, nbOnline = 0;
+        await Promise.all(cibles.map(id =>
+            fetch(`/api/ping/appareil/${id}`)
+                .then(r => r.json().then(j => ({...j, id, ok: r.ok})))
+                .catch(() => ({id, en_ligne: false, ok: false}))
+                .then(res => {
+                    if (!res.ok) sansIp++;
+                    if (res.ok && res.en_ligne) nbOnline++;
+                    Object.values(slots).forEach(s => (s.ports || []).forEach(p => {
+                        if (p.appareil_id === res.id) p.en_ligne = !!res.en_ligne;
+                    }));
+                    document.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
+                        el.classList.toggle('port-online', !!res.en_ligne);
+                    });
+                    fait++; majProgress();
+                })));
+        let msg = `Ping de la baie terminé : ${nbOnline}/${cibles.length} appareil(s) en ligne.`;
+        if (sansIp) msg += ` ${sansIp} sans IP renseignée (ignoré${sansIp > 1 ? 's' : ''}).`;
+        showFlash(msg, nbOnline ? 'success' : 'info');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = texteInitial;
+        progressEl.style.display = 'none';
     }
 }
 
@@ -1181,8 +1360,14 @@ function rechercherEquip(q) {
         const sk  = key(parseInt(cell.dataset.pos), parseInt(cell.dataset.col));
         const s   = slots[sk] || Object.values(slots).find(x => x.id === id);
         if (!s) return;
-        const txt = [s.nom_machine, s.nom_custom, s.type_equipement, s.adresse_ip, s.description,
-                     s.p_categorie, s.p_marque, s.p_modele].join(' ').toLowerCase();
+        const champs = [s.nom_machine, s.nom_custom, s.type_equipement, s.adresse_ip, s.description,
+                        s.p_categorie, s.p_marque, s.p_modele];
+        // Couvre aussi le contenu des ports (pièce assignée à un port de
+        // bandeau RJ, usage libre, cible câblée) — chercher le nom d'une
+        // pièce ne trouvait jusqu'ici rien, seul l'élément lui-même était
+        // indexé, jamais ce que ses ports portent individuellement.
+        (s.ports || []).forEach(p => champs.push(p.piece, p.usage_libre, p.nom_cible, p.cible_finale));
+        const txt = champs.join(' ').toLowerCase();
         if (txt.includes(q)) cell.classList.add('highlighted');
     });
 }
@@ -1263,31 +1448,60 @@ function portEditorRowHTML(slotId, p, estBandeau) {
     const valeur = p.appareil_id ? 'a:'+p.appareil_id
         : (p.peripherique_id ? 'p:'+p.peripherique_id
         : (p.lie_slot_id ? 'l' : (p.usage_libre ? 'u' : '')));
-    // Sur un bandeau RJ (prises murales), le libellé/placeholder oriente vers
-    // une pièce plutôt qu'un usage générique — même champ usage_libre dans
-    // les deux cas, juste une invite adaptée au contexte.
-    const libelleUsage = estBandeau ? '🚪 Pièce du site…' : '✎ Usage personnalisé…';
-    const placeholder  = estBandeau ? 'Bureau 204, Salle de réunion...' : 'Téléphonie, alarme...';
     // "Relié" n'est pas une option qu'on choisit dans ce menu (créer un lien
     // se fait via "🔗 Lier des ports" dans la baie, pas ici) — juste l'état
     // affiché tel quel ; disabled empêche de la reproposer une fois qu'on
     // bascule sur autre chose.
     const optionLien = p.lie_slot_id
         ? `<option value="l" selected disabled>🔗 ${escH(p.nom_cible)}</option>` : '';
-    return `
+    let html = `
     <div style="display:flex;gap:.3rem;align-items:center;">
         <span style="width:28px;flex-shrink:0;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--text-muted);">#${p.numero}</span>
         <select data-slot="${slotId}" data-numero="${p.numero}" onchange="changerPort(this)" style="flex:1.4;font-size:.7rem;padding:.2rem .3rem;margin:0;">
             <option value=""${valeur===''?' selected':''}>— Libre —</option>
             ${optionLien}
-            <option value="u"${valeur==='u'?' selected':''}>${libelleUsage}</option>
+            <option value="u"${valeur==='u'?' selected':''}>✎ Usage personnalisé…</option>
             ${optionsAppareilsPeriph(valeur)}
         </select>
-        <input type="text" data-slot="${slotId}" data-numero="${p.numero}" list="dl-localisations"
-               value="${escH(p.usage_libre||'')}" placeholder="${placeholder}"
+        <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
+               value="${escH(p.usage_libre||'')}" placeholder="Téléphonie, alarme..."
                style="flex:1;font-size:.7rem;padding:.2rem .3rem;margin:0;${valeur==='u'?'':'display:none;'}"
                onchange="changerPortUsage(this)">
     </div>`;
+    // Pièce du site desservie par ce port (bandeau RJ) — champ INDÉPENDANT
+    // de la cible ci-dessus (voir migration piece dans init_db()) : reste
+    // renseigné même une fois le port câblé vers un switch via "🔗 Lier des
+    // ports", pour que la chaîne complète (pièce -> bandeau -> câble ->
+    // switch -> appareil) reste lisible d'un bout à l'autre.
+    if (estBandeau) {
+        html += `
+    <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;">
+        <input type="text" data-slot="${slotId}" data-numero="${p.numero}" list="dl-localisations"
+               value="${escH(p.piece||'')}" placeholder="🚪 Pièce du site…"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerPortPiece(this)">
+    </div>`;
+    }
+    // Étiquette de câble (couleur/longueur) — uniquement pour un port câblé
+    // à un autre, purement documentaire, sauvegardée via la même route que
+    // la création du lien (rejouer le même couple slot/numero est sans
+    // danger, voir api_baie_lien_port).
+    if (p.lie_slot_id) {
+        html += `
+    <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;">
+        <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
+               data-lie-slot="${p.lie_slot_id}" data-lie-numero="${p.lie_port_numero}"
+               value="${escH(p.cable_couleur||'')}" placeholder="Couleur câble"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerCableLabel(this)">
+        <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
+               data-lie-slot="${p.lie_slot_id}" data-lie-numero="${p.lie_port_numero}"
+               value="${escH(p.cable_longueur||'')}" placeholder="Longueur"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerCableLabel(this)">
+    </div>`;
+    }
+    return html;
 }
 
 async function changerPort(sel) {
@@ -1306,6 +1520,43 @@ async function changerPort(sel) {
 async function changerPortUsage(input) {
     await enregistrerPort(input.dataset.slot, input.dataset.numero,
         { appareil_id: null, peripherique_id: null, usage_libre: input.value.trim() });
+}
+
+// Pièce du site (bandeau RJ) — payload volontairement réduit à { piece },
+// sans appareil_id/peripherique_id/usage_libre : la route les laisse
+// intacts tant que ces clés sont absentes (voir api_baie_port côté
+// serveur), donc ce changement ne touche jamais la cible du port ni un
+// éventuel câblage en place.
+async function changerPortPiece(input) {
+    await enregistrerPort(input.dataset.slot, input.dataset.numero, { piece: input.value.trim() });
+}
+
+// Étiquette de câble (couleur/longueur) d'un lien port-à-port déjà créé —
+// même route que la création du lien (rejouer le même couple slot/numero
+// est sans danger, voir api_baie_lien_port) ; les deux champs voisins sont
+// toujours renvoyés ensemble, sinon celui qu'on ne vient pas de modifier
+// serait effacé (la route écrase les deux colonnes à chaque appel).
+async function changerCableLabel(input) {
+    const [inputCouleur, inputLongueur] = input.parentElement.querySelectorAll('input');
+    const r = await fetch('/api/baie/lien-port', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+            slot1_id: parseInt(input.dataset.slot), numero1: parseInt(input.dataset.numero),
+            slot2_id: parseInt(input.dataset.lieSlot), numero2: parseInt(input.dataset.lieNumero),
+            cable_couleur: inputCouleur.value.trim(), cable_longueur: inputLongueur.value.trim()
+        })
+    });
+    const data = await r.json();
+    if (data.error) { showFlash(data.error, 'danger'); return; }
+    [data.port1, data.port2].forEach(port => {
+        if (!port) return;
+        const sl = Object.values(slots).find(x => x.id === port.slot_id);
+        if (sl && sl.ports) {
+            const idx = sl.ports.findIndex(x => x.numero === port.numero);
+            if (idx >= 0) sl.ports[idx] = port;
+        }
+    });
+    renderRack();
 }
 
 async function enregistrerPort(slotId, numero, payload) {

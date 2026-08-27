@@ -1,0 +1,61 @@
+{% extends "mobile/base.html" %}
+{% block title %}Baie de brassage — {{ client.nom }}{% endblock %}
+{% block extra_styles %}
+<style>
+.card-note { font-size:.78rem; color:var(--text-secondary); margin-top:.35rem; }
+.baie-ports { margin-top:.55rem; padding-top:.5rem; border-top:1px solid var(--topbar-border); display:flex; flex-direction:column; gap:.3rem; }
+.baie-port-row { display:flex; align-items:center; gap:.4rem; font-size:.76rem; }
+.baie-port-row.warn { color:var(--accent-red, #ff3355); }
+.baie-port-cible { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-secondary); }
+</style>
+{% endblock %}
+{% block content %}
+
+{% if baies|length > 1 %}
+<div class="chip-row" style="margin-bottom:.7rem;">
+    {% for b in baies %}
+    <a class="chip{% if b == baie_nom %} active{% endif %}" href="{{ url_for('mobile_baie', baie=b) }}">{{ b }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% for s in slots %}
+<div class="card mobile-item">
+    <div class="card-row">
+        <div style="min-width:0;">
+            <div class="card-title">{{ s.nom_affiche }}</div>
+            <div class="card-sub">U{{ s.position }}{% if s.hauteur_u and s.hauteur_u > 1 %}–{{ s.position + s.hauteur_u - 1 }}{% endif %}{% if s.adresse_ip %} · <span class="mono">{{ s.adresse_ip }}</span>{% endif %}</div>
+        </div>
+        {% if s.appareil_id %}
+            {% if s.en_ligne %}<span class="badge badge-green">En ligne</span>
+            {% else %}<span class="badge badge-grey">Hors ligne</span>{% endif %}
+        {% endif %}
+    </div>
+    <div class="card-meta">
+        {% if s.type_equipement %}<span class="badge badge-blue">{{ s.type_equipement }}</span>{% endif %}
+        {% if s.nb_ports %}<span class="badge badge-grey">{{ s.nb_ports }} port(s)</span>{% endif %}
+    </div>
+    {% if s.description %}<div class="card-note">{{ s.description }}</div>{% endif %}
+
+    {% if s.ports_actifs %}
+    <div class="baie-ports">
+        {% for p in s.ports_actifs %}
+        <div class="baie-port-row{% if p.cible_hors_ligne %} warn{% endif %}">
+            <span class="mono">#{{ p.numero }}</span>
+            <span class="baie-port-cible">
+                {% if p.piece %}🚪 {{ p.piece }}{% if p.nom_cible %} · {% endif %}{% endif %}
+                {{ p.nom_cible }}{% if p.cible_finale %} → {{ p.cible_finale }}{% endif %}
+            </span>
+            {% if p.cible_hors_ligne %}<span class="badge badge-red">Hors ligne</span>{% endif %}
+        </div>
+        {% endfor %}
+        {% set libres = s.nb_ports - s.ports_actifs|length %}
+        {% if libres > 0 %}<div class="cap-note">{{ libres }} port(s) libre(s)</div>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% else %}
+<div class="empty-state"><div class="icon">🗄️</div>Aucun équipement placé dans cette baie.</div>
+{% endfor %}
+
+{% endblock %}

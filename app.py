@@ -1736,6 +1736,21 @@ def init_db():
             c.execute(f"ALTER TABLE baie_slot_ports ADD COLUMN {col_add} {defval}")
         except: pass
 
+    # Pièce du site desservie par ce port (prise murale), et étiquette de
+    # câble (couleur/longueur) pour un lien port-à-port — deux métadonnées
+    # DÉLIBÉRÉMENT INDÉPENDANTES de appareil_id/peripherique_id/usage_libre/
+    # lie_slot_id (jamais effacées quand l'un de ces champs change, et
+    # n'effacent jamais rien d'autre) : un port de bandeau RJ dessert une
+    # pièce ET peut ensuite être câblé à un port de switch en même temps —
+    # avant cette colonne, `piece` réutilisait usage_libre, effacé dès que
+    # le port était câblé à un autre (perte de l'info "quelle pièce" au
+    # moment où elle compte le plus). Sert la traçabilité de bout en bout
+    # (pièce -> port bandeau -> câble -> port switch -> appareil).
+    for col_add in ('piece', 'cable_couleur', 'cable_longueur'):
+        try:
+            c.execute(f"ALTER TABLE baie_slot_ports ADD COLUMN {col_add} TEXT DEFAULT ''")
+        except: pass
+
     # Largeur d'un élément de baie, en dixièmes de la largeur du rack (1-10) —
     # demandé : redimensionner un élément en largeur à la souris, sur une
     # grille de 10 positions. NULL (pas juste 10) est le défaut délibéré :
@@ -5557,10 +5572,20 @@ def _couleur_port(appareil_type=None, periph_categorie=None, usage_libre=None, e
 def _ports_avec_details(conn, slot_id):
     """Ports d'un slot, enrichis du nom et de la couleur de leur cible —
     y compris, pour un port relié à un autre port (câblage physique switch
-    <-> routeur, etc.), le nom de l'élément et le numéro du port en face."""
+    <-> routeur, etc.), le nom de l'élément en face ET, si CET ÉLÉMENT (pas
+    le port — un port câblé n'a par construction plus d'appareil_id/
+    peripherique_id propre, voir api_baie_lien_port) est lui-même associé à
+    un appareil (rack-mounted, "Associer à un appareil" dans le panneau),
+    son nom et son statut : la chaîne complète (pièce -> port bandeau ->
+    câble -> élément -> appareil) se lit alors d'un coup dans la bulle, sans
+    cliquer de proche en proche (cible_finale/cible_hors_ligne — sert aussi
+    à colorer le câble en avertissement côté client si l'appareil au bout
+    est injoignable). `piece` (pièce du site desservie, pour un bandeau RJ)
+    est indépendant de tout ça — jamais effacé par un changement de cible,
+    voir la migration dans init_db()."""
     rows = conn.execute(
         '''SELECT bp.slot_id, bp.numero, bp.appareil_id, bp.peripherique_id, bp.usage_libre,
-                  bp.lie_slot_id, bp.lie_port_numero,
+                  bp.lie_slot_id, bp.lie_port_numero, bp.piece, bp.cable_couleur, bp.cable_longueur,
                   a.nom_machine, a.type_appareil, a.en_ligne,
                   p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
            FROM baie_slot_ports bp
@@ -5570,14 +5595,24 @@ def _ports_avec_details(conn, slot_id):
     ports = []
     for r in rows:
         d = row_to_dict(r)
+        d['cible_finale'] = ''
+        d['cible_hors_ligne'] = None
         if d['appareil_id']:
             nom = d['nom_machine'] or ('Appareil #%d' % d['appareil_id'])
         elif d['peripherique_id']:
             nom = ' '.join(filter(None, [d['p_categorie'], d['p_marque'], d['p_modele']])) or ('Périphérique #%d' % d['peripherique_id'])
         elif d['lie_slot_id']:
-            cible = conn.execute('SELECT nom_custom, type_equipement FROM baie_slots WHERE id=?', (d['lie_slot_id'],)).fetchone()
+            cible = conn.execute(
+                'SELECT nom_custom, type_equipement, appareil_id FROM baie_slots WHERE id=?',
+                (d['lie_slot_id'],)).fetchone()
             nom_elem = (cible[0] or cible[1] if cible else None) or ('Élément #%d' % d['lie_slot_id'])
             nom = 'Port %d — %s' % (d['lie_port_numero'], nom_elem)
+            if cible and cible[2]:
+                far_app = conn.execute(
+                    'SELECT nom_machine, en_ligne FROM appareils WHERE id=?', (cible[2],)).fetchone()
+                if far_app:
+                    d['cible_finale'] = far_app[0] or ('Appareil #%d' % cible[2])
+                    d['cible_hors_ligne'] = (far_app[1] == 0)
         else:
             nom = d['usage_libre'] or ''
         d['nom_cible'] = nom
@@ -5596,19 +5631,22 @@ def _detacher_liens_vers(conn, slot_id, numeros=None):
     if numeros:
         placeholders = ','.join('?' * len(numeros))
         conn.execute(
-            f'UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL '
+            f"UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, "
+            f"cable_couleur='', cable_longueur='' "
             f'WHERE lie_slot_id=? AND lie_port_numero IN ({placeholders})',
             (slot_id, *numeros))
     else:
-        conn.execute('UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL WHERE lie_slot_id=?', (slot_id,))
+        conn.execute("UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, "
+                     "cable_couleur='', cable_longueur='' WHERE lie_slot_id=?", (slot_id,))
 
 def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None):
     """Ajuste les lignes baie_slot_ports d'un slot à nb_ports (0-48) : crée
     les numéros manquants, retire ceux au-delà (en détachant d'abord tout
     lien port-à-port pointant vers un numéro sur le point de disparaître).
     ports_existants (dict numero -> (appareil_id, peripherique_id,
-    usage_libre, lie_slot_id, lie_port_numero)), s'il est fourni, permet de
-    reporter les liaisons d'un ancien slot remplacé au même emplacement
+    usage_libre, lie_slot_id, lie_port_numero, piece, cable_couleur,
+    cable_longueur)), s'il est fourni, permet de reporter les liaisons d'un
+    ancien slot remplacé au même emplacement
     (voir api_baie_ajouter_slot) au lieu de les perdre — l'appelant doit
     ensuite repointer vers le NOUVEAU slot_id les ports ailleurs qui
     visaient l'ancien (UPDATE ... SET lie_slot_id=nouveau WHERE
@@ -5628,10 +5666,12 @@ def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None):
                 conn.execute('INSERT INTO baie_slot_ports (slot_id,numero,date_maj) VALUES (?,?,?)', (slot_id, numero, now))
     else:
         for numero in range(1, nb_ports + 1):
-            ap, pe, us, lsid, lnum = ports_existants.get(numero, (None, None, '', None, None))
+            ap, pe, us, lsid, lnum, piece, cc, cl = ports_existants.get(
+                numero, (None, None, '', None, None, '', '', ''))
             conn.execute('''INSERT INTO baie_slot_ports
-                (slot_id,numero,appareil_id,peripherique_id,usage_libre,lie_slot_id,lie_port_numero,date_maj)
-                VALUES (?,?,?,?,?,?,?,?)''', (slot_id, numero, ap, pe, us, lsid, lnum, now))
+                (slot_id,numero,appareil_id,peripherique_id,usage_libre,lie_slot_id,lie_port_numero,
+                 piece,cable_couleur,cable_longueur,date_maj)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (slot_id, numero, ap, pe, us, lsid, lnum, piece, cc, cl, now))
     return nb_ports
 
 def _clamp_largeur_u(v):
@@ -5661,8 +5701,9 @@ def api_baie_ajouter_slot():
     ancien = conn.execute('SELECT id FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col)).fetchone()
     anciens_ports = None
     if ancien:
-        anciens_ports = {r[0]: (r[1], r[2], r[3], r[4], r[5]) for r in conn.execute(
-            'SELECT numero, appareil_id, peripherique_id, usage_libre, lie_slot_id, lie_port_numero '
+        anciens_ports = {r[0]: (r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]) for r in conn.execute(
+            'SELECT numero, appareil_id, peripherique_id, usage_libre, lie_slot_id, lie_port_numero, '
+            'piece, cable_couleur, cable_longueur '
             'FROM baie_slot_ports WHERE slot_id=?', (ancien[0],)).fetchall()}
         # Numéros qui ne seront pas recréés (nb_ports réduit) : détacher leur
         # éventuel partenaire AVANT de perdre la trace de l'ancien slot_id.
@@ -5697,6 +5738,11 @@ def api_baie_ajouter_slot():
            FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
                              LEFT JOIN peripheriques p ON s.peripherique_id=p.id WHERE s.id=?''', (sid,)).fetchone() or {})
     slot['ports'] = _ports_avec_details(conn, sid)
+    nom_slot = slot.get('nom_custom') or slot.get('type_equipement') or slot.get('nom_machine') or f'Emplacement #{sid}'
+    log_history(conn, cid, 'baie_slot', sid, nom_slot,
+                'Modification (baie)' if ancien else 'Placement',
+                f"{baie_nom} · U{pos}·C{col}, {slot.get('type_equipement') or 'sans type'}, {nb_ports} port(s)")
+    conn.commit()
     conn.close()
     return jsonify(slot)
 
@@ -5706,9 +5752,16 @@ def api_baie_slot(id):
     cid = get_client_id()
     conn = get_db()
     if request.method == 'DELETE':
+        avant = row_to_dict(conn.execute(
+            'SELECT nom_custom, type_equipement, position, col_index, baie_nom FROM baie_slots '
+            'WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
         _detacher_liens_vers(conn, id)
         conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=?', (id,))
         conn.execute('DELETE FROM baie_slots WHERE id=? AND client_id=?', (id, cid))
+        if avant:
+            nom_slot = avant.get('nom_custom') or avant.get('type_equipement') or f'Emplacement #{id}'
+            log_history(conn, cid, 'baie_slot', id, nom_slot, 'Retrait',
+                        f"{avant.get('baie_nom') or 'Baie principale'} · U{avant.get('position')}·C{avant.get('col_index', 0)}")
         conn.commit(); conn.close()
         return jsonify({'ok': True})
     f = request.json or {}
@@ -5727,6 +5780,12 @@ def api_baie_slot(id):
            FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
                              LEFT JOIN peripheriques p ON s.peripherique_id=p.id WHERE s.id=?''', (id,)).fetchone() or {})
     slot['ports'] = _ports_avec_details(conn, id)
+    if slot:
+        nom_slot = slot.get('nom_custom') or slot.get('type_equipement') or f'Emplacement #{id}'
+        log_history(conn, cid, 'baie_slot', id, nom_slot, 'Modification (baie)',
+                    f"{slot.get('baie_nom') or 'Baie principale'} · U{slot.get('position')}·C{slot.get('col_index',0)}, "
+                    f"{slot.get('hauteur_u',1)}U, {nb_ports} port(s)")
+        conn.commit()
     conn.close()
     return jsonify(slot)
 
@@ -5741,28 +5800,50 @@ def api_baie_port(slot_id, numero):
     appelle cette même route sans rien renseigner."""
     cid = get_client_id()
     conn = get_db()
-    slot = conn.execute('SELECT id FROM baie_slots WHERE id=? AND client_id=?', (slot_id, cid)).fetchone()
+    slot = conn.execute('SELECT id, nom_custom, type_equipement FROM baie_slots WHERE id=? AND client_id=?', (slot_id, cid)).fetchone()
     if not slot:
         conn.close()
         return jsonify({'error': 'Slot introuvable'}), 404
     f = request.json or {}
-    appareil_id = f.get('appareil_id') or None
-    peripherique_id = f.get('peripherique_id') or None
-    usage_libre = f.get('usage_libre', '').strip() if not (appareil_id or peripherique_id) else ''
     now = _utcnow().isoformat()
-    ancien_lien = conn.execute(
-        'SELECT lie_slot_id, lie_port_numero FROM baie_slot_ports WHERE slot_id=? AND numero=?',
-        (slot_id, numero)).fetchone()
-    if ancien_lien and ancien_lien[0]:
-        conn.execute('UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, date_maj=? '
-                     'WHERE slot_id=? AND numero=?', (now, ancien_lien[0], ancien_lien[1]))
-    conn.execute('''UPDATE baie_slot_ports SET appareil_id=?,peripherique_id=?,usage_libre=?,
-        lie_slot_id=NULL,lie_port_numero=NULL,date_maj=? WHERE slot_id=? AND numero=?''',
-        (appareil_id, peripherique_id, usage_libre, now, slot_id, numero))
+    # `piece` (pièce du site desservie, indépendante — voir la migration dans
+    # init_db()) peut être modifiée SEULE (le champ dédié du bandeau RJ
+    # n'envoie que ça) : cible_fournie distingue "on change la cible du
+    # port" de "on ne touche qu'à la pièce" — sans cette distinction, un
+    # appel piece-only aurait fait tomber le bloc ci-dessous, qui écrase
+    # TOUJOURS appareil_id/peripherique_id/usage_libre/lie_slot_id/câble
+    # avec les valeurs (absentes ⇒ vides) du payload reçu, effaçant
+    # silencieusement la cible ou le câblage à chaque simple renommage de
+    # pièce.
+    cible_fournie = any(k in f for k in ('appareil_id', 'peripherique_id', 'usage_libre'))
+    if cible_fournie:
+        appareil_id = f.get('appareil_id') or None
+        peripherique_id = f.get('peripherique_id') or None
+        usage_libre = f.get('usage_libre', '').strip() if not (appareil_id or peripherique_id) else ''
+        ancien_lien = conn.execute(
+            'SELECT lie_slot_id, lie_port_numero FROM baie_slot_ports WHERE slot_id=? AND numero=?',
+            (slot_id, numero)).fetchone()
+        if ancien_lien and ancien_lien[0]:
+            conn.execute("UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, "
+                         "cable_couleur='', cable_longueur='', date_maj=? "
+                         'WHERE slot_id=? AND numero=?', (now, ancien_lien[0], ancien_lien[1]))
+        conn.execute('''UPDATE baie_slot_ports SET appareil_id=?,peripherique_id=?,usage_libre=?,
+            lie_slot_id=NULL,lie_port_numero=NULL,cable_couleur='',cable_longueur='',date_maj=?
+            WHERE slot_id=? AND numero=?''',
+            (appareil_id, peripherique_id, usage_libre, now, slot_id, numero))
+    if 'piece' in f:
+        conn.execute('UPDATE baie_slot_ports SET piece=?, date_maj=? WHERE slot_id=? AND numero=?',
+                     (str(f.get('piece') or '').strip(), now, slot_id, numero))
     conn.commit()
     ports = _ports_avec_details(conn, slot_id)
-    conn.close()
     port = next((p for p in ports if p['numero'] == numero), None)
+    if port and (cible_fournie or 'piece' in f):
+        nom_slot = slot[1] or slot[2] or f'Emplacement #{slot_id}'
+        detail = f"Port {numero} -> {port.get('nom_cible') or '— Libre —'}" if cible_fournie \
+            else f"Port {numero}, pièce -> {port.get('piece') or '(vide)'}"
+        log_history(conn, cid, 'baie_slot', slot_id, nom_slot, 'Modification (port baie)', detail)
+        conn.commit()
+    conn.close()
     return jsonify(port or {'error': 'Port introuvable'}), (200 if port else 404)
 
 @app.route('/api/baie/lien-port', methods=['POST'])
@@ -5777,11 +5858,17 @@ def api_baie_lien_port():
     f = request.json or {}
     s1, n1 = f.get('slot1_id'), f.get('numero1')
     s2, n2 = f.get('slot2_id'), f.get('numero2')
+    # Étiquette de câble optionnelle (couleur/longueur) — texte libre, purement
+    # documentaire, indépendante de tout le reste (voir migration init_db()).
+    cable_couleur = str(f.get('cable_couleur') or '').strip()
+    cable_longueur = str(f.get('cable_longueur') or '').strip()
     if not (s1 and n1 and s2 and n2) or (s1 == s2 and n1 == n2):
         return jsonify({'error': 'Deux ports distincts sont requis'}), 400
     conn = get_db()
-    ok = conn.execute('SELECT COUNT(*) FROM baie_slots WHERE id IN (?,?) AND client_id=?', (s1, s2, cid)).fetchone()[0]
-    if ok != 2:
+    slots_noms = {r[0]: (r[1] or r[2] or f'Emplacement #{r[0]}') for r in conn.execute(
+        'SELECT id, nom_custom, type_equipement FROM baie_slots WHERE id IN (?,?) AND client_id=?',
+        (s1, s2, cid)).fetchall()}
+    if len(slots_noms) != 2:
         conn.close()
         return jsonify({'error': 'Port introuvable'}), 404
     now = _utcnow().isoformat()
@@ -5790,14 +5877,19 @@ def api_baie_lien_port():
             'SELECT lie_slot_id, lie_port_numero FROM baie_slot_ports WHERE slot_id=? AND numero=?',
             (sid, num)).fetchone()
         if ancien and ancien[0]:
-            conn.execute('UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, date_maj=? '
+            conn.execute("UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, "
+                         "cable_couleur='', cable_longueur='', date_maj=? "
                          'WHERE slot_id=? AND numero=?', (now, ancien[0], ancien[1]))
     conn.execute('''UPDATE baie_slot_ports SET lie_slot_id=?,lie_port_numero=?,
-        appareil_id=NULL,peripherique_id=NULL,usage_libre='',date_maj=? WHERE slot_id=? AND numero=?''',
-        (s2, n2, now, s1, n1))
+        appareil_id=NULL,peripherique_id=NULL,usage_libre='',cable_couleur=?,cable_longueur=?,date_maj=?
+        WHERE slot_id=? AND numero=?''',
+        (s2, n2, cable_couleur, cable_longueur, now, s1, n1))
     conn.execute('''UPDATE baie_slot_ports SET lie_slot_id=?,lie_port_numero=?,
-        appareil_id=NULL,peripherique_id=NULL,usage_libre='',date_maj=? WHERE slot_id=? AND numero=?''',
-        (s1, n1, now, s2, n2))
+        appareil_id=NULL,peripherique_id=NULL,usage_libre='',cable_couleur=?,cable_longueur=?,date_maj=?
+        WHERE slot_id=? AND numero=?''',
+        (s1, n1, cable_couleur, cable_longueur, now, s2, n2))
+    log_history(conn, cid, 'baie_slot', s1, slots_noms[s1], 'Câblage (baie)',
+                f"Port {n1} relié à {slots_noms[s2]} port {n2}")
     conn.commit()
     ports1 = _ports_avec_details(conn, s1)
     ports2 = ports1 if s2 == s1 else _ports_avec_details(conn, s2)
@@ -5832,6 +5924,11 @@ def api_baie_deplacer_slot(id):
            FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
                              LEFT JOIN peripheriques p ON s.peripherique_id=p.id WHERE s.id=?''', (id,)).fetchone() or {})
     slot['ports'] = _ports_avec_details(conn, id)
+    if slot:
+        nom_slot = slot.get('nom_custom') or slot.get('type_equipement') or f'Emplacement #{id}'
+        log_history(conn, cid, 'baie_slot', id, nom_slot, 'Déplacement',
+                    f"{slot.get('baie_nom') or 'Baie principale'} · vers U{new_pos}·C{new_col}")
+        conn.commit()
     conn.close()
     return jsonify(slot)
 
@@ -5863,6 +5960,8 @@ def api_baie_supprimer():
                      f'WHERE lie_slot_id IN ({placeholders})', slot_ids)
         conn.execute(f'DELETE FROM baie_slot_ports WHERE slot_id IN ({placeholders})', slot_ids)
     conn.execute(f'DELETE FROM baie_slots WHERE client_id=? AND {cond}', params)
+    log_history(conn, cid, 'baie', 0, baie_nom, 'Suppression (baie)',
+                f"{len(slot_ids)} emplacement(s) supprimé(s)")
     conn.commit(); conn.close()
     return jsonify({'ok': True})
 
@@ -5891,6 +5990,74 @@ def api_baie_slots():
     if 'Baie principale' not in baies: baies.insert(0, 'Baie principale')
     conn.close()
     return jsonify({'slots': slots, 'nb_u': parc.get('baie_nb_u', 12) or 12, 'baies': baies})
+
+def _liste_cablage(conn, cid):
+    """Chaque lien port-à-port du client, une seule fois (pas les deux sens),
+    avec le nom des deux éléments — sert à la fois à la page imprimable et à
+    l'export CSV. La condition d'ordre (slot_id, numero) élimine le doublon
+    inhérent au stockage bidirectionnel de baie_slot_ports (chaque port du
+    lien porte sa propre ligne, référençant l'autre)."""
+    rows = conn.execute('''
+        SELECT COALESCE(s1.baie_nom,'Baie principale') AS baie,
+               s1.position AS pos1, s1.nom_custom AS nom1_custom, s1.type_equipement AS type1,
+               bp.numero AS numero1, bp.cable_couleur, bp.cable_longueur,
+               s2.position AS pos2, s2.nom_custom AS nom2_custom, s2.type_equipement AS type2,
+               bp.lie_port_numero AS numero2
+        FROM baie_slot_ports bp
+        JOIN baie_slots s1 ON bp.slot_id = s1.id
+        JOIN baie_slots s2 ON bp.lie_slot_id = s2.id
+        WHERE s1.client_id=? AND s2.client_id=? AND bp.lie_slot_id IS NOT NULL
+          AND (bp.slot_id < bp.lie_slot_id
+               OR (bp.slot_id = bp.lie_slot_id AND bp.numero < bp.lie_port_numero))
+        ORDER BY baie, pos1, bp.numero
+    ''', (cid, cid)).fetchall()
+    liens = []
+    for r in rows:
+        d = row_to_dict(r)
+        d['nom1'] = d['nom1_custom'] or d['type1'] or f"U{d['pos1']}"
+        d['nom2'] = d['nom2_custom'] or d['type2'] or f"U{d['pos2']}"
+        liens.append(d)
+    return liens
+
+@app.route('/baie/cablage')
+@login_required
+def baie_cablage():
+    """Liste imprimable de tous les liens port-à-port du client — demandé
+    comme documentation à laisser sur site ou pour un audit : chaque câble
+    physique (bandeau <-> switch, switch <-> routeur…) sur une ligne, sans
+    naviguer élément par élément dans l'éditeur."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        flash('Accès refusé', 'danger')
+        return redirect(url_for('dashboard'))
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    liens = _liste_cablage(conn, cid)
+    conn.close()
+    return render_template('baie_cablage.html', client=client, liens=liens,
+                           clients=get_clients(), client_actif_id=cid,
+                           date_export=_utcnow().strftime('%d/%m/%Y %H:%M'))
+
+@app.route('/baie/cablage.csv')
+@login_required
+def baie_cablage_csv():
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Accès refusé'}), 403
+    conn = get_db()
+    liens = _liste_cablage(conn, cid)
+    conn.close()
+    buf = io.StringIO()
+    buf.write('﻿')  # BOM — Excel ouvre le CSV en UTF-8 sans le corrompre
+    w = csv.writer(buf, delimiter=';')
+    w.writerow(['Baie', 'Élément A', 'Port A', 'Élément B', 'Port B', 'Couleur câble', 'Longueur câble'])
+    for l in liens:
+        w.writerow([l['baie'], l['nom1'], l['numero1'], l['nom2'], l['numero2'],
+                    l['cable_couleur'], l['cable_longueur']])
+    resp = make_response(buf.getvalue())
+    resp.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    resp.headers['Content-Disposition'] = 'attachment; filename="cablage_baie.csv"'
+    return resp
 
 # ─── PHOTOS BAIE ─────────────────────────────────────────────────────────────
 
@@ -6421,43 +6588,82 @@ def _run_hidden(cmd, **kwargs):
     return subprocess.run(cmd, **kwargs)
 
 
+def _tcp_probe_rapide(ip_str, ports, timeout=0.3):
+    """Sonde plusieurs ports TCP EN PARALLÈLE, retourne dès que l'un répond
+    (ou après épuisement de tous les autres).
+
+    Remplace un ancien fallback séquentiel (un port après l'autre, chacun
+    jusqu'à son propre timeout) dont le pire cas — hôte injoignable, aucun
+    port ouvert, le cas le plus courant pour la grande majorité des
+    adresses inutilisées d'un scan réseau — coûtait plusieurs secondes PAR
+    HÔTE rien que pour ce fallback (jusqu'à 12 × 0.4s = 4.8s dans `_ping()`,
+    8 × 1.0s = 8s dans `_ping_once()`), avant même le reste du sondage.
+    Ici, le pire cas est borné au timeout d'UN SEUL port quel que soit le
+    nombre de ports essayés — c'était le principal goulot d'étranglement du
+    ping et du scan réseau, signalé comme trop lent en usage réel.
+    """
+    def _essai(port):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            ok = s.connect_ex((ip_str, port)) == 0
+            s.close()
+            return ok
+        except Exception:
+            return False
+    # Pas de `with` ici : Executor.__exit__ appelle shutdown(wait=True), qui
+    # bloquerait jusqu'à ce que TOUS les threads terminent — y compris ceux
+    # qu'on n'attend plus une fois qu'un port a déjà répondu, un port ouvert
+    # répond typiquement en quelques millisecondes pendant qu'un autre,
+    # filtré, met tout le timeout à échouer. shutdown(wait=False) laisse les
+    # threads restants se terminer seuls en arrière-plan, sans bloquer le
+    # retour de la fonction.
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=len(ports))
+    futures = [ex.submit(_essai, p) for p in ports]
+    trouve = False
+    try:
+        for f in concurrent.futures.as_completed(futures, timeout=timeout + 1):
+            if f.result():
+                trouve = True
+                break
+    except concurrent.futures.TimeoutError:
+        pass
+    finally:
+        ex.shutdown(wait=False)
+    return trouve
+
 def _ping(ip_str):
     """Teste si un hôte est joignable.
-    
+
     Stratégie en 2 étapes :
     1. Commande ping système (ICMP fiable, évite les faux positifs du raw socket)
-    2. Fallback TCP sur ports courants si ping non disponible
-    
+    2. Fallback TCP sur ports courants si ping non disponible (en parallèle,
+       voir _tcp_probe_rapide — c'est ce qui rend le scan réseau rapide
+       même sur les nombreuses adresses inutilisées d'une plage /24)
+
     Note : le raw ICMP socket N'EST PAS utilisé car en scan parallèle,
     un socket peut intercepter la réponse ICMP destinée à un autre thread,
     générant des faux positifs.
     """
-    # 1. Commande ping système
+    # 1. Commande ping système — timeout subprocess resserré à 1.5s (la
+    # commande elle-même est déjà bornée en interne par -w 500/-W 1) : les
+    # 3s précédentes n'étaient qu'une marge de sécurité rarement nécessaire,
+    # payée en pire cas sur chaque hôte injoignable.
     try:
         if IS_WINDOWS:
             cmd = ['ping', '-n', '1', '-w', '500', ip_str]
         else:
             cmd = ['ping', '-c', '1', '-W', '1', ip_str]
-        result = _run_hidden(cmd, capture_output=True, timeout=3)
+        result = _run_hidden(cmd, capture_output=True, timeout=1.5)
         if result.returncode == 0:
             return True
     except FileNotFoundError:
         pass  # ping non disponible, on passe au fallback TCP
     except Exception:
         pass
-    # 2. Fallback TCP — on essaie plusieurs ports courants
-    # Un hôte vivant a forcément au moins un de ces ports ouverts
-    for port in [80, 443, 22, 445, 135, 139, 3389, 8080, 53, 8443, 5000, 9100]:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.4)
-            if s.connect_ex((ip_str, port)) == 0:
-                s.close()
-                return True
-            s.close()
-        except Exception:
-            pass
-    return False
+    # 2. Fallback TCP — un hôte vivant a forcément au moins un de ces ports
+    # ouverts (ou fermé-mais-répondant, ce qui suffit à prouver sa présence)
+    return _tcp_probe_rapide(ip_str, [80, 443, 22, 445, 135, 139, 3389, 8080, 53, 8443, 5000, 9100])
 
 def _hostname(ip_str):
     """Résolution DNS inverse."""
@@ -11487,7 +11693,12 @@ def api_services_supprimer():
 # écrasé par un faux « hors ligne ».
 
 PING_INTERVAL = 60   # secondes entre deux cycles complets
-PING_TIMEOUT  = 1.0  # timeout par tentative ping
+# Timeout par port lors du fallback TCP (_tcp_probe_rapide) — les ports sont
+# désormais sondés EN PARALLÈLE plutôt qu'un par un, donc cette valeur borne
+# le pire cas total (hôte injoignable) plutôt que de s'accumuler par port ;
+# resserré de 1.0s à 0.4s au passage (correctif de lenteur signalé en usage
+# réel), toujours assez patient pour un réseau local normal.
+PING_TIMEOUT  = 0.4  # timeout par tentative ping
 PING_WORKERS  = 30   # threads simultanes
 
 _ping_cache = {}           # { appareil_id: {en_ligne, ts, ip} }
@@ -11547,22 +11758,20 @@ def _appareil_sur_reseau_courant(ip_appareil, plage_client, reseaux_locaux):
     return any(reseau_local.overlaps(cible) for reseau_local in reseaux_locaux for cible in cibles)
 
 def _ping_once(ip_str):
+    # Timeout subprocess resserré à 1.5s (voir _ping()/_tcp_probe_rapide un
+    # peu plus haut dans le fichier — même correctif de performance, cette
+    # fonction est le pendant "un seul hôte à la demande" utilisée par le
+    # bouton Ping de la baie de brassage et par le watchdog en tâche de
+    # fond) ; fallback TCP en parallèle plutôt que port par port, seul
+    # vrai goulot d'étranglement du ping quand l'ICMP est filtré (pare-feu
+    # Windows par défaut).
     try:
         cmd = ['ping','-n','1','-w','500',ip_str] if IS_WINDOWS else ['ping','-c','1','-W','1',ip_str]
-        if _run_hidden(cmd, capture_output=True, timeout=3).returncode == 0:
+        if _run_hidden(cmd, capture_output=True, timeout=1.5).returncode == 0:
             return True
     except Exception:
         pass
-    for port in [80, 443, 22, 445, 3389, 8080, 53, 135, 139]:
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(PING_TIMEOUT)
-            if s.connect_ex((ip_str, port)) == 0:
-                s.close(); return True
-            s.close()
-        except Exception:
-            pass
-    return False
+    return _tcp_probe_rapide(ip_str, [80, 443, 22, 445, 3389, 8080, 53, 135, 139], timeout=PING_TIMEOUT)
 
 def _ping_worker(item):
     """Ping puis, si ça répond, vérifie via ARP que c'est bien NOTRE
@@ -14137,6 +14346,45 @@ def mobile_appareil_detail(id):
                            contrats_lies=contrats_lies, docs=docs, licences=licences,
                            cles_bitlocker=cles_bitlocker,
                            client=client, clients=get_clients(), client_actif_id=cid)
+
+
+@app.route('/m/baie')
+@login_required
+def mobile_baie():
+    """Consultation lecture seule de la baie de brassage — demandé : c'est
+    justement l'écran qu'un technicien veut voir depuis son téléphone,
+    debout devant l'armoire, pas de quoi le modifier depuis là. Pas de
+    grille glisser-déposer (impraticable sur petit écran) : une liste
+    verticale par position U, dans l'ordre du rack."""
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    baies = [r[0] for r in conn.execute(
+        "SELECT DISTINCT COALESCE(baie_nom,'Baie principale') FROM baie_slots WHERE client_id=? ORDER BY 1",
+        (cid,)).fetchall()]
+    if not baies:
+        baies = ['Baie principale']
+    baie_nom = request.args.get('baie') or baies[0]
+    if baie_nom not in baies:
+        baie_nom = baies[0]
+    cond = "(s.baie_nom=? OR s.baie_nom IS NULL)" if baie_nom == 'Baie principale' else "s.baie_nom=?"
+    slots = [row_to_dict(r) for r in conn.execute(
+        f'''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.en_ligne,
+                  p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
+           FROM baie_slots s LEFT JOIN appareils a ON s.appareil_id=a.id
+                             LEFT JOIN peripheriques p ON s.peripherique_id=p.id
+           WHERE s.client_id=? AND {cond} ORDER BY s.position''', (cid, baie_nom)).fetchall()]
+    for s in slots:
+        s['ports'] = _ports_avec_details(conn, s['id']) if s.get('nb_ports') else []
+        s['ports_actifs'] = [p for p in s['ports'] if p.get('nom_cible') or p.get('piece')]
+        s['nom_affiche'] = s.get('nom_custom') or s.get('nom_machine') or (
+            ' '.join(filter(None, [s.get('p_categorie'), s.get('p_marque'), s.get('p_modele')]))) \
+            or s.get('type_equipement') or f"U{s['position']}"
+    conn.close()
+    return render_template('mobile/baie.html', client=client, clients=get_clients(), client_actif_id=cid,
+                           slots=slots, baies=baies, baie_nom=baie_nom)
 
 
 @app.route('/m/contrats')
