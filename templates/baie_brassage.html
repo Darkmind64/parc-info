@@ -44,11 +44,23 @@
     color:#2a4a6a; padding-right:4px; flex-shrink:0;
 }
 .rack-rows { flex:1; display:flex; flex-direction:column; gap:1px; }
-.rack-row { display:flex; gap:2px; flex-shrink:0; position:relative; }
+/* Grille FIXE à 10 colonnes — chaque élément (occupé ou case vide) se
+   positionne via grid-column:"début / span largeur" (voir makeOccupiedCell/
+   makeEmptyCell), en dixièmes de la largeur du rack. Remplace l'ancien
+   modèle flex (col_index = index de tranche 0-4, largeur calculée par
+   partage égal du flex restant) : ce dernier cassait dès qu'un élément à la
+   fois partiel en largeur ET en hauteur (hauteur_u > 1) partageait sa
+   rangée avec un autre élément — les rangées "débordées" par le haut
+   (spannedBy) redonnaient un partage égal (flex:1) au lieu de reprendre la
+   largeur RÉELLE de l'élément qui déborde, désalignant les colonnes d'une
+   rangée à l'autre. Avec une grille à positions absolues, l'alignement est
+   garanti par construction : la même paire (début, largeur) produit
+   toujours le même grid-column, quelle que soit la rangée. */
+.rack-row { display:grid; grid-template-columns:repeat(10, 1fr); gap:2px; position:relative; }
 
 /* U height constant */
 .rack-cell {
-    flex:1; background:#0d1520; border:1px solid #1a2a3a; border-radius:2px;
+    background:#0d1520; border:1px solid #1a2a3a; border-radius:2px;
     cursor:pointer; display:flex; align-items:center; padding:0 6px; overflow:hidden;
     font-family:'Share Tech Mono',monospace; font-size:.65rem; transition:all .12s;
     position:relative; min-width:0; box-sizing:border-box;
@@ -126,6 +138,14 @@
     position:absolute; top:0; bottom:0; right:-2px; width:5px; cursor:ew-resize; z-index:6;
 }
 .cell-resize-w:hover, .cell-resize-w.resizing { background:rgba(0,201,255,.35); }
+
+/* Poignée de redimensionnement DIAGONAL — coin bas-droit, change hauteur_u
+   ET largeur_u en un seul geste (voir redimensionnerCoinSlot()). */
+.cell-resize-corner {
+    position:absolute; right:-2px; bottom:-2px; width:9px; height:9px; cursor:nwse-resize; z-index:7;
+    border-radius:0 0 2px 0;
+}
+.cell-resize-corner:hover, .cell-resize-corner.resizing { background:rgba(0,201,255,.55); }
 
 /* Un port RJ45 dans la grille d'un élément réseau — numéroté, coloré selon
    sa cible (couleur type/catégorie déjà configurée ailleurs dans l'app, ou
@@ -405,15 +425,14 @@
             </div>
             <div class="form-row cols-2" style="margin-bottom:.6rem;">
                 <div class="form-group" style="margin-bottom:0;">
-                    <label>Colonne</label>
-                    <input type="number" id="cfg-col" min="0" max="4" value="0"
-                           style="font-family:'Share Tech Mono',monospace;" title="0 = pleine largeur, 1-4 = côte à côte">
+                    <label>Colonne (0-9)</label>
+                    <input type="number" id="cfg-col" min="0" max="9" value="0"
+                           style="font-family:'Share Tech Mono',monospace;" title="Position de départ dans la grille de 10 colonnes du rack">
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
                     <label>Largeur</label>
-                    <select id="cfg-largeur" title="Se règle aussi en glissant le bord droit de l'élément dans la baie">
-                        <option value="">Auto (partage égal)</option>
-                        {% for i in range(1,11) %}<option value="{{ i }}">{{ i }}/10</option>{% endfor %}
+                    <select id="cfg-largeur" title="Se règle aussi en glissant le bord droit (ou le coin) de l'élément dans la baie">
+                        {% for i in range(1,11) %}<option value="{{ i }}"{% if i==10 %} selected{% endif %}>{{ i }}/10</option>{% endfor %}
                     </select>
                 </div>
             </div>
@@ -636,27 +655,27 @@ function renderRack() {
     const rows = document.getElementById('rack-rows');
     nums.innerHTML = ''; rows.innerHTML = '';
 
-    // Pre-pass : multi-U spans
-    const originSlot = {}, spannedBy = {};
-    for (let u = 1; u <= nbU; u++) {
-        for (let col = 0; col < MAX_COLS; col++) {
-            const s = slots[key(u, col)];
-            if (s) {
-                originSlot[key(u, col)] = s;
-                for (let du = 1; du < (s.hauteur_u || 1); du++) {
-                    spannedBy[key(u + du, col)] = s;
-                }
-            }
+    // Pré-passe : pour chaque U, quels slots y ont leur origine (s.position
+    // === u, rendu réel) et lesquels y débordent depuis plus haut
+    // (hauteur_u > 1 : la cellule d'origine, plus haut, déborde visuellement
+    // ici via sa propre hauteur CSS — rien à rendre ici pour elle, juste
+    // réserver sa plage de colonnes). Remplace l'ancien couple originSlot/
+    // spannedBy indexé par (u, col_index en tranche 0-4) : indexé ici
+    // directement par u, sans notion de colonne discrète — élimine le
+    // désalignement qui apparaissait dès qu'un élément à la fois partiel en
+    // largeur ET en hauteur (hauteur_u > 1) partageait sa rangée avec un
+    // autre élément (les rangées "débordées" retombaient sur un partage
+    // égal générique au lieu de reprendre la largeur RÉELLE de l'élément
+    // qui déborde, signalé en usage réel).
+    const originesParU = {}, debordeParU = {};
+    Object.values(slots).forEach(s => {
+        const pos = s.position, hu = s.hauteur_u || 1;
+        (originesParU[pos] = originesParU[pos] || []).push(s);
+        for (let du = 1; du < hu; du++) {
+            const u2 = pos + du;
+            (debordeParU[u2] = debordeParU[u2] || []).push(s);
         }
-    }
-
-    function colsActiveAtU(u) {
-        let max = 0;
-        for (let col = 0; col < MAX_COLS; col++) {
-            if (originSlot[key(u, col)] || spannedBy[key(u, col)]) max = col + 1;
-        }
-        return Math.max(1, max);
-    }
+    });
 
     let totalOccupied = 0;
 
@@ -667,75 +686,37 @@ function renderRack() {
         nd.textContent = u;
         nums.appendChild(nd);
 
-        const activeCols = colsActiveAtU(u);
         const row = document.createElement('div');
         row.className = 'rack-row';
         row.style.height = U_H + 'px';
 
-        // rowSlots : les slots RÉELLEMENT occupés de cette rangée (ni spacer
-        // ni case vide) — sert après coup à calculer si un reliquat de
-        // largeur (élément(s) redimensionné(s) en dessous de 10/10, sans
-        // voisin "auto" pour absorber le reste) doit être matérialisé en
-        // case vide cliquable (voir largeurRemainder ci-dessous).
-        const rowSlots = [];
-        let hasAuto = false; // au moins un slot/case sans largeur_u explicite
+        // Plages de colonnes (0-9) déjà couvertes à cette rangée, par une
+        // origine réelle ou un débordement venu d'au-dessus — le
+        // complémentaire dans [0,9] devient des cases vides. Aucune plaque
+        // grise n'est donc jamais rendue sous un élément qui déborde depuis
+        // une rangée du dessus (demandé explicitement).
+        const couvert = [];
+        (originesParU[u] || []).forEach(s => {
+            const debut = Math.min(9, Math.max(0, s.col_index || 0));
+            const largeur = Math.min(10 - debut, Math.max(1, s.largeur_u || 10));
+            couvert.push({debut, fin: debut + largeur - 1});
+            totalOccupied++;
+            row.appendChild(makeOccupiedCell(s, u, debut, largeur));
+        });
+        (debordeParU[u] || []).forEach(s => {
+            const debut = Math.min(9, Math.max(0, s.col_index || 0));
+            const largeur = Math.min(10 - debut, Math.max(1, s.largeur_u || 10));
+            couvert.push({debut, fin: debut + largeur - 1});
+        });
 
-        if (activeCols === 1) {
-            const sk = key(u, 0);
-            if (spannedBy[sk]) {
-                // Spacer (visually hidden - slot rendered above with height)
-                const ph = document.createElement('div');
-                ph.style.cssText = `flex:1;height:${U_H}px;`;
-                row.appendChild(ph);
-                hasAuto = true;
-            } else if (originSlot[sk]) {
-                totalOccupied++;
-                const s = originSlot[sk];
-                rowSlots.push(s);
-                if (!s.largeur_u) hasAuto = true;
-                row.appendChild(makeOccupiedCell(s, u, 0));
-            } else {
-                row.appendChild(makeEmptyCell(u, 0, true));
-                hasAuto = true;
-            }
-        } else {
-            for (let col = 0; col < activeCols; col++) {
-                const sk = key(u, col);
-                if (spannedBy[sk]) {
-                    const ph = document.createElement('div');
-                    ph.style.cssText = `flex:1;height:${U_H}px;`;
-                    row.appendChild(ph);
-                    hasAuto = true;
-                } else if (originSlot[sk]) {
-                    totalOccupied++;
-                    const s = originSlot[sk];
-                    rowSlots.push(s);
-                    if (!s.largeur_u) hasAuto = true;
-                    row.appendChild(makeOccupiedCell(s, u, col));
-                } else {
-                    row.appendChild(makeEmptyCell(u, col, false));
-                    hasAuto = true;
-                }
-            }
-        }
+        couvert.sort((a, b) => a.debut - b.debut);
+        let curseur = 0;
+        couvert.forEach(c => {
+            if (c.debut > curseur) row.appendChild(makeEmptyCell(u, curseur, c.debut - curseur));
+            curseur = Math.max(curseur, c.fin + 1);
+        });
+        if (curseur < 10) row.appendChild(makeEmptyCell(u, curseur, 10 - curseur));
 
-        // Reliquat de largeur : si tous les éléments de la rangée ont une
-        // largeur_u explicite et que leur somme n'atteint pas 10/10, rien
-        // dans la rangée ne peut naturellement s'étirer (flex:1) pour
-        // combler le reste — sans quoi cet espace resterait juste vide et
-        // non cliquable. On matérialise le reliquat en case vide normale,
-        // sur la prochaine colonne libre (0-4), pour pouvoir y placer un
-        // autre équipement.
-        if (!hasAuto && rowSlots.length) {
-            const sommeDixiemes = rowSlots.reduce((t, s) => t + (s.largeur_u || 10), 0);
-            if (sommeDixiemes < 10 && activeCols < MAX_COLS) {
-                const ph = makeEmptyCell(u, activeCols, false);
-                ph.classList.add('remainder');
-                ph.style.flex = `0 0 ${(10 - sommeDixiemes) * 10}%`;
-                ph.style.maxWidth = `${(10 - sommeDixiemes) * 10}%`;
-                row.appendChild(ph);
-            }
-        }
         rows.appendChild(row);
     }
 
@@ -803,31 +784,29 @@ function renderCableLinks() {
 }
 
 // ── CELL BUILDERS ─────────────────────────────────────────────────────────────
-function makeOccupiedCell(s, u, col) {
+function makeOccupiedCell(s, u, debut, largeur) {
     const cell = document.createElement('div');
     cell.className = 'rack-cell occupied';
     cell.dataset.pos = u;
-    cell.dataset.col = col;
+    cell.dataset.col = debut;
     cell.dataset.id  = s.id;
 
     const hu = s.hauteur_u || 1;
     if (hu > 1) {
         cell.style.height     = (hu * U_H + (hu - 1)) + 'px';
-        cell.style.alignSelf  = 'flex-start';
         cell.style.position   = 'relative';
         cell.style.zIndex     = '2';
     } else {
         cell.style.height = U_H + 'px';
     }
 
-    // Largeur explicite (glisser la poignée de droite, ou champ "Largeur"
-    // du panneau) — en dixièmes de la largeur du rack. Sans ça (largeur_u
-    // null), la cellule garde le comportement historique flex:1 (partage
-    // égal automatique avec ses voisines de rangée).
-    if (s.largeur_u) {
-        cell.style.flex     = `0 0 ${s.largeur_u * 10}%`;
-        cell.style.maxWidth = `${s.largeur_u * 10}%`;
-    }
+    // Position/largeur dans la grille à 10 colonnes du rack — debut (0-9)
+    // et largeur (1-10, largeur_u en base) sont TOUJOURS explicites
+    // (largeur_u vaut 10 par défaut côté serveur, jamais "auto"), donc la
+    // même paire produit toujours le même grid-column quelle que soit la
+    // rangée : c'est ce qui garantit l'alignement des rangées "débordées"
+    // par un élément haut de plusieurs U (voir renderRack()).
+    cell.style.gridColumn = `${debut + 1} / span ${largeur}`;
 
     const tcss = TYPE_CSS[s.type_equipement] || '';
     if (tcss) cell.classList.add('cell-' + tcss);
@@ -858,7 +837,8 @@ function makeOccupiedCell(s, u, col) {
 
     cell.innerHTML = ligneInfo + zonePorts
         + `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`
-        + `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`;
+        + `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`
+        + `<div class="cell-resize-corner" title="Redimensionner en hauteur et largeur (glisser en diagonale)"></div>`;
 
     // Ports : clic = surbrillance de tout port lié à la même cible (ou, en
     // mode "Lier des ports", sélection du 1er/2e port à câbler ensemble),
@@ -939,11 +919,8 @@ function makeOccupiedCell(s, u, col) {
     });
 
     // Redimensionnement en LARGEUR à la souris : glisser la poignée de
-    // droite change largeur_u par pas de 1/10 de la largeur du rack. Le
-    // point de départ se base sur la largeur RENDUE actuelle de la cellule
-    // (pas sur largeur_u, qui peut être null/"auto") pour que le premier
-    // mouvement de souris parte de ce que l'utilisateur voit déjà, même
-    // pour un élément jamais redimensionné explicitement.
+    // droite change largeur_u par pas de 1/10 de la largeur du rack, borné
+    // pour ne jamais dépasser le bord droit de la grille (10 - debut).
     const poigneeW = cell.querySelector('.cell-resize-w');
     poigneeW.addEventListener('mousedown', e => {
         e.preventDefault();
@@ -951,19 +928,18 @@ function makeOccupiedCell(s, u, col) {
         cell.draggable = false;
         poigneeW.classList.add('resizing');
         const row = cell.parentElement;
-        const rowWidth = row.getBoundingClientRect().width;
-        const tenthPx = rowWidth / 10;
+        const tenthPx = row.getBoundingClientRect().width / 10;
         const startX = e.clientX;
-        const startLargeur = Math.max(1, Math.min(10, Math.round(cell.getBoundingClientRect().width / tenthPx)));
+        const startLargeur = s.largeur_u || 10;
+        const maxLargeur = 10 - debut;
 
         const calculerNouvelleLargeur = clientX => {
             const delta = Math.round((clientX - startX) / tenthPx);
-            return Math.min(10, Math.max(1, startLargeur + delta));
+            return Math.min(maxLargeur, Math.max(1, startLargeur + delta));
         };
         const onMove = ev => {
             const nv = calculerNouvelleLargeur(ev.clientX);
-            cell.style.flex = `0 0 ${nv * 10}%`;
-            cell.style.maxWidth = `${nv * 10}%`;
+            cell.style.gridColumn = `${debut + 1} / span ${nv}`;
             renderCableLinks(); // suit les ports en direct pendant le geste
         };
         const onUp = async ev => {
@@ -972,7 +948,47 @@ function makeOccupiedCell(s, u, col) {
             poigneeW.classList.remove('resizing');
             cell.draggable = true;
             const nv = calculerNouvelleLargeur(ev.clientX);
-            if (nv !== (s.largeur_u || startLargeur)) await redimensionnerLargeurSlot(s, nv);
+            if (nv !== startLargeur) await redimensionnerLargeurSlot(s, nv);
+            else renderRack();
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+
+    // Redimensionnement DIAGONAL (coin bas-droit) : hauteur ET largeur en un
+    // seul geste — un seul appel réseau à la fin plutôt que deux
+    // redimensionnements successifs qui pourraient se marcher dessus.
+    const poigneeC = cell.querySelector('.cell-resize-corner');
+    poigneeC.addEventListener('mousedown', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        cell.draggable = false;
+        poigneeC.classList.add('resizing');
+        const row = cell.parentElement;
+        const tenthPx = row.getBoundingClientRect().width / 10;
+        const startX = e.clientX, startY = e.clientY;
+        const startHu = s.hauteur_u || 1;
+        const startLargeur = s.largeur_u || 10;
+        const maxHu = Math.min(8, nbU - s.position + 1);
+        const maxLargeur = 10 - debut;
+
+        const calculer = (clientX, clientY) => ({
+            hu: Math.min(maxHu, Math.max(1, startHu + Math.round((clientY - startY) / U_H))),
+            largeur: Math.min(maxLargeur, Math.max(1, startLargeur + Math.round((clientX - startX) / tenthPx))),
+        });
+        const onMove = ev => {
+            const {hu, largeur} = calculer(ev.clientX, ev.clientY);
+            cell.style.height = (hu * U_H + (hu - 1)) + 'px';
+            cell.style.gridColumn = `${debut + 1} / span ${largeur}`;
+            renderCableLinks();
+        };
+        const onUp = async ev => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            poigneeC.classList.remove('resizing');
+            cell.draggable = true;
+            const {hu, largeur} = calculer(ev.clientX, ev.clientY);
+            if (hu !== startHu || largeur !== startLargeur) await redimensionnerCoinSlot(s, hu, largeur);
             else renderRack();
         };
         document.addEventListener('mousemove', onMove);
@@ -987,7 +1003,7 @@ function makeOccupiedCell(s, u, col) {
     // Drag & drop
     cell.draggable = true;
     cell.addEventListener('dragstart', e => {
-        e.dataTransfer.setData('text/plain', JSON.stringify({id: s.id, pos: u, col: col}));
+        e.dataTransfer.setData('text/plain', JSON.stringify({id: s.id, pos: u, col: debut}));
         cell.classList.add('dragging');
         setTimeout(() => cell.classList.add('dragging'), 0);
     });
@@ -996,21 +1012,25 @@ function makeOccupiedCell(s, u, col) {
     return cell;
 }
 
-function makeEmptyCell(u, col, fullWidth) {
+function makeEmptyCell(u, debut, largeur) {
     const cell = document.createElement('div');
     cell.className = 'rack-cell empty';
     cell.style.height = U_H + 'px';
+    cell.style.gridColumn = `${debut + 1} / span ${largeur}`;
     cell.dataset.pos = u;
-    cell.dataset.col = col;
-    cell.innerHTML = fullWidth
+    cell.dataset.col = debut;
+    cell.innerHTML = largeur >= 10
         ? `<span style="color:#1a2a3a;font-size:.52rem;user-select:none;">U${u}</span>`
-        : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">C${col}</span>`;
+        : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">C${debut}</span>`;
 
+    // Pré-remplit position ET largeur pour reprendre EXACTEMENT l'espace
+    // libre cliqué (l'utilisateur peut toujours ajuster ensuite) — plus
+    // besoin de deviner la bonne colonne/largeur à la main.
     cell.addEventListener('click', () => {
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
         document.getElementById('cfg-pos').value = u;
-        document.getElementById('cfg-col').value = col;
-        document.getElementById('cfg-largeur').value = '';
+        document.getElementById('cfg-col').value = debut;
+        document.getElementById('cfg-largeur').value = String(largeur);
         document.getElementById('cfg-nb-ports').value = 0;
         document.getElementById('ports-editor').style.display = 'none';
         showTab('tab-add');
@@ -1025,7 +1045,7 @@ function makeEmptyCell(u, col, fullWidth) {
         e.preventDefault();
         cell.classList.remove('drag-over');
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        await deplacerSlot(data.id, u, col);
+        await deplacerSlot(data.id, u, debut);
     });
 
     return cell;
@@ -1079,6 +1099,25 @@ async function redimensionnerLargeurSlot(s, nouvelleLargeur) {
         method: 'PUT', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
             position: s.position, hauteur_u: s.hauteur_u || 1,
+            appareil_id: s.appareil_id || null, peripherique_id: s.peripherique_id || null,
+            nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
+            couleur: s.couleur || '#1e3a5f', description: s.description || '',
+            nb_ports: s.nb_ports || 0, largeur_u: nouvelleLargeur
+        })
+    });
+    const updated = await r.json();
+    slots[key(updated.position, updated.col_index || 0)] = updated;
+    renderRack(); renderList();
+}
+
+// Redimensionnement diagonal (poignée du coin) : hauteur et largeur en un
+// seul appel — mêmes précautions que les deux fonctions ci-dessus (tous les
+// champs renvoyés pour ne rien effacer).
+async function redimensionnerCoinSlot(s, nouvelleHu, nouvelleLargeur) {
+    const r = await fetch(`/api/baie/slot/${s.id}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+            position: s.position, hauteur_u: nouvelleHu,
             appareil_id: s.appareil_id || null, peripherique_id: s.peripherique_id || null,
             nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
             couleur: s.couleur || '#1e3a5f', description: s.description || '',
@@ -1483,7 +1522,7 @@ function selectSlot(s, cell) {
     cell.classList.add('selected');
     document.getElementById('cfg-pos').value   = s.position;
     document.getElementById('cfg-col').value   = s.col_index || 0;
-    document.getElementById('cfg-largeur').value = s.largeur_u || '';
+    document.getElementById('cfg-largeur').value = s.largeur_u || 10;
     document.getElementById('cfg-hu').value    = s.hauteur_u || 1;
     document.getElementById('cfg-type').value  = s.type_equipement || '';
     document.getElementById('cfg-nom').value   = nomEquipementSlot(s) || '';
@@ -1681,7 +1720,7 @@ function ajouterBandeauRJ() {
     document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
     document.getElementById('cfg-hu').value = 1;
     document.getElementById('cfg-col').value = 0;
-    document.getElementById('cfg-largeur').value = '';
+    document.getElementById('cfg-largeur').value = '10';
     document.getElementById('cfg-type').value = 'Bandeau RJ';
     document.getElementById('cfg-nom').value = 'Bandeau RJ';
     document.getElementById('cfg-desc').value = '';
@@ -1696,7 +1735,7 @@ function ajouterBandeauRJ() {
 
 async function placerEquip() {
     const pos = parseInt(document.getElementById('cfg-pos').value) || 1;
-    const col = Math.min(4, Math.max(0, parseInt(document.getElementById('cfg-col').value) || 0));
+    const col = Math.min(9, Math.max(0, parseInt(document.getElementById('cfg-col').value) || 0));
     const hu  = parseInt(document.getElementById('cfg-hu').value) || 1;
     if (pos < 1 || pos > nbU) { showFlash(`Position entre 1 et ${nbU}`, 'info'); return; }
 

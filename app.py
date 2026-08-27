@@ -5674,16 +5674,38 @@ def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None):
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (slot_id, numero, ap, pe, us, lsid, lnum, piece, cc, cl, now))
     return nb_ports
 
-def _clamp_largeur_u(v):
-    """1-10 (dixièmes de la largeur du rack) ou None ("jamais redimensionné,
-    partage égal automatique" — voir la migration largeur_u dans init_db())."""
+def _clamp_largeur_u(v, col=0):
+    """1-10 (dixièmes de la largeur du rack, position dans la grille à 10
+    colonnes du client — voir renderRack() dans baie_brassage.html). Valeur
+    manquante/invalide -> 10 (pleine largeur) : chaque emplacement a
+    désormais TOUJOURS une largeur explicite, plus de notion de "partage
+    égal automatique" entre éléments d'une même rangée (l'ancien design,
+    où largeur_u valait None tant que l'utilisateur n'avait jamais
+    redimensionné, cassait dès qu'un élément à la fois partiel en largeur
+    ET en hauteur (hauteur_u > 1) partageait sa rangée avec un autre —
+    voir le commentaire de renderRack() côté client pour le détail).
+    `col` (0-9, colonne de départ déjà bornée par l'appelant) plafonne en
+    plus la largeur à 10-col : sans ça, un slot à col=9 pourrait se voir
+    attribuer largeur_u=5, débordant de la grille à 10 colonnes (grid-column
+    créerait alors des pistes implicites au-delà de la 10e, décalant tout
+    ce qui suit dans la même rangée)."""
     if v in (None, '', 0, '0'):
-        return None
+        n = 10
+    else:
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            n = 10
+    n = min(10, max(1, n))
+    return min(n, max(1, 10 - col))
+
+def _clamp_col_index(v):
+    """0-9 : position de départ dans la grille à 10 colonnes du rack."""
     try:
-        n = int(v)
+        n = int(v or 0)
     except (TypeError, ValueError):
-        return None
-    return min(10, max(1, n))
+        return 0
+    return min(9, max(0, n))
 
 @app.route('/api/baie/slot', methods=['POST'])
 @login_required
@@ -5692,7 +5714,7 @@ def api_baie_ajouter_slot():
     f = request.json or {}
     conn = get_db()
     pos = f.get('position', 1)
-    col = f.get('col_index', 0)
+    col = _clamp_col_index(f.get('col_index', 0))
     # Supprimer l'ancien slot à cette position+col si existe — en conservant
     # ses liaisons de ports (placerEquip() ré-envoie systématiquement un
     # POST, y compris pour éditer un slot existant : sans ce report, chaque
@@ -5720,7 +5742,7 @@ def api_baie_ajouter_slot():
         (cid, pos, col, f.get('hauteur_u', 1),
          f.get('appareil_id') or None, f.get('peripherique_id') or None, f.get('nom_custom', ''),
          f.get('type_equipement', ''), f.get('couleur', '#1e3a5f'),
-         f.get('description', ''), baie_nom, 0, _clamp_largeur_u(f.get('largeur_u')), _utcnow().isoformat()))
+         f.get('description', ''), baie_nom, 0, _clamp_largeur_u(f.get('largeur_u'), col), _utcnow().isoformat()))
     conn.commit()
     sid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     nb_ports = _reconcilier_ports(conn, sid, f.get('nb_ports', 0), anciens_ports)
@@ -5766,11 +5788,18 @@ def api_baie_slot(id):
         return jsonify({'ok': True})
     f = request.json or {}
     nb_ports = min(48, max(0, int(f.get('nb_ports', 0) or 0)))
+    # col_index n'est pas modifiable par cette route (déplacer un slot passe
+    # par /deplacer) — sa valeur ACTUELLE reste indispensable pour plafonner
+    # largeur_u à 10-col (voir _clamp_largeur_u).
+    col_actuel = conn.execute(
+        'SELECT col_index FROM baie_slots WHERE id=? AND client_id=?', (id, cid)).fetchone()
+    col_actuel = col_actuel[0] if col_actuel else 0
     conn.execute('''UPDATE baie_slots SET position=?,hauteur_u=?,appareil_id=?,peripherique_id=?,
         nom_custom=?,type_equipement=?,couleur=?,description=?,nb_ports=?,largeur_u=?,date_maj=? WHERE id=? AND client_id=?''',
         (f.get('position',1), f.get('hauteur_u',1), f.get('appareil_id') or None, f.get('peripherique_id') or None,
          f.get('nom_custom',''), f.get('type_equipement',''),
-         f.get('couleur','#1e3a5f'), f.get('description',''), nb_ports, _clamp_largeur_u(f.get('largeur_u')),
+         f.get('couleur','#1e3a5f'), f.get('description',''), nb_ports,
+         _clamp_largeur_u(f.get('largeur_u'), col_actuel),
          _utcnow().isoformat(), id, cid))
     _reconcilier_ports(conn, id, nb_ports)
     conn.commit()
@@ -5905,7 +5934,7 @@ def api_baie_deplacer_slot(id):
     cid = get_client_id()
     f = request.json or {}
     new_pos = f.get('position', 1)
-    new_col = f.get('col_index', 0)
+    new_col = _clamp_col_index(f.get('col_index', 0))
     conn = get_db()
     # Supprimer l'éventuel occupant de la destination (et ses ports — c'est
     # le slot déplacé, avec son propre id et ses propres ports intacts, qui

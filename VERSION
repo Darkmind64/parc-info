@@ -1,8 +1,40 @@
-PARCINFO_VERSION=2.18.66
+PARCINFO_VERSION=2.18.67
 RELEASE_DATE=2026-08-27
-BUILD_NUMBER=2026082704
+BUILD_NUMBER=2026082705
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.67 - Baie de brassage : grille à 10 colonnes, corrige le désalignement largeur/hauteur
+# Refonte du positionnement horizontal des éléments de la baie.
+#
+# Signalé en usage réel : un élément à la fois partiel en largeur ET haut
+# de plusieurs U (ex. un NAS de 3U posé sur 2/10 de la largeur, à côté d'un
+# autre élément) désalignait les rangées qu'il traversait — l'ancien modèle
+# (col_index = index de tranche 0-4, largeur calculée par partage égal du
+# flex restant) perdait la largeur RÉELLE de l'élément sur les rangées où
+# il ne faisait que déborder depuis le haut (hauteur_u > 1) : ces rangées
+# retombaient sur un partage générique à parts égales au lieu de reprendre
+# la largeur effective, décalant les colonnes d'une rangée à l'autre.
+#
+# Remplacé par une grille CSS à 10 colonnes fixes : chaque élément (occupé
+# ou case vide) se positionne par grid-column (début 0-9, span = largeur),
+# calculé une fois et réutilisé identiquement à chaque rangée qu'il
+# traverse — l'alignement est garanti par construction. Effets :
+#   - Un élément peut être placé à n'importe laquelle des 10 positions en
+#     largeur (colonne 0-9, plus seulement 0-4).
+#   - Plus aucune case vide ("plaque grise") dessinée sous un élément qui
+#     déborde sur plusieurs U depuis une rangée du dessus — demandé
+#     explicitement.
+#   - Nouvelle poignée de redimensionnement en COIN (bas-droit) : hauteur
+#     et largeur en un seul geste diagonal, en plus des poignées bord bas
+#     (hauteur seule) et bord droit (largeur seule) déjà existantes.
+#   - Garde-fou : colonne + largeur ne peuvent plus dépasser la grille
+#     (plafonné automatiquement côté serveur, y compris sur la route de
+#     redimensionnement qui ne reçoit pas la colonne et doit donc relire
+#     sa valeur actuelle en base).
+#   - largeur_u vaut désormais TOUJOURS une valeur explicite (10 par
+#     défaut) — plus de sentinelle NULL/"auto" (partage égal implicite),
+#     incompatible avec un positionnement à coordonnées absolues.
 
 # Version 2.18.66 - Baie de brassage : voyants de ping corrigés + ping automatique
 # Deux correctifs/ajouts sur le même sujet, signalés séparément.
