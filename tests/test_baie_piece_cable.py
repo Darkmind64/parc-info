@@ -121,7 +121,11 @@ def test_chaine_complete_cible_finale_et_statut(client, make_client, make_user, 
     cid = make_client(auth_user_id=uid)
     login_session(client, uid, cid)
     app_id = make_appareil(cid, nom_machine='SRV-CORE')
-    conn.execute('UPDATE appareils SET en_ligne=0 WHERE id=?', (app_id,))
+    # dernier_ping renseigné : en_ligne=0 seul est indiscernable d'un
+    # appareil jamais pingé (voir _ports_avec_details) — il faut les DEUX
+    # pour simuler un échec de ping CONFIRMÉ, pas une absence de ping.
+    conn.execute("UPDATE appareils SET en_ligne=0, dernier_ping=? WHERE id=?",
+                 ('2026-01-01T00:00:00', app_id))
     conn.commit()
 
     bandeau, switch = _poser_bandeau_et_switch(client, cid)

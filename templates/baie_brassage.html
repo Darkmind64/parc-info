@@ -178,6 +178,21 @@
 /* Progression du ping en cours (voir pingerPortsElement()) — affichée après
    le nom de l'élément, masquée en dehors d'un ping actif. */
 .cell-ping-progress { font-size:.6rem; color:var(--accent); flex-shrink:0; margin-left:6px; font-family:'Share Tech Mono',monospace; }
+
+/* Progression du "Ping toute la baie" (barre d'outils) — signalé en usage
+   réel : posée EN LIGNE parmi les boutons (voir pingerToutelaBaie()), son
+   apparition/disparition à chaque scan changeait la largeur de la rangée
+   et décalait tous les boutons suivants (câblage, ±U, verrou, vider).
+   Sortie du flux normal (position absolute, ancrée sous le bouton 📡 via
+   .ping-baie-wrap ci-dessous) : elle peut désormais apparaître et
+   disparaître sans jamais déplacer quoi que ce soit d'autre. */
+.ping-baie-wrap { position:relative; display:inline-flex; }
+.ping-progress-badge {
+    position:absolute; top:100%; left:50%; transform:translateX(-50%); margin-top:4px;
+    white-space:nowrap; background:#0d1520; border:1px solid var(--accent); border-radius:3px;
+    padding:.1rem .4rem; font-family:'Share Tech Mono',monospace; font-size:.65rem; color:var(--accent);
+    z-index:20; pointer-events:none; box-shadow:0 2px 6px rgba(0,0,0,.5);
+}
 .cell-del  {
     /* #64748b (slate) plutôt que var(--text-muted) : ce dernier (#3a5570)
        reste trop proche du fond très sombre de la baie (#0d1520) — bouton
@@ -186,6 +201,16 @@
     padding:0 2px; flex-shrink:0; transition:all .12s; line-height:1; border-radius:2px;
 }
 .cell-del:hover { color:var(--accent-red); background:rgba(255,51,85,.15); }
+
+/* Ouvrir l'interface d'administration de l'appareil (http://<ip>) — même
+   gabarit que .cell-del (icône seule, discrète au repos) mais accent plutôt
+   que rouge : une action anodine (ouvre un onglet), pas destructive. */
+.cell-admin {
+    background:none; border:none; color:#64748b; cursor:pointer; font-size:.62rem;
+    padding:0 2px; flex-shrink:0; transition:all .12s; line-height:1; border-radius:2px;
+    text-decoration:none; display:inline-flex; align-items:center;
+}
+.cell-admin:hover { color:var(--accent); background:rgba(0,201,255,.15); }
 
 /* Zones de prise agrandies (invisibles au repos, comme avant — seul le
    hover/.resizing colore) : les tailles précédentes (5px, 5px, 9x9)
@@ -247,6 +272,10 @@
 .port.port-pending { outline:2px dashed #fbbf24; outline-offset:1px; }
 #btn-mode-lien.active { background:var(--accent); color:#001018; border-color:var(--accent); }
 #btn-verrou.active { background:#7c2d12; color:#fed7aa; border-color:#c2410c; }
+/* Scan en cours (voir pingerToutelaBaie) : plus de changement de texte sur
+   le bouton lui-même (voir ping-progress-badge plus haut) — l'état "busy"
+   se voit ici, sans jamais changer sa largeur. */
+#btn-ping-baie:disabled { opacity:.55; cursor:wait; }
 
 /* Voyant de ping — coin supérieur gauche du port, visible seulement une fois
    un ping tenté (au chargement si un statut est déjà connu côté serveur —
@@ -414,7 +443,10 @@
                 <button onclick="ajouterBandeauRJ()" class="btn btn-primary btn-sm" title="Pré-remplit le formulaire : 1U, 24 ports — reste à choisir la position et valider">+ Bandeau RJ</button>
                 <button onclick="ajouterEtagere()" class="btn btn-primary btn-sm" title="Une tablette physique (1U, pleine largeur) — les appareils posés dessus se placent ensuite normalement, dans la rangée juste au-dessus">+ Étagère</button>
                 <button id="btn-mode-lien" onclick="toggleModeLien()" class="btn btn-primary btn-sm" title="Lier deux ports : cliquer sur deux ports successivement pour les relier (câblage physique)">🔗 Lier</button>
-                <button id="btn-ping-baie" onclick="pingerToutelaBaie()" class="btn btn-primary btn-sm" title="Pinger tous les appareils reliés à un port de cette baie">📡</button>
+                <span class="ping-baie-wrap">
+                    <button id="btn-ping-baie" onclick="pingerToutelaBaie()" class="btn btn-primary btn-sm" title="Pinger tous les appareils reliés à un port de cette baie">📡</button>
+                    <span id="ping-baie-progress" class="ping-progress-badge" style="display:none;"></span>
+                </span>
                 <select id="sel-ping-auto" onchange="changerPingAuto(this)" class="btn btn-primary btn-sm" style="width:auto;flex:0 0 auto;padding-right:1.2rem;" title="Ping automatique de toute la baie à intervalle régulier">
                     <option value="0">🔁 désactivé</option>
                     <option value="5000">🔁 5 s</option>
@@ -424,7 +456,6 @@
                     <option value="60000">🔁 60 s</option>
                     <option value="300000">🔁 300 s</option>
                 </select>
-                <span id="ping-baie-progress" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--accent);"></span>
                 <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌</a>
                 <button onclick="changerU(-1)" class="btn btn-primary btn-sm" title="Réduire la baie d'1U">− U</button>
                 <button onclick="changerU(1)"  class="btn btn-primary btn-sm" title="Agrandir la baie d'1U">+ U</button>
@@ -1036,12 +1067,19 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     const ports = s.ports || [];
     if (ports.length) cell.classList.add('has-ports');
 
+    // Interface d'administration de l'appareil — n'importe quel équipement
+    // réseau (switch, routeur, NAS...) associé DIRECTEMENT à l'élément a
+    // généralement une page web d'admin sur sa propre IP. <a target=_blank>
+    // plutôt qu'un bouton JS : clic milieu/clic droit "ouvrir dans un nouvel
+    // onglet" fonctionnent alors normalement, comme n'importe quel lien.
+    const boutonAdmin = ip ? `<a class="cell-admin" href="http://${escH(ip)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="Ouvrir l'interface d'administration (${escH(ip)})">🌐</a>` : '';
     const ligneInfo = `
         <div class="cell-row">
             <span class="cell-led ${ledCls}"></span>
             <span class="cell-name">${nom}${desc ? `<span class="cell-desc"> — ${desc}</span>` : ''}</span>
             <span class="cell-ping-progress" style="display:none;"></span>
             ${ip ? `<span class="cell-ip">${escH(ip)}</span>` : ''}
+            ${boutonAdmin}
             <button class="cell-del" onclick="event.stopPropagation();delSlot(${s.id})" title="Retirer">✕</button>
         </div>`;
 
@@ -1558,32 +1596,49 @@ function portHTML(p) {
     // d'un port réellement inutilisé.
     const libre = !p.appareil_id && !p.peripherique_id && !p.usage_libre && !p.lie_slot_id;
     const style = libre ? '' : `background:${p.couleur};`;
+    // Appareil à pinger pour CE port : le sien en direct, ou — cas standard
+    // du brassage structuré (bandeau RJ câblé à un appareil via une prise
+    // murale, relié par cordon à un switch) — celui résolu au bout d'un
+    // lien port-à-port (lie_appareil_id, voir _ports_avec_details côté
+    // serveur). Sans ce second cas, ni le voyant ni "Ping toute la baie"
+    // ne concernaient jamais un appareil seulement atteint via un lien.
+    const appareilCible = p.appareil_id || p.lie_appareil_id || '';
     // Voyant initial reflétant le dernier ping connu (watchdog en tâche de
     // fond ou ping manuel précédent) — dernier_ping vide = jamais pingé,
     // aucun voyant (en_ligne vaut 0 par défaut en base, indiscernable d'un
     // vrai échec sans ce champ) ; sinon vert/rouge selon en_ligne.
-    const classePing = (p.appareil_id && p.dernier_ping) ? (p.en_ligne ? ' port-ping-ok' : ' port-ping-fail') : '';
+    const classePing = (appareilCible && p.dernier_ping) ? (p.en_ligne ? ' port-ping-ok' : ' port-ping-fail') : '';
     // Badge de détachement (✕ rouge, coin haut-droit) — uniquement pour un
     // port câblé à un autre (lie_slot_id) : révélé au survol par CSS
     // (.port.port-lie:hover .port-unlink), cliqué via delierPort() branché
     // plus bas dans makeOccupiedCell (même boucle que les autres écouteurs
     // de port, pas besoin de data-attributes supplémentaires ici).
     const badgeLien = p.lie_slot_id ? `<span class="port-unlink" title="Détacher ce lien">✕</span>` : '';
-    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${p.appareil_id || ''}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
+    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
         <span class="port-led"></span>${badgeLien}${p.numero}</span>`;
 }
 
 // Clé identifiant la cible d'un port — même cible = même clé, quel que soit
 // le port/slot qui la porte. Vide (jamais surlignable) pour un port libre.
 function cleCiblePort(p) {
-    if (p.appareil_id) return 'a:' + p.appareil_id;
-    if (p.peripherique_id) return 'p:' + p.peripherique_id;
+    // lie_slot_id d'ABORD : depuis que api_baie_lien_port ne détruit plus
+    // une association directe existante pour créer un lien (un port de
+    // bandeau RJ peut légitimement porter les deux à la fois — câblage
+    // fixe vers une prise ET cordon vers un switch, voir la même route),
+    // un port peut avoir À LA FOIS appareil_id ET lie_slot_id. Il doit
+    // malgré tout s'apparier avec son VRAI partenaire de câble (même clé
+    // que l'autre bout du lien) pour que la ligne de câblage se dessine
+    // (voir renderCableLinks()) — la vérification de appareil_id/
+    // peripherique_id APRÈS ne sert donc plus qu'aux ports qui n'ont pas
+    // de lien du tout.
     if (p.lie_slot_id) {
         // Clé symétrique : les deux ports d'un même câble doivent produire
         // exactement la même clé, quel que soit celui interrogé en premier.
         const a = `${p.slot_id}:${p.numero}`, b = `${p.lie_slot_id}:${p.lie_port_numero}`;
         return 'l:' + (a < b ? a + '|' + b : b + '|' + a);
     }
+    if (p.appareil_id) return 'a:' + p.appareil_id;
+    if (p.peripherique_id) return 'p:' + p.peripherique_id;
     if (p.usage_libre) return 'u:' + p.usage_libre.trim().toLowerCase();
     return '';
 }
@@ -1739,12 +1794,15 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau) {
 // l'app pour le statut en ligne/hors ligne d'un appareil), un appel par
 // appareil DISTINCT (plusieurs ports peuvent pointer vers le même appareil
 // — deux cartes réseau, par exemple — inutile de le pinger deux fois).
-// Seuls les ports liés à un appareil sont concernés : un périphérique n'a
-// pas d'adresse IP dans ce schéma, un usage personnalisé encore moins.
+// Un port associé DIRECTEMENT à un appareil (p.appareil_id) ou relié par
+// câble à un port qui l'est lui-même (p.lie_appareil_id — cas standard du
+// brassage structuré, voir _ports_avec_details côté serveur) comptent tous
+// les deux. Seul un périphérique ou un usage personnalisé n'a pas d'IP
+// dans ce schéma.
 async function pingerPortsElement(cell, ports) {
     const btn = cell.querySelector('.cell-ping-btn');
     const progressEl = cell.querySelector('.cell-ping-progress');
-    const cibles = [...new Set(ports.filter(p => p.appareil_id).map(p => p.appareil_id))];
+    const cibles = [...new Set(ports.filter(p => p.appareil_id || p.lie_appareil_id).map(p => p.appareil_id || p.lie_appareil_id))];
     if (!cibles.length) { showFlash('Aucun appareil relié à un port de cet élément.', 'info'); return; }
     btn.disabled = true;
     const texteInitial = btn.textContent;
@@ -1771,7 +1829,7 @@ async function pingerPortsElement(cell, ports) {
                     if (!res.ok) sansIp++;
                     if (res.ok && res.en_ligne) nbOnline++;
                     ports.forEach(p => {
-                        if (p.appareil_id !== res.id) return;
+                        if ((p.appareil_id || p.lie_appareil_id) !== res.id) return;
                         p.en_ligne = !!res.en_ligne;
                         if (res.ok) p.dernier_ping = new Date().toISOString(); // marque "pingé" pour les re-rendus suivants
                     });
@@ -1805,12 +1863,20 @@ async function pingerPortsElement(cell, ports) {
 async function pingerToutelaBaie(manuel = true) {
     const btn = document.getElementById('btn-ping-baie');
     const progressEl = document.getElementById('ping-baie-progress');
+    // p.lie_appareil_id (résolu au bout d'un lien port-à-port, voir
+    // pingerPortsElement plus haut) compte aussi — sans ça, un appareil
+    // uniquement atteint via un câblage structuré (bandeau RJ -> switch)
+    // n'était jamais pingé par "Ping toute la baie".
     const cibles = [...new Set(Object.values(slots).flatMap(s => (s.ports || [])
-        .filter(p => p.appareil_id).map(p => p.appareil_id)))];
+        .filter(p => p.appareil_id || p.lie_appareil_id).map(p => p.appareil_id || p.lie_appareil_id)))];
     if (!cibles.length) { if (manuel) showFlash('Aucun appareil relié à un port dans cette baie.', 'info'); return; }
+    // Ni le texte du bouton (icône seule depuis la compaction de la barre
+    // d'outils, voir CLAUDE.md) ni sa taille ne changent plus pendant le
+    // scan — seul :disabled ci-dessous l'indique visuellement. Un texte
+    // plus long ("⏳ Ping…") aurait élargi le bouton et décalé tout ce qui
+    // suit dans la barre d'outils (même défaut que la pastille de
+    // progression, corrigée juste en dessous).
     if (manuel) { btn.disabled = true; }
-    const texteInitial = btn.textContent;
-    if (manuel) btn.textContent = '⏳ Ping…';
     let fait = 0;
     const majProgress = () => { progressEl.textContent = `📡 ${fait}/${cibles.length}`; };
     progressEl.style.display = ''; majProgress();
@@ -1824,7 +1890,7 @@ async function pingerToutelaBaie(manuel = true) {
                     if (!res.ok) sansIp++;
                     if (res.ok && res.en_ligne) nbOnline++;
                     Object.values(slots).forEach(s => (s.ports || []).forEach(p => {
-                        if (p.appareil_id !== res.id) return;
+                        if ((p.appareil_id || p.lie_appareil_id) !== res.id) return;
                         p.en_ligne = !!res.en_ligne;
                         if (res.ok) p.dernier_ping = new Date().toISOString();
                     }));
@@ -1842,7 +1908,7 @@ async function pingerToutelaBaie(manuel = true) {
             showFlash(msg, nbOnline ? 'success' : 'info');
         }
     } finally {
-        if (manuel) { btn.disabled = false; btn.textContent = texteInitial; }
+        if (manuel) { btn.disabled = false; }
         progressEl.style.display = 'none';
     }
 }
@@ -2114,7 +2180,13 @@ async function enregistrerPort(slotId, numero, payload) {
 // automatiquement, des deux côtés.
 async function delierPort(slotId, numero, nomCible) {
     if (!confirm(`Détacher le lien vers ${nomCible || 'cet élément'} ?`)) return;
-    await enregistrerPort(slotId, numero, { appareil_id: null, peripherique_id: null, usage_libre: '' });
+    // { detacher_lien: true } — PAS { appareil_id: null, ... } : ce port
+    // peut légitimement porter à la fois une association directe (câblage
+    // fixe vers une prise murale) ET ce lien (cordon vers un switch), voir
+    // api_baie_lien_port. Envoyer une "cible" (même vide) effacerait
+    // l'association directe en plus du lien — on ne veut détacher QUE le
+    // cordon ici.
+    await enregistrerPort(slotId, numero, { detacher_lien: true });
 }
 
 // ── ACTIONS ──────────────────────────────────────────────────────────────────

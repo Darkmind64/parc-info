@@ -1,8 +1,33 @@
-PARCINFO_VERSION=2.18.71
+PARCINFO_VERSION=2.18.72
 RELEASE_DATE=2026-08-28
-BUILD_NUMBER=2026082801
+BUILD_NUMBER=2026082802
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.72 - Baie de brassage : interface d'administration en un clic, ping/couleur des appareils câblés via un lien
+# Deux ajouts distincts sur le même écran.
+#
+# 1) Bouton "ouvrir l'interface d'administration" (🌐) sur tout élément
+# ayant une IP résolue — lien <a target=_blank> vers http://<ip>, clic
+# gauche/molette/droit fonctionnent normalement.
+#
+# 2) Cause plus profonde que prévu derrière "un NAS câblé au switch via un
+# bandeau de brassage n'est ni coloré ni pingé" : la résolution couleur/
+# ping/tooltip d'un port relié par câble (lien port-à-port, 🔗) à un autre
+# port ne regardait que si le SLOT en face avait un appareil associé
+# directement — jamais le PORT précis en face, pourtant le cas le plus
+# courant (port de bandeau associé à un appareil, puis relié par cordon au
+# switch). Corrigé : la résolution suit désormais les deux niveaux (port
+# en face en priorité, repli sur le slot en face si le port lui-même ne
+# porte rien).
+#
+# En creusant, second bug préexistant trouvé et corrigé : créer ce lien
+# effaçait l'association directe du port en face (un port de bandeau
+# perdait son "Associer à un appareil" dès qu'on le reliait au switch). Un
+# port peut désormais porter les deux à la fois — câblage fixe vers une
+# prise ET cordon vers un switch, deux informations physiquement
+# distinctes sur le même port. Le bouton ✕ de déliaison (2.18.70) ne
+# détache maintenant que le câble, sans effacer l'association directe.
 
 # Version 2.18.71 - Baie de brassage : positionnement à la souris enfin fluide, badge de déliaison corrigé
 # Suite directe de la 2.18.70 (chevauchements désormais bloqués) : une fois

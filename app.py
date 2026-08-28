@@ -5582,17 +5582,29 @@ def _couleur_port(appareil_type=None, periph_categorie=None, usage_libre=None, e
 def _ports_avec_details(conn, slot_id):
     """Ports d'un slot, enrichis du nom et de la couleur de leur cible —
     y compris, pour un port relié à un autre port (câblage physique switch
-    <-> routeur, etc.), le nom de l'élément en face ET, si CET ÉLÉMENT (pas
-    le port — un port câblé n'a par construction plus d'appareil_id/
-    peripherique_id propre, voir api_baie_lien_port) est lui-même associé à
-    un appareil (rack-mounted, "Associer à un appareil" dans le panneau),
-    son nom et son statut : la chaîne complète (pièce -> port bandeau ->
-    câble -> élément -> appareil) se lit alors d'un coup dans la bulle, sans
-    cliquer de proche en proche (cible_finale/cible_hors_ligne — sert aussi
-    à colorer le câble en avertissement côté client si l'appareil au bout
-    est injoignable). `piece` (pièce du site desservie, pour un bandeau RJ)
-    est indépendant de tout ça — jamais effacé par un changement de cible,
-    voir la migration dans init_db()."""
+    <-> bandeau RJ, routeur, etc.), le nom de l'élément en face ET, si un
+    appareil/périphérique est joignable au bout de ce câble, son nom et son
+    statut (cible_finale/cible_hors_ligne/lie_appareil_id — sert aussi à
+    colorer le port en direct côté client, et à le pinger). Deux façons
+    DISTINCTES pour l'élément en face de porter cette association, toutes
+    deux résolues ici :
+    1. Sur le PORT EN FACE lui-même (bp2.appareil_id/peripherique_id) —
+       cas standard du brassage structuré : bandeau RJ dont le port sert
+       une prise murale, "Associer à un appareil" sur CE port précis, cordon
+       vers le switch. Une omission ici (bug corrigé, signalé en usage
+       réel) faisait qu'un appareil seulement atteint via ce chemin
+       n'était jamais coloré ni pingé.
+    2. Sur le SLOT en face tout entier (baie_slots.appareil_id) — cas d'un
+       appareil RACK-MONTÉ (ex. routeur), "Associer à un appareil" dans le
+       panneau "+ Placer" du slot lui-même, un de ses ports relié au switch
+       sans que CE port porte l'association (elle vit au niveau du slot).
+       C'est le mécanisme d'origine, conservé tel quel.
+    Le port en face ne peut par construction pas cumuler les deux premiers
+    cas avec être lui-même un lien (voir api_baie_lien_port : un port n'a
+    qu'une seule cible à la fois) — priorité au port, repli sur le slot.
+    `piece` (pièce du site desservie, pour un bandeau RJ) est indépendant
+    de tout ça — jamais effacé par un changement de cible, voir la
+    migration dans init_db()."""
     rows = conn.execute(
         '''SELECT bp.slot_id, bp.numero, bp.appareil_id, bp.peripherique_id, bp.usage_libre,
                   bp.lie_slot_id, bp.lie_port_numero, bp.piece, bp.cable_couleur, bp.cable_longueur,
@@ -5607,6 +5619,9 @@ def _ports_avec_details(conn, slot_id):
         d = row_to_dict(r)
         d['cible_finale'] = ''
         d['cible_hors_ligne'] = None
+        d['lie_appareil_id'] = None
+        lie_type_appareil = None
+        lie_p_categorie = None
         if d['appareil_id']:
             nom = d['nom_machine'] or ('Appareil #%d' % d['appareil_id'])
         elif d['peripherique_id']:
@@ -5617,16 +5632,47 @@ def _ports_avec_details(conn, slot_id):
                 (d['lie_slot_id'],)).fetchone()
             nom_elem = (cible[0] or cible[1] if cible else None) or ('Élément #%d' % d['lie_slot_id'])
             nom = 'Port %d — %s' % (d['lie_port_numero'], nom_elem)
-            if cible and cible[2]:
+            far_port = conn.execute(
+                '''SELECT bp2.appareil_id, bp2.peripherique_id, a2.nom_machine, a2.en_ligne, a2.type_appareil,
+                          p2.categorie, p2.marque, p2.modele, a2.dernier_ping
+                   FROM baie_slot_ports bp2
+                   LEFT JOIN appareils a2 ON bp2.appareil_id=a2.id
+                   LEFT JOIN peripheriques p2 ON bp2.peripherique_id=p2.id
+                   WHERE bp2.slot_id=? AND bp2.numero=?''',
+                (d['lie_slot_id'], d['lie_port_numero'])).fetchone()
+            if far_port and far_port[0]:
+                d['cible_finale'] = far_port[2] or ('Appareil #%d' % far_port[0])
+                # en_ligne vaut 0 par défaut en base, indiscernable d'un vrai
+                # échec sans dernier_ping (même garde que côté client pour
+                # le voyant d'un port, voir portHTML()) — sans lui, un
+                # appareil simplement JAMAIS pingé s'affichait à tort comme
+                # "⚠️ hors ligne" dans la bulle du port relié.
+                d['cible_hors_ligne'] = bool(far_port[8]) and (far_port[3] == 0)
+                d['lie_appareil_id'] = far_port[0]
+                lie_type_appareil = far_port[4]
+            elif far_port and far_port[1]:
+                d['cible_finale'] = ' '.join(filter(None, far_port[5:8])) or ('Périphérique #%d' % far_port[1])
+                lie_p_categorie = far_port[5]
+            elif cible and cible[2]:
+                # Repli : le port en face n'a lui-même rien (ni appareil, ni
+                # périphérique) — c'est le SLOT en face qui porte
+                # l'association (appareil rack-monté, voir docstring).
                 far_app = conn.execute(
-                    'SELECT nom_machine, en_ligne FROM appareils WHERE id=?', (cible[2],)).fetchone()
+                    'SELECT nom_machine, en_ligne, type_appareil, dernier_ping FROM appareils WHERE id=?', (cible[2],)).fetchone()
                 if far_app:
                     d['cible_finale'] = far_app[0] or ('Appareil #%d' % cible[2])
-                    d['cible_hors_ligne'] = (far_app[1] == 0)
+                    d['cible_hors_ligne'] = bool(far_app[3]) and (far_app[1] == 0)
+                    d['lie_appareil_id'] = cible[2]
+                    lie_type_appareil = far_app[2]
         else:
             nom = d['usage_libre'] or ''
         d['nom_cible'] = nom
-        d['couleur'] = _couleur_port(d.get('type_appareil'), d.get('p_categorie'), d.get('usage_libre'), bool(d['lie_slot_id']))
+        if d['lie_slot_id'] and (lie_type_appareil or lie_p_categorie):
+            # Cible résolue au bout du câble : sa propre couleur de type,
+            # pas l'indigo générique "lien" — c'est elle qui doit se voir.
+            d['couleur'] = _couleur_port(lie_type_appareil, lie_p_categorie, None, False)
+        else:
+            d['couleur'] = _couleur_port(d.get('type_appareil'), d.get('p_categorie'), d.get('usage_libre'), bool(d['lie_slot_id']))
         ports.append(d)
     return ports
 
@@ -5966,16 +6012,39 @@ def api_baie_port(slot_id, numero):
             lie_slot_id=NULL,lie_port_numero=NULL,cable_couleur='',cable_longueur='',date_maj=?
             WHERE slot_id=? AND numero=?''',
             (appareil_id, peripherique_id, usage_libre, now, slot_id, numero))
+    elif f.get('detacher_lien'):
+        # Détache SEULEMENT le lien (bouton ✕ sur un port câblé, voir
+        # delierPort() côté client) — sans toucher à une éventuelle
+        # association directe sur CE port (appareil_id/peripherique_id/
+        # usage_libre) : depuis que api_baie_lien_port ne les efface plus
+        # à la création d'un lien (un port de bandeau RJ peut légitimement
+        # porter les deux à la fois), les effacer ICI aussi aurait perdu
+        # l'association directe pour un simple débranchement du cordon.
+        ancien_lien = conn.execute(
+            'SELECT lie_slot_id, lie_port_numero FROM baie_slot_ports WHERE slot_id=? AND numero=?',
+            (slot_id, numero)).fetchone()
+        if ancien_lien and ancien_lien[0]:
+            conn.execute("UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, "
+                         "cable_couleur='', cable_longueur='', date_maj=? "
+                         'WHERE slot_id=? AND numero=?', (now, ancien_lien[0], ancien_lien[1]))
+        conn.execute("UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, "
+                     "cable_couleur='', cable_longueur='', date_maj=? WHERE slot_id=? AND numero=?",
+                     (now, slot_id, numero))
     if 'piece' in f:
         conn.execute('UPDATE baie_slot_ports SET piece=?, date_maj=? WHERE slot_id=? AND numero=?',
                      (str(f.get('piece') or '').strip(), now, slot_id, numero))
     conn.commit()
     ports = _ports_avec_details(conn, slot_id)
     port = next((p for p in ports if p['numero'] == numero), None)
-    if port and (cible_fournie or 'piece' in f):
+    detacher_lien = (not cible_fournie) and bool(f.get('detacher_lien'))
+    if port and (cible_fournie or detacher_lien or 'piece' in f):
         nom_slot = slot[1] or slot[2] or f'Emplacement #{slot_id}'
-        detail = f"Port {numero} -> {port.get('nom_cible') or '— Libre —'}" if cible_fournie \
-            else f"Port {numero}, pièce -> {port.get('piece') or '(vide)'}"
+        if cible_fournie:
+            detail = f"Port {numero} -> {port.get('nom_cible') or '— Libre —'}"
+        elif detacher_lien:
+            detail = f"Port {numero} : lien détaché"
+        else:
+            detail = f"Port {numero}, pièce -> {port.get('piece') or '(vide)'}"
         log_history(conn, cid, 'baie_slot', slot_id, nom_slot, 'Modification (port baie)', detail)
         conn.commit()
     conn.close()
@@ -5988,7 +6057,19 @@ def api_baie_lien_port():
     bidirectionnel : les deux ports se référencent mutuellement. Toute
     liaison précédente sur L'UN OU L'AUTRE port — y compris avec un
     troisième port différent — est détachée des deux côtés au passage, pour
-    ne jamais laisser un lien à sens unique après un reclassement."""
+    ne jamais laisser un lien à sens unique après un reclassement.
+
+    N'efface PLUS appareil_id/peripherique_id/usage_libre du port : un port
+    de bandeau RJ peut légitimement porter les DEUX à la fois — l'appareil
+    qu'il dessert (câblage fixe vers la prise murale, "Associer à un
+    appareil") ET un lien (cordon de brassage vers un switch) — ce n'est
+    pas un conflit, ce sont deux informations physiquement distinctes sur
+    le MÊME port. Les effacer empêchait de jamais représenter le cas
+    standard du brassage structuré (bug corrigé, signalé en usage réel :
+    lier un port de bandeau déjà associé à un appareil au switch effaçait
+    silencieusement cette association). La résolution du port EN FACE
+    (couleur/ping/tooltip, voir _ports_avec_details) donne toujours la
+    priorité à l'association directe d'un port sur son propre lien."""
     cid = get_client_id()
     f = request.json or {}
     s1, n1 = f.get('slot1_id'), f.get('numero1')
@@ -6016,11 +6097,11 @@ def api_baie_lien_port():
                          "cable_couleur='', cable_longueur='', date_maj=? "
                          'WHERE slot_id=? AND numero=?', (now, ancien[0], ancien[1]))
     conn.execute('''UPDATE baie_slot_ports SET lie_slot_id=?,lie_port_numero=?,
-        appareil_id=NULL,peripherique_id=NULL,usage_libre='',cable_couleur=?,cable_longueur=?,date_maj=?
+        cable_couleur=?,cable_longueur=?,date_maj=?
         WHERE slot_id=? AND numero=?''',
         (s2, n2, cable_couleur, cable_longueur, now, s1, n1))
     conn.execute('''UPDATE baie_slot_ports SET lie_slot_id=?,lie_port_numero=?,
-        appareil_id=NULL,peripherique_id=NULL,usage_libre='',cable_couleur=?,cable_longueur=?,date_maj=?
+        cable_couleur=?,cable_longueur=?,date_maj=?
         WHERE slot_id=? AND numero=?''',
         (s1, n1, cable_couleur, cable_longueur, now, s2, n2))
     log_history(conn, cid, 'baie_slot', s1, slots_noms[s1], 'Câblage (baie)',

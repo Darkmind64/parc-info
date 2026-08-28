@@ -223,6 +223,89 @@ def test_lien_port_a_port_bidirectionnel(client, make_client, make_user):
     assert data['port1']['couleur'] == data['port2']['couleur'] == '#818cf8'
 
 
+def test_lien_resout_couleur_ping_via_port_en_face(client, make_client, make_user, make_appareil):
+    """Cas standard du brassage structuré : un bandeau RJ dont un port est
+    associé DIRECTEMENT à un appareil (prise murale), relié par cordon à un
+    port de switch. Signalé en usage réel : le port du switch restait
+    indigo générique (couleur "lien") au lieu de la couleur du type de
+    l'appareil, et n'était jamais inclus dans "Ping toute la baie" — ni la
+    couleur ni le ping ne suivaient la chaîne au-delà de l'élément en face."""
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+    nas_id = make_appareil(cid, nom_machine='NAS-TEST', type_appareil='NAS', adresse_ip='10.0.0.5')
+
+    patch = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale',
+        'type_equipement': 'Bandeau RJ', 'nom_custom': 'PATCH', 'nb_ports': 4,
+    }).get_json()
+    sw = client.post('/api/baie/slot', json={
+        'position': 2, 'col_index': 0, 'baie_nom': 'Baie principale',
+        'type_equipement': 'Switch', 'nom_custom': 'SW', 'nb_ports': 4,
+    }).get_json()
+
+    # Port 1 du bandeau associé DIRECTEMENT au NAS (câblage réel vers la prise murale).
+    client.put(f"/api/baie/slot/{patch['id']}/port/1", json={'appareil_id': nas_id})
+    # Cordon de brassage : port 2 du switch <-> port 1 du bandeau.
+    r = client.post('/api/baie/lien-port', json={
+        'slot1_id': sw['id'], 'numero1': 2, 'slot2_id': patch['id'], 'numero2': 1,
+    })
+    assert r.status_code == 200
+    port_switch = r.get_json()['port1']
+
+    assert port_switch['cible_finale'] == 'NAS-TEST'
+    assert port_switch['cible_hors_ligne'] is False
+    assert port_switch['lie_appareil_id'] == nas_id
+    assert port_switch['couleur'] != '#818cf8', "doit prendre la couleur du NAS, pas l'indigo générique du lien"
+
+    # Le patch panel port 1 garde bien son association directe (le lien ne
+    # doit pas l'avoir effacée — c'est le port du SWITCH qui devient un
+    # lien, pas celui du bandeau).
+    ports_patch = client.get('/api/baie/slots?baie=Baie%20principale').get_json()['slots']
+    patch_frais = next(s for s in ports_patch if s['id'] == patch['id'])
+    port1_patch = next(p for p in patch_frais['ports'] if p['numero'] == 1)
+    assert port1_patch['appareil_id'] == nas_id
+
+    # "Ping toute la baie" doit inclure le NAS via ce port du switch.
+    cibles = {p['appareil_id'] or p['lie_appareil_id']
+              for s in ports_patch for p in s['ports']
+              if p['appareil_id'] or p['lie_appareil_id']}
+    assert nas_id in cibles
+
+
+def test_lien_resout_via_slot_en_face_si_port_libre(client, make_client, make_user, make_appareil):
+    """Deuxième cas, plus ancien : l'appareil au bout du câble est
+    RACK-MONTÉ (son propre élément de baie), associé au niveau du SLOT
+    (comme un serveur) plutôt que sur le port précis relié — le port relié
+    lui-même ne porte aucune association directe. Doit continuer à
+    fonctionner (mécanisme d'origine, non régressé par le correctif du cas
+    ci-dessus)."""
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+    nas_id = make_appareil(cid, nom_machine='NAS-RACKMOUNT', type_appareil='NAS', adresse_ip='10.0.0.6')
+
+    nas_slot = client.post('/api/baie/slot', json={
+        'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale',
+        'type_equipement': 'NAS', 'nom_custom': 'NAS-RACKMOUNT',
+        'appareil_id': nas_id, 'nb_ports': 1,
+    }).get_json()
+    sw = client.post('/api/baie/slot', json={
+        'position': 2, 'col_index': 0, 'baie_nom': 'Baie principale',
+        'type_equipement': 'Switch', 'nom_custom': 'SW2', 'nb_ports': 4,
+    }).get_json()
+
+    r = client.post('/api/baie/lien-port', json={
+        'slot1_id': sw['id'], 'numero1': 1, 'slot2_id': nas_slot['id'], 'numero2': 1,
+    })
+    assert r.status_code == 200
+    port_switch = r.get_json()['port1']
+
+    assert port_switch['cible_finale'] == 'NAS-RACKMOUNT'
+    assert port_switch['lie_appareil_id'] == nas_id
+    assert port_switch['couleur'] != '#818cf8'
+
+
 def test_lien_port_refuse_meme_port(client, make_client, make_user):
     uid, _, _ = make_user()
     cid = make_client(auth_user_id=uid)

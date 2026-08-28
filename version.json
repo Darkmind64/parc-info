@@ -1,25 +1,24 @@
 {
-  "version": "2.18.71",
+  "version": "2.18.72",
   "release_date": "2026-08-28T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.71",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.72/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.72/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.72/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.72",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.72/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.72/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.72/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.72/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.72/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : positionnement à la souris enfin fluide — retour visuel en direct (rouge/valide) pendant le glisser-déposer et le redimensionnement, décalage de prise préservé sur un élément haut de plusieurs U, poignées agrandies, badge de déliaison de port corrigé",
+    "new_features": "Baie de brassage : bouton pour ouvrir l'interface d'administration d'un appareil, et couleur/ping qui suivent enfin la chaîne d'un appareil câblé via un lien port-à-port (ex. NAS relié au switch par un bandeau de brassage)",
     "improvements": [
-      "Baie de brassage : la zone visée passe en rouge EN DIRECT dès qu'elle chevaucherait un autre élément (glisser-déposer et les 3 poignées de redimensionnement), au lieu de ne le découvrir qu'au relâchement après un aller-retour serveur — le relâchement n'appelle même plus le serveur si c'est déjà signalé invalide.",
-      "Baie de brassage : saisir un élément haut de plusieurs U ailleurs qu'à son coin (par exemple près du bas) ne fait plus « sauter » sa position au dépôt — l'endroit exact où il a été saisi reste sous le curseur pendant tout le geste.",
-      "Baie de brassage : zones de prise des poignées de redimensionnement agrandies (rendu au repos inchangé), plus faciles à viser sur un élément étroit.",
-      "Baie de brassage : le badge de déliaison d'un port câblé (✕ au survol) débordait au-dessus de la prise et se faisait couper en deux par le conteneur — repositionné entièrement à l'intérieur de la prise."
+      "Baie de brassage : nouveau bouton 🌐 sur tout élément ayant une IP résolue — ouvre son interface web d'administration dans un nouvel onglet.",
+      "Baie de brassage : un port relié par câble (🔗) à un autre port ne regardait que si l'ÉLÉMENT en face avait un appareil associé directement, jamais le PORT précis en face — le cas le plus courant (bandeau RJ associé à un appareil, relié par cordon au switch) restait donc sans couleur ni ping. Corrigé : la résolution suit désormais les deux niveaux.",
+      "Baie de brassage : créer un lien port-à-port effaçait l'association directe du port en face (bug préexistant) — un port peut désormais porter les deux à la fois (câblage fixe vers une prise ET cordon vers un switch) ; le bouton ✕ de déliaison ne détache plus que le câble."
     ]
   },
   "checksums": {
@@ -30,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.71"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.72"
 }
