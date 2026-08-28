@@ -1751,6 +1751,65 @@ def init_db():
             c.execute(f"ALTER TABLE baie_slot_ports ADD COLUMN {col_add} TEXT DEFAULT ''")
         except: pass
 
+    # PRISES MURALES — demandé : sur un bandeau RJ, séparer la prise murale
+    # (côté local — pièce desservie, appareil branché dans le bureau) du
+    # port RJ (côté baie — sert désormais UNIQUEMENT à interconnecter avec
+    # un autre élément de la baie via "🔗 Lier des ports", comme dans un
+    # vrai système de brassage structuré). Avant cette table, les deux
+    # étaient conflées sur la même ligne baie_slot_ports (voir commentaire
+    # piece/cable_couleur/cable_longueur ci-dessus) : un port de bandeau
+    # portait À LA FOIS son appareil_id/peripherique_id/usage_libre/piece
+    # ET, éventuellement, un lien vers un switch.
+    # Correspondance AUTOMATIQUE par numéro de port avec baie_slot_ports —
+    # pas de lien à créer manuellement, la prise murale #12 est
+    # structurellement celle du port RJ #12 du même bandeau (voir
+    # _reconcilier_prises_murales, en miroir de _reconcilier_ports).
+    # cable_couleur/cable_longueur ici documentent le câble FIXE mur ->
+    # bandeau, distinct du cordon de brassage (bandeau -> switch, resté sur
+    # baie_slot_ports.cable_couleur/cable_longueur).
+    c.execute('''CREATE TABLE IF NOT EXISTS baie_prises_murales (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slot_id INTEGER NOT NULL,
+        numero INTEGER NOT NULL,
+        piece TEXT DEFAULT '',
+        appareil_id INTEGER,
+        peripherique_id INTEGER,
+        usage_libre TEXT DEFAULT '',
+        cable_couleur TEXT DEFAULT '',
+        cable_longueur TEXT DEFAULT '',
+        date_maj TEXT DEFAULT '',
+        FOREIGN KEY(slot_id) REFERENCES baie_slots(id),
+        FOREIGN KEY(appareil_id) REFERENCES appareils(id),
+        FOREIGN KEY(peripherique_id) REFERENCES peripheriques(id),
+        UNIQUE(slot_id, numero))''')
+
+    # Migration : reprend les ports de bandeau RJ déjà en base (créés avant
+    # cette table) — copie appareil_id/peripherique_id/usage_libre/piece
+    # vers la prise murale de même numéro, puis les vide côté port RJ (le
+    # lien port-à-port éventuel — lie_slot_id/lie_port_numero/cable_couleur/
+    # cable_longueur — n'est PAS touché, c'est le cordon vers le switch,
+    # toujours du ressort du port). Idempotente par construction, sans
+    # marqueur séparé : une fois migrée, une ligne n'a plus aucun de ces 4
+    # champs renseigné, donc plus rien à reprendre au prochain démarrage.
+    a_migrer = conn.execute(
+        "SELECT bp.slot_id, bp.numero, bp.appareil_id, bp.peripherique_id, bp.usage_libre, bp.piece "
+        "FROM baie_slot_ports bp JOIN baie_slots s ON s.id=bp.slot_id "
+        "WHERE s.type_equipement='Bandeau RJ' AND ("
+        "  bp.appareil_id IS NOT NULL OR bp.peripherique_id IS NOT NULL OR "
+        "  (bp.usage_libre IS NOT NULL AND bp.usage_libre!='') OR "
+        "  (bp.piece IS NOT NULL AND bp.piece!=''))"
+    ).fetchall()
+    if a_migrer:
+        _now_migration = _utcnow().isoformat()
+        for _slot_id, _numero, _aid, _pid, _usage, _piece in a_migrer:
+            c.execute('''INSERT OR IGNORE INTO baie_prises_murales
+                (slot_id, numero, piece, appareil_id, peripherique_id, usage_libre, date_maj)
+                VALUES (?,?,?,?,?,?,?)''',
+                (_slot_id, _numero, _piece or '', _aid, _pid, _usage or '', _now_migration))
+            c.execute('''UPDATE baie_slot_ports SET appareil_id=NULL, peripherique_id=NULL,
+                usage_libre='', piece='' WHERE slot_id=? AND numero=?''', (_slot_id, _numero))
+        logger.info('Migration prises murales : %d port(s) de bandeau RJ repris', len(a_migrer))
+
     # Largeur d'un élément de baie, en dixièmes de la largeur du rack (1-10) —
     # demandé : redimensionner un élément en largeur à la souris, sur une
     # grille de 10 positions. NULL (pas juste 10) est le défaut délibéré :
@@ -1847,6 +1906,13 @@ def init_db():
         # ports déjà créés avant ce correctif (ajouter le trigger ici ne
         # journalise que les écritures FUTURES).
         'baie_slot_ports': 'id',
+        # baie_prises_murales : nouvelle table (voir migration ci-dessus),
+        # suit le même besoin que baie_slot_ports — ajoutée au trigger dès
+        # sa création, pas de rattrapage nécessaire pour les écritures
+        # futures. Les lignes issues de la migration ci-dessus (données déjà
+        # existantes) ont, elles, besoin d'un rattrapage séparé : voir
+        # rattraper_sync_baie_prises_murales() plus bas.
+        'baie_prises_murales': 'id',
         # Tables à clé texte (pas de colonne 'id')
         'config': 'cle', 'journal_maj': 'cle', 'collectes': 'cle',
         'cles_recuperation': 'cle',
@@ -4012,12 +4078,22 @@ def editer_appareil(id):
     # Demandé : retrouver depuis la fiche appareil les ports de baie qui le
     # référencent (un appareil peut être câblé sur plusieurs ports — deux
     # cartes réseau, une carte de gestion...).
+    # UNION avec baie_prises_murales : un appareil câblé via le système de
+    # prise murale d'un bandeau RJ (voir _prises_murales_avec_details) n'a
+    # plus son appareil_id sur le PORT lui-même mais sur sa prise murale —
+    # sans cette union, il aurait silencieusement disparu de cette section
+    # dès la migration prises murales (voir init_db()).
     ports_baie = [row_to_dict(r) for r in conn.execute(
         '''SELECT bp.numero, bs.id AS slot_id, bs.baie_nom, bs.position,
-                  bs.nom_custom, bs.type_equipement
+                  bs.nom_custom, bs.type_equipement, 'port' AS origine
            FROM baie_slot_ports bp JOIN baie_slots bs ON bp.slot_id=bs.id
            WHERE bp.appareil_id=? AND bs.client_id=?
-           ORDER BY bs.baie_nom, bs.position, bp.numero''', (id, cid)).fetchall()]
+           UNION ALL
+           SELECT pm.numero, bs.id AS slot_id, bs.baie_nom, bs.position,
+                  bs.nom_custom, bs.type_equipement, 'prise_murale' AS origine
+           FROM baie_prises_murales pm JOIN baie_slots bs ON pm.slot_id=bs.id
+           WHERE pm.appareil_id=? AND bs.client_id=?
+           ORDER BY baie_nom, position, numero''', (id, cid, id, cid)).fetchall()]
     conn.close()
     try:
         sw_sel = json.loads(a.get('logiciels') or '[]')
@@ -4073,6 +4149,8 @@ def supprimer_appareil(id):
     conn.execute('DELETE FROM collectes WHERE appareil_id=? AND client_id=?', (id, cid))
     conn.execute('UPDATE identifiants SET appareil_id=NULL WHERE appareil_id=? AND client_id=?', (id, cid))
     conn.execute('''UPDATE baie_slot_ports SET appareil_id=NULL WHERE appareil_id=? AND slot_id IN
+        (SELECT id FROM baie_slots WHERE client_id=?)''', (id, cid))
+    conn.execute('''UPDATE baie_prises_murales SET appareil_id=NULL WHERE appareil_id=? AND slot_id IN
         (SELECT id FROM baie_slots WHERE client_id=?)''', (id, cid))
     conn.execute('DELETE FROM appareils WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
@@ -5579,32 +5657,71 @@ def _couleur_port(appareil_type=None, periph_categorie=None, usage_libre=None, e
         return '#f59e0b'
     return '#334155'
 
+def _prises_murales_avec_details(conn, slot_id):
+    """Prises murales d'un bandeau RJ, enrichies du nom et de la couleur de
+    leur cible — même logique de résolution qu'un port directement associé
+    (voir _ports_avec_details), mais côté prise murale : c'est ELLE qui
+    porte désormais l'appareil/périphérique/usage branché dans la pièce,
+    le port RJ correspondant ne servant plus qu'à interconnecter avec un
+    autre élément de la baie. Retourne un dict {numero: détails}, vide pour
+    un slot qui n'est pas (ou plus) un bandeau RJ."""
+    rows = conn.execute(
+        '''SELECT pm.slot_id, pm.numero, pm.piece, pm.appareil_id, pm.peripherique_id, pm.usage_libre,
+                  pm.cable_couleur, pm.cable_longueur,
+                  a.nom_machine, a.type_appareil, a.en_ligne, a.dernier_ping,
+                  p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
+           FROM baie_prises_murales pm
+           LEFT JOIN appareils a ON pm.appareil_id=a.id
+           LEFT JOIN peripheriques p ON pm.peripherique_id=p.id
+           WHERE pm.slot_id=? ORDER BY pm.numero''', (slot_id,)).fetchall()
+    par_numero = {}
+    for r in rows:
+        d = row_to_dict(r)
+        if d['appareil_id']:
+            nom = d['nom_machine'] or ('Appareil #%d' % d['appareil_id'])
+        elif d['peripherique_id']:
+            nom = ' '.join(filter(None, [d['p_categorie'], d['p_marque'], d['p_modele']])) or ('Périphérique #%d' % d['peripherique_id'])
+        else:
+            nom = d['usage_libre'] or ''
+        d['nom_cible'] = nom
+        d['couleur'] = _couleur_port(d.get('type_appareil'), d.get('p_categorie'), d.get('usage_libre'), False)
+        par_numero[d['numero']] = d
+    return par_numero
+
 def _ports_avec_details(conn, slot_id):
     """Ports d'un slot, enrichis du nom et de la couleur de leur cible —
     y compris, pour un port relié à un autre port (câblage physique switch
     <-> bandeau RJ, routeur, etc.), le nom de l'élément en face ET, si un
     appareil/périphérique est joignable au bout de ce câble, son nom et son
     statut (cible_finale/cible_hors_ligne/lie_appareil_id — sert aussi à
-    colorer le port en direct côté client, et à le pinger). Deux façons
+    colorer le port en direct côté client, et à le pinger). Trois façons
     DISTINCTES pour l'élément en face de porter cette association, toutes
-    deux résolues ici :
+    trois résolues ici :
     1. Sur le PORT EN FACE lui-même (bp2.appareil_id/peripherique_id) —
-       cas standard du brassage structuré : bandeau RJ dont le port sert
-       une prise murale, "Associer à un appareil" sur CE port précis, cordon
-       vers le switch. Une omission ici (bug corrigé, signalé en usage
-       réel) faisait qu'un appareil seulement atteint via ce chemin
-       n'était jamais coloré ni pingé.
+       un élément d'interconnexion (Patch Panel générique, PDU...) dont le
+       port sert directement un appareil/périphérique, sans passer par le
+       système de prise murale (réservé au bandeau RJ, voir ci-dessous).
     2. Sur le SLOT en face tout entier (baie_slots.appareil_id) — cas d'un
        appareil RACK-MONTÉ (ex. routeur), "Associer à un appareil" dans le
        panneau "+ Placer" du slot lui-même, un de ses ports relié au switch
        sans que CE port porte l'association (elle vit au niveau du slot).
        C'est le mécanisme d'origine, conservé tel quel.
-    Le port en face ne peut par construction pas cumuler les deux premiers
-    cas avec être lui-même un lien (voir api_baie_lien_port : un port n'a
-    qu'une seule cible à la fois) — priorité au port, repli sur le slot.
-    `piece` (pièce du site desservie, pour un bandeau RJ) est indépendant
-    de tout ça — jamais effacé par un changement de cible, voir la
-    migration dans init_db()."""
+    3. Sur la PRISE MURALE en face, quand l'élément en face est un bandeau
+       RJ (voir _prises_murales_avec_details) — cas standard du brassage
+       structuré : prise murale d'un bureau câblée en fixe vers ce port du
+       bandeau, lui-même relié par cordon à un port de switch/routeur. La
+       prise murale porte l'appareil, le port RJ ne sert qu'à interconnecter.
+    Le port en face ne peut par construction cumuler les cas 1/2 avec être
+    lui-même un lien (voir api_baie_lien_port : un port n'a qu'une seule
+    cible à la fois) — priorité au port, repli sur le slot, repli sur sa
+    prise murale. `piece`/appareil/périphérique/usage d'un port de bandeau
+    RJ lui-même sont, depuis la migration prises murales (voir init_db()),
+    normalement toujours vides — la prise murale de même numéro
+    (d['prise_murale'], via _prises_murales_avec_details) les porte à sa
+    place."""
+    type_slot = conn.execute('SELECT type_equipement FROM baie_slots WHERE id=?', (slot_id,)).fetchone()
+    est_bandeau = bool(type_slot and type_slot[0] == 'Bandeau RJ')
+    prises_par_numero = _prises_murales_avec_details(conn, slot_id) if est_bandeau else {}
     rows = conn.execute(
         '''SELECT bp.slot_id, bp.numero, bp.appareil_id, bp.peripherique_id, bp.usage_libre,
                   bp.lie_slot_id, bp.lie_port_numero, bp.piece, bp.cable_couleur, bp.cable_longueur,
@@ -5640,6 +5757,23 @@ def _ports_avec_details(conn, slot_id):
                    LEFT JOIN peripheriques p2 ON bp2.peripherique_id=p2.id
                    WHERE bp2.slot_id=? AND bp2.numero=?''',
                 (d['lie_slot_id'], d['lie_port_numero'])).fetchone()
+            # Cas STANDARD du brassage structuré (voir cas 3 de la docstring) :
+            # le port en face est lui-même un port RJ de bandeau, dont
+            # l'appareil/périphérique éventuel vit désormais sur sa PRISE
+            # MURALE de même numéro, jamais sur le port lui-même (far_port
+            # ci-dessus reste vide pour un bandeau) — requête seulement si
+            # far_port n'a lui-même rien porté, pour ne pas interroger cette
+            # table pour rien sur un lien vers un élément non-bandeau.
+            far_pm = None
+            if cible and cible[1] == 'Bandeau RJ' and not (far_port and (far_port[0] or far_port[1])):
+                far_pm = conn.execute(
+                    '''SELECT pm.appareil_id, pm.peripherique_id, a3.nom_machine, a3.en_ligne, a3.type_appareil,
+                              p3.categorie, p3.marque, p3.modele, a3.dernier_ping
+                       FROM baie_prises_murales pm
+                       LEFT JOIN appareils a3 ON pm.appareil_id=a3.id
+                       LEFT JOIN peripheriques p3 ON pm.peripherique_id=p3.id
+                       WHERE pm.slot_id=? AND pm.numero=?''',
+                    (d['lie_slot_id'], d['lie_port_numero'])).fetchone()
             if far_port and far_port[0]:
                 d['cible_finale'] = far_port[2] or ('Appareil #%d' % far_port[0])
                 # en_ligne vaut 0 par défaut en base, indiscernable d'un vrai
@@ -5653,10 +5787,18 @@ def _ports_avec_details(conn, slot_id):
             elif far_port and far_port[1]:
                 d['cible_finale'] = ' '.join(filter(None, far_port[5:8])) or ('Périphérique #%d' % far_port[1])
                 lie_p_categorie = far_port[5]
+            elif far_pm and far_pm[0]:
+                d['cible_finale'] = far_pm[2] or ('Appareil #%d' % far_pm[0])
+                d['cible_hors_ligne'] = bool(far_pm[8]) and (far_pm[3] == 0)
+                d['lie_appareil_id'] = far_pm[0]
+                lie_type_appareil = far_pm[4]
+            elif far_pm and far_pm[1]:
+                d['cible_finale'] = ' '.join(filter(None, far_pm[5:8])) or ('Périphérique #%d' % far_pm[1])
+                lie_p_categorie = far_pm[5]
             elif cible and cible[2]:
-                # Repli : le port en face n'a lui-même rien (ni appareil, ni
-                # périphérique) — c'est le SLOT en face qui porte
-                # l'association (appareil rack-monté, voir docstring).
+                # Repli ultime : le SLOT en face porte l'association
+                # (appareil rack-monté, voir docstring) — jamais atteint si
+                # far_pm a déjà résolu quelque chose ci-dessus.
                 far_app = conn.execute(
                     'SELECT nom_machine, en_ligne, type_appareil, dernier_ping FROM appareils WHERE id=?', (cible[2],)).fetchone()
                 if far_app:
@@ -5673,6 +5815,7 @@ def _ports_avec_details(conn, slot_id):
             d['couleur'] = _couleur_port(lie_type_appareil, lie_p_categorie, None, False)
         else:
             d['couleur'] = _couleur_port(d.get('type_appareil'), d.get('p_categorie'), d.get('usage_libre'), bool(d['lie_slot_id']))
+        d['prise_murale'] = prises_par_numero.get(d['numero'])
         ports.append(d)
     return ports
 
@@ -5695,10 +5838,21 @@ def _detacher_liens_vers(conn, slot_id, numeros=None):
         conn.execute("UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, "
                      "cable_couleur='', cable_longueur='' WHERE lie_slot_id=?", (slot_id,))
 
-def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None):
-    """Ajuste les lignes baie_slot_ports d'un slot à nb_ports (0-48) : crée
-    les numéros manquants, retire ceux au-delà (en détachant d'abord tout
-    lien port-à-port pointant vers un numéro sur le point de disparaître).
+def _plafond_nb_ports(type_equipement):
+    """Nombre de ports maximum d'un élément de baie. Un bandeau RJ est
+    plafonné à 24 (et non 48 comme les autres éléments) : demandé pour
+    garantir la place d'empiler la rangée des prises murales AU-DESSUS de
+    la rangée des ports RJ (voir _prises_murales_avec_details / rendu côté
+    client) sans avoir à compacter les cellules ni agrandir la hauteur du
+    bandeau — un bandeau RJ réel fait d'ailleurs déjà typiquement 24 ports
+    (voir le raccourci "+ Bandeau RJ" côté client)."""
+    return 24 if type_equipement == 'Bandeau RJ' else 48
+
+def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None, type_equipement=None):
+    """Ajuste les lignes baie_slot_ports d'un slot à nb_ports (0-48, 0-24
+    pour un bandeau RJ — voir _plafond_nb_ports) : crée les numéros
+    manquants, retire ceux au-delà (en détachant d'abord tout lien
+    port-à-port pointant vers un numéro sur le point de disparaître).
     ports_existants (dict numero -> (appareil_id, peripherique_id,
     usage_libre, lie_slot_id, lie_port_numero, piece, cable_couleur,
     cable_longueur)), s'il est fourni, permet de reporter les liaisons d'un
@@ -5708,7 +5862,7 @@ def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None):
     visaient l'ancien (UPDATE ... SET lie_slot_id=nouveau WHERE
     lie_slot_id=ancien), ce que cette fonction ne peut pas faire elle-même
     puisqu'elle ne connaît pas l'ancien id."""
-    nb_ports = min(48, max(0, int(nb_ports or 0)))
+    nb_ports = min(_plafond_nb_ports(type_equipement), max(0, int(nb_ports or 0)))
     now = _utcnow().isoformat()
     if ports_existants is None:
         supprimes = [r[0] for r in conn.execute(
@@ -5729,6 +5883,34 @@ def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None):
                  piece,cable_couleur,cable_longueur,date_maj)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (slot_id, numero, ap, pe, us, lsid, lnum, piece, cc, cl, now))
     return nb_ports
+
+def _reconcilier_prises_murales(conn, slot_id, nb_ports, type_equipement, prises_existantes=None):
+    """Ajuste les lignes baie_prises_murales d'un bandeau RJ à nb_ports —
+    même mécanique que _reconcilier_ports, en miroir côté prise murale.
+    Un élément qui n'est PAS (ou plus) un bandeau RJ n'a par construction
+    aucune prise murale : celles qui existeraient (changement de
+    type_equipement après coup) sont supprimées.
+    prises_existantes (dict numero -> (piece, appareil_id, peripherique_id,
+    usage_libre, cable_couleur, cable_longueur)), s'il est fourni, reporte
+    les prises murales d'un ancien slot remplacé au même emplacement — même
+    rôle que ports_existants pour _reconcilier_ports."""
+    if type_equipement != 'Bandeau RJ':
+        conn.execute('DELETE FROM baie_prises_murales WHERE slot_id=?', (slot_id,))
+        return
+    nb_ports = min(24, max(0, int(nb_ports or 0)))
+    now = _utcnow().isoformat()
+    if prises_existantes is None:
+        conn.execute('DELETE FROM baie_prises_murales WHERE slot_id=? AND numero>?', (slot_id, nb_ports))
+        deja = {r[0] for r in conn.execute('SELECT numero FROM baie_prises_murales WHERE slot_id=?', (slot_id,)).fetchall()}
+        for numero in range(1, nb_ports + 1):
+            if numero not in deja:
+                conn.execute('INSERT INTO baie_prises_murales (slot_id,numero,date_maj) VALUES (?,?,?)', (slot_id, numero, now))
+    else:
+        for numero in range(1, nb_ports + 1):
+            piece, ap, pe, us, cc, cl = prises_existantes.get(numero, ('', None, None, '', '', ''))
+            conn.execute('''INSERT INTO baie_prises_murales
+                (slot_id,numero,piece,appareil_id,peripherique_id,usage_libre,cable_couleur,cable_longueur,date_maj)
+                VALUES (?,?,?,?,?,?,?,?,?)''', (slot_id, numero, piece, ap, pe, us, cc, cl, now))
 
 def _clamp_largeur_u(v, col=0):
     """1-10 (dixièmes de la largeur du rack, position dans la grille à 10
@@ -5850,18 +6032,26 @@ def api_baie_ajouter_slot():
     # modification via le panneau "Placer l'équipement" effacerait tous les
     # ports déjà affectés).
     anciens_ports = None
+    anciennes_prises = None
     if ancien:
         anciens_ports = {r[0]: (r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]) for r in conn.execute(
             'SELECT numero, appareil_id, peripherique_id, usage_libre, lie_slot_id, lie_port_numero, '
             'piece, cable_couleur, cable_longueur '
             'FROM baie_slot_ports WHERE slot_id=?', (ancien[0],)).fetchall()}
+        # Prises murales de l'ancien slot — même report que pour les ports
+        # (placerEquip() ré-envoie systématiquement un POST, y compris pour
+        # éditer un bandeau existant).
+        anciennes_prises = {r[0]: (r[1], r[2], r[3], r[4], r[5], r[6]) for r in conn.execute(
+            'SELECT numero, piece, appareil_id, peripherique_id, usage_libre, cable_couleur, cable_longueur '
+            'FROM baie_prises_murales WHERE slot_id=?', (ancien[0],)).fetchall()}
         # Numéros qui ne seront pas recréés (nb_ports réduit) : détacher leur
         # éventuel partenaire AVANT de perdre la trace de l'ancien slot_id.
-        nb_ports_demande = min(48, max(0, int(f.get('nb_ports', 0) or 0)))
+        nb_ports_demande = min(_plafond_nb_ports(f.get('type_equipement', '')), max(0, int(f.get('nb_ports', 0) or 0)))
         supprimes = [n for n in anciens_ports if n > nb_ports_demande]
         if supprimes:
             _detacher_liens_vers(conn, ancien[0], supprimes)
         conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=?', (ancien[0],))
+        conn.execute('DELETE FROM baie_prises_murales WHERE slot_id=?', (ancien[0],))
     conn.execute('DELETE FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col))
     conn.execute('''INSERT INTO baie_slots
         (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,nb_ports,largeur_u,date_maj)
@@ -5872,7 +6062,8 @@ def api_baie_ajouter_slot():
          f.get('description', ''), baie_nom, 0, largeur_u, _utcnow().isoformat()))
     conn.commit()
     sid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-    nb_ports = _reconcilier_ports(conn, sid, f.get('nb_ports', 0), anciens_ports)
+    nb_ports = _reconcilier_ports(conn, sid, f.get('nb_ports', 0), anciens_ports, f.get('type_equipement', ''))
+    _reconcilier_prises_murales(conn, sid, nb_ports, f.get('type_equipement', ''), anciennes_prises)
     if ancien:
         # Le remplacement change l'id du slot (voir commentaire ci-dessus) :
         # tout port — sur ce slot ou un autre — qui pointait vers l'ANCIEN id
@@ -5906,6 +6097,7 @@ def api_baie_slot(id):
             'WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
         _detacher_liens_vers(conn, id)
         conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=?', (id,))
+        conn.execute('DELETE FROM baie_prises_murales WHERE slot_id=?', (id,))
         conn.execute('DELETE FROM baie_slots WHERE id=? AND client_id=?', (id, cid))
         if avant:
             nom_slot = avant.get('nom_custom') or avant.get('type_equipement') or f'Emplacement #{id}'
@@ -5914,7 +6106,7 @@ def api_baie_slot(id):
         conn.commit(); conn.close()
         return jsonify({'ok': True})
     f = request.json or {}
-    nb_ports = min(48, max(0, int(f.get('nb_ports', 0) or 0)))
+    nb_ports = min(_plafond_nb_ports(f.get('type_equipement', '')), max(0, int(f.get('nb_ports', 0) or 0)))
     actuel = conn.execute(
         'SELECT col_index, baie_nom FROM baie_slots WHERE id=? AND client_id=?', (id, cid)).fetchone()
     if not actuel:
@@ -5953,7 +6145,8 @@ def api_baie_slot(id):
          f.get('couleur','#1e3a5f'), f.get('description',''), nb_ports,
          largeur_u,
          _utcnow().isoformat(), id, cid))
-    _reconcilier_ports(conn, id, nb_ports)
+    _reconcilier_ports(conn, id, nb_ports, type_equipement=f.get('type_equipement', ''))
+    _reconcilier_prises_murales(conn, id, nb_ports, f.get('type_equipement', ''))
     conn.commit()
     slot = row_to_dict(conn.execute(
         '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne,
@@ -5987,15 +6180,9 @@ def api_baie_port(slot_id, numero):
         return jsonify({'error': 'Slot introuvable'}), 404
     f = request.json or {}
     now = _utcnow().isoformat()
-    # `piece` (pièce du site desservie, indépendante — voir la migration dans
-    # init_db()) peut être modifiée SEULE (le champ dédié du bandeau RJ
-    # n'envoie que ça) : cible_fournie distingue "on change la cible du
-    # port" de "on ne touche qu'à la pièce" — sans cette distinction, un
-    # appel piece-only aurait fait tomber le bloc ci-dessous, qui écrase
-    # TOUJOURS appareil_id/peripherique_id/usage_libre/lie_slot_id/câble
-    # avec les valeurs (absentes ⇒ vides) du payload reçu, effaçant
-    # silencieusement la cible ou le câblage à chaque simple renommage de
-    # pièce.
+    # `piece` a déménagé sur la prise murale (voir api_baie_prise_murale) —
+    # un port RJ, bandeau ou non, ne la porte plus : cette route n'a donc
+    # plus besoin de la distinguer d'un changement de cible.
     cible_fournie = any(k in f for k in ('appareil_id', 'peripherique_id', 'usage_libre'))
     if cible_fournie:
         appareil_id = f.get('appareil_id') or None
@@ -6030,25 +6217,77 @@ def api_baie_port(slot_id, numero):
         conn.execute("UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL, "
                      "cable_couleur='', cable_longueur='', date_maj=? WHERE slot_id=? AND numero=?",
                      (now, slot_id, numero))
-    if 'piece' in f:
-        conn.execute('UPDATE baie_slot_ports SET piece=?, date_maj=? WHERE slot_id=? AND numero=?',
-                     (str(f.get('piece') or '').strip(), now, slot_id, numero))
     conn.commit()
     ports = _ports_avec_details(conn, slot_id)
     port = next((p for p in ports if p['numero'] == numero), None)
     detacher_lien = (not cible_fournie) and bool(f.get('detacher_lien'))
-    if port and (cible_fournie or detacher_lien or 'piece' in f):
+    if port and (cible_fournie or detacher_lien):
         nom_slot = slot[1] or slot[2] or f'Emplacement #{slot_id}'
         if cible_fournie:
             detail = f"Port {numero} -> {port.get('nom_cible') or '— Libre —'}"
-        elif detacher_lien:
-            detail = f"Port {numero} : lien détaché"
         else:
-            detail = f"Port {numero}, pièce -> {port.get('piece') or '(vide)'}"
+            detail = f"Port {numero} : lien détaché"
         log_history(conn, cid, 'baie_slot', slot_id, nom_slot, 'Modification (port baie)', detail)
         conn.commit()
     conn.close()
     return jsonify(port or {'error': 'Port introuvable'}), (200 if port else 404)
+
+@app.route('/api/baie/prise-murale/<int:slot_id>/<int:numero>', methods=['PUT'])
+@login_required
+def api_baie_prise_murale(slot_id, numero):
+    """Édite UNE prise murale d'un bandeau RJ — la pièce desservie et
+    l'appareil/périphérique/usage qui y est branché, plus l'étiquette du
+    câble fixe mur -> bandeau. Entité séparée du port RJ de même numéro
+    (voir baie_prises_murales dans init_db()) : le port RJ, lui, ne sert
+    plus qu'à interconnecter avec un autre élément de la baie (voir
+    api_baie_lien_port) et n'est jamais modifié par cette route."""
+    cid = get_client_id()
+    conn = get_db()
+    slot = conn.execute(
+        "SELECT id, nom_custom, type_equipement FROM baie_slots "
+        "WHERE id=? AND client_id=? AND type_equipement='Bandeau RJ'", (slot_id, cid)).fetchone()
+    if not slot:
+        conn.close()
+        return jsonify({'error': 'Bandeau RJ introuvable'}), 404
+    existe = conn.execute(
+        'SELECT 1 FROM baie_prises_murales WHERE slot_id=? AND numero=?', (slot_id, numero)).fetchone()
+    if not existe:
+        conn.close()
+        return jsonify({'error': 'Prise murale introuvable'}), 404
+    f = request.json or {}
+    now = _utcnow().isoformat()
+    cible_fournie = any(k in f for k in ('appareil_id', 'peripherique_id', 'usage_libre'))
+    if cible_fournie:
+        appareil_id = f.get('appareil_id') or None
+        peripherique_id = f.get('peripherique_id') or None
+        usage_libre = f.get('usage_libre', '').strip() if not (appareil_id or peripherique_id) else ''
+        conn.execute('''UPDATE baie_prises_murales SET appareil_id=?,peripherique_id=?,usage_libre=?,date_maj=?
+            WHERE slot_id=? AND numero=?''', (appareil_id, peripherique_id, usage_libre, now, slot_id, numero))
+    piece_fournie = 'piece' in f
+    if piece_fournie:
+        conn.execute('UPDATE baie_prises_murales SET piece=?, date_maj=? WHERE slot_id=? AND numero=?',
+                     (str(f.get('piece') or '').strip(), now, slot_id, numero))
+    cable_fourni = ('cable_couleur' in f) or ('cable_longueur' in f)
+    if cable_fourni:
+        conn.execute('UPDATE baie_prises_murales SET cable_couleur=?, cable_longueur=?, date_maj=? '
+                     'WHERE slot_id=? AND numero=?',
+                     (str(f.get('cable_couleur') or '').strip(), str(f.get('cable_longueur') or '').strip(),
+                      now, slot_id, numero))
+    conn.commit()
+    prises = _prises_murales_avec_details(conn, slot_id)
+    prise = prises.get(numero)
+    if prise and (cible_fournie or piece_fournie or cable_fourni):
+        nom_slot = slot[1] or slot[2] or f'Emplacement #{slot_id}'
+        if cible_fournie:
+            detail = f"Prise murale {numero} -> {prise.get('nom_cible') or '— Libre —'}"
+        elif piece_fournie:
+            detail = f"Prise murale {numero}, pièce -> {prise.get('piece') or '(vide)'}"
+        else:
+            detail = f"Prise murale {numero} : câble mis à jour"
+        log_history(conn, cid, 'baie_slot', slot_id, nom_slot, 'Modification (prise murale)', detail)
+        conn.commit()
+    conn.close()
+    return jsonify(prise or {'error': 'Prise murale introuvable'}), (200 if prise else 404)
 
 @app.route('/api/baie/lien-port', methods=['POST'])
 @login_required
@@ -6193,6 +6432,7 @@ def api_baie_supprimer():
         conn.execute(f'UPDATE baie_slot_ports SET lie_slot_id=NULL, lie_port_numero=NULL '
                      f'WHERE lie_slot_id IN ({placeholders})', slot_ids)
         conn.execute(f'DELETE FROM baie_slot_ports WHERE slot_id IN ({placeholders})', slot_ids)
+        conn.execute(f'DELETE FROM baie_prises_murales WHERE slot_id IN ({placeholders})', slot_ids)
     conn.execute(f'DELETE FROM baie_slots WHERE client_id=? AND {cond}', params)
     log_history(conn, cid, 'baie', 0, baie_nom, 'Suppression (baie)',
                 f"{len(slot_ids)} emplacement(s) supprimé(s)")
@@ -8614,6 +8854,49 @@ def rattraper_sync_baie_slot_ports():
         conn.close()
 
 
+#: Même mécanique que _CLE_RATTRAPAGE_BAIE_PORTS ci-dessus, pour les prises
+#: murales issues de la migration dans init_db() — ajouter la table au
+#: trigger de journalisation ne couvre que les écritures FUTURES, pas les
+#: lignes que la migration vient d'insérer directement en base.
+_CLE_RATTRAPAGE_BAIE_PRISES_MURALES = '_baie_prises_murales_journalisees_v1'
+_rattrapage_baie_prises_murales_fait = False
+
+
+def rattraper_sync_baie_prises_murales():
+    """Journalise (une seule fois) les baie_prises_murales déjà en base
+    comme autant d'INSERT — même rôle que rattraper_sync_baie_slot_ports()
+    pour la table sœur."""
+    global _rattrapage_baie_prises_murales_fait
+    if _rattrapage_baie_prises_murales_fait:
+        return 0
+    _rattrapage_baie_prises_murales_fait = True
+
+    conn = get_db()
+    try:
+        if (cfg_get(_CLE_RATTRAPAGE_BAIE_PRISES_MURALES, '') or '').strip():
+            return 0
+
+        ids = [r[0] for r in conn.execute('SELECT id FROM baie_prises_murales').fetchall()]
+        now = _utcnow().isoformat()
+        for rid in ids:
+            conn.execute(
+                "DELETE FROM _sync_journal WHERE tbl='baie_prises_murales' AND record_id=? AND action='INSERT'",
+                (rid,))
+            conn.execute(
+                "INSERT INTO _sync_journal (tbl, record_id, action, timestamp) VALUES ('baie_prises_murales', ?, 'INSERT', ?)",
+                (rid, now))
+        conn.commit()
+        cfg_set(_CLE_RATTRAPAGE_BAIE_PRISES_MURALES, _utcnow().isoformat(timespec='seconds'))
+        if ids:
+            logger.info('Rattrapage sync baie_prises_murales : %d prise(s) journalisée(s)', len(ids))
+        return len(ids)
+    except Exception:
+        logger.exception('Rattrapage sync baie_prises_murales (sans conséquence)')
+        return 0
+    finally:
+        conn.close()
+
+
 def jeton_collecteur_valide(cid=None):
     """Vrai si la requête du collecteur est autorisée.
 
@@ -9635,12 +9918,19 @@ def editer_peripherique(id):
         'WHERE ip.peripherique_id=? AND i.statut != ? ORDER BY i.date_intervention DESC LIMIT 10',
         (id, 'archivee')).fetchall()]
 
+    # UNION avec baie_prises_murales — voir le même commentaire côté fiche
+    # appareil (fonction editer_appareil).
     ports_baie = [row_to_dict(r) for r in conn.execute(
         '''SELECT bp.numero, bs.id AS slot_id, bs.baie_nom, bs.position,
-                  bs.nom_custom, bs.type_equipement
+                  bs.nom_custom, bs.type_equipement, 'port' AS origine
            FROM baie_slot_ports bp JOIN baie_slots bs ON bp.slot_id=bs.id
            WHERE bp.peripherique_id=? AND bs.client_id=?
-           ORDER BY bs.baie_nom, bs.position, bp.numero''', (id, cid)).fetchall()]
+           UNION ALL
+           SELECT pm.numero, bs.id AS slot_id, bs.baie_nom, bs.position,
+                  bs.nom_custom, bs.type_equipement, 'prise_murale' AS origine
+           FROM baie_prises_murales pm JOIN baie_slots bs ON pm.slot_id=bs.id
+           WHERE pm.peripherique_id=? AND bs.client_id=?
+           ORDER BY baie_nom, position, numero''', (id, cid, id, cid)).fetchall()]
 
     conn.close()
     return render_template('form_peripherique.html', peripherique=p, documents=docs_per, action='Modifier',
@@ -9667,6 +9957,8 @@ def supprimer_peripherique(id):
     conn.execute('UPDATE identifiants SET peripherique_id=NULL WHERE peripherique_id=? AND client_id=?', (id, cid))
     conn.execute('UPDATE baie_slots SET peripherique_id=NULL WHERE peripherique_id=? AND client_id=?', (id, cid))
     conn.execute('''UPDATE baie_slot_ports SET peripherique_id=NULL WHERE peripherique_id=? AND slot_id IN
+        (SELECT id FROM baie_slots WHERE client_id=?)''', (id, cid))
+    conn.execute('''UPDATE baie_prises_murales SET peripherique_id=NULL WHERE peripherique_id=? AND slot_id IN
         (SELECT id FROM baie_slots WHERE client_id=?)''', (id, cid))
     conn.execute('DELETE FROM peripheriques WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
@@ -14674,7 +14966,11 @@ def mobile_baie():
            WHERE s.client_id=? AND {cond} ORDER BY s.position''', (cid, baie_nom)).fetchall()]
     for s in slots:
         s['ports'] = _ports_avec_details(conn, s['id']) if s.get('nb_ports') else []
-        s['ports_actifs'] = [p for p in s['ports'] if p.get('nom_cible') or p.get('piece')]
+        # Un port "actif" l'est aussi via sa prise murale (bandeau RJ) — voir
+        # _prises_murales_avec_details ; p.piece/p.nom_cible directement sur
+        # le port restent utiles pour tout élément qui n'est pas un bandeau.
+        s['ports_actifs'] = [p for p in s['ports'] if p.get('nom_cible') or p.get('piece')
+                             or (p.get('prise_murale') and (p['prise_murale'].get('nom_cible') or p['prise_murale'].get('piece')))]
         s['nom_affiche'] = s.get('nom_custom') or s.get('nom_machine') or (
             ' '.join(filter(None, [s.get('p_categorie'), s.get('p_marque'), s.get('p_modele')]))) \
             or s.get('type_equipement') or f"U{s['position']}"

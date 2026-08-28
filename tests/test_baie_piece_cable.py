@@ -1,9 +1,9 @@
 """
-Pièce du site (bandeau RJ) et étiquette de câble — deux métadonnées
-indépendantes de la cible d'un port (appareil/périphérique/usage_libre/
-lien port-à-port), et le chaînage complet qu'elles permettent (pièce ->
-port bandeau -> câble -> port switch -> appareil, avec alerte si l'appareil
-au bout de la chaîne est hors ligne).
+Pièce du site et étiquette de câble d'une PRISE MURALE (bandeau RJ) —
+entité séparée du port RJ depuis la 2.18.74 (voir test_baie_prises_murales.py
+pour sa couverture dédiée), et le chaînage complet qu'elles permettent
+(pièce -> prise murale -> port bandeau -> câble -> port switch -> appareil,
+avec alerte si l'appareil au bout de la chaîne est hors ligne).
 """
 from conftest import login_session
 
@@ -21,41 +21,49 @@ def _poser_bandeau_et_switch(client, cid):
 
 
 def test_piece_persiste_independamment_de_la_cible(client, make_client, make_user, make_appareil):
-    """Assigner une pièce à un port de bandeau, puis le câbler à un switch,
-    puis réassigner sa cible : la pièce ne doit JAMAIS disparaître — c'était
-    le défaut de l'ancien design (usage_libre réutilisé, effacé par tout
-    changement de cible)."""
+    """Assigner une pièce à une PRISE MURALE, câbler le port RJ correspondant
+    à un switch, puis réassigner la cible de la prise : la pièce ne doit
+    JAMAIS disparaître, et le câblage RJ (interconnexion) reste totalement
+    indépendant de la prise murale (entité séparée depuis la 2.18.74)."""
     uid, _, _ = make_user()
     cid = make_client(auth_user_id=uid)
     login_session(client, uid, cid)
     bandeau, switch = _poser_bandeau_et_switch(client, cid)
 
-    r = client.put(f"/api/baie/slot/{bandeau['id']}/port/5", json={'piece': 'Salle 202'})
-    port = r.get_json()
-    assert port['piece'] == 'Salle 202'
-    assert port['appareil_id'] is None  # non touché
+    r = client.put(f"/api/baie/prise-murale/{bandeau['id']}/5", json={'piece': 'Salle 202'})
+    prise = r.get_json()
+    assert prise['piece'] == 'Salle 202'
+    assert prise['appareil_id'] is None  # non touché
 
-    # Câblage vers le switch — la pièce doit survivre.
+    # Câblage du PORT RJ (interconnexion) vers le switch — la pièce de la
+    # prise murale doit survivre, et le port RJ ne doit RIEN porter d'autre.
     lien = client.post('/api/baie/lien-port', json={
         'slot1_id': bandeau['id'], 'numero1': 5, 'slot2_id': switch['id'], 'numero2': 1,
     }).get_json()
-    assert lien['port1']['piece'] == 'Salle 202'
     assert lien['port1']['lie_slot_id'] == switch['id']
+    assert lien['port1']['appareil_id'] is None
+    ports = client.get('/api/baie/slots?baie=Baie%20principale').get_json()['slots']
+    bandeau_frais = next(s for s in ports if s['id'] == bandeau['id'])
+    prise5 = next(p for p in bandeau_frais['ports'] if p['numero'] == 5)['prise_murale']
+    assert prise5['piece'] == 'Salle 202'
 
-    # Réassigner explicitement une cible (usage libre) détache le lien mais
-    # ne touche toujours pas à la pièce.
+    # Réassigner explicitement une cible sur la PRISE MURALE ne touche
+    # jamais au lien du port RJ (deux entités séparées).
     app_id = make_appareil(cid)
-    r2 = client.put(f"/api/baie/slot/{bandeau['id']}/port/5", json={'appareil_id': app_id})
-    port2 = r2.get_json()
-    assert port2['piece'] == 'Salle 202'
-    assert port2['appareil_id'] == app_id
-    assert port2['lie_slot_id'] is None
+    r2 = client.put(f"/api/baie/prise-murale/{bandeau['id']}/5", json={'appareil_id': app_id})
+    prise2 = r2.get_json()
+    assert prise2['piece'] == 'Salle 202'
+    assert prise2['appareil_id'] == app_id
+    port5_apres = client.get('/api/baie/slots?baie=Baie%20principale').get_json()['slots']
+    bandeau_apres = next(s for s in port5_apres if s['id'] == bandeau['id'])
+    port5 = next(p for p in bandeau_apres['ports'] if p['numero'] == 5)
+    assert port5['lie_slot_id'] == switch['id'], "le lien du port RJ ne doit pas être touché par la prise murale"
 
 
 def test_maj_piece_seule_ne_touche_pas_la_cible_ni_le_lien(client, make_client, make_user):
-    """Non-régression du bug trouvé en cours d'implémentation : un payload
-    {piece: ...} SEUL ne doit jamais réinitialiser appareil_id/
-    peripherique_id/usage_libre/lie_slot_id — la route distinguait mal
+    """Non-régression : un payload {piece: ...} SEUL sur une prise murale ne
+    doit jamais réinitialiser son appareil_id/peripherique_id/usage_libre,
+    ni toucher au lien du port RJ correspondant — la route distinguait mal
     "on ne fournit pas ces clés" de "on les vide explicitement"."""
     uid, _, _ = make_user()
     cid = make_client(auth_user_id=uid)
@@ -64,10 +72,13 @@ def test_maj_piece_seule_ne_touche_pas_la_cible_ni_le_lien(client, make_client, 
     client.post('/api/baie/lien-port', json={
         'slot1_id': bandeau['id'], 'numero1': 3, 'slot2_id': switch['id'], 'numero2': 2,
     })
-    r = client.put(f"/api/baie/slot/{bandeau['id']}/port/3", json={'piece': 'Bureau 12'})
-    port = r.get_json()
-    assert port['piece'] == 'Bureau 12'
-    assert port['lie_slot_id'] == switch['id'], "un payload piece-only n'aurait jamais dû détacher le lien"
+    r = client.put(f"/api/baie/prise-murale/{bandeau['id']}/3", json={'piece': 'Bureau 12'})
+    prise = r.get_json()
+    assert prise['piece'] == 'Bureau 12'
+    ports = client.get('/api/baie/slots?baie=Baie%20principale').get_json()['slots']
+    bandeau_frais = next(s for s in ports if s['id'] == bandeau['id'])
+    port3 = next(p for p in bandeau_frais['ports'] if p['numero'] == 3)
+    assert port3['lie_slot_id'] == switch['id'], "un payload piece-only n'aurait jamais dû détacher le lien du port RJ"
 
 
 def test_etiquette_cable_persiste_et_editable(client, make_client, make_user):

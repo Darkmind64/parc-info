@@ -1,22 +1,24 @@
 {
-  "version": "2.18.73",
+  "version": "2.18.74",
   "release_date": "2026-08-28T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.73/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.73/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.73/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.73",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.73/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.73/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.73/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.73/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.73/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.74",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif critique : en déploiement Docker, le statut en ligne/hors ligne des appareils restait figé (le watchdog de ping excluait silencieusement tous les appareils du LAN client, réseau du conteneur oblige)",
+    "new_features": "Baie de brassage : prises murales d'un bandeau RJ séparées des ports RJ, sur le modèle d'un vrai système de brassage structuré — la prise murale (pièce + appareil branché dans le bureau) automatiquement en vis-à-vis du port RJ correspondant, qui ne sert plus qu'à interconnecter avec les autres éléments de la baie",
     "improvements": [
-      "Le watchdog de ping en tâche de fond restreint désormais son filtre \"réseau actuel\" aux déploiements non-Docker : en Docker, l'IP du conteneur (réseau bridge interne) ne recoupe jamais le LAN du client, même quand celui-ci reste joignable via le NAT sortant de l'hôte — tous les appareils étaient donc exclus de chaque cycle de ping, statut affiché figé sur sa dernière valeur connue."
+      "Baie de brassage : nouvelle table baie_prises_murales (une par port d'un bandeau RJ, correspondance automatique par numéro) — porte la pièce, l'appareil/périphérique/usage branché et le câble mural, migrés automatiquement depuis les anciens ports de bandeau au démarrage, sans rien perdre.",
+      "Baie de brassage : la couleur/le ping/la cible d'un port de switch câblé à un bandeau suivent désormais la chaîne complète prise murale -> port RJ -> cordon -> switch.",
+      "Baie de brassage : un bandeau RJ est plafonné à 24 ports (48 pour les autres éléments) — garantit la place d'empiler la rangée des prises murales au-dessus de celle des ports RJ sans agrandir la hauteur du bandeau."
     ]
   },
   "checksums": {
@@ -27,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.73"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.74"
 }

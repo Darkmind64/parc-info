@@ -100,6 +100,9 @@ def test_mobile_baie_liste_les_elements(client, make_client, make_user):
 
 
 def test_mobile_baie_affiche_la_piece(client, make_client, make_user):
+    """La pièce vit désormais sur la PRISE MURALE (voir
+    test_baie_prises_murales.py), pas le port RJ — la vue mobile doit
+    continuer à l'afficher."""
     uid, _, _ = make_user()
     cid = make_client(auth_user_id=uid)
     login_session(client, uid, cid)
@@ -107,7 +110,7 @@ def test_mobile_baie_affiche_la_piece(client, make_client, make_user):
         'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale',
         'type_equipement': 'Bandeau RJ', 'nom_custom': 'BANDEAU-M', 'nb_ports': 4,
     }).get_json()
-    client.put(f"/api/baie/slot/{bandeau['id']}/port/2", json={'piece': 'Salle Réunion'})
+    client.put(f"/api/baie/prise-murale/{bandeau['id']}/2", json={'piece': 'Salle Réunion'})
     r = client.get('/m/baie')
     assert 'Salle Réunion' in r.get_data(as_text=True)
 

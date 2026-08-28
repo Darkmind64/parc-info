@@ -93,3 +93,11 @@ def register_update_routes(app):
             rattraper_sync_baie_slot_ports()
         except Exception:
             pass
+        # Idem pour baie_prises_murales (prises murales issues de la
+        # migration piece/appareil/périphérique d'un port de bandeau RJ,
+        # voir init_db()) — même raison d'être.
+        try:
+            from app import rattraper_sync_baie_prises_murales
+            rattraper_sync_baie_prises_murales()
+        except Exception:
+            pass

@@ -177,7 +177,7 @@ async function loadHistoriquePer() {
         <div style="display:flex;flex-direction:column;gap:.4rem;">
         {% for p in ports_baie %}
             <a href="/baie" style="display:flex;justify-content:space-between;align-items:center;padding:.4rem .6rem;background:var(--bg-secondary);border-radius:4px;text-decoration:none;color:var(--text-primary);font-size:.82rem;">
-                <span>🔌 Port {{ p.numero }} — {{ p.nom_custom or p.type_equipement or 'Élément #' ~ p.slot_id }}</span>
+                <span>{% if p.origine == 'prise_murale' %}🚪 Prise murale {{ p.numero }}{% else %}🔌 Port {{ p.numero }}{% endif %} — {{ p.nom_custom or p.type_equipement or 'Élément #' ~ p.slot_id }}</span>
                 <span style="color:var(--text-muted);font-size:.75rem;">{{ p.baie_nom or 'Baie principale' }} · U{{ p.position }}</span>
             </a>
         {% endfor %}

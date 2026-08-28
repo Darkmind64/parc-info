@@ -1,8 +1,42 @@
-PARCINFO_VERSION=2.18.73
+PARCINFO_VERSION=2.18.74
 RELEASE_DATE=2026-08-28
-BUILD_NUMBER=2026082803
+BUILD_NUMBER=2026082804
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.74 - Baie de brassage : prises murales séparées des ports RJ d'un bandeau
+# Demandé : pouvoir assigner les prises Ethernet d'un bandeau RJ aux prises
+# murales des locaux, sur le modèle des vraies baies de brassage — la prise
+# murale reliée automatiquement à la prise RJ correspondante, assignable à
+# la machine branchée dans le bureau, le port RJ ne servant alors plus qu'à
+# interconnecter avec les autres éléments de la baie (cordon vers un switch).
+#
+# Nouvelle table baie_prises_murales (une ligne par port d'un bandeau RJ,
+# même numérotation — correspondance automatique, rien à câbler à la main) :
+# porte désormais la pièce du site, l'appareil/périphérique/usage branché,
+# et une étiquette de câble dédiée (câble fixe mur -> bandeau, distincte du
+# cordon de brassage). Migration automatique au démarrage : les ports de
+# bandeau déjà affectés (appareil/pièce/usage) sont repris vers leur prise
+# murale de même numéro, sans rien perdre — y compris un port déjà câblé au
+# switch. Le port RJ, lui, ne conserve plus que le lien port-à-port.
+#
+# La résolution couleur/ping/cible d'un port de switch câblé à un bandeau
+# suit désormais la chaîne complète : prise murale -> port RJ -> cordon ->
+# switch (auparavant, seul un appareil associé DIRECTEMENT au port du
+# bandeau était suivi — devenu impossible depuis que l'appareil vit sur la
+# prise murale).
+#
+# Plafond de 24 ports pour un bandeau RJ (48 pour les autres éléments,
+# inchangé) : garantit la place d'empiler la rangée des prises murales
+# au-dessus de celle des ports RJ dans le rack sans agrandir la hauteur du
+# bandeau — vérifié en direct, tient sans chevauchement sur une largeur
+# d'écran normale.
+#
+# Rendu, panneau d'édition (scindé en deux blocs par port), infobulles,
+# recherche, "Ping toute la baie" et fiches appareil/périphérique
+# ("Câblage — Baie de brassage") tous mis à jour en conséquence. Non
+# traité : la liste de câblage imprimable/CSV (/baie/cablage) ne documente
+# encore que les cordons RJ<->RJ, pas les paires prise murale<->port RJ.
 
 # Version 2.18.73 - Correctif critique : statut en ligne/hors ligne figé en déploiement Docker
 # Signalé par l'utilisateur : dans l'inventaire des appareils, le statut en

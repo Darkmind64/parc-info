@@ -40,11 +40,17 @@
     {% if s.ports_actifs %}
     <div class="baie-ports">
         {% for p in s.ports_actifs %}
+        {% set pm = p.prise_murale %}
         <div class="baie-port-row{% if p.cible_hors_ligne %} warn{% endif %}">
             <span class="mono">#{{ p.numero }}</span>
             <span class="baie-port-cible">
-                {% if p.piece %}🚪 {{ p.piece }}{% if p.nom_cible %} · {% endif %}{% endif %}
-                {{ p.nom_cible }}{% if p.cible_finale %} → {{ p.cible_finale }}{% endif %}
+                {% if pm %}
+                    {% if pm.piece %}🚪 {{ pm.piece }}{% if pm.nom_cible %} · {% endif %}{% endif %}
+                    {{ pm.nom_cible }}{% if p.nom_cible %} → {{ p.nom_cible }}{% endif %}
+                {% else %}
+                    {% if p.piece %}🚪 {{ p.piece }}{% if p.nom_cible %} · {% endif %}{% endif %}
+                    {{ p.nom_cible }}{% if p.cible_finale %} → {{ p.cible_finale }}{% endif %}
+                {% endif %}
             </span>
             {% if p.cible_hors_ligne %}<span class="badge badge-red">Hors ligne</span>{% endif %}
         </div>

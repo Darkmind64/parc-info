@@ -116,6 +116,39 @@
 }
 .cell-ping-zone { flex-shrink:0; display:flex; justify-content:flex-end; }
 
+/* Bandeau RJ : rangée des prises murales EMPILÉE au-dessus de celle des
+   ports RJ (voir priseMuraleHTML/makeOccupiedCell) — demandé : la prise
+   murale (côté local, pièce + appareil branché dans le bureau) est
+   désormais une entité séparée du port RJ (côté baie, réservé à
+   l'interconnexion avec un autre élément — voir baie_prises_murales côté
+   serveur). nb_ports plafonné à 24 pour un bandeau (voir
+   _plafond_nb_ports) : garantit que les deux rangées, chacune sur UNE
+   seule ligne à largeur pleine, tiennent l'une sous l'autre sans agrandir
+   la hauteur du bandeau (1U) ni compacter les cellules. */
+.cell-ports-stack { display:flex; flex-direction:column; flex:1; min-width:0; gap:2px; overflow:hidden; }
+.cell-prises-murales {
+    display:grid; grid-template-columns:repeat(auto-fill, 24px); gap:2px;
+    align-content:flex-start; overflow:hidden;
+}
+/* Prise murale : cellule plus fine qu'un port RJ (13px contre 22px) — elle
+   n'a besoin que d'afficher un numéro, un voyant de ping et sa couleur de
+   cible, pas le badge de déliaison (pas de "lien" à détacher, la
+   correspondance avec le port RJ de même numéro est automatique et fixe).
+   Même mécanique de fond assombri/voyant/surbrillance que .port. */
+.prise-murale {
+    position:relative; width:24px; height:13px; border-radius:2px 2px 0 0;
+    font-size:.5rem; line-height:13px; text-align:center; font-weight:700;
+    color:#0a0e14; cursor:pointer; background:#334155; user-select:none;
+    border-bottom:2px solid rgba(0,0,0,.4);
+    transition:transform .1s, box-shadow .15s;
+}
+.prise-murale:not(.pm-libre) { box-shadow:inset 0 0 0 999px rgba(8,10,16,.38); }
+.prise-murale:hover { transform:scale(1.15); z-index:3; position:relative; }
+.prise-murale:not(.pm-libre):hover,
+.prise-murale:not(.pm-libre).pm-highlight { box-shadow:inset 0 0 0 999px rgba(8,10,16,0); }
+.prise-murale.pm-libre { color:#64748b; background:#1a2530; }
+.prise-murale.pm-highlight { box-shadow:inset 0 0 0 999px rgba(8,10,16,0), 0 0 0 2px #fff, 0 0 6px #fff; transform:scale(1.12); z-index:4; position:relative; }
+
 /* Equipment type colors */
 .cell-srv   { background:rgba(124,58,237,.12)!important; border-color:rgba(124,58,237,.45)!important; }
 .cell-sw    { background:rgba(8,145,178,.12)!important;  border-color:rgba(8,145,178,.45)!important; }
@@ -287,8 +320,8 @@
     position:absolute; top:1px; left:1px; width:6px; height:6px; border-radius:50%;
     border:1px solid #000; display:none; z-index:2;
 }
-.port.port-ping-ok .port-led   { display:block; background:#22c55e; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #22c55e; }
-.port.port-ping-fail .port-led { display:block; background:#ef4444; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #ef4444; }
+.port.port-ping-ok .port-led, .prise-murale.pm-ping-ok .port-led   { display:block; background:#22c55e; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #22c55e; }
+.port.port-ping-fail .port-led, .prise-murale.pm-ping-fail .port-led { display:block; background:#ef4444; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #ef4444; }
 
 /* Détacher un lien port-à-port (câblage) — coin haut-droit, visible
    seulement au survol d'un port câblé (voir delierPort()). Manquait une
@@ -1083,9 +1116,20 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             <button class="cell-del" onclick="event.stopPropagation();delSlot(${s.id})" title="Retirer">✕</button>
         </div>`;
 
+    // Bandeau RJ : rangée des prises murales empilée AU-DESSUS de celle des
+    // ports RJ (demandé) — chaque prise murale porte désormais l'appareil/
+    // pièce, le port RJ de même numéro ne servant plus qu'à interconnecter
+    // (voir priseMuraleHTML / baie_prises_murales côté serveur).
+    const estBandeauPorts = s.type_equipement === 'Bandeau RJ';
+    const lignePrisesMurales = estBandeauPorts
+        ? `<div class="cell-prises-murales">${ports.map(p => priseMuraleHTML(p.prise_murale, p.numero)).join('')}</div>`
+        : '';
     const zonePorts = ports.length ? `
         <div class="cell-ports-wrap">
-            <div class="cell-ports">${ports.map(portHTML).join('')}</div>
+            <div class="cell-ports-stack">
+                ${lignePrisesMurales}
+                <div class="cell-ports">${ports.map(portHTML).join('')}</div>
+            </div>
             <div class="cell-ping-zone">
                 <button class="cell-ping-btn" title="Pinger les appareils reliés aux ports">📡</button>
             </div>
@@ -1139,6 +1183,28 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             document.querySelectorAll('.port-hover-link').forEach(pel => pel.classList.remove('port-hover-link'));
             document.querySelectorAll('.cable-link.cable-hover').forEach(l => l.classList.remove('cable-hover'));
         });
+    });
+
+    // Prises murales (bandeau RJ uniquement) : mêmes interactions que les
+    // ports (clic = surbrillance, survol = infobulle) en plus simple — pas
+    // de mode lien (une prise murale n'est jamais elle-même l'extrémité
+    // d'un câblage bandeau<->switch, voir portRjEditorRowHTML) ni de badge
+    // de déliaison (correspondance fixe avec le port RJ de même numéro,
+    // rien à détacher).
+    cell.querySelectorAll('.prise-murale').forEach((el, i) => {
+        const port = ports[i];
+        const pm = port && port.prise_murale;
+        if (!pm) return;
+        el.addEventListener('click', e => {
+            e.stopPropagation();
+            surbrillerPortsLies(cleCiblePriseMurale(pm));
+        });
+        el.addEventListener('mouseenter', e => {
+            e.stopPropagation();
+            afficherTooltipPriseMurale(e, pm, port.numero, nom);
+        });
+        el.addEventListener('mousemove', e => { e.stopPropagation(); const t = document.getElementById('rack-tooltip'); if (t.classList.contains('show')) positionnerTooltip(e); });
+        el.addEventListener('mouseleave', e => { e.stopPropagation(); masquerTooltip(); });
     });
 
     if (ports.length) {
@@ -1618,6 +1684,27 @@ function portHTML(p) {
         <span class="port-led"></span>${badgeLien}${p.numero}</span>`;
 }
 
+// Prise murale (bandeau RJ) — même logique de rendu que portHTML, en plus
+// simple : jamais de lien (voir cleCiblePriseMurale), donc jamais de
+// badge de déliaison. pm peut être absent (ports.map appelle toujours
+// cette fonction pour garder l'index aligné avec le port RJ de même
+// numéro — voir priseMuraleHTML dans makeOccupiedCell) : rendu "libre".
+function priseMuraleHTML(pm, numero) {
+    const p = pm || {};
+    const libre = !p.appareil_id && !p.peripherique_id && !p.usage_libre;
+    const style = libre ? '' : `background:${p.couleur};`;
+    const classePing = (p.appareil_id && p.dernier_ping) ? (p.en_ligne ? ' pm-ping-ok' : ' pm-ping-fail') : '';
+    return `<span class="prise-murale${libre ? ' pm-libre' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePriseMurale(p))}" data-appareil="${p.appareil_id || ''}">
+        <span class="port-led"></span>${numero}</span>`;
+}
+
+function cleCiblePriseMurale(p) {
+    if (p.appareil_id) return 'a:' + p.appareil_id;
+    if (p.peripherique_id) return 'p:' + p.peripherique_id;
+    if (p.usage_libre) return 'u:' + p.usage_libre.trim().toLowerCase();
+    return '';
+}
+
 // Clé identifiant la cible d'un port — même cible = même clé, quel que soit
 // le port/slot qui la porte. Vide (jamais surlignable) pour un port libre.
 function cleCiblePort(p) {
@@ -1651,11 +1738,18 @@ let _cleSurbrillance = null;
 // une par une. Un second clic sur la même cible enlève la surbrillance.
 function surbrillerPortsLies(cle) {
     document.querySelectorAll('.port.port-highlight').forEach(el => el.classList.remove('port-highlight'));
+    document.querySelectorAll('.prise-murale.pm-highlight').forEach(el => el.classList.remove('pm-highlight'));
     document.querySelectorAll('.cable-link.cable-hover').forEach(el => el.classList.remove('cable-hover'));
     if (!cle || cle === _cleSurbrillance) { _cleSurbrillance = null; return; }
     _cleSurbrillance = cle;
     document.querySelectorAll('.port').forEach(el => {
         if (el.dataset.cle === cle) el.classList.add('port-highlight');
+    });
+    // Une prise murale partage le même espace de clés qu'un port (ex. 'a:123')
+    // — un appareil câblé à la fois via une prise murale ET un autre port
+    // (deux cartes réseau) doit se surligner des deux côtés.
+    document.querySelectorAll('.prise-murale').forEach(el => {
+        if (el.dataset.cle === cle) el.classList.add('pm-highlight');
     });
     const ligne = document.querySelector(`.cable-link[data-cle="${escH(cle)}"]`);
     if (ligne) ligne.classList.add('cable-hover');
@@ -1789,6 +1883,34 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau) {
     positionnerTooltip(e);
 }
 
+// Infobulle d'une prise murale (bandeau RJ) — pièce desservie, cible
+// (appareil/périphérique/usage) et son statut, câble fixe mur -> bandeau.
+// Plus simple que afficherTooltipPort : jamais de lien port-à-port ici
+// (voir cleCiblePriseMurale), la correspondance avec le port RJ de même
+// numéro est fixe et automatique, pas quelque chose à câbler soi-même.
+function afficherTooltipPriseMurale(e, pm, numero, nomSlot) {
+    const t = document.getElementById('rack-tooltip');
+    let html = `<div class="tip-title">🚪 Prise murale ${numero}${pm.nom_cible ? ' — ' + escH(pm.nom_cible) : ''}</div>`;
+    html += `<div class="tip-row"><span class="tip-key">Bandeau</span><span class="tip-val">${escH(nomSlot)}</span></div>`;
+    if (pm.piece) {
+        html += `<div class="tip-row"><span class="tip-key">Pièce</span><span class="tip-val">🚪 ${escH(pm.piece)}</span></div>`;
+    }
+    if (pm.appareil_id) {
+        html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${pm.en_ligne ? '🟢 En ligne' : '🔴 Hors ligne'}</span></div>`;
+    } else if (pm.peripherique_id) {
+        html += `<div class="tip-row"><span class="tip-key">Type</span><span class="tip-val">Périphérique</span></div>`;
+    } else if (!pm.usage_libre) {
+        html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);">Prise libre — non affectée</span></div>`;
+    }
+    if (pm.cable_couleur || pm.cable_longueur) {
+        html += `<div class="tip-row"><span class="tip-key">Câble</span><span class="tip-val">${[pm.cable_couleur, pm.cable_longueur].filter(Boolean).map(escH).join(' · ')}</span></div>`;
+    }
+    html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);font-size:.68rem;">↓ Port RJ ${numero} : interconnexion</span></div>`;
+    t.innerHTML = html;
+    t.classList.add('show');
+    positionnerTooltip(e);
+}
+
 // Ping des appareils reliés aux ports d'un élément — réutilise la route de
 // ping existante (/api/ping/appareil/<id>, déjà utilisée ailleurs dans
 // l'app pour le statut en ligne/hors ligne d'un appareil), un appel par
@@ -1802,7 +1924,9 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau) {
 async function pingerPortsElement(cell, ports) {
     const btn = cell.querySelector('.cell-ping-btn');
     const progressEl = cell.querySelector('.cell-ping-progress');
-    const cibles = [...new Set(ports.filter(p => p.appareil_id || p.lie_appareil_id).map(p => p.appareil_id || p.lie_appareil_id))];
+    // p.prise_murale.appareil_id compte aussi (bandeau RJ — l'appareil est
+    // désormais branché sur la prise murale, pas le port RJ lui-même).
+    const cibles = [...new Set(ports.flatMap(p => [p.appareil_id, p.lie_appareil_id, p.prise_murale && p.prise_murale.appareil_id]).filter(Boolean))];
     if (!cibles.length) { showFlash('Aucun appareil relié à un port de cet élément.', 'info'); return; }
     btn.disabled = true;
     const texteInitial = btn.textContent;
@@ -1829,14 +1953,22 @@ async function pingerPortsElement(cell, ports) {
                     if (!res.ok) sansIp++;
                     if (res.ok && res.en_ligne) nbOnline++;
                     ports.forEach(p => {
-                        if ((p.appareil_id || p.lie_appareil_id) !== res.id) return;
-                        p.en_ligne = !!res.en_ligne;
-                        if (res.ok) p.dernier_ping = new Date().toISOString(); // marque "pingé" pour les re-rendus suivants
+                        if (p.appareil_id === res.id || p.lie_appareil_id === res.id) {
+                            p.en_ligne = !!res.en_ligne;
+                            if (res.ok) p.dernier_ping = new Date().toISOString(); // marque "pingé" pour les re-rendus suivants
+                        }
+                        if (p.prise_murale && p.prise_murale.appareil_id === res.id) {
+                            p.prise_murale.en_ligne = !!res.en_ligne;
+                            if (res.ok) p.prise_murale.dernier_ping = new Date().toISOString();
+                        }
                     });
                     if (res.ok) {
-                        cell.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
-                            el.classList.remove('port-ping-ok', 'port-ping-fail');
-                            el.classList.add(res.en_ligne ? 'port-ping-ok' : 'port-ping-fail');
+                        cell.querySelectorAll(`.port[data-appareil="${res.id}"], .prise-murale[data-appareil="${res.id}"]`).forEach(el => {
+                            el.classList.remove('port-ping-ok', 'port-ping-fail', 'pm-ping-ok', 'pm-ping-fail');
+                            const cls = el.classList.contains('prise-murale')
+                                ? (res.en_ligne ? 'pm-ping-ok' : 'pm-ping-fail')
+                                : (res.en_ligne ? 'port-ping-ok' : 'port-ping-fail');
+                            el.classList.add(cls);
                         });
                     }
                     fait++; majProgress();
@@ -1868,7 +2000,7 @@ async function pingerToutelaBaie(manuel = true) {
     // uniquement atteint via un câblage structuré (bandeau RJ -> switch)
     // n'était jamais pingé par "Ping toute la baie".
     const cibles = [...new Set(Object.values(slots).flatMap(s => (s.ports || [])
-        .filter(p => p.appareil_id || p.lie_appareil_id).map(p => p.appareil_id || p.lie_appareil_id)))];
+        .flatMap(p => [p.appareil_id, p.lie_appareil_id, p.prise_murale && p.prise_murale.appareil_id])).filter(Boolean))];
     if (!cibles.length) { if (manuel) showFlash('Aucun appareil relié à un port dans cette baie.', 'info'); return; }
     // Ni le texte du bouton (icône seule depuis la compaction de la barre
     // d'outils, voir CLAUDE.md) ni sa taille ne changent plus pendant le
@@ -1890,14 +2022,22 @@ async function pingerToutelaBaie(manuel = true) {
                     if (!res.ok) sansIp++;
                     if (res.ok && res.en_ligne) nbOnline++;
                     Object.values(slots).forEach(s => (s.ports || []).forEach(p => {
-                        if ((p.appareil_id || p.lie_appareil_id) !== res.id) return;
-                        p.en_ligne = !!res.en_ligne;
-                        if (res.ok) p.dernier_ping = new Date().toISOString();
+                        if (p.appareil_id === res.id || p.lie_appareil_id === res.id) {
+                            p.en_ligne = !!res.en_ligne;
+                            if (res.ok) p.dernier_ping = new Date().toISOString();
+                        }
+                        if (p.prise_murale && p.prise_murale.appareil_id === res.id) {
+                            p.prise_murale.en_ligne = !!res.en_ligne;
+                            if (res.ok) p.prise_murale.dernier_ping = new Date().toISOString();
+                        }
                     }));
                     if (res.ok) {
-                        document.querySelectorAll(`.port[data-appareil="${res.id}"]`).forEach(el => {
-                            el.classList.remove('port-ping-ok', 'port-ping-fail');
-                            el.classList.add(res.en_ligne ? 'port-ping-ok' : 'port-ping-fail');
+                        document.querySelectorAll(`.port[data-appareil="${res.id}"], .prise-murale[data-appareil="${res.id}"]`).forEach(el => {
+                            el.classList.remove('port-ping-ok', 'port-ping-fail', 'pm-ping-ok', 'pm-ping-fail');
+                            const cls = el.classList.contains('prise-murale')
+                                ? (res.en_ligne ? 'pm-ping-ok' : 'pm-ping-fail')
+                                : (res.en_ligne ? 'port-ping-ok' : 'port-ping-fail');
+                            el.classList.add(cls);
                         });
                     }
                     fait++; majProgress();
@@ -1956,11 +2096,14 @@ function rechercherEquip(q) {
         if (!s) return;
         const champs = [s.nom_machine, s.nom_custom, s.type_equipement, s.adresse_ip, s.description,
                         s.p_categorie, s.p_marque, s.p_modele];
-        // Couvre aussi le contenu des ports (pièce assignée à un port de
-        // bandeau RJ, usage libre, cible câblée) — chercher le nom d'une
-        // pièce ne trouvait jusqu'ici rien, seul l'élément lui-même était
-        // indexé, jamais ce que ses ports portent individuellement.
-        (s.ports || []).forEach(p => champs.push(p.piece, p.usage_libre, p.nom_cible, p.cible_finale));
+        // Couvre aussi le contenu des ports (usage libre, cible câblée) et,
+        // pour un bandeau RJ, de leur prise murale (pièce, cible) — chercher
+        // le nom d'une pièce ne trouvait jusqu'ici rien, seul l'élément
+        // lui-même était indexé, jamais ce que ses ports/prises portent.
+        (s.ports || []).forEach(p => {
+            champs.push(p.piece, p.usage_libre, p.nom_cible, p.cible_finale);
+            if (p.prise_murale) champs.push(p.prise_murale.piece, p.prise_murale.usage_libre, p.prise_murale.nom_cible);
+        });
         const txt = champs.join(' ').toLowerCase();
         if (txt.includes(q)) cell.classList.add('highlighted');
     });
@@ -2028,8 +2171,14 @@ function afficherEditeurPorts(s) {
     const ports = s.ports || [];
     if (!s.id || !ports.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
     wrap.style.display = 'block';
+    // Bandeau RJ : deux blocs distincts par numéro (prise murale au-dessus,
+    // port RJ interconnexion-only en dessous) — tout autre élément garde
+    // l'unique éditeur historique (cible directe + usage libre).
     const estBandeau = s.type_equipement === 'Bandeau RJ';
-    list.innerHTML = ports.map(p => portEditorRowHTML(s.id, p, estBandeau)).join('');
+    list.innerHTML = ports.map(p => estBandeau
+        ? (priseMuraleEditorRowHTML(s.id, p.prise_murale, p.numero) + portRjEditorRowHTML(s.id, p))
+        : portEditorRowHTML(s.id, p)
+    ).join('');
 }
 
 function optionsAppareilsPeriph(valeurActuelle) {
@@ -2040,7 +2189,7 @@ function optionsAppareilsPeriph(valeurActuelle) {
     return appOpts + perOpts;
 }
 
-function portEditorRowHTML(slotId, p, estBandeau) {
+function portEditorRowHTML(slotId, p) {
     const valeur = p.appareil_id ? 'a:'+p.appareil_id
         : (p.peripherique_id ? 'p:'+p.peripherique_id
         : (p.lie_slot_id ? 'l' : (p.usage_libre ? 'u' : '')));
@@ -2064,20 +2213,6 @@ function portEditorRowHTML(slotId, p, estBandeau) {
                style="flex:1;font-size:.7rem;padding:.2rem .3rem;margin:0;${valeur==='u'?'':'display:none;'}"
                onchange="changerPortUsage(this)">
     </div>`;
-    // Pièce du site desservie par ce port (bandeau RJ) — champ INDÉPENDANT
-    // de la cible ci-dessus (voir migration piece dans init_db()) : reste
-    // renseigné même une fois le port câblé vers un switch via "🔗 Lier des
-    // ports", pour que la chaîne complète (pièce -> bandeau -> câble ->
-    // switch -> appareil) reste lisible d'un bout à l'autre.
-    if (estBandeau) {
-        html += `
-    <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;">
-        <input type="text" data-slot="${slotId}" data-numero="${p.numero}" list="dl-localisations"
-               value="${escH(p.piece||'')}" placeholder="🚪 Pièce du site…"
-               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
-               onchange="changerPortPiece(this)">
-    </div>`;
-    }
     // Étiquette de câble (couleur/longueur) — uniquement pour un port câblé
     // à un autre, purement documentaire, sauvegardée via la même route que
     // la création du lien (rejouer le même couple slot/numero est sans
@@ -2088,6 +2223,80 @@ function portEditorRowHTML(slotId, p, estBandeau) {
         <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
                data-lie-slot="${p.lie_slot_id}" data-lie-numero="${p.lie_port_numero}"
                value="${escH(p.cable_couleur||'')}" placeholder="Couleur câble"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerCableLabel(this)">
+        <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
+               data-lie-slot="${p.lie_slot_id}" data-lie-numero="${p.lie_port_numero}"
+               value="${escH(p.cable_longueur||'')}" placeholder="Longueur"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerCableLabel(this)">
+    </div>`;
+    }
+    return html;
+}
+
+// Prise murale d'un bandeau RJ — porte désormais ce qu'un port de bandeau
+// portait directement avant (voir CLAUDE.md/version 2.18.74) : la pièce du
+// site, la cible (appareil/périphérique/usage), et l'étiquette du câble
+// FIXE mur -> bandeau (distincte du cordon de brassage, géré par
+// portRjEditorRowHTML ci-dessous).
+function priseMuraleEditorRowHTML(slotId, pm, numero) {
+    const p = pm || {};
+    const valeur = p.appareil_id ? 'a:'+p.appareil_id
+        : (p.peripherique_id ? 'p:'+p.peripherique_id
+        : (p.usage_libre ? 'u' : ''));
+    let html = `
+    <div style="display:flex;gap:.3rem;align-items:center;">
+        <span style="width:28px;flex-shrink:0;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--text-muted);">🚪${numero}</span>
+        <select data-slot="${slotId}" data-numero="${numero}" onchange="changerPriseMurale(this)" style="flex:1.4;font-size:.7rem;padding:.2rem .3rem;margin:0;">
+            <option value=""${valeur===''?' selected':''}>— Libre —</option>
+            <option value="u"${valeur==='u'?' selected':''}>✎ Usage personnalisé…</option>
+            ${optionsAppareilsPeriph(valeur)}
+        </select>
+        <input type="text" data-slot="${slotId}" data-numero="${numero}"
+               value="${escH(p.usage_libre||'')}" placeholder="Téléphonie, alarme..."
+               style="flex:1;font-size:.7rem;padding:.2rem .3rem;margin:0;${valeur==='u'?'':'display:none;'}"
+               onchange="changerPriseMuraleUsage(this)">
+    </div>
+    <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;">
+        <input type="text" data-slot="${slotId}" data-numero="${numero}" list="dl-localisations"
+               value="${escH(p.piece||'')}" placeholder="🚪 Pièce du site…"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerPriseMuralePiece(this)">
+    </div>
+    <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;">
+        <input type="text" data-slot="${slotId}" data-numero="${numero}"
+               value="${escH(p.cable_couleur||'')}" placeholder="Couleur câble mural"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerCablePriseMurale(this)">
+        <input type="text" data-slot="${slotId}" data-numero="${numero}"
+               value="${escH(p.cable_longueur||'')}" placeholder="Longueur"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerCablePriseMurale(this)">
+    </div>`;
+    return html;
+}
+
+// Port RJ d'un bandeau RJ — ne sert plus qu'à interconnecter avec un autre
+// élément de la baie (voir baie_prises_murales côté serveur) : pas de
+// sélecteur cible ici (la prise murale ci-dessus la porte), seulement
+// l'état du lien — créé via "🔗 Lier des ports" dans la barre d'outils ou
+// détaché via le badge ✕ du port câblé affiché dans le rack — et
+// l'étiquette du cordon de brassage.
+function portRjEditorRowHTML(slotId, p) {
+    const etat = p.lie_slot_id
+        ? `🔗 ${escH(p.nom_cible)}`
+        : '<span style="color:var(--text-muted);">— Libre (interconnexion) —</span>';
+    let html = `
+    <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;border-top:1px dashed var(--border);padding-top:.3rem;margin-top:.15rem;">
+        <span style="flex:1;font-size:.7rem;color:var(--text-secondary);">🔌 Port ${p.numero} : ${etat}</span>
+    </div>`;
+    if (p.lie_slot_id) {
+        html += `
+    <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;">
+        <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
+               data-lie-slot="${p.lie_slot_id}" data-lie-numero="${p.lie_port_numero}"
+               value="${escH(p.cable_couleur||'')}" placeholder="Couleur cordon"
                style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
                onchange="changerCableLabel(this)">
         <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
@@ -2118,13 +2327,40 @@ async function changerPortUsage(input) {
         { appareil_id: null, peripherique_id: null, usage_libre: input.value.trim() });
 }
 
-// Pièce du site (bandeau RJ) — payload volontairement réduit à { piece },
+async function changerPriseMurale(sel) {
+    const slotId = sel.dataset.slot, numero = sel.dataset.numero;
+    const v = sel.value;
+    const usageInput = sel.nextElementSibling;
+    const estUsage = v === 'u';
+    usageInput.style.display = estUsage ? '' : 'none';
+    const payload = { appareil_id: null, peripherique_id: null, usage_libre: '' };
+    if (v.startsWith('a:')) payload.appareil_id = parseInt(v.slice(2));
+    else if (v.startsWith('p:')) payload.peripherique_id = parseInt(v.slice(2));
+    else if (estUsage) payload.usage_libre = usageInput.value.trim();
+    await enregistrerPriseMurale(slotId, numero, payload);
+}
+
+async function changerPriseMuraleUsage(input) {
+    await enregistrerPriseMurale(input.dataset.slot, input.dataset.numero,
+        { appareil_id: null, peripherique_id: null, usage_libre: input.value.trim() });
+}
+
+// Pièce du site (prise murale) — payload volontairement réduit à { piece },
 // sans appareil_id/peripherique_id/usage_libre : la route les laisse
-// intacts tant que ces clés sont absentes (voir api_baie_port côté
-// serveur), donc ce changement ne touche jamais la cible du port ni un
-// éventuel câblage en place.
-async function changerPortPiece(input) {
-    await enregistrerPort(input.dataset.slot, input.dataset.numero, { piece: input.value.trim() });
+// intacts tant que ces clés sont absentes (voir api_baie_prise_murale côté
+// serveur), donc ce changement ne touche jamais la cible de la prise.
+async function changerPriseMuralePiece(input) {
+    await enregistrerPriseMurale(input.dataset.slot, input.dataset.numero, { piece: input.value.trim() });
+}
+
+// Étiquette du câble FIXE mur -> bandeau (distincte du cordon de brassage,
+// voir changerCableLabel) — les deux champs voisins sont toujours renvoyés
+// ensemble, sinon celui qu'on ne vient pas de modifier serait effacé.
+async function changerCablePriseMurale(input) {
+    const [inputCouleur, inputLongueur] = input.parentElement.querySelectorAll('input');
+    await enregistrerPriseMurale(input.dataset.slot, input.dataset.numero, {
+        cable_couleur: inputCouleur.value.trim(), cable_longueur: inputLongueur.value.trim()
+    });
 }
 
 // Étiquette de câble (couleur/longueur) d'un lien port-à-port déjà créé —
@@ -2166,6 +2402,18 @@ async function enregistrerPort(slotId, numero, payload) {
     // soit ; sans ce rechargement, le port partenaire restait affiché
     // "relié" avec des données périmées (couleur, infobulle) jusqu'à sa
     // propre sélection — la ligne de câble disparaissait bien, pas lui.
+    await chargerBaie(currentBaie);
+    const cur = slotActuel();
+    if (cur) afficherEditeurPorts(cur);
+}
+
+// Même mécanique que enregistrerPort, côté prise murale — la prise murale
+// n'a jamais de partenaire à détacher (pas de lien), mais on recharge quand
+// même toute la baie pour rester cohérent avec le reste de l'éditeur.
+async function enregistrerPriseMurale(slotId, numero, payload) {
+    await fetch(`/api/baie/prise-murale/${slotId}/${numero}`, {
+        method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
     await chargerBaie(currentBaie);
     const cur = slotActuel();
     if (cur) afficherEditeurPorts(cur);
@@ -2283,6 +2531,19 @@ function majLabelEmplacements() {
     document.getElementById('hint-etagere').style.display = estEtagere ? '' : 'none';
     if (estEtagere) document.getElementById('cfg-nb-ports').value = '0';
 
+    // Bandeau RJ plafonné à 24 ports (voir _plafond_nb_ports côté serveur) —
+    // demandé : garantit la place d'empiler la rangée des prises murales
+    // au-dessus de celle des ports RJ sans agrandir la hauteur du bandeau.
+    // max mis à jour côté champ (pas seulement au submit, voir placerEquip)
+    // pour que le navigateur refuse déjà une saisie hors plage.
+    const estBandeauCfg = document.getElementById('cfg-type').value === 'Bandeau RJ';
+    const cfgNbPorts = document.getElementById('cfg-nb-ports');
+    cfgNbPorts.max = estBandeauCfg ? '24' : '48';
+    if (estBandeauCfg && parseInt(cfgNbPorts.value) > 24) cfgNbPorts.value = '24';
+    document.getElementById('hint-nb-ports').textContent = estBandeauCfg
+        ? '0 = pas de ports affichés. 24 maximum (prises murales incluses, une par port).'
+        : '0 = pas de ports affichés. 48 maximum.';
+
     // Une étagère est toujours 1U conceptuel — pas de "tablette 2U", voir
     // makeOccupiedCell (hu forcé à 1 pour ce type de toute façon en
     // défense) : autant l'exposer clairement dans le formulaire plutôt que
@@ -2299,12 +2560,14 @@ async function placerEquip() {
     const hu  = parseInt(document.getElementById('cfg-hu').value) || 1;
     if (pos < 1 || pos > nbU) { showFlash(`Position entre 1 et ${nbU}`, 'info'); return; }
 
-    const nbPorts = Math.min(48, Math.max(0, parseInt(document.getElementById('cfg-nb-ports').value) || 0));
+    const typeEquip = document.getElementById('cfg-type').value;
+    const plafondPorts = typeEquip === 'Bandeau RJ' ? 24 : 48;
+    const nbPorts = Math.min(plafondPorts, Math.max(0, parseInt(document.getElementById('cfg-nb-ports').value) || 0));
     const largeurVal = document.getElementById('cfg-largeur').value;
 
     const payload = {
         position: pos, col_index: col, hauteur_u: hu, baie_nom: currentBaie,
-        type_equipement: document.getElementById('cfg-type').value,
+        type_equipement: typeEquip,
         nom_custom:  document.getElementById('cfg-nom').value.trim(),
         description: document.getElementById('cfg-desc').value.trim(),
         couleur:     document.getElementById('cfg-couleur').value,

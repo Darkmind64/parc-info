@@ -224,12 +224,14 @@ def test_lien_port_a_port_bidirectionnel(client, make_client, make_user):
 
 
 def test_lien_resout_couleur_ping_via_port_en_face(client, make_client, make_user, make_appareil):
-    """Cas standard du brassage structuré : un bandeau RJ dont un port est
-    associé DIRECTEMENT à un appareil (prise murale), relié par cordon à un
-    port de switch. Signalé en usage réel : le port du switch restait
-    indigo générique (couleur "lien") au lieu de la couleur du type de
-    l'appareil, et n'était jamais inclus dans "Ping toute la baie" — ni la
-    couleur ni le ping ne suivaient la chaîne au-delà de l'élément en face."""
+    """Cas d'un élément d'interconnexion générique (Patch Panel — PAS un
+    bandeau RJ, voir test_baie_prises_murales.py pour son équivalent côté
+    prise murale) dont un port est associé DIRECTEMENT à un appareil, relié
+    par cordon à un port de switch. Signalé en usage réel : le port du
+    switch restait indigo générique (couleur "lien") au lieu de la couleur
+    du type de l'appareil, et n'était jamais inclus dans "Ping toute la
+    baie" — ni la couleur ni le ping ne suivaient la chaîne au-delà de
+    l'élément en face."""
     uid, _, _ = make_user()
     cid = make_client(auth_user_id=uid)
     login_session(client, uid, cid)
@@ -237,16 +239,16 @@ def test_lien_resout_couleur_ping_via_port_en_face(client, make_client, make_use
 
     patch = client.post('/api/baie/slot', json={
         'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale',
-        'type_equipement': 'Bandeau RJ', 'nom_custom': 'PATCH', 'nb_ports': 4,
+        'type_equipement': 'Patch Panel', 'nom_custom': 'PATCH', 'nb_ports': 4,
     }).get_json()
     sw = client.post('/api/baie/slot', json={
         'position': 2, 'col_index': 0, 'baie_nom': 'Baie principale',
         'type_equipement': 'Switch', 'nom_custom': 'SW', 'nb_ports': 4,
     }).get_json()
 
-    # Port 1 du bandeau associé DIRECTEMENT au NAS (câblage réel vers la prise murale).
+    # Port 1 du patch panel associé DIRECTEMENT au NAS.
     client.put(f"/api/baie/slot/{patch['id']}/port/1", json={'appareil_id': nas_id})
-    # Cordon de brassage : port 2 du switch <-> port 1 du bandeau.
+    # Cordon de brassage : port 2 du switch <-> port 1 du patch panel.
     r = client.post('/api/baie/lien-port', json={
         'slot1_id': sw['id'], 'numero1': 2, 'slot2_id': patch['id'], 'numero2': 1,
     })
@@ -260,7 +262,7 @@ def test_lien_resout_couleur_ping_via_port_en_face(client, make_client, make_use
 
     # Le patch panel port 1 garde bien son association directe (le lien ne
     # doit pas l'avoir effacée — c'est le port du SWITCH qui devient un
-    # lien, pas celui du bandeau).
+    # lien, pas celui du patch panel).
     ports_patch = client.get('/api/baie/slots?baie=Baie%20principale').get_json()['slots']
     patch_frais = next(s for s in ports_patch if s['id'] == patch['id'])
     port1_patch = next(p for p in patch_frais['ports'] if p['numero'] == 1)
