@@ -1,24 +1,25 @@
 {
-  "version": "2.18.70",
-  "release_date": "2026-08-27T00:00:00.000000",
+  "version": "2.18.71",
+  "release_date": "2026-08-28T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.70",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.71",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.71/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : la cause réelle du placement difficile enfin corrigée — plus de doublon en déplaçant un élément via le formulaire, et détection des chevauchements entre éléments à la création/au redimensionnement/au déplacement",
+    "new_features": "Baie de brassage : positionnement à la souris enfin fluide — retour visuel en direct (rouge/valide) pendant le glisser-déposer et le redimensionnement, décalage de prise préservé sur un élément haut de plusieurs U, poignées agrandies, badge de déliaison de port corrigé",
     "improvements": [
-      "Baie de brassage : éditer la position d'un élément déjà placé via le panneau « + Placer » créait un doublon à la nouvelle case au lieu de le déplacer (le formulaire ne postait jamais qu'une création) — corrigé, il modifie désormais l'élément sélectionné en place.",
-      "Baie de brassage : création, redimensionnement (hauteur/largeur/coin) et glisser-déposer vérifient maintenant que l'empreinte complète d'un élément (toutes ses rangées U × toutes ses colonnes) reste libre, pas seulement sa case d'origine — un élément haut de plusieurs U et étroit pouvait auparavant se superposer silencieusement à un autre.",
-      "Baie de brassage : un chevauchement est refusé avec un message nommant précisément ce qui bloque, sans rien modifier en base ; l'élément revient instantanément à sa position/taille d'origine à l'écran."
+      "Baie de brassage : la zone visée passe en rouge EN DIRECT dès qu'elle chevaucherait un autre élément (glisser-déposer et les 3 poignées de redimensionnement), au lieu de ne le découvrir qu'au relâchement après un aller-retour serveur — le relâchement n'appelle même plus le serveur si c'est déjà signalé invalide.",
+      "Baie de brassage : saisir un élément haut de plusieurs U ailleurs qu'à son coin (par exemple près du bas) ne fait plus « sauter » sa position au dépôt — l'endroit exact où il a été saisi reste sous le curseur pendant tout le geste.",
+      "Baie de brassage : zones de prise des poignées de redimensionnement agrandies (rendu au repos inchangé), plus faciles à viser sur un élément étroit.",
+      "Baie de brassage : le badge de déliaison d'un port câblé (✕ au survol) débordait au-dessus de la prise et se faisait couper en deux par le conteneur — repositionné entièrement à l'intérieur de la prise."
     ]
   },
   "checksums": {
@@ -29,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.70"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.71"
 }

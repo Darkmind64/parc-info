@@ -80,10 +80,19 @@
    JS (majMarqueur) à chaque déplacement de souris/glisser, jamais figé sur
    le début de la case. Masqué par défaut, affiché via style.display. */
 .cell-magnet { position:absolute; top:0; bottom:0; display:none; background:rgba(0,201,255,.22); border-left:1px solid var(--accent); border-right:1px solid var(--accent); pointer-events:none; }
+/* Case cible invalide (chevauchement détecté EN DIRECT, voir
+   elementEnCollision) : rouge au lieu du cyan habituel — visible PENDANT
+   le geste, avant de relâcher la souris, plutôt que de laisser l'élément
+   "sauter" ou revenir en arrière sans explication au relâchement. */
+.cell-magnet.invalide { background:rgba(255,51,85,.28); border-color:var(--accent-red,#ff3355); }
+.rack-cell.drag-over.invalide { border-color:var(--accent-red,#ff3355)!important; background:rgba(255,51,85,.12)!important; box-shadow:0 0 8px rgba(255,51,85,.5)!important; cursor:not-allowed; }
 .rack-cell.drag-over    { border-color:rgba(0,201,255,.8)!important; background:rgba(0,201,255,.1)!important; box-shadow:0 0 8px rgba(0,201,255,.5)!important; }
 .rack-cell.selected     { border-color:var(--accent)!important; box-shadow:0 0 8px rgba(0,201,255,.3); }
 .rack-cell.highlighted  { border-color:#fbbf24!important; background:rgba(251,191,36,.1)!important; }
 .rack-cell.dragging     { opacity:.4; }
+/* Redimensionnement (poignée bas/droite/coin) en cours de chevaucher un
+   autre élément — même code couleur rouge, sur la cellule qu'on étire. */
+.rack-cell.invalide { outline:2px solid var(--accent-red,#ff3355); outline-offset:-2px; }
 
 /* Élément avec ports : la ligne d'infos passe en en-tête fixe, les ports se
    répartissent dans le reste de la hauteur disponible — laquelle dépend de
@@ -178,8 +187,13 @@
 }
 .cell-del:hover { color:var(--accent-red); background:rgba(255,51,85,.15); }
 
+/* Zones de prise agrandies (invisibles au repos, comme avant — seul le
+   hover/.resizing colore) : les tailles précédentes (5px, 5px, 9x9)
+   étaient signalées comme trop fines pour viser fiablement à la souris,
+   particulièrement sur un élément étroit — corrigé sans changer le rendu
+   au repos, seule la zone RÉELLEMENT cliquable grandit. */
 .cell-resize {
-    position:absolute; left:0; right:0; bottom:-2px; height:5px; cursor:ns-resize; z-index:6;
+    position:absolute; left:0; right:0; bottom:-4px; height:9px; cursor:ns-resize; z-index:6;
 }
 .cell-resize:hover, .cell-resize.resizing { background:rgba(0,201,255,.35); }
 
@@ -188,14 +202,14 @@
    redimensionnerLargeurSlot()). Même logique que .cell-resize (hauteur),
    orientée horizontalement. */
 .cell-resize-w {
-    position:absolute; top:0; bottom:0; right:-2px; width:5px; cursor:ew-resize; z-index:6;
+    position:absolute; top:0; bottom:0; right:-4px; width:9px; cursor:ew-resize; z-index:6;
 }
 .cell-resize-w:hover, .cell-resize-w.resizing { background:rgba(0,201,255,.35); }
 
 /* Poignée de redimensionnement DIAGONAL — coin bas-droit, change hauteur_u
    ET largeur_u en un seul geste (voir redimensionnerCoinSlot()). */
 .cell-resize-corner {
-    position:absolute; right:-2px; bottom:-2px; width:9px; height:9px; cursor:nwse-resize; z-index:7;
+    position:absolute; right:-4px; bottom:-4px; width:14px; height:14px; cursor:nwse-resize; z-index:7;
     border-radius:0 0 2px 0;
 }
 .cell-resize-corner:hover, .cell-resize-corner.resizing { background:rgba(0,201,255,.55); }
@@ -251,14 +265,22 @@
    seulement au survol d'un port câblé (voir delierPort()). Manquait une
    action directe pour ça : jusqu'ici, la seule façon était de rouvrir
    l'éditeur de ports et choisir "— Libre —" dans le menu déroulant, jamais
-   évident à trouver en partant du câble affiché dans le rack. */
+   évident à trouver en partant du câble affiché dans le rack.
+   top:0/right:0 (jamais de décalage négatif, contrairement au premier
+   essai) : un port est un des rares éléments de la baie logé DANS un
+   ancêtre à overflow:hidden (.rack-cell, nécessaire ailleurs pour habiller
+   l'étagère et tronquer les textes) — un badge qui dépasse ne serait-ce
+   que de quelques px au-dessus de son port se faisait couper en deux,
+   signalé en usage réel. Reste dans le coin, comme .port-led (voyant de
+   ping) déjà posé en haut-gauche sans jamais déborder. */
 .port-unlink {
-    display:none; position:absolute; top:-4px; right:-4px; width:12px; height:12px;
-    border-radius:50%; background:#dc2626; color:#fff; font-size:8px; font-weight:700;
-    line-height:12px; text-align:center; z-index:5; box-shadow:0 0 0 1px rgba(0,0,0,.6);
+    display:none; position:absolute; top:0; right:0; width:11px; height:11px;
+    background:rgba(10,14,20,.88); color:#fca5a5; font-size:9px; font-weight:700;
+    line-height:11px; text-align:center; z-index:5; border-radius:0 3px 0 4px;
+    cursor:pointer;
 }
 .port.port-lie:hover .port-unlink { display:block; }
-.port-unlink:hover { background:#ff3355; transform:scale(1.2); }
+.port-unlink:hover { background:var(--accent-red,#ff3355); color:#fff; }
 
 .cell-ping-btn {
     background:none; border:1px solid #334155; color:#64748b; cursor:pointer;
@@ -627,6 +649,16 @@ let selectedSlotId = null;
 function slotActuel() {
     return selectedSlotId ? Object.values(slots).find(x => x.id === selectedSlotId) : null;
 }
+
+// Glisser-déposer d'un élément entier (pas un redimensionnement) : infos
+// de l'élément EN COURS de glisser, posées au dragstart. Une variable
+// globale plutôt que dataTransfer.getData() — volontaire : l'API HTML5
+// Drag & Drop interdit de LIRE la valeur transportée pendant dragover
+// (seulement au drop), alors qu'un retour en direct (magnétisation
+// rouge/valide) doit justement se calculer pendant le survol, à chaque
+// case vide traversée. dataTransfer garde son rôle minimal (juste l'id,
+// pour rester lisible si un jour un autre point de dépôt en dépend).
+let dragInfo = null;
 const MAX_COLS = 5;
 // U_H : calculé dynamiquement pour respecter le ratio 19" × 1,75" par U
 // (1 U = 1,75 pouce ; largeur rack = 19 pouces → ratio = 1,75/19 ≈ 0,0921)
@@ -738,6 +770,28 @@ async function chargerBaie(baieNom) {
 
 function key(pos, col) { return `${pos}-${col}`; }
 function escH(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// Même règle de chevauchement que _slots_en_collision côté serveur (voir
+// app.py), mais évaluée EN DIRECT côté client, à partir des données déjà
+// en mémoire (`slots`) — sert à colorer la zone visée en rouge/valide
+// PENDANT un glisser ou un redimensionnement, avant même de relâcher la
+// souris. Jusqu'ici, le seul retour venait du serveur au relâchement :
+// l'élément semblait "sauter" ou revenir en arrière sans qu'on comprenne
+// pourquoi pendant le geste — signalé en usage réel comme rendant le
+// positionnement à la souris "toujours galère", même une fois le
+// chevauchement effectivement bloqué (2.18.70).
+function elementEnCollision(position, hauteur, colDebut, largeur, excludeId) {
+    const finU = position + hauteur - 1;
+    const finCol = colDebut + largeur - 1;
+    for (const sl of Object.values(slots)) {
+        if (sl.id === excludeId) continue;
+        const slHu = sl.hauteur_u || 1, slLu = sl.largeur_u || 10, slCol = sl.col_index || 0;
+        const slFinU = sl.position + slHu - 1;
+        const slFinCol = slCol + slLu - 1;
+        if (position <= slFinU && sl.position <= finU && colDebut <= slFinCol && slCol <= finCol) return sl;
+    }
+    return null;
+}
 
 // ── VERROUILLAGE ─────────────────────────────────────────────────────────────
 // Une clé par baie (currentBaie) : verrouiller "Baie principale" ne doit
@@ -1079,19 +1133,33 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             const deltaU = Math.round((clientY - startY) / U_H);
             return Math.min(maxHu, Math.max(1, startHu + deltaU));
         };
+        let dernierInvalide = false;
         const onMove = ev => {
             const nv = calculerNouvelleHu(ev.clientY);
             cell.style.height = (nv * U_H + (nv - 1)) + 'px';
+            // Chevauchement en direct (voir elementEnCollision) — rouge
+            // PENDANT le geste plutôt que de découvrir le refus seulement
+            // au relâchement (voir CLAUDE.md, correctif "galère souris").
+            dernierInvalide = !!elementEnCollision(s.position, nv, debut, s.largeur_u || 10, s.id);
+            cell.classList.toggle('invalide', dernierInvalide);
             renderCableLinks(); // suit les ports en direct pendant le geste
         };
         const onUp = async ev => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             poignee.classList.remove('resizing');
+            cell.classList.remove('invalide');
             cell.draggable = true;
             const nv = calculerNouvelleHu(ev.clientY);
-            if (nv !== startHu) await redimensionnerSlot(s, nv);
-            else renderRack();
+            if (nv === startHu) { renderRack(); return; }
+            if (dernierInvalide) {
+                // Déjà signalé en rouge pendant le geste : pas la peine
+                // d'aller vérifier côté serveur, juste revenir en arrière.
+                showFlash('Chevauche un autre élément — redimensionnement annulé.', 'danger');
+                renderRack();
+                return;
+            }
+            await redimensionnerSlot(s, nv);
         };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
@@ -1118,19 +1186,28 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             const delta = Math.round((clientX - startX) / tenthPx);
             return Math.min(maxLargeur, Math.max(1, startLargeur + delta));
         };
+        let dernierInvalide = false;
         const onMove = ev => {
             const nv = calculerNouvelleLargeur(ev.clientX);
             cell.style.gridColumn = `${debut + 1} / span ${nv}`;
+            dernierInvalide = !!elementEnCollision(s.position, s.hauteur_u || 1, debut, nv, s.id);
+            cell.classList.toggle('invalide', dernierInvalide);
             renderCableLinks(); // suit les ports en direct pendant le geste
         };
         const onUp = async ev => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             poigneeW.classList.remove('resizing');
+            cell.classList.remove('invalide');
             cell.draggable = true;
             const nv = calculerNouvelleLargeur(ev.clientX);
-            if (nv !== startLargeur) await redimensionnerLargeurSlot(s, nv);
-            else renderRack();
+            if (nv === startLargeur) { renderRack(); return; }
+            if (dernierInvalide) {
+                showFlash('Chevauche un autre élément — redimensionnement annulé.', 'danger');
+                renderRack();
+                return;
+            }
+            await redimensionnerLargeurSlot(s, nv);
         };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
@@ -1158,20 +1235,29 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             hu: Math.min(maxHu, Math.max(1, startHu + Math.round((clientY - startY) / U_H))),
             largeur: Math.min(maxLargeur, Math.max(1, startLargeur + Math.round((clientX - startX) / tenthPx))),
         });
+        let dernierInvalide = false;
         const onMove = ev => {
             const {hu, largeur} = calculer(ev.clientX, ev.clientY);
             cell.style.height = (hu * U_H + (hu - 1)) + 'px';
             cell.style.gridColumn = `${debut + 1} / span ${largeur}`;
+            dernierInvalide = !!elementEnCollision(s.position, hu, debut, largeur, s.id);
+            cell.classList.toggle('invalide', dernierInvalide);
             renderCableLinks();
         };
         const onUp = async ev => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             poigneeC.classList.remove('resizing');
+            cell.classList.remove('invalide');
             cell.draggable = true;
             const {hu, largeur} = calculer(ev.clientX, ev.clientY);
-            if (hu !== startHu || largeur !== startLargeur) await redimensionnerCoinSlot(s, hu, largeur);
-            else renderRack();
+            if (hu === startHu && largeur === startLargeur) { renderRack(); return; }
+            if (dernierInvalide) {
+                showFlash('Chevauche un autre élément — redimensionnement annulé.', 'danger');
+                renderRack();
+                return;
+            }
+            await redimensionnerCoinSlot(s, hu, largeur);
         };
         document.addEventListener('mousemove', onMove);
         document.addEventListener('mouseup', onUp);
@@ -1188,10 +1274,22 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     cell.draggable = !baieVerrouillee;
     cell.addEventListener('dragstart', e => {
         e.dataTransfer.setData('text/plain', JSON.stringify({id: s.id, pos: u, col: debut}));
+        // Décalage de prise EN U et en colonnes — l'endroit où la souris a
+        // saisi l'élément, pas forcément son coin haut-gauche (rare de
+        // saisir un pavé de plusieurs U pile par son origine). Sans ce
+        // décalage, déposer faisait toujours correspondre l'ORIGINE de
+        // l'élément à la case survolée, quel que soit l'endroit où il avait
+        // été saisi — un pavé haut de 3U saisi près du bas "sautait" de 2U
+        // vers le haut au dépôt, disproportionné par rapport au geste
+        // réellement fait. Ici, le point saisi reste sous le curseur.
+        const rect = cell.getBoundingClientRect();
+        const decalageU = Math.max(0, Math.min(hu - 1, Math.floor((e.clientY - rect.top) / U_H)));
+        const decalageCol = Math.max(0, Math.min(largeur - 1, Math.floor((e.clientX - rect.left) / (rect.width / largeur))));
+        dragInfo = { id: s.id, hauteurU: hu, largeurU: largeur, decalageU, decalageCol };
         cell.classList.add('dragging');
         setTimeout(() => cell.classList.add('dragging'), 0);
     });
-    cell.addEventListener('dragend', () => cell.classList.remove('dragging'));
+    cell.addEventListener('dragend', () => { cell.classList.remove('dragging'); dragInfo = null; });
 
     return cell;
 }
@@ -1231,10 +1329,36 @@ function makeEmptyCell(u, debut, largeur, rowH) {
         m.style.left = ((col - debut) / largeur * 100) + '%';
         m.style.width = (100 / largeur) + '%';
         m.style.display = 'block';
+        // Pendant un VRAI glisser d'élément (dragInfo posé au dragstart,
+        // voir plus haut) : colore en rouge si déposer ICI chevaucherait un
+        // autre élément — calculé avec le décalage de prise appliqué (voir
+        // positionViseeGlisser), c'est-à-dire l'endroit où l'élément
+        // atterrirait VRAIMENT, pas la case brute sous le curseur. Simple
+        // survol (clic à venir, pas de glisser en cours) : jamais de rouge,
+        // rien à chevaucher puisque rien ne bouge encore.
+        if (dragInfo) {
+            const {pos, col: colAjuste} = positionViseeGlisser(clientX);
+            const invalide = !!elementEnCollision(pos, dragInfo.hauteurU, colAjuste, dragInfo.largeurU, dragInfo.id);
+            m.classList.toggle('invalide', invalide);
+            cell.classList.toggle('invalide', invalide);
+        } else {
+            m.classList.remove('invalide');
+        }
     }
     function masquerMarqueur() {
         const m = cell.querySelector('.cell-magnet');
-        if (m) m.style.display = 'none';
+        if (m) { m.style.display = 'none'; m.classList.remove('invalide'); }
+        cell.classList.remove('invalide');
+    }
+    // Décalage de prise appliqué (voir dragInfo, posé au dragstart) : la
+    // position/colonne où l'élément atterrirait VRAIMENT si on relâchait
+    // ici, pas la case brute sous le curseur — sans ça, un pavé haut de
+    // plusieurs U saisi ailleurs qu'à son coin ferait un bond disproportionné
+    // par rapport au geste réellement fait.
+    function positionViseeGlisser(clientX) {
+        const col = colonneVisee(clientX);
+        if (!dragInfo) return { pos: u, col };
+        return { pos: Math.max(1, u - dragInfo.decalageU), col: Math.max(0, col - dragInfo.decalageCol) };
     }
 
     // Pré-remplit position ET largeur pour reprendre l'espace libre depuis
@@ -1266,16 +1390,24 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     cell.addEventListener('drop', async e => {
         e.preventDefault();
         cell.classList.remove('drag-over');
-        masquerMarqueur();
         // Repli défensif : draggable=false sur les cellules occupées
         // empêche déjà tout dragstart quand la baie est verrouillée (voir
         // toggleVerrouBaie), donc cette branche ne devrait jamais s'exécuter
         // dans ce cas — gardée quand même au cas où un glisser aurait pu
         // démarrer autrement.
-        if (baieVerrouillee) return;
+        if (baieVerrouillee) { masquerMarqueur(); return; }
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
-        const col = colonneVisee(e.clientX);
-        await deplacerSlot(data.id, u, col);
+        const { pos, col } = positionViseeGlisser(e.clientX);
+        // Déjà signalé en rouge pendant le survol (voir majMarqueur) : pas
+        // la peine d'aller vérifier côté serveur, l'utilisateur a déjà vu
+        // que cet endroit était refusé avant même de relâcher la souris.
+        if (dragInfo && elementEnCollision(pos, dragInfo.hauteurU, col, dragInfo.largeurU, dragInfo.id)) {
+            showFlash('Chevauche un autre élément — déplacement annulé.', 'danger');
+            masquerMarqueur();
+            return;
+        }
+        masquerMarqueur();
+        await deplacerSlot(data.id, pos, col);
     });
 
     return cell;

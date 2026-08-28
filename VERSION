@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.18.70
-RELEASE_DATE=2026-08-27
-BUILD_NUMBER=2026082708
+PARCINFO_VERSION=2.18.71
+RELEASE_DATE=2026-08-28
+BUILD_NUMBER=2026082801
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.71 - Baie de brassage : positionnement à la souris enfin fluide, badge de déliaison corrigé
+# Suite directe de la 2.18.70 (chevauchements désormais bloqués) : une fois
+# le blocage en place, le retour utilisateur a été net — toujours "galère"
+# à la souris, alors que les mêmes actions via les champs Position/
+# Colonne/Hauteur/Largeur se faisaient sans accroc. Deux causes distinctes
+# trouvées en étudiant précisément le geste à la souris (glisser-déposer et
+# les trois poignées de redimensionnement), plus un correctif visuel signalé
+# séparément.
+#
+# 1) Aucun retour PENDANT le geste : le contrôle de chevauchement (2.18.70)
+# ne se déclenchait qu'au relâchement, après un aller-retour serveur —
+# l'élément semblait parfois revenir en arrière sans qu'on comprenne
+# pourquoi. La zone visée passe désormais en ROUGE en direct dès qu'elle
+# chevaucherait un autre élément (glisser-déposer et les 3 poignées), et le
+# relâchement n'appelle même plus le serveur si c'est déjà signalé invalide.
+#
+# 2) Un pavé haut de plusieurs U "sautait" au glisser-déposer : le saisir
+# ailleurs qu'à son coin (par exemple près du bas) faisait que l'élément se
+# replaçait avec son ORIGINE sous le curseur au dépôt, un bond disproportionné
+# par rapport au geste réellement fait. Corrigé : l'endroit exact où
+# l'élément a été saisi (en U et en colonne) reste sous le curseur pendant
+# tout le geste.
+#
+# Plus : poignées de redimensionnement agrandies (zones de prise réelles,
+# rendu au repos inchangé) ; badge de déliaison d'un port câblé (✕ au
+# survol, ajouté en 2.18.70) qui débordait au-dessus de la prise et se
+# faisait couper en deux par le conteneur — repositionné entièrement à
+# l'intérieur de la prise, plus jamais rogné.
 
 # Version 2.18.70 - Baie de brassage : la vraie cause du placement difficile enfin corrigée (doublon + chevauchements)
 # Quatrième tour de retours consécutif sur le même écran. Les précédents
