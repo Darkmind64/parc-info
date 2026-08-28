@@ -54,13 +54,32 @@ def verifier(condition, libelle, detail=''):
 
 
 print('=== 1. _reseaux_locaux_actuels() : dérivé des IP locales, sans la boucle ===')
+# RUNNING_IN_DOCKER=1 (mis en place plus haut, par convention avec les
+# autres tests autonomes) court-circuite désormais cette détection — voir
+# section 1bis. Pour tester la détection RÉELLE ici, on le retire le temps
+# de l'appel, comme le fait déjà ce test pour gethostbyname_ex ci-dessous.
+_docker_env_original = os.environ.pop('RUNNING_IN_DOCKER', None)
 _ghe_original = A.socket.gethostbyname_ex
 A.socket.gethostbyname_ex = lambda h: (h, [], ['192.168.1.42', '10.0.5.7', '127.0.0.1'])
 reseaux = A._reseaux_locaux_actuels()
 A.socket.gethostbyname_ex = _ghe_original
+if _docker_env_original is not None:
+    os.environ['RUNNING_IN_DOCKER'] = _docker_env_original
 verifier(ipaddress.ip_network('192.168.1.0/24') in reseaux, "réseau de la première interface retenu")
 verifier(ipaddress.ip_network('10.0.5.0/24') in reseaux, "réseau de la seconde interface (multi-interfaces) retenu")
 verifier(not any(str(r).startswith('127.') for r in reseaux), "la boucle locale (127.x) est exclue")
+
+print('\n=== 1bis. _reseaux_locaux_actuels() : court-circuitée en Docker ===')
+# Régression réelle signalée : en Docker, l'IP vue par le conteneur (réseau
+# bridge interne) ne recoupe jamais le LAN du client, même quand le NAT
+# sortant du hôte permet bel et bien de le joindre — sans ce court-circuit,
+# _appareil_sur_reseau_courant() rejetterait alors TOUS les appareils à
+# chaque cycle, et le statut en ligne/hors ligne resterait figé pour de bon.
+assert os.environ.get('RUNNING_IN_DOCKER') == '1', "précondition : RUNNING_IN_DOCKER=1 pour ce test"
+A.socket.gethostbyname_ex = lambda h: (h, [], ['172.17.0.2'])
+reseaux_docker = A._reseaux_locaux_actuels()
+A.socket.gethostbyname_ex = _ghe_original
+verifier(reseaux_docker == set(), "en Docker, retourne un set vide (repli : on pingue tout, comme avant le filtre)")
 
 print('\n=== 2. _appareil_sur_reseau_courant() ===')
 un_reseau = {ipaddress.ip_network('192.168.1.0/24')}

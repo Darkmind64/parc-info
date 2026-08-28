@@ -1,8 +1,33 @@
-PARCINFO_VERSION=2.18.72
+PARCINFO_VERSION=2.18.73
 RELEASE_DATE=2026-08-28
-BUILD_NUMBER=2026082802
+BUILD_NUMBER=2026082803
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.73 - Correctif critique : statut en ligne/hors ligne figé en déploiement Docker
+# Signalé par l'utilisateur : dans l'inventaire des appareils, le statut en
+# ligne/hors ligne ne se mettait plus à jour, certains appareils réellement
+# en ligne restant affichés comme hors ligne.
+# Cause : le watchdog de ping en tâche de fond (_watchdog_cycle) ne pingue
+# depuis la 2.18.20 que les appareils jugés "sur le réseau actuel"
+# (_appareil_sur_reseau_courant), pour éviter de marquer à tort hors ligne
+# les appareils d'un client dont on a quitté le réseau (poste technicien
+# mobile). Cette détection compare les IP locales du poste hôte
+# (_reseaux_locaux_actuels(), via socket.gethostbyname_ex) à la plage IP du
+# client — un calcul qui n'a aucun sens en Docker (déploiement pourtant
+# officiellement supporté, cf. Dockerfile RUNNING_IN_DOCKER=1) : l'IP vue
+# par le conteneur est celle du réseau bridge interne (ex. 172.17.0.2),
+# jamais celle du LAN du client, même quand le conteneur peut parfaitement
+# joindre ce LAN via le NAT sortant de l'hôte. Résultat : TOUS les
+# appareils étaient silencieusement exclus de chaque cycle de ping — le
+# watchdog tournait bien (compteur de cycles et horodatage à jour, topbar
+# non figée en apparence) mais ne pingait plus jamais rien, laissant le
+# statut affiché gelé sur sa dernière valeur connue.
+# Corrigé : _reseaux_locaux_actuels() retourne désormais un ensemble vide
+# en Docker, déclenchant le repli déjà prévu pour "réseau local
+# indéterminable" — on ping à nouveau tous les appareils, comme avant
+# l'introduction de ce filtre. Nouveau cas de test dédié dans
+# test_watchdog_reseau_courant.py.
 
 # Version 2.18.72 - Baie de brassage : interface d'administration en un clic, ping/couleur des appareils câblés via un lien
 # Deux ajouts distincts sur le même écran.

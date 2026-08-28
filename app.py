@@ -11993,7 +11993,23 @@ def _reseaux_locaux_actuels():
     (Ethernet + Wi-Fi) : socket.gethostbyname_ex() (même technique que
     collector_core.get_ip_addresses(), côté collecteur) remonte les adresses
     IP de toutes les interfaces connues du système, pas une seule — sans
-    dépendance supplémentaire (pas de psutil/netifaces)."""
+    dépendance supplémentaire (pas de psutil/netifaces).
+
+    En Docker (RUNNING_IN_DOCKER=1, déploiement officiellement supporté —
+    voir Dockerfile / README), cette détection n'a aucun sens : l'IP vue
+    par le conteneur est celle du réseau bridge interne (ex. 172.17.0.2),
+    jamais celle du LAN du client (ex. 192.168.1.0/24), même quand le
+    conteneur PEUT parfaitement joindre ce LAN via le NAT sortant du hôte.
+    Sans ce court-circuit, _appareil_sur_reseau_courant() rejette alors
+    silencieusement TOUS les appareils à chaque cycle : le watchdog tourne
+    (le compteur de cycles avance) mais ne ping plus jamais rien, et le
+    statut en ligne/hors ligne affiché reste figé sur sa dernière valeur
+    connue — exactement le symptôme d'un appareil réellement en ligne
+    affiché à tort comme hors ligne. Retourner un set vide déclenche le
+    même repli que « résolution DNS indisponible » : on ping tout, comme
+    avant l'introduction de ce filtre (comportement historique)."""
+    if os.environ.get('RUNNING_IN_DOCKER'):
+        return set()
     reseaux = set()
     try:
         ips = socket.gethostbyname_ex(socket.gethostname())[2]
