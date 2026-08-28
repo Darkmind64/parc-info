@@ -1242,6 +1242,11 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     // peut toujours ajuster ensuite).
     cell.addEventListener('click', e => {
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
+        // Case VIDE cliquée : on place forcément quelque chose de NOUVEAU,
+        // jamais une édition de l'élément précédemment sélectionné — sans
+        // cette remise à zéro, placerEquip() aurait continué de cibler
+        // l'ancien id (PUT dessus) au lieu de créer ce nouvel élément.
+        selectedSlotId = null;
         const col = colonneVisee(e.clientX);
         document.getElementById('cfg-pos').value = u;
         document.getElementById('cfg-col').value = col;
@@ -1283,6 +1288,15 @@ async function deplacerSlot(id, newPos, newCol) {
         body: JSON.stringify({position: newPos, col_index: newCol})
     });
     const slot = await r.json();
+    if (!r.ok || slot.error) {
+        // Refusé (chevauchement avec un autre élément — voir
+        // _slots_en_collision côté serveur) : rien n'a bougé en base, un
+        // simple re-rendu à partir des données INCHANGÉES suffit à faire
+        // revenir la cellule glissée à sa place d'origine.
+        showFlash(slot.error || 'Déplacement refusé.', 'danger');
+        renderRack();
+        return;
+    }
     // Rebuild slots map — à partir de la réponse SERVEUR (slot.position/
     // col_index), pas des newPos/newCol demandés : le serveur peut avoir
     // recalé la colonne pour que le slot (avec sa largeur propre) ne
@@ -1290,10 +1304,7 @@ async function deplacerSlot(id, newPos, newCol) {
     // api_baie_deplacer_slot) — utiliser les valeurs demandées ici aurait
     // indexé le slot au mauvais endroit dans la carte côté client.
     Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
-    const nk = key(slot.position, slot.col_index || 0);
-    // Remove any existing at destination
-    Object.keys(slots).forEach(k => { if (k === nk) delete slots[k]; });
-    slots[nk] = slot;
+    slots[key(slot.position, slot.col_index || 0)] = slot;
     nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1));
     renderRack(); renderList();
 }
@@ -1317,6 +1328,15 @@ async function redimensionnerSlot(s, nouvelleHu) {
         })
     });
     const updated = await r.json();
+    if (!r.ok || updated.error) {
+        // Refusé (chevauchement — voir _slots_en_collision) : rien n'a
+        // changé en base, un re-rendu depuis les données INCHANGÉES fait
+        // revenir la cellule à sa hauteur d'origine (elle avait été
+        // agrandie/réduite optimistiquement pendant le glisser).
+        showFlash(updated.error || 'Redimensionnement refusé.', 'danger');
+        renderRack();
+        return;
+    }
     slots[key(updated.position, updated.col_index || 0)] = updated;
     renderRack(); renderList();
 }
@@ -1336,6 +1356,11 @@ async function redimensionnerLargeurSlot(s, nouvelleLargeur) {
         })
     });
     const updated = await r.json();
+    if (!r.ok || updated.error) {
+        showFlash(updated.error || 'Redimensionnement refusé.', 'danger');
+        renderRack();
+        return;
+    }
     slots[key(updated.position, updated.col_index || 0)] = updated;
     renderRack(); renderList();
 }
@@ -1355,6 +1380,11 @@ async function redimensionnerCoinSlot(s, nouvelleHu, nouvelleLargeur) {
         })
     });
     const updated = await r.json();
+    if (!r.ok || updated.error) {
+        showFlash(updated.error || 'Redimensionnement refusé.', 'danger');
+        renderRack();
+        return;
+    }
     slots[key(updated.position, updated.col_index || 0)] = updated;
     renderRack(); renderList();
 }
@@ -2080,10 +2110,36 @@ async function placerEquip() {
         largeur_u: largeurVal ? parseInt(largeurVal) : null
     };
 
-    const r = await fetch('/api/baie/slot', {
-        method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+    // Élément déjà sélectionné (voir selectSlot/selectedSlotId) : PUT sur
+    // SON id pour le déplacer/redimensionner/modifier en place. Auparavant
+    // ce bouton postait TOUJOURS une création (/api/baie/slot en POST) —
+    // changer la position ou la colonne dans le formulaire créait donc un
+    // DOUBLON à la nouvelle case sans jamais toucher l'ancien élément,
+    // resté planté à son ancienne place. C'était la seule façon fiable de
+    // positionner précisément un élément moins large que la baie et haut
+    // de plusieurs U (le glisser-déposer à la souris est difficile sur un
+    // gros pavé) — et elle ne marchait pas.
+    const editingId = slotActuel()?.id || null;
+    const url = editingId ? `/api/baie/slot/${editingId}` : '/api/baie/slot';
+    const r = await fetch(url, {
+        method: editingId ? 'PUT' : 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
     });
     const s = await r.json();
+    if (!r.ok || s.error) {
+        // Rejeté (le plus souvent : chevauchement avec un autre élément,
+        // voir _slots_en_collision côté serveur) — rien n'a changé en
+        // base, ne rien changer côté client non plus : pas de re-rendu qui
+        // ferait disparaître ou dédoubler quoi que ce soit à l'écran.
+        showFlash(s.error || 'Le placement a été refusé.', 'danger');
+        return;
+    }
+    if (editingId) {
+        // Retire l'ancienne entrée de la carte locale si la case a changé
+        // (déplacement) — sinon l'élément resterait dupliqué dans `slots`
+        // sous son ancienne clé position-colonne en plus de la nouvelle.
+        const nk = key(s.position, s.col_index || 0);
+        Object.keys(slots).forEach(k => { if (slots[k].id === editingId && k !== nk) delete slots[k]; });
+    }
     slots[key(s.position, s.col_index||0)] = s;
     if ((s.col_index||0) + 1 > nbCols) nbCols = (s.col_index||0) + 1;
     renderRack(); renderList();

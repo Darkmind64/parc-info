@@ -1,27 +1,24 @@
 {
-  "version": "2.18.69",
+  "version": "2.18.70",
   "release_date": "2026-08-27T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.69/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.69/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.69/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.69",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.69/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.69/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.69/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.69/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.69/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.70",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.70/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : positionnement vraiment magnétique (clic/glisser suit le curseur), étagère repensée en tablette physique, verrouillage de baie, détachement d'un lien port-à-port en un clic",
+    "new_features": "Baie de brassage : la cause réelle du placement difficile enfin corrigée — plus de doublon en déplaçant un élément via le formulaire, et détection des chevauchements entre éléments à la création/au redimensionnement/au déplacement",
     "improvements": [
-      "Baie de brassage : la grille de positionnement, révélée au survol depuis la 2.18.68, résout maintenant la colonne exacte visée par le curseur (clic et glisser-déposer) au lieu de toujours pointer vers le début de la case libre — un élément moins large que la baie se place précisément où on le veut.",
-      "Baie de brassage : l'étagère n'est plus un élément « boîte » avec des ports internes mais une fine tablette physique (rangée réduite en hauteur, resserrée entre ses voisines) sur laquelle les appareils se posent normalement, dans la rangée du dessus — avec repli automatique en hauteur pleine si un autre élément la traverse, pour ne jamais désaligner la baie.",
-      "Baie de brassage : synchronisation multi-instance corrigée — les ports et le câblage (baie_slot_ports) n'étaient jamais journalisés, contrairement au positionnement des éléments ; rattrapage automatique des ports déjà créés au premier démarrage après mise à jour.",
-      "Baie de brassage : verrouillage (bloque glisser-déposer et redimensionnement, préférence locale au navigateur) pour éviter un déplacement accidentel une fois la disposition finalisée.",
-      "Baie de brassage : bouton pour détacher un lien port-à-port directement depuis le port affiché (✕ au survol) et confirmation avant qu'un nouveau lien n'écrase silencieusement une affectation de port existante.",
-      "Baie de brassage : barre d'outils compactée (icônes + info-bulles) et port partenaire d'un lien correctement rafraîchi après une modification de câblage."
+      "Baie de brassage : éditer la position d'un élément déjà placé via le panneau « + Placer » créait un doublon à la nouvelle case au lieu de le déplacer (le formulaire ne postait jamais qu'une création) — corrigé, il modifie désormais l'élément sélectionné en place.",
+      "Baie de brassage : création, redimensionnement (hauteur/largeur/coin) et glisser-déposer vérifient maintenant que l'empreinte complète d'un élément (toutes ses rangées U × toutes ses colonnes) reste libre, pas seulement sa case d'origine — un élément haut de plusieurs U et étroit pouvait auparavant se superposer silencieusement à un autre.",
+      "Baie de brassage : un chevauchement est refusé avec un message nommant précisément ce qui bloque, sans rien modifier en base ; l'élément revient instantanément à sa position/taille d'origine à l'écran."
     ]
   },
   "checksums": {
@@ -32,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.69"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.70"
 }

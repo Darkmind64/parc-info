@@ -1,8 +1,39 @@
-PARCINFO_VERSION=2.18.69
+PARCINFO_VERSION=2.18.70
 RELEASE_DATE=2026-08-27
-BUILD_NUMBER=2026082707
+BUILD_NUMBER=2026082708
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.70 - Baie de brassage : la vraie cause du placement difficile enfin corrigée (doublon + chevauchements)
+# Quatrième tour de retours consécutif sur le même écran. Les précédents
+# (2.18.67-2.18.69) avaient corrigé la PRÉCISION du positionnement (grille
+# à 10 colonnes, grille magnétique, curseur exact) sans jamais s'attaquer
+# à ce qui rendait un élément à la fois moins large que la baie ET haut de
+# plusieurs U "toujours très compliqué" à placer. Cette fois, étude
+# complète du fonctionnement plutôt qu'un nouveau réglage ponctuel : deux
+# bugs de fond, tous deux corrigés.
+#
+# 1) Éditer la position d'un élément déjà placé via le panneau "+ Placer"
+# (le moyen le plus fiable de positionner précisément un gros élément,
+# bien plus que de le glisser à la souris) créait un DOUBLON à la
+# nouvelle case au lieu de le déplacer — le formulaire ne postait jamais
+# qu'une création (POST), jamais une modification en place. Corrigé :
+# PUT sur l'id de l'élément sélectionné pour le déplacer/redimensionner/
+# modifier, POST réservé aux vraies créations.
+#
+# 2) Aucune route ne détectait le chevauchement entre deux éléments —
+# création, redimensionnement (hauteur/largeur/coin) ou glisser-déposer
+# ne vérifiaient jamais que l'empreinte COMPLÈTE d'un élément (toutes ses
+# rangées U × toutes ses colonnes), pas seulement sa case d'origine,
+# restait libre. Un élément haut de plusieurs U et étroit pouvait donc
+# silencieusement se superposer à un autre sur les rangées du dessous,
+# les deux se battant en z-index sans le moindre avertissement —
+# strictement impossible à comprendre depuis l'écran. Corrigé : chaque
+# route vérifie désormais le rectangle complet avant d'agir ; en cas de
+# conflit, refusé avec un message nommant précisément ce qui bloque
+# (« Chevauche SW-CORE (U3-5, col 2-6). »), rien n'est modifié en base,
+# et l'élément revient instantanément à sa position/taille d'origine à
+# l'écran.
 
 # Version 2.18.69 - Baie de brassage : positionnement magnétique précis, étagère repensée, synchronisation des ports corrigée
 # Trois tours de retours consécutifs sur le même écran, tous traités ici.

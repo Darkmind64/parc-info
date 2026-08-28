@@ -5717,6 +5717,61 @@ def _clamp_col_index(v):
         return 0
     return min(9, max(0, n))
 
+def _slots_en_collision(conn, cid, baie_nom, position, col_index, hauteur_u, largeur_u, exclude_id=None):
+    """Retourne les slots de la baie dont le rectangle (rangées U × colonnes
+    0-9) chevauche celui donné.
+
+    Signalé en usage réel : placer, redimensionner ou déplacer un élément
+    à la fois moins large que la baie ET haut de plusieurs U restait
+    "toujours très compliqué" — la cause réelle n'était pas la précision du
+    positionnement (déjà corrigée en 2.18.69) mais l'absence TOTALE de
+    détection de chevauchement : aucune route ne vérifiait quoi que ce soit
+    au-delà de la case d'origine exacte (position, col_index). Un élément
+    haut de 3U et large de 4/10 pouvait donc silencieusement se superposer
+    à un autre élément occupant une partie de ces mêmes rangées, sans le
+    moindre avertissement — visuellement, les deux se chevauchaient/se
+    battaient en z-index, strictement impossible à comprendre ou corriger
+    depuis l'interface.
+    """
+    fin_u = position + hauteur_u - 1
+    fin_col = col_index + largeur_u - 1
+    # baie_nom IS NULL traité comme 'Baie principale' — mêmes emplacements
+    # "historiques" que partout ailleurs dans ce fichier (voir
+    # api_baie_supprimer/api_baie_slots) : sans cette équivalence, un
+    # ancien slot jamais migré échapperait silencieusement au contrôle.
+    sql = ('SELECT id, position, col_index, hauteur_u, largeur_u, nom_custom, type_equipement '
+           'FROM baie_slots WHERE client_id=? AND (baie_nom=? OR (baie_nom IS NULL AND ?=\'Baie principale\'))')
+    params = [cid, baie_nom, baie_nom]
+    if exclude_id:
+        sql += ' AND id!=?'
+        params.append(exclude_id)
+    collisions = []
+    for r in conn.execute(sql, params).fetchall():
+        s_id, s_pos, s_col, s_hu, s_lu, s_nom, s_type = r
+        s_hu = s_hu or 1
+        s_lu = s_lu or 10
+        s_col = s_col or 0
+        s_fin_u = s_pos + s_hu - 1
+        s_fin_col = s_col + s_lu - 1
+        if position <= s_fin_u and s_pos <= fin_u and col_index <= s_fin_col and s_col <= fin_col:
+            collisions.append({
+                'id': s_id, 'nom': s_nom or s_type or ('Emplacement #%d' % s_id),
+                'position': s_pos, 'col_index': s_col, 'hauteur_u': s_hu, 'largeur_u': s_lu,
+            })
+    return collisions
+
+def _msg_collision(collisions):
+    """Message d'erreur listant nommément ce qui bloque le placement — pour
+    que l'utilisateur comprenne IMMÉDIATEMENT pourquoi, plutôt qu'un
+    "conflit" générique qui ne dit pas quoi déplacer ou redimensionner."""
+    noms = ', '.join(
+        '%s (U%d%s, col %d-%d)' % (
+            c['nom'], c['position'],
+            '-%d' % (c['position'] + c['hauteur_u'] - 1) if c['hauteur_u'] > 1 else '',
+            c['col_index'], c['col_index'] + c['largeur_u'] - 1)
+        for c in collisions)
+    return 'Chevauche %s.' % noms
+
 @app.route('/api/baie/slot', methods=['POST'])
 @login_required
 def api_baie_ajouter_slot():
@@ -5725,12 +5780,29 @@ def api_baie_ajouter_slot():
     conn = get_db()
     pos = f.get('position', 1)
     col = _clamp_col_index(f.get('col_index', 0))
+    baie_nom = f.get('baie_nom', 'Baie principale')
+    try:
+        hauteur_u = max(1, int(f.get('hauteur_u') or 1))
+    except (TypeError, ValueError):
+        hauteur_u = 1
+    largeur_u = _clamp_largeur_u(f.get('largeur_u'), col)
+    ancien = conn.execute('SELECT id FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col)).fetchone()
+    # Chevauchement avec un AUTRE élément (voir _slots_en_collision) —
+    # AVANT toute suppression : l'éventuel "ancien" à la case d'origine
+    # EXACTE est exclu du contrôle (c'est lui qu'on remplace en place, pas
+    # un chevauchement), mais tant qu'on n'a pas vérifié, rien n'est encore
+    # supprimé — sans quoi un rejet ici aurait déjà perdu l'ancien élément
+    # et ses ports pour rien.
+    collisions = _slots_en_collision(conn, cid, baie_nom, pos, col, hauteur_u, largeur_u,
+                                      exclude_id=(ancien[0] if ancien else None))
+    if collisions:
+        conn.close()
+        return jsonify({'error': _msg_collision(collisions)}), 409
     # Supprimer l'ancien slot à cette position+col si existe — en conservant
     # ses liaisons de ports (placerEquip() ré-envoie systématiquement un
     # POST, y compris pour éditer un slot existant : sans ce report, chaque
     # modification via le panneau "Placer l'équipement" effacerait tous les
     # ports déjà affectés).
-    ancien = conn.execute('SELECT id FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col)).fetchone()
     anciens_ports = None
     if ancien:
         anciens_ports = {r[0]: (r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]) for r in conn.execute(
@@ -5745,14 +5817,13 @@ def api_baie_ajouter_slot():
             _detacher_liens_vers(conn, ancien[0], supprimes)
         conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=?', (ancien[0],))
     conn.execute('DELETE FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col))
-    baie_nom = f.get('baie_nom', 'Baie principale')
     conn.execute('''INSERT INTO baie_slots
         (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,nb_ports,largeur_u,date_maj)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-        (cid, pos, col, f.get('hauteur_u', 1),
+        (cid, pos, col, hauteur_u,
          f.get('appareil_id') or None, f.get('peripherique_id') or None, f.get('nom_custom', ''),
          f.get('type_equipement', ''), f.get('couleur', '#1e3a5f'),
-         f.get('description', ''), baie_nom, 0, _clamp_largeur_u(f.get('largeur_u'), col), _utcnow().isoformat()))
+         f.get('description', ''), baie_nom, 0, largeur_u, _utcnow().isoformat()))
     conn.commit()
     sid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     nb_ports = _reconcilier_ports(conn, sid, f.get('nb_ports', 0), anciens_ports)
@@ -5798,18 +5869,43 @@ def api_baie_slot(id):
         return jsonify({'ok': True})
     f = request.json or {}
     nb_ports = min(48, max(0, int(f.get('nb_ports', 0) or 0)))
-    # col_index n'est pas modifiable par cette route (déplacer un slot passe
-    # par /deplacer) — sa valeur ACTUELLE reste indispensable pour plafonner
-    # largeur_u à 10-col (voir _clamp_largeur_u).
-    col_actuel = conn.execute(
-        'SELECT col_index FROM baie_slots WHERE id=? AND client_id=?', (id, cid)).fetchone()
-    col_actuel = col_actuel[0] if col_actuel else 0
-    conn.execute('''UPDATE baie_slots SET position=?,hauteur_u=?,appareil_id=?,peripherique_id=?,
+    actuel = conn.execute(
+        'SELECT col_index, baie_nom FROM baie_slots WHERE id=? AND client_id=?', (id, cid)).fetchone()
+    if not actuel:
+        conn.close()
+        return jsonify({'error': 'Slot introuvable'}), 404
+    # col_index est désormais modifiable par cette route (repli sur la
+    # valeur actuelle si absente du payload, pour ne rien changer au geste
+    # de redimensionnement qui n'en envoie jamais) — auparavant réservé à
+    # /deplacer, ce qui empêchait de déplacer HORIZONTALEMENT un élément en
+    # modifiant simplement le champ "Colonne" du panneau "+ Placer" : le
+    # formulaire recréait alors un DOUBLON à la nouvelle position sans
+    # jamais toucher l'ancien (placerEquip() ne postait que des créations).
+    col_index = _clamp_col_index(f['col_index']) if 'col_index' in f else (actuel[0] or 0)
+    baie_nom = actuel[1] or 'Baie principale'
+    try:
+        position = int(f.get('position') or 1)
+    except (TypeError, ValueError):
+        position = 1
+    try:
+        hauteur_u = max(1, int(f.get('hauteur_u') or 1))
+    except (TypeError, ValueError):
+        hauteur_u = 1
+    largeur_u = _clamp_largeur_u(f.get('largeur_u'), col_index)
+    # Chevauchement avec un AUTRE élément (voir _slots_en_collision),
+    # celui-ci exclu de son propre contrôle — sinon impossible de
+    # redimensionner/déplacer quoi que ce soit, un slot chevauche toujours
+    # SA PROPRE position actuelle.
+    collisions = _slots_en_collision(conn, cid, baie_nom, position, col_index, hauteur_u, largeur_u, exclude_id=id)
+    if collisions:
+        conn.close()
+        return jsonify({'error': _msg_collision(collisions)}), 409
+    conn.execute('''UPDATE baie_slots SET position=?,col_index=?,hauteur_u=?,appareil_id=?,peripherique_id=?,
         nom_custom=?,type_equipement=?,couleur=?,description=?,nb_ports=?,largeur_u=?,date_maj=? WHERE id=? AND client_id=?''',
-        (f.get('position',1), f.get('hauteur_u',1), f.get('appareil_id') or None, f.get('peripherique_id') or None,
+        (position, col_index, hauteur_u, f.get('appareil_id') or None, f.get('peripherique_id') or None,
          f.get('nom_custom',''), f.get('type_equipement',''),
          f.get('couleur','#1e3a5f'), f.get('description',''), nb_ports,
-         _clamp_largeur_u(f.get('largeur_u'), col_actuel),
+         largeur_u,
          _utcnow().isoformat(), id, cid))
     _reconcilier_ports(conn, id, nb_ports)
     conn.commit()
@@ -5946,21 +6042,32 @@ def api_baie_deplacer_slot(id):
     new_pos = f.get('position', 1)
     new_col = _clamp_col_index(f.get('col_index', 0))
     conn = get_db()
-    # La largeur du slot déplacé ne change pas ici (seule sa position
-    # bouge) — mais new_col doit rester compatible avec elle, sans quoi le
-    # slot déborderait de la grille à 10 colonnes (voir _clamp_largeur_u).
-    largeur_actuelle = conn.execute(
-        'SELECT largeur_u FROM baie_slots WHERE id=? AND client_id=?', (id, cid)).fetchone()
-    largeur_actuelle = (largeur_actuelle[0] if largeur_actuelle else None) or 10
+    # La largeur/hauteur du slot déplacé ne changent pas ici (seule sa
+    # position bouge) — mais new_col doit rester compatible avec la
+    # largeur, sans quoi le slot déborderait de la grille à 10 colonnes
+    # (voir _clamp_largeur_u), et les deux sont nécessaires pour le
+    # contrôle de chevauchement ci-dessous (rectangle complet, pas
+    # seulement la case d'origine visée).
+    actuel = conn.execute(
+        'SELECT largeur_u, hauteur_u, baie_nom FROM baie_slots WHERE id=? AND client_id=?', (id, cid)).fetchone()
+    if not actuel:
+        conn.close()
+        return jsonify({'error': 'Slot introuvable'}), 404
+    largeur_actuelle = actuel[0] or 10
+    hauteur_actuelle = actuel[1] or 1
+    baie_nom = actuel[2] or 'Baie principale'
     new_col = min(new_col, max(0, 10 - largeur_actuelle))
-    # Supprimer l'éventuel occupant de la destination (et ses ports — c'est
-    # le slot déplacé, avec son propre id et ses propres ports intacts, qui
-    # prend cette place)
-    conn.execute('''DELETE FROM baie_slot_ports WHERE slot_id IN
-        (SELECT id FROM baie_slots WHERE client_id=? AND position=? AND col_index=? AND id!=?)''',
-        (cid, new_pos, new_col, id))
-    conn.execute('DELETE FROM baie_slots WHERE client_id=? AND position=? AND col_index=? AND id!=?',
-                 (cid, new_pos, new_col, id))
+    # Chevauchement avec un AUTRE élément (voir _slots_en_collision) — avant
+    # (2.18.69), un dépôt écrasait silencieusement tout ce qui occupait
+    # EXACTEMENT la case visée (jamais atteignable en pratique, on ne peut
+    # déposer que sur une case vide) sans jamais vérifier les rangées
+    # supplémentaires couvertes par un élément haut de plusieurs U : un
+    # déplacement pouvait ainsi silencieusement chevaucher un élément
+    # occupant une partie de ces rangées, sans le moindre avertissement.
+    collisions = _slots_en_collision(conn, cid, baie_nom, new_pos, new_col, hauteur_actuelle, largeur_actuelle, exclude_id=id)
+    if collisions:
+        conn.close()
+        return jsonify({'error': _msg_collision(collisions)}), 409
     conn.execute('UPDATE baie_slots SET position=?, col_index=? WHERE id=? AND client_id=?',
                  (new_pos, new_col, id, cid))
     conn.commit()
