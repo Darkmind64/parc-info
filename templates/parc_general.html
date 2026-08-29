@@ -451,7 +451,7 @@ function getQRCanvas(qrId) {
 
 function telechargerQR(qrId, nom) {
     const canvas = getQRCanvas(qrId);
-    if (!canvas) { alert('Générez d\'abord le QR code en renseignant le SSID.'); return; }
+    if (!canvas) { showFlash('Générez d\'abord le QR code en renseignant le SSID.', 'info'); return; }
     const link = document.createElement('a');
     link.download = nom + '_qrcode.png';
     link.href = canvas.toDataURL('image/png');
@@ -460,11 +460,11 @@ function telechargerQR(qrId, nom) {
 
 function copierQRDataURL(qrId) {
     const canvas = getQRCanvas(qrId);
-    if (!canvas) { alert('Aucun QR code à copier.'); return; }
+    if (!canvas) { showFlash('Aucun QR code à copier.', 'info'); return; }
     canvas.toBlob(blob => {
         try {
             navigator.clipboard.write([new ClipboardItem({'image/png': blob})]);
-            alert('QR code copié dans le presse-papier !');
+            showFlash('QR code copié dans le presse-papier !', 'success');
         } catch(e) {
             // Fallback: propose le téléchargement
             telechargerQR(qrId, 'qrcode');
@@ -538,9 +538,9 @@ function basculerEdition() {
         if (first) { first.focus(); first.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
     } else {
         // Annuler
-        if (confirm('Annuler les modifications et recharger la page ?')) {
+        appConfirm('Annuler les modifications et recharger la page ?', () => {
             window.location.reload();
-        }
+        }, { title: 'Confirmation', icon: '⚠️', ok: 'Recharger', btnClass: 'btn-warning' });
     }
 }
 
@@ -565,23 +565,31 @@ document.addEventListener('DOMContentLoaded', function() {
 
 
 function confirmerImport() {
+    // appConfirm() est asynchrone (modale) — cette fonction, appelée par
+    // onsubmit="return confirmerImport()", doit donc TOUJOURS renvoyer
+    // false pour empêcher la soumission native, et ne la relancer QUE si
+    // confirmé, via form.submit() dans le callback (ne redéclenche pas
+    // onsubmit, pas de boucle).
+    const form  = document.getElementById('form-import-global');
     const mode  = document.getElementById('import-mode').value;
     const scope = document.getElementById('import-scope-field').value;
     const file  = document.querySelector('#form-import-global input[type=file]').files[0];
     if (!file) return false;
     const portee = scope === 'client' ? 'le client actif' : 'tous vos clients';
-    if (mode === 'reset') {
-        return confirm(
-            `⚠ RÉINITIALISATION — ${portee.toUpperCase()}\n\n` +
-            `Toutes les données de ${portee} seront définitivement supprimées ` +
-            `et remplacées par celles du fichier.\n\nCette action est irréversible. Continuer ?`
-        );
-    }
-    return confirm(
-        `Importer "${file.name}" en mode fusion (${portee}) ?\n\n` +
-        `Les données existantes ne seront pas modifiées. ` +
-        `Seules les nouvelles entrées absentes de la base seront ajoutées.`
-    );
+    const estReset = mode === 'reset';
+    const msg = estReset
+        ? `⚠ RÉINITIALISATION — ${portee.toUpperCase()}\n\n` +
+          `Toutes les données de ${portee} seront définitivement supprimées ` +
+          `et remplacées par celles du fichier.\n\nCette action est irréversible. Continuer ?`
+        : `Importer "${file.name}" en mode fusion (${portee}) ?\n\n` +
+          `Les données existantes ne seront pas modifiées. ` +
+          `Seules les nouvelles entrées absentes de la base seront ajoutées.`;
+    appConfirm(msg, () => form.submit(), {
+        title: estReset ? 'Réinitialisation' : 'Import',
+        icon: estReset ? '⚠️' : '⬆️',
+        ok: estReset ? 'Réinitialiser et importer' : 'Importer',
+    });
+    return false;
 }
 </script>
 {% endblock %}

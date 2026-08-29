@@ -400,30 +400,31 @@ async function supprimerEntree(id, btn) {
     }
 }
 
-async function viderErreurs(btn) {
-    if (!confirm('Supprimer toutes les entrées d\'erreur système du journal ?')) return;
-    btn.disabled = true;
-    try {
-        const r = await fetch('/historique/vider-erreurs', {
-            method: 'POST',
-            headers: { 'X-CSRFToken': '{{ csrf_token }}' }
-        });
-        const d = await r.json();
-        if (d.ok) {
-            document.querySelectorAll('.hist-entry').forEach(row => {
-                const badge = row.querySelector('.badge-action-erreur');
-                if (badge) {
-                    row.style.transition = 'opacity .2s';
-                    row.style.opacity = '0';
-                    setTimeout(() => row.remove(), 220);
-                }
+function viderErreurs(btn) {
+    appConfirm('Supprimer toutes les entrées d\'erreur système du journal ?', async () => {
+        btn.disabled = true;
+        try {
+            const r = await fetch('/historique/vider-erreurs', {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}' }
             });
-            btn.textContent = `✓ ${d.nb} supprimée(s)`;
-            btn.style.color = 'var(--accent-green)';
+            const d = await r.json();
+            if (d.ok) {
+                document.querySelectorAll('.hist-entry').forEach(row => {
+                    const badge = row.querySelector('.badge-action-erreur');
+                    if (badge) {
+                        row.style.transition = 'opacity .2s';
+                        row.style.opacity = '0';
+                        setTimeout(() => row.remove(), 220);
+                    }
+                });
+                btn.textContent = `✓ ${d.nb} supprimée(s)`;
+                btn.style.color = 'var(--accent-green)';
+            }
+        } catch {
+            btn.disabled = false;
         }
-    } catch {
-        btn.disabled = false;
-    }
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
 }
 </script>
 {% endblock %}

@@ -315,12 +315,13 @@ function afficherDroit(d) {
     grid.appendChild(div);
 }
 
-async function supprimerDroit(id) {
-    if (!confirm('Supprimer ce droit ?')) return;
-    await fetch('/api/droit/' + id, { method:'DELETE' });
-    document.getElementById('droit-' + id)?.remove();
-    nbDroits--;
-    document.getElementById('nb-droits').textContent = nbDroits;
+function supprimerDroit(id) {
+    appConfirm('Supprimer ce droit ?', async () => {
+        await fetch('/api/droit/' + id, { method:'DELETE' });
+        document.getElementById('droit-' + id)?.remove();
+        nbDroits--;
+        document.getElementById('nb-droits').textContent = nbDroits;
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
 }
 </script>
 {% endblock %}

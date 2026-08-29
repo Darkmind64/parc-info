@@ -329,14 +329,15 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function confirmerMaintenance(id) {
-    if (!confirm('Marquer cette maintenance comme réalisée ?')) return;
-    fetch(`/maintenance/${id}/confirmer`, {
-        method: 'POST',
-        headers: { 'X-CSRF-Token': '{{ csrf_token }}', 'Content-Type': 'application/json' }
-    })
-    .then(r => r.json())
-    .then(data => { if (data.ok) location.reload(); else showFlash('Erreur : ' + (data.error || ''), 'danger'); })
-    .catch(e => showFlash('Erreur réseau : ' + e, 'danger'));
+    appConfirm('Marquer cette maintenance comme réalisée ?', () => {
+        fetch(`/maintenance/${id}/confirmer`, {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': '{{ csrf_token }}', 'Content-Type': 'application/json' }
+        })
+        .then(r => r.json())
+        .then(data => { if (data.ok) location.reload(); else showFlash('Erreur : ' + (data.error || ''), 'danger'); })
+        .catch(e => showFlash('Erreur réseau : ' + e, 'danger'));
+    }, { title: 'Confirmation', icon: '✓', ok: 'Confirmer', btnClass: 'btn-success' });
 }
 </script>
 {% endblock %}

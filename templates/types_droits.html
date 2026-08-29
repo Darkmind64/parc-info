@@ -149,10 +149,11 @@ async function majType(id, champ, valeur) {
     });
 }
 
-async function supprimerType(id) {
-    if (!confirm('Supprimer ce type de droit ? Les droits déjà attribués ne seront pas supprimés.')) return;
-    await fetch('/api/type-droit/' + id, { method: 'DELETE' });
-    document.getElementById('trow-' + id)?.remove();
+function supprimerType(id) {
+    appConfirm('Supprimer ce type de droit ? Les droits déjà attribués ne seront pas supprimés.', async () => {
+        await fetch('/api/type-droit/' + id, { method: 'DELETE' });
+        document.getElementById('trow-' + id)?.remove();
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
 }
 
 async function ajouterType() {

@@ -569,18 +569,21 @@ async function importerSelection() {
     // Suggestion (jamais imposée) : équipements réseau détectés mais pas
     // encore positionnés dans la baie de brassage — voir _TYPES_SUGGESTION_BAIE
     // côté serveur. La position physique dans le rack reste à saisir, elle
-    // ne peut pas être déduite d'un scan réseau. confirm() reste légitime ici
-    // (vraie question oui/non), contrairement à un simple message de statut.
+    // ne peut pas être déduite d'un scan réseau. Une vraie question oui/non
+    // reste légitime ici, contrairement à un simple message de statut —
+    // appConfirm() (base.html) affiche ce message multi-ligne correctement
+    // grâce à white-space:pre-line sur #app-confirm-msg.
     const suggestions = d.suggestions_baie || [];
     if (suggestions.length) {
         const liste = suggestions.map(s => `• ${s.nom} (${s.type})`).join('\n');
         const msgConfirm = `${msgCourt}\n\n📡 ${suggestions.length} équipement(s) réseau détecté(s), pas encore ` +
                `positionné(s) dans la baie de brassage :\n${liste}\n\n` +
                `Ouvrir la baie de brassage pour les placer maintenant ?`;
-        if (confirm(msgConfirm)) {
-            location.href = '/baie';
-            return;
-        }
+        appConfirm(msgConfirm, () => { location.href = '/baie'; }, {
+            title: 'Nouveaux équipements réseau', icon: '📡', ok: 'Ouvrir la baie', btnClass: 'btn-primary',
+            onCancel: () => showFlash(msgCourt, 'success'),
+        });
+        return;
     }
     showFlash(msgCourt, 'success');
 }

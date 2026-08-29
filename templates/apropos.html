@@ -118,12 +118,12 @@ const ProposControle = {
             });
     },
     redemarrer() {
-        if (!confirm('Redémarrer ParcInfo maintenant ?')) return;
-        this._appel('/apropos/redemarrer', 'Redémarrage');
+        appConfirm('Redémarrer ParcInfo maintenant ?', () => this._appel('/apropos/redemarrer', 'Redémarrage'),
+            { title: 'Redémarrage', icon: '🔄', ok: 'Redémarrer', btnClass: 'btn-warning' });
     },
     quitter() {
-        if (!confirm('Arrêter ParcInfo ? Il faudra le relancer manuellement.')) return;
-        this._appel('/apropos/quitter', 'Arrêt');
+        appConfirm('Arrêter ParcInfo ? Il faudra le relancer manuellement.', () => this._appel('/apropos/quitter', 'Arrêt'),
+            { title: 'Arrêt', icon: '⏻', ok: 'Arrêter' });
     },
 };
 </script>

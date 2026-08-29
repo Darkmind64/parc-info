@@ -438,18 +438,22 @@ const KB = (() => {
         document.body.style.overflow = 'hidden';
     }
 
-    async function supprimerArticle() {
+    function supprimerArticle() {
         if (!_kbCurrentId) return;
         const titre = document.getElementById('kb-modal-title').textContent;
-        if (!confirm(`Supprimer "${titre}" ?`)) return;
-        await fetch('/api/kb/article/' + _kbCurrentId, { method:'DELETE' });
-        window.location.reload();
+        appConfirm(`Supprimer "${titre}" ?`, async () => {
+            await fetch('/api/kb/article/' + _kbCurrentId, { method:'DELETE' });
+            window.location.reload();
+        }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
     }
 
     async function nouvelleCategorie() {
-        const nom = prompt('Nom de la nouvelle catégorie :');
+        // Deux saisies enchaînées (await sur une modale Promise-based, voir
+        // appPrompt dans base.html) — nom PUIS icône, chacune annulable
+        // indépendamment.
+        const nom = await appPrompt('Nom de la nouvelle catégorie :', { icon: '📂' });
         if (!nom || !nom.trim()) return;
-        const icone = prompt('Icône (emoji) :', '📋') || '📋';
+        const icone = (await appPrompt('Icône (emoji) :', { value: '📋', icon: '📋' })) || '📋';
         await fetch('/api/kb/category', {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({nom: nom.trim(), icone: icone.trim()})
@@ -457,10 +461,11 @@ const KB = (() => {
         window.location.reload();
     }
 
-    async function supprimerCategorie(id, nom) {
-        if (!confirm(`Supprimer la catégorie "${nom}" et tous ses articles ?`)) return;
-        await fetch('/api/kb/category/' + id, { method:'DELETE' });
-        window.location.reload();
+    function supprimerCategorie(id, nom) {
+        appConfirm(`Supprimer la catégorie "${nom}" et tous ses articles ?`, async () => {
+            await fetch('/api/kb/category/' + id, { method:'DELETE' });
+            window.location.reload();
+        }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
     }
 
     function fermerModal() {

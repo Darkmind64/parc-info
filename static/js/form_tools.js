@@ -165,8 +165,18 @@ function initConfirm(form) {
 
     document.querySelectorAll('a.btn-primary[href], a.btn[href]').forEach(function(link) {
         link.addEventListener('click', function(e) {
-            if (modified && !confirm('Des modifications non sauvegardées seront perdues. Quitter quand même ?')) {
-                e.preventDefault();
+            // appConfirm() (base.html) est asynchrone (modale), contrairement à
+            // confirm() natif — preventDefault() TOUJOURS d'abord (sinon la
+            // navigation est déjà lancée avant que l'utilisateur ait répondu),
+            // navigation programmatique seulement si confirmé.
+            if (!modified) return;
+            e.preventDefault();
+            if (typeof appConfirm === 'function') {
+                appConfirm('Des modifications non sauvegardées seront perdues. Quitter quand même ?', function () {
+                    window.location.href = link.href;
+                }, { title: 'Modifications non sauvegardées', icon: '⚠️', ok: 'Quitter', btnClass: 'btn-danger' });
+            } else if (confirm('Des modifications non sauvegardées seront perdues. Quitter quand même ?')) {
+                window.location.href = link.href;
             }
         });
     });

@@ -1,25 +1,25 @@
 {
-  "version": "2.18.77",
+  "version": "2.18.78",
   "release_date": "2026-08-29T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.77",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.78",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : édition par double-clic (ports, câbles reliés, photos) et fiche de brassage complète (prises murales + interconnexions, câble mural et cordon distincts)",
+    "new_features": "Tous les dialogues natifs du navigateur (confirm/prompt/alert) encore utilisés dans l'app remplacés par des modales stylées cohérentes avec le reste de l'interface",
     "improvements": [
-      "Baie de brassage : double-clic sur un port non-bandeau ouvre une modale d'édition rapide (cible + étiquette de cordon si relié), sans passer par le panneau latéral complet.",
-      "Baie de brassage : double-clic sur un port relié ou directement sur la courbe de câble visible édite son étiquette (couleur/longueur) ; enregistrer sans y toucher ne détache jamais le lien.",
-      "Baie de brassage : double-clic sur une photo de la baie édite son nom/sa description (nouvelle route dédiée) — jusqu'ici modifiables seulement à l'upload.",
-      "Baie de brassage : la fiche de câblage imprimable/CSV (/baie/cablage) documente désormais aussi les prises murales de chaque bandeau RJ (pièce, identification, câble mural ET cordon distincts, cible finale), en plus des interconnexions entre éléments non-bandeau."
+      "Nouvelle modale de saisie appPrompt() (base.html), sur le même principe que la modale de confirmation appConfirm() déjà existante — remplace tous les window.prompt() restants.",
+      "appConfirm() gagne un rappel optionnel à l'annulation (onCancel), et affiche désormais correctement les messages multi-lignes.",
+      "~25 confirm()/prompt() appelés directement en JS convertis, dans base.html, les modules JS partagés (import CSV, modifications non sauvegardées) et une quinzaine de pages (baie de brassage, base de connaissances, scan réseau, gestionnaire d'outils, parc général, etc.).",
+      "4 alert() oubliés d'un audit précédent migrés vers showFlash(), la voie normale déjà établie pour les messages informatifs."
     ]
   },
   "checksums": {
@@ -30,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.77"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.78"
 }

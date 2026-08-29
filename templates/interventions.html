@@ -146,14 +146,14 @@ function filtrerIntv() {
 }
 
 function confirmerSuppression(id, titre) {
-    if (confirm('Archiver l\'intervention "' + titre + '" ?')) {
+    appConfirm('Archiver l\'intervention "' + titre + '" ?', () => {
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = '/intervention/' + id + '/supprimer';
         form.innerHTML = '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">';
         document.body.appendChild(form);
         form.submit();
-    }
+    }, { title: 'Archivage', icon: '📦', ok: 'Archiver', btnClass: 'btn-warning' });
 }
 </script>
 {% endblock %}

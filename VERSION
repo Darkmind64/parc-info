@@ -1,8 +1,50 @@
-PARCINFO_VERSION=2.18.77
+PARCINFO_VERSION=2.18.78
 RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082901
+BUILD_NUMBER=2026082902
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.78 - Dialogues natifs remplacés par des modales stylées (confirm/prompt/alert)
+# Suite de l'audit demandé : recenser tous les appels confirm()/alert()/
+# prompt() natifs du navigateur encore utilisés dans l'app et les remplacer
+# par des modales cohérentes avec le reste de l'interface. Une bonne partie
+# (~20 formulaires de suppression) était déjà interceptée par un mécanisme
+# existant dans base.html (appConfirm()) ; ce chantier couvre tout le
+# reste : les appels confirm()/prompt() faits directement en JS.
+#
+# Nouveau dans base.html : appPrompt() (modale de saisie texte, basée sur
+# une Promise — `await appPrompt(...)` renvoie la valeur ou null si annulé,
+# même contrat que window.prompt()) ; appConfirm() gagne un opts.onCancel
+# (rappelé si annulé, pour les cas où le "non" a lui-même un effet de bord
+# à rejouer — ex. réinitialiser le mode "Lier des ports" de la baie de
+# brassage) ; les messages multi-lignes s'affichent désormais correctement
+# dans la modale de confirmation (white-space:pre-line).
+#
+# Convertis : les 8 confirm() de base.html (document, type personnalisé,
+# port de scan, réinitialisation des paramètres, restauration de
+# sauvegarde en deux étapes, transfert de données, liste personnalisée) ;
+# les 2 modules JS partagés form_tools.js (modifications non sauvegardées)
+# et liste_tools.js (import CSV) ; et un ou plusieurs confirm()/prompt()
+# sur chacune de : baie_brassage (5 confirm + 1 prompt), apropos,
+# client_dashboard, detail_intervention, droits_utilisateur, historique,
+# interventions, kb (2 confirm + 2 prompt enchaînés), liste_maintenances,
+# outils, parc_general (dont un formulaire d'import réécrit pour rester
+# compatible avec une confirmation asynchrone), plan_editeur, qrcode_
+# generator, scan_reseau (message multi-ligne avec liste à puces), types_
+# droits. Plus 4 alert() oubliés d'un audit précédent (form_identifiant,
+# parc_general) migrés vers showFlash(), la voie normale déjà établie pour
+# les messages informatifs.
+#
+# Laissé tel quel, volontairement : les formulaires onsubmit="return
+# confirm(...)" déjà interceptés ; popup_identifiant.html (popup autonome
+# sans base.html) ; le repli alert() de showFlash() elle-même (pages sans
+# bannière) ; une fonction confirm() locale de plan_editeur.html (masque
+# le nom global pour valider un champ texte, sans rapport avec un
+# dialogue).
+#
+# Signalé en testant, hors périmètre : utilisateurs.html lève une erreur
+# JS (tri de colonnes) préexistante, sans lien avec ce chantier — non
+# corrigée.
 
 # Version 2.18.77 - Baie de brassage : édition par double-clic + fiche de brassage complète
 # Suite directe de la 2.18.74 (prises murales), deux chantiers demandés

@@ -1533,12 +1533,13 @@ document.addEventListener('DOMContentLoaded', function() {
   };
 
   window.deleteCustomTemplate = function(templateId) {
-    if (!confirm('Êtes-vous sûr de vouloir supprimer ce modèle?')) return;
-    const customTemplates = JSON.parse(localStorage.getItem('customTemplates') || '{}');
-    delete customTemplates[templateId];
-    localStorage.setItem('customTemplates', JSON.stringify(customTemplates));
-    document.querySelector('div[style*="position: fixed"]').remove();
-    btnLoadTemplate.click(); // Reopen modal
+    appConfirm('Êtes-vous sûr de vouloir supprimer ce modèle ?', () => {
+      const customTemplates = JSON.parse(localStorage.getItem('customTemplates') || '{}');
+      delete customTemplates[templateId];
+      localStorage.setItem('customTemplates', JSON.stringify(customTemplates));
+      document.querySelector('div[style*="position: fixed"]').remove();
+      btnLoadTemplate.click(); // Reopen modal
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
   };
 
   // Update template select options

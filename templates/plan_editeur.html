@@ -1886,7 +1886,8 @@ class PlanEditor {
 
         // ── Wire delete ───────────────────────────────────────────────────────
         document.getElementById('prop-del-btn').addEventListener('click', () => {
-            if (confirm('Supprimer cet élément ?')) this.deleteElement(el.id);
+            appConfirm('Supprimer cet élément ?', () => this.deleteElement(el.id),
+                { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
         });
     }
 

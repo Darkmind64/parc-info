@@ -1222,27 +1222,28 @@ drawDonut('donut-periph', [
 {% endif %}
 
 // ── IGNORER ALERTE GARANTIE ───────────────────────────────────────────────────
-async function ignorerGarantie(id, btn) {
-    if (!confirm('Ignorer les alertes de garantie pour cet appareil ?\n\nVous pourrez réactiver les alertes depuis la fiche de l\'appareil.')) return;
-    btn.disabled = true;
-    try {
-        const r = await fetch(`/api/appareil/${id}/garantie-ignorer`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ignorer: true })
-        });
-        const d = await r.json().catch(() => ({}));
-        if (d.ok) {
-            const strip = btn.closest('.alert-strip');
-            if (strip) strip.remove();
-        } else {
+function ignorerGarantie(id, btn) {
+    appConfirm('Ignorer les alertes de garantie pour cet appareil ?\n\nVous pourrez réactiver les alertes depuis la fiche de l\'appareil.', async () => {
+        btn.disabled = true;
+        try {
+            const r = await fetch(`/api/appareil/${id}/garantie-ignorer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ignorer: true })
+            });
+            const d = await r.json().catch(() => ({}));
+            if (d.ok) {
+                const strip = btn.closest('.alert-strip');
+                if (strip) strip.remove();
+            } else {
+                btn.disabled = false;
+                showFlash(d.error || 'Erreur lors de la mise à jour.', 'danger');
+            }
+        } catch (e) {
             btn.disabled = false;
-            showFlash(d.error || 'Erreur lors de la mise à jour.', 'danger');
+            showFlash('Erreur réseau', 'danger');
         }
-    } catch (e) {
-        btn.disabled = false;
-        showFlash('Erreur réseau', 'danger');
-    }
+    }, { title: 'Confirmation', icon: '⚠️', ok: 'Ignorer', btnClass: 'btn-warning' });
 }
 
 // ── PRÉ-CHARGER LA CONFIGURATION AU DÉMARRAGE ─────────────────────────────────

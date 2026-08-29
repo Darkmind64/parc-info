@@ -1988,14 +1988,17 @@ async function gererClicLienPort(s, p, el) {
     const occupes = [];
     if (portDejaOccupe(premierPortLien.port)) occupes.push(`port ${premierPortLien.port.numero} (${premierPortLien.port.nom_cible || 'occupé'})`);
     if (portDejaOccupe(p)) occupes.push(`port ${p.numero} (${p.nom_cible || 'occupé'})`);
-    if (occupes.length && !confirm(`Ce lien remplacera l'affectation actuelle de ${occupes.join(' et ')}. Continuer ?`)) {
-        desactiverModeLien();
+    if (occupes.length) {
+        appConfirm(`Ce lien remplacera l'affectation actuelle de ${occupes.join(' et ')}. Continuer ?`,
+            () => creerLienPort(premierPortLien.slotId, premierPortLien.numero, s.id, p.numero),
+            { title: 'Remplacement', icon: '⚠️', ok: 'Continuer', onCancel: desactiverModeLien });
         return;
     }
-    const payload = {
-        slot1_id: premierPortLien.slotId, numero1: premierPortLien.numero,
-        slot2_id: s.id, numero2: p.numero,
-    };
+    await creerLienPort(premierPortLien.slotId, premierPortLien.numero, s.id, p.numero);
+}
+
+async function creerLienPort(slot1Id, numero1, slot2Id, numero2) {
+    const payload = { slot1_id: slot1Id, numero1: numero1, slot2_id: slot2Id, numero2: numero2 };
     desactiverModeLien();
     const r = await fetch('/api/baie/lien-port', {
         method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
@@ -2870,8 +2873,8 @@ const PhotoModal = (() => {
 // api_baie_port : cible_fournie devient vraie dès que usage_libre est
 // présent dans le payload, même vide) — détache aussi le partenaire
 // automatiquement, des deux côtés.
-async function delierPort(slotId, numero, nomCible) {
-    if (!confirm(`Détacher le lien vers ${nomCible || 'cet élément'} ?`)) return;
+function delierPort(slotId, numero, nomCible) {
+    appConfirm(`Détacher le lien vers ${nomCible || 'cet élément'} ?`, async () => {
     // { detacher_lien: true } — PAS { appareil_id: null, ... } : ce port
     // peut légitimement porter à la fois une association directe (câblage
     // fixe vers une prise murale) ET ce lien (cordon vers un switch), voir
@@ -2879,6 +2882,7 @@ async function delierPort(slotId, numero, nomCible) {
     // l'association directe en plus du lien — on ne veut détacher QUE le
     // cordon ici.
     await enregistrerPort(slotId, numero, { detacher_lien: true });
+    }, { title: 'Détacher le câble', icon: '🔌', ok: 'Détacher' });
 }
 
 // ── ACTIONS ──────────────────────────────────────────────────────────────────
@@ -3057,21 +3061,23 @@ async function placerEquip() {
     afficherEditeurPorts(s);
 }
 
-async function delSlot(id) {
-    if (!confirm('Retirer cet équipement de la baie ?')) return;
-    await fetch('/api/baie/slot/' + id, { method:'DELETE' });
-    Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
-    if (selectedSlotId === id) selectedSlotId = null;
-    nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1), 1);
-    renderRack(); renderList();
+function delSlot(id) {
+    appConfirm('Retirer cet équipement de la baie ?', async () => {
+        await fetch('/api/baie/slot/' + id, { method:'DELETE' });
+        Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
+        if (selectedSlotId === id) selectedSlotId = null;
+        nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1), 1);
+        renderRack(); renderList();
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });
 }
 
-async function toutVider() {
-    if (!confirm(`Vider toute la baie "${currentBaie}" ?`)) return;
-    for (const s of Object.values(slots))
-        await fetch('/api/baie/slot/' + s.id, { method:'DELETE' });
-    slots = {}; nbCols = 1;
-    renderRack(); renderList();
+function toutVider() {
+    appConfirm(`Vider toute la baie "${currentBaie}" ?`, async () => {
+        for (const s of Object.values(slots))
+            await fetch('/api/baie/slot/' + s.id, { method:'DELETE' });
+        slots = {}; nbCols = 1;
+        renderRack(); renderList();
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Vider' });
 }
 
 async function changerU(delta) {
@@ -3090,8 +3096,8 @@ function changerBaie(nom) {
     chargerBaie(nom);
 }
 
-function ajouterBaie() {
-    const nom = prompt('Nom de la nouvelle baie :', 'Baie secondaire');
+async function ajouterBaie() {
+    const nom = await appPrompt('Nom de la nouvelle baie :', { value: 'Baie secondaire', icon: '🗄️', ok: 'Créer' });
     if (!nom || !nom.trim()) return;
     if (baiesList.includes(nom.trim())) { showFlash('Cette baie existe déjà.', 'info'); return; }
     baiesList.push(nom.trim());
@@ -3103,8 +3109,8 @@ function ajouterBaie() {
     chargerBaie(nom.trim());
 }
 
-async function supprimerBaie() {
-    if (!confirm(`Supprimer la baie "${currentBaie}" et tout son contenu (${Object.keys(slots).length} emplacement(s)) ? Cette action est irréversible.`)) return;
+function supprimerBaie() {
+    appConfirm(`Supprimer la baie "${currentBaie}" et tout son contenu (${Object.keys(slots).length} emplacement(s)) ? Cette action est irréversible.`, async () => {
     await fetch('/api/baie?baie=' + encodeURIComponent(currentBaie), { method: 'DELETE' });
     baiesList = baiesList.filter(b => b !== currentBaie);
     // Toujours au moins une baie disponible dans la liste, même vide — elle
@@ -3114,6 +3120,7 @@ async function supprimerBaie() {
     if (!baiesList.length) baiesList.push('Baie principale');
     const prochaine = baiesList.includes('Baie principale') ? 'Baie principale' : baiesList[0];
     await chargerBaie(prochaine);
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
 }
 
 // ── EXPORT IMAGE ──────────────────────────────────────────────────────────────

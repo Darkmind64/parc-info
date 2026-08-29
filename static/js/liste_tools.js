@@ -97,37 +97,45 @@ const ListeTools = (() => {
 
             fileInput.onchange = function() {
                 if (!this.files.length) return;
-                if (!confirm(
-                    'Importer ce fichier CSV ?\n\n' +
+                const input = this;
+                const lancerImport = () => {
+                    // Vraie soumission de formulaire plutôt qu'un fetch() : la route
+                    // d'import répond toujours par flash()+redirect (succès ET échec
+                    // partagent le même statut HTTP 200-après-redirection), le message
+                    // n'existe donc que côté session Flask, affiché une seule fois par
+                    // get_flashed_messages(). Un fetch() qui suit la redirection lui-même
+                    // consommait déjà ce message avant la navigation manuelle suivante
+                    // (window.location.href) — succès et échec s'affichaient alors tous
+                    // deux sans aucun message. Une vraie soumission ne fait qu'une seule
+                    // navigation, donc le flash s'affiche normalement sur la page rechargée.
+                    const form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = s.cfg.importUrl;
+                    form.enctype = 'multipart/form-data';
+                    form.style.display = 'none';
+                    const clone = input.cloneNode(false);
+                    clone.name = 'fichier';
+                    // Un <input type=file> ne peut pas être réassigné par programme —
+                    // DataTransfer sert de pont pour reporter le fichier déjà choisi
+                    // sur ce nouvel input (qu'on ne peut pas simplement déplacer : il
+                    // doit rester dans le <form> qu'on soumet).
+                    const dt = new DataTransfer();
+                    dt.items.add(input.files[0]);
+                    clone.files = dt.files;
+                    form.appendChild(clone);
+                    document.body.appendChild(form);
+                    form.submit();
+                };
+                const msg = 'Importer ce fichier CSV ?\n\n' +
                     'Les lignes existantes seront mises à jour si elles correspondent.\n' +
-                    'Les nouvelles lignes seront ajoutées.'
-                )) { this.value = ''; return; }
-                // Vraie soumission de formulaire plutôt qu'un fetch() : la route
-                // d'import répond toujours par flash()+redirect (succès ET échec
-                // partagent le même statut HTTP 200-après-redirection), le message
-                // n'existe donc que côté session Flask, affiché une seule fois par
-                // get_flashed_messages(). Un fetch() qui suit la redirection lui-même
-                // consommait déjà ce message avant la navigation manuelle suivante
-                // (window.location.href) — succès et échec s'affichaient alors tous
-                // deux sans aucun message. Une vraie soumission ne fait qu'une seule
-                // navigation, donc le flash s'affiche normalement sur la page rechargée.
-                const form = document.createElement('form');
-                form.method = 'POST';
-                form.action = s.cfg.importUrl;
-                form.enctype = 'multipart/form-data';
-                form.style.display = 'none';
-                const clone = this.cloneNode(false);
-                clone.name = 'fichier';
-                // Un <input type=file> ne peut pas être réassigné par programme —
-                // DataTransfer sert de pont pour reporter le fichier déjà choisi
-                // sur ce nouvel input (qu'on ne peut pas simplement déplacer : il
-                // doit rester dans le <form> qu'on soumet).
-                const dt = new DataTransfer();
-                dt.items.add(this.files[0]);
-                clone.files = dt.files;
-                form.appendChild(clone);
-                document.body.appendChild(form);
-                form.submit();
+                    'Les nouvelles lignes seront ajoutées.';
+                if (typeof appConfirm === 'function') {
+                    appConfirm(msg, lancerImport, { title: 'Import CSV', icon: '⬆️', ok: 'Importer', btnClass: 'btn-warning' });
+                } else if (confirm(msg)) {
+                    lancerImport();
+                } else {
+                    input.value = '';
+                }
             };
 
             right.appendChild(importBtn);

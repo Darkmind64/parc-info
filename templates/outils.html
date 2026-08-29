@@ -330,19 +330,20 @@ async function ajouterOutil() {
     }
 }
 
-async function supprimerOutil(id) {
-    if (!confirm('Supprimer cet outil ?')) return;
-    const resp = await fetch('/api/outils/' + id + '/supprimer', { method: 'POST' });
-    const d = await resp.json();
-    if (d.ok) {
-        const card = document.getElementById('outil-' + id);
-        if (card) {
-            card.style.transition = 'opacity .3s, transform .3s';
-            card.style.opacity = '0';
-            card.style.transform = 'scale(.95)';
-            setTimeout(() => card.remove(), 350);
+function supprimerOutil(id) {
+    appConfirm('Supprimer cet outil ?', async () => {
+        const resp = await fetch('/api/outils/' + id + '/supprimer', { method: 'POST' });
+        const d = await resp.json();
+        if (d.ok) {
+            const card = document.getElementById('outil-' + id);
+            if (card) {
+                card.style.transition = 'opacity .3s, transform .3s';
+                card.style.opacity = '0';
+                card.style.transform = 'scale(.95)';
+                setTimeout(() => card.remove(), 350);
+            }
         }
-    }
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
 }
 
 async function toggleOutil(id, btn) {

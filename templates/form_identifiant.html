@@ -213,7 +213,7 @@ function majQRForm() {
 
 function telechargerQRForm() {
     const cv = document.querySelector('#qr-form canvas');
-    if (!cv) { alert('Renseignez le SSID pour générer le QR.'); return; }
+    if (!cv) { showFlash('Renseignez le SSID pour générer le QR.', 'info'); return; }
     const ssid = document.getElementById('wifi_ssid').value;
     const a = document.createElement('a');
     a.download = 'wifi_' + ssid.replace(/[^a-z0-9]/gi,'_') + '.png';

@@ -1880,15 +1880,16 @@ const DocsModal = (() => {
         charger();
     }
 
-    async function supprimer(docId) {
-        if (!confirm('Supprimer ce document définitivement ?')) return;
-        const fd = new FormData();
-        fd.append('next', window.location.pathname);
-        const delUrl = _entite === 'peripherique'
-            ? '/doc-peripherique/' + docId + '/supprimer'
-            : '/document/' + docId + '/supprimer';
-        await fetch(delUrl, { method:'POST', body: fd });
-        charger();
+    function supprimer(docId) {
+        appConfirm('Supprimer ce document définitivement ?', async () => {
+            const fd = new FormData();
+            fd.append('next', window.location.pathname);
+            const delUrl = _entite === 'peripherique'
+                ? '/doc-peripherique/' + docId + '/supprimer'
+                : '/document/' + docId + '/supprimer';
+            await fetch(delUrl, { method:'POST', body: fd });
+            charger();
+        }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
     }
 
     function fermer() {
@@ -2303,35 +2304,36 @@ function _renderTypesGrid() {
     grid.innerHTML = _typesList.map(_buildTypeRow).join('');
 }
 
-async function _typeSupprimer(btn) {
+function _typeSupprimer(btn) {
     const row   = btn.closest('[data-label]');
     const label = row ? row.dataset.label.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"') : '';
     if (!label) return;
-    if (!confirm(`Supprimer le type "${label}" ?`)) return;
-    btn.disabled = true;
-    try {
-        const resp = await fetch('/api/listes/types_appareils/supprimer', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({valeur: label})
-        });
-        const d = await resp.json().catch(()=>({}));
-        if (d.ok) {
-            _typesList = _typesList.filter(t => t !== label);
-            // Mise à jour de TYPE_LIST et TYPE_LABELS en mémoire
-            const idx = TYPE_LIST.indexOf(label);
-            if (idx !== -1) TYPE_LIST.splice(idx, 1);
-            const k = _typeCssKey(label);
-            if (TYPE_LABELS[k] === label) delete TYPE_LABELS[k];
-            _renderTypesGrid();
-            showToast(`Type "${label}" supprimé`, 'info');
-        } else {
+    appConfirm(`Supprimer le type "${label}" ?`, async () => {
+        btn.disabled = true;
+        try {
+            const resp = await fetch('/api/listes/types_appareils/supprimer', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({valeur: label})
+            });
+            const d = await resp.json().catch(()=>({}));
+            if (d.ok) {
+                _typesList = _typesList.filter(t => t !== label);
+                // Mise à jour de TYPE_LIST et TYPE_LABELS en mémoire
+                const idx = TYPE_LIST.indexOf(label);
+                if (idx !== -1) TYPE_LIST.splice(idx, 1);
+                const k = _typeCssKey(label);
+                if (TYPE_LABELS[k] === label) delete TYPE_LABELS[k];
+                _renderTypesGrid();
+                showToast(`Type "${label}" supprimé`, 'info');
+            } else {
+                btn.disabled = false;
+                showToast(d.error || 'Erreur lors de la suppression', 'danger');
+            }
+        } catch(e) {
             btn.disabled = false;
-            showToast(d.error || 'Erreur lors de la suppression', 'danger');
+            showToast('Erreur réseau', 'danger');
         }
-    } catch(e) {
-        btn.disabled = false;
-        showToast('Erreur réseau', 'danger');
-    }
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
 }
 
 async function _typeAjouter() {
@@ -2406,40 +2408,38 @@ async function _ajouterPort() {
 }
 
 // Supprimer un port de la liste des services
-async function _supprimerPort(port) {
-    if (!confirm(`Êtes-vous sûr de vouloir supprimer le port ${port} ?`)) {
-        return;
-    }
+function _supprimerPort(port) {
+    appConfirm(`Êtes-vous sûr de vouloir supprimer le port ${port} ?`, async () => {
+        // Récupérer la liste actuelle des ports
+        const scanPortsStr = g('scan_ports') || '21,22,23,25,53,80,110,135,139,143,443,445,631,3389,5900,8080,8443,9100';
+        const ports = scanPortsStr.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
 
-    // Récupérer la liste actuelle des ports
-    const scanPortsStr = g('scan_ports') || '21,22,23,25,53,80,110,135,139,143,443,445,631,3389,5900,8080,8443,9100';
-    const ports = scanPortsStr.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p));
-
-    if (!ports.includes(port)) {
-        showToast(`Port ${port} non trouvé`, 'warning');
-        return;
-    }
-
-    // Supprimer le port
-    const newPorts = ports.filter(p => p !== port);
-    const newPortsStr = newPorts.join(',');
-
-    try {
-        const resp = await fetch('/api/config', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({scan_ports: newPortsStr})
-        });
-        const d = await resp.json().catch(()=>({}));
-        if (d.ok) {
-            cfgData.scan_ports = newPortsStr;
-            rendreConfig();
-            showToast(`Port ${port} supprimé`, 'success');
-        } else {
-            showToast(d.error || 'Erreur lors de la suppression', 'danger');
+        if (!ports.includes(port)) {
+            showToast(`Port ${port} non trouvé`, 'warning');
+            return;
         }
-    } catch(e) {
-        showToast('Erreur réseau', 'danger');
-    }
+
+        // Supprimer le port
+        const newPorts = ports.filter(p => p !== port);
+        const newPortsStr = newPorts.join(',');
+
+        try {
+            const resp = await fetch('/api/config', {
+                method:'POST', headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({scan_ports: newPortsStr})
+            });
+            const d = await resp.json().catch(()=>({}));
+            if (d.ok) {
+                cfgData.scan_ports = newPortsStr;
+                rendreConfig();
+                showToast(`Port ${port} supprimé`, 'success');
+            } else {
+                showToast(d.error || 'Erreur lors de la suppression', 'danger');
+            }
+        } catch(e) {
+            showToast('Erreur réseau', 'danger');
+        }
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
 }
 
 // Sauvegarde automatique avec debounce
@@ -2555,12 +2555,13 @@ async function sauvegarderConfig() {
     }
 }
 
-async function reinitialiserConfig() {
-    if (!confirm('Réinitialiser tous les paramètres aux valeurs par défaut ?')) return;
-    await fetch('/api/config/reset', { method:'POST' });
-    cfgData = {};
-    await chargerConfig();
-    showToast('Configuration réinitialisée', 'info');
+function reinitialiserConfig() {
+    appConfirm('Réinitialiser tous les paramètres aux valeurs par défaut ?', async () => {
+        await fetch('/api/config/reset', { method:'POST' });
+        cfgData = {};
+        await chargerConfig();
+        showToast('Configuration réinitialisée', 'info');
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Réinitialiser' });
 }
 
 // ─── DASHBOARD WIDGET CONFIGURATION ──────────────────────────────────────────────────
@@ -3568,24 +3569,28 @@ function creerSauvegarde() {
 }
 
 function restaurerSauvegarde(fichier, quand) {
-    // Deux confirmations : l'opération remplace toutes les données en cours,
-    // et le bouton se trouve à côté d'un simple "Sauvegarder maintenant".
-    if (!confirm('Restaurer la sauvegarde du ' + quand + ' ?\n\n'
+    // Deux confirmations enchaînées : l'opération remplace toutes les
+    // données en cours, et le bouton se trouve à côté d'un simple
+    // "Sauvegarder maintenant" — la seconde appConfirm() s'ouvre dans le
+    // callback de la première, une fois celle-ci refermée.
+    appConfirm('Restaurer la sauvegarde du ' + quand + ' ?\n\n'
         + 'Toutes les données actuelles seront remplacées par celles de cette date.\n'
-        + 'Une sauvegarde de sécurité est prise juste avant.')) return;
-    if (!confirm('Dernière confirmation : remplacer les données actuelles ?')) return;
-    const zone = document.getElementById('liste-sauvegardes');
-    if (zone) zone.textContent = 'Restauration en cours…';
-    fetch('/api/db/sauvegarde/restaurer', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
-        body: JSON.stringify({fichier: fichier})
-    }).then(r => r.json()).then(d => {
-        if (!d.ok) { if (zone) zone.textContent = '✗ ' + (d.error || 'Échec'); return; }
-        showFlash('Base restaurée depuis ' + d.fichier + '. Sauvegarde de sécurité conservée : '
-            + (d.filet || 'aucune') + '. Rechargement…', 'success');
-        setTimeout(() => location.reload(), 1500);
-    }).catch(() => { if (zone) zone.textContent = '✗ Erreur réseau'; });
+        + 'Une sauvegarde de sécurité est prise juste avant.', () => {
+        appConfirm('Dernière confirmation : remplacer les données actuelles ?', () => {
+            const zone = document.getElementById('liste-sauvegardes');
+            if (zone) zone.textContent = 'Restauration en cours…';
+            fetch('/api/db/sauvegarde/restaurer', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+                body: JSON.stringify({fichier: fichier})
+            }).then(r => r.json()).then(d => {
+                if (!d.ok) { if (zone) zone.textContent = '✗ ' + (d.error || 'Échec'); return; }
+                showFlash('Base restaurée depuis ' + d.fichier + '. Sauvegarde de sécurité conservée : '
+                    + (d.filet || 'aucune') + '. Rechargement…', 'success');
+                setTimeout(() => location.reload(), 1500);
+            }).catch(() => { if (zone) zone.textContent = '✗ Erreur réseau'; });
+        }, { title: 'Dernière confirmation', icon: '🗑️', ok: 'Restaurer' });
+    }, { title: 'Action irréversible', icon: '⚠️', ok: 'Continuer' });
 }
 
 function testTursoConn() {
@@ -3609,22 +3614,23 @@ function testTursoConn() {
 
 function transferDb(direction) {
     const lbl = direction === 'local_to_turso' ? 'Local \u2192 Turso' : 'Turso \u2192 Local';
-    if (!confirm('Transf\u00e9rer les donn\u00e9es\u00a0: ' + lbl + '\u00a0?\nLes donn\u00e9es existantes dans la cible seront remplac\u00e9es.')) return;
-    const el = document.getElementById('db-transfer-msg');
-    if (el) { el.style.color = 'var(--text-secondary)'; el.textContent = 'Transfert en cours\u2026'; }
-    fetch('/api/db/transfer', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
-        body: JSON.stringify({direction})
-    }).then(r => r.json()).then(d => {
-        if (el) {
-            el.style.color = d.ok ? 'var(--accent-green)' : 'var(--accent-red)';
-            el.textContent = d.ok ? ('\u2713 ' + d.summary) : ('\u2717 ' + (d.error || 'Erreur'));
-        }
-        if (d.ok) showToast('Transfert r\u00e9ussi\u00a0: ' + d.summary, 'success');
-    }).catch(() => {
-        if (el) { el.style.color = 'var(--accent-red)'; el.textContent = '\u2717 Erreur r\u00e9seau'; }
-    });
+    appConfirm('Transf\u00e9rer les donn\u00e9es\u00a0: ' + lbl + '\u00a0?\nLes donn\u00e9es existantes dans la cible seront remplac\u00e9es.', () => {
+        const el = document.getElementById('db-transfer-msg');
+        if (el) { el.style.color = 'var(--text-secondary)'; el.textContent = 'Transfert en cours\u2026'; }
+        fetch('/api/db/transfer', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'X-CSRFToken': '{{ csrf_token }}'},
+            body: JSON.stringify({direction})
+        }).then(r => r.json()).then(d => {
+            if (el) {
+                el.style.color = d.ok ? 'var(--accent-green)' : 'var(--accent-red)';
+                el.textContent = d.ok ? ('\u2713 ' + d.summary) : ('\u2717 ' + (d.error || 'Erreur'));
+            }
+            if (d.ok) showToast('Transfert r\u00e9ussi\u00a0: ' + d.summary, 'success');
+        }).catch(() => {
+            if (el) { el.style.color = 'var(--accent-red)'; el.textContent = '\u2717 Erreur r\u00e9seau'; }
+        });
+    }, { title: 'Action irr\u00e9versible', icon: '\u26a0\ufe0f', ok: 'Transf\u00e9rer' });
 }
 
 // ── SYNCHRONISATION ──────────────────────────────────────────────────────────
@@ -3940,39 +3946,40 @@ async function ajouterValeur(nom) {
     }
 }
 
-async function supprimerValeur(nom, valeur, label) {
-    if (!confirm('Supprimer "' + (label || valeur) + '" de cette liste ?')) return;
+function supprimerValeur(nom, valeur, label) {
+    appConfirm('Supprimer "' + (label || valeur) + '" de cette liste ?', async () => {
+        let resp;
+        if (nom === 'services_utilisateurs') {
+            resp = await fetch('/api/services/supprimer', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ id: valeur })
+            });
+        } else {
+            resp = await fetch('/api/listes/' + nom + '/supprimer', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ valeur: valeur })
+            });
+        }
 
-    let resp;
-    if (nom === 'services_utilisateurs') {
-        resp = await fetch('/api/services/supprimer', {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ id: valeur })
-        });
-    } else {
-        resp = await fetch('/api/listes/' + nom + '/supprimer', {
-            method: 'POST', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ valeur: valeur })
-        });
-    }
-
-    const d = await resp.json();
-    if (d.ok) {
-        await rafraichirListe(nom);
-        showToast('Supprimé', 'info');
-    } else {
-        showToast(d.error || 'Erreur', 'danger');
-    }
+        const d = await resp.json();
+        if (d.ok) {
+            await rafraichirListe(nom);
+            showToast('Supprimé', 'info');
+        } else {
+            showToast(d.error || 'Erreur', 'danger');
+        }
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
 }
 
-async function resetListe(nom) {
-    if (!confirm('Rétablir la liste "' + LISTES_META[nom].label + '" aux valeurs par défaut ?')) return;
-    const resp = await fetch('/api/listes/' + nom + '/reset', { method: 'POST' });
-    const d = await resp.json();
-    if (d.ok) {
-        await rafraichirListe(nom);
-        showToast('Liste réinitialisée', 'info');
-    }
+function resetListe(nom) {
+    appConfirm('Rétablir la liste "' + LISTES_META[nom].label + '" aux valeurs par défaut ?', async () => {
+        const resp = await fetch('/api/listes/' + nom + '/reset', { method: 'POST' });
+        const d = await resp.json();
+        if (d.ok) {
+            await rafraichirListe(nom);
+            showToast('Liste réinitialisée', 'info');
+        }
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Rétablir' });
 }
 </script>
 
@@ -4178,7 +4185,7 @@ body.theme-light .liste-item { background: rgba(0,0,0,.03); }
             <span id="app-confirm-icon" style="font-size:1.8rem;line-height:1;flex-shrink:0;filter:drop-shadow(0 0 8px currentColor);">⚠️</span>
             <div style="flex:1;min-width:0;">
                 <div id="app-confirm-title" style="font-weight:700;font-size:.95rem;color:var(--text-primary);margin-bottom:.4rem;letter-spacing:.02em;">Confirmation</div>
-                <div id="app-confirm-msg" style="color:var(--text-secondary);font-size:.85rem;line-height:1.55;"></div>
+                <div id="app-confirm-msg" style="color:var(--text-secondary);font-size:.85rem;line-height:1.55;white-space:pre-line;"></div>
             </div>
         </div>
         <div style="display:flex;gap:.6rem;justify-content:flex-end;">
@@ -4203,8 +4210,14 @@ body.theme-light .liste-item { background: rgba(0,0,0,.03); }
     var iconEl  = document.getElementById('app-confirm-icon');
     var okBtn   = document.getElementById('app-confirm-ok');
     var _cb     = null;
+    var _onCancel = null;
 
-    /* ── API publique ── */
+    /* ── API publique ──
+       opts.onCancel (optionnel) : rappelé si l'utilisateur annule/ferme —
+       pour les cas où le "non" a lui-même un effet de bord à rejouer (ex.
+       gererClicLienPort() dans baie_brassage.html, qui doit réinitialiser
+       le mode "Lier" si l'écrasement proposé est refusé), pas seulement
+       "ne rien faire". */
     window.appConfirm = function (msg, callback, opts) {
         opts = opts || {};
         msgEl.textContent   = msg;
@@ -4214,13 +4227,17 @@ body.theme-light .liste-item { background: rgba(0,0,0,.03); }
         okBtn.className     = 'btn btn-sm ' + (opts.btnClass || 'btn-danger');
         okBtn.style.minWidth = '100px';
         _cb = callback;
+        _onCancel = opts.onCancel || null;
         overlay.style.display = 'flex';
         setTimeout(function () { okBtn.focus(); }, 50);
     };
 
     window.appConfirmCancel = function () {
         overlay.style.display = 'none';
+        var cancelCb = _onCancel;
         _cb = null;
+        _onCancel = null;
+        if (cancelCb) cancelCb();
     };
 
     okBtn.addEventListener('click', function () {
@@ -4265,6 +4282,79 @@ body.theme-light .liste-item { background: rgba(0,0,0,.03); }
         });
     }, true /* capture, après CSRF */);
 
+})();
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     MODALE DE SAISIE GLOBALE
+     Remplace window.prompt() — même esprit que la modale de confirmation
+     ci-dessus, avec un champ texte. Promise-based (pas de callback) pour
+     chaîner proprement plusieurs saisies successives avec await, comme
+     nouvelleCategorie() dans kb.html (nom PUIS icône).
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div id="app-prompt-overlay" style="display:none;position:fixed;inset:0;z-index:9900;background:rgba(0,8,20,.75);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
+    <div id="app-prompt-box" style="background:var(--bg-card);border:1px solid var(--border-glow);border-radius:10px;padding:1.6rem 1.8rem;max-width:420px;width:92%;box-shadow:0 28px 90px rgba(0,0,0,.65);animation:fadeInScale .16s ease;">
+        <div style="display:flex;gap:.9rem;align-items:flex-start;margin-bottom:1.2rem;">
+            <span id="app-prompt-icon" style="font-size:1.8rem;line-height:1;flex-shrink:0;filter:drop-shadow(0 0 8px currentColor);">✎</span>
+            <div style="flex:1;min-width:0;">
+                <div id="app-prompt-title" style="font-weight:700;font-size:.95rem;color:var(--text-primary);margin-bottom:.4rem;letter-spacing:.02em;">Saisie</div>
+                <div id="app-prompt-msg" style="color:var(--text-secondary);font-size:.85rem;line-height:1.5;white-space:pre-line;margin-bottom:.6rem;"></div>
+                <input type="text" id="app-prompt-input" style="width:100%;">
+            </div>
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:flex-end;">
+            <button onclick="appPromptCancel()" class="btn btn-primary btn-sm" style="min-width:80px;">Annuler</button>
+            <button id="app-prompt-ok" class="btn btn-success btn-sm" style="min-width:100px;">Valider</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var overlay = document.getElementById('app-prompt-overlay');
+    var msgEl   = document.getElementById('app-prompt-msg');
+    var titleEl = document.getElementById('app-prompt-title');
+    var iconEl  = document.getElementById('app-prompt-icon');
+    var inputEl = document.getElementById('app-prompt-input');
+    var okBtn   = document.getElementById('app-prompt-ok');
+    var _resolve = null;
+
+    /* ── API publique ──
+       await appPrompt('Nom :', {value: 'Défaut', placeholder: '…'}) → string
+       (déjà .trim() côté appelant, voir sites convertis) ou null si annulé —
+       même contrat que window.prompt(), en Promise plutôt qu'en blocage
+       synchrone du thread principal. */
+    window.appPrompt = function (msg, opts) {
+        opts = opts || {};
+        msgEl.textContent    = msg || '';
+        msgEl.style.display  = msg ? '' : 'none';
+        titleEl.textContent  = opts.title || 'Saisie';
+        iconEl.textContent   = opts.icon  || '✎';
+        inputEl.value        = opts.value != null ? opts.value : '';
+        inputEl.placeholder  = opts.placeholder || '';
+        okBtn.textContent    = opts.ok || 'Valider';
+        overlay.style.display = 'flex';
+        setTimeout(function () { inputEl.focus(); inputEl.select(); }, 50);
+        return new Promise(function (resolve) { _resolve = resolve; });
+    };
+
+    function finir(valeur) {
+        overlay.style.display = 'none';
+        var r = _resolve; _resolve = null;
+        if (r) r(valeur);
+    }
+
+    window.appPromptCancel = function () { finir(null); };
+    okBtn.addEventListener('click', function () { finir(inputEl.value); });
+    inputEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); finir(inputEl.value); }
+    });
+    overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) appPromptCancel();
+    });
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && overlay.style.display === 'flex') appPromptCancel();
+    });
 })();
 </script>
 

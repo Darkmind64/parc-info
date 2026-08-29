@@ -223,14 +223,14 @@
 
 <script>
 function supprimerDoc(id, nom) {
-    if (confirm('Supprimer le document "' + nom + '" ?')) {
+    appConfirm('Supprimer le document "' + nom + '" ?', () => {
         const form = document.createElement('form');
         form.method = 'POST';
         form.action = '/intervention/document/' + id + '/supprimer';
         form.innerHTML = '<input type="hidden" name="csrf_token" value="{{ csrf_token }}">';
         document.body.appendChild(form);
         form.submit();
-    }
+    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Supprimer' });
 }
 </script>
 {% endblock %}
