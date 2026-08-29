@@ -1454,9 +1454,14 @@ function renderCableLinks() {
         // Zone de double-clic élargie et invisible, superposée (voir CSS
         // .cable-link-hit) : édition rapide du câble (couleur/longueur)
         // directement depuis la courbe visible, sans passer par un port.
+        // data-cle posé ici aussi (pas seulement sur .cable-link) pour que
+        // mettreCableEnAvant() puisse la retrouver et la déplacer avec sa
+        // courbe visible — sinon elle resterait à son ancienne position de
+        // peinture, dépareillée de la courbe qu'elle est censée survoler.
         const zoneClic = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         zoneClic.setAttribute('d', d);
         zoneClic.setAttribute('class', 'cable-link-hit');
+        zoneClic.dataset.cle = els[0].dataset.cle;
         zoneClic.addEventListener('dblclick', e => {
             e.stopPropagation();
             PortModal.ouvrir(parseInt(a.dataset.slot), parseInt(a.dataset.numero));
@@ -1464,6 +1469,20 @@ function renderCableLinks() {
         svg.appendChild(zoneClic);
         idx++;
     });
+}
+
+// Ramène au premier plan (dernier peint = visible par-dessus tous les
+// autres) la courbe de câble d'une cible donnée, et sa zone de clic
+// associée — SVG peint dans l'ORDRE DU DOM, indépendant de tout z-index ;
+// sans ce déplacement, une courbe survolée/sélectionnée pouvait rester
+// invisible, cachée sous d'autres câbles peints après elle, dès que la
+// baie a plusieurs liens qui se croisent (signalé en usage réel : le
+// survol semblait "ne pas marcher" alors que la classe cable-hover était
+// bien posée — juste invisible sous le reste du câblage).
+function mettreCableEnAvant(cle) {
+    const svg = document.getElementById('cable-overlay');
+    if (!svg || !cle) return;
+    svg.querySelectorAll(`[data-cle="${escH(cle)}"]`).forEach(el => svg.appendChild(el));
 }
 
 // ── CELL BUILDERS ─────────────────────────────────────────────────────────────
@@ -1686,6 +1705,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
                     .forEach(pel => pel.classList.add('port-hover-link'));
                 const ligne = document.querySelector(`.cable-link[data-cle="${escH(cle)}"]`);
                 if (ligne) ligne.classList.add('cable-hover');
+                mettreCableEnAvant(cle);
             }
         });
         el.addEventListener('mousemove',  e => { e.stopPropagation(); const t = document.getElementById('rack-tooltip'); if(t.classList.contains('show')) positionnerTooltip(e); });
@@ -2290,6 +2310,7 @@ function surbrillerPortsLies(cle) {
     });
     const ligne = document.querySelector(`.cable-link[data-cle="${escH(cle)}"]`);
     if (ligne) ligne.classList.add('cable-hover');
+    mettreCableEnAvant(cle);
 }
 
 // ── LIER DEUX PORTS (câblage physique) ─────────────────────────────────────────

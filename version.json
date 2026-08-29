@@ -1,24 +1,23 @@
 {
-  "version": "2.18.82",
+  "version": "2.18.83",
   "release_date": "2026-08-29T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.82",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.83/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.83/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.83/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.83",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.83/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.83/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.83/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.83/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.83/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : la disposition 2 lignes d'un switch garde désormais les ports à leur taille normale tant que la place le permet, au lieu de les réduire systématiquement",
+    "new_features": "Baie de brassage : la mise en surbrillance d'un câble au survol/clic d'un port reste désormais visible même dans une baie chargée en câblages qui se croisent",
     "improvements": [
-      "Signalé en usage réel : les ports en disposition 2 lignes étaient réduits (20×11) même quand la baie était assez large pour les garder à taille normale (24×22). Vérification faite : sur un écran de bureau courant, 2 rangées de ports pleine taille tiennent déjà dans 1U avec de la marge.",
-      "La taille des ports en 2 lignes est maintenant calculée depuis la hauteur réellement disponible sur cette rangée du rack, pas fixée d'avance — pleine taille dès que la place suffit, réduite seulement autant que nécessaire sinon.",
-      "Bug trouvé au passage en testant une fenêtre étroite : quand la zone SFP retombait sur 2 lignes, elle poussait la zone RJ vers le bas en la centrant contre elle, causant un léger débordement malgré des ports déjà correctement réduits. Corrigé (les zones démarrent désormais en haut, jamais centrées l'une contre l'autre)."
+      "Signalé en usage réel : la surbrillance d'un câble (survol d'un port relié, ou clic pour la surbrillance croisée) semblait parfois ne pas fonctionner. Cause trouvée en vérifiant : un SVG se peint dans l'ordre du DOM, indépendant de tout z-index — le câble mis en avant recevait bien sa couleur/épaisseur de surbrillance, mais restait à sa position de dessin d'origine, invisible sous d'autres câbles tracés après lui dès que plusieurs liens se croisent.",
+      "La courbe survolée ou sélectionnée est désormais ramenée au premier plan (peinte par-dessus tout le reste), pour le survol d'un port comme pour le clic. La zone invisible de double-clic (édition rapide du câble) suit la courbe pour rester alignée avec elle."
     ]
   },
   "checksums": {
@@ -29,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.82"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.83"
 }

@@ -1,8 +1,35 @@
-PARCINFO_VERSION=2.18.82
+PARCINFO_VERSION=2.18.83
 RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082906
+BUILD_NUMBER=2026082907
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.83 - Baie de brassage : câble en surbrillance toujours visible même chargée
+# Signalé en usage réel : la mise en surbrillance (survol d'un port relié,
+# ou clic pour la surbrillance croisée) ne fonctionnait pas toujours —
+# suspecté lié à une baie un peu chargée en câblages, ce qui s'est
+# confirmé en vérifiant.
+#
+# Cause réelle : un SVG se peint dans l'ORDRE DU DOM, indépendant de tout
+# z-index. Le câble mis en avant recevait bien sa classe cable-hover
+# (couleur/épaisseur changées), mais restait à sa position de dessin
+# d'origine — un câble tracé TÔT (donc peint en premier) pouvait se
+# retrouver entièrement caché sous d'autres câbles tracés APRÈS lui, dès
+# que plusieurs liens se croisent dans la même baie. Reproduit et confirmé
+# en direct dans le navigateur : 8 câbles croisés entre 3 switches, un
+# câble initialement peint tout en dessous des 7 autres était bel et bien
+# invisible au survol de son port, malgré la surbrillance correctement
+# appliquée.
+#
+# Corrigé : la courbe survolée ou sélectionnée par clic est désormais
+# ramenée au premier plan (déplacée en dernière position du SVG = peinte
+# par-dessus tout le reste), pour les deux chemins qui posent cable-hover
+# (survol d'un port ET clic pour la surbrillance croisée). La zone
+# invisible de double-clic associée (édition rapide du câble) suit la
+# courbe pour rester alignée avec elle.
+#
+# Changement JS pur, aucun code serveur touché. Suite de tests pytest
+# toujours verte (174 tests).
 
 # Version 2.18.82 - Baie de brassage : taille de ports dynamique en disposition 2 lignes
 # Signalé en usage réel juste après la 2.18.81 : en disposition 2 lignes,
