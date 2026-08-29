@@ -109,6 +109,30 @@ def test_assigner_prise_murale_ne_touche_pas_le_port_rj(client, make_client, mak
     assert port3['prise_murale']['appareil_id'] == app_id
 
 
+def test_identification_persiste_independamment_de_la_piece_et_de_la_cible(client, make_client, make_user, make_appareil):
+    """Identification (repère physique de la prise, ex. "RJ 3.12") — champ
+    demandé séparément de la pièce (emplacement) : les deux, et la cible,
+    doivent pouvoir être modifiés indépendamment sans s'effacer l'un
+    l'autre, comme piece/appareil_id (voir test_baie_piece_cable.py)."""
+    uid, _, _ = make_user()
+    cid = make_client(auth_user_id=uid)
+    login_session(client, uid, cid)
+    app_id = make_appareil(cid, nom_machine='PC-IDENT')
+    bandeau = _poser_bandeau(client)
+
+    r = client.put(f"/api/baie/prise-murale/{bandeau['id']}/4", json={'identification': 'RJ 3.12'})
+    prise = r.get_json()
+    assert prise['identification'] == 'RJ 3.12'
+    assert prise['piece'] == ''
+    assert prise['appareil_id'] is None
+
+    r2 = client.put(f"/api/baie/prise-murale/{bandeau['id']}/4", json={'piece': 'Bureau 5', 'appareil_id': app_id})
+    prise2 = r2.get_json()
+    assert prise2['identification'] == 'RJ 3.12', "l'identification ne doit pas disparaître à un autre changement"
+    assert prise2['piece'] == 'Bureau 5'
+    assert prise2['appareil_id'] == app_id
+
+
 def test_prise_murale_usage_libre_exclusif_de_la_cible(client, make_client, make_user, make_appareil):
     uid, _, _ = make_user()
     cid = make_client(auth_user_id=uid)
@@ -268,7 +292,9 @@ def test_remplacement_meme_position_conserve_les_prises_murales(client, make_cli
     login_session(client, uid, cid)
     app_id = make_appareil(cid, nom_machine='PC-REPORT')
     bandeau1 = _poser_bandeau(client, nb_ports=4)
-    client.put(f"/api/baie/prise-murale/{bandeau1['id']}/2", json={'appareil_id': app_id, 'piece': 'Salle A'})
+    client.put(f"/api/baie/prise-murale/{bandeau1['id']}/2", json={
+        'appareil_id': app_id, 'piece': 'Salle A', 'identification': 'RJ 2.02',
+    })
 
     bandeau2 = client.post('/api/baie/slot', json={
         'position': 1, 'col_index': 0, 'baie_nom': 'Baie principale',
@@ -279,6 +305,7 @@ def test_remplacement_meme_position_conserve_les_prises_murales(client, make_cli
     prise2 = next(p['prise_murale'] for p in bandeau2['ports'] if p['numero'] == 2)
     assert prise2['appareil_id'] == app_id, "la prise murale du port 2 aurait dû être reportée"
     assert prise2['piece'] == 'Salle A'
+    assert prise2['identification'] == 'RJ 2.02'
 
     reste = conn.execute('SELECT COUNT(*) FROM baie_prises_murales WHERE slot_id=?', (bandeau1['id'],)).fetchone()[0]
     assert reste == 0

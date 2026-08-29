@@ -1772,6 +1772,7 @@ def init_db():
         slot_id INTEGER NOT NULL,
         numero INTEGER NOT NULL,
         piece TEXT DEFAULT '',
+        identification TEXT DEFAULT '',
         appareil_id INTEGER,
         peripherique_id INTEGER,
         usage_libre TEXT DEFAULT '',
@@ -1782,6 +1783,13 @@ def init_db():
         FOREIGN KEY(appareil_id) REFERENCES appareils(id),
         FOREIGN KEY(peripherique_id) REFERENCES peripheriques(id),
         UNIQUE(slot_id, numero))''')
+    # identification (repère physique de la prise, ex. "RJ 3.12" imprimé sur
+    # la plaque murale — distinct de `piece`, qui nomme la pièce desservie,
+    # pas la prise elle-même) : ajoutée après coup (v2.18.75), migration
+    # nécessaire pour toute base ayant déjà créé la table ci-dessus (2.18.74).
+    try:
+        c.execute("ALTER TABLE baie_prises_murales ADD COLUMN identification TEXT DEFAULT ''")
+    except: pass
 
     # Migration : reprend les ports de bandeau RJ déjà en base (créés avant
     # cette table) — copie appareil_id/peripherique_id/usage_libre/piece
@@ -5666,7 +5674,7 @@ def _prises_murales_avec_details(conn, slot_id):
     autre élément de la baie. Retourne un dict {numero: détails}, vide pour
     un slot qui n'est pas (ou plus) un bandeau RJ."""
     rows = conn.execute(
-        '''SELECT pm.slot_id, pm.numero, pm.piece, pm.appareil_id, pm.peripherique_id, pm.usage_libre,
+        '''SELECT pm.slot_id, pm.numero, pm.piece, pm.identification, pm.appareil_id, pm.peripherique_id, pm.usage_libre,
                   pm.cable_couleur, pm.cable_longueur,
                   a.nom_machine, a.type_appareil, a.en_ligne, a.dernier_ping,
                   p.categorie AS p_categorie, p.marque AS p_marque, p.modele AS p_modele
@@ -5890,10 +5898,10 @@ def _reconcilier_prises_murales(conn, slot_id, nb_ports, type_equipement, prises
     Un élément qui n'est PAS (ou plus) un bandeau RJ n'a par construction
     aucune prise murale : celles qui existeraient (changement de
     type_equipement après coup) sont supprimées.
-    prises_existantes (dict numero -> (piece, appareil_id, peripherique_id,
-    usage_libre, cable_couleur, cable_longueur)), s'il est fourni, reporte
-    les prises murales d'un ancien slot remplacé au même emplacement — même
-    rôle que ports_existants pour _reconcilier_ports."""
+    prises_existantes (dict numero -> (piece, identification, appareil_id,
+    peripherique_id, usage_libre, cable_couleur, cable_longueur)), s'il est
+    fourni, reporte les prises murales d'un ancien slot remplacé au même
+    emplacement — même rôle que ports_existants pour _reconcilier_ports."""
     if type_equipement != 'Bandeau RJ':
         conn.execute('DELETE FROM baie_prises_murales WHERE slot_id=?', (slot_id,))
         return
@@ -5907,10 +5915,10 @@ def _reconcilier_prises_murales(conn, slot_id, nb_ports, type_equipement, prises
                 conn.execute('INSERT INTO baie_prises_murales (slot_id,numero,date_maj) VALUES (?,?,?)', (slot_id, numero, now))
     else:
         for numero in range(1, nb_ports + 1):
-            piece, ap, pe, us, cc, cl = prises_existantes.get(numero, ('', None, None, '', '', ''))
+            piece, ident, ap, pe, us, cc, cl = prises_existantes.get(numero, ('', '', None, None, '', '', ''))
             conn.execute('''INSERT INTO baie_prises_murales
-                (slot_id,numero,piece,appareil_id,peripherique_id,usage_libre,cable_couleur,cable_longueur,date_maj)
-                VALUES (?,?,?,?,?,?,?,?,?)''', (slot_id, numero, piece, ap, pe, us, cc, cl, now))
+                (slot_id,numero,piece,identification,appareil_id,peripherique_id,usage_libre,cable_couleur,cable_longueur,date_maj)
+                VALUES (?,?,?,?,?,?,?,?,?,?)''', (slot_id, numero, piece, ident, ap, pe, us, cc, cl, now))
 
 def _clamp_largeur_u(v, col=0):
     """1-10 (dixièmes de la largeur du rack, position dans la grille à 10
@@ -6041,8 +6049,8 @@ def api_baie_ajouter_slot():
         # Prises murales de l'ancien slot — même report que pour les ports
         # (placerEquip() ré-envoie systématiquement un POST, y compris pour
         # éditer un bandeau existant).
-        anciennes_prises = {r[0]: (r[1], r[2], r[3], r[4], r[5], r[6]) for r in conn.execute(
-            'SELECT numero, piece, appareil_id, peripherique_id, usage_libre, cable_couleur, cable_longueur '
+        anciennes_prises = {r[0]: (r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in conn.execute(
+            'SELECT numero, piece, identification, appareil_id, peripherique_id, usage_libre, cable_couleur, cable_longueur '
             'FROM baie_prises_murales WHERE slot_id=?', (ancien[0],)).fetchall()}
         # Numéros qui ne seront pas recréés (nb_ports réduit) : détacher leur
         # éventuel partenaire AVANT de perdre la trace de l'ancien slot_id.
@@ -6235,12 +6243,18 @@ def api_baie_port(slot_id, numero):
 @app.route('/api/baie/prise-murale/<int:slot_id>/<int:numero>', methods=['PUT'])
 @login_required
 def api_baie_prise_murale(slot_id, numero):
-    """Édite UNE prise murale d'un bandeau RJ — la pièce desservie et
-    l'appareil/périphérique/usage qui y est branché, plus l'étiquette du
-    câble fixe mur -> bandeau. Entité séparée du port RJ de même numéro
-    (voir baie_prises_murales dans init_db()) : le port RJ, lui, ne sert
-    plus qu'à interconnecter avec un autre élément de la baie (voir
-    api_baie_lien_port) et n'est jamais modifié par cette route."""
+    """Édite UNE prise murale d'un bandeau RJ — la pièce desservie, son
+    identification (repère physique de la prise, ex. "RJ 3.12" imprimé sur
+    la plaque murale — distinct de la pièce) et l'appareil/périphérique/
+    usage qui y est branché, plus l'étiquette du câble fixe mur -> bandeau.
+    Chaque champ peut être fourni seul (payload partiel, voir les panneaux
+    d'édition dédiés) ou tous ensemble (payload complet, voir la modale
+    d'édition par double-clic) : chaque clé du payload ne touche que sa
+    propre colonne, les absentes restent inchangées. Entité séparée du port
+    RJ de même numéro (voir baie_prises_murales dans init_db()) : le port
+    RJ, lui, ne sert plus qu'à interconnecter avec un autre élément de la
+    baie (voir api_baie_lien_port) et n'est jamais modifié par cette
+    route."""
     cid = get_client_id()
     conn = get_db()
     slot = conn.execute(
@@ -6267,6 +6281,10 @@ def api_baie_prise_murale(slot_id, numero):
     if piece_fournie:
         conn.execute('UPDATE baie_prises_murales SET piece=?, date_maj=? WHERE slot_id=? AND numero=?',
                      (str(f.get('piece') or '').strip(), now, slot_id, numero))
+    identification_fournie = 'identification' in f
+    if identification_fournie:
+        conn.execute('UPDATE baie_prises_murales SET identification=?, date_maj=? WHERE slot_id=? AND numero=?',
+                     (str(f.get('identification') or '').strip(), now, slot_id, numero))
     cable_fourni = ('cable_couleur' in f) or ('cable_longueur' in f)
     if cable_fourni:
         conn.execute('UPDATE baie_prises_murales SET cable_couleur=?, cable_longueur=?, date_maj=? '
@@ -6276,12 +6294,16 @@ def api_baie_prise_murale(slot_id, numero):
     conn.commit()
     prises = _prises_murales_avec_details(conn, slot_id)
     prise = prises.get(numero)
-    if prise and (cible_fournie or piece_fournie or cable_fourni):
+    if prise and (cible_fournie or piece_fournie or identification_fournie or cable_fourni):
         nom_slot = slot[1] or slot[2] or f'Emplacement #{slot_id}'
         if cible_fournie:
             detail = f"Prise murale {numero} -> {prise.get('nom_cible') or '— Libre —'}"
-        elif piece_fournie:
+        elif piece_fournie and not identification_fournie:
             detail = f"Prise murale {numero}, pièce -> {prise.get('piece') or '(vide)'}"
+        elif identification_fournie and not piece_fournie:
+            detail = f"Prise murale {numero}, identification -> {prise.get('identification') or '(vide)'}"
+        elif piece_fournie or identification_fournie:
+            detail = f"Prise murale {numero} : infos mises à jour"
         else:
             detail = f"Prise murale {numero} : câble mis à jour"
         log_history(conn, cid, 'baie_slot', slot_id, nom_slot, 'Modification (prise murale)', detail)
@@ -6470,7 +6492,14 @@ def _liste_cablage(conn, cid):
     avec le nom des deux éléments — sert à la fois à la page imprimable et à
     l'export CSV. La condition d'ordre (slot_id, numero) élimine le doublon
     inhérent au stockage bidirectionnel de baie_slot_ports (chaque port du
-    lien porte sa propre ligne, référençant l'autre)."""
+    lien porte sa propre ligne, référençant l'autre).
+    Exclut désormais les liens dont un bout est un port de bandeau RJ — ces
+    liens-là (bandeau -> switch/routeur, le cas standard du brassage
+    structuré) sont documentés en détail, avec la prise murale d'en face,
+    par _fiche_prises_murales() : les reprendre ici ferait doublon avec la
+    fiche de brassage. Ne restent que les interconnexions "backbone" entre
+    deux éléments ni l'un ni l'autre bandeau (switch<->routeur,
+    switch<->switch, PDU...)."""
     rows = conn.execute('''
         SELECT COALESCE(s1.baie_nom,'Baie principale') AS baie,
                s1.position AS pos1, s1.nom_custom AS nom1_custom, s1.type_equipement AS type1,
@@ -6481,6 +6510,7 @@ def _liste_cablage(conn, cid):
         JOIN baie_slots s1 ON bp.slot_id = s1.id
         JOIN baie_slots s2 ON bp.lie_slot_id = s2.id
         WHERE s1.client_id=? AND s2.client_id=? AND bp.lie_slot_id IS NOT NULL
+          AND s1.type_equipement != 'Bandeau RJ' AND s2.type_equipement != 'Bandeau RJ'
           AND (bp.slot_id < bp.lie_slot_id
                OR (bp.slot_id = bp.lie_slot_id AND bp.numero < bp.lie_port_numero))
         ORDER BY baie, pos1, bp.numero
@@ -6493,22 +6523,67 @@ def _liste_cablage(conn, cid):
         liens.append(d)
     return liens
 
+def _fiche_prises_murales(conn, cid):
+    """Une ligne par port de CHAQUE bandeau RJ du client (les 24 au complet,
+    affectés ou non — une fiche de brassage documente tout le panneau, pas
+    seulement les prises déjà câblées, pour savoir d'un coup d'œil ce qui
+    reste disponible) : pièce desservie, identification de la prise,
+    appareil/périphérique/usage qui y est branché, et — si le port RJ
+    correspondant est câblé vers un autre élément — la chaîne complète
+    jusqu'à la cible finale. Réutilise telle quelle la résolution déjà
+    faite par _ports_avec_details() (même donnée que l'écran de la baie,
+    y compris la couleur/le statut), pas de requête SQL séparée à
+    maintenir en double."""
+    bandeaux = conn.execute(
+        "SELECT id, baie_nom, position, nom_custom FROM baie_slots "
+        "WHERE client_id=? AND type_equipement='Bandeau RJ' "
+        "ORDER BY COALESCE(baie_nom,'Baie principale'), position", (cid,)).fetchall()
+    lignes = []
+    for slot_id, baie_nom, position, nom_custom in bandeaux:
+        nom_bandeau = nom_custom or f'U{position}'
+        for p in _ports_avec_details(conn, slot_id):
+            pm = p.get('prise_murale') or {}
+            lignes.append({
+                'baie': baie_nom or 'Baie principale',
+                'bandeau': nom_bandeau,
+                'numero': p['numero'],
+                'piece': pm.get('piece') or '',
+                'identification': pm.get('identification') or '',
+                'prise_cible': pm.get('nom_cible') or '',
+                # Deux câbles PHYSIQUEMENT distincts (voir baie_prises_murales
+                # dans init_db()) : le câble mural fixe (mur -> bandeau, sur
+                # la prise murale elle-même) et le cordon de brassage
+                # (bandeau -> élément relié, sur le port RJ, baie_slot_ports)
+                # — les confondre ferait perdre exactement l'info que cette
+                # table sépare depuis la 2.18.74.
+                'cable_mural_couleur': pm.get('cable_couleur') or '',
+                'cable_mural_longueur': pm.get('cable_longueur') or '',
+                'lien_cible': p.get('nom_cible') if p.get('lie_slot_id') else '',
+                'cible_finale': p.get('cible_finale') or '',
+                'cordon_couleur': p.get('cable_couleur') or '',
+                'cordon_longueur': p.get('cable_longueur') or '',
+            })
+    return lignes
+
 @app.route('/baie/cablage')
 @login_required
 def baie_cablage():
-    """Liste imprimable de tous les liens port-à-port du client — demandé
-    comme documentation à laisser sur site ou pour un audit : chaque câble
-    physique (bandeau <-> switch, switch <-> routeur…) sur une ligne, sans
-    naviguer élément par élément dans l'éditeur."""
+    """Fiche de brassage imprimable — documentation complète à laisser sur
+    site ou pour un audit, en deux parties : chaque prise murale d'un
+    bandeau RJ (pièce, identification, appareil branché, chaîne jusqu'à sa
+    cible finale — voir _fiche_prises_murales) puis les interconnexions
+    "backbone" entre éléments non-bandeau (switch<->routeur, etc. — voir
+    _liste_cablage), sans naviguer élément par élément dans l'éditeur."""
     cid = get_client_id()
     if not get_client_access(cid):
         flash('Accès refusé', 'danger')
         return redirect(url_for('dashboard'))
     conn = get_db()
     client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    prises = _fiche_prises_murales(conn, cid)
     liens = _liste_cablage(conn, cid)
     conn.close()
-    return render_template('baie_cablage.html', client=client, liens=liens,
+    return render_template('baie_cablage.html', client=client, liens=liens, prises=prises,
                            clients=get_clients(), client_actif_id=cid,
                            date_export=_utcnow().strftime('%d/%m/%Y %H:%M'))
 
@@ -6519,18 +6594,31 @@ def baie_cablage_csv():
     if not get_client_access(cid):
         return jsonify({'error': 'Accès refusé'}), 403
     conn = get_db()
+    prises = _fiche_prises_murales(conn, cid)
     liens = _liste_cablage(conn, cid)
     conn.close()
     buf = io.StringIO()
     buf.write('﻿')  # BOM — Excel ouvre le CSV en UTF-8 sans le corrompre
     w = csv.writer(buf, delimiter=';')
+    w.writerow(['PRISES MURALES'])
+    w.writerow(['Baie', 'Bandeau', 'Port', 'Pièce', 'Identification', 'Prise branchée à',
+                'Câble mural', 'Relié (port RJ) à', 'Cordon', 'Cible finale'])
+    for p in prises:
+        w.writerow([p['baie'], p['bandeau'], p['numero'], p['piece'], p['identification'],
+                    p['prise_cible'],
+                    ' · '.join(filter(None, [p['cable_mural_couleur'], p['cable_mural_longueur']])),
+                    p['lien_cible'],
+                    ' · '.join(filter(None, [p['cordon_couleur'], p['cordon_longueur']])),
+                    p['cible_finale']])
+    w.writerow([])
+    w.writerow(['INTERCONNEXIONS'])
     w.writerow(['Baie', 'Élément A', 'Port A', 'Élément B', 'Port B', 'Couleur câble', 'Longueur câble'])
     for l in liens:
         w.writerow([l['baie'], l['nom1'], l['numero1'], l['nom2'], l['numero2'],
                     l['cable_couleur'], l['cable_longueur']])
     resp = make_response(buf.getvalue())
     resp.headers['Content-Type'] = 'text/csv; charset=utf-8'
-    resp.headers['Content-Disposition'] = 'attachment; filename="cablage_baie.csv"'
+    resp.headers['Content-Disposition'] = 'attachment; filename="fiche_brassage.csv"'
     return resp
 
 # ─── PHOTOS BAIE ─────────────────────────────────────────────────────────────
@@ -6561,6 +6649,32 @@ def upload_photo_baie():
     conn.commit(); conn.close()
     flash(f'Photo « {nom} » ajoutée', 'success')
     return redirect(url_for('baie_brassage'))
+
+@app.route('/baie/photo/<int:id>', methods=['PUT'])
+@login_required
+def modifier_photo_baie(id):
+    """Édite le nom/la description d'une photo déjà uploadée — jusqu'ici
+    seuls l'upload (nom/description figés une fois pour toutes, voir
+    upload_photo_baie ci-dessus) et la suppression existaient, aucun moyen
+    de corriger une photo mal nommée sans la supprimer puis la
+    re-uploader."""
+    cid = get_client_id()
+    conn = get_db()
+    photo = row_to_dict(conn.execute('SELECT id FROM baie_photos WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    if not photo:
+        conn.close()
+        return jsonify({'error': 'Photo introuvable'}), 404
+    f = request.json or {}
+    nom = str(f.get('nom') or '').strip()
+    if not nom:
+        conn.close()
+        return jsonify({'error': 'Nom requis'}), 400
+    description = str(f.get('description') or '').strip()
+    conn.execute('UPDATE baie_photos SET nom=?, description=? WHERE id=? AND client_id=?',
+                 (nom, description, id, cid))
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True, 'nom': nom, 'description': description})
 
 @app.route('/baie/photo/<int:id>/supprimer', methods=['POST'])
 @login_required

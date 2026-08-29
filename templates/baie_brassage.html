@@ -38,6 +38,13 @@
    éclairci au survol comme un câble normal. */
 .cable-link.cable-warning { stroke:#8a4a3a; opacity:.65; }
 .cable-link.cable-warning.cable-hover { stroke:#e0785a; opacity:1; }
+/* Zone de double-clic élargie et invisible, superposée à chaque courbe —
+   le trait visible (2px) est trop fin pour viser un double-clic fiablement.
+   pointer-events:stroke réactive les événements sur ce tracé précis malgré
+   #cable-overlay { pointer-events:none } sur le conteneur (voir
+   renderCableLinks() : double-clic = édition rapide du câble, même modale
+   que pour un port relié, voir PortModal). */
+.cable-link-hit { fill:none; stroke:transparent; stroke-width:14px; cursor:pointer; pointer-events:stroke; }
 .rack-num {
     display:flex; align-items:center; justify-content:flex-end;
     font-family:'Share Tech Mono',monospace; font-size:.58rem;
@@ -126,9 +133,14 @@
    seule ligne à largeur pleine, tiennent l'une sous l'autre sans agrandir
    la hauteur du bandeau (1U) ni compacter les cellules. */
 .cell-ports-stack { display:flex; flex-direction:column; flex:1; min-width:0; gap:2px; overflow:hidden; }
+/* Symbole à gauche de chaque rangée d'un bandeau RJ (🚪 prise murale, 🔌
+   port RJ) — décale légèrement la grille de ports/prises vers la droite
+   pour lui faire de la place, comme demandé. */
+.cell-row-labeled { display:flex; align-items:center; gap:3px; min-width:0; }
+.row-icon { flex-shrink:0; width:12px; text-align:center; font-size:.58rem; line-height:1; opacity:.55; user-select:none; }
 .cell-prises-murales {
     display:grid; grid-template-columns:repeat(auto-fill, 24px); gap:2px;
-    align-content:flex-start; overflow:hidden;
+    align-content:flex-start; overflow:hidden; min-width:0; flex:1;
 }
 /* Prise murale : cellule plus fine qu'un port RJ (13px contre 22px) — elle
    n'a besoin que d'afficher un numéro, un voyant de ping et sa couleur de
@@ -534,7 +546,18 @@
             </div>
             <div class="photos-grid">
                 {% for p in photos %}
-                <div class="photo-thumb" onclick="ouvrirPhoto('/baie/photo/{{ p.id }}/apercu','{{ p.nom|e }}')">
+                {#- data-nom/data-description (pas d'interpolation directe dans
+                   onclick/ondblclick) : un nom/description contenant un
+                   guillemet simple casserait le littéral JS malgré |e — |e
+                   échappe pour un contexte ATTRIBUT HTML, pas pour un
+                   littéral JS imbriqué dans cet attribut (l'apostrophe
+                   échappée en &#39; est re-décodée par le navigateur avant
+                   compilation du gestionnaire inline, redonnant un ' brut en
+                   plein milieu de la chaîne JS). this.dataset.* lit la
+                   valeur déjà décodée, sans ce risque. -#}
+                <div class="photo-thumb" data-photo-id="{{ p.id }}" data-nom="{{ p.nom }}" data-description="{{ p.description or '' }}"
+                     onclick="ouvrirPhoto('/baie/photo/{{ p.id }}/apercu', this.dataset.nom)"
+                     ondblclick="event.stopPropagation();PhotoModal.ouvrir({{ p.id }}, this.dataset.nom, this.dataset.description)">
                     <img src="/baie/photo/{{ p.id }}/apercu" alt="{{ p.nom|e }}" loading="lazy">
                     <span class="photo-label">{{ p.nom }}</span>
                     <form method="POST" action="/baie/photo/{{ p.id }}/supprimer" style="display:inline;"
@@ -679,6 +702,113 @@
 
 <!-- TOOLTIP -->
 <div class="rack-tooltip" id="rack-tooltip"></div>
+
+<!-- MODALE D'ÉDITION D'UNE PRISE MURALE — double-clic sur une prise murale
+     dans le rack (voir PriseMuraleModal plus bas), pour éditer ses infos
+     sans passer par le panneau latéral complet. -->
+<div id="prise-murale-modal" class="modal-overlay" onclick="PriseMuraleModal.fermerSiOverlay(event)">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-glow);border-radius:8px;
+                padding:1.4rem;width:380px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">🚪 <span id="pmm-titre">Prise murale</span></h3>
+            <button type="button" onclick="PriseMuraleModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
+        </div>
+        <div class="form-group" style="margin-bottom:.7rem;">
+            <label>Emplacement de la prise</label>
+            <input type="text" id="pmm-piece" list="dl-localisations" placeholder="Bureau, salle de réunion…">
+        </div>
+        <div class="form-group" style="margin-bottom:.7rem;">
+            <label>Identification de la prise</label>
+            <input type="text" id="pmm-identification" placeholder="Repère physique, ex. RJ 3.12…">
+        </div>
+        <div class="form-group" style="margin-bottom:.3rem;">
+            <label>Utilisation</label>
+            <select id="pmm-cible" onchange="PriseMuraleModal.changerCible()" style="width:100%;">
+                <option value="">— Libre —</option>
+                <option value="u">✎ Usage personnalisé…</option>
+            </select>
+        </div>
+        <div class="form-group" id="pmm-usage-wrap" style="display:none;margin-bottom:.7rem;">
+            <input type="text" id="pmm-usage" placeholder="Téléphonie, alarme...">
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1rem;">
+            <button type="button" class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="PriseMuraleModal.fermer()">Annuler</button>
+            <button type="button" class="btn btn-success btn-sm" onclick="PriseMuraleModal.enregistrer()">✓ Enregistrer</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODALE D'ÉDITION D'UN PORT RJ — double-clic sur un port dans le rack (voir
+     PortModal plus bas) ou sur la courbe de câble d'un lien déjà créé. Cible
+     directe (appareil/périphérique/usage) masquée pour un port de bandeau
+     RJ (interconnexion uniquement, voir portRjEditorRowHTML côté panneau
+     latéral) ; étiquette du cordon affichée seulement si le port est relié. -->
+<div id="port-modal" class="modal-overlay" onclick="PortModal.fermerSiOverlay(event)">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-glow);border-radius:8px;
+                padding:1.4rem;width:380px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">🔌 <span id="pom-titre">Port</span></h3>
+            <button type="button" onclick="PortModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
+        </div>
+        <div id="pom-cible-section">
+            <div class="form-group" style="margin-bottom:.3rem;">
+                <label>Utilisation</label>
+                <select id="pom-cible" onchange="PortModal.changerCible()" style="width:100%;">
+                    <option value="">— Libre —</option>
+                    <option value="u">✎ Usage personnalisé…</option>
+                </select>
+            </div>
+            <div class="form-group" id="pom-usage-wrap" style="display:none;margin-bottom:.7rem;">
+                <input type="text" id="pom-usage" placeholder="Téléphonie, alarme...">
+            </div>
+        </div>
+        <div id="pom-lien-section" style="display:none;">
+            <div class="form-group" style="margin-bottom:.3rem;">
+                <label>Interconnexion</label>
+                <div id="pom-lien-etat" style="font-size:.85rem;color:var(--text-secondary);padding:.3rem 0;"></div>
+            </div>
+            <div id="pom-cable-wrap" style="display:none;">
+                <div class="form-group" style="margin-bottom:.7rem;">
+                    <label>Câble (cordon de brassage)</label>
+                    <div style="display:flex;gap:.5rem;">
+                        <input type="text" id="pom-cable-couleur" placeholder="Couleur" style="flex:1;">
+                        <input type="text" id="pom-cable-longueur" placeholder="Longueur" style="flex:1;">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1rem;">
+            <button type="button" class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="PortModal.fermer()">Annuler</button>
+            <button type="button" class="btn btn-success btn-sm" onclick="PortModal.enregistrer()">✓ Enregistrer</button>
+        </div>
+    </div>
+</div>
+
+<!-- MODALE D'ÉDITION D'UNE PHOTO DE BAIE — double-clic sur une vignette (le
+     clic simple reste la prévisualisation, voir ouvrirPhoto) : nom/
+     description ne pouvaient jusqu'ici être renseignés qu'à l'upload,
+     aucun moyen de les corriger ensuite sans supprimer puis re-uploader. -->
+<div id="photo-modal" class="modal-overlay" onclick="PhotoModal.fermerSiOverlay(event)">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-glow);border-radius:8px;
+                padding:1.4rem;width:380px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.4);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">📷 Photo de la baie</h3>
+            <button type="button" onclick="PhotoModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
+        </div>
+        <div class="form-group" style="margin-bottom:.7rem;">
+            <label>Nom</label>
+            <input type="text" id="phm-nom" placeholder="Ex: Vue générale, Face arrière…">
+        </div>
+        <div class="form-group" style="margin-bottom:.3rem;">
+            <label>Description</label>
+            <input type="text" id="phm-description" placeholder="Note libre (optionnelle)…">
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1rem;">
+            <button type="button" class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="PhotoModal.fermer()">Annuler</button>
+            <button type="button" class="btn btn-success btn-sm" onclick="PhotoModal.enregistrer()">✓ Enregistrer</button>
+        </div>
+    </div>
+</div>
 
 <!-- LIGHTBOX -->
 <div class="lightbox" id="lightbox" onclick="fermerLightbox()">
@@ -1038,8 +1168,9 @@ function renderCableLinks() {
         const versLaGauche = Math.max(x1, x2) > rect.width * 0.72;
         const sens = versLaGauche ? -1 : 1;
         const bombe = (Math.max(28, Math.min(90, Math.abs(y2 - y1) * 0.35)) + (idx % 3) * 12) * sens;
+        const d = `M ${x1} ${y1} C ${x1 + bombe} ${y1}, ${x2 + bombe} ${y2}, ${x2} ${y2}`;
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', `M ${x1} ${y1} C ${x1 + bombe} ${y1}, ${x2 + bombe} ${y2}, ${x2} ${y2}`);
+        path.setAttribute('d', d);
         // Avertissement si l'appareil au bout de la chaîne (un cran plus loin
         // que le port en face, voir cible_hors_ligne côté serveur) est hors
         // ligne — porté par l'UN OU L'AUTRE port du couple.
@@ -1047,6 +1178,18 @@ function renderCableLinks() {
         path.setAttribute('class', horsLigne ? 'cable-link cable-warning' : 'cable-link');
         path.dataset.cle = els[0].dataset.cle;
         svg.appendChild(path);
+
+        // Zone de double-clic élargie et invisible, superposée (voir CSS
+        // .cable-link-hit) : édition rapide du câble (couleur/longueur)
+        // directement depuis la courbe visible, sans passer par un port.
+        const zoneClic = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        zoneClic.setAttribute('d', d);
+        zoneClic.setAttribute('class', 'cable-link-hit');
+        zoneClic.addEventListener('dblclick', e => {
+            e.stopPropagation();
+            PortModal.ouvrir(parseInt(a.dataset.slot), parseInt(a.dataset.numero));
+        });
+        svg.appendChild(zoneClic);
         idx++;
     });
 }
@@ -1121,14 +1264,23 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // pièce, le port RJ de même numéro ne servant plus qu'à interconnecter
     // (voir priseMuraleHTML / baie_prises_murales côté serveur).
     const estBandeauPorts = s.type_equipement === 'Bandeau RJ';
+    // Symboles à gauche de chaque rangée (demandé) — 🚪 = prise murale
+    // (déjà le symbole "pièce/local" utilisé partout ailleurs dans cet
+    // écran), 🔌 = port RJ, cohérent avec les libellés déjà utilisés dans
+    // l'éditeur de ports et les fiches appareil/périphérique. Seul le
+    // bandeau RJ a ces deux rangées distinctes — les ports/prises se
+    // décalent légèrement pour leur faire de la place.
     const lignePrisesMurales = estBandeauPorts
-        ? `<div class="cell-prises-murales">${ports.map(p => priseMuraleHTML(p.prise_murale, p.numero)).join('')}</div>`
+        ? `<div class="cell-row-labeled"><span class="row-icon" title="Prises murales (RJ)">🚪</span><div class="cell-prises-murales">${ports.map(p => priseMuraleHTML(p.prise_murale, p.numero)).join('')}</div></div>`
         : '';
+    const ligneRJ = estBandeauPorts
+        ? `<div class="cell-row-labeled"><span class="row-icon" title="Ports RJ (interconnexion)">🔌</span><div class="cell-ports">${ports.map(portHTML).join('')}</div></div>`
+        : `<div class="cell-ports">${ports.map(portHTML).join('')}</div>`;
     const zonePorts = ports.length ? `
         <div class="cell-ports-wrap">
             <div class="cell-ports-stack">
                 ${lignePrisesMurales}
-                <div class="cell-ports">${ports.map(portHTML).join('')}</div>
+                ${ligneRJ}
             </div>
             <div class="cell-ping-zone">
                 <button class="cell-ping-btn" title="Pinger les appareils reliés aux ports">📡</button>
@@ -1156,6 +1308,17 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             e.stopPropagation();
             if (modeLien) { gererClicLienPort(s, p, el); }
             else { surbrillerPortsLies(cleCiblePort(p)); }
+        });
+        // Double-clic = édition rapide de CE port (cible directe et/ou
+        // étiquette du cordon si déjà relié) — demandé, même principe que
+        // pour une prise murale, sans devoir sélectionner tout l'élément
+        // puis dérouler le panneau latéral. Désactivé pendant le mode
+        // "🔗 Lier" pour ne pas interférer avec la sélection des deux ports.
+        el.addEventListener('dblclick', e => {
+            e.stopPropagation();
+            if (modeLien) return;
+            masquerTooltip();
+            PortModal.ouvrir(s.id, p.numero);
         });
         // Badge ✕ (voir portHTML) — présent uniquement sur un port câblé.
         // stopPropagation pour ne déclencher ni la surbrillance ni le mode
@@ -1198,6 +1361,13 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         el.addEventListener('click', e => {
             e.stopPropagation();
             surbrillerPortsLies(cleCiblePriseMurale(pm));
+        });
+        // Double-clic = édition rapide de CETTE prise murale (demandé) —
+        // sans passer par la sélection du bandeau puis le panneau latéral.
+        el.addEventListener('dblclick', e => {
+            e.stopPropagation();
+            masquerTooltip();
+            PriseMuraleModal.ouvrir(s.id, port.numero);
         });
         el.addEventListener('mouseenter', e => {
             e.stopPropagation();
@@ -1680,7 +1850,11 @@ function portHTML(p) {
     // plus bas dans makeOccupiedCell (même boucle que les autres écouteurs
     // de port, pas besoin de data-attributes supplémentaires ici).
     const badgeLien = p.lie_slot_id ? `<span class="port-unlink" title="Détacher ce lien">✕</span>` : '';
-    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
+    // data-slot/data-numero : identifient ce port sans dépendre de sa
+    // position dans le tableau ports[] — utilisé par le double-clic sur la
+    // courbe de câble (renderCableLinks) pour ouvrir PortModal côté port A
+    // sans avoir à refaire une recherche.
+    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
         <span class="port-led"></span>${badgeLien}${p.numero}</span>`;
 }
 
@@ -1895,6 +2069,9 @@ function afficherTooltipPriseMurale(e, pm, numero, nomSlot) {
     if (pm.piece) {
         html += `<div class="tip-row"><span class="tip-key">Pièce</span><span class="tip-val">🚪 ${escH(pm.piece)}</span></div>`;
     }
+    if (pm.identification) {
+        html += `<div class="tip-row"><span class="tip-key">Identification</span><span class="tip-val">🏷 ${escH(pm.identification)}</span></div>`;
+    }
     if (pm.appareil_id) {
         html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${pm.en_ligne ? '🟢 En ligne' : '🔴 Hors ligne'}</span></div>`;
     } else if (pm.peripherique_id) {
@@ -1906,6 +2083,7 @@ function afficherTooltipPriseMurale(e, pm, numero, nomSlot) {
         html += `<div class="tip-row"><span class="tip-key">Câble</span><span class="tip-val">${[pm.cable_couleur, pm.cable_longueur].filter(Boolean).map(escH).join(' · ')}</span></div>`;
     }
     html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);font-size:.68rem;">↓ Port RJ ${numero} : interconnexion</span></div>`;
+    html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);font-size:.68rem;">✎ Double-clic pour éditer</span></div>`;
     t.innerHTML = html;
     t.classList.add('show');
     positionnerTooltip(e);
@@ -2102,7 +2280,7 @@ function rechercherEquip(q) {
         // lui-même était indexé, jamais ce que ses ports/prises portent.
         (s.ports || []).forEach(p => {
             champs.push(p.piece, p.usage_libre, p.nom_cible, p.cible_finale);
-            if (p.prise_murale) champs.push(p.prise_murale.piece, p.prise_murale.usage_libre, p.prise_murale.nom_cible);
+            if (p.prise_murale) champs.push(p.prise_murale.piece, p.prise_murale.identification, p.prise_murale.usage_libre, p.prise_murale.nom_cible);
         });
         const txt = champs.join(' ').toLowerCase();
         if (txt.includes(q)) cell.classList.add('highlighted');
@@ -2266,6 +2444,12 @@ function priseMuraleEditorRowHTML(slotId, pm, numero) {
     </div>
     <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;">
         <input type="text" data-slot="${slotId}" data-numero="${numero}"
+               value="${escH(p.identification||'')}" placeholder="🏷 Identification (repère physique)…"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerPriseMuraleIdentification(this)">
+    </div>
+    <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;">
+        <input type="text" data-slot="${slotId}" data-numero="${numero}"
                value="${escH(p.cable_couleur||'')}" placeholder="Couleur câble mural"
                style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
                onchange="changerCablePriseMurale(this)">
@@ -2353,6 +2537,12 @@ async function changerPriseMuralePiece(input) {
     await enregistrerPriseMurale(input.dataset.slot, input.dataset.numero, { piece: input.value.trim() });
 }
 
+// Identification de la prise (repère physique, ex. "RJ 3.12") — même
+// principe que changerPriseMuralePiece, payload réduit à { identification }.
+async function changerPriseMuraleIdentification(input) {
+    await enregistrerPriseMurale(input.dataset.slot, input.dataset.numero, { identification: input.value.trim() });
+}
+
 // Étiquette du câble FIXE mur -> bandeau (distincte du cordon de brassage,
 // voir changerCableLabel) — les deux champs voisins sont toujours renvoyés
 // ensemble, sinon celui qu'on ne vient pas de modifier serait effacé.
@@ -2418,6 +2608,260 @@ async function enregistrerPriseMurale(slotId, numero, payload) {
     const cur = slotActuel();
     if (cur) afficherEditeurPorts(cur);
 }
+
+// ── MODALE D'ÉDITION D'UNE PRISE MURALE (double-clic) ───────────────────────
+// Édition rapide d'une seule prise murale directement depuis le rack, sans
+// devoir d'abord sélectionner tout le bandeau puis dérouler son panneau
+// latéral (afficherEditeurPorts) — les 4 informations demandées : emplacement
+// (pièce), identification (repère physique de la prise), utilisation, et
+// appareil connecté (choix dans la liste des appareils/périphériques, même
+// sélecteur que le panneau latéral — voir optionsAppareilsPeriph).
+const PriseMuraleModal = (() => {
+    let slotId = null, numero = null;
+
+    function ouvrir(sid, num) {
+        const s = Object.values(slots).find(x => x.id === sid);
+        const port = s && (s.ports || []).find(p => p.numero === num);
+        const pm = (port && port.prise_murale) || {};
+        slotId = sid; numero = num;
+        document.getElementById('pmm-titre').textContent =
+            `Prise murale ${num} — ${(s && nomEquipementSlot(s)) || 'Bandeau'}`;
+        document.getElementById('pmm-piece').value = pm.piece || '';
+        document.getElementById('pmm-identification').value = pm.identification || '';
+        const valeur = pm.appareil_id ? 'a:'+pm.appareil_id
+            : (pm.peripherique_id ? 'p:'+pm.peripherique_id
+            : (pm.usage_libre ? 'u' : ''));
+        const sel = document.getElementById('pmm-cible');
+        sel.innerHTML = `
+            <option value="">— Libre —</option>
+            <option value="u">✎ Usage personnalisé…</option>
+            ${optionsAppareilsPeriph(valeur)}`;
+        sel.value = valeur;
+        document.getElementById('pmm-usage').value = pm.usage_libre || '';
+        document.getElementById('pmm-usage-wrap').style.display = valeur === 'u' ? '' : 'none';
+        document.getElementById('prise-murale-modal').classList.add('open');
+    }
+
+    function fermer() {
+        document.getElementById('prise-murale-modal').classList.remove('open');
+        slotId = null; numero = null;
+    }
+
+    // Clic sur le voile (pas sur la boîte elle-même) — même convention que
+    // DocsModal.fermerSiOverlay.
+    function fermerSiOverlay(e) {
+        if (e.target.id === 'prise-murale-modal') fermer();
+    }
+
+    function changerCible() {
+        document.getElementById('pmm-usage-wrap').style.display =
+            document.getElementById('pmm-cible').value === 'u' ? '' : 'none';
+    }
+
+    async function enregistrer() {
+        if (!slotId || !numero) return;
+        const v = document.getElementById('pmm-cible').value;
+        const estUsage = v === 'u';
+        const payload = {
+            piece: document.getElementById('pmm-piece').value.trim(),
+            identification: document.getElementById('pmm-identification').value.trim(),
+            appareil_id: null, peripherique_id: null, usage_libre: '',
+        };
+        if (v.startsWith('a:')) payload.appareil_id = parseInt(v.slice(2));
+        else if (v.startsWith('p:')) payload.peripherique_id = parseInt(v.slice(2));
+        else if (estUsage) payload.usage_libre = document.getElementById('pmm-usage').value.trim();
+        await enregistrerPriseMurale(slotId, numero, payload);
+        fermer();
+    }
+
+    return { ouvrir, fermer, fermerSiOverlay, changerCible, enregistrer };
+})();
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && document.getElementById('prise-murale-modal').classList.contains('open')) {
+        PriseMuraleModal.fermer();
+    }
+    if (e.key === 'Escape' && document.getElementById('port-modal').classList.contains('open')) {
+        PortModal.fermer();
+    }
+    if (e.key === 'Escape' && document.getElementById('photo-modal').classList.contains('open')) {
+        PhotoModal.fermer();
+    }
+});
+
+// ── MODALE D'ÉDITION D'UN PORT (double-clic) ────────────────────────────────
+// Même principe que PriseMuraleModal, appliqué au port lui-même — cible
+// directe (appareil/périphérique/usage) pour un port non-bandeau, section
+// masquée pour un port de bandeau RJ (interconnexion uniquement) ; étiquette
+// du cordon (couleur/longueur) si le port est déjà relié, quel que soit le
+// type d'élément. N'envoie que ce qui a réellement changé (comparé à l'état
+// chargé à l'ouverture) : un simple "Enregistrer" sans y toucher ne doit
+// jamais détacher un lien existant — cible_fournie côté serveur (voir
+// api_baie_port) détache TOUJOURS le lien en cours, même en réenvoyant la
+// même valeur, donc l'appel est purement et simplement évité si rien n'a
+// changé dans cette section.
+const PortModal = (() => {
+    let slotId = null, numero = null, valeurInitiale = '', usageInitial = '', cableInitial = ['', ''];
+
+    function ouvrir(sid, num) {
+        const s = Object.values(slots).find(x => x.id === sid);
+        const port = s && (s.ports || []).find(p => p.numero === num);
+        if (!s || !port) return;
+        slotId = sid; numero = num;
+        const estBandeau = s.type_equipement === 'Bandeau RJ';
+        document.getElementById('pom-titre').textContent = `Port ${num} — ${nomEquipementSlot(s) || 'Élément'}`;
+
+        document.getElementById('pom-cible-section').style.display = estBandeau ? 'none' : '';
+        valeurInitiale = ''; usageInitial = '';
+        if (!estBandeau) {
+            valeurInitiale = port.appareil_id ? 'a:'+port.appareil_id
+                : (port.peripherique_id ? 'p:'+port.peripherique_id
+                : (port.usage_libre ? 'u' : ''));
+            usageInitial = port.usage_libre || '';
+            const sel = document.getElementById('pom-cible');
+            sel.innerHTML = `
+                <option value="">— Libre —</option>
+                <option value="u">✎ Usage personnalisé…</option>
+                ${optionsAppareilsPeriph(valeurInitiale)}`;
+            sel.value = valeurInitiale;
+            document.getElementById('pom-usage').value = usageInitial;
+            document.getElementById('pom-usage-wrap').style.display = valeurInitiale === 'u' ? '' : 'none';
+        }
+
+        const lienSection = document.getElementById('pom-lien-section');
+        const cableWrap = document.getElementById('pom-cable-wrap');
+        if (port.lie_slot_id) {
+            lienSection.style.display = '';
+            document.getElementById('pom-lien-etat').textContent = `🔗 ${port.nom_cible || ''}`;
+            cableInitial = [port.cable_couleur || '', port.cable_longueur || ''];
+            document.getElementById('pom-cable-couleur').value = cableInitial[0];
+            document.getElementById('pom-cable-longueur').value = cableInitial[1];
+            cableWrap.style.display = '';
+        } else {
+            cableInitial = ['', ''];
+            if (estBandeau) {
+                lienSection.style.display = '';
+                document.getElementById('pom-lien-etat').textContent = '— Libre (interconnexion) —';
+            } else {
+                lienSection.style.display = 'none';
+            }
+            cableWrap.style.display = 'none';
+        }
+        document.getElementById('port-modal').classList.add('open');
+    }
+
+    function fermer() {
+        document.getElementById('port-modal').classList.remove('open');
+        slotId = null; numero = null;
+    }
+
+    function fermerSiOverlay(e) {
+        if (e.target.id === 'port-modal') fermer();
+    }
+
+    function changerCible() {
+        document.getElementById('pom-usage-wrap').style.display =
+            document.getElementById('pom-cible').value === 'u' ? '' : 'none';
+    }
+
+    async function enregistrer() {
+        if (!slotId || !numero) return;
+        const s = Object.values(slots).find(x => x.id === slotId);
+        const port = s && (s.ports || []).find(p => p.numero === numero);
+        const estBandeau = s && s.type_equipement === 'Bandeau RJ';
+
+        if (!estBandeau) {
+            const v = document.getElementById('pom-cible').value;
+            const estUsage = v === 'u';
+            const usageVal = estUsage ? document.getElementById('pom-usage').value.trim() : '';
+            if (v !== valeurInitiale || (estUsage && usageVal !== usageInitial)) {
+                const payload = { appareil_id: null, peripherique_id: null, usage_libre: '' };
+                if (v.startsWith('a:')) payload.appareil_id = parseInt(v.slice(2));
+                else if (v.startsWith('p:')) payload.peripherique_id = parseInt(v.slice(2));
+                else if (estUsage) payload.usage_libre = usageVal;
+                await fetch(`/api/baie/slot/${slotId}/port/${numero}`, {
+                    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+                });
+            }
+        }
+        if (port && port.lie_slot_id) {
+            const cc = document.getElementById('pom-cable-couleur').value.trim();
+            const cl = document.getElementById('pom-cable-longueur').value.trim();
+            if (cc !== cableInitial[0] || cl !== cableInitial[1]) {
+                // Même route que changerCableLabel() : rejouer le couple
+                // slot/numero courant est sans danger (voir api_baie_lien_port).
+                await fetch('/api/baie/lien-port', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({
+                        slot1_id: slotId, numero1: numero,
+                        slot2_id: port.lie_slot_id, numero2: port.lie_port_numero,
+                        cable_couleur: cc, cable_longueur: cl,
+                    })
+                });
+            }
+        }
+        await chargerBaie(currentBaie);
+        const cur = slotActuel();
+        if (cur) afficherEditeurPorts(cur);
+        fermer();
+    }
+
+    return { ouvrir, fermer, fermerSiOverlay, changerCible, enregistrer };
+})();
+
+// ── MODALE D'ÉDITION D'UNE PHOTO DE BAIE (double-clic) ──────────────────────
+// nom/description n'étaient jusqu'ici modifiables qu'à l'upload — aucune
+// route ne permettait de les corriger après coup (seule /supprimer
+// existait). Nouvelle route PUT /baie/photo/<id> dédiée.
+const PhotoModal = (() => {
+    let photoId = null;
+
+    function ouvrir(id, nomActuel, descriptionActuelle) {
+        photoId = id;
+        document.getElementById('phm-nom').value = nomActuel || '';
+        document.getElementById('phm-description').value = descriptionActuelle || '';
+        document.getElementById('photo-modal').classList.add('open');
+    }
+
+    function fermer() {
+        document.getElementById('photo-modal').classList.remove('open');
+        photoId = null;
+    }
+
+    function fermerSiOverlay(e) {
+        if (e.target.id === 'photo-modal') fermer();
+    }
+
+    async function enregistrer() {
+        if (!photoId) return;
+        const nom = document.getElementById('phm-nom').value.trim();
+        const description = document.getElementById('phm-description').value.trim();
+        // Hors /api/* (route sœur de /baie/photo/upload et /supprimer, pas un
+        // endpoint collecteur) : le CSRF s'applique, via l'en-tête plutôt que
+        // le corps JSON — validate_csrf_request() ne lit jamais ce dernier
+        // (request.form uniquement, ou X-CSRF-Token), voir auth_utils.py.
+        const r = await fetch(`/baie/photo/${photoId}`, {
+            method: 'PUT',
+            headers: {'Content-Type':'application/json', 'X-CSRF-Token': '{{ csrf_token }}'},
+            body: JSON.stringify({ nom, description })
+        });
+        const data = await r.json().catch(() => null);
+        if (!r.ok) { showFlash((data && data.error) || 'Erreur', 'danger'); return; }
+        // Rafraîchir juste le libellé affiché sous la vignette, sans recharger
+        // toute la page — l'attribut alt et le lightbox suivent au prochain
+        // rechargement (peu gênant, la vignette elle-même est déjà à jour).
+        // AVANT fermer() : fermer() remet photoId à null, le sélecteur
+        // ci-dessous ne trouverait plus rien une fois appelé après coup
+        // (bug trouvé en testant en direct dans le navigateur).
+        const label = document.querySelector(`.photo-thumb[data-photo-id="${photoId}"] .photo-label`);
+        if (label) label.textContent = nom;
+        const thumb = document.querySelector(`.photo-thumb[data-photo-id="${photoId}"]`);
+        if (thumb) { thumb.dataset.nom = nom; thumb.dataset.description = description; }
+        fermer();
+    }
+
+    return { ouvrir, fermer, fermerSiOverlay, enregistrer };
+})();
 
 // Détacher un lien port-à-port (câblage) directement depuis le port affiché
 // dans le rack — jusqu'ici, la seule façon était de rouvrir l'éditeur de

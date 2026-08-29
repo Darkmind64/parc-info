@@ -1,17 +1,21 @@
 {% extends "base.html" %}
-{% block title %}Câblage — {{ client.nom }}{% endblock %}
+{% block title %}Fiche de brassage — {{ client.nom }}{% endblock %}
 
 {% block extra_styles %}
 <style>
 .cbl-header { display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-bottom:1.2rem; flex-wrap:wrap; }
 .cbl-actions { display:flex; gap:.5rem; }
 .cbl-meta { color:var(--text-muted); font-size:.85rem; margin-bottom:1rem; }
+.cbl-section-title { font-family:'Rajdhani',sans-serif; font-size:.85rem; font-weight:700; letter-spacing:2px;
+    text-transform:uppercase; color:var(--accent); margin:1.6rem 0 .6rem; }
+.cbl-section-title:first-of-type { margin-top:0; }
 .cbl-table { width:100%; border-collapse:collapse; background:var(--bg-card); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
 .cbl-table th, .cbl-table td { padding:.5rem .8rem; text-align:left; border-bottom:1px solid var(--border); font-size:.85rem; }
 .cbl-table th { background:rgba(255,255,255,.03); font-weight:700; color:var(--text-muted); text-transform:uppercase; font-size:.7rem; letter-spacing:.5px; }
 .cbl-table tbody tr:last-child td { border-bottom:none; }
 .cbl-baie-row td { background:rgba(0,201,255,.06); font-weight:700; color:var(--accent); }
-.cbl-empty { padding:2rem; text-align:center; color:var(--text-muted); }
+.cbl-empty { padding:1.2rem; text-align:center; color:var(--text-muted); background:var(--bg-card); border:1px solid var(--border); border-radius:8px; }
+.cbl-libre { color:var(--text-muted); }
 
 @media print {
     .app-nav, .app-topbar, .cbl-actions, .cbl-meta, #flash-messages { display:none !important; }
@@ -21,6 +25,12 @@
     .cbl-table th, .cbl-table td { border-color:#ccc; color:#000 !important; }
     .cbl-table th { background:#eee !important; }
     .cbl-baie-row td { background:#f5f5f5 !important; color:#000 !important; }
+    .cbl-section-title { color:#000 !important; }
+    /* Un tableau qui commence en bas de page se coupe proprement plutôt que
+       de laisser l'en-tête seul sur une page et le corps sur la suivante. */
+    .cbl-table { page-break-inside:auto; }
+    .cbl-table tr { page-break-inside:avoid; }
+    .cbl-section-title { page-break-after:avoid; }
 }
 </style>
 {% endblock %}
@@ -28,7 +38,7 @@
 {% block content %}
 <div class="cbl-header">
     <div>
-        <h1>🔌 Liste de câblage</h1>
+        <h1>🔌 Fiche de brassage</h1>
         <div style="color:var(--text-muted);">{{ client.nom }}</div>
     </div>
     <div class="cbl-actions">
@@ -37,8 +47,58 @@
         <a class="btn btn-secondary btn-sm" href="{{ url_for('baie_brassage') }}">← Retour à la baie</a>
     </div>
 </div>
-<div class="cbl-meta">Généré le {{ date_export }} — {{ liens|length }} lien(s) port-à-port</div>
+<div class="cbl-meta">Généré le {{ date_export }} — {{ prises|length }} prise(s) murale(s) · {{ liens|length }} interconnexion(s)</div>
 
+<div class="cbl-section-title">🚪 Prises murales</div>
+{% if prises %}
+<table class="cbl-table">
+    <thead>
+        <tr>
+            <th>Bandeau</th>
+            <th>Port</th>
+            <th>Pièce</th>
+            <th>Identification</th>
+            <th>Branchée à</th>
+            <th>Câble mural</th>
+            <th>Relié (port RJ) à</th>
+            <th>Cordon</th>
+            <th>Cible finale</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% set ns = namespace(baie_courante=None) %}
+        {% for p in prises %}
+        {% if p.baie != ns.baie_courante %}
+        {% set ns.baie_courante = p.baie %}
+        <tr class="cbl-baie-row"><td colspan="9">{{ p.baie }}</td></tr>
+        {% endif %}
+        <tr>
+            <td>{{ p.bandeau }}</td>
+            <td>Port {{ p.numero }}</td>
+            <td>{{ p.piece or '—' }}</td>
+            <td>{{ p.identification or '—' }}</td>
+            <td class="{{ '' if p.prise_cible else 'cbl-libre' }}">{{ p.prise_cible or 'Libre' }}</td>
+            <td>
+                {% if p.cable_mural_couleur or p.cable_mural_longueur %}
+                    {{ [p.cable_mural_couleur, p.cable_mural_longueur]|select|join(' · ') }}
+                {% else %}—{% endif %}
+            </td>
+            <td class="{{ '' if p.lien_cible else 'cbl-libre' }}">{{ p.lien_cible or '—' }}</td>
+            <td>
+                {% if p.cordon_couleur or p.cordon_longueur %}
+                    {{ [p.cordon_couleur, p.cordon_longueur]|select|join(' · ') }}
+                {% else %}—{% endif %}
+            </td>
+            <td>{{ p.cible_finale or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="cbl-empty">Aucun bandeau RJ posé dans la baie de ce client.</div>
+{% endif %}
+
+<div class="cbl-section-title">🔀 Interconnexions</div>
 {% if liens %}
 <table class="cbl-table">
     <thead>
@@ -52,10 +112,10 @@
         </tr>
     </thead>
     <tbody>
-        {% set ns = namespace(baie_courante=None) %}
+        {% set ns2 = namespace(baie_courante=None) %}
         {% for l in liens %}
-        {% if l.baie != ns.baie_courante %}
-        {% set ns.baie_courante = l.baie %}
+        {% if l.baie != ns2.baie_courante %}
+        {% set ns2.baie_courante = l.baie %}
         <tr class="cbl-baie-row"><td colspan="6">{{ l.baie }}</td></tr>
         {% endif %}
         <tr>
@@ -74,6 +134,6 @@
     </tbody>
 </table>
 {% else %}
-<div class="cbl-empty">Aucun lien port-à-port enregistré pour ce client.</div>
+<div class="cbl-empty">Aucun lien port-à-port entre éléments d'interconnexion pour ce client.</div>
 {% endif %}
 {% endblock %}

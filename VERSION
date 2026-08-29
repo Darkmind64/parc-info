@@ -1,8 +1,45 @@
-PARCINFO_VERSION=2.18.74
-RELEASE_DATE=2026-08-28
-BUILD_NUMBER=2026082804
+PARCINFO_VERSION=2.18.77
+RELEASE_DATE=2026-08-29
+BUILD_NUMBER=2026082901
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.77 - Baie de brassage : édition par double-clic + fiche de brassage complète
+# Suite directe de la 2.18.74 (prises murales), deux chantiers demandés
+# séparément.
+#
+# 1) Édition par double-clic, appliquée partout où c'était pertinent (audit
+# systématique des interactions de l'écran, demandé explicitement) :
+#   - Port RJ d'un élément non-bandeau (Switch, Patch Panel, PDU...) :
+#     double-clic -> modale cible (appareil/périphérique/usage) + étiquette
+#     du cordon si déjà relié. Jusqu'ici il fallait sélectionner tout
+#     l'élément puis dérouler le panneau latéral pour éditer un seul port.
+#   - Port déjà relié : double-clic sur le port OU directement sur la
+#     courbe de câble visible -> même modale, focalisée câble. Un simple
+#     "Enregistrer" sans y toucher ne détache jamais le lien (comparé à
+#     l'état chargé à l'ouverture — cible_fournie côté serveur détache
+#     toujours le lien en cours, même en réenvoyant la même valeur, sans
+#     cette garde l'ouverture seule de la modale aurait pu le casser).
+#   - Photo de la baie : double-clic sur une vignette -> modale nom/
+#     description (nouvelle route PUT /baie/photo/<id>) — jusqu'ici
+#     modifiables seulement à l'upload, aucun moyen de corriger une photo
+#     mal nommée sans la supprimer puis la re-uploader.
+# Signalé au passage, non corrigé (hors périmètre, systémique) : aucune
+# route de mutation de la baie ne vérifie can_write() — un accès lecture
+# seule peut aujourd'hui tout modifier dans cet écran, pré-existant à ce
+# chantier, sur l'ensemble du sous-système.
+#
+# 2) Fiche de brassage complète (/baie/cablage, page imprimable + CSV) :
+# ne documentait jusqu'ici que les cordons RJ<->RJ, pas les prises
+# murales. Réécrite en deux parties : "Prises murales" (tous les ports de
+# chaque bandeau RJ, même vides — pièce, identification, appareil branché,
+# câble mural ET cordon de brassage bien distingués, cible finale quand la
+# chaîne va plus loin) puis "Interconnexions" (liens backbone entre
+# éléments non-bandeau uniquement, pour ne jamais documenter deux fois le
+# même câble physique). Bug trouvé et corrigé en vérifiant en direct dans
+# le navigateur : la colonne "Câble mural" affichait en réalité le cordon
+# (les deux champs, pourtant bien séparés en base depuis la 2.18.74,
+# étaient confondus dans la première version de la fiche).
 
 # Version 2.18.74 - Baie de brassage : prises murales séparées des ports RJ d'un bandeau
 # Demandé : pouvoir assigner les prises Ethernet d'un bandeau RJ aux prises

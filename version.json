@@ -1,24 +1,25 @@
 {
-  "version": "2.18.74",
-  "release_date": "2026-08-28T00:00:00.000000",
+  "version": "2.18.77",
+  "release_date": "2026-08-29T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.74",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.74/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.77",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.77/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : prises murales d'un bandeau RJ séparées des ports RJ, sur le modèle d'un vrai système de brassage structuré — la prise murale (pièce + appareil branché dans le bureau) automatiquement en vis-à-vis du port RJ correspondant, qui ne sert plus qu'à interconnecter avec les autres éléments de la baie",
+    "new_features": "Baie de brassage : édition par double-clic (ports, câbles reliés, photos) et fiche de brassage complète (prises murales + interconnexions, câble mural et cordon distincts)",
     "improvements": [
-      "Baie de brassage : nouvelle table baie_prises_murales (une par port d'un bandeau RJ, correspondance automatique par numéro) — porte la pièce, l'appareil/périphérique/usage branché et le câble mural, migrés automatiquement depuis les anciens ports de bandeau au démarrage, sans rien perdre.",
-      "Baie de brassage : la couleur/le ping/la cible d'un port de switch câblé à un bandeau suivent désormais la chaîne complète prise murale -> port RJ -> cordon -> switch.",
-      "Baie de brassage : un bandeau RJ est plafonné à 24 ports (48 pour les autres éléments) — garantit la place d'empiler la rangée des prises murales au-dessus de celle des ports RJ sans agrandir la hauteur du bandeau."
+      "Baie de brassage : double-clic sur un port non-bandeau ouvre une modale d'édition rapide (cible + étiquette de cordon si relié), sans passer par le panneau latéral complet.",
+      "Baie de brassage : double-clic sur un port relié ou directement sur la courbe de câble visible édite son étiquette (couleur/longueur) ; enregistrer sans y toucher ne détache jamais le lien.",
+      "Baie de brassage : double-clic sur une photo de la baie édite son nom/sa description (nouvelle route dédiée) — jusqu'ici modifiables seulement à l'upload.",
+      "Baie de brassage : la fiche de câblage imprimable/CSV (/baie/cablage) documente désormais aussi les prises murales de chaque bandeau RJ (pièce, identification, câble mural ET cordon distincts, cible finale), en plus des interconnexions entre éléments non-bandeau."
     ]
   },
   "checksums": {
@@ -29,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.74"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.77"
 }
