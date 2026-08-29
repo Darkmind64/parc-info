@@ -1,8 +1,40 @@
-PARCINFO_VERSION=2.18.78
+PARCINFO_VERSION=2.18.79
 RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082902
+BUILD_NUMBER=2026082903
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.79 - Correctifs signalés en testant la 2.18.78 : tri Utilisateurs + ACL baie de brassage
+# Deux correctifs, tous deux explicitement signalés (mais volontairement pas
+# corrigés sur le moment, hors périmètre) lors de chantiers précédents.
+#
+# 1) utilisateurs.html levait "Cannot read properties of null (reading
+# 'style')" au chargement de la page. Cause : le {% endblock %} du bloc
+# content fermait AVANT la div #sort-status-users (la barre "Trié par...")
+# — hors de tout bloc Jinja, elle n'était donc jamais rendue dans le DOM,
+# et updateSortStatusUsers() plantait sur getElementById(...) === null dès
+# DOMContentLoaded. Même défaut structurel que liste_appareils.html, qui
+# s'en tirait par une garde `if (!bar) return;` absente ici — comparé à
+# identifiants.html (la div correctement placée À L'INTÉRIEUR du bloc
+# content) pour confirmer le bon emplacement avant de corriger. Vérifié en
+# direct dans le navigateur après correction : plus d'erreur, la div existe.
+#
+# 2) can_write() n'était vérifié sur AUCUNE route de mutation de la baie de
+# brassage — signalé dès la 2.18.77 comme "systémique, hors périmètre" au
+# moment d'ajouter de nouvelles routes sur ce même sous-système, plutôt que
+# de corriger une seule route en laissant les 10 autres non protégées. Un
+# accès en lecture seule pouvait donc placer/modifier/déplacer/supprimer un
+# emplacement, éditer un port ou une prise murale, lier deux ports, changer
+# la hauteur (U) de la baie, ou uploader/éditer/supprimer une photo.
+# Contrôle ajouté sur les 11 routes concernées (api_baie_ajouter_slot,
+# api_baie_slot PUT/DELETE, api_baie_port, api_baie_prise_murale,
+# api_baie_lien_port, api_baie_deplacer_slot, api_baie_supprimer,
+# api_baie_nb_u, upload_photo_baie, modifier_photo_baie,
+# supprimer_photo_baie), même convention que le reste de l'app (jsonify
+# 403 pour les routes JSON, flash+redirect pour les deux routes
+# formulaire). Nouveau tests/test_baie_acl.py (13 tests) : un accès
+# 'lecture' reçoit 403 et la base ne bouge pas sur chaque route, un accès
+# 'ecriture' continue de fonctionner (contrôle négatif).
 
 # Version 2.18.78 - Dialogues natifs remplacés par des modales stylées (confirm/prompt/alert)
 # Suite de l'audit demandé : recenser tous les appels confirm()/alert()/

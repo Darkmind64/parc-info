@@ -1,25 +1,23 @@
 {
-  "version": "2.18.78",
+  "version": "2.18.79",
   "release_date": "2026-08-29T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.78",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.78/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.79",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Tous les dialogues natifs du navigateur (confirm/prompt/alert) encore utilisés dans l'app remplacés par des modales stylées cohérentes avec le reste de l'interface",
+    "new_features": "Deux correctifs signalés en testant la 2.18.78 : erreur JS sur la page Utilisateurs (tri de colonnes) et absence de contrôle d'accès en écriture sur toute la baie de brassage",
     "improvements": [
-      "Nouvelle modale de saisie appPrompt() (base.html), sur le même principe que la modale de confirmation appConfirm() déjà existante — remplace tous les window.prompt() restants.",
-      "appConfirm() gagne un rappel optionnel à l'annulation (onCancel), et affiche désormais correctement les messages multi-lignes.",
-      "~25 confirm()/prompt() appelés directement en JS convertis, dans base.html, les modules JS partagés (import CSV, modifications non sauvegardées) et une quinzaine de pages (baie de brassage, base de connaissances, scan réseau, gestionnaire d'outils, parc général, etc.).",
-      "4 alert() oubliés d'un audit précédent migrés vers showFlash(), la voie normale déjà établie pour les messages informatifs."
+      "utilisateurs.html : {% endblock %} fermait le bloc content AVANT la barre « Trié par... », qui n'était donc jamais rendue dans le DOM — updateSortStatusUsers() plantait sur un élément null dès le chargement de la page.",
+      "Baie de brassage : les 11 routes de mutation (placer/modifier/déplacer/supprimer un emplacement, éditer un port ou une prise murale, lier deux ports, changer la hauteur U, uploader/éditer/supprimer une photo) ne vérifiaient can_write() nulle part — un accès en lecture seule pouvait tout modifier. Contrôle ajouté partout, avec 13 nouveaux tests dédiés."
     ]
   },
   "checksums": {
@@ -30,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.78"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.79"
 }

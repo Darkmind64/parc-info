@@ -6012,6 +6012,8 @@ def _msg_collision(collisions):
 @login_required
 def api_baie_ajouter_slot():
     cid = get_client_id()
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
     f = request.json or {}
     conn = get_db()
     pos = f.get('position', 1)
@@ -6098,6 +6100,8 @@ def api_baie_ajouter_slot():
 @login_required
 def api_baie_slot(id):
     cid = get_client_id()
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
     conn = get_db()
     if request.method == 'DELETE':
         avant = row_to_dict(conn.execute(
@@ -6181,6 +6185,8 @@ def api_baie_port(slot_id, numero):
     détaché des deux côtés — le champ "— Libre —" du sélecteur de port
     appelle cette même route sans rien renseigner."""
     cid = get_client_id()
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
     conn = get_db()
     slot = conn.execute('SELECT id, nom_custom, type_equipement FROM baie_slots WHERE id=? AND client_id=?', (slot_id, cid)).fetchone()
     if not slot:
@@ -6256,6 +6262,8 @@ def api_baie_prise_murale(slot_id, numero):
     baie (voir api_baie_lien_port) et n'est jamais modifié par cette
     route."""
     cid = get_client_id()
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
     conn = get_db()
     slot = conn.execute(
         "SELECT id, nom_custom, type_equipement FROM baie_slots "
@@ -6332,6 +6340,8 @@ def api_baie_lien_port():
     (couleur/ping/tooltip, voir _ports_avec_details) donne toujours la
     priorité à l'association directe d'un port sur son propre lien."""
     cid = get_client_id()
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
     f = request.json or {}
     s1, n1 = f.get('slot1_id'), f.get('numero1')
     s2, n2 = f.get('slot2_id'), f.get('numero2')
@@ -6380,6 +6390,8 @@ def api_baie_lien_port():
 def api_baie_deplacer_slot(id):
     '''Drag & drop : déplace un slot vers une nouvelle position/col.'''
     cid = get_client_id()
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
     f = request.json or {}
     new_pos = f.get('position', 1)
     new_col = _clamp_col_index(f.get('col_index', 0))
@@ -6439,6 +6451,8 @@ def api_baie_supprimer():
     "historiques" sans baie_nom explicite (NULL, traité comme 'Baie
     principale' partout ailleurs dans ce fichier)."""
     cid = get_client_id()
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
     baie_nom = request.args.get('baie', 'Baie principale')
     conn = get_db()
     if baie_nom == 'Baie principale':
@@ -6627,6 +6641,9 @@ def baie_cablage_csv():
 @login_required
 def upload_photo_baie():
     cid = get_client_id()
+    if not can_write():
+        flash('Accès en lecture seule', 'danger')
+        return redirect(url_for('baie_brassage'))
     if 'fichier' not in request.files:
         return redirect(url_for('baie_brassage'))
     f = request.files['fichier']
@@ -6659,6 +6676,8 @@ def modifier_photo_baie(id):
     de corriger une photo mal nommée sans la supprimer puis la
     re-uploader."""
     cid = get_client_id()
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
     conn = get_db()
     photo = row_to_dict(conn.execute('SELECT id FROM baie_photos WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     if not photo:
@@ -6680,6 +6699,9 @@ def modifier_photo_baie(id):
 @login_required
 def supprimer_photo_baie(id):
     cid = get_client_id()
+    if not can_write():
+        flash('Accès en lecture seule', 'danger')
+        return redirect(url_for('baie_brassage'))
     conn = get_db()
     photo = row_to_dict(conn.execute('SELECT * FROM baie_photos WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     if photo:
@@ -6712,6 +6734,8 @@ def apercu_photo_baie(id):
 @login_required
 def api_baie_nb_u():
     cid = get_client_id()
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
     data = request.json or {}
     nb = max(6, min(48, int(data.get('nb_u', 12))))
     conn = get_db()

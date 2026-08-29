@@ -173,12 +173,12 @@ th[data-col]:hover { color: var(--accent) !important; background: rgba(0,201,255
     </div>
 {% endif %}
 </div>
-{% endblock %}
 
 <div id="sort-status-users" class="sort-bar" style="display:none;">
     Trié par <span id="sort-col-users"></span> <span id="sort-dir-users"></span>
     <button class="sort-reset" onclick="resetTriUsers()">✕ Réinitialiser</button>
 </div>
+{% endblock %}
 
 {% block extra_scripts %}
 <script src="/static/js/tri.js"></script>
