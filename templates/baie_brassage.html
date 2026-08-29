@@ -1410,6 +1410,30 @@ function renderRack() {
 // symétrique "l:slotA:numA|slotB:numB") : les deux ports d'un même câble
 // partagent exactement la même valeur, donc les regrouper suffit à
 // retrouver chaque paire sans revenir aux données brutes des slots.
+// Subdivise une courbe de Bézier cubique P0-P1-P2-P3 pour n'en garder que le
+// segment [u0, u1] (formule standard de sous-courbe, via la dérivée de
+// B(t)) — utilisé par renderCableLinks() pour rétrécir la zone de clic
+// invisible d'un câble (voir plus bas pourquoi).
+function sousCourbeBezier(P0, P1, P2, P3, u0, u1) {
+    const lerp = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    const pointSur = t => {
+        const a = lerp(P0, P1, t), b = lerp(P1, P2, t), c = lerp(P2, P3, t);
+        return lerp(lerp(a, b, t), lerp(b, c, t), t);
+    };
+    const deriveeEn = t => {
+        const mt = 1 - t;
+        return [
+            3 * mt * mt * (P1[0] - P0[0]) + 6 * mt * t * (P2[0] - P1[0]) + 3 * t * t * (P3[0] - P2[0]),
+            3 * mt * mt * (P1[1] - P0[1]) + 6 * mt * t * (P2[1] - P1[1]) + 3 * t * t * (P3[1] - P2[1]),
+        ];
+    };
+    const Q0 = pointSur(u0), Q3 = pointSur(u1);
+    const d0 = deriveeEn(u0), d1 = deriveeEn(u1);
+    const echelle = (u1 - u0) / 3;
+    return [Q0, [Q0[0] + d0[0] * echelle, Q0[1] + d0[1] * echelle],
+            [Q3[0] - d1[0] * echelle, Q3[1] - d1[1] * echelle], Q3];
+}
+
 function renderCableLinks() {
     const svg = document.getElementById('cable-overlay');
     const body = document.getElementById('rack-body');
@@ -1458,8 +1482,24 @@ function renderCableLinks() {
         // mettreCableEnAvant() puisse la retrouver et la déplacer avec sa
         // courbe visible — sinon elle resterait à son ancienne position de
         // peinture, dépareillée de la courbe qu'elle est censée survoler.
+        //
+        // Rétrécie aux 60% CENTRAUX de la courbe (t dans [0.2, 0.8]), PAS la
+        // courbe complète port-à-port : le SVG se peignant après (donc
+        // au-dessus de) .rack-rows dans le DOM, ce tracé invisible de 14px
+        // de large — nécessaire pour viser un double-clic sur un trait de
+        // 2px — recouvrait sinon ENTIÈREMENT le port lui-même à chacune de
+        // ses deux extrémités (la courbe part et arrive tangentiellement à
+        // l'horizontale, pile sur le centre du port, cf. sousCourbeBezier
+        // ci-dessus), volant silencieusement TOUS ses clics/survols au
+        // port en dessous. Symptôme réel confirmé en vérifiant : un port
+        // relié devenait par endroits impossible à re-cliquer/survoler —
+        // pire à mesure que la baie se charge en câblages (plus de courbes
+        // superposées). La portion centrale reste largement assez grande
+        // pour un double-clic volontaire sur le câble.
+        const [q0, q1, q2, q3] = sousCourbeBezier(
+            [x1, y1], [x1 + bombe, y1], [x2 + bombe, y2], [x2, y2], 0.2, 0.8);
         const zoneClic = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        zoneClic.setAttribute('d', d);
+        zoneClic.setAttribute('d', `M ${q0[0]} ${q0[1]} C ${q1[0]} ${q1[1]}, ${q2[0]} ${q2[1]}, ${q3[0]} ${q3[1]}`);
         zoneClic.setAttribute('class', 'cable-link-hit');
         zoneClic.dataset.cle = els[0].dataset.cle;
         zoneClic.addEventListener('dblclick', e => {
@@ -1670,8 +1710,20 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // survol = infobulle sur la cible + surbrillance croisée du port
     // partenaire s'il y en a un. stopPropagation partout pour ne pas aussi
     // déclencher le clic de la cellule (sélection de l'élément lui-même).
-    cell.querySelectorAll('.port').forEach((el, i) => {
-        const p = ports[i];
+    // Association DOM -> donnée par NUMÉRO (data-numero), jamais par index
+    // de position — l'ordre de rendu des ports dans le DOM ne correspond
+    // plus forcément à l'ordre du tableau `ports` (trié par numéro côté
+    // serveur) depuis la disposition 2 lignes d'un switch (impairs PUIS
+    // pairs, voir plus haut) et les zones WAN/LAN/Fibre d'un routeur (LAN
+    // PUIS WAN PUIS Fibre) : un appariement par index i aurait alors lié
+    // CHAQUE port à la donnée du port voisin plutôt qu'à la sienne —
+    // exactement le symptôme signalé en usage réel ("ports adjacents mis
+    // en surbrillance en même temps", lien affiché sur un seul des deux
+    // ports). La table de correspondance élimine toute hypothèse d'ordre.
+    const portsParNumero = new Map(ports.map(p => [p.numero, p]));
+    cell.querySelectorAll('.port').forEach(el => {
+        const p = portsParNumero.get(parseInt(el.dataset.numero, 10));
+        if (!p) return;
         el.addEventListener('click', e => {
             e.stopPropagation();
             if (modeLien) { gererClicLienPort(s, p, el); }
@@ -1723,8 +1775,12 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // d'un câblage bandeau<->switch, voir portRjEditorRowHTML) ni de badge
     // de déliaison (correspondance fixe avec le port RJ de même numéro,
     // rien à détacher).
-    cell.querySelectorAll('.prise-murale').forEach((el, i) => {
-        const port = ports[i];
+    // Même correspondance par NUMÉRO (pas par index) que les ports RJ
+    // ci-dessus — un bandeau RJ n'est pour l'instant jamais réordonné (une
+    // seule ligne, toujours dans l'ordre du tableau `ports`), mais autant
+    // ne pas dépendre implicitement de cette hypothèse.
+    cell.querySelectorAll('.prise-murale').forEach(el => {
+        const port = portsParNumero.get(parseInt(el.dataset.numero, 10));
         const pm = port && port.prise_murale;
         if (!pm) return;
         el.addEventListener('click', e => {
@@ -2251,7 +2307,7 @@ function priseMuraleHTML(pm, numero) {
     const libre = !p.appareil_id && !p.peripherique_id && !p.usage_libre;
     const style = libre ? '' : `background:${p.couleur};`;
     const classePing = (p.appareil_id && p.dernier_ping) ? (p.en_ligne ? ' pm-ping-ok' : ' pm-ping-fail') : '';
-    return `<span class="prise-murale${libre ? ' pm-libre' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePriseMurale(p))}" data-appareil="${p.appareil_id || ''}">
+    return `<span class="prise-murale${libre ? ' pm-libre' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePriseMurale(p))}" data-appareil="${p.appareil_id || ''}" data-numero="${numero}">
         <span class="port-led"></span>${numero}</span>`;
 }
 
@@ -2392,15 +2448,17 @@ async function creerLienPort(slot1Id, numero1, slot2Id, numero2) {
         showFlash(data.error, 'danger');
         return;
     }
-    [data.port1, data.port2].forEach(port => {
-        if (!port) return;
-        const sl = Object.values(slots).find(x => x.id === port.slot_id);
-        if (sl && sl.ports) {
-            const idx = sl.ports.findIndex(x => x.numero === port.numero);
-            if (idx >= 0) sl.ports[idx] = port;
-        }
-    });
-    renderRack();
+    // Recharge toute la baie plutôt que de ne patcher QUE les deux ports
+    // renvoyés par l'appel (même raison que enregistrerPort()) : créer ce
+    // lien détache AUTOMATIQUEMENT, côté serveur, toute liaison précédente
+    // sur L'UN OU L'AUTRE port — y compris avec un TROISIÈME port qui
+    // n'apparaît dans AUCUNE des deux réponses port1/port2. Un patch
+    // partiel laissait ce troisième port affiché "relié" à son ancien
+    // partenaire (data-cle périmée) alors que ce dernier pointe déjà
+    // ailleurs côté serveur — la ligne de câble ne retrouvait alors plus
+    // son second port, ou le survol ne surlignait plus la bonne paire
+    // (signalé en usage réel).
+    await chargerBaie(currentBaie);
     showFlash('Lien créé.', 'success');
 }
 
@@ -2954,15 +3012,11 @@ async function changerCableLabel(input) {
     });
     const data = await r.json();
     if (data.error) { showFlash(data.error, 'danger'); return; }
-    [data.port1, data.port2].forEach(port => {
-        if (!port) return;
-        const sl = Object.values(slots).find(x => x.id === port.slot_id);
-        if (sl && sl.ports) {
-            const idx = sl.ports.findIndex(x => x.numero === port.numero);
-            if (idx >= 0) sl.ports[idx] = port;
-        }
-    });
-    renderRack();
+    // Recharge toute la baie (même raison que creerLienPort()) plutôt que
+    // de ne patcher que les deux ports renvoyés — cette route détache
+    // aussi automatiquement toute liaison précédente sur l'un ou l'autre
+    // port, y compris avec un troisième port absent de cette réponse.
+    await chargerBaie(currentBaie);
 }
 
 async function enregistrerPort(slotId, numero, payload) {
@@ -3357,7 +3411,13 @@ function delierPort(slotId, numero, nomCible) {
 }
 
 // ── ACTIONS ──────────────────────────────────────────────────────────────────
-document.getElementById('cfg-app').addEventListener('change', autoRemplir);
+// #cfg-app a déjà son onchange="autoRemplir('cfg')" inline dans le HTML —
+// cet addEventListener supplémentaire est un reliquat d'avant que
+// autoRemplir() prenne un paramètre prefix (voir plus bas) : il
+// l'appelait alors sans argument, l'Event natif se retrouvant à la place
+// du prefix attendu, ce qui levait une erreur JS à CHAQUE changement de
+// ce champ (document.getElementById(event + '-app') === null). Retiré,
+// l'attribut onchange suffit déjà.
 document.getElementById('cfg-type').addEventListener('change', () => couleurAuto('cfg'));
 
 // Les trois fonctions suivantes opèrent indifféremment sur le panneau +

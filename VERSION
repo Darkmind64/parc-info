@@ -1,8 +1,60 @@
-PARCINFO_VERSION=2.18.83
+PARCINFO_VERSION=2.18.84
 RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082907
+BUILD_NUMBER=2026082908
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.84 - Baie de brassage : fiabilisation complète du mécanisme de liaison des ports
+# Signalé en usage réel après la 2.18.83 : "ça dysfonctionne toujours" —
+# problèmes d'affichage des liens, ports adjacents parfois mis en
+# surbrillance ensemble, les deux ports d'un lien pas toujours affichés,
+# et un port libéré qui restait coloré au lieu de repasser en gris.
+# Audit complet du mécanisme, six causes réelles trouvées et corrigées :
+#
+# 1. Association DOM->donnée par INDEX DE POSITION plutôt que par numéro
+#    de port : la disposition "2 lignes" d'un switch (impairs puis pairs)
+#    et les zones WAN/LAN/Fibre d'un routeur réordonnent les éléments
+#    .port dans le DOM par rapport au tableau `ports` (trié par numéro
+#    côté serveur) — un appariement par index liait alors CHAQUE port à
+#    la donnée d'un port voisin. Cause directe des ports adjacents mis en
+#    surbrillance ensemble ET du mauvais port détaché par le badge ✕
+#    (donc du port qui restait coloré). Corrigé : appariement par
+#    data-numero via une Map, plus jamais par position.
+# 2. creerLienPort()/changerCableLabel() ne patchaient dans le cache local
+#    que les DEUX ports renvoyés par l'API, alors que la route détache
+#    aussi automatiquement toute liaison précédente sur un TROISIÈME port
+#    absent de la réponse, qui restait donc affiché comme lié à tort.
+#    Corrigé par un rechargement complet de la baie après ces appels.
+# 3. Lier deux ports du MÊME équipement échouait toujours avec un faux
+#    "Port introuvable" (404) côté serveur — la vérification d'appartenance
+#    comparait un nombre de lignes SQL au lieu de tester chaque slot
+#    individuellement, et une requête IN (id, id) ne renvoie qu'UNE ligne
+#    quand les deux ports sont sur le même équipement.
+# 4. La zone de clic invisible (14px) utilisée pour le double-clic
+#    d'édition rapide d'un câble allait jusqu'au CENTRE de chaque port —
+#    donc recouvrait entièrement le port lui-même à ses deux extrémités,
+#    lui volant silencieusement ses clics/survols. Pire à mesure que la
+#    baie se charge en câblages. Corrigée en la rétrécissant aux 60%
+#    centraux de la courbe (le double-clic reste largement assez précis).
+# 5. Bug transverse dans la modale de confirmation partagée (base.html,
+#    utilisée par toute l'app) : cliquer "Confirmer" déclenchait AUSSI le
+#    callback d'ANNULATION avant le vrai callback. Sans incidence en
+#    général, mais gererClicLienPort() (remplacement d'un lien existant)
+#    passe un onCancel qui remet l'état à null — le vrai callback levait
+#    alors un TypeError silencieux et n'appelait JAMAIS l'API : confirmer
+#    le remplacement d'un lien ne faisait simplement rien, sans erreur
+#    visible. Touchait aussi scan_reseau.html (effet de bord plus discret
+#    là, la navigation masquant le symptôme).
+# 6. Un addEventListener redondant et cassé sur #cfg-app (reliquat d'un
+#    refactor antérieur) levait une erreur JS à chaque changement de type
+#    d'équipement dans le panneau "+ Placer" — sans lien avec le
+#    signalement, trouvé et corrigé au passage.
+#
+# Chaque scénario reproduit et vérifié en direct dans le navigateur :
+# switch 2 lignes + liens croisés, remplacement d'un lien existant,
+# détachement via le badge ✕, lien puis re-lien forçant le détachement
+# automatique d'un troisième port. Suite de tests pytest toujours verte
+# (174 tests) + tous les scripts de test autonomes.
 
 # Version 2.18.83 - Baie de brassage : câble en surbrillance toujours visible même chargée
 # Signalé en usage réel : la mise en surbrillance (survol d'un port relié,

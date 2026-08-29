@@ -6507,7 +6507,13 @@ def api_baie_lien_port():
     slots_noms = {r[0]: (r[1] or r[2] or f'Emplacement #{r[0]}') for r in conn.execute(
         'SELECT id, nom_custom, type_equipement FROM baie_slots WHERE id IN (?,?) AND client_id=?',
         (s1, s2, cid)).fetchall()}
-    if len(slots_noms) != 2:
+    # Comparer l'appartenance de s1 ET s2 individuellement, pas len(...) != 2 :
+    # relier deux ports du MÊME équipement (boucle de test, brassage interne)
+    # est un cas légitime où s1 == s2 — la requête IN (?,?) ne renvoie alors
+    # qu'UNE ligne pour les deux, ce qui faisait échouer ce cas pourtant
+    # valide avec un faux "Port introuvable" (bug trouvé en vérifiant tout le
+    # mécanisme de liaison suite à un signalement d'affichage de liens).
+    if s1 not in slots_noms or s2 not in slots_noms:
         conn.close()
         return jsonify({'error': 'Port introuvable'}), 404
     now = _utcnow().isoformat()

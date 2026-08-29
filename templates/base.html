@@ -4242,17 +4242,39 @@ body.theme-light .liste-item { background: rgba(0,0,0,.03); }
         setTimeout(function () { okBtn.focus(); }, 50);
     };
 
-    window.appConfirmCancel = function () {
+    // Cache la modale et efface l'état, SANS déclencher onCancel — utilisé
+    // par la confirmation elle-même (voir okBtn ci-dessous), qui a besoin
+    // du même nettoyage (masquer, vider _cb/_onCancel) mais surtout PAS de
+    // rejouer le callback d'ANNULATION.
+    function masquerModal() {
         overlay.style.display = 'none';
-        var cancelCb = _onCancel;
         _cb = null;
         _onCancel = null;
+    }
+
+    window.appConfirmCancel = function () {
+        var cancelCb = _onCancel;
+        masquerModal();
         if (cancelCb) cancelCb();
     };
 
     okBtn.addEventListener('click', function () {
+        // Bug corrigé (trouvé en vérifiant tout le mécanisme de liaison de
+        // la baie de brassage suite à un signalement de dysfonctionnement) :
+        // ce handler appelait auparavant appConfirmCancel() avant cb(), qui
+        // déclenche TOUJOURS opts.onCancel s'il est défini — donc CONFIRMER
+        // exécutait aussi le callback d'ANNULATION juste avant le vrai
+        // callback. Sans incidence quand onCancel ne fait rien de plus que
+        // cb() elle-même, mais gererClicLienPort() (baie_brassage.html)
+        // passe onCancel: desactiverModeLien(), qui remet premierPortLien à
+        // null — et cb() y est un () => creerLienPort(premierPortLien...)
+        // qui ne lit premierPortLien qu'à L'EXÉCUTION : cliquer "Continuer"
+        // sur la modale de remplacement de lien levait alors un
+        // TypeError silencieux (Cannot read properties of null) et
+        // n'appelait JAMAIS l'API — le lien demandé n'était simplement
+        // jamais créé, sans aucun message d'erreur visible.
         var cb = _cb;
-        appConfirmCancel();
+        masquerModal();
         if (cb) cb();
     });
 
