@@ -129,7 +129,19 @@
    (flex:1, occupe tout .cell-ports-wrap) comme conteneur des deux zones ;
    les autres types d'équipement (Patch Panel, PDU, NAS...) gardent le rendu
    historique (.cell-ports seule, pleine largeur, jamais de zone SFP). */
-.cell-ports-main-switch { display:flex; align-items:center; flex:1; min-width:0; overflow:hidden; }
+/* align-items:flex-start (pas center) : si la zone SFP/WAN/Fibre (20%,
+   flex-wrap) doit exceptionnellement retomber sur 2 lignes (beaucoup de
+   ports SFP sur une baie étroite), elle ne doit jamais pousser la zone
+   RJ/LAN vers le bas en la centrant contre une sœur plus haute — la
+   hauteur des 2 rangées de la disposition 2-lignes (voir
+   tailleDeuxLignes) est calculée pour tenir exactement dans la hauteur
+   disponible, un centrage aurait fait déborder le calcul par le bas
+   (bug trouvé en testant une fenêtre étroite : la 2e rangée débordait de
+   quelques px malgré des ports déjà réduits à la bonne taille). Chaque
+   zone démarre donc en haut ; un éventuel dépassement de la zone SFP
+   reste rogné par l'overflow:hidden du conteneur, comme filet de
+   sécurité. */
+.cell-ports-main-switch { display:flex; align-items:flex-start; flex:1; min-width:0; overflow:hidden; }
 .cell-ports-rj-zone {
     flex:0 0 80%; max-width:80%; display:flex; flex-direction:column;
     align-items:stretch; justify-content:center; gap:2px; overflow:hidden; min-width:0;
@@ -150,21 +162,26 @@
 /* Disposition 2 lignes (1 3 5 7.../2 4 6 8...) — chaque rangée wrap si trop
    de ports pour la largeur disponible, plutôt que de forcer exactement 2
    lignes CSS quel que soit nb_ports (jusqu'à 48 ports RJ possibles).
-   Ports RÉDUITS (20×11 au lieu de 24×22, voir .cell-ports-row .port
-   ci-dessous) : 2 rangées à la taille normale d'un port (22px) ne
-   tiennent PAS dans la hauteur d'une seule U — un vrai switch zigzag
-   24 ports a d'ailleurs, en réalité, des prises RJ bien plus resserrées
-   qu'un switch 1 ligne. Sans cette réduction, la 2e rangée était
-   silencieusement rognée par l'overflow:hidden du conteneur (bug trouvé
-   en vérifiant : U1 sur un switch 24 ports 2-lignes affichait la rangée
-   du bas tronquée, invisible à l'écran mais confirmé en mesurant les
-   positions DOM). */
+   Taille de port CALCULÉE dynamiquement en JS (voir portsDeuxLignesHTML
+   dans makeOccupiedCell) selon la hauteur RÉELLEMENT disponible sur cette
+   rangée du rack — pleine taille (24×22, comme 1 ligne) dès que la place
+   suffit, ce qui est le cas courant (une U large de ~900px et plus tient
+   2 rangées de ports pleine taille sans problème), réduite seulement si
+   la fenêtre est étroite au point de ne plus avoir la place. Variables
+   --port-w/--port-h/--port-fs posées en ligne sur .cell-ports-rj-zone,
+   consommées ci-dessous avec un repli sur la taille normale d'un port —
+   sans ce calcul dynamique (un temps fixé à 20×11 quelle que soit la
+   place réelle), le rendu paraissait à tort "rétréci pour rien" sur un
+   écran large, signalé en usage réel. Le repli sur l'overflow:hidden du
+   conteneur reste le filet de sécurité si jamais l'espace est trop
+   réduit malgré tout. */
 .cell-ports-row { display:flex; flex-wrap:wrap; justify-content:center; gap:2px; }
 .cell-ports-row .port {
-    width:20px; height:11px; font-size:.48rem; line-height:11px; border-radius:2px;
+    width:var(--port-w, 24px); height:var(--port-h, 22px); font-size:var(--port-fs, .6rem);
+    line-height:var(--port-h, 22px); border-radius:var(--port-radius, 3px);
 }
-.cell-ports-row .port-led { width:5px; height:5px; }
-.cell-ports-row .port-unlink { width:9px; height:9px; font-size:7px; line-height:9px; }
+.cell-ports-row .port-led { width:var(--port-led, 6px); height:var(--port-led, 6px); }
+.cell-ports-row .port-unlink { width:var(--port-unlink, 11px); height:var(--port-unlink, 11px); font-size:var(--port-unlink-fs, 9px); line-height:var(--port-unlink, 11px); }
 .cell-ports-sfp-zone {
     flex:0 0 20%; max-width:20%; display:flex; align-items:center; justify-content:center;
     gap:2px; flex-wrap:wrap; overflow:hidden; min-width:0;
@@ -1072,6 +1089,36 @@ function numeroAffiche(numero) {
     return numero;
 }
 
+// Taille des ports en disposition 2 lignes (voir .cell-ports-row en CSS)
+// — CALCULÉE depuis la hauteur RÉELLEMENT disponible sur cette rangée du
+// rack (rowH, transmis par makeOccupiedCell), pas une valeur fixée
+// d'avance : sur une baie assez large (~900px et plus, le cas courant),
+// 2 rangées de ports PLEINE TAILLE (24×22, identique à 1 ligne) tiennent
+// déjà dans 1U — les réduire systématiquement était trop conservateur et
+// rétrécissait pour rien, signalé en usage réel. Ne réduit qu'en dessous
+// de cette taille normale, et seulement autant que nécessaire pour que
+// les 2 rangées tiennent sans être rognées par l'overflow:hidden du
+// conteneur (le filet de sécurité si l'espace venait vraiment à manquer).
+function tailleDeuxLignes(rowH) {
+    // Marge de sécurité (4px) : quelques pixels de décalage constatés en
+    // pratique entre cette estimation (info-row + padding + interligne)
+    // et la position réelle de la 1re rangée — sous-pixels d'arrondi de
+    // mise en page, jamais entièrement nuls d'un navigateur à l'autre.
+    // Mieux vaut quelques px d'espace inutilisé en bas qu'un débordement.
+    const hauteurLigneInfo = 16, paddingHautZone = 3, gapEntreLignes = 2, margeSecurite = 4;
+    const dispo = (rowH || U_H) - hauteurLigneInfo - paddingHautZone - gapEntreLignes - margeSecurite;
+    const h = Math.max(9, Math.min(22, Math.floor(dispo / 2)));
+    const ratio = h / 22;
+    const w = Math.max(14, Math.round(24 * ratio));
+    const fs = Math.round(9.6 * ratio * 10) / 10;
+    const radius = Math.max(2, Math.round(3 * ratio));
+    const led = Math.max(4, Math.round(6 * ratio));
+    const unlink = Math.max(8, Math.round(11 * ratio));
+    const unlinkFs = Math.max(6, Math.round(9 * ratio));
+    return `--port-w:${w}px;--port-h:${h}px;--port-fs:${fs}px;--port-radius:${radius}px;`
+         + `--port-led:${led}px;--port-unlink:${unlink}px;--port-unlink-fs:${unlinkFs}px;`;
+}
+
 // Libellé complet d'un port affiché (tooltip, modale d'édition d'un port,
 // éditeur de ports) — centralise ici toute la connaissance "quel nom pour
 // quelle plage/quel type d'équipement" plutôt que de la disperser à
@@ -1562,8 +1609,9 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         // de filtrer par parité plutôt que de retrier.
         const impairs = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 1);
         const pairs   = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 0);
-        ligneRJ = `<div class="cell-ports-row">${impairs.map(portHTML).join('')}</div>`
-                + `<div class="cell-ports-row">${pairs.map(portHTML).join('')}</div>`;
+        const styleDeuxLignes = tailleDeuxLignes(rowH);
+        ligneRJ = `<div class="cell-ports-row" style="${styleDeuxLignes}">${impairs.map(portHTML).join('')}</div>`
+                + `<div class="cell-ports-row" style="${styleDeuxLignes}">${pairs.map(portHTML).join('')}</div>`;
         zonePortsPrincipale = zonesSwitchActives
             ? `<div class="cell-ports-main-switch">
                    <div class="cell-ports-rj-zone">${ligneRJ}</div>

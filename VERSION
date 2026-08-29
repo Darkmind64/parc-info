@@ -1,8 +1,38 @@
-PARCINFO_VERSION=2.18.81
+PARCINFO_VERSION=2.18.82
 RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082905
+BUILD_NUMBER=2026082906
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.82 - Baie de brassage : taille de ports dynamique en disposition 2 lignes
+# Signalé en usage réel juste après la 2.18.81 : en disposition 2 lignes,
+# la taille des ports (20×11) était réduite même quand la baie était assez
+# large pour les garder à taille normale (24×22, comme en 1 ligne).
+#
+# Vérification faite avant de corriger (demandée explicitement) : sur un
+# écran de bureau courant (rack ≥ ~900px de large), 2 rangées de ports
+# pleine taille tiennent déjà confortablement dans 1U — la réduction
+# systématique introduite en 2.18.80 était trop conservatrice, calée sur
+# le pire cas (fenêtre de test étroite) plutôt que sur l'espace réellement
+# disponible.
+#
+# La taille des ports en 2 lignes est désormais CALCULÉE depuis la hauteur
+# réellement disponible sur cette rangée du rack au moment du rendu (pas
+# fixée d'avance) : pleine taille dès que la place suffit, réduite
+# seulement autant que nécessaire sinon — jamais plus.
+#
+# Bug trouvé au passage en vérifiant sur une fenêtre étroite : quand la
+# zone SFP/Fibre/WAN retombait exceptionnellement sur 2 lignes (beaucoup
+# de ports sur peu de largeur), elle poussait la zone RJ/LAN vers le bas
+# en la centrant contre une sœur plus haute (align-items:center), causant
+# un léger débordement malgré des ports déjà correctement réduits par le
+# calcul ci-dessus. Corrigé : les zones démarrent désormais en haut
+# (align-items:flex-start), jamais centrées l'une contre l'autre — un
+# éventuel dépassement de la zone SFP reste rogné par l'overflow:hidden
+# du conteneur, comme filet de sécurité.
+#
+# Changement JS/CSS uniquement, aucun code serveur touché. Suite de tests
+# pytest toujours verte (174 tests).
 
 # Version 2.18.81 - Baie de brassage : modale d'édition (double-clic) + routeur WAN/LAN/Fibre
 # Signalé en usage réel après la 2.18.80 : la disposition 1/2 lignes d'un

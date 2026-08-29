@@ -1,26 +1,24 @@
 {
-  "version": "2.18.81",
+  "version": "2.18.82",
   "release_date": "2026-08-29T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.81/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.81/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.81/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.81",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.81/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.81/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.81/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.81/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.81/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.82",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.82/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : nouvelle modale d'édition d'équipement (double-clic), et un routeur/pare-feu ou un serveur/mini PC peuvent désormais avoir des ports WAN/LAN/Fibre distincts, sur le même principe que les ports SFP d'un switch",
+    "new_features": "Baie de brassage : la disposition 2 lignes d'un switch garde désormais les ports à leur taille normale tant que la place le permet, au lieu de les réduire systématiquement",
     "improvements": [
-      "Double-clic sur un équipement déjà posé -> modale d'édition complète (type en premier, encart de configuration réseau mis en évidence, position/identification, éditeur de ports, Retirer/Enregistrer). Le panneau + Placer ne sert plus qu'à créer un nouvel équipement, réorganisé sur le même principe.",
-      "Nouveau type Mini PC. Routeur/Pare-feu gagne des groupes WAN + LAN + Fibre distincts (jusqu'à 4 WAN, 8 Fibre) ; Serveur et Mini PC gagnent un groupe SFP optionnel — même mécanisme générique que le switch, zones côte à côte plutôt qu'empilées pour ne jamais dépasser la hauteur d'une U.",
-      "Onduleur/PDU : prises électriques (icône dédiée) réutilisant tel quel le mécanisme des ports.",
-      "Deux bugs trouvés et corrigés en vérifiant en direct dans le navigateur avant publication : réduire le nombre de ports Fibre d'un routeur pouvait silencieusement détacher/supprimer ses ports WAN (plages de numérotation mal bornées) ; un switch en 1 ligne avec des ports SFP configurés pouvait empiler tous ses ports RJ verticalement au lieu de les afficher sur une ligne (grille CSS sans largeur définie dans sa zone) — bug latent depuis la version précédente, jamais déclenché faute d'avoir testé cette combinaison précise.",
-      "Correctif au passage : Échap pendant une confirmation (le bouton Retirer de la nouvelle modale, notamment) renvoyait à tort vers le tableau de bord au lieu de juste fermer la confirmation."
+      "Signalé en usage réel : les ports en disposition 2 lignes étaient réduits (20×11) même quand la baie était assez large pour les garder à taille normale (24×22). Vérification faite : sur un écran de bureau courant, 2 rangées de ports pleine taille tiennent déjà dans 1U avec de la marge.",
+      "La taille des ports en 2 lignes est maintenant calculée depuis la hauteur réellement disponible sur cette rangée du rack, pas fixée d'avance — pleine taille dès que la place suffit, réduite seulement autant que nécessaire sinon.",
+      "Bug trouvé au passage en testant une fenêtre étroite : quand la zone SFP retombait sur 2 lignes, elle poussait la zone RJ vers le bas en la centrant contre elle, causant un léger débordement malgré des ports déjà correctement réduits. Corrigé (les zones démarrent désormais en haut, jamais centrées l'une contre l'autre)."
     ]
   },
   "checksums": {
@@ -31,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.81"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.82"
 }
