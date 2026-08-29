@@ -1733,6 +1733,24 @@ def init_db():
         c.execute("ALTER TABLE baie_slots ADD COLUMN nb_ports_wan INTEGER DEFAULT 0")
     except: pass
 
+    # Orientation d'un élément — 'horizontal' (comportement historique) ou
+    # 'vertical' (PDU/onduleur monté sur le rail latéral, courant en baie
+    # réelle) — demandé. Reste dans la MÊME grille position+col_index+
+    # hauteur_u+largeur_u (aucune géométrie séparée à gérer) : seul le rendu
+    # interne (nom, ports/prises) pivote côté client, voir cell-vertical.
+    try:
+        c.execute("ALTER TABLE baie_slots ADD COLUMN orientation TEXT DEFAULT 'horizontal'")
+    except: pass
+
+    # Puissance nominale d'un onduleur, en VA — demandé, purement informatif
+    # (affiché sur l'élément et dans son infobulle), aucun calcul de charge
+    # cumulée des appareils branchés dessus. 0 = non renseignée. Seul le
+    # type 'UPS' expose ce champ côté formulaire (voir appliquerReglesType),
+    # mais la colonne reste générique comme le reste du schéma baie_slots.
+    try:
+        c.execute("ALTER TABLE baie_slots ADD COLUMN puissance_va INTEGER DEFAULT 0")
+    except: pass
+
     # TABLE PORTS DE BAIE — un port par numéro, par slot. FOREIGN KEY sur
     # slot_id sans ON DELETE CASCADE (SQLite ne l'applique de toute façon que
     # si PRAGMA foreign_keys=ON est actif sur LA connexion courante, pas
@@ -6202,13 +6220,16 @@ def api_baie_ajouter_slot():
         conn.execute('DELETE FROM baie_prises_murales WHERE slot_id=?', (ancien[0],))
     conn.execute('DELETE FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col))
     ports_disposition = f.get('ports_disposition') if f.get('ports_disposition') in ('ligne', 'deux_lignes') else 'ligne'
+    orientation = f.get('orientation') if f.get('orientation') in ('horizontal', 'vertical') else 'horizontal'
+    puissance_va = max(0, int(f.get('puissance_va', 0) or 0))
     conn.execute('''INSERT INTO baie_slots
-        (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,nb_ports,largeur_u,date_maj,ports_disposition,nb_ports_sfp,nb_ports_wan)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,nb_ports,largeur_u,date_maj,ports_disposition,nb_ports_sfp,nb_ports_wan,orientation,puissance_va)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (cid, pos, col, hauteur_u,
          f.get('appareil_id') or None, f.get('peripherique_id') or None, f.get('nom_custom', ''),
          f.get('type_equipement', ''), f.get('couleur', '#1e3a5f'),
-         f.get('description', ''), baie_nom, 0, largeur_u, _utcnow().isoformat(), ports_disposition, 0, 0))
+         f.get('description', ''), baie_nom, 0, largeur_u, _utcnow().isoformat(), ports_disposition, 0, 0,
+         orientation, puissance_va))
     conn.commit()
     sid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     nb_ports = _reconcilier_ports(conn, sid, f.get('nb_ports', 0), anciens_ports, f.get('type_equipement', ''))
@@ -6265,6 +6286,8 @@ def api_baie_slot(id):
     nb_ports_sfp = min(PLAFOND_SFP, max(0, int(f.get('nb_ports_sfp', 0) or 0)))
     nb_ports_wan = min(PLAFOND_WAN, max(0, int(f.get('nb_ports_wan', 0) or 0)))
     ports_disposition = f.get('ports_disposition') if f.get('ports_disposition') in ('ligne', 'deux_lignes') else 'ligne'
+    orientation = f.get('orientation') if f.get('orientation') in ('horizontal', 'vertical') else 'horizontal'
+    puissance_va = max(0, int(f.get('puissance_va', 0) or 0))
     actuel = conn.execute(
         'SELECT col_index, baie_nom FROM baie_slots WHERE id=? AND client_id=?', (id, cid)).fetchone()
     if not actuel:
@@ -6298,12 +6321,13 @@ def api_baie_slot(id):
         return jsonify({'error': _msg_collision(collisions)}), 409
     conn.execute('''UPDATE baie_slots SET position=?,col_index=?,hauteur_u=?,appareil_id=?,peripherique_id=?,
         nom_custom=?,type_equipement=?,couleur=?,description=?,nb_ports=?,largeur_u=?,date_maj=?,
-        ports_disposition=?,nb_ports_sfp=?,nb_ports_wan=? WHERE id=? AND client_id=?''',
+        ports_disposition=?,nb_ports_sfp=?,nb_ports_wan=?,orientation=?,puissance_va=? WHERE id=? AND client_id=?''',
         (position, col_index, hauteur_u, f.get('appareil_id') or None, f.get('peripherique_id') or None,
          f.get('nom_custom',''), f.get('type_equipement',''),
          f.get('couleur','#1e3a5f'), f.get('description',''), nb_ports,
          largeur_u,
-         _utcnow().isoformat(), ports_disposition, nb_ports_sfp, nb_ports_wan, id, cid))
+         _utcnow().isoformat(), ports_disposition, nb_ports_sfp, nb_ports_wan,
+         orientation, puissance_va, id, cid))
     _reconcilier_ports(conn, id, nb_ports, type_equipement=f.get('type_equipement', ''))
     nb_ports_sfp = _reconcilier_ports_sfp(conn, id, nb_ports_sfp)
     nb_ports_wan = _reconcilier_ports_wan(conn, id, nb_ports_wan)

@@ -1,8 +1,45 @@
-PARCINFO_VERSION=2.18.84
+PARCINFO_VERSION=2.18.85
 RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082908
+BUILD_NUMBER=2026082909
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.85 - Baie de brassage : rotation des éléments + prises électriques d'onduleur détaillées
+# Demandé : possibilité de placer un élément à l'horizontale ou à la
+# verticale (rotation), et des prises d'onduleur plus grosses, à l'échelle,
+# distinguant les prises ONDULÉES (secourues par la batterie) des prises
+# PROTÉGÉES (parafoudre seul), avec leurs symboles respectifs (batterie 🔋 /
+# éclair ⚡) et la puissance nominale de l'onduleur en VA.
+#
+# Rotation : nouveau champ Orientation (↔ Horizontale / ↕ Verticale), pour
+# n'importe quel type d'équipement — reste dans la MÊME grille position +
+# colonne + hauteur_u + largeur_u qu'un élément horizontal (aucune
+# géométrie séparée à gérer, aucun changement de comportement du
+# glisser-déposer/redimensionnement) : seul le rendu INTERNE pivote. Le nom
+# se lit de haut en bas (writing-mode), et la grille de ports/prises
+# remplit la hauteur en colonnes plutôt que la largeur en lignes — utile en
+# premier lieu pour un PDU/onduleur monté sur le rail latéral d'une baie
+# réelle (largeur étroite, toute la hauteur), mais disponible pour
+# n'importe quel élément.
+#
+# Onduleur (UPS) : la plage de prises "de base" (nb_ports, déjà existante)
+# devient ses prises ONDULÉES, et le groupe "haut" — déjà utilisé pour
+# SFP/Fibre sur d'autres types, réutilisé tel quel, aucune nouvelle plage
+# de numérotation nécessaire — devient ses prises PROTÉGÉES. Chaque prise
+# porte désormais son symbole (🔋 ondulée / ⚡ protégée), affiché même
+# libre, comme la sérigraphie d'un vrai onduleur. Nouveau champ Puissance
+# (VA), purement informatif, affiché en badge à côté de l'IP de l'élément.
+# Un PDU (simple multiprise parafoudre, jamais de batterie) garde son seul
+# groupe de prises, comme avant.
+#
+# Prises électriques agrandies (34×32 contre 24×22 pour un port RJ45) —
+# demandé "essayer de mettre à l'échelle" — pour se distinguer nettement
+# d'un port réseau, sur les deux types UPS et PDU.
+#
+# Suite de tests pytest toujours verte (174 tests) + tous les scripts de
+# test autonomes. Vérifié en direct dans le navigateur : onduleur avec
+# prises ondulées+protégées+VA, PDU vertical 8U, non-régression d'un
+# switch avec SFP.
 
 # Version 2.18.84 - Baie de brassage : fiabilisation complète du mécanisme de liaison des ports
 # Signalé en usage réel après la 2.18.83 : "ça dysfonctionne toujours" —

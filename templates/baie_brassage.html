@@ -536,8 +536,55 @@
    ports (assignation appareil/périphérique/usage libre, éditeur, tooltip)
    demandé : pas un nouveau système, juste une présentation dédiée — forme
    de prise plutôt que carré RJ, pas de badge de déliaison (une prise ne se
-   "câble" pas à un autre port, elle alimente directement un appareil). */
-.port-elec { border-radius: 3px 3px 8px 8px; }
+   "câble" pas à un autre port, elle alimente directement un appareil).
+   Agrandie à l'échelle d'une vraie prise électrique — nettement plus
+   grosse qu'un port RJ45 (24×22) — demandé, avec son symbole (batterie 🔋
+   prise ondulée d'onduleur, éclair ⚡ prise protégée d'onduleur ou prise de
+   PDU, voir portHTML) empilé au-dessus du numéro plutôt qu'à côté, pour
+   rester compacte malgré la taille augmentée. */
+.port-elec {
+    width: 34px; height: 32px; border-radius: 4px 4px 11px 11px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px; line-height: 1;
+}
+.port-elec-symbole { font-size: .8rem; line-height: 1; }
+.port-elec-num { font-size: .58rem; line-height: 1; }
+/* Grille de prises électriques : pistes de 34px (au lieu de 24px pour un
+   port RJ, voir .cell-ports) pour correspondre à la taille agrandie
+   ci-dessus — sans ce variant, les prises débordaient de leur piste. */
+.cell-ports-elec { grid-template-columns: repeat(auto-fill, 34px); grid-auto-rows: 32px; }
+
+/* Badge de puissance (VA) d'un onduleur, demandé — même gabarit que
+   .cell-ip, affiché à sa suite dans l'en-tête de l'élément. */
+.cell-va { font-size: .6rem; color: #d97706; flex-shrink: 0; margin-left: 4px; font-weight: 700; }
+
+/* Orientation verticale d'un élément (demandé) — reste dans la MÊME grille
+   U/colonne+hauteur_u+largeur_u qu'un élément horizontal (voir la classe
+   posée dans makeOccupiedCell) : seul le rendu INTERNE pivote. Le nom se
+   lit de haut en bas (writing-mode, plus lisible qu'une simple rotation
+   CSS pour un texte long — l'ellipsis fonctionne nativement avec) ; la
+   grille de ports/prises remplit la HAUTEUR disponible en colonnes
+   (grid-auto-flow:column + grid-template-rows) plutôt que la largeur en
+   lignes — même principe auto-fill que la version horizontale, juste sur
+   l'axe perpendiculaire. */
+.cell-vertical .cell-row { height: auto; align-items: flex-start; padding: 3px 0; }
+.cell-vertical .cell-name {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 100%;
+}
+.cell-vertical .cell-desc { writing-mode: vertical-rl; }
+.cell-vertical .cell-ip, .cell-vertical .cell-va { writing-mode: vertical-rl; margin-left: 0; margin-top: 4px; }
+.cell-vertical .cell-led { margin-right: 0; margin-bottom: 4px; }
+/* Progression de ping en cours : texte horizontal étroit peu lisible en
+   vertical (voir pingerPortsElement) — masquée plutôt que pivotée, le
+   bouton 📡 lui-même reste disponible et fonctionnel. */
+.cell-vertical .cell-ping-progress { display: none; }
+.cell-vertical .cell-ports-wrap { flex-direction: column; }
+.cell-vertical .cell-ports {
+    grid-template-columns: none; grid-auto-flow: column;
+    grid-template-rows: repeat(auto-fill, 24px);
+}
+.cell-vertical .cell-ports-elec { grid-template-rows: repeat(auto-fill, 32px); }
 </style>
 {% endblock %}
 
@@ -566,6 +613,12 @@
         <input type="number" id="{{p}}-nb-ports-wan" min="0" max="4" value="0"
                style="font-family:'Share Tech Mono',monospace;">
         <div class="form-hint">0 = pas de port WAN. 4 maximum.</div>
+    </div>
+    <div class="form-group" id="{{p}}-grp-va" style="margin:.6rem 0 0;display:none;">
+        <label>⚡ Puissance de l'onduleur (VA)</label>
+        <input type="number" id="{{p}}-va" min="0" step="10" value="0"
+               style="font-family:'Share Tech Mono',monospace;">
+        <div class="form-hint">0 = non renseignée. Ex : 1500 (VA).</div>
     </div>
 </div>
 <div class="form-hint" id="{{p}}-hint-etagere" style="display:none;margin:-.4rem 0 .8rem;">
@@ -749,6 +802,13 @@
                         {% for i in range(1,11) %}<option value="{{ i }}"{% if i==10 %} selected{% endif %}>{{ i }}/10</option>{% endfor %}
                     </select>
                 </div>
+            </div>
+            <div class="form-group" style="margin-bottom:.6rem;">
+                <label>Orientation</label>
+                <select id="cfg-orientation" title="Verticale : le nom et les ports/prises s'affichent de haut en bas — pour un PDU/onduleur monté sur le rail latéral">
+                    <option value="horizontal" selected>↔ Horizontale</option>
+                    <option value="vertical">↕ Verticale</option>
+                </select>
             </div>
             <div class="form-row cols-2" style="margin-bottom:.6rem;">
                 <div class="form-group" style="margin-bottom:0;">
@@ -945,6 +1005,13 @@
             </div>
         </div>
         <div class="form-group" style="margin-bottom:.6rem;">
+            <label>Orientation</label>
+            <select id="eqm-orientation" title="Verticale : le nom et les ports/prises s'affichent de haut en bas — pour un PDU/onduleur monté sur le rail latéral">
+                <option value="horizontal">↔ Horizontale</option>
+                <option value="vertical">↕ Verticale</option>
+            </select>
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem;">
             <label>Couleur</label>
             <input type="color" id="eqm-couleur">
         </div>
@@ -1123,10 +1190,13 @@ function tailleDeuxLignes(rowH) {
 // éditeur de ports) — centralise ici toute la connaissance "quel nom pour
 // quelle plage/quel type d'équipement" plutôt que de la disperser à
 // chaque appelant : Switch/Serveur/Mini PC "SFP", Routeur/Pare-feu "Fibre"
-// (même plage numéro, juste un nom différent) ou "WAN"/"LAN", Onduleur/PDU
-// "Prise" (jamais "Port").
+// (même plage numéro, juste un nom différent) ou "WAN"/"LAN", PDU "Prise"
+// (jamais "Port"). Un onduleur va plus loin (demandé) : "Prise ondulée"
+// (plage de base, secourue par la batterie) ou "Prise protégée" (plage
+// "haute", parafoudre seul — même mécanisme que SFP/Fibre ci-dessous).
 function libellePortAffiche(typeEquipement, numero) {
-    if (typeEquipement === 'UPS' || typeEquipement === 'PDU') return 'Prise ' + numero;
+    if (typeEquipement === 'UPS') return (estPortSfp(numero) ? 'Prise protégée ' : 'Prise ondulée ') + numeroAffiche(numero);
+    if (typeEquipement === 'PDU') return 'Prise ' + numero;
     if (estPortWan(numero)) return 'Port WAN ' + numeroAffiche(numero);
     if (estPortSfp(numero)) {
         const nom = typeEquipement === 'Routeur/Pare-feu' ? 'Fibre' : 'SFP';
@@ -1140,7 +1210,8 @@ function libellePortAffiche(typeEquipement, numero) {
 // l'éditeur de ports (portEditorRowHTML) — même logique de plage/type,
 // juste abrégée pour tenir sur ~40px.
 function labelCourtPort(typeEquipement, numero) {
-    if (typeEquipement === 'UPS' || typeEquipement === 'PDU') return `⚡${numero}`;
+    if (typeEquipement === 'UPS') return (estPortSfp(numero) ? '⚡' : '🔋') + numeroAffiche(numero);
+    if (typeEquipement === 'PDU') return `⚡${numero}`;
     if (estPortWan(numero)) return `WAN${numeroAffiche(numero)}`;
     if (estPortSfp(numero)) return (typeEquipement === 'Routeur/Pare-feu' ? 'FO' : 'SFP') + numeroAffiche(numero);
     if (typeEquipement === 'Routeur/Pare-feu') return `LAN${numero}`;
@@ -1560,6 +1631,11 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
 
     const tcss = TYPE_CSS[s.type_equipement] || '';
     if (tcss) cell.classList.add('cell-' + tcss);
+    // Orientation (demandé) : reste dans la MÊME grille U/colonne — seul le
+    // rendu interne (nom, ports/prises) pivote via cette classe, voir
+    // .cell-vertical en CSS. Utile pour un PDU/onduleur monté sur le rail
+    // latéral, mais disponible pour n'importe quel type d'équipement.
+    if (s.orientation === 'vertical') cell.classList.add('cell-vertical');
     // Rangée effectivement réduite (rowH < U_H, voir renderRack) : rendu
     // compact, la plaque tôlée remplit directement toute la cellule. Sinon
     // (repli de sécurité — un autre élément partage la rangée ou déborde
@@ -1580,12 +1656,16 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // plutôt qu'un bouton JS : clic milieu/clic droit "ouvrir dans un nouvel
     // onglet" fonctionnent alors normalement, comme n'importe quel lien.
     const boutonAdmin = ip ? `<a class="cell-admin" href="http://${escH(ip)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="Ouvrir l'interface d'administration (${escH(ip)})">🌐</a>` : '';
+    // Puissance de l'onduleur (VA, demandé) — purement informative, affichée
+    // à côté de l'IP quand renseignée (jamais pour un autre type que UPS).
+    const badgeVa = (s.type_equipement === 'UPS' && s.puissance_va) ? `<span class="cell-va" title="Puissance de l'onduleur">⚡${s.puissance_va} VA</span>` : '';
     const ligneInfo = `
         <div class="cell-row">
             <span class="cell-led ${ledCls}"></span>
             <span class="cell-name">${nom}${desc ? `<span class="cell-desc"> — ${desc}</span>` : ''}</span>
             <span class="cell-ping-progress" style="display:none;"></span>
             ${ip ? `<span class="cell-ip">${escH(ip)}</span>` : ''}
+            ${badgeVa}
             ${boutonAdmin}
             <button class="cell-del" onclick="event.stopPropagation();delSlot(${s.id})" title="Retirer">✕</button>
         </div>`;
@@ -1619,12 +1699,16 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // demandé. Réutilise tel quel le mécanisme d'assignation appareil/
     // périphérique/usage libre, aucun champ ni colonne supplémentaire.
     const estElec = s.type_equipement === 'UPS' || s.type_equipement === 'PDU';
+    const estUPS = s.type_equipement === 'UPS';
     const estRouteur = s.type_equipement === 'Routeur/Pare-feu';
     const estServeurMiniPC = s.type_equipement === 'Serveur' || s.type_equipement === 'Mini PC';
     // Groupe "haut" (même plage numéro que SFP, voir SFP_NUMERO_OFFSET) —
-    // SFP pour switch/serveur/mini PC, Fibre pour un routeur/pare-feu.
-    const estHautDisponible = estSwitch || estRouteur || estServeurMiniPC;
-    const basePorts = (estSwitch || estRouteur || estServeurMiniPC) ? ports.filter(p => !estPortSfp(p.numero) && !estPortWan(p.numero)) : ports;
+    // SFP pour switch/serveur/mini PC, Fibre pour un routeur/pare-feu,
+    // prises PROTÉGÉES (parafoudre seul, jamais secourues) pour un
+    // onduleur — sa plage de base (basePorts) devient alors ses prises
+    // ONDULÉES (secourues par la batterie), voir portHTML/appliquerReglesType.
+    const estHautDisponible = estSwitch || estRouteur || estServeurMiniPC || estUPS;
+    const basePorts = (estSwitch || estRouteur || estServeurMiniPC || estUPS) ? ports.filter(p => !estPortSfp(p.numero) && !estPortWan(p.numero)) : ports;
     const hautPorts = estHautDisponible ? ports.filter(p => estPortSfp(p.numero)) : [];
     const wanPorts  = estRouteur ? ports.filter(p => estPortWan(p.numero)) : [];
     // La zone 80/20 du switch (et la largeur RJ réduite qui va avec) n'a de
@@ -1640,7 +1724,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // rangées étiquetées seulement s'il y a vraiment un groupe Fibre/WAN
     // configuré, sinon rendu historique pleine largeur (pas de rangée
     // "LAN" à elle seule pour un serveur resté en configuration par défaut).
-    const zonesMultiGroupesActives = (estRouteur || estServeurMiniPC) && (hautPorts.length > 0 || wanPorts.length > 0);
+    const zonesMultiGroupesActives = (estRouteur || estServeurMiniPC || estUPS) && (hautPorts.length > 0 || wanPorts.length > 0);
 
     let ligneRJ;
     let zonePortsPrincipale;
@@ -1658,9 +1742,9 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         const largeurBase = nbZonesExtra === 2 ? 60 : 80;
         const largeurExtra = nbZonesExtra === 2 ? 20 : 20;
         let zones = `<div class="cell-ports-rj-zone" style="flex-basis:${largeurBase}%;max-width:${largeurBase}%;">
-            <div class="cell-ports">${basePorts.map(p => portHTML(p, false)).join('')}</div></div>`;
+            <div class="cell-ports${estElec ? ' cell-ports-elec' : ''}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div></div>`;
         if (wanPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurExtra}%;max-width:${largeurExtra}%;" title="Ports WAN">${wanPorts.map(p => portHTML(p, false)).join('')}</div>`;
-        if (hautPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurExtra}%;max-width:${largeurExtra}%;" title="Ports ${estRouteur ? 'Fibre' : 'SFP'}">${hautPorts.map(p => portHTML(p, false)).join('')}</div>`;
+        if (hautPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurExtra}%;max-width:${largeurExtra}%;" title="${estRouteur ? 'Ports Fibre' : estUPS ? 'Prises protégées' : 'Ports SFP'}">${hautPorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
         zonePortsPrincipale = `<div class="cell-ports-main-switch">${zones}</div>`;
     } else if (estSwitch && s.ports_disposition === 'deux_lignes') {
         // Impairs en haut, pairs en dessous (1 3 5 7.../2 4 6 8...) — même
@@ -1678,7 +1762,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
                </div>`
             : `<div class="cell-ports-stack">${ligneRJ}</div>`;
     } else {
-        ligneRJ = `<div class="cell-ports">${basePorts.map(p => portHTML(p, estElec)).join('')}</div>`;
+        ligneRJ = `<div class="cell-ports${estElec ? ' cell-ports-elec' : ''}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
         zonePortsPrincipale = (estSwitch && zonesSwitchActives)
             ? `<div class="cell-ports-main-switch">
                    <div class="cell-ports-rj-zone">${ligneRJ}</div>
@@ -2080,6 +2164,8 @@ function makeEmptyCell(u, debut, largeur, rowH) {
         document.getElementById('cfg-col').value = col;
         document.getElementById('cfg-largeur').value = String(debut + largeur - col);
         document.getElementById('cfg-nb-ports').value = 0;
+        document.getElementById('cfg-orientation').value = 'horizontal';
+        document.getElementById('cfg-va').value = 0;
         showTab('tab-add');
     });
     cell.addEventListener('mouseenter', e => { cell.classList.add('drag-over'); majMarqueur(e.clientX); });
@@ -2257,9 +2343,14 @@ function masquerTooltip() {
 // ── PORTS ─────────────────────────────────────────────────────────────────────
 // estElec (optionnel) : prise électrique d'un onduleur/PDU plutôt qu'un
 // port réseau — voir makeOccupiedCell. Purement une question de classe CSS
-// (.port-elec, forme distincte) et de libellé de tooltip ; la donnée et le
-// mécanisme d'assignation restent identiques à un port RJ.
-function portHTML(p, estElec) {
+// (.port-elec, forme plus grosse à l'échelle d'une vraie prise) et de
+// libellé de tooltip ; la donnée et le mécanisme d'assignation restent
+// identiques à un port RJ. typeEquipement (optionnel, seulement utile avec
+// estElec) : distingue le symbole affiché DANS la prise — batterie 🔋 pour
+// une prise ondulée d'onduleur (plage de base, secourue), éclair ⚡ pour une
+// prise protégée d'onduleur (plage "haute", parafoudre seul) ou pour un PDU
+// (jamais de batterie, un seul groupe) — demandé.
+function portHTML(p, estElec, typeEquipement) {
     // Un port câblé à un autre (lie_slot_id) n'a ni appareil_id, ni
     // peripherique_id, ni usage_libre — sans ce cas, il retombait ici dans
     // "libre" (classe port-libre, gris neutre) malgré sa couleur de lien
@@ -2293,8 +2384,14 @@ function portHTML(p, estElec) {
     // (avec offset pour un port SFP, voir SFP_NUMERO_OFFSET) — c'est ce que
     // le serveur attend en retour ; seul le LIBELLÉ affiché est ajusté.
     const sfp = estPortSfp(p.numero);
+    // Symbole de prise (demandé) : uniquement pour une prise électrique
+    // (estElec) — batterie pour la plage ondulée d'un onduleur, éclair pour
+    // sa plage protégée ou pour un PDU (jamais de batterie). Affiché même
+    // libre, comme le sérigraphie d'un vrai onduleur sur toutes ses prises.
+    const symbole = estElec ? ((typeEquipement === 'UPS' && !sfp) ? '🔋' : '⚡') : '';
+    const contenuNumero = estElec ? `<span class="port-elec-num">${numeroAffiche(p.numero)}</span>` : numeroAffiche(p.numero);
     return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${estElec ? ' port-elec' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
-        <span class="port-led"></span>${badgeLien}${numeroAffiche(p.numero)}</span>`;
+        <span class="port-led"></span>${badgeLien}${symbole ? `<span class="port-elec-symbole">${symbole}</span>` : ''}${contenuNumero}</span>`;
 }
 
 // Prise murale (bandeau RJ) — même logique de rendu que portHTML, en plus
@@ -2488,7 +2585,10 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau, typeEquipement) {
         html += `<div class="tip-row"><span class="tip-key">${estBandeau ? 'Pièce' : 'Usage'}</span><span class="tip-val">${escH(p.usage_libre)}</span></div>`;
     } else {
         const estElec = typeEquipement === 'UPS' || typeEquipement === 'PDU';
-        html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);">${estElec ? 'Prise libre — inutilisée' : 'Port libre — non affecté'}</span></div>`;
+        const libreTxt = typeEquipement === 'UPS'
+            ? (estPortSfp(p.numero) ? 'Prise protégée libre — inutilisée' : 'Prise ondulée libre — inutilisée')
+            : estElec ? 'Prise libre — inutilisée' : 'Port libre — non affecté';
+        html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);">${libreTxt}</span></div>`;
     }
     // Pièce du site (bandeau RJ) — indépendante de la cible ci-dessus,
     // affichée dans tous les cas où elle est renseignée (y compris un port
@@ -3273,11 +3373,13 @@ const EquipmentModal = (() => {
         document.getElementById('eqm-ports-disposition').value = s.ports_disposition || 'ligne';
         document.getElementById('eqm-nb-ports-sfp').value = s.nb_ports_sfp || 0;
         document.getElementById('eqm-nb-ports-wan').value = s.nb_ports_wan || 0;
+        document.getElementById('eqm-va').value = s.puissance_va || 0;
         appliquerReglesType('eqm');
         document.getElementById('eqm-pos').value = s.position;
         document.getElementById('eqm-hu').value = s.hauteur_u || 1;
         document.getElementById('eqm-col').value = s.col_index || 0;
         document.getElementById('eqm-largeur').value = s.largeur_u || 10;
+        document.getElementById('eqm-orientation').value = s.orientation === 'vertical' ? 'vertical' : 'horizontal';
         document.getElementById('eqm-couleur').value = s.couleur || '#1e3a5f';
         // Options identiques à celles du panneau + Placer (même liste
         // appareils/périphériques rendue côté serveur) — copiées plutôt que
@@ -3522,19 +3624,27 @@ function appliquerReglesType(prefix) {
     // appareil/périphérique/usage libre déjà en place, voir portHTML côté
     // rendu) — juste relabellisé, aucun nouveau champ ni colonne nécessaire
     // puisqu'un onduleur/PDU n'a jamais BESOIN de ports réseau en même
-    // temps que ses prises.
+    // temps que ses prises. Un onduleur va plus loin (demandé) : ce groupe
+    // "de base" devient ses prises ONDULÉES (protégées ET secourues par la
+    // batterie), le groupe "haut" — réutilisé tel quel, voir plus bas —
+    // devient ses prises PROTÉGÉES (parafoudre seul, jamais coupées par la
+    // batterie). Un PDU (simple multiprise parafoudre, jamais de batterie)
+    // garde un unique groupe de prises, comme avant.
     const estElec = type === 'UPS' || type === 'PDU';
+    const estUPS = type === 'UPS';
     const estSwitchCfg = type === 'Switch';
     const estRouteur = type === 'Routeur/Pare-feu';
     // Groupe "haut" (même plage numéro que SFP, voir SFP_NUMERO_OFFSET
     // côté serveur) — SFP pour switch/serveur/mini PC, Fibre pour un
-    // routeur/pare-feu : jamais les deux en même temps sur un même type.
-    const estHautDisponible = estSwitchCfg || estRouteur || type === 'Serveur' || type === 'Mini PC';
+    // routeur/pare-feu, prises protégées pour un onduleur : jamais deux de
+    // ces usages en même temps sur un même type.
+    const estHautDisponible = estSwitchCfg || estRouteur || type === 'Serveur' || type === 'Mini PC' || estUPS;
     g('ports-box-titre').textContent = estSwitchCfg ? 'Configuration réseau — Switch'
         : estRouteur ? 'Configuration réseau — Routeur/Pare-feu'
         : (type === 'Serveur' || type === 'Mini PC') ? `Configuration réseau — ${type}`
         : estElec ? 'Alimentation électrique' : 'Ports';
-    g('lbl-nb-ports').textContent = estElec ? 'Nombre de prises électriques'
+    g('lbl-nb-ports').textContent = estUPS ? '🔋 Prises ondulées (batterie)'
+        : estElec ? 'Nombre de prises électriques'
         : estRouteur ? 'Nombre de ports LAN' : 'Nombre de ports (Ethernet)';
 
     // Bandeau RJ plafonné à 24 ports (voir _plafond_nb_ports côté serveur) —
@@ -3546,7 +3656,9 @@ function appliquerReglesType(prefix) {
     const nbPorts = g('nb-ports');
     nbPorts.max = estBandeauCfg ? '24' : '48';
     if (estBandeauCfg && parseInt(nbPorts.value) > 24) nbPorts.value = '24';
-    g('hint-nb-ports').textContent = estElec
+    g('hint-nb-ports').textContent = estUPS
+        ? '0 = pas de prise ondulée affichée. 48 maximum.'
+        : estElec
         ? '0 = pas de prise affichée. 48 maximum.'
         : (estBandeauCfg
             ? '0 = pas de ports affichés. 24 maximum (prises murales incluses, une par port).'
@@ -3568,13 +3680,16 @@ function appliquerReglesType(prefix) {
     g('grp-ports-disposition').style.display = estSwitchCfg ? '' : 'none';
     if (!estSwitchCfg) g('ports-disposition').value = 'ligne';
 
-    // Groupe "haut" — SFP (switch/serveur/mini PC) ou Fibre (routeur), même
-    // plage de numéros, juste relabellisée selon le type (voir
-    // libellePortAffiche côté rendu).
+    // Groupe "haut" — SFP (switch/serveur/mini PC), Fibre (routeur) ou
+    // prises protégées (onduleur), même plage de numéros, juste
+    // relabellisée selon le type (voir libellePortAffiche côté rendu).
     g('grp-nb-ports-sfp').style.display = estHautDisponible ? '' : 'none';
-    g('lbl-nb-ports-sfp').textContent = estRouteur ? 'Ports Fibre' : 'Ports SFP (fibre)';
+    g('lbl-nb-ports-sfp').textContent = estRouteur ? 'Ports Fibre'
+        : estUPS ? '⚡ Prises protégées (parafoudre)' : 'Ports SFP (fibre)';
     g('hint-nb-ports-sfp').textContent = estRouteur
         ? '0 = pas de port fibre. 8 maximum.'
+        : estUPS
+        ? '0 = pas de prise protégée affichée. 8 maximum, affichées à part (20% droite de l\'élément) — jamais secourues par la batterie, contrairement aux prises ondulées ci-dessus.'
         : '0 = pas de ports SFP. 8 maximum, affichés à part (20% droite de l\'élément).';
     if (!estHautDisponible) g('nb-ports-sfp').value = '0';
 
@@ -3582,6 +3697,11 @@ function appliquerReglesType(prefix) {
     // des trois groupes (WAN + LAN + Fibre) en même temps.
     g('grp-nb-ports-wan').style.display = estRouteur ? '' : 'none';
     if (!estRouteur) g('nb-ports-wan').value = '0';
+
+    // Puissance de l'onduleur (VA) — réservée au type UPS, purement
+    // informative (voir la migration puissance_va dans app.py).
+    g('grp-va').style.display = estUPS ? '' : 'none';
+    if (!estUPS) g('va').value = '0';
 }
 
 // Construit le payload JSON envoyé à /api/baie/slot depuis l'UN OU L'AUTRE
@@ -3601,12 +3721,15 @@ function lirePayloadEquipement(prefix) {
     // propres valeurs par défaut ('ligne'/0) sinon.
     const estSwitch = typeEquip === 'Switch';
     const estRouteur = typeEquip === 'Routeur/Pare-feu';
-    const estHautDisponible = estSwitch || estRouteur || typeEquip === 'Serveur' || typeEquip === 'Mini PC';
+    const estUPS = typeEquip === 'UPS';
+    const estHautDisponible = estSwitch || estRouteur || typeEquip === 'Serveur' || typeEquip === 'Mini PC' || estUPS;
     const nbPortsSfp = estHautDisponible
         ? Math.min(PLAFOND_SFP, Math.max(0, parseInt(g('nb-ports-sfp').value) || 0)) : 0;
     const nbPortsWan = estRouteur
         ? Math.min(PLAFOND_WAN, Math.max(0, parseInt(g('nb-ports-wan').value) || 0)) : 0;
     const portsDisposition = estSwitch ? g('ports-disposition').value : 'ligne';
+    const orientation = g('orientation') && g('orientation').value === 'vertical' ? 'vertical' : 'horizontal';
+    const puissanceVa = estUPS ? Math.max(0, parseInt(g('va').value) || 0) : 0;
 
     return {
         position: parseInt(g('pos').value) || 1,
@@ -3617,6 +3740,8 @@ function lirePayloadEquipement(prefix) {
         nom_custom:  g('nom').value.trim(),
         description: g('desc').value.trim(),
         couleur:     g('couleur').value,
+        orientation: orientation,
+        puissance_va: puissanceVa,
         appareil_id: g('app').value ? parseInt(g('app').value) : null,
         peripherique_id: g('periph').value ? parseInt(g('periph').value) : null,
         nb_ports: nbPorts,

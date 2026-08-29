@@ -1,27 +1,25 @@
 {
-  "version": "2.18.84",
+  "version": "2.18.85",
   "release_date": "2026-08-29T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.84/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.84/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.84/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.84",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.84/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.84/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.84/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.84/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.84/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.85",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : fiabilisation complète du mécanisme de liaison des ports (six causes réelles corrigées, voir détail)",
+    "new_features": "Baie de brassage : rotation horizontale/verticale des éléments, et prises électriques d'onduleur détaillées (ondulées/protégées, symboles, puissance en VA)",
     "improvements": [
-      "Signalé en usage réel : problèmes persistants d'affichage des liens, ports adjacents parfois mis en surbrillance ensemble, les deux ports d'un lien pas toujours affichés, et un port libéré qui restait coloré au lieu de repasser en gris.",
-      "Cause principale : les clics/survols étaient associés au port par INDEX DE POSITION dans le DOM plutôt que par numéro de port — la disposition 2 lignes d'un switch et les zones WAN/LAN/Fibre d'un routeur réordonnent les ports affichés par rapport aux données, ce qui liait chaque port à la donnée d'un voisin (surbrillance croisée, mauvais port détaché par le badge ✕).",
-      "Un port tiers auto-détaché lors de la création d'un nouveau lien restait affiché comme lié à tort (cache local partiel) : corrigé par un rechargement complet après chaque liaison/relabel de câble.",
-      "Lier deux ports du même équipement échouait toujours avec un faux « Port introuvable » côté serveur.",
-      "La zone de clic invisible du double-clic sur un câble recouvrait entièrement les ports à ses deux extrémités, leur volant leurs clics — pire à mesure que la baie se charge en câblages.",
-      "Bug transverse dans la modale de confirmation partagée de l'app : confirmer déclenchait aussi, par erreur, le callback d'annulation — ce qui faisait échouer silencieusement la confirmation de remplacement d'un lien existant (aucune erreur visible, le lien n'était juste jamais créé)."
+      "Nouveau champ Orientation (↔ Horizontale / ↕ Verticale), pour n'importe quel type d'équipement — reste dans la même grille position/colonne/hauteur/largeur qu'un élément horizontal, seul le rendu interne pivote (nom lu de haut en bas, ports/prises en colonne) — utile en premier lieu pour un PDU/onduleur monté sur le rail latéral.",
+      "Onduleur (UPS) : les prises se répartissent désormais en deux groupes distincts — ondulées (secourues par la batterie, symbole 🔋) et protégées (parafoudre seul, jamais secourues, symbole ⚡), chacune affichant son symbole même libre, comme la sérigraphie d'un vrai onduleur.",
+      "Nouveau champ Puissance de l'onduleur (VA), purement informatif, affiché en badge sur l'élément.",
+      "Prises électriques (UPS et PDU) agrandies pour se distinguer nettement d'un port réseau."
     ]
   },
   "checksums": {
@@ -32,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.84"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.85"
 }
