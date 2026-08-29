@@ -1,25 +1,24 @@
 {
-  "version": "2.18.85",
+  "version": "2.18.86",
   "release_date": "2026-08-29T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.85",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.85/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.86",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : rotation horizontale/verticale des éléments, et prises électriques d'onduleur détaillées (ondulées/protégées, symboles, puissance en VA)",
+    "new_features": "Baie de brassage : correctifs sur les prises électriques (rondes à l'échelle, symboles corrects, ping retiré)",
     "improvements": [
-      "Nouveau champ Orientation (↔ Horizontale / ↕ Verticale), pour n'importe quel type d'équipement — reste dans la même grille position/colonne/hauteur/largeur qu'un élément horizontal, seul le rendu interne pivote (nom lu de haut en bas, ports/prises en colonne) — utile en premier lieu pour un PDU/onduleur monté sur le rail latéral.",
-      "Onduleur (UPS) : les prises se répartissent désormais en deux groupes distincts — ondulées (secourues par la batterie, symbole 🔋) et protégées (parafoudre seul, jamais secourues, symbole ⚡), chacune affichant son symbole même libre, comme la sérigraphie d'un vrai onduleur.",
-      "Nouveau champ Puissance de l'onduleur (VA), purement informatif, affiché en badge sur l'élément.",
-      "Prises électriques (UPS et PDU) agrandies pour se distinguer nettement d'un port réseau."
+      "Signalé en usage réel juste après la 2.18.85 : les ports RJ d'un bandeau et d'un switch étaient devenus plus gros et portaient à tort le symbole ⚡ réservé à l'onduleur. Cause : plusieurs appels ports.map(portHTML) passaient la fonction par référence nue — Array.prototype.map appelle son callback avec (élément, index, tableau), donc le nouveau paramètre estElec recevait silencieusement l'index de position au lieu d'un booléen. Corrigé.",
+      "Prises électriques rondes, à l'échelle d'une vraie prise européenne 2P+T (cercle 36×36), au lieu du carré arrondi précédent.",
+      "Bouton et voyant de ping retirés des prises électriques (UPS/PDU) : une prise alimente un appareil, elle ne le relie pas au réseau."
     ]
   },
   "checksums": {
@@ -30,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.85"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.86"
 }

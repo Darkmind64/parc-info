@@ -534,25 +534,26 @@
 
 /* Prise électrique (onduleur/PDU) — réutilise le mécanisme générique des
    ports (assignation appareil/périphérique/usage libre, éditeur, tooltip)
-   demandé : pas un nouveau système, juste une présentation dédiée — forme
-   de prise plutôt que carré RJ, pas de badge de déliaison (une prise ne se
-   "câble" pas à un autre port, elle alimente directement un appareil).
-   Agrandie à l'échelle d'une vraie prise électrique — nettement plus
-   grosse qu'un port RJ45 (24×22) — demandé, avec son symbole (batterie 🔋
-   prise ondulée d'onduleur, éclair ⚡ prise protégée d'onduleur ou prise de
-   PDU, voir portHTML) empilé au-dessus du numéro plutôt qu'à côté, pour
-   rester compacte malgré la taille augmentée. */
+   demandé : pas un nouveau système, juste une présentation dédiée — ronde,
+   comme une vraie prise européenne 2P+T (plutôt que le carré arrondi d'un
+   port RJ), pas de badge de déliaison (une prise ne se "câble" pas à un
+   autre port, elle alimente directement un appareil). Agrandie à l'échelle
+   d'une vraie prise électrique — nettement plus grosse qu'un port RJ45
+   (24×22) — demandé, avec son symbole (batterie 🔋 prise ondulée
+   d'onduleur, éclair ⚡ prise protégée d'onduleur ou prise de PDU, voir
+   portHTML) empilé au-dessus du numéro plutôt qu'à côté, pour rester
+   compacte malgré la taille augmentée. */
 .port-elec {
-    width: 34px; height: 32px; border-radius: 4px 4px 11px 11px;
+    width: 36px; height: 36px; border-radius: 50%;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 1px; line-height: 1;
 }
-.port-elec-symbole { font-size: .8rem; line-height: 1; }
+.port-elec-symbole { font-size: .85rem; line-height: 1; }
 .port-elec-num { font-size: .58rem; line-height: 1; }
-/* Grille de prises électriques : pistes de 34px (au lieu de 24px pour un
+/* Grille de prises électriques : pistes de 36px (au lieu de 24px pour un
    port RJ, voir .cell-ports) pour correspondre à la taille agrandie
    ci-dessus — sans ce variant, les prises débordaient de leur piste. */
-.cell-ports-elec { grid-template-columns: repeat(auto-fill, 34px); grid-auto-rows: 32px; }
+.cell-ports-elec { grid-template-columns: repeat(auto-fill, 36px); grid-auto-rows: 36px; }
 
 /* Badge de puissance (VA) d'un onduleur, demandé — même gabarit que
    .cell-ip, affiché à sa suite dans l'en-tête de l'élément. */
@@ -584,7 +585,7 @@
     grid-template-columns: none; grid-auto-flow: column;
     grid-template-rows: repeat(auto-fill, 24px);
 }
-.cell-vertical .cell-ports-elec { grid-template-rows: repeat(auto-fill, 32px); }
+.cell-vertical .cell-ports-elec { grid-template-rows: repeat(auto-fill, 36px); }
 </style>
 {% endblock %}
 
@@ -1729,7 +1730,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     let ligneRJ;
     let zonePortsPrincipale;
     if (estBandeauPorts) {
-        ligneRJ = `<div class="cell-row-labeled"><span class="row-icon" title="Ports RJ (interconnexion)">🔌</span><div class="cell-ports">${ports.map(portHTML).join('')}</div></div>`;
+        ligneRJ = `<div class="cell-row-labeled"><span class="row-icon" title="Ports RJ (interconnexion)">🔌</span><div class="cell-ports">${ports.map(p => portHTML(p, false)).join('')}</div></div>`;
         zonePortsPrincipale = `<div class="cell-ports-stack">${lignePrisesMurales}${ligneRJ}</div>`;
     } else if (zonesMultiGroupesActives) {
         // Zones côte à côte (même principe que le 80/20 d'un switch,
@@ -1753,12 +1754,12 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         const impairs = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 1);
         const pairs   = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 0);
         const styleDeuxLignes = tailleDeuxLignes(rowH);
-        ligneRJ = `<div class="cell-ports-row" style="${styleDeuxLignes}">${impairs.map(portHTML).join('')}</div>`
-                + `<div class="cell-ports-row" style="${styleDeuxLignes}">${pairs.map(portHTML).join('')}</div>`;
+        ligneRJ = `<div class="cell-ports-row" style="${styleDeuxLignes}">${impairs.map(p => portHTML(p, false)).join('')}</div>`
+                + `<div class="cell-ports-row" style="${styleDeuxLignes}">${pairs.map(p => portHTML(p, false)).join('')}</div>`;
         zonePortsPrincipale = zonesSwitchActives
             ? `<div class="cell-ports-main-switch">
                    <div class="cell-ports-rj-zone">${ligneRJ}</div>
-                   ${hautPorts.length ? `<div class="cell-ports-sfp-zone" title="Ports SFP (fibre)">${hautPorts.map(portHTML).join('')}</div>` : ''}
+                   ${hautPorts.length ? `<div class="cell-ports-sfp-zone" title="Ports SFP (fibre)">${hautPorts.map(p => portHTML(p, false)).join('')}</div>` : ''}
                </div>`
             : `<div class="cell-ports-stack">${ligneRJ}</div>`;
     } else {
@@ -1766,17 +1767,22 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         zonePortsPrincipale = (estSwitch && zonesSwitchActives)
             ? `<div class="cell-ports-main-switch">
                    <div class="cell-ports-rj-zone">${ligneRJ}</div>
-                   ${hautPorts.length ? `<div class="cell-ports-sfp-zone" title="Ports SFP (fibre)">${hautPorts.map(portHTML).join('')}</div>` : ''}
+                   ${hautPorts.length ? `<div class="cell-ports-sfp-zone" title="Ports SFP (fibre)">${hautPorts.map(p => portHTML(p, false)).join('')}</div>` : ''}
                </div>`
             : `<div class="cell-ports-stack">${ligneRJ}</div>`;
     }
 
+    // Bouton "Pinger les appareils reliés aux ports" — sans objet pour une
+    // prise électrique (demandé) : une prise alimente un appareil, elle ne
+    // le relie pas au réseau ; son statut réseau se consulte sur sa propre
+    // fiche, pas via l'onduleur/PDU qui l'alimente. Voir aussi portHTML
+    // (pas de voyant de ping ni de classePing sur une prise, même logique).
     const zonePorts = ports.length ? `
         <div class="cell-ports-wrap">
             ${zonePortsPrincipale}
-            <div class="cell-ping-zone">
+            ${estElec ? '' : `<div class="cell-ping-zone">
                 <button class="cell-ping-btn" title="Pinger les appareils reliés aux ports">📡</button>
-            </div>
+            </div>`}
         </div>` : '';
 
     // Une étagère n'a pas de hauteur ajustable (toujours 1U conceptuel, voir
@@ -1886,8 +1892,13 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         el.addEventListener('mouseleave', e => { e.stopPropagation(); masquerTooltip(); });
     });
 
-    if (ports.length) {
-        cell.querySelector('.cell-ping-btn').addEventListener('click', e => {
+    // Pas de bouton ping du tout sur une prise électrique (estElec, voir
+    // zonePorts ci-dessus) — cette recherche peut donc légitimement ne rien
+    // trouver, contrairement à avant où ports.length > 0 suffisait à
+    // garantir sa présence.
+    const btnPing = cell.querySelector('.cell-ping-btn');
+    if (btnPing) {
+        btnPing.addEventListener('click', e => {
             e.stopPropagation();
             pingerPortsElement(cell, ports);
         });
@@ -2369,8 +2380,11 @@ function portHTML(p, estElec, typeEquipement) {
     // Voyant initial reflétant le dernier ping connu (watchdog en tâche de
     // fond ou ping manuel précédent) — dernier_ping vide = jamais pingé,
     // aucun voyant (en_ligne vaut 0 par défaut en base, indiscernable d'un
-    // vrai échec sans ce champ) ; sinon vert/rouge selon en_ligne.
-    const classePing = (appareilCible && p.dernier_ping) ? (p.en_ligne ? ' port-ping-ok' : ' port-ping-fail') : '';
+    // vrai échec sans ce champ) ; sinon vert/rouge selon en_ligne. Sans
+    // objet pour une prise électrique (demandé) : elle alimente un
+    // appareil, elle ne le relie pas au réseau — voir aussi cell-ping-zone
+    // dans makeOccupiedCell (bouton 📡 masqué pour le même motif).
+    const classePing = (estElec || !(appareilCible && p.dernier_ping)) ? '' : (p.en_ligne ? ' port-ping-ok' : ' port-ping-fail');
     // Badge de détachement (✕ rouge, coin haut-droit) — uniquement pour un
     // port câblé à un autre (lie_slot_id) : révélé au survol par CSS
     // (.port.port-lie:hover .port-unlink), cliqué via delierPort() branché
@@ -2390,8 +2404,11 @@ function portHTML(p, estElec, typeEquipement) {
     // libre, comme le sérigraphie d'un vrai onduleur sur toutes ses prises.
     const symbole = estElec ? ((typeEquipement === 'UPS' && !sfp) ? '🔋' : '⚡') : '';
     const contenuNumero = estElec ? `<span class="port-elec-num">${numeroAffiche(p.numero)}</span>` : numeroAffiche(p.numero);
+    // Voyant de ping omis pour une prise électrique (demandé, voir
+    // classePing ci-dessus) — jamais de statut réseau à montrer dessus.
+    const voyant = estElec ? '' : '<span class="port-led"></span>';
     return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${estElec ? ' port-elec' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
-        <span class="port-led"></span>${badgeLien}${symbole ? `<span class="port-elec-symbole">${symbole}</span>` : ''}${contenuNumero}</span>`;
+        ${voyant}${badgeLien}${symbole ? `<span class="port-elec-symbole">${symbole}</span>` : ''}${contenuNumero}</span>`;
 }
 
 // Prise murale (bandeau RJ) — même logique de rendu que portHTML, en plus

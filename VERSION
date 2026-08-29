@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.18.85
+PARCINFO_VERSION=2.18.86
 RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082909
+BUILD_NUMBER=2026082910
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.86 - Baie de brassage : correctifs sur les prises electriques (v2.18.85)
+# Signalé en usage réel juste après la 2.18.85, capture d'écran à l'appui :
+# les ports RJ d'un bandeau et d'un switch étaient devenus plus gros et
+# portaient à tort le symbole ⚡ (normalement réservé à l'onduleur).
+#
+# Cause réelle : plusieurs `ports.map(portHTML)` passaient la fonction PAR
+# RÉFÉRENCE NUE — Array.prototype.map appelle son callback avec (élément,
+# INDEX, tableau), donc le nouveau paramètre estElec de portHTML recevait
+# silencieusement l'INDEX de position (vrai pour tout port sauf le premier)
+# au lieu d'un booléen, et typeEquipement recevait le TABLEAU entier. Le
+# bug existait en réalité déjà (repli discret sur un simple arrondi de
+# coin), mais restait invisible jusqu'à ce que .port-elec devienne
+# nettement plus gros/symbolisé en 2.18.85. Corrigé : chaque appel passe
+# désormais explicitement (p, false).
+#
+# Deux ajustements demandés en plus :
+# - Prises rondes, à l'échelle d'une vraie prise européenne 2P+T (cercle
+#   36×36, au lieu du carré arrondi précédent).
+# - Bouton de ping et voyant de ping retirés des prises électriques
+#   (UPS/PDU) : une prise alimente un appareil, elle ne le relie pas au
+#   réseau — sans objet ici, contrairement à un port RJ/SFP/WAN.
+#
+# Un null-check ajouté au passage (querySelector('.cell-ping-btn') peut
+# désormais légitimement ne rien trouver sur une prise électrique).
+#
+# Suite pytest toujours verte (174 tests) + tous les scripts de test
+# autonomes. Vérifié en direct dans le navigateur : bandeau RJ, switch
+# avec SFP, onduleur (ondulées+protégées+VA), PDU vertical.
 
 # Version 2.18.85 - Baie de brassage : rotation des éléments + prises électriques d'onduleur détaillées
 # Demandé : possibilité de placer un élément à l'horizontale ou à la
