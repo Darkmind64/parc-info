@@ -1,8 +1,47 @@
-PARCINFO_VERSION=2.18.79
+PARCINFO_VERSION=2.18.80
 RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082903
+BUILD_NUMBER=2026082904
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.80 - Baie de brassage : switch 1/2 lignes de ports RJ + ports SFP (fibre)
+# Demandé : pouvoir afficher les ports RJ d'un switch soit sur une ligne
+# (comportement historique), soit sur deux lignes façon vrai switch/patch
+# panel (impairs en haut, pairs en dessous — 1 3 5 7.../2 4 6 8...),
+# centrées dans les 80% gauche de l'élément, plus la possibilité de
+# représenter des ports SFP (fibre), centrés dans les 20% restants.
+#
+# Nouveaux champs « Disposition des ports RJ » et « Ports SFP » (0-8) dans
+# le panneau "+ Placer", visibles uniquement pour le type Switch — tout
+# autre élément (Patch Panel, PDU, NAS...) garde le rendu historique, une
+# seule grille pleine largeur.
+#
+# Les ports SFP vivent dans un espace de numérotation SÉPARÉ des ports RJ
+# (SFP_NUMERO_OFFSET = 1000, ex. SFP 1 = numéro 1001) plutôt qu'une colonne
+# type_port supplémentaire sur baie_slot_ports : les deux plages ne se
+# chevauchent jamais (RJ 1-48, SFP 1001-1008), pas besoin de toucher à sa
+# contrainte UNIQUE(slot_id, numero) — tout le mécanisme déjà existant
+# (liaison appareil/périphérique/usage libre, câblage port-à-port, ping,
+# résolution de couleur, éditeur de ports, tooltip, modale d'édition par
+# double-clic) fonctionne sur les ports SFP sans code dupliqué.
+#
+# Deux bugs trouvés et corrigés en vérifiant en direct dans le navigateur
+# AVANT publication (signalés par l'utilisateur sur un premier aperçu) :
+# 1) Un switch resté en configuration par défaut (1 ligne, 0 SFP — le cas
+#    de TOUS les switchs déjà existants avant cette fonctionnalité) aurait
+#    perdu 20% de largeur pour une zone SFP qui ne s'affiche jamais : la
+#    zone 80/20 ne s'active désormais que si la disposition 2 lignes est
+#    choisie ou qu'au moins un port SFP est configuré.
+# 2) La disposition 2 lignes, à la taille de port normale (22px), ne
+#    tenait PAS dans la hauteur d'une seule U (~44-56px) : la rangée du bas
+#    était silencieusement rognée par l'overflow:hidden du conteneur,
+#    invisible à l'écran mais confirmé en mesurant les positions DOM. Les
+#    ports de cette disposition sont désormais réduits (20×11px, comme sur
+#    un vrai switch zigzag densément peuplé) — un switch 24 ports + 4 SFP
+#    en 2 lignes tient maintenant entièrement dans 1U.
+#
+# Nouveau tests/test_baie_switch_sfp.py (7 tests), suite de tests pytest
+# toujours verte (168 tests).
 
 # Version 2.18.79 - Correctifs signalés en testant la 2.18.78 : tri Utilisateurs + ACL baie de brassage
 # Deux correctifs, tous deux explicitement signalés (mais volontairement pas

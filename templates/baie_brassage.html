@@ -123,6 +123,49 @@
 }
 .cell-ping-zone { flex-shrink:0; display:flex; justify-content:flex-end; }
 
+/* Switch : ports RJ (80% gauche, 1 ou 2 lignes) + ports SFP optionnels
+   (20% restants, séparés par un liseré) — demandé, sur le modèle d'un vrai
+   switch/patch panel. cell-ports-main-switch remplace cell-ports-stack
+   (flex:1, occupe tout .cell-ports-wrap) comme conteneur des deux zones ;
+   les autres types d'équipement (Patch Panel, PDU, NAS...) gardent le rendu
+   historique (.cell-ports seule, pleine largeur, jamais de zone SFP). */
+.cell-ports-main-switch { display:flex; align-items:center; flex:1; min-width:0; overflow:hidden; }
+.cell-ports-rj-zone {
+    flex:0 0 80%; max-width:80%; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:2px; overflow:hidden; min-width:0;
+}
+/* Grille 1 ligne : centrée dans sa zone (justify-content par défaut du
+   grid est 'start' ailleurs, volontairement inchangé pour ne pas déplacer
+   le rendu existant des autres types d'équipement/du bandeau RJ). */
+.cell-ports-rj-zone .cell-ports { flex:none; justify-content:center; }
+/* Disposition 2 lignes (1 3 5 7.../2 4 6 8...) — chaque rangée wrap si trop
+   de ports pour la largeur disponible, plutôt que de forcer exactement 2
+   lignes CSS quel que soit nb_ports (jusqu'à 48 ports RJ possibles).
+   Ports RÉDUITS (20×11 au lieu de 24×22, voir .cell-ports-row .port
+   ci-dessous) : 2 rangées à la taille normale d'un port (22px) ne
+   tiennent PAS dans la hauteur d'une seule U — un vrai switch zigzag
+   24 ports a d'ailleurs, en réalité, des prises RJ bien plus resserrées
+   qu'un switch 1 ligne. Sans cette réduction, la 2e rangée était
+   silencieusement rognée par l'overflow:hidden du conteneur (bug trouvé
+   en vérifiant : U1 sur un switch 24 ports 2-lignes affichait la rangée
+   du bas tronquée, invisible à l'écran mais confirmé en mesurant les
+   positions DOM). */
+.cell-ports-row { display:flex; flex-wrap:wrap; justify-content:center; gap:2px; }
+.cell-ports-row .port {
+    width:20px; height:11px; font-size:.48rem; line-height:11px; border-radius:2px;
+}
+.cell-ports-row .port-led { width:5px; height:5px; }
+.cell-ports-row .port-unlink { width:9px; height:9px; font-size:7px; line-height:9px; }
+.cell-ports-sfp-zone {
+    flex:0 0 20%; max-width:20%; display:flex; align-items:center; justify-content:center;
+    gap:2px; flex-wrap:wrap; overflow:hidden; min-width:0;
+    border-left:1px dashed rgba(255,255,255,.15); margin-left:.3rem; padding-left:.3rem;
+}
+/* Port SFP : forme distincte du port RJ (capsule plutôt que carré arrondi)
+   — seul indice visuel nécessaire, la position (zone dédiée à droite) et
+   l'infobulle ("Port SFP N") suffisent déjà à ne pas les confondre. */
+.port-sfp { border-radius:9px; }
+
 /* Bandeau RJ : rangée des prises murales EMPILÉE au-dessus de celle des
    ports RJ (voir priseMuraleHTML/makeOccupiedCell) — demandé : la prise
    murale (côté local, pièce + appareil branché dans le bureau) est
@@ -671,6 +714,22 @@
                        style="font-family:'Share Tech Mono',monospace;">
                 <div class="form-hint" id="hint-nb-ports">0 = pas de ports affichés. 48 maximum.</div>
             </div>
+            <!-- Switch uniquement : disposition des ports RJ (1 ou 2 lignes,
+                 façon vrai switch — impairs/pairs) et ports SFP (fibre),
+                 centrés dans les 20% restants — demandé. -->
+            <div class="form-group" id="grp-ports-disposition" style="margin-bottom:.8rem;display:none;">
+                <label>Disposition des ports RJ</label>
+                <select id="cfg-ports-disposition">
+                    <option value="ligne">1 ligne</option>
+                    <option value="deux_lignes">2 lignes (1 3 5.../2 4 6...)</option>
+                </select>
+            </div>
+            <div class="form-group" id="grp-nb-ports-sfp" style="margin-bottom:.8rem;display:none;">
+                <label>Ports SFP (fibre)</label>
+                <input type="number" id="cfg-nb-ports-sfp" min="0" max="8" value="0"
+                       style="font-family:'Share Tech Mono',monospace;">
+                <div class="form-hint">0 = pas de ports SFP. 8 maximum, affichés à part (20% droite de l'élément).</div>
+            </div>
             <!-- Étagère : pas de ports/emplacements — c'est une tablette
                  physique, pas un élément réseau. Les appareils posés dessus
                  se placent normalement (rangée du dessus), pas via ce champ. -->
@@ -874,6 +933,13 @@ const TYPE_CSS = {
     'Serveur':'srv','Switch':'sw','Routeur/Pare-feu':'fw','NAS':'nas',
     'UPS':'ups','Patch Panel':'patch','Bandeau RJ':'bandeau','Étagère':'etagere','PDU':'pdu','Borne WiFi':'ap',
 };
+// Ports SFP (fibre) d'un switch — même convention que côté serveur (voir
+// SFP_NUMERO_OFFSET/PLAFOND_SFP dans app.py) : espace de numérotation
+// séparé des ports RJ (1001, 1002...), jamais partagé.
+const SFP_NUMERO_OFFSET = 1000;
+const PLAFOND_SFP = 8;
+function estPortSfp(numero) { return numero > SFP_NUMERO_OFFSET; }
+function numeroAffiche(numero) { return estPortSfp(numero) ? numero - SFP_NUMERO_OFFSET : numero; }
 const TYPE_COLORS = {
     'Serveur':'#3b1a8a','Switch':'#0a4a5a','Routeur/Pare-feu':'#5a0a0a','NAS':'#0a3a1a',
     'UPS':'#5a3a00','Patch Panel':'#1a2535','Bandeau RJ':'#0a3a3a','Étagère':'#4a2e10','PDU':'#3a0a5a','Borne WiFi':'#0a1a4a',
@@ -1273,15 +1339,48 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     const lignePrisesMurales = estBandeauPorts
         ? `<div class="cell-row-labeled"><span class="row-icon" title="Prises murales (RJ)">🚪</span><div class="cell-prises-murales">${ports.map(p => priseMuraleHTML(p.prise_murale, p.numero)).join('')}</div></div>`
         : '';
-    const ligneRJ = estBandeauPorts
-        ? `<div class="cell-row-labeled"><span class="row-icon" title="Ports RJ (interconnexion)">🔌</span><div class="cell-ports">${ports.map(portHTML).join('')}</div></div>`
-        : `<div class="cell-ports">${ports.map(portHTML).join('')}</div>`;
+
+    // Switch : ports RJ (1 ou 2 lignes façon vrai switch, centrés dans les
+    // 80% gauche) + ports SFP optionnels (20% restants) — demandé. Seul un
+    // switch a cette distinction ; tout autre type (Patch Panel, PDU,
+    // NAS...) garde le rendu historique, une seule grille pleine largeur.
+    const estSwitch = s.type_equipement === 'Switch';
+    const rjPorts  = estSwitch ? ports.filter(p => !estPortSfp(p.numero)) : ports;
+    const sfpPorts = estSwitch ? ports.filter(p => estPortSfp(p.numero)) : [];
+    // La zone 80/20 (et la largeur RJ réduite qui va avec) n'a de sens que
+    // s'il y a réellement une zone SFP à séparer, ou la disposition 2
+    // lignes explicitement choisie — jamais pour un switch resté en
+    // configuration par défaut (1 ligne, 0 SFP : le cas de TOUT switch déjà
+    // existant avant cette fonctionnalité). Sans cette garde, chaque switch
+    // existant aurait vu ses ports RJ perdre 20% de largeur pour une zone
+    // SFP qui ne s'affiche jamais — régression trouvée en vérifiant.
+    const zonesSwitchActives = estSwitch && (s.ports_disposition === 'deux_lignes' || sfpPorts.length > 0);
+
+    let ligneRJ;
+    if (estBandeauPorts) {
+        ligneRJ = `<div class="cell-row-labeled"><span class="row-icon" title="Ports RJ (interconnexion)">🔌</span><div class="cell-ports">${ports.map(portHTML).join('')}</div></div>`;
+    } else if (estSwitch && s.ports_disposition === 'deux_lignes') {
+        // Impairs en haut, pairs en dessous (1 3 5 7.../2 4 6 8...) — même
+        // ordre de tri que côté serveur (ORDER BY numero), il suffit donc
+        // de filtrer par parité plutôt que de retrier.
+        const impairs = rjPorts.filter(p => numeroAffiche(p.numero) % 2 === 1);
+        const pairs   = rjPorts.filter(p => numeroAffiche(p.numero) % 2 === 0);
+        ligneRJ = `<div class="cell-ports-row">${impairs.map(portHTML).join('')}</div>`
+                + `<div class="cell-ports-row">${pairs.map(portHTML).join('')}</div>`;
+    } else {
+        ligneRJ = `<div class="cell-ports">${rjPorts.map(portHTML).join('')}</div>`;
+    }
+
+    const zonePortsPrincipale = zonesSwitchActives
+        ? `<div class="cell-ports-main-switch">
+               <div class="cell-ports-rj-zone">${ligneRJ}</div>
+               ${sfpPorts.length ? `<div class="cell-ports-sfp-zone" title="Ports SFP (fibre)">${sfpPorts.map(portHTML).join('')}</div>` : ''}
+           </div>`
+        : `<div class="cell-ports-stack">${lignePrisesMurales}${ligneRJ}</div>`;
+
     const zonePorts = ports.length ? `
         <div class="cell-ports-wrap">
-            <div class="cell-ports-stack">
-                ${lignePrisesMurales}
-                ${ligneRJ}
-            </div>
+            ${zonePortsPrincipale}
             <div class="cell-ping-zone">
                 <button class="cell-ping-btn" title="Pinger les appareils reliés aux ports">📡</button>
             </div>
@@ -1730,7 +1829,8 @@ async function redimensionnerSlot(s, nouvelleHu) {
             appareil_id: s.appareil_id || null, peripherique_id: s.peripherique_id || null,
             nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
             couleur: s.couleur || '#1e3a5f', description: s.description || '',
-            nb_ports: s.nb_ports || 0, largeur_u: s.largeur_u || null
+            nb_ports: s.nb_ports || 0, largeur_u: s.largeur_u || null,
+            nb_ports_sfp: s.nb_ports_sfp || 0, ports_disposition: s.ports_disposition || 'ligne'
         })
     });
     const updated = await r.json();
@@ -1758,7 +1858,8 @@ async function redimensionnerLargeurSlot(s, nouvelleLargeur) {
             appareil_id: s.appareil_id || null, peripherique_id: s.peripherique_id || null,
             nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
             couleur: s.couleur || '#1e3a5f', description: s.description || '',
-            nb_ports: s.nb_ports || 0, largeur_u: nouvelleLargeur
+            nb_ports: s.nb_ports || 0, largeur_u: nouvelleLargeur,
+            nb_ports_sfp: s.nb_ports_sfp || 0, ports_disposition: s.ports_disposition || 'ligne'
         })
     });
     const updated = await r.json();
@@ -1782,7 +1883,8 @@ async function redimensionnerCoinSlot(s, nouvelleHu, nouvelleLargeur) {
             appareil_id: s.appareil_id || null, peripherique_id: s.peripherique_id || null,
             nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
             couleur: s.couleur || '#1e3a5f', description: s.description || '',
-            nb_ports: s.nb_ports || 0, largeur_u: nouvelleLargeur
+            nb_ports: s.nb_ports || 0, largeur_u: nouvelleLargeur,
+            nb_ports_sfp: s.nb_ports_sfp || 0, ports_disposition: s.ports_disposition || 'ligne'
         })
     });
     const updated = await r.json();
@@ -1853,9 +1955,12 @@ function portHTML(p) {
     // data-slot/data-numero : identifient ce port sans dépendre de sa
     // position dans le tableau ports[] — utilisé par le double-clic sur la
     // courbe de câble (renderCableLinks) pour ouvrir PortModal côté port A
-    // sans avoir à refaire une recherche.
-    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
-        <span class="port-led"></span>${badgeLien}${p.numero}</span>`;
+    // sans avoir à refaire une recherche. data-numero reste le numéro BRUT
+    // (avec offset pour un port SFP, voir SFP_NUMERO_OFFSET) — c'est ce que
+    // le serveur attend en retour ; seul le LIBELLÉ affiché est ajusté.
+    const sfp = estPortSfp(p.numero);
+    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
+        <span class="port-led"></span>${badgeLien}${numeroAffiche(p.numero)}</span>`;
 }
 
 // Prise murale (bandeau RJ) — même logique de rendu que portHTML, en plus
@@ -1986,8 +2091,8 @@ async function gererClicLienPort(s, p, el) {
     // lien) — jusqu'ici, cliquer deux ports déjà occupés en mode "Lier"
     // remplaçait tout sans prévenir.
     const occupes = [];
-    if (portDejaOccupe(premierPortLien.port)) occupes.push(`port ${premierPortLien.port.numero} (${premierPortLien.port.nom_cible || 'occupé'})`);
-    if (portDejaOccupe(p)) occupes.push(`port ${p.numero} (${p.nom_cible || 'occupé'})`);
+    if (portDejaOccupe(premierPortLien.port)) occupes.push(`port ${numeroAffiche(premierPortLien.port.numero)} (${premierPortLien.port.nom_cible || 'occupé'})`);
+    if (portDejaOccupe(p)) occupes.push(`port ${numeroAffiche(p.numero)} (${p.nom_cible || 'occupé'})`);
     if (occupes.length) {
         appConfirm(`Ce lien remplacera l'affectation actuelle de ${occupes.join(' et ')}. Continuer ?`,
             () => creerLienPort(premierPortLien.slotId, premierPortLien.numero, s.id, p.numero),
@@ -2026,7 +2131,8 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau) {
     // repris intégralement dans la ligne "Relié à" ci-dessous — l'omettre du
     // titre évite la redondance "Port 12 — Port 1 — Routeur B".
     const cible = p.lie_slot_id ? '' : (p.nom_cible || '');
-    let html = `<div class="tip-title">Port ${p.numero}${cible ? ' — ' + escH(cible) : ''}</div>`;
+    const libellePort = estPortSfp(p.numero) ? `Port SFP ${numeroAffiche(p.numero)}` : `Port ${p.numero}`;
+    let html = `<div class="tip-title">${libellePort}${cible ? ' — ' + escH(cible) : ''}</div>`;
     html += `<div class="tip-row"><span class="tip-key">Élément</span><span class="tip-val">${escH(nomSlot)}</span></div>`;
     if (p.appareil_id) {
         html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${p.en_ligne ? '🟢 En ligne' : '🔴 Hors ligne'}</span></div>`;
@@ -2340,6 +2446,8 @@ function selectSlot(s, cell) {
     document.getElementById('cfg-app').value    = s.appareil_id || '';
     document.getElementById('cfg-periph').value = s.peripherique_id || '';
     document.getElementById('cfg-nb-ports').value = s.nb_ports || 0;
+    document.getElementById('cfg-ports-disposition').value = s.ports_disposition || 'ligne';
+    document.getElementById('cfg-nb-ports-sfp').value = s.nb_ports_sfp || 0;
     majLabelEmplacements();
     showTab('tab-add');
     afficherEditeurPorts(s);
@@ -2356,10 +2464,19 @@ function afficherEditeurPorts(s) {
     // port RJ interconnexion-only en dessous) — tout autre élément garde
     // l'unique éditeur historique (cible directe + usage libre).
     const estBandeau = s.type_equipement === 'Bandeau RJ';
-    list.innerHTML = ports.map(p => estBandeau
-        ? (priseMuraleEditorRowHTML(s.id, p.prise_murale, p.numero) + portRjEditorRowHTML(s.id, p))
-        : portEditorRowHTML(s.id, p)
-    ).join('');
+    if (estBandeau) {
+        list.innerHTML = ports.map(p => priseMuraleEditorRowHTML(s.id, p.prise_murale, p.numero) + portRjEditorRowHTML(s.id, p)).join('');
+        return;
+    }
+    // Ports SFP affichés après les ports RJ, séparés par un intitulé — la
+    // liste est déjà triée par numéro côté serveur (voir
+    // _ports_avec_details), donc toujours RJ (1..48) avant SFP (1001+,
+    // voir SFP_NUMERO_OFFSET) sans besoin de retrier.
+    const rj  = ports.filter(p => !estPortSfp(p.numero));
+    const sfp = ports.filter(p => estPortSfp(p.numero));
+    list.innerHTML = rj.map(p => portEditorRowHTML(s.id, p)).join('')
+        + (sfp.length ? `<div class="form-section-title" style="margin:.4rem 0 .2rem;font-size:.65rem;">SFP (fibre)</div>` : '')
+        + sfp.map(p => portEditorRowHTML(s.id, p)).join('');
 }
 
 function optionsAppareilsPeriph(valeurActuelle) {
@@ -2380,9 +2497,11 @@ function portEditorRowHTML(slotId, p) {
     // bascule sur autre chose.
     const optionLien = p.lie_slot_id
         ? `<option value="l" selected disabled>🔗 ${escH(p.nom_cible)}</option>` : '';
+    const sfp = estPortSfp(p.numero);
+    const labelNumero = sfp ? `SFP${numeroAffiche(p.numero)}` : `#${p.numero}`;
     let html = `
     <div style="display:flex;gap:.3rem;align-items:center;">
-        <span style="width:28px;flex-shrink:0;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--text-muted);">#${p.numero}</span>
+        <span style="width:${sfp ? 38 : 28}px;flex-shrink:0;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--text-muted);">${labelNumero}</span>
         <select data-slot="${slotId}" data-numero="${p.numero}" onchange="changerPort(this)" style="flex:1.4;font-size:.7rem;padding:.2rem .3rem;margin:0;">
             <option value=""${valeur===''?' selected':''}>— Libre —</option>
             ${optionLien}
@@ -2712,7 +2831,8 @@ const PortModal = (() => {
         if (!s || !port) return;
         slotId = sid; numero = num;
         const estBandeau = s.type_equipement === 'Bandeau RJ';
-        document.getElementById('pom-titre').textContent = `Port ${num} — ${nomEquipementSlot(s) || 'Élément'}`;
+        const libelleNum = estPortSfp(num) ? `SFP ${numeroAffiche(num)}` : num;
+        document.getElementById('pom-titre').textContent = `Port ${libelleNum} — ${nomEquipementSlot(s) || 'Élément'}`;
 
         document.getElementById('pom-cible-section').style.display = estBandeau ? 'none' : '';
         valeurInitiale = ''; usageInitial = '';
@@ -3000,6 +3120,18 @@ function majLabelEmplacements() {
     cfgHu.disabled = estEtagere;
     cfgHu.title = estEtagere ? 'Une étagère est toujours 1U (fine tablette, pas de hauteur ajustable)' : '';
     if (estEtagere) cfgHu.value = '1';
+
+    // Disposition des ports RJ (1/2 lignes) + ports SFP : réservé aux
+    // switchs (demandé) — masqués et remis à leur valeur par défaut pour
+    // tout autre type, pour ne jamais laisser une valeur choisie plus tôt
+    // (en changeant de type sans y repenser) survivre silencieusement.
+    const estSwitchCfg = document.getElementById('cfg-type').value === 'Switch';
+    document.getElementById('grp-ports-disposition').style.display = estSwitchCfg ? '' : 'none';
+    document.getElementById('grp-nb-ports-sfp').style.display = estSwitchCfg ? '' : 'none';
+    if (!estSwitchCfg) {
+        document.getElementById('cfg-ports-disposition').value = 'ligne';
+        document.getElementById('cfg-nb-ports-sfp').value = '0';
+    }
 }
 
 async function placerEquip() {
@@ -3012,6 +3144,13 @@ async function placerEquip() {
     const plafondPorts = typeEquip === 'Bandeau RJ' ? 24 : 48;
     const nbPorts = Math.min(plafondPorts, Math.max(0, parseInt(document.getElementById('cfg-nb-ports').value) || 0));
     const largeurVal = document.getElementById('cfg-largeur').value;
+    // Disposition/SFP : réservés aux switchs (voir majLabelEmplacements) —
+    // envoyés seulement pour ce type, le serveur applique de toute façon
+    // ses propres valeurs par défaut ('ligne'/0) sinon.
+    const estSwitch = typeEquip === 'Switch';
+    const nbPortsSfp = estSwitch
+        ? Math.min(PLAFOND_SFP, Math.max(0, parseInt(document.getElementById('cfg-nb-ports-sfp').value) || 0)) : 0;
+    const portsDisposition = estSwitch ? document.getElementById('cfg-ports-disposition').value : 'ligne';
 
     const payload = {
         position: pos, col_index: col, hauteur_u: hu, baie_nom: currentBaie,
@@ -3022,6 +3161,8 @@ async function placerEquip() {
         appareil_id: document.getElementById('cfg-app').value ? parseInt(document.getElementById('cfg-app').value) : null,
         peripherique_id: document.getElementById('cfg-periph').value ? parseInt(document.getElementById('cfg-periph').value) : null,
         nb_ports: nbPorts,
+        nb_ports_sfp: nbPortsSfp,
+        ports_disposition: portsDisposition,
         largeur_u: largeurVal ? parseInt(largeurVal) : null
     };
 

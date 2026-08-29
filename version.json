@@ -1,23 +1,24 @@
 {
-  "version": "2.18.79",
+  "version": "2.18.80",
   "release_date": "2026-08-29T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.79",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.79/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.80/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.80/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.80/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.80",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.80/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.80/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.80/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.80/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.80/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Deux correctifs signalés en testant la 2.18.78 : erreur JS sur la page Utilisateurs (tri de colonnes) et absence de contrôle d'accès en écriture sur toute la baie de brassage",
+    "new_features": "Baie de brassage : un switch peut désormais afficher ses ports RJ sur 1 ou 2 lignes (façon vrai switch, impairs/pairs), et gagner des ports SFP (fibre) distincts, centrés dans les 20% de largeur restants",
     "improvements": [
-      "utilisateurs.html : {% endblock %} fermait le bloc content AVANT la barre « Trié par... », qui n'était donc jamais rendue dans le DOM — updateSortStatusUsers() plantait sur un élément null dès le chargement de la page.",
-      "Baie de brassage : les 11 routes de mutation (placer/modifier/déplacer/supprimer un emplacement, éditer un port ou une prise murale, lier deux ports, changer la hauteur U, uploader/éditer/supprimer une photo) ne vérifiaient can_write() nulle part — un accès en lecture seule pouvait tout modifier. Contrôle ajouté partout, avec 13 nouveaux tests dédiés."
+      "Nouveau champ « Disposition des ports RJ » (1 ligne / 2 lignes) et « Ports SFP » (0-8) dans le panneau + Placer, réservés au type Switch — les autres éléments (Patch Panel, PDU, NAS...) gardent le rendu historique.",
+      "Les ports SFP vivent dans un espace de numérotation séparé des ports RJ, réutilisent tout le mécanisme existant (liaison à un appareil/périphérique/usage libre, câblage port-à-port, ping, couleur) sans code dupliqué.",
+      "Deux bugs trouvés et corrigés en vérifiant en direct dans le navigateur avant publication : un switch resté en configuration par défaut (1 ligne, 0 SFP — le cas de tous les switchs déjà existants) aurait perdu 20% de largeur pour une zone SFP qui ne s'affiche jamais ; la disposition 2 lignes à taille de port normale ne tenait pas dans une seule U (rangée du bas invisiblement rognée) — ports de cette disposition réduits en conséquence."
     ]
   },
   "checksums": {
@@ -28,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.79"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.80"
 }
