@@ -1725,6 +1725,14 @@ def init_db():
         c.execute("ALTER TABLE baie_slots ADD COLUMN nb_ports_sfp INTEGER DEFAULT 0")
     except: pass
 
+    # Ports WAN d'un routeur/pare-feu — troisième groupe de connecteurs
+    # générique, dans un espace de numérotation encore séparé (voir
+    # WAN_NUMERO_OFFSET plus bas). Un switch ou un onduleur/PDU n'utilisent
+    # jamais cette colonne (0 par défaut, jamais modifiée pour ces types).
+    try:
+        c.execute("ALTER TABLE baie_slots ADD COLUMN nb_ports_wan INTEGER DEFAULT 0")
+    except: pass
+
     # TABLE PORTS DE BAIE — un port par numéro, par slot. FOREIGN KEY sur
     # slot_id sans ON DELETE CASCADE (SQLite ne l'applique de toute façon que
     # si PRAGMA foreign_keys=ON est actif sur LA connexion courante, pas
@@ -5775,12 +5783,17 @@ def _ports_avec_details(conn, slot_id):
                 'SELECT nom_custom, type_equipement, appareil_id FROM baie_slots WHERE id=?',
                 (d['lie_slot_id'],)).fetchone()
             nom_elem = (cible[0] or cible[1] if cible else None) or ('Élément #%d' % d['lie_slot_id'])
-            # Numéro AFFICHÉ du port en face — SFP %d - SFP_NUMERO_OFFSET
-            # (voir la constante) plutôt que le numéro brut 1001+, jamais
+            # Numéro AFFICHÉ du port en face — SFP/WAN %d - offset (voir les
+            # constantes) plutôt que le numéro brut 1001+/2001+, jamais
             # montré à l'utilisateur (même ajustement que côté client, voir
             # numeroAffiche() dans baie_brassage.html).
             far_num = d['lie_port_numero']
-            far_label = ('SFP %d' % (far_num - SFP_NUMERO_OFFSET)) if far_num > SFP_NUMERO_OFFSET else ('Port %d' % far_num)
+            if far_num > WAN_NUMERO_OFFSET:
+                far_label = 'WAN %d' % (far_num - WAN_NUMERO_OFFSET)
+            elif far_num > SFP_NUMERO_OFFSET:
+                far_label = 'SFP %d' % (far_num - SFP_NUMERO_OFFSET)
+            else:
+                far_label = 'Port %d' % far_num
             nom = '%s — %s' % (far_label, nom_elem)
             far_port = conn.execute(
                 '''SELECT bp2.appareil_id, bp2.peripherique_id, a2.nom_machine, a2.en_ligne, a2.type_appareil,
@@ -5885,9 +5898,23 @@ def _plafond_nb_ports(type_equipement):
 # RJ (voir la migration nb_ports_sfp dans init_db()) : 1001, 1002... plutôt
 # que 1, 2... pour ne jamais entrer en collision avec un numéro de port RJ
 # (plafonné à 48) sur la même ligne baie_slot_ports (UNIQUE(slot_id,
-# numero)). Un switch réel a rarement plus de 8 ports SFP/SFP+ uplink.
+# numero)). Un switch réel a rarement plus de 8 ports SFP/SFP+ uplink. Le
+# MÊME espace de numérotation (mêmes colonne et offset) sert de "Fibre"
+# pour un routeur/pare-feu (voir appliquerReglesType côté client) — un
+# routeur n'a jamais besoin des deux groupes RJ ET SFP d'un switch à la
+# fois, la plage peut donc être réutilisée telle quelle sous un autre nom.
 SFP_NUMERO_OFFSET = 1000
 PLAFOND_SFP = 8
+
+# Ports WAN d'un routeur/pare-feu — troisième et dernier espace de
+# numérotation générique (après la plage "de base" nb_ports/1-48 et la
+# plage "haute" nb_ports_sfp/1001+ ci-dessus), pour un équipement qui a
+# BESOIN des trois groupes en même temps (WAN + LAN + Fibre) — un switch
+# ou un onduleur/PDU n'en ont jamais besoin, seul un routeur/pare-feu
+# active ce troisième groupe (voir la migration nb_ports_wan dans
+# init_db()). Un routeur réel a rarement plus de 4 liens WAN.
+WAN_NUMERO_OFFSET = 2000
+PLAFOND_WAN = 4
 
 def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None, type_equipement=None):
     """Ajuste les lignes baie_slot_ports d'un slot à nb_ports (0-48, 0-24
@@ -5926,24 +5953,32 @@ def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None, type_equip
     return nb_ports
 
 def _reconcilier_ports_sfp(conn, slot_id, nb_ports_sfp, ports_existants=None):
-    """Miroir de _reconcilier_ports pour les ports SFP (fibre) d'un switch
-    (0-8, voir PLAFOND_SFP) — même mécanique, sur la plage de numéros
-    dédiée SFP_NUMERO_OFFSET+1..+nb_ports_sfp, jamais partagée avec les
-    numéros de port RJ (plafonnés à 48) : évite de toucher à la contrainte
+    """Miroir de _reconcilier_ports pour les ports SFP/Fibre (0-8, voir
+    PLAFOND_SFP) — même mécanique, sur la plage de numéros dédiée
+    SFP_NUMERO_OFFSET+1..+nb_ports_sfp, jamais partagée avec les numéros
+    de port RJ/LAN (plafonnés à 48) : évite de toucher à la contrainte
     UNIQUE(slot_id, numero) de baie_slot_ports pour distinguer les deux
     types. ports_existants, s'il est fourni, est le MÊME dict complet
     (numero -> tuple, sans filtre de plage) que celui passé à
     _reconcilier_ports — la clé (numero) suffit à isoler les entrées SFP
-    sans requête séparée."""
+    sans requête séparée.
+    Bornée en haut par WAN_NUMERO_OFFSET : un routeur/pare-feu peut avoir
+    À LA FOIS des ports Fibre (cette plage) ET des ports WAN (plage encore
+    plus haute, voir _reconcilier_ports_wan) sur le MÊME slot — sans cette
+    borne, réduire nb_ports_sfp aurait aussi supprimé/détaché à tort tous
+    les ports WAN déjà configurés (numero > plafond_numero de cette
+    fonction, quel que soit ce plafond)."""
     nb_ports_sfp = min(PLAFOND_SFP, max(0, int(nb_ports_sfp or 0)))
     plafond_numero = SFP_NUMERO_OFFSET + nb_ports_sfp
     now = _utcnow().isoformat()
     if ports_existants is None:
         supprimes = [r[0] for r in conn.execute(
-            'SELECT numero FROM baie_slot_ports WHERE slot_id=? AND numero>?', (slot_id, plafond_numero)).fetchall()]
+            'SELECT numero FROM baie_slot_ports WHERE slot_id=? AND numero>? AND numero<?',
+            (slot_id, plafond_numero, WAN_NUMERO_OFFSET)).fetchall()]
         if supprimes:
             _detacher_liens_vers(conn, slot_id, supprimes)
-        conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=? AND numero>?', (slot_id, plafond_numero))
+        conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=? AND numero>? AND numero<?',
+                     (slot_id, plafond_numero, WAN_NUMERO_OFFSET))
         deja = {r[0] for r in conn.execute('SELECT numero FROM baie_slot_ports WHERE slot_id=?', (slot_id,)).fetchall()}
         for numero in range(SFP_NUMERO_OFFSET + 1, plafond_numero + 1):
             if numero not in deja:
@@ -5957,6 +5992,34 @@ def _reconcilier_ports_sfp(conn, slot_id, nb_ports_sfp, ports_existants=None):
                  piece,cable_couleur,cable_longueur,date_maj)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (slot_id, numero, ap, pe, us, lsid, lnum, piece, cc, cl, now))
     return nb_ports_sfp
+
+def _reconcilier_ports_wan(conn, slot_id, nb_ports_wan, ports_existants=None):
+    """Miroir de _reconcilier_ports_sfp pour les ports WAN d'un routeur/
+    pare-feu (0-4, voir PLAFOND_WAN), sur la plage WAN_NUMERO_OFFSET+1..+n
+    — la plus haute des trois (RJ/LAN, SFP/Fibre, WAN), donc pas besoin de
+    borne supérieure pour sa propre suppression (rien n'existe au-dessus)."""
+    nb_ports_wan = min(PLAFOND_WAN, max(0, int(nb_ports_wan or 0)))
+    plafond_numero = WAN_NUMERO_OFFSET + nb_ports_wan
+    now = _utcnow().isoformat()
+    if ports_existants is None:
+        supprimes = [r[0] for r in conn.execute(
+            'SELECT numero FROM baie_slot_ports WHERE slot_id=? AND numero>?', (slot_id, plafond_numero)).fetchall()]
+        if supprimes:
+            _detacher_liens_vers(conn, slot_id, supprimes)
+        conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=? AND numero>?', (slot_id, plafond_numero))
+        deja = {r[0] for r in conn.execute('SELECT numero FROM baie_slot_ports WHERE slot_id=?', (slot_id,)).fetchall()}
+        for numero in range(WAN_NUMERO_OFFSET + 1, plafond_numero + 1):
+            if numero not in deja:
+                conn.execute('INSERT INTO baie_slot_ports (slot_id,numero,date_maj) VALUES (?,?,?)', (slot_id, numero, now))
+    else:
+        for numero in range(WAN_NUMERO_OFFSET + 1, plafond_numero + 1):
+            ap, pe, us, lsid, lnum, piece, cc, cl = ports_existants.get(
+                numero, (None, None, '', None, None, '', '', ''))
+            conn.execute('''INSERT INTO baie_slot_ports
+                (slot_id,numero,appareil_id,peripherique_id,usage_libre,lie_slot_id,lie_port_numero,
+                 piece,cable_couleur,cable_longueur,date_maj)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (slot_id, numero, ap, pe, us, lsid, lnum, piece, cc, cl, now))
+    return nb_ports_wan
 
 def _reconcilier_prises_murales(conn, slot_id, nb_ports, type_equipement, prises_existantes=None):
     """Ajuste les lignes baie_prises_murales d'un bandeau RJ à nb_ports —
@@ -6120,16 +6183,19 @@ def api_baie_ajouter_slot():
         anciennes_prises = {r[0]: (r[1], r[2], r[3], r[4], r[5], r[6], r[7]) for r in conn.execute(
             'SELECT numero, piece, identification, appareil_id, peripherique_id, usage_libre, cable_couleur, cable_longueur '
             'FROM baie_prises_murales WHERE slot_id=?', (ancien[0],)).fetchall()}
-        # Numéros qui ne seront pas recréés (nb_ports/nb_ports_sfp réduits) :
-        # détacher leur éventuel partenaire AVANT de perdre la trace de
-        # l'ancien slot_id. Deux plages distinctes (voir SFP_NUMERO_OFFSET) :
-        # un seuil unique aurait à tort marqué TOUS les ports SFP existants
-        # (numéro > 1000) comme "supprimés" dès que nb_ports_demande (RJ,
-        # plafonné à 48) est comparé à leur numéro.
+        # Numéros qui ne seront pas recréés (nb_ports/nb_ports_sfp/
+        # nb_ports_wan réduits) : détacher leur éventuel partenaire AVANT
+        # de perdre la trace de l'ancien slot_id. Trois plages distinctes
+        # (voir SFP_NUMERO_OFFSET/WAN_NUMERO_OFFSET) : un seuil unique
+        # aurait à tort marqué TOUS les ports d'une plage haute comme
+        # "supprimés" dès que le plafond d'une AUTRE plage est comparé à
+        # leur numéro.
         nb_ports_demande = min(_plafond_nb_ports(f.get('type_equipement', '')), max(0, int(f.get('nb_ports', 0) or 0)))
         nb_ports_sfp_demande = min(PLAFOND_SFP, max(0, int(f.get('nb_ports_sfp', 0) or 0)))
+        nb_ports_wan_demande = min(PLAFOND_WAN, max(0, int(f.get('nb_ports_wan', 0) or 0)))
         supprimes = ([n for n in anciens_ports if n <= SFP_NUMERO_OFFSET and n > nb_ports_demande]
-                     + [n for n in anciens_ports if n > SFP_NUMERO_OFFSET and n > SFP_NUMERO_OFFSET + nb_ports_sfp_demande])
+                     + [n for n in anciens_ports if SFP_NUMERO_OFFSET < n <= WAN_NUMERO_OFFSET and n > SFP_NUMERO_OFFSET + nb_ports_sfp_demande]
+                     + [n for n in anciens_ports if n > WAN_NUMERO_OFFSET and n > WAN_NUMERO_OFFSET + nb_ports_wan_demande])
         if supprimes:
             _detacher_liens_vers(conn, ancien[0], supprimes)
         conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=?', (ancien[0],))
@@ -6137,16 +6203,17 @@ def api_baie_ajouter_slot():
     conn.execute('DELETE FROM baie_slots WHERE client_id=? AND position=? AND col_index=?', (cid, pos, col))
     ports_disposition = f.get('ports_disposition') if f.get('ports_disposition') in ('ligne', 'deux_lignes') else 'ligne'
     conn.execute('''INSERT INTO baie_slots
-        (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,nb_ports,largeur_u,date_maj,ports_disposition,nb_ports_sfp)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+        (client_id,position,col_index,hauteur_u,appareil_id,peripherique_id,nom_custom,type_equipement,couleur,description,baie_nom,nb_ports,largeur_u,date_maj,ports_disposition,nb_ports_sfp,nb_ports_wan)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
         (cid, pos, col, hauteur_u,
          f.get('appareil_id') or None, f.get('peripherique_id') or None, f.get('nom_custom', ''),
          f.get('type_equipement', ''), f.get('couleur', '#1e3a5f'),
-         f.get('description', ''), baie_nom, 0, largeur_u, _utcnow().isoformat(), ports_disposition, 0))
+         f.get('description', ''), baie_nom, 0, largeur_u, _utcnow().isoformat(), ports_disposition, 0, 0))
     conn.commit()
     sid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     nb_ports = _reconcilier_ports(conn, sid, f.get('nb_ports', 0), anciens_ports, f.get('type_equipement', ''))
     nb_ports_sfp = _reconcilier_ports_sfp(conn, sid, f.get('nb_ports_sfp', 0), anciens_ports)
+    nb_ports_wan = _reconcilier_ports_wan(conn, sid, f.get('nb_ports_wan', 0), anciens_ports)
     _reconcilier_prises_murales(conn, sid, nb_ports, f.get('type_equipement', ''), anciennes_prises)
     if ancien:
         # Le remplacement change l'id du slot (voir commentaire ci-dessus) :
@@ -6154,7 +6221,7 @@ def api_baie_ajouter_slot():
         # doit suivre vers le nouveau, sans quoi le câblage documenté casse à
         # chaque simple modification via le panneau "Placer l'équipement".
         conn.execute('UPDATE baie_slot_ports SET lie_slot_id=? WHERE lie_slot_id=?', (sid, ancien[0]))
-    conn.execute('UPDATE baie_slots SET nb_ports=?, nb_ports_sfp=? WHERE id=?', (nb_ports, nb_ports_sfp, sid))
+    conn.execute('UPDATE baie_slots SET nb_ports=?, nb_ports_sfp=?, nb_ports_wan=? WHERE id=?', (nb_ports, nb_ports_sfp, nb_ports_wan, sid))
     conn.commit()
     slot = row_to_dict(conn.execute(
         '''SELECT s.*, a.nom_machine, a.type_appareil, a.adresse_ip, a.marque, a.en_ligne,
@@ -6164,9 +6231,10 @@ def api_baie_ajouter_slot():
     slot['ports'] = _ports_avec_details(conn, sid)
     nom_slot = slot.get('nom_custom') or slot.get('type_equipement') or slot.get('nom_machine') or f'Emplacement #{sid}'
     detail_sfp = f", {nb_ports_sfp} SFP" if nb_ports_sfp else ''
+    detail_wan = f", {nb_ports_wan} WAN" if nb_ports_wan else ''
     log_history(conn, cid, 'baie_slot', sid, nom_slot,
                 'Modification (baie)' if ancien else 'Placement',
-                f"{baie_nom} · U{pos}·C{col}, {slot.get('type_equipement') or 'sans type'}, {nb_ports} port(s){detail_sfp}")
+                f"{baie_nom} · U{pos}·C{col}, {slot.get('type_equipement') or 'sans type'}, {nb_ports} port(s){detail_sfp}{detail_wan}")
     conn.commit()
     conn.close()
     return jsonify(slot)
@@ -6195,6 +6263,7 @@ def api_baie_slot(id):
     f = request.json or {}
     nb_ports = min(_plafond_nb_ports(f.get('type_equipement', '')), max(0, int(f.get('nb_ports', 0) or 0)))
     nb_ports_sfp = min(PLAFOND_SFP, max(0, int(f.get('nb_ports_sfp', 0) or 0)))
+    nb_ports_wan = min(PLAFOND_WAN, max(0, int(f.get('nb_ports_wan', 0) or 0)))
     ports_disposition = f.get('ports_disposition') if f.get('ports_disposition') in ('ligne', 'deux_lignes') else 'ligne'
     actuel = conn.execute(
         'SELECT col_index, baie_nom FROM baie_slots WHERE id=? AND client_id=?', (id, cid)).fetchone()
@@ -6229,15 +6298,16 @@ def api_baie_slot(id):
         return jsonify({'error': _msg_collision(collisions)}), 409
     conn.execute('''UPDATE baie_slots SET position=?,col_index=?,hauteur_u=?,appareil_id=?,peripherique_id=?,
         nom_custom=?,type_equipement=?,couleur=?,description=?,nb_ports=?,largeur_u=?,date_maj=?,
-        ports_disposition=?,nb_ports_sfp=? WHERE id=? AND client_id=?''',
+        ports_disposition=?,nb_ports_sfp=?,nb_ports_wan=? WHERE id=? AND client_id=?''',
         (position, col_index, hauteur_u, f.get('appareil_id') or None, f.get('peripherique_id') or None,
          f.get('nom_custom',''), f.get('type_equipement',''),
          f.get('couleur','#1e3a5f'), f.get('description',''), nb_ports,
          largeur_u,
-         _utcnow().isoformat(), ports_disposition, nb_ports_sfp, id, cid))
+         _utcnow().isoformat(), ports_disposition, nb_ports_sfp, nb_ports_wan, id, cid))
     _reconcilier_ports(conn, id, nb_ports, type_equipement=f.get('type_equipement', ''))
     nb_ports_sfp = _reconcilier_ports_sfp(conn, id, nb_ports_sfp)
-    conn.execute('UPDATE baie_slots SET nb_ports_sfp=? WHERE id=?', (nb_ports_sfp, id))
+    nb_ports_wan = _reconcilier_ports_wan(conn, id, nb_ports_wan)
+    conn.execute('UPDATE baie_slots SET nb_ports_sfp=?, nb_ports_wan=? WHERE id=?', (nb_ports_sfp, nb_ports_wan, id))
     _reconcilier_prises_murales(conn, id, nb_ports, f.get('type_equipement', ''))
     conn.commit()
     slot = row_to_dict(conn.execute(
@@ -6249,9 +6319,10 @@ def api_baie_slot(id):
     if slot:
         nom_slot = slot.get('nom_custom') or slot.get('type_equipement') or f'Emplacement #{id}'
         detail_sfp = f", {nb_ports_sfp} SFP" if nb_ports_sfp else ''
+        detail_wan = f", {nb_ports_wan} WAN" if nb_ports_wan else ''
         log_history(conn, cid, 'baie_slot', id, nom_slot, 'Modification (baie)',
                     f"{slot.get('baie_nom') or 'Baie principale'} · U{slot.get('position')}·C{slot.get('col_index',0)}, "
-                    f"{slot.get('hauteur_u',1)}U, {nb_ports} port(s){detail_sfp}")
+                    f"{slot.get('hauteur_u',1)}U, {nb_ports} port(s){detail_sfp}{detail_wan}")
         conn.commit()
     conn.close()
     return jsonify(slot)

@@ -1,8 +1,69 @@
-PARCINFO_VERSION=2.18.80
+PARCINFO_VERSION=2.18.81
 RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082904
+BUILD_NUMBER=2026082905
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.81 - Baie de brassage : modale d'édition (double-clic) + routeur WAN/LAN/Fibre
+# Signalé en usage réel après la 2.18.80 : la disposition 1/2 lignes d'un
+# switch existait bien côté code mais était difficile à trouver (panneau
+# + Placer = longue liste de champs identiques quel que soit
+# l'équipement, les champs propres au type noyés tout en bas), et le
+# panneau confondait "créer" et "éditer" (un clic simple sur un
+# équipement existant pré-remplissait tout le formulaire). Demandé dans
+# la foulée : prévoir différents types d'équipement réseau avec leurs
+# propres connecteurs (switch, routeur, NAS, pare-feu, point d'accès
+# WiFi, serveur, mini PC...), et un onduleur avec ses prises électriques.
+#
+# 1) Nouvelle modale d'édition d'un équipement — double-clic sur un
+# équipement déjà posé dans le rack, même principe que les modales port/
+# prise murale déjà en place. Un seul endroit regroupe tout : Type
+# d'équipement en premier (il pilote le reste), encart de configuration
+# réseau mis en évidence juste en-dessous (adapté automatiquement au
+# type choisi), position/identification, éditeur de ports intégré, et
+# Retirer/Annuler/Enregistrer en bas. Le panneau + Placer ne sert plus
+# qu'à CRÉER un nouvel équipement (réorganisé sur le même principe : Type
+# d'abord, encart mis en évidence juste après) ; un simple clic sur un
+# équipement déjà posé ne fait plus que le surligner.
+#
+# 2) Généralisation du mécanisme de connecteurs par groupes nommés,
+# démarré avec les ports SFP d'un switch (2.18.80) : un routeur/pare-feu
+# gagne des groupes WAN + LAN + Fibre distincts (jusqu'à 4 WAN, 8 Fibre,
+# 48 LAN), un serveur ou un nouveau type Mini PC gagne un groupe SFP
+# optionnel — même mécanisme générique (espace de numérotation séparé
+# par plage, WAN_NUMERO_OFFSET = 2000 en plus de SFP_NUMERO_OFFSET =
+# 1000), tout le reste (assignation appareil/périphérique/usage libre,
+# câblage port-à-port, ping, couleur, éditeur, tooltip) fonctionne sans
+# code dupliqué. Rendu en zones côte à côte (comme le 80/20 d'un switch),
+# jamais en rangées empilées — un routeur réel montre WAN/LAN/Fibre sur
+# une seule rangée en façade, et empiler aurait recréé le problème de
+# hauteur déjà rencontré avec la disposition 2 lignes d'un switch.
+#
+# 3) Onduleur/PDU : prises électriques avec icône dédiée, réutilisant tel
+# quel le mécanisme des ports (juste relabellisé) — demandé en même
+# temps que les types d'équipement.
+#
+# Trois bugs trouvés et corrigés en vérifiant en direct dans le
+# navigateur AVANT publication :
+# - Réduire le nombre de ports Fibre d'un routeur pouvait silencieusement
+#   détacher/supprimer ses ports WAN : la suppression des ports "en trop"
+#   d'une plage n'était pas bornée en haut, elle empiétait donc sur la
+#   plage WAN, plus haute. Chaque plage est désormais bornée aux deux
+#   extrémités.
+# - Un switch en 1 ligne AVEC des ports SFP configurés (jamais testé en
+#   2.18.80, seule la disposition 2 lignes l'avait été) empilait tous ses
+#   ports RJ verticalement au lieu de les afficher sur une ligne : une
+#   grille CSS (auto-fill) a besoin d'une largeur définie pour calculer
+#   ses colonnes, et align-items:center sur son conteneur flex privait la
+#   grille de cette largeur. Passé à align-items:stretch.
+# - Échap pendant une confirmation (le bouton "Retirer" de la nouvelle
+#   modale, en particulier) renvoyait à tort vers le tableau de bord au
+#   lieu de juste fermer la confirmation — un raccourci clavier global ne
+#   reconnaissait pas ce type de popup (overlay basculé par style inline,
+#   pas par une classe .open comme les autres modales).
+#
+# Nouveau tests/test_baie_routeur_wan.py (6 tests). Suite de tests pytest
+# toujours verte (174 tests).
 
 # Version 2.18.80 - Baie de brassage : switch 1/2 lignes de ports RJ + ports SFP (fibre)
 # Demandé : pouvoir afficher les ports RJ d'un switch soit sur une ligne

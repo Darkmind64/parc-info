@@ -132,11 +132,20 @@
 .cell-ports-main-switch { display:flex; align-items:center; flex:1; min-width:0; overflow:hidden; }
 .cell-ports-rj-zone {
     flex:0 0 80%; max-width:80%; display:flex; flex-direction:column;
-    align-items:center; justify-content:center; gap:2px; overflow:hidden; min-width:0;
+    align-items:stretch; justify-content:center; gap:2px; overflow:hidden; min-width:0;
 }
-/* Grille 1 ligne : centrée dans sa zone (justify-content par défaut du
-   grid est 'start' ailleurs, volontairement inchangé pour ne pas déplacer
-   le rendu existant des autres types d'équipement/du bandeau RJ). */
+/* align-items:stretch (pas center) sur la zone : une grille CSS
+   (grid-template-columns:repeat(auto-fill,24px), voir .cell-ports) a
+   besoin d'une largeur DÉFINIE pour calculer combien de colonnes de 24px
+   tiennent — avec align-items:center, l'enfant grid n'a plus de largeur
+   propre (auto, dépend de son propre contenu) et le calcul devient
+   circulaire : le navigateur retombe alors sur UNE seule colonne, empilant
+   tous les ports verticalement au lieu de les montrer sur une ligne — bug
+   trouvé en testant un routeur/pare-feu (zone LAN à 60% au lieu de 80%,
+   jamais exercé pour un switch 1-ligne + SFP en phase 1). stretch donne à
+   la grille la pleine largeur de la zone ; le centrage horizontal des
+   ports se fait alors via justify-content sur la grille elle-même
+   (ci-dessous), pas sur ce conteneur. */
 .cell-ports-rj-zone .cell-ports { flex:none; justify-content:center; }
 /* Disposition 2 lignes (1 3 5 7.../2 4 6 8...) — chaque rangée wrap si trop
    de ports pour la largeur disponible, plutôt que de forcer exactement 2
@@ -491,8 +500,61 @@
 /* ── RECHERCHE ── */
 .search-rack { display:flex; gap:.4rem; margin-bottom:.7rem; }
 .search-rack input { flex:1; font-size:.8rem; padding:.3rem .6rem; }
+
+/* Encart "Ports/Configuration" du panneau + Placer et de la modale
+   d'édition — mis en évidence (bordure + fond teinté) pour que les champs
+   propres au type choisi (ports Switch, prises électriques...) ne se
+   noient plus dans une longue liste de champs identiques, quel que soit
+   l'équipement — signalé comme peu ergonomique en usage réel. */
+.ports-config-box {
+    background: rgba(0,201,255,.05); border: 1px solid rgba(0,201,255,.25);
+    border-radius: 6px; padding: .7rem .8rem;
+}
+.ports-config-box .eqcfg-titre {
+    font-size: .68rem; text-transform: uppercase; letter-spacing: .5px;
+    color: var(--accent); margin-bottom: .5rem; font-weight: 700;
+}
+
+/* Prise électrique (onduleur/PDU) — réutilise le mécanisme générique des
+   ports (assignation appareil/périphérique/usage libre, éditeur, tooltip)
+   demandé : pas un nouveau système, juste une présentation dédiée — forme
+   de prise plutôt que carré RJ, pas de badge de déliaison (une prise ne se
+   "câble" pas à un autre port, elle alimente directement un appareil). */
+.port-elec { border-radius: 3px 3px 8px 8px; }
 </style>
 {% endblock %}
+
+{% macro ports_box(p) %}
+<div class="form-group ports-config-box" id="{{p}}-ports-box" style="margin-bottom:.8rem;">
+    <div class="eqcfg-titre" id="{{p}}-ports-box-titre">Ports</div>
+    <label id="{{p}}-lbl-nb-ports" style="margin-top:0;">Nombre de ports (Ethernet)</label>
+    <input type="number" id="{{p}}-nb-ports" min="0" max="48" value="0"
+           style="font-family:'Share Tech Mono',monospace;">
+    <div class="form-hint" id="{{p}}-hint-nb-ports">0 = pas de ports affichés. 48 maximum.</div>
+    <div class="form-group" id="{{p}}-grp-ports-disposition" style="margin:.6rem 0 0;display:none;">
+        <label>Disposition des ports RJ</label>
+        <select id="{{p}}-ports-disposition">
+            <option value="ligne">1 ligne</option>
+            <option value="deux_lignes">2 lignes (1 3 5.../2 4 6...)</option>
+        </select>
+    </div>
+    <div class="form-group" id="{{p}}-grp-nb-ports-sfp" style="margin:.6rem 0 0;display:none;">
+        <label id="{{p}}-lbl-nb-ports-sfp">Ports SFP (fibre)</label>
+        <input type="number" id="{{p}}-nb-ports-sfp" min="0" max="8" value="0"
+               style="font-family:'Share Tech Mono',monospace;">
+        <div class="form-hint" id="{{p}}-hint-nb-ports-sfp">0 = pas de ports SFP. 8 maximum, affichés à part (20% droite de l'élément).</div>
+    </div>
+    <div class="form-group" id="{{p}}-grp-nb-ports-wan" style="margin:.6rem 0 0;display:none;">
+        <label>Ports WAN</label>
+        <input type="number" id="{{p}}-nb-ports-wan" min="0" max="4" value="0"
+               style="font-family:'Share Tech Mono',monospace;">
+        <div class="form-hint">0 = pas de port WAN. 4 maximum.</div>
+    </div>
+</div>
+<div class="form-hint" id="{{p}}-hint-etagere" style="display:none;margin:-.4rem 0 .8rem;">
+    Une étagère est une tablette : posez les appareils dessus en les plaçant normalement, dans la rangée juste au-dessus.
+</div>
+{% endmacro %}
 
 {% block content %}
 <div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
@@ -632,6 +694,19 @@
 
         <!-- ONGLET PLACER -->
         <div class="cfg-pane active" id="tab-add">
+            <div class="form-hint" style="margin:-.2rem 0 .8rem;">Cliquez une case libre de la baie pour pré-remplir la position, ou double-cliquez un équipement déjà posé pour l'éditer.</div>
+            <div class="form-group" style="margin-bottom:.6rem;">
+                <label>Type d'équipement</label>
+                <select id="cfg-type" onchange="couleurAuto('cfg')">
+                    <option value="">—</option>
+                    <option>Serveur</option><option>Mini PC</option><option>Switch</option>
+                    <option>Routeur/Pare-feu</option><option>NAS</option>
+                    <option>UPS</option><option>Patch Panel</option>
+                    <option>Bandeau RJ</option><option>Étagère</option>
+                    <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
+                </select>
+            </div>
+            {{ ports_box('cfg') }}
             <div class="form-row cols-2" style="margin-bottom:.6rem;">
                 <div class="form-group" style="margin-bottom:0;">
                     <label>Position (U)</label>
@@ -665,19 +740,8 @@
                 </div>
             </div>
             <div class="form-group" style="margin-bottom:.6rem;">
-                <label>Type d'équipement</label>
-                <select id="cfg-type" onchange="couleurAuto()">
-                    <option value="">—</option>
-                    <option>Serveur</option><option>Switch</option>
-                    <option>Routeur/Pare-feu</option><option>NAS</option>
-                    <option>UPS</option><option>Patch Panel</option>
-                    <option>Bandeau RJ</option><option>Étagère</option>
-                    <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
-                </select>
-            </div>
-            <div class="form-group" style="margin-bottom:.6rem;">
                 <label>Associer à un appareil</label>
-                <select id="cfg-app" onchange="autoRemplir()">
+                <select id="cfg-app" onchange="autoRemplir('cfg')">
                     <option value="">— Aucun / saisie libre —</option>
                     {% for a in appareils %}
                     <option value="{{ a.id }}" data-nom="{{ a.nom_machine }}"
@@ -689,7 +753,7 @@
             </div>
             <div class="form-group" style="margin-bottom:.6rem;">
                 <label>Associer à un périphérique</label>
-                <select id="cfg-periph" onchange="autoRemplirPeriph()">
+                <select id="cfg-periph" onchange="autoRemplirPeriph('cfg')">
                     <option value="">— Aucun / saisie libre —</option>
                     {% for p in peripheriques %}
                     <option value="{{ p.id }}" data-nom="{{ p.categorie }} {{ p.marque }} {{ p.modele }}"
@@ -708,41 +772,7 @@
                 <label>Description / note</label>
                 <input type="text" id="cfg-desc" placeholder="Ex: Ports 1-24 bureau...">
             </div>
-            <div class="form-group" id="grp-nb-ports" style="margin-bottom:.8rem;">
-                <label id="lbl-nb-ports">Nombre de ports (Ethernet)</label>
-                <input type="number" id="cfg-nb-ports" min="0" max="48" value="0"
-                       style="font-family:'Share Tech Mono',monospace;">
-                <div class="form-hint" id="hint-nb-ports">0 = pas de ports affichés. 48 maximum.</div>
-            </div>
-            <!-- Switch uniquement : disposition des ports RJ (1 ou 2 lignes,
-                 façon vrai switch — impairs/pairs) et ports SFP (fibre),
-                 centrés dans les 20% restants — demandé. -->
-            <div class="form-group" id="grp-ports-disposition" style="margin-bottom:.8rem;display:none;">
-                <label>Disposition des ports RJ</label>
-                <select id="cfg-ports-disposition">
-                    <option value="ligne">1 ligne</option>
-                    <option value="deux_lignes">2 lignes (1 3 5.../2 4 6...)</option>
-                </select>
-            </div>
-            <div class="form-group" id="grp-nb-ports-sfp" style="margin-bottom:.8rem;display:none;">
-                <label>Ports SFP (fibre)</label>
-                <input type="number" id="cfg-nb-ports-sfp" min="0" max="8" value="0"
-                       style="font-family:'Share Tech Mono',monospace;">
-                <div class="form-hint">0 = pas de ports SFP. 8 maximum, affichés à part (20% droite de l'élément).</div>
-            </div>
-            <!-- Étagère : pas de ports/emplacements — c'est une tablette
-                 physique, pas un élément réseau. Les appareils posés dessus
-                 se placent normalement (rangée du dessus), pas via ce champ. -->
-            <div class="form-hint" id="hint-etagere" style="display:none;margin:-.4rem 0 .8rem;">
-                Une étagère est une tablette : posez les appareils dessus en les plaçant normalement, dans la rangée juste au-dessus.
-            </div>
             <button onclick="placerEquip()" class="btn btn-success" style="width:100%;">✓ Placer l'équipement</button>
-
-            <!-- ÉDITEUR DE PORTS — un slot déjà enregistré, avec au moins un port -->
-            <div id="ports-editor" style="display:none;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">
-                <div class="form-section-title" id="lbl-ports-editor" style="margin-bottom:.6rem;">&#9632; Ports</div>
-                <div id="ports-editor-list" style="display:flex;flex-direction:column;gap:.4rem;max-height:340px;overflow-y:auto;"></div>
-            </div>
         </div>
 
         <!-- Suggestions pour l'affectation d'un port à une pièce (bandeau RJ) —
@@ -843,6 +873,94 @@
     </div>
 </div>
 
+<!-- MODALE D'ÉDITION D'UN ÉQUIPEMENT — double-clic sur un équipement déjà
+     posé dans le rack (voir EquipmentModal plus bas). Remplace l'ancien
+     mécanisme où un clic simple pré-remplissait le panneau + Placer, qui
+     servait alors à la fois à créer ET éditer — signalé peu ergonomique
+     (champs propres au type noyés dans une longue liste identique quel
+     que soit l'équipement, ports SFP/disposition introuvables). Type
+     d'équipement en premier, encart de configuration mis en évidence
+     juste en-dessous (voir la macro ports_box()), champs secondaires
+     ensuite, éditeur de ports en bas — un seul endroit pour tout ce qui
+     concerne CET équipement. -->
+<div id="equipment-modal" class="modal-overlay" onclick="EquipmentModal.fermerSiOverlay(event)">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-glow);border-radius:8px;
+                padding:1.4rem;width:420px;max-width:94vw;max-height:88vh;overflow-y:auto;
+                box-shadow:0 20px 60px rgba(0,0,0,.4);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">⬛ <span id="eqm-titre">Équipement</span></h3>
+            <button type="button" onclick="EquipmentModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem;">
+            <label>Type d'équipement</label>
+            <select id="eqm-type" onchange="couleurAuto('eqm')">
+                <option value="">—</option>
+                <option>Serveur</option><option>Mini PC</option><option>Switch</option>
+                <option>Routeur/Pare-feu</option><option>NAS</option>
+                <option>UPS</option><option>Patch Panel</option>
+                <option>Bandeau RJ</option><option>Étagère</option>
+                <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
+            </select>
+        </div>
+        {{ ports_box('eqm') }}
+        <div class="form-row cols-2" style="margin-bottom:.6rem;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Position (U)</label>
+                <input type="number" id="eqm-pos" min="1" max="{{ nb_u }}" style="font-family:'Share Tech Mono',monospace;">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Hauteur (U)</label>
+                <select id="eqm-hu">
+                    {% for i in range(1,9) %}<option value="{{ i }}">{{ i }}U</option>{% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-row cols-2" style="margin-bottom:.6rem;">
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Colonne (0-9)</label>
+                <input type="number" id="eqm-col" min="0" max="9" style="font-family:'Share Tech Mono',monospace;">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+                <label>Largeur</label>
+                <select id="eqm-largeur">
+                    {% for i in range(1,11) %}<option value="{{ i }}">{{ i }}/10</option>{% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem;">
+            <label>Couleur</label>
+            <input type="color" id="eqm-couleur">
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem;">
+            <label>Associer à un appareil</label>
+            <select id="eqm-app" onchange="autoRemplir('eqm')"></select>
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem;">
+            <label>Associer à un périphérique</label>
+            <select id="eqm-periph" onchange="autoRemplirPeriph('eqm')"></select>
+        </div>
+        <div class="form-group" style="margin-bottom:.6rem;">
+            <label>Nom personnalisé</label>
+            <input type="text" id="eqm-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
+        </div>
+        <div class="form-group" style="margin-bottom:.8rem;">
+            <label>Description / note</label>
+            <input type="text" id="eqm-desc" placeholder="Ex: Ports 1-24 bureau...">
+        </div>
+        <div id="eqm-ports-editor" style="display:none;margin-bottom:.8rem;padding-top:.8rem;border-top:1px solid var(--border);">
+            <div class="form-section-title" style="margin-bottom:.6rem;">&#9632; Ports</div>
+            <div id="eqm-ports-editor-list" style="display:flex;flex-direction:column;gap:.4rem;max-height:280px;overflow-y:auto;"></div>
+        </div>
+        <div style="display:flex;gap:.6rem;justify-content:space-between;margin-top:1rem;">
+            <button type="button" class="btn btn-sm btn-danger" onclick="EquipmentModal.retirer()">🗑 Retirer</button>
+            <div style="display:flex;gap:.6rem;">
+                <button type="button" class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="EquipmentModal.fermer()">Annuler</button>
+                <button type="button" class="btn btn-success btn-sm" onclick="EquipmentModal.enregistrer()">✓ Enregistrer</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- MODALE D'ÉDITION D'UNE PHOTO DE BAIE — double-clic sur une vignette (le
      clic simple reste la prévisualisation, voir ouvrirPhoto) : nom/
      description ne pouvaient jusqu'ici être renseignés qu'à l'upload,
@@ -893,14 +1011,16 @@ let baiesList   = ['Baie principale'];
 // n'empêche ni la sélection/édition via le formulaire, ni la suppression
 // (déjà protégée par un confirm()), ni l'ajout de nouveaux éléments.
 let baieVerrouillee = false;
-// Slot actuellement affiché dans le panneau d'édition (voir selectSlot()) —
-// permet à enregistrerPort()/delierPort() de rafraîchir l'éditeur de ports
-// ouvert après une modification qui recharge toute la baie, sans quoi il
-// resterait affiché avec des données périmées (ex : un port qu'on vient de
-// détacher montrerait encore l'option "🔗 relié" désactivée).
-let selectedSlotId = null;
+// Slot actuellement ouvert dans la modale d'édition (voir EquipmentModal
+// plus bas, double-clic sur un équipement) — permet à enregistrerPort()/
+// delierPort() de rafraîchir sa liste de ports après une modification qui
+// recharge toute la baie, sans quoi elle resterait affichée avec des
+// données périmées (ex : un port qu'on vient de détacher montrerait
+// encore l'option "🔗 relié" désactivée). Délégué à EquipmentModal (défini
+// plus bas mais déjà résolu au moment du premier appel, après interaction
+// utilisateur) plutôt qu'une variable globale séparée à tenir synchronisée.
 function slotActuel() {
-    return selectedSlotId ? Object.values(slots).find(x => x.id === selectedSlotId) : null;
+    return EquipmentModal.slotCourant();
 }
 
 // Glisser-déposer d'un élément entier (pas un redimensionnement) : infos
@@ -930,18 +1050,57 @@ function calcUH(rerender) {
 }
 
 const TYPE_CSS = {
-    'Serveur':'srv','Switch':'sw','Routeur/Pare-feu':'fw','NAS':'nas',
+    'Serveur':'srv','Mini PC':'srv','Switch':'sw','Routeur/Pare-feu':'fw','NAS':'nas',
     'UPS':'ups','Patch Panel':'patch','Bandeau RJ':'bandeau','Étagère':'etagere','PDU':'pdu','Borne WiFi':'ap',
 };
-// Ports SFP (fibre) d'un switch — même convention que côté serveur (voir
-// SFP_NUMERO_OFFSET/PLAFOND_SFP dans app.py) : espace de numérotation
-// séparé des ports RJ (1001, 1002...), jamais partagé.
+// Trois plages génériques de numérotation de port, même convention que
+// côté serveur (voir SFP_NUMERO_OFFSET/WAN_NUMERO_OFFSET dans app.py) :
+// "de base" (RJ/LAN/Ethernet/prises électriques, 1-48, jamais d'offset),
+// "haute" (SFP pour un switch/serveur, Fibre pour un routeur — même
+// plage, juste relabellisée selon le type, voir appliquerReglesType), et
+// "WAN" (routeur/pare-feu uniquement, la plus haute des trois). Jamais
+// partagées entre elles, pas besoin de colonne "type de port" séparée.
 const SFP_NUMERO_OFFSET = 1000;
 const PLAFOND_SFP = 8;
-function estPortSfp(numero) { return numero > SFP_NUMERO_OFFSET; }
-function numeroAffiche(numero) { return estPortSfp(numero) ? numero - SFP_NUMERO_OFFSET : numero; }
+const WAN_NUMERO_OFFSET = 2000;
+const PLAFOND_WAN = 4;
+function estPortSfp(numero) { return numero > SFP_NUMERO_OFFSET && numero <= WAN_NUMERO_OFFSET; }
+function estPortWan(numero) { return numero > WAN_NUMERO_OFFSET; }
+function numeroAffiche(numero) {
+    if (estPortWan(numero)) return numero - WAN_NUMERO_OFFSET;
+    if (estPortSfp(numero)) return numero - SFP_NUMERO_OFFSET;
+    return numero;
+}
+
+// Libellé complet d'un port affiché (tooltip, modale d'édition d'un port,
+// éditeur de ports) — centralise ici toute la connaissance "quel nom pour
+// quelle plage/quel type d'équipement" plutôt que de la disperser à
+// chaque appelant : Switch/Serveur/Mini PC "SFP", Routeur/Pare-feu "Fibre"
+// (même plage numéro, juste un nom différent) ou "WAN"/"LAN", Onduleur/PDU
+// "Prise" (jamais "Port").
+function libellePortAffiche(typeEquipement, numero) {
+    if (typeEquipement === 'UPS' || typeEquipement === 'PDU') return 'Prise ' + numero;
+    if (estPortWan(numero)) return 'Port WAN ' + numeroAffiche(numero);
+    if (estPortSfp(numero)) {
+        const nom = typeEquipement === 'Routeur/Pare-feu' ? 'Fibre' : 'SFP';
+        return 'Port ' + nom + ' ' + numeroAffiche(numero);
+    }
+    if (typeEquipement === 'Routeur/Pare-feu') return 'Port LAN ' + numero;
+    return 'Port ' + numero;
+}
+
+// Variante compacte de libellePortAffiche, pour la colonne étroite de
+// l'éditeur de ports (portEditorRowHTML) — même logique de plage/type,
+// juste abrégée pour tenir sur ~40px.
+function labelCourtPort(typeEquipement, numero) {
+    if (typeEquipement === 'UPS' || typeEquipement === 'PDU') return `⚡${numero}`;
+    if (estPortWan(numero)) return `WAN${numeroAffiche(numero)}`;
+    if (estPortSfp(numero)) return (typeEquipement === 'Routeur/Pare-feu' ? 'FO' : 'SFP') + numeroAffiche(numero);
+    if (typeEquipement === 'Routeur/Pare-feu') return `LAN${numero}`;
+    return `#${numero}`;
+}
 const TYPE_COLORS = {
-    'Serveur':'#3b1a8a','Switch':'#0a4a5a','Routeur/Pare-feu':'#5a0a0a','NAS':'#0a3a1a',
+    'Serveur':'#3b1a8a','Mini PC':'#3b1a8a','Switch':'#0a4a5a','Routeur/Pare-feu':'#5a0a0a','NAS':'#0a3a1a',
     'UPS':'#5a3a00','Patch Panel':'#1a2535','Bandeau RJ':'#0a3a3a','Étagère':'#4a2e10','PDU':'#3a0a5a','Borne WiFi':'#0a1a4a',
 };
 // Rapprochement indicatif catégorie périphérique -> type de baie, pour
@@ -1341,42 +1500,85 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         : '';
 
     // Switch : ports RJ (1 ou 2 lignes façon vrai switch, centrés dans les
-    // 80% gauche) + ports SFP optionnels (20% restants) — demandé. Seul un
-    // switch a cette distinction ; tout autre type (Patch Panel, PDU,
-    // NAS...) garde le rendu historique, une seule grille pleine largeur.
+    // 80% gauche) + ports SFP optionnels (20% restants) — demandé. Un
+    // routeur/pare-feu ou un serveur/mini PC avec un groupe Fibre/WAN
+    // configuré réutilise le MÊME principe de zones côte à côte (jamais de
+    // rangées empilées — un routeur réel montre WAN/LAN/Fibre sur une
+    // seule rangée en façade, et empiler recréerait le problème de hauteur
+    // déjà rencontré avec la disposition 2 lignes d'un switch). Tout autre
+    // type garde le rendu historique, une seule grille pleine largeur.
     const estSwitch = s.type_equipement === 'Switch';
-    const rjPorts  = estSwitch ? ports.filter(p => !estPortSfp(p.numero)) : ports;
-    const sfpPorts = estSwitch ? ports.filter(p => estPortSfp(p.numero)) : [];
-    // La zone 80/20 (et la largeur RJ réduite qui va avec) n'a de sens que
-    // s'il y a réellement une zone SFP à séparer, ou la disposition 2
-    // lignes explicitement choisie — jamais pour un switch resté en
-    // configuration par défaut (1 ligne, 0 SFP : le cas de TOUT switch déjà
-    // existant avant cette fonctionnalité). Sans cette garde, chaque switch
-    // existant aurait vu ses ports RJ perdre 20% de largeur pour une zone
-    // SFP qui ne s'affiche jamais — régression trouvée en vérifiant.
-    const zonesSwitchActives = estSwitch && (s.ports_disposition === 'deux_lignes' || sfpPorts.length > 0);
+    // Onduleur/PDU : mêmes ports génériques, présentés comme des prises
+    // électriques (icône dédiée, voir .port-elec) plutôt que des ports RJ —
+    // demandé. Réutilise tel quel le mécanisme d'assignation appareil/
+    // périphérique/usage libre, aucun champ ni colonne supplémentaire.
+    const estElec = s.type_equipement === 'UPS' || s.type_equipement === 'PDU';
+    const estRouteur = s.type_equipement === 'Routeur/Pare-feu';
+    const estServeurMiniPC = s.type_equipement === 'Serveur' || s.type_equipement === 'Mini PC';
+    // Groupe "haut" (même plage numéro que SFP, voir SFP_NUMERO_OFFSET) —
+    // SFP pour switch/serveur/mini PC, Fibre pour un routeur/pare-feu.
+    const estHautDisponible = estSwitch || estRouteur || estServeurMiniPC;
+    const basePorts = (estSwitch || estRouteur || estServeurMiniPC) ? ports.filter(p => !estPortSfp(p.numero) && !estPortWan(p.numero)) : ports;
+    const hautPorts = estHautDisponible ? ports.filter(p => estPortSfp(p.numero)) : [];
+    const wanPorts  = estRouteur ? ports.filter(p => estPortWan(p.numero)) : [];
+    // La zone 80/20 du switch (et la largeur RJ réduite qui va avec) n'a de
+    // sens que s'il y a réellement une zone SFP à séparer, ou la
+    // disposition 2 lignes explicitement choisie — jamais pour un switch
+    // resté en configuration par défaut (1 ligne, 0 SFP : le cas de TOUT
+    // switch déjà existant avant cette fonctionnalité). Sans cette garde,
+    // chaque switch existant aurait vu ses ports RJ perdre 20% de largeur
+    // pour une zone SFP qui ne s'affiche jamais — régression trouvée en
+    // vérifiant.
+    const zonesSwitchActives = estSwitch && (s.ports_disposition === 'deux_lignes' || hautPorts.length > 0);
+    // Même logique de garde pour routeur/pare-feu et serveur/mini PC :
+    // rangées étiquetées seulement s'il y a vraiment un groupe Fibre/WAN
+    // configuré, sinon rendu historique pleine largeur (pas de rangée
+    // "LAN" à elle seule pour un serveur resté en configuration par défaut).
+    const zonesMultiGroupesActives = (estRouteur || estServeurMiniPC) && (hautPorts.length > 0 || wanPorts.length > 0);
 
     let ligneRJ;
+    let zonePortsPrincipale;
     if (estBandeauPorts) {
         ligneRJ = `<div class="cell-row-labeled"><span class="row-icon" title="Ports RJ (interconnexion)">🔌</span><div class="cell-ports">${ports.map(portHTML).join('')}</div></div>`;
+        zonePortsPrincipale = `<div class="cell-ports-stack">${lignePrisesMurales}${ligneRJ}</div>`;
+    } else if (zonesMultiGroupesActives) {
+        // Zones côte à côte (même principe que le 80/20 d'un switch,
+        // JAMAIS empilées en rangées) : un WAN+LAN+Fibre réel se lit
+        // toujours sur UNE seule rangée en façade — empiler aurait
+        // démesurément grandi la hauteur nécessaire pour rien (même piège
+        // que la disposition 2 lignes d'un switch à taille de port
+        // normale, voir le commentaire de .cell-ports-row en CSS).
+        const nbZonesExtra = (wanPorts.length ? 1 : 0) + (hautPorts.length ? 1 : 0);
+        const largeurBase = nbZonesExtra === 2 ? 60 : 80;
+        const largeurExtra = nbZonesExtra === 2 ? 20 : 20;
+        let zones = `<div class="cell-ports-rj-zone" style="flex-basis:${largeurBase}%;max-width:${largeurBase}%;">
+            <div class="cell-ports">${basePorts.map(p => portHTML(p, false)).join('')}</div></div>`;
+        if (wanPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurExtra}%;max-width:${largeurExtra}%;" title="Ports WAN">${wanPorts.map(p => portHTML(p, false)).join('')}</div>`;
+        if (hautPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurExtra}%;max-width:${largeurExtra}%;" title="Ports ${estRouteur ? 'Fibre' : 'SFP'}">${hautPorts.map(p => portHTML(p, false)).join('')}</div>`;
+        zonePortsPrincipale = `<div class="cell-ports-main-switch">${zones}</div>`;
     } else if (estSwitch && s.ports_disposition === 'deux_lignes') {
         // Impairs en haut, pairs en dessous (1 3 5 7.../2 4 6 8...) — même
         // ordre de tri que côté serveur (ORDER BY numero), il suffit donc
         // de filtrer par parité plutôt que de retrier.
-        const impairs = rjPorts.filter(p => numeroAffiche(p.numero) % 2 === 1);
-        const pairs   = rjPorts.filter(p => numeroAffiche(p.numero) % 2 === 0);
+        const impairs = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 1);
+        const pairs   = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 0);
         ligneRJ = `<div class="cell-ports-row">${impairs.map(portHTML).join('')}</div>`
                 + `<div class="cell-ports-row">${pairs.map(portHTML).join('')}</div>`;
+        zonePortsPrincipale = zonesSwitchActives
+            ? `<div class="cell-ports-main-switch">
+                   <div class="cell-ports-rj-zone">${ligneRJ}</div>
+                   ${hautPorts.length ? `<div class="cell-ports-sfp-zone" title="Ports SFP (fibre)">${hautPorts.map(portHTML).join('')}</div>` : ''}
+               </div>`
+            : `<div class="cell-ports-stack">${ligneRJ}</div>`;
     } else {
-        ligneRJ = `<div class="cell-ports">${rjPorts.map(portHTML).join('')}</div>`;
+        ligneRJ = `<div class="cell-ports">${basePorts.map(p => portHTML(p, estElec)).join('')}</div>`;
+        zonePortsPrincipale = (estSwitch && zonesSwitchActives)
+            ? `<div class="cell-ports-main-switch">
+                   <div class="cell-ports-rj-zone">${ligneRJ}</div>
+                   ${hautPorts.length ? `<div class="cell-ports-sfp-zone" title="Ports SFP (fibre)">${hautPorts.map(portHTML).join('')}</div>` : ''}
+               </div>`
+            : `<div class="cell-ports-stack">${ligneRJ}</div>`;
     }
-
-    const zonePortsPrincipale = zonesSwitchActives
-        ? `<div class="cell-ports-main-switch">
-               <div class="cell-ports-rj-zone">${ligneRJ}</div>
-               ${sfpPorts.length ? `<div class="cell-ports-sfp-zone" title="Ports SFP (fibre)">${sfpPorts.map(portHTML).join('')}</div>` : ''}
-           </div>`
-        : `<div class="cell-ports-stack">${lignePrisesMurales}${ligneRJ}</div>`;
 
     const zonePorts = ports.length ? `
         <div class="cell-ports-wrap">
@@ -1429,7 +1631,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         });
         el.addEventListener('mouseenter', e => {
             e.stopPropagation();
-            afficherTooltipPort(e, p, nom, s.type_equipement === 'Bandeau RJ');
+            afficherTooltipPort(e, p, nom, s.type_equipement === 'Bandeau RJ', s.type_equipement);
             if (p.lie_slot_id) {
                 const cle = cleCiblePort(p);
                 document.querySelectorAll(`.port[data-cle="${escH(cle)}"]`)
@@ -1483,8 +1685,18 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         });
     }
 
-    // Click → pré-remplir formulaire
-    cell.addEventListener('click', () => selectSlot(s, cell));
+    // Clic simple = juste une surbrillance visuelle (aucun effet de bord sur
+    // le panneau + Placer, qui reste dédié à la création — voir plus bas).
+    // Double-clic = ouvre la modale d'édition complète de l'équipement,
+    // même principe que pour un port ou une prise murale.
+    cell.addEventListener('click', () => {
+        document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
+        cell.classList.add('selected');
+    });
+    cell.addEventListener('dblclick', e => {
+        e.stopPropagation();
+        EquipmentModal.ouvrir(s.id);
+    });
 
     // Redimensionnement à la souris : glisser la poignée du bas change
     // hauteur_u par pas de 1U. draggable est désactivé le temps du geste —
@@ -1739,17 +1951,11 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     // peut toujours ajuster ensuite).
     cell.addEventListener('click', e => {
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
-        // Case VIDE cliquée : on place forcément quelque chose de NOUVEAU,
-        // jamais une édition de l'élément précédemment sélectionné — sans
-        // cette remise à zéro, placerEquip() aurait continué de cibler
-        // l'ancien id (PUT dessus) au lieu de créer ce nouvel élément.
-        selectedSlotId = null;
         const col = colonneVisee(e.clientX);
         document.getElementById('cfg-pos').value = u;
         document.getElementById('cfg-col').value = col;
         document.getElementById('cfg-largeur').value = String(debut + largeur - col);
         document.getElementById('cfg-nb-ports').value = 0;
-        document.getElementById('ports-editor').style.display = 'none';
         showTab('tab-add');
     });
     cell.addEventListener('mouseenter', e => { cell.classList.add('drag-over'); majMarqueur(e.clientX); });
@@ -1830,7 +2036,7 @@ async function redimensionnerSlot(s, nouvelleHu) {
             nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
             couleur: s.couleur || '#1e3a5f', description: s.description || '',
             nb_ports: s.nb_ports || 0, largeur_u: s.largeur_u || null,
-            nb_ports_sfp: s.nb_ports_sfp || 0, ports_disposition: s.ports_disposition || 'ligne'
+            nb_ports_sfp: s.nb_ports_sfp || 0, ports_disposition: s.ports_disposition || 'ligne', nb_ports_wan: s.nb_ports_wan || 0
         })
     });
     const updated = await r.json();
@@ -1859,7 +2065,7 @@ async function redimensionnerLargeurSlot(s, nouvelleLargeur) {
             nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
             couleur: s.couleur || '#1e3a5f', description: s.description || '',
             nb_ports: s.nb_ports || 0, largeur_u: nouvelleLargeur,
-            nb_ports_sfp: s.nb_ports_sfp || 0, ports_disposition: s.ports_disposition || 'ligne'
+            nb_ports_sfp: s.nb_ports_sfp || 0, ports_disposition: s.ports_disposition || 'ligne', nb_ports_wan: s.nb_ports_wan || 0
         })
     });
     const updated = await r.json();
@@ -1884,7 +2090,7 @@ async function redimensionnerCoinSlot(s, nouvelleHu, nouvelleLargeur) {
             nom_custom: s.nom_custom || '', type_equipement: s.type_equipement || '',
             couleur: s.couleur || '#1e3a5f', description: s.description || '',
             nb_ports: s.nb_ports || 0, largeur_u: nouvelleLargeur,
-            nb_ports_sfp: s.nb_ports_sfp || 0, ports_disposition: s.ports_disposition || 'ligne'
+            nb_ports_sfp: s.nb_ports_sfp || 0, ports_disposition: s.ports_disposition || 'ligne', nb_ports_wan: s.nb_ports_wan || 0
         })
     });
     const updated = await r.json();
@@ -1925,7 +2131,11 @@ function masquerTooltip() {
 }
 
 // ── PORTS ─────────────────────────────────────────────────────────────────────
-function portHTML(p) {
+// estElec (optionnel) : prise électrique d'un onduleur/PDU plutôt qu'un
+// port réseau — voir makeOccupiedCell. Purement une question de classe CSS
+// (.port-elec, forme distincte) et de libellé de tooltip ; la donnée et le
+// mécanisme d'assignation restent identiques à un port RJ.
+function portHTML(p, estElec) {
     // Un port câblé à un autre (lie_slot_id) n'a ni appareil_id, ni
     // peripherique_id, ni usage_libre — sans ce cas, il retombait ici dans
     // "libre" (classe port-libre, gris neutre) malgré sa couleur de lien
@@ -1959,7 +2169,7 @@ function portHTML(p) {
     // (avec offset pour un port SFP, voir SFP_NUMERO_OFFSET) — c'est ce que
     // le serveur attend en retour ; seul le LIBELLÉ affiché est ajusté.
     const sfp = estPortSfp(p.numero);
-    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
+    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${estElec ? ' port-elec' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
         <span class="port-led"></span>${badgeLien}${numeroAffiche(p.numero)}</span>`;
 }
 
@@ -2125,13 +2335,13 @@ async function creerLienPort(slot1Id, numero1, slot2Id, numero2) {
     showFlash('Lien créé.', 'success');
 }
 
-function afficherTooltipPort(e, p, nomSlot, estBandeau) {
+function afficherTooltipPort(e, p, nomSlot, estBandeau, typeEquipement) {
     const t = document.getElementById('rack-tooltip');
     // Pour un lien port-à-port, nom_cible ("Port 1 — Routeur B") est déjà
     // repris intégralement dans la ligne "Relié à" ci-dessous — l'omettre du
     // titre évite la redondance "Port 12 — Port 1 — Routeur B".
     const cible = p.lie_slot_id ? '' : (p.nom_cible || '');
-    const libellePort = estPortSfp(p.numero) ? `Port SFP ${numeroAffiche(p.numero)}` : `Port ${p.numero}`;
+    const libellePort = libellePortAffiche(typeEquipement, p.numero);
     let html = `<div class="tip-title">${libellePort}${cible ? ' — ' + escH(cible) : ''}</div>`;
     html += `<div class="tip-row"><span class="tip-key">Élément</span><span class="tip-val">${escH(nomSlot)}</span></div>`;
     if (p.appareil_id) {
@@ -2150,7 +2360,8 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau) {
     } else if (p.usage_libre) {
         html += `<div class="tip-row"><span class="tip-key">${estBandeau ? 'Pièce' : 'Usage'}</span><span class="tip-val">${escH(p.usage_libre)}</span></div>`;
     } else {
-        html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);">Port libre — non affecté</span></div>`;
+        const estElec = typeEquipement === 'UPS' || typeEquipement === 'PDU';
+        html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);">${estElec ? 'Prise libre — inutilisée' : 'Port libre — non affecté'}</span></div>`;
     }
     // Pièce du site (bandeau RJ) — indépendante de la cible ci-dessus,
     // affichée dans tous les cas où elle est renseignée (y compris un port
@@ -2431,32 +2642,10 @@ function surbrillanceEquip(pos, col) {
 }
 
 // ── SELECTION ────────────────────────────────────────────────────────────────
-function selectSlot(s, cell) {
-    document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
-    cell.classList.add('selected');
-    selectedSlotId = s.id;
-    document.getElementById('cfg-pos').value   = s.position;
-    document.getElementById('cfg-col').value   = s.col_index || 0;
-    document.getElementById('cfg-largeur').value = s.largeur_u || 10;
-    document.getElementById('cfg-hu').value    = s.hauteur_u || 1;
-    document.getElementById('cfg-type').value  = s.type_equipement || '';
-    document.getElementById('cfg-nom').value   = nomEquipementSlot(s) || '';
-    document.getElementById('cfg-desc').value  = s.description || '';
-    document.getElementById('cfg-couleur').value = s.couleur || '#1e3a5f';
-    document.getElementById('cfg-app').value    = s.appareil_id || '';
-    document.getElementById('cfg-periph').value = s.peripherique_id || '';
-    document.getElementById('cfg-nb-ports').value = s.nb_ports || 0;
-    document.getElementById('cfg-ports-disposition').value = s.ports_disposition || 'ligne';
-    document.getElementById('cfg-nb-ports-sfp').value = s.nb_ports_sfp || 0;
-    majLabelEmplacements();
-    showTab('tab-add');
-    afficherEditeurPorts(s);
-}
-
-// ── ÉDITEUR DE PORTS ─────────────────────────────────────────────────────────
+// ── ÉDITEUR DE PORTS (dans la modale d'édition, voir EquipmentModal) ───────────
 function afficherEditeurPorts(s) {
-    const wrap = document.getElementById('ports-editor');
-    const list = document.getElementById('ports-editor-list');
+    const wrap = document.getElementById('eqm-ports-editor');
+    const list = document.getElementById('eqm-ports-editor-list');
     const ports = s.ports || [];
     if (!s.id || !ports.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
     wrap.style.display = 'block';
@@ -2468,15 +2657,20 @@ function afficherEditeurPorts(s) {
         list.innerHTML = ports.map(p => priseMuraleEditorRowHTML(s.id, p.prise_murale, p.numero) + portRjEditorRowHTML(s.id, p)).join('');
         return;
     }
-    // Ports SFP affichés après les ports RJ, séparés par un intitulé — la
-    // liste est déjà triée par numéro côté serveur (voir
-    // _ports_avec_details), donc toujours RJ (1..48) avant SFP (1001+,
-    // voir SFP_NUMERO_OFFSET) sans besoin de retrier.
-    const rj  = ports.filter(p => !estPortSfp(p.numero));
-    const sfp = ports.filter(p => estPortSfp(p.numero));
-    list.innerHTML = rj.map(p => portEditorRowHTML(s.id, p)).join('')
-        + (sfp.length ? `<div class="form-section-title" style="margin:.4rem 0 .2rem;font-size:.65rem;">SFP (fibre)</div>` : '')
-        + sfp.map(p => portEditorRowHTML(s.id, p)).join('');
+    // Trois groupes affichés dans l'ordre, chacun séparé par un intitulé
+    // s'il y en a plus d'un — la liste est déjà triée par numéro côté
+    // serveur (voir _ports_avec_details), donc toujours base (1..48) puis
+    // haute (1001+, SFP/Fibre) puis WAN (2001+) sans besoin de retrier.
+    const type = s.type_equipement;
+    const base = ports.filter(p => !estPortSfp(p.numero) && !estPortWan(p.numero));
+    const haut = ports.filter(p => estPortSfp(p.numero));
+    const wan  = ports.filter(p => estPortWan(p.numero));
+    const labelHaut = type === 'Routeur/Pare-feu' ? 'Fibre' : 'SFP (fibre)';
+    list.innerHTML = base.map(p => portEditorRowHTML(s.id, p, type)).join('')
+        + (haut.length ? `<div class="form-section-title" style="margin:.4rem 0 .2rem;font-size:.65rem;">${labelHaut}</div>` : '')
+        + haut.map(p => portEditorRowHTML(s.id, p, type)).join('')
+        + (wan.length ? `<div class="form-section-title" style="margin:.4rem 0 .2rem;font-size:.65rem;">WAN</div>` : '')
+        + wan.map(p => portEditorRowHTML(s.id, p, type)).join('');
 }
 
 function optionsAppareilsPeriph(valeurActuelle) {
@@ -2487,7 +2681,7 @@ function optionsAppareilsPeriph(valeurActuelle) {
     return appOpts + perOpts;
 }
 
-function portEditorRowHTML(slotId, p) {
+function portEditorRowHTML(slotId, p, typeEquipement) {
     const valeur = p.appareil_id ? 'a:'+p.appareil_id
         : (p.peripherique_id ? 'p:'+p.peripherique_id
         : (p.lie_slot_id ? 'l' : (p.usage_libre ? 'u' : '')));
@@ -2497,11 +2691,10 @@ function portEditorRowHTML(slotId, p) {
     // bascule sur autre chose.
     const optionLien = p.lie_slot_id
         ? `<option value="l" selected disabled>🔗 ${escH(p.nom_cible)}</option>` : '';
-    const sfp = estPortSfp(p.numero);
-    const labelNumero = sfp ? `SFP${numeroAffiche(p.numero)}` : `#${p.numero}`;
+    const labelNumero = labelCourtPort(typeEquipement, p.numero);
     let html = `
     <div style="display:flex;gap:.3rem;align-items:center;">
-        <span style="width:${sfp ? 38 : 28}px;flex-shrink:0;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--text-muted);">${labelNumero}</span>
+        <span style="width:${labelNumero.length > 3 ? 38 : 28}px;flex-shrink:0;font-family:'Share Tech Mono',monospace;font-size:.7rem;color:var(--text-muted);">${labelNumero}</span>
         <select data-slot="${slotId}" data-numero="${p.numero}" onchange="changerPort(this)" style="flex:1.4;font-size:.7rem;padding:.2rem .3rem;margin:0;">
             <option value=""${valeur===''?' selected':''}>— Libre —</option>
             ${optionLien}
@@ -2831,8 +3024,8 @@ const PortModal = (() => {
         if (!s || !port) return;
         slotId = sid; numero = num;
         const estBandeau = s.type_equipement === 'Bandeau RJ';
-        const libelleNum = estPortSfp(num) ? `SFP ${numeroAffiche(num)}` : num;
-        document.getElementById('pom-titre').textContent = `Port ${libelleNum} — ${nomEquipementSlot(s) || 'Élément'}`;
+        const titrePort = libellePortAffiche(s.type_equipement, num);
+        document.getElementById('pom-titre').textContent = `${titrePort} — ${nomEquipementSlot(s) || 'Élément'}`;
 
         document.getElementById('pom-cible-section').style.display = estBandeau ? 'none' : '';
         valeurInitiale = ''; usageInitial = '';
@@ -2932,6 +3125,95 @@ const PortModal = (() => {
     return { ouvrir, fermer, fermerSiOverlay, changerCible, enregistrer };
 })();
 
+// ── MODALE D'ÉDITION D'UN ÉQUIPEMENT (double-clic dans le rack) ────────────────
+// Remplace l'ancien mécanisme "clic simple = pré-remplir le panneau + Placer,
+// qui servait alors À LA FOIS à créer et à éditer" — signalé peu ergonomique
+// en usage réel (champs propres au type noyés dans une longue liste
+// identique quel que soit l'équipement). Le panneau + Placer ne sert plus
+// qu'à créer (voir placerEquip()) ; toute l'édition d'un équipement déjà
+// posé — position, type, configuration réseau/électrique, ports — passe
+// par cette modale, sur le même principe que PortModal/PriseMuraleModal.
+const EquipmentModal = (() => {
+    let slotId = null;
+
+    function slotCourant() {
+        return slotId ? Object.values(slots).find(x => x.id === slotId) : null;
+    }
+
+    function ouvrir(sid) {
+        const s = Object.values(slots).find(x => x.id === sid);
+        if (!s) return;
+        slotId = sid;
+        document.getElementById('eqm-titre').textContent = nomEquipementSlot(s) || 'Équipement';
+        document.getElementById('eqm-type').value = s.type_equipement || '';
+        document.getElementById('eqm-nb-ports').value = s.nb_ports || 0;
+        document.getElementById('eqm-ports-disposition').value = s.ports_disposition || 'ligne';
+        document.getElementById('eqm-nb-ports-sfp').value = s.nb_ports_sfp || 0;
+        document.getElementById('eqm-nb-ports-wan').value = s.nb_ports_wan || 0;
+        appliquerReglesType('eqm');
+        document.getElementById('eqm-pos').value = s.position;
+        document.getElementById('eqm-hu').value = s.hauteur_u || 1;
+        document.getElementById('eqm-col').value = s.col_index || 0;
+        document.getElementById('eqm-largeur').value = s.largeur_u || 10;
+        document.getElementById('eqm-couleur').value = s.couleur || '#1e3a5f';
+        // Options identiques à celles du panneau + Placer (même liste
+        // appareils/périphériques rendue côté serveur) — copiées plutôt que
+        // reconstruites, pour ne jamais diverger de la source Jinja unique.
+        document.getElementById('eqm-app').innerHTML = document.getElementById('cfg-app').innerHTML;
+        document.getElementById('eqm-app').value = s.appareil_id || '';
+        document.getElementById('eqm-periph').innerHTML = document.getElementById('cfg-periph').innerHTML;
+        document.getElementById('eqm-periph').value = s.peripherique_id || '';
+        document.getElementById('eqm-nom').value = nomEquipementSlot(s) || '';
+        document.getElementById('eqm-desc').value = s.description || '';
+        afficherEditeurPorts(s);
+        document.getElementById('equipment-modal').classList.add('open');
+    }
+
+    function fermer() {
+        document.getElementById('equipment-modal').classList.remove('open');
+        slotId = null;
+    }
+
+    function fermerSiOverlay(e) {
+        if (e.target.id === 'equipment-modal') fermer();
+    }
+
+    async function enregistrer() {
+        if (!slotId) return;
+        const payload = lirePayloadEquipement('eqm');
+        const r = await fetch(`/api/baie/slot/${slotId}`, {
+            method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+        });
+        const s = await r.json();
+        if (!r.ok || s.error) {
+            showFlash(s.error || 'La modification a été refusée.', 'danger');
+            return;
+        }
+        // Retire l'ancienne entrée de la carte locale si la case a changé
+        // (déplacement/redimensionnement via les champs Position/Colonne).
+        const nk = key(s.position, s.col_index || 0);
+        Object.keys(slots).forEach(k => { if (slots[k].id === slotId && k !== nk) delete slots[k]; });
+        slots[nk] = s;
+        if ((s.col_index||0) + 1 > nbCols) nbCols = (s.col_index||0) + 1;
+        renderRack(); renderList();
+        fermer();
+    }
+
+    function retirer() {
+        if (!slotId) return;
+        const sid = slotId;
+        appConfirm('Retirer cet équipement de la baie ?', async () => {
+            await fetch('/api/baie/slot/' + sid, { method:'DELETE' });
+            Object.keys(slots).forEach(k => { if (slots[k].id === sid) delete slots[k]; });
+            nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1), 1);
+            renderRack(); renderList();
+            fermer();
+        }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });
+    }
+
+    return { ouvrir, fermer, fermerSiOverlay, enregistrer, retirer, slotCourant };
+})();
+
 // ── MODALE D'ÉDITION D'UNE PHOTO DE BAIE (double-clic) ──────────────────────
 // nom/description n'étaient jusqu'ici modifiables qu'à l'upload — aucune
 // route ne permettait de les corriger après coup (seule /supprimer
@@ -3007,32 +3289,36 @@ function delierPort(slotId, numero, nomCible) {
 
 // ── ACTIONS ──────────────────────────────────────────────────────────────────
 document.getElementById('cfg-app').addEventListener('change', autoRemplir);
-document.getElementById('cfg-type').addEventListener('change', couleurAuto);
+document.getElementById('cfg-type').addEventListener('change', () => couleurAuto('cfg'));
 
-function autoRemplir() {
-    const sel = document.getElementById('cfg-app');
+// Les trois fonctions suivantes opèrent indifféremment sur le panneau +
+// Placer ('cfg') ou la modale d'édition ('eqm') — même paire d'ids
+// suffixés que appliquerReglesType()/lirePayloadEquipement(), pour ne
+// jamais dupliquer cette logique deux fois.
+function autoRemplir(prefix) {
+    const sel = document.getElementById(prefix + '-app');
     const opt = sel.options[sel.selectedIndex];
     if (opt.value) {
-        document.getElementById('cfg-periph').value = ''; // un slot = un seul équipement
-        document.getElementById('cfg-nom').value  = opt.dataset.nom || '';
-        document.getElementById('cfg-type').value = opt.dataset.type || '';
-        couleurAuto();
+        document.getElementById(prefix + '-periph').value = ''; // un slot = un seul équipement
+        document.getElementById(prefix + '-nom').value  = opt.dataset.nom || '';
+        document.getElementById(prefix + '-type').value = opt.dataset.type || '';
+        couleurAuto(prefix);
     }
 }
-function autoRemplirPeriph() {
-    const sel = document.getElementById('cfg-periph');
+function autoRemplirPeriph(prefix) {
+    const sel = document.getElementById(prefix + '-periph');
     const opt = sel.options[sel.selectedIndex];
     if (opt.value) {
-        document.getElementById('cfg-app').value = ''; // un slot = un seul équipement
-        document.getElementById('cfg-nom').value  = opt.dataset.nom || '';
-        document.getElementById('cfg-type').value = PERIPH_TYPE_MAP[opt.dataset.type] || '';
-        couleurAuto();
+        document.getElementById(prefix + '-app').value = ''; // un slot = un seul équipement
+        document.getElementById(prefix + '-nom').value  = opt.dataset.nom || '';
+        document.getElementById(prefix + '-type').value = PERIPH_TYPE_MAP[opt.dataset.type] || '';
+        couleurAuto(prefix);
     }
 }
-function couleurAuto() {
-    const t = document.getElementById('cfg-type').value;
-    document.getElementById('cfg-couleur').value = TYPE_COLORS[t] || '#1e3a5f';
-    majLabelEmplacements();
+function couleurAuto(prefix) {
+    const t = document.getElementById(prefix + '-type').value;
+    document.getElementById(prefix + '-couleur').value = TYPE_COLORS[t] || '#1e3a5f';
+    appliquerReglesType(prefix);
 }
 
 // Raccourci "+ Bandeau RJ" : pré-remplit le formulaire Placer pour un
@@ -3042,7 +3328,6 @@ function couleurAuto() {
 // site, pas le bandeau lui-même.
 function ajouterBandeauRJ() {
     document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
-    selectedSlotId = null;
     document.getElementById('cfg-hu').value = 1;
     document.getElementById('cfg-col').value = 0;
     document.getElementById('cfg-largeur').value = '10';
@@ -3052,9 +3337,7 @@ function ajouterBandeauRJ() {
     document.getElementById('cfg-app').value = '';
     document.getElementById('cfg-periph').value = '';
     document.getElementById('cfg-nb-ports').value = 24;
-    document.getElementById('ports-editor').style.display = 'none';
-    couleurAuto();
-    majLabelEmplacements();
+    couleurAuto('cfg');
     showTab('tab-add');
     document.getElementById('cfg-pos').focus();
 }
@@ -3070,7 +3353,6 @@ function ajouterBandeauRJ() {
 // comme dans un vrai rack.
 function ajouterEtagere() {
     document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
-    selectedSlotId = null;
     document.getElementById('cfg-hu').value = 1;
     document.getElementById('cfg-col').value = 0;
     document.getElementById('cfg-largeur').value = '10';
@@ -3080,105 +3362,151 @@ function ajouterEtagere() {
     document.getElementById('cfg-app').value = '';
     document.getElementById('cfg-periph').value = '';
     document.getElementById('cfg-nb-ports').value = 0;
-    document.getElementById('ports-editor').style.display = 'none';
-    couleurAuto();
-    majLabelEmplacements();
+    couleurAuto('cfg');
     showTab('tab-add');
     document.getElementById('cfg-pos').focus();
 }
 
-function majLabelEmplacements() {
+// Applique les règles dépendantes du type d'équipement (visibilité/libellés
+// des champs de la section Ports/Configuration, plafonds, hauteur figée
+// pour une étagère) à UN des deux formulaires équivalents de l'écran —
+// 'cfg' (panneau + Placer, création) ou 'eqm' (modale d'édition, double-clic
+// sur un équipement déjà posé) — tous deux construits avec le même jeu
+// d'ids suffixés (voir la macro ports_box() et #equipment-modal), pour ne
+// jamais dupliquer cette logique deux fois.
+function appliquerReglesType(prefix) {
+    const g = id => document.getElementById(prefix + '-' + id);
+    const type = g('type').value;
     // Une étagère est une tablette PHYSIQUE, pas un élément réseau : pas de
     // ports/emplacements pour elle — les appareils qu'elle porte sont des
     // éléments normaux, placés dans la rangée du dessus (voir cell-etagere
-    // en CSS pour le rendu en fine plaque plutôt qu'en boîtier). Le champ
-    // est masqué et forcé à 0 plutôt que simplement renommé, pour ne pas
-    // laisser croire qu'on peut encore l'utiliser pour ce type.
-    const estEtagere = document.getElementById('cfg-type').value === 'Étagère';
-    document.getElementById('grp-nb-ports').style.display = estEtagere ? 'none' : '';
-    document.getElementById('hint-etagere').style.display = estEtagere ? '' : 'none';
-    if (estEtagere) document.getElementById('cfg-nb-ports').value = '0';
+    // en CSS pour le rendu en fine plaque plutôt qu'en boîtier). L'encart
+    // est masqué et le champ forcé à 0 plutôt que simplement renommé, pour
+    // ne pas laisser croire qu'on peut encore l'utiliser pour ce type.
+    const estEtagere = type === 'Étagère';
+    g('ports-box').style.display = estEtagere ? 'none' : '';
+    g('hint-etagere').style.display = estEtagere ? '' : 'none';
+    if (estEtagere) g('nb-ports').value = '0';
+
+    // Onduleur/PDU : le même champ « Nombre de ports » sert désormais à
+    // compter des PRISES ÉLECTRIQUES (même mécanisme d'assignation
+    // appareil/périphérique/usage libre déjà en place, voir portHTML côté
+    // rendu) — juste relabellisé, aucun nouveau champ ni colonne nécessaire
+    // puisqu'un onduleur/PDU n'a jamais BESOIN de ports réseau en même
+    // temps que ses prises.
+    const estElec = type === 'UPS' || type === 'PDU';
+    const estSwitchCfg = type === 'Switch';
+    const estRouteur = type === 'Routeur/Pare-feu';
+    // Groupe "haut" (même plage numéro que SFP, voir SFP_NUMERO_OFFSET
+    // côté serveur) — SFP pour switch/serveur/mini PC, Fibre pour un
+    // routeur/pare-feu : jamais les deux en même temps sur un même type.
+    const estHautDisponible = estSwitchCfg || estRouteur || type === 'Serveur' || type === 'Mini PC';
+    g('ports-box-titre').textContent = estSwitchCfg ? 'Configuration réseau — Switch'
+        : estRouteur ? 'Configuration réseau — Routeur/Pare-feu'
+        : (type === 'Serveur' || type === 'Mini PC') ? `Configuration réseau — ${type}`
+        : estElec ? 'Alimentation électrique' : 'Ports';
+    g('lbl-nb-ports').textContent = estElec ? 'Nombre de prises électriques'
+        : estRouteur ? 'Nombre de ports LAN' : 'Nombre de ports (Ethernet)';
 
     // Bandeau RJ plafonné à 24 ports (voir _plafond_nb_ports côté serveur) —
     // demandé : garantit la place d'empiler la rangée des prises murales
     // au-dessus de celle des ports RJ sans agrandir la hauteur du bandeau.
     // max mis à jour côté champ (pas seulement au submit, voir placerEquip)
     // pour que le navigateur refuse déjà une saisie hors plage.
-    const estBandeauCfg = document.getElementById('cfg-type').value === 'Bandeau RJ';
-    const cfgNbPorts = document.getElementById('cfg-nb-ports');
-    cfgNbPorts.max = estBandeauCfg ? '24' : '48';
-    if (estBandeauCfg && parseInt(cfgNbPorts.value) > 24) cfgNbPorts.value = '24';
-    document.getElementById('hint-nb-ports').textContent = estBandeauCfg
-        ? '0 = pas de ports affichés. 24 maximum (prises murales incluses, une par port).'
-        : '0 = pas de ports affichés. 48 maximum.';
+    const estBandeauCfg = type === 'Bandeau RJ';
+    const nbPorts = g('nb-ports');
+    nbPorts.max = estBandeauCfg ? '24' : '48';
+    if (estBandeauCfg && parseInt(nbPorts.value) > 24) nbPorts.value = '24';
+    g('hint-nb-ports').textContent = estElec
+        ? '0 = pas de prise affichée. 48 maximum.'
+        : (estBandeauCfg
+            ? '0 = pas de ports affichés. 24 maximum (prises murales incluses, une par port).'
+            : '0 = pas de ports affichés. 48 maximum.');
 
     // Une étagère est toujours 1U conceptuel — pas de "tablette 2U", voir
     // makeOccupiedCell (hu forcé à 1 pour ce type de toute façon en
     // défense) : autant l'exposer clairement dans le formulaire plutôt que
     // de laisser une valeur choisie ici sans effet visuel réel.
-    const cfgHu = document.getElementById('cfg-hu');
-    cfgHu.disabled = estEtagere;
-    cfgHu.title = estEtagere ? 'Une étagère est toujours 1U (fine tablette, pas de hauteur ajustable)' : '';
-    if (estEtagere) cfgHu.value = '1';
+    const hu = g('hu');
+    hu.disabled = estEtagere;
+    hu.title = estEtagere ? 'Une étagère est toujours 1U (fine tablette, pas de hauteur ajustable)' : '';
+    if (estEtagere) hu.value = '1';
 
-    // Disposition des ports RJ (1/2 lignes) + ports SFP : réservé aux
-    // switchs (demandé) — masqués et remis à leur valeur par défaut pour
-    // tout autre type, pour ne jamais laisser une valeur choisie plus tôt
-    // (en changeant de type sans y repenser) survivre silencieusement.
-    const estSwitchCfg = document.getElementById('cfg-type').value === 'Switch';
-    document.getElementById('grp-ports-disposition').style.display = estSwitchCfg ? '' : 'none';
-    document.getElementById('grp-nb-ports-sfp').style.display = estSwitchCfg ? '' : 'none';
-    if (!estSwitchCfg) {
-        document.getElementById('cfg-ports-disposition').value = 'ligne';
-        document.getElementById('cfg-nb-ports-sfp').value = '0';
-    }
+    // Disposition des ports RJ (1/2 lignes) : réservée aux switchs
+    // (demandé) — masquée et remise à sa valeur par défaut pour tout autre
+    // type, pour ne jamais laisser une valeur choisie plus tôt (en
+    // changeant de type sans y repenser) survivre silencieusement.
+    g('grp-ports-disposition').style.display = estSwitchCfg ? '' : 'none';
+    if (!estSwitchCfg) g('ports-disposition').value = 'ligne';
+
+    // Groupe "haut" — SFP (switch/serveur/mini PC) ou Fibre (routeur), même
+    // plage de numéros, juste relabellisée selon le type (voir
+    // libellePortAffiche côté rendu).
+    g('grp-nb-ports-sfp').style.display = estHautDisponible ? '' : 'none';
+    g('lbl-nb-ports-sfp').textContent = estRouteur ? 'Ports Fibre' : 'Ports SFP (fibre)';
+    g('hint-nb-ports-sfp').textContent = estRouteur
+        ? '0 = pas de port fibre. 8 maximum.'
+        : '0 = pas de ports SFP. 8 maximum, affichés à part (20% droite de l\'élément).';
+    if (!estHautDisponible) g('nb-ports-sfp').value = '0';
+
+    // Groupe WAN — réservé au routeur/pare-feu, seul type à avoir BESOIN
+    // des trois groupes (WAN + LAN + Fibre) en même temps.
+    g('grp-nb-ports-wan').style.display = estRouteur ? '' : 'none';
+    if (!estRouteur) g('nb-ports-wan').value = '0';
 }
 
-async function placerEquip() {
-    const pos = parseInt(document.getElementById('cfg-pos').value) || 1;
-    const col = Math.min(9, Math.max(0, parseInt(document.getElementById('cfg-col').value) || 0));
-    const hu  = parseInt(document.getElementById('cfg-hu').value) || 1;
-    if (pos < 1 || pos > nbU) { showFlash(`Position entre 1 et ${nbU}`, 'info'); return; }
-
-    const typeEquip = document.getElementById('cfg-type').value;
+// Construit le payload JSON envoyé à /api/baie/slot depuis l'UN OU L'AUTRE
+// des deux formulaires équivalents de l'écran ('cfg' = panneau + Placer,
+// 'eqm' = modale d'édition) — mêmes ids suffixés que appliquerReglesType(),
+// pour ne jamais dupliquer cette lecture/ces plafonds deux fois.
+function lirePayloadEquipement(prefix) {
+    const g = id => document.getElementById(prefix + '-' + id);
+    const typeEquip = g('type').value;
     const plafondPorts = typeEquip === 'Bandeau RJ' ? 24 : 48;
-    const nbPorts = Math.min(plafondPorts, Math.max(0, parseInt(document.getElementById('cfg-nb-ports').value) || 0));
-    const largeurVal = document.getElementById('cfg-largeur').value;
-    // Disposition/SFP : réservés aux switchs (voir majLabelEmplacements) —
-    // envoyés seulement pour ce type, le serveur applique de toute façon
-    // ses propres valeurs par défaut ('ligne'/0) sinon.
+    const nbPorts = Math.min(plafondPorts, Math.max(0, parseInt(g('nb-ports').value) || 0));
+    const largeurVal = g('largeur').value;
+    // Disposition : réservée aux switchs (voir appliquerReglesType).
+    // SFP/Fibre : switch, routeur/pare-feu, serveur, mini PC. WAN :
+    // routeur/pare-feu uniquement. Envoyés seulement quand le type
+    // concerné les affiche — le serveur applique de toute façon ses
+    // propres valeurs par défaut ('ligne'/0) sinon.
     const estSwitch = typeEquip === 'Switch';
-    const nbPortsSfp = estSwitch
-        ? Math.min(PLAFOND_SFP, Math.max(0, parseInt(document.getElementById('cfg-nb-ports-sfp').value) || 0)) : 0;
-    const portsDisposition = estSwitch ? document.getElementById('cfg-ports-disposition').value : 'ligne';
+    const estRouteur = typeEquip === 'Routeur/Pare-feu';
+    const estHautDisponible = estSwitch || estRouteur || typeEquip === 'Serveur' || typeEquip === 'Mini PC';
+    const nbPortsSfp = estHautDisponible
+        ? Math.min(PLAFOND_SFP, Math.max(0, parseInt(g('nb-ports-sfp').value) || 0)) : 0;
+    const nbPortsWan = estRouteur
+        ? Math.min(PLAFOND_WAN, Math.max(0, parseInt(g('nb-ports-wan').value) || 0)) : 0;
+    const portsDisposition = estSwitch ? g('ports-disposition').value : 'ligne';
 
-    const payload = {
-        position: pos, col_index: col, hauteur_u: hu, baie_nom: currentBaie,
+    return {
+        position: parseInt(g('pos').value) || 1,
+        col_index: Math.min(9, Math.max(0, parseInt(g('col').value) || 0)),
+        hauteur_u: parseInt(g('hu').value) || 1,
+        baie_nom: currentBaie,
         type_equipement: typeEquip,
-        nom_custom:  document.getElementById('cfg-nom').value.trim(),
-        description: document.getElementById('cfg-desc').value.trim(),
-        couleur:     document.getElementById('cfg-couleur').value,
-        appareil_id: document.getElementById('cfg-app').value ? parseInt(document.getElementById('cfg-app').value) : null,
-        peripherique_id: document.getElementById('cfg-periph').value ? parseInt(document.getElementById('cfg-periph').value) : null,
+        nom_custom:  g('nom').value.trim(),
+        description: g('desc').value.trim(),
+        couleur:     g('couleur').value,
+        appareil_id: g('app').value ? parseInt(g('app').value) : null,
+        peripherique_id: g('periph').value ? parseInt(g('periph').value) : null,
         nb_ports: nbPorts,
         nb_ports_sfp: nbPortsSfp,
+        nb_ports_wan: nbPortsWan,
         ports_disposition: portsDisposition,
         largeur_u: largeurVal ? parseInt(largeurVal) : null
     };
+}
 
-    // Élément déjà sélectionné (voir selectSlot/selectedSlotId) : PUT sur
-    // SON id pour le déplacer/redimensionner/modifier en place. Auparavant
-    // ce bouton postait TOUJOURS une création (/api/baie/slot en POST) —
-    // changer la position ou la colonne dans le formulaire créait donc un
-    // DOUBLON à la nouvelle case sans jamais toucher l'ancien élément,
-    // resté planté à son ancienne place. C'était la seule façon fiable de
-    // positionner précisément un élément moins large que la baie et haut
-    // de plusieurs U (le glisser-déposer à la souris est difficile sur un
-    // gros pavé) — et elle ne marchait pas.
-    const editingId = slotActuel()?.id || null;
-    const url = editingId ? `/api/baie/slot/${editingId}` : '/api/baie/slot';
-    const r = await fetch(url, {
-        method: editingId ? 'PUT' : 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
+// Le panneau + Placer ne sert plus qu'à CRÉER un nouvel équipement — POST
+// systématique (voir EquipmentModal.enregistrer() pour l'édition d'un
+// équipement déjà posé, sur double-clic dans le rack).
+async function placerEquip() {
+    const payload = lirePayloadEquipement('cfg');
+    if (payload.position < 1 || payload.position > nbU) { showFlash(`Position entre 1 et ${nbU}`, 'info'); return; }
+
+    const r = await fetch('/api/baie/slot', {
+        method: 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
     });
     const s = await r.json();
     if (!r.ok || s.error) {
@@ -3189,24 +3517,15 @@ async function placerEquip() {
         showFlash(s.error || 'Le placement a été refusé.', 'danger');
         return;
     }
-    if (editingId) {
-        // Retire l'ancienne entrée de la carte locale si la case a changé
-        // (déplacement) — sinon l'élément resterait dupliqué dans `slots`
-        // sous son ancienne clé position-colonne en plus de la nouvelle.
-        const nk = key(s.position, s.col_index || 0);
-        Object.keys(slots).forEach(k => { if (slots[k].id === editingId && k !== nk) delete slots[k]; });
-    }
     slots[key(s.position, s.col_index||0)] = s;
     if ((s.col_index||0) + 1 > nbCols) nbCols = (s.col_index||0) + 1;
     renderRack(); renderList();
-    afficherEditeurPorts(s);
 }
 
 function delSlot(id) {
     appConfirm('Retirer cet équipement de la baie ?', async () => {
         await fetch('/api/baie/slot/' + id, { method:'DELETE' });
         Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
-        if (selectedSlotId === id) selectedSlotId = null;
         nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1), 1);
         renderRack(); renderList();
     }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });

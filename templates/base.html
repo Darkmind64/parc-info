@@ -1714,7 +1714,17 @@ document.addEventListener('keydown', function(e) {
 
     // Échap = retour (si pas de modal ouverte)
     if (!isInput && e.key === 'Escape') {
-        // Ne pas interférer si une modale est ouverte
+        // Ne pas interférer si une modale est ouverte — y compris
+        // #app-confirm-overlay (appConfirm()), qui bascule display:flex/none
+        // en ligne plutôt qu'une classe .open comme les autres : sans ce cas
+        // à part, ce handler ne le détectait pas et renvoyait à tort vers la
+        // page précédente au lieu de laisser le propre handler Échap
+        // d'appConfirm() (voir plus bas dans ce fichier) fermer juste la
+        // confirmation — bug trouvé en testant la nouvelle modale d'édition
+        // d'équipement de la baie de brassage, dont le bouton "Retirer"
+        // ouvre justement une confirmation.
+        const appConfirmOuvert = document.getElementById('app-confirm-overlay')?.style.display === 'flex';
+        if (appConfirmOuvert) return;
         const modal = document.querySelector('.modal-overlay.open, .qr-modal-overlay.open, .kbd-help-overlay.open');
         if (modal) { modal.classList.remove('open'); return; }
         // Retour à la liste selon la page
