@@ -1,24 +1,23 @@
 {
-  "version": "2.18.88",
+  "version": "2.18.89",
   "release_date": "2026-08-30T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.88/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.88/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.88/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.88",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.88/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.88/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.88/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.88/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.88/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.89",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Inventaire des appareils : badge UPS (alimenté par un onduleur, même à travers un ou plusieurs PDU en cascade) + prise d'entrée automatique sur le PDU",
+    "new_features": "Baie de brassage : audit complet des libellés de port + correctif du rendu d'un PDU/onduleur en orientation verticale très étroite",
     "improvements": [
-      "Badge UPS dans l'inventaire des appareils : un appareil branché sur une prise d'un vrai onduleur affiche un badge ambre « UPS » à côté de son nom, avec le nom de l'onduleur au survol — toutes les baies du client sont prises en compte.",
-      "Prise d'entrée du PDU : chaque PDU reçoit automatiquement une prise « Entrée » dédiée (toujours exactement une seule) — à lier via « 🔗 Lier des ports » vers une prise d'onduleur, comme le reste du câblage de la baie.",
-      "Badge UPS transitif : un appareil branché sur un PDU dont l'entrée remonte, directement ou en cascade à travers plusieurs PDU, jusqu'à un onduleur hérite désormais du badge, avec un tooltip qui distingue le cas direct du cas via PDU."
+      "Fiche de câblage imprimable et export CSV (/baie/cablage) : affichaient jusqu'ici le numéro brut de port stocké en base (ex. « Port 1001 », « Port 9001 ») au lieu du libellé logique (« Port SFP 1 », « Entrée ») — corrigé.",
+      "PDU/onduleur en orientation verticale très étroite (largeur_u réduite) : les prises électriques débordaient/étaient rognées, la grille se dimensionnant à sa largeur de contenu non contrainte plutôt qu'à la largeur réelle de la cellule — corrigé, avec un dimensionnement dynamique des prises selon la largeur disponible."
     ]
   },
   "checksums": {
@@ -29,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.88"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.89"
 }

@@ -1,8 +1,36 @@
-PARCINFO_VERSION=2.18.88
+PARCINFO_VERSION=2.18.89
 RELEASE_DATE=2026-08-30
-BUILD_NUMBER=2026083002
+BUILD_NUMBER=2026083003
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.89 - Baie de brassage : audit complet + correctif PDU vertical etroit
+# Demande : faire le point sur l'ensemble de la partie baie de brassage,
+# corriger les incoherences trouvees, puis corriger specifiquement le
+# rendu d'un PDU/onduleur en orientation verticale tres etroit.
+#
+# 1. Fiche de cablage imprimable et export CSV (/baie/cablage) :
+#    affichaient le numero BRUT de port stocke en base (ex. "Port 1001"
+#    pour un port SFP, "Port 9001" pour l'entree d'un PDU) au lieu du
+#    libelle logique ("Port SFP 1", "Entree") deja utilise partout
+#    ailleurs dans l'app - corrige via une fonction centralisee cote
+#    serveur (_libelle_port_pour_type), miroir exact de la logique JS
+#    deja en place.
+# 2. PDU/onduleur en orientation verticale tres etroit (largeur_u
+#    reduite) : la grille de prises electriques se dimensionnait a sa
+#    largeur de CONTENU non contrainte (align-items:flex-start herite de
+#    la regle horizontale) plutot qu'a la largeur reelle, bornee, de la
+#    cellule - les prises debordaient/etaient rognees par
+#    l'overflow:hidden. Corrige (align-items:stretch en vertical) + ajout
+#    d'un dimensionnement dynamique des prises selon la largeur
+#    disponible (tailleElecVertical), symetrique au mecanisme existant
+#    base sur la hauteur en orientation horizontale.
+#
+# Suite pytest toujours verte (174 tests) + tous les scripts de test
+# autonomes. Verifie en direct dans le navigateur : fiche de cablage et
+# export CSV avec libelles corrects, PDU vertical etroit (largeur_u=2)
+# sans debordement sur plusieurs colonnes de prises, non-regression sur
+# un switch vertical etroit et un switch horizontal avec SFP.
 
 # Version 2.18.88 - Inventaire : badge UPS + prise d'entree du PDU (chaine d'alimentation)
 # Demande : dans l'inventaire des appareils, un badge quand un appareil

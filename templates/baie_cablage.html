@@ -121,9 +121,9 @@
         <tr>
             <td>{{ l.baie }}</td>
             <td>{{ l.nom1 }}</td>
-            <td>Port {{ l.numero1 }}</td>
+            <td>{{ l.numero1_label }}</td>
             <td>{{ l.nom2 }}</td>
-            <td>Port {{ l.numero2 }}</td>
+            <td>{{ l.numero2_label }}</td>
             <td>
                 {% if l.cable_couleur or l.cable_longueur %}
                     {{ [l.cable_couleur, l.cable_longueur]|select|join(' · ') }}

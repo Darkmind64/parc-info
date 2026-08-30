@@ -5811,17 +5811,15 @@ def _ports_avec_details(conn, slot_id):
                 'SELECT nom_custom, type_equipement, appareil_id FROM baie_slots WHERE id=?',
                 (d['lie_slot_id'],)).fetchone()
             nom_elem = (cible[0] or cible[1] if cible else None) or ('Élément #%d' % d['lie_slot_id'])
-            # Numéro AFFICHÉ du port en face — SFP/WAN %d - offset (voir les
-            # constantes) plutôt que le numéro brut 1001+/2001+, jamais
-            # montré à l'utilisateur (même ajustement que côté client, voir
-            # numeroAffiche() dans baie_brassage.html).
+            # Libellé du port en face — voir _libelle_port_pour_type
+            # (miroir de libellePortAffiche côté client) : numéro AFFICHÉ,
+            # sans l'offset de sa plage (1001+/2001+/9001), et distingue
+            # SFP/Fibre/prise ondulée-protégée/entrée selon le TYPE de
+            # l'élément en face — pas juste "WAN %d"/"SFP %d" génériques
+            # (bug trouvé en auditant : un lien vers l'entrée d'un PDU,
+            # numéro brut 9001, s'affichait à tort comme "WAN 7001").
             far_num = d['lie_port_numero']
-            if far_num > WAN_NUMERO_OFFSET:
-                far_label = 'WAN %d' % (far_num - WAN_NUMERO_OFFSET)
-            elif far_num > SFP_NUMERO_OFFSET:
-                far_label = 'SFP %d' % (far_num - SFP_NUMERO_OFFSET)
-            else:
-                far_label = 'Port %d' % far_num
+            far_label = _libelle_port_pour_type(cible[1] if cible else None, far_num)
             nom = '%s — %s' % (far_label, nom_elem)
             far_port = conn.execute(
                 '''SELECT bp2.appareil_id, bp2.peripherique_id, a2.nom_machine, a2.en_ligne, a2.type_appareil,
@@ -5959,6 +5957,45 @@ PLAFOND_WAN = 4
 # port.
 ENTREE_NUMERO_OFFSET = 9000
 NUMERO_ENTREE_PDU = ENTREE_NUMERO_OFFSET + 1
+
+def _numero_logique_port(numero):
+    """Numéro AFFICHÉ d'un port — retire l'offset de sa plage (voir
+    SFP_NUMERO_OFFSET/WAN_NUMERO_OFFSET/ENTREE_NUMERO_OFFSET) pour ne
+    jamais montrer le numéro BRUT stocké en base (ex. 1001 pour un port
+    SFP) là où l'utilisateur attend le numéro logique (1) qu'il voit
+    partout ailleurs dans l'app. Équivalent serveur de numeroAffiche()
+    côté client (baie_brassage.html) — DOIT rester en miroir exact."""
+    if numero > ENTREE_NUMERO_OFFSET:
+        return numero
+    if numero > WAN_NUMERO_OFFSET:
+        return numero - WAN_NUMERO_OFFSET
+    if numero > SFP_NUMERO_OFFSET:
+        return numero - SFP_NUMERO_OFFSET
+    return numero
+
+def _libelle_port_pour_type(type_equipement, numero):
+    """Équivalent serveur de libellePortAffiche() côté client (voir
+    baie_brassage.html) — DOIT rester en miroir exact : même logique de
+    plage/type des deux côtés. Utilisé partout où un numéro de port doit
+    être présenté à l'utilisateur côté serveur (nom_cible d'un lien dans
+    _ports_avec_details, fiche de câblage imprimable/CSV) — sans cette
+    fonction centralisée, ces deux endroits affichaient le numéro BRUT
+    (avec offset, ex. 1001/2001/9001) au lieu du libellé logique (bugs
+    trouvés en auditant tout le mécanisme de la baie de brassage)."""
+    if numero > ENTREE_NUMERO_OFFSET:
+        return 'Entrée'
+    if type_equipement == 'UPS':
+        return ('Prise protégée ' if SFP_NUMERO_OFFSET < numero <= WAN_NUMERO_OFFSET else 'Prise ondulée ') + str(_numero_logique_port(numero))
+    if type_equipement == 'PDU':
+        return 'Prise %d' % numero
+    if numero > WAN_NUMERO_OFFSET:
+        return 'Port WAN %d' % (numero - WAN_NUMERO_OFFSET)
+    if SFP_NUMERO_OFFSET < numero <= WAN_NUMERO_OFFSET:
+        nom = 'Fibre' if type_equipement == 'Routeur/Pare-feu' else 'SFP'
+        return 'Port %s %d' % (nom, numero - SFP_NUMERO_OFFSET)
+    if type_equipement == 'Routeur/Pare-feu':
+        return 'Port LAN %d' % numero
+    return 'Port %d' % numero
 
 def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None, type_equipement=None):
     """Ajuste les lignes baie_slot_ports d'un slot à nb_ports (0-48, 0-24
@@ -6843,6 +6880,12 @@ def _liste_cablage(conn, cid):
         d = row_to_dict(r)
         d['nom1'] = d['nom1_custom'] or d['type1'] or f"U{d['pos1']}"
         d['nom2'] = d['nom2_custom'] or d['type2'] or f"U{d['pos2']}"
+        # Libellé AFFICHÉ du port (voir _libelle_port_pour_type), pas le
+        # numéro BRUT stocké — bug trouvé en auditant : la fiche imprimable
+        # et l'export CSV montraient jusqu'ici "Port 1001"/"Port 9001" au
+        # lieu de "Port SFP 1"/"Entrée" pour un lien SFP/WAN/entrée de PDU.
+        d['numero1_label'] = _libelle_port_pour_type(d['type1'], d['numero1'])
+        d['numero2_label'] = _libelle_port_pour_type(d['type2'], d['numero2'])
         liens.append(d)
     return liens
 
@@ -6937,7 +6980,7 @@ def baie_cablage_csv():
     w.writerow(['INTERCONNEXIONS'])
     w.writerow(['Baie', 'Élément A', 'Port A', 'Élément B', 'Port B', 'Couleur câble', 'Longueur câble'])
     for l in liens:
-        w.writerow([l['baie'], l['nom1'], l['numero1'], l['nom2'], l['numero2'],
+        w.writerow([l['baie'], l['nom1'], l['numero1_label'], l['nom2'], l['numero2_label'],
                     l['cable_couleur'], l['cable_longueur']])
     resp = make_response(buf.getvalue())
     resp.headers['Content-Type'] = 'text/csv; charset=utf-8'

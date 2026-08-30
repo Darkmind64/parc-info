@@ -603,12 +603,64 @@
    vertical (voir pingerPortsElement) — masquée plutôt que pivotée, le
    bouton 📡 lui-même reste disponible et fonctionnel. */
 .cell-vertical .cell-ping-progress { display: none; }
-.cell-vertical .cell-ports-wrap { flex-direction: column; }
+/* align-items:stretch, pas le flex-start hérité de la règle de base : en
+   colonne (flex-direction ci-dessous), l'axe transverse devient la LARGEUR
+   — avec flex-start, chaque zone de ports (cell-ports-main-switch/-stack)
+   se dimensionne à sa largeur de CONTENU non contrainte (celle que
+   demanderait une grille de prises sans limite de largeur) au lieu d'être
+   forcée à la largeur réelle, bornée, de la cellule : un PDU vertical
+   étroit (largeur_u réduite) voyait ainsi sa grille de prises réclamer
+   ~330px de large dans une cellule de ~150px, débordant/rognée par
+   l'overflow:hidden (bug trouvé en vérifiant — root cause de la gêne sur
+   un PDU vertical étroit, au-delà de la seule taille de prise). */
+.cell-vertical .cell-ports-wrap { flex-direction: column; align-items: stretch; }
 .cell-vertical .cell-ports {
     grid-template-columns: none; grid-auto-flow: column;
     grid-template-rows: repeat(auto-fill, 24px);
+    /* height:100% indispensable : sans hauteur EXPLICITE ici, cet enfant
+       flex de .cell-ports-rj-zone/.cell-ports-stack (flex-direction:column)
+       ne prend que sa hauteur de CONTENU ("auto"), pas celle, bornée,
+       héritée du parent — grid ne sait alors combien de tracks de
+       repeat(auto-fill, 24px) tiennent en hauteur (indéfinie) et retombe
+       sur UNE SEULE rangée, chaque prise suivante ouvrant sa PROPRE
+       colonne au lieu de s'empiler (bug trouvé en vérifiant : toutes les
+       prises d'un PDU vertical s'étalaient en ligne, débordant largement
+       de la cellule). */
+    height: 100%;
 }
-.cell-vertical .cell-ports-elec { grid-template-rows: repeat(auto-fill, 54px); }
+/* var(--elec-size), pas 54px fixe : posée par tailleElecVertical() côté JS
+   (voir makeOccupiedCell) pour un PDU/onduleur vertical étroit — sans ce
+   renvoi à la variable, la taille calculée dynamiquement (réduite pour
+   tenir dans une largeur_u réduite) était ignorée ici, la grille gardant
+   des pistes de 54px fixes indépendamment de la largeur réelle disponible
+   (bug trouvé en vérifiant : prises débordantes/rognées sur un PDU vertical
+   étroit). */
+.cell-vertical .cell-ports-elec { grid-template-rows: repeat(auto-fill, var(--elec-size, 54px)); }
+/* Zones côte à côte (switch+SFP, routeur WAN/LAN/Fibre, onduleur ondulées+
+   protégées, PDU sortie+entrée — voir zonesMultiGroupesActives côté JS) :
+   EMPILÉES plutôt que côte à côte en orientation verticale — sans cette
+   règle, un PDU vertical étroit (largeur_u réduite) écrasait ses deux
+   zones l'une À CÔTÉ de l'autre dans une largeur minuscule au lieu de les
+   empiler comme le reste du contenu vertical (bug trouvé en vérifiant).
+   !important nécessaire : flex-basis/max-width sont posés en style EN
+   LIGNE par le JS (répartition en % de la LARGEUR, sans objet ici). */
+.cell-vertical .cell-ports-main-switch { flex-direction: column; align-items: stretch; }
+.cell-vertical .cell-ports-rj-zone,
+.cell-vertical .cell-ports-sfp-zone {
+    /* flex:1 1 0 + min-height:0 : sans hauteur EXPLICITE ici, la grille
+       grid-auto-flow:column de .cell-ports (à l'intérieur) ne sait plus où
+       « wrapper » en nouvelle colonne et étale toutes les prises sur une
+       seule rangée logique, débordant très largement de la cellule
+       (bug trouvé en vérifiant — .cell-ports-rj-zone/.cell-ports-sfp-zone
+       n'ont normalement JAMAIS besoin de leur propre hauteur en
+       horizontal, seule la largeur en % comptait jusqu'ici). */
+    flex-basis: auto !important; max-width: none !important; width: 100%;
+    flex: 1 1 0; min-height: 0; overflow: hidden;
+}
+.cell-vertical .cell-ports-sfp-zone {
+    border-left: none; margin-left: 0; padding-left: 0;
+    border-top: 1px dashed rgba(255,255,255,.15); margin-top: .3rem; padding-top: .3rem;
+}
 </style>
 {% endblock %}
 
@@ -1150,12 +1202,18 @@ const MAX_COLS = 5;
 // (1 U = 1,75 pouce ; largeur rack = 19 pouces → ratio = 1,75/19 ≈ 0,0921)
 const U_RATIO = 1.75 / 19;
 let U_H = 44;   // valeur initiale, recalculée après rendu
+// Largeur réelle (px) d'une rangée du rack — grille à 10 colonnes fractionnées
+// (voir .rack-row en CSS) : sert à convertir un span de colonnes (1-10,
+// largeur_u) en pixels pour tailleElecVertical() ci-dessous. Mesurée en même
+// temps que U_H (même conteneur, même règle de recalcul).
+let RACK_ROW_W = 900;   // valeur initiale, recalculée après rendu
 
 function calcUH(rerender) {
     const rr = document.getElementById('rack-rows');
     if (!rr) return;
     const w = rr.getBoundingClientRect().width || rr.offsetWidth;
     if (w < 60) return;
+    RACK_ROW_W = w;
     const newH = Math.max(22, Math.round(w * U_RATIO));
     if (newH === U_H && !rerender) return;
     U_H = newH;
@@ -1239,6 +1297,33 @@ function tailleDeuxLignes(rowH) {
 function tailleElec(rowH) {
     const hauteurLigneInfo = 16, paddingCellule = 6, paddingHautZone = 3, margeSecurite = 3;
     const dispo = (rowH || U_H) - hauteurLigneInfo - paddingCellule - paddingHautZone - margeSecurite;
+    const taille = Math.max(28, Math.min(54, dispo));
+    const ratio = taille / 54;
+    const symboleFs = Math.max(10, Math.round(19 * ratio));
+    const numFs = Math.max(7, Math.round(11 * ratio));
+    return `--elec-size:${taille}px;--elec-symbole-fs:${symboleFs}px;--elec-num-fs:${numFs}px;`;
+}
+
+// Équivalent de tailleElec() ci-dessus, mais pour l'orientation VERTICALE
+// (voir .cell-vertical en CSS) : la grille de prises y remplit la HAUTEUR en
+// colonnes plutôt que la largeur en lignes, donc la contrainte qui compte
+// n'est plus rowH mais la LARGEUR réelle de la cellule — jusqu'ici jamais
+// calculée, tailleElec() restait délibérément non appliquée en vertical
+// (voir makeOccupiedCell) et la taille de prise retombait sur le plancher
+// CSS fixe de 54px (.cell-vertical .cell-ports-elec) quelle que soit la
+// largeur disponible. Un PDU vertical étroit (largeur_u=2, quelques
+// dizaines de px après padding) rendait donc des prises pleine taille dans
+// une colonne bien trop étroite pour les accueillir — signalé en usage
+// réel, corrigé en appliquant ici le même principe de réduction que
+// tailleElec, sur l'axe perpendiculaire.
+// largeur : span de colonnes du rack (1-10, PAS un pixel — le paramètre
+// `largeur` déjà reçu par makeOccupiedCell), converti en pixels via
+// RACK_ROW_W (grille à 10 colonnes fractionnées, voir .rack-row en CSS).
+function tailleElecVertical(largeur) {
+    const nbColsRack = 10, gapRack = 2, paddingCellule = 10;
+    const colPx = (RACK_ROW_W - (nbColsRack - 1) * gapRack) / nbColsRack;
+    const largeurCellPx = colPx * (largeur || 10) + Math.max(0, (largeur || 10) - 1) * gapRack;
+    const dispo = largeurCellPx - paddingCellule;
     const taille = Math.max(28, Math.min(54, dispo));
     const ratio = taille / 54;
     const symboleFs = Math.max(10, Math.round(19 * ratio));
@@ -1805,17 +1890,23 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     const estElec = s.type_equipement === 'UPS' || s.type_equipement === 'PDU';
     const estUPS = s.type_equipement === 'UPS';
     const estPDU = s.type_equipement === 'PDU';
-    // Taille des prises calculée depuis la hauteur RÉELLE de l'élément
-    // (voir tailleElec) — UNIQUEMENT en orientation horizontale : à la
-    // verticale, la vraie contrainte est la LARGEUR (hors sujet ici),
-    // appliquer tailleElec() y aurait réduit les prises sans raison.
-    // hauteurReelleCell, pas rowH tel quel : rowH n'est jamais que la
+    // Taille des prises calculée depuis la dimension RÉELLEMENT contrainte
+    // de l'élément : la hauteur en horizontal (tailleElec — la grille de
+    // prises y remplit la largeur en lignes), la LARGEUR en vertical
+    // (tailleElecVertical — la grille y remplit la hauteur en colonnes,
+    // voir .cell-vertical en CSS) — sans ce second cas, un PDU vertical
+    // étroit (largeur_u réduite) gardait des prises à taille fixe (54px)
+    // quelle que soit la largeur réellement disponible, débordant/rognées
+    // dans une colonne trop étroite pour les accueillir (signalé en usage
+    // réel). hauteurReelleCell, pas rowH tel quel : rowH n'est jamais que la
     // hauteur d'UNE SEULE rangée U, alors qu'un élément hauteur_u > 1
     // (ex. un onduleur en 2U) déborde sur plusieurs rangées et dispose de
     // BIEN plus de hauteur que rowH seul (bug trouvé en vérifiant — un
     // onduleur en 2U voyait ses prises réduites exactement comme en 1U).
     const hauteurReelleCell = hu > 1 ? (hu * U_H + (hu - 1)) : (rowH || U_H);
-    const styleElec = (estElec && s.orientation !== 'vertical') ? tailleElec(hauteurReelleCell) : '';
+    const styleElec = estElec
+        ? (s.orientation === 'vertical' ? tailleElecVertical(largeur) : tailleElec(hauteurReelleCell))
+        : '';
     const estRouteur = s.type_equipement === 'Routeur/Pare-feu';
     const estServeurMiniPC = s.type_equipement === 'Serveur' || s.type_equipement === 'Mini PC';
     // Groupe "haut" (même plage numéro que SFP, voir SFP_NUMERO_OFFSET) —
@@ -2767,7 +2858,12 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau, typeEquipement) {
         html += `<div class="tip-row"><span class="tip-key">${estBandeau ? 'Pièce' : 'Usage'}</span><span class="tip-val">${escH(p.usage_libre)}</span></div>`;
     } else {
         const estElec = typeEquipement === 'UPS' || typeEquipement === 'PDU';
-        const libreTxt = typeEquipement === 'UPS'
+        // Port d'entrée non relié (voir estPortEntree) : jamais "Prise
+        // libre" (ce n'est pas une prise de SORTIE inutilisée, juste pas
+        // encore câblée à un onduleur) — incohérent avec son titre "Entrée
+        // (alimentation du PDU)" ci-dessus, corrigé en vérifiant.
+        const libreTxt = estPortEntree(p.numero) ? 'Pas encore reliée à un onduleur'
+            : typeEquipement === 'UPS'
             ? (estPortSfp(p.numero) ? 'Prise protégée libre — inutilisée' : 'Prise ondulée libre — inutilisée')
             : estElec ? 'Prise libre — inutilisée' : 'Port libre — non affecté';
         html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);">${libreTxt}</span></div>`;
@@ -3066,20 +3162,27 @@ function afficherEditeurPorts(s) {
         list.innerHTML = ports.map(p => priseMuraleEditorRowHTML(s.id, p.prise_murale, p.numero) + portRjEditorRowHTML(s.id, p)).join('');
         return;
     }
-    // Trois groupes affichés dans l'ordre, chacun séparé par un intitulé
+    // Quatre groupes affichés dans l'ordre, chacun séparé par un intitulé
     // s'il y en a plus d'un — la liste est déjà triée par numéro côté
     // serveur (voir _ports_avec_details), donc toujours base (1..48) puis
-    // haute (1001+, SFP/Fibre) puis WAN (2001+) sans besoin de retrier.
+    // haute (1001+, SFP/Fibre/protégées) puis WAN (2001+) puis entrée PDU
+    // (9001) sans besoin de retrier. !estPortEntree sur "base" : sans ce
+    // filtre, le port d'entrée d'un PDU (ni SFP ni WAN au sens des plages
+    // existantes) tombait dedans et affichait à tort un sélecteur
+    // d'appareil, comme une prise de SORTIE normale (bug corrigé, voir
+    // portEntreeEditorRowHTML — ce port ne se lie qu'à une autre prise).
     const type = s.type_equipement;
-    const base = ports.filter(p => !estPortSfp(p.numero) && !estPortWan(p.numero));
+    const base = ports.filter(p => !estPortSfp(p.numero) && !estPortWan(p.numero) && !estPortEntree(p.numero));
     const haut = ports.filter(p => estPortSfp(p.numero));
     const wan  = ports.filter(p => estPortWan(p.numero));
-    const labelHaut = type === 'Routeur/Pare-feu' ? 'Fibre' : 'SFP (fibre)';
+    const entree = ports.filter(p => estPortEntree(p.numero));
+    const labelHaut = type === 'Routeur/Pare-feu' ? 'Fibre' : (type === 'UPS' ? 'Prises protégées' : 'SFP (fibre)');
     list.innerHTML = base.map(p => portEditorRowHTML(s.id, p, type)).join('')
         + (haut.length ? `<div class="form-section-title" style="margin:.4rem 0 .2rem;font-size:.65rem;">${labelHaut}</div>` : '')
         + haut.map(p => portEditorRowHTML(s.id, p, type)).join('')
         + (wan.length ? `<div class="form-section-title" style="margin:.4rem 0 .2rem;font-size:.65rem;">WAN</div>` : '')
-        + wan.map(p => portEditorRowHTML(s.id, p, type)).join('');
+        + wan.map(p => portEditorRowHTML(s.id, p, type)).join('')
+        + entree.map(p => portEntreeEditorRowHTML(s.id, p)).join('');
 }
 
 // Calcule, pour la baie COURANTE, les appareil_id déjà affectés à UNE
@@ -3244,6 +3347,41 @@ function portRjEditorRowHTML(slotId, p) {
     if (p.lie_slot_id) {
         html += `
     <div style="display:flex;gap:.3rem;align-items:center;padding-left:31px;">
+        <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
+               data-lie-slot="${p.lie_slot_id}" data-lie-numero="${p.lie_port_numero}"
+               value="${escH(p.cable_couleur||'')}" placeholder="Couleur cordon"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerCableLabel(this)">
+        <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
+               data-lie-slot="${p.lie_slot_id}" data-lie-numero="${p.lie_port_numero}"
+               value="${escH(p.cable_longueur||'')}" placeholder="Longueur"
+               style="flex:1;font-size:.68rem;padding:.2rem .3rem;margin:0;"
+               onchange="changerCableLabel(this)">
+    </div>`;
+    }
+    return html;
+}
+
+// Port "Entrée" d'un PDU (voir NUMERO_ENTREE_PDU) — même principe que
+// portRjEditorRowHTML ci-dessus : pas de sélecteur cible (ce port ne
+// SE LIE qu'à une autre prise, jamais assigné directement à un appareil/
+// périphérique/usage libre), seulement l'état du lien — créé via
+// "🔗 Lier des ports" — et l'étiquette du cordon. Bug corrigé, trouvé en
+// vérifiant : sans cette fonction dédiée, ce port tombait dans le groupe
+// "base" générique de afficherEditeurPorts() (ni SFP ni WAN au sens des
+// plages existantes) et affichait à tort un sélecteur d'appareil, comme
+// une prise de SORTIE normale.
+function portEntreeEditorRowHTML(slotId, p) {
+    const etat = p.lie_slot_id
+        ? `🔗 ${escH(p.nom_cible)}`
+        : '<span style="color:var(--text-muted);">— Non reliée —</span>';
+    let html = `
+    <div style="display:flex;gap:.3rem;align-items:center;padding-left:0;border-top:1px dashed var(--border);padding-top:.3rem;margin-top:.15rem;">
+        <span style="flex:1;font-size:.7rem;color:var(--text-secondary);">🔌 Entrée : ${etat}</span>
+    </div>`;
+    if (p.lie_slot_id) {
+        html += `
+    <div style="display:flex;gap:.3rem;align-items:center;">
         <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
                data-lie-slot="${p.lie_slot_id}" data-lie-numero="${p.lie_port_numero}"
                value="${escH(p.cable_couleur||'')}" placeholder="Couleur cordon"
