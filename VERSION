@@ -1,8 +1,43 @@
-PARCINFO_VERSION=2.18.87
+PARCINFO_VERSION=2.18.88
 RELEASE_DATE=2026-08-30
-BUILD_NUMBER=2026083001
+BUILD_NUMBER=2026083002
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.88 - Inventaire : badge UPS + prise d'entree du PDU (chaine d'alimentation)
+# Demande : dans l'inventaire des appareils, un badge quand un appareil
+# est relie electriquement a un onduleur - sauf que ca doit aussi
+# fonctionner quand l'appareil est branche sur un PDU (simple multiprise)
+# dont l'entree est elle-meme reliee a un onduleur.
+#
+# 1. Badge UPS dans l'inventaire des appareils : un appareil branche sur
+#    une prise d'un vrai onduleur affiche desormais un badge ambre "UPS"
+#    a cote de son nom (meme gabarit que les badges AV/EDR/RMM deja
+#    presents), avec le nom de l'onduleur au survol. Toutes les baies du
+#    client sont prises en compte, pas seulement celle affichee.
+# 2. Prise d'entree du PDU : chaque PDU recoit desormais automatiquement
+#    une prise "Entree" (zone dediee, separee des prises de SORTIE,
+#    toujours exactement une seule) - a lier via le meme mode "Lier des
+#    ports" deja utilise pour tout le cablage de la baie, typiquement vers
+#    une prise d'onduleur. Creee/retiree automatiquement selon le type de
+#    l'equipement, jamais un champ a saisir.
+# 3. Badge UPS TRANSITIF : un appareil branche sur un PDU dont l'entree
+#    remonte - directement, ou a travers plusieurs PDU en cascade -
+#    jusqu'a un vrai onduleur, herite desormais du badge. Le tooltip
+#    distingue clairement les deux cas ("Alimente par l'onduleur X" vs
+#    "Alimente par le PDU Y, lui-meme alimente par un onduleur").
+#
+# Ajustement trouve en verifiant : la premiere version empilait la
+# nouvelle zone "Entree" AU-DESSUS des prises de sortie (comme les prises
+# murales d'un bandeau RJ) - deux rangees de prises rondes ne tiennent pas
+# dans 1U, rognees par l'overflow:hidden du conteneur. Repositionnee en
+# zone LATERALE (meme principe que WAN/SFP d'un routeur).
+#
+# Suite pytest toujours verte (174 tests) + tous les scripts de test
+# autonomes. Verifie en direct dans le navigateur : creation automatique
+# de la prise d'entree, liaison a un onduleur, badge transitif correct,
+# disparition du badge une fois le lien detache, non-regression sur un
+# routeur avec WAN+Fibre.
 
 # Version 2.18.87 - Baie de brassage : badge d'alimentation, mise a l'echelle des prises electriques
 # Trois ajustements demandes en usage reel sur les prises electriques

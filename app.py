@@ -3938,6 +3938,16 @@ def liste_appareils():
         })
     for a in appareils:
         a['peripheriques'] = periph_by_app.get(a['id'], [])
+    # Badge UPS (demandé) : un appareil branché sur une prise d'onduleur —
+    # directement, ou via un PDU dont l'entrée remonte, en cascade, jusqu'à
+    # un onduleur (voir _appareils_secourus_par_onduleur) — toutes les
+    # baies du client, pas seulement une en particulier, l'inventaire étant
+    # une vue globale du parc.
+    conn3 = get_db()
+    ups_par_appareil = _appareils_secourus_par_onduleur(conn3, cid)
+    conn3.close()
+    for a in appareils:
+        a['ups_nom'] = ups_par_appareil.get(a['id'])
     service_filtre_nom = None
     if f_service:
         conn2 = get_db()
@@ -5934,6 +5944,22 @@ PLAFOND_SFP = 8
 WAN_NUMERO_OFFSET = 2000
 PLAFOND_WAN = 4
 
+# Port "Entrée" d'un PDU — son propre cordon d'alimentation (typiquement
+# branché sur une prise d'onduleur, éventuellement sur un AUTRE PDU en
+# cascade), distinct des prises de SORTIE (nb_ports) qu'il redistribue —
+# demandé, pour propager le statut "alimenté par un onduleur" (voir
+# liste_appareils()) aux appareils branchés sur ce PDU quand son entrée
+# remonte, directement ou en cascade, jusqu'à un vrai onduleur. Plage la
+# plus haute de toutes (après WAN_NUMERO_OFFSET) : TOUJOURS EXACTEMENT 1
+# port, jamais configurable (pas de "nombre d'entrées" — un PDU n'a
+# physiquement qu'un seul cordon), créé/retiré automatiquement selon
+# type_equipement (voir _reconcilier_port_entree), jamais depuis un champ
+# de formulaire. Se lie avec le MÊME mécanisme générique que tout autre
+# port (api_baie_lien_port) — un onduleur/switch/routeur n'a jamais ce
+# port.
+ENTREE_NUMERO_OFFSET = 9000
+NUMERO_ENTREE_PDU = ENTREE_NUMERO_OFFSET + 1
+
 def _reconcilier_ports(conn, slot_id, nb_ports, ports_existants=None, type_equipement=None):
     """Ajuste les lignes baie_slot_ports d'un slot à nb_ports (0-48, 0-24
     pour un bandeau RJ — voir _plafond_nb_ports) : crée les numéros
@@ -6013,18 +6039,23 @@ def _reconcilier_ports_sfp(conn, slot_id, nb_ports_sfp, ports_existants=None):
 
 def _reconcilier_ports_wan(conn, slot_id, nb_ports_wan, ports_existants=None):
     """Miroir de _reconcilier_ports_sfp pour les ports WAN d'un routeur/
-    pare-feu (0-4, voir PLAFOND_WAN), sur la plage WAN_NUMERO_OFFSET+1..+n
-    — la plus haute des trois (RJ/LAN, SFP/Fibre, WAN), donc pas besoin de
-    borne supérieure pour sa propre suppression (rien n'existe au-dessus)."""
+    pare-feu (0-4, voir PLAFOND_WAN), sur la plage WAN_NUMERO_OFFSET+1..+n.
+    Bornée en haut par ENTREE_NUMERO_OFFSET (même raison que SFP bornée par
+    WAN_NUMERO_OFFSET, voir _reconcilier_ports_sfp) : un slot peut avoir à
+    la fois des ports WAN ET, s'il s'agit d'un PDU — cas normalement
+    exclusif en pratique, mais la borne coûte rien et évite toute
+    ambiguïté future — un port d'entrée (voir _reconcilier_port_entree)."""
     nb_ports_wan = min(PLAFOND_WAN, max(0, int(nb_ports_wan or 0)))
     plafond_numero = WAN_NUMERO_OFFSET + nb_ports_wan
     now = _utcnow().isoformat()
     if ports_existants is None:
         supprimes = [r[0] for r in conn.execute(
-            'SELECT numero FROM baie_slot_ports WHERE slot_id=? AND numero>?', (slot_id, plafond_numero)).fetchall()]
+            'SELECT numero FROM baie_slot_ports WHERE slot_id=? AND numero>? AND numero<?',
+            (slot_id, plafond_numero, ENTREE_NUMERO_OFFSET)).fetchall()]
         if supprimes:
             _detacher_liens_vers(conn, slot_id, supprimes)
-        conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=? AND numero>?', (slot_id, plafond_numero))
+        conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=? AND numero>? AND numero<?',
+                     (slot_id, plafond_numero, ENTREE_NUMERO_OFFSET))
         deja = {r[0] for r in conn.execute('SELECT numero FROM baie_slot_ports WHERE slot_id=?', (slot_id,)).fetchall()}
         for numero in range(WAN_NUMERO_OFFSET + 1, plafond_numero + 1):
             if numero not in deja:
@@ -6038,6 +6069,97 @@ def _reconcilier_ports_wan(conn, slot_id, nb_ports_wan, ports_existants=None):
                  piece,cable_couleur,cable_longueur,date_maj)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''', (slot_id, numero, ap, pe, us, lsid, lnum, piece, cc, cl, now))
     return nb_ports_wan
+
+def _reconcilier_port_entree(conn, slot_id, type_equipement, ports_existants=None):
+    """Crée ou retire le port d'entrée unique d'un PDU (numero=
+    NUMERO_ENTREE_PDU, voir plus haut) selon que type_equipement vaut
+    'PDU' ou non — même mécanique que les autres _reconcilier_ports*, mais
+    TOUJOURS 0 ou 1 (jamais un compte fourni par l'appelant, contrairement
+    à nb_ports/nb_ports_sfp/nb_ports_wan)."""
+    doit_exister = (type_equipement == 'PDU')
+    now = _utcnow().isoformat()
+    if ports_existants is None:
+        existe = conn.execute('SELECT 1 FROM baie_slot_ports WHERE slot_id=? AND numero=?',
+                               (slot_id, NUMERO_ENTREE_PDU)).fetchone()
+        if not doit_exister:
+            if existe:
+                _detacher_liens_vers(conn, slot_id, [NUMERO_ENTREE_PDU])
+                conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=? AND numero=?', (slot_id, NUMERO_ENTREE_PDU))
+        elif not existe:
+            conn.execute('INSERT INTO baie_slot_ports (slot_id,numero,date_maj) VALUES (?,?,?)',
+                         (slot_id, NUMERO_ENTREE_PDU, now))
+    elif doit_exister:
+        ap, pe, us, lsid, lnum, piece, cc, cl = ports_existants.get(
+            NUMERO_ENTREE_PDU, (None, None, '', None, None, '', '', ''))
+        conn.execute('''INSERT INTO baie_slot_ports
+            (slot_id,numero,appareil_id,peripherique_id,usage_libre,lie_slot_id,lie_port_numero,
+             piece,cable_couleur,cable_longueur,date_maj)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
+            (slot_id, NUMERO_ENTREE_PDU, ap, pe, us, lsid, lnum, piece, cc, cl, now))
+    # else : ports_existants fourni mais doit_exister faux — rien à
+    # reporter, l'ancien port d'entrée (s'il existait) ne survit
+    # simplement pas au remplacement, cohérent avec le reste du report.
+
+def _appareils_secourus_par_onduleur(conn, cid):
+    """appareil_id -> nom de l'élément qui l'alimente directement, pour
+    tout appareil branché — même transitivement à travers une cascade de
+    PDU — sur un vrai onduleur (demandé, voir badge_ups dans
+    liste_appareils.html). Un PDU n'est secouru QUE si son port d'entrée
+    (NUMERO_ENTREE_PDU, voir _reconcilier_port_entree) est lié, directement
+    ou via un autre PDU déjà secouru, à un port d'un onduleur — jamais
+    déduit automatiquement, toujours un lien explicite posé via
+    "🔗 Lier des ports" comme n'importe quel autre câblage. Une prise
+    ondulée ou protégée d'un onduleur compte pareil (toutes deux une
+    connexion ÉLECTRIQUE via sa batterie/son parafoudre), le port d'entrée
+    lui-même jamais (il n'alimente rien directement, appareil_id y est
+    toujours NULL par construction).
+    Propagation par point fixe (boucle jusqu'à stabilité) plutôt qu'une
+    requête SQL récursive : le nombre de PDU en cascade dans une baie
+    réelle est trivialement petit, une implémentation simple en Python
+    reste largement assez rapide et bien plus lisible qu'un WITH RECURSIVE."""
+    slots_rows = conn.execute(
+        "SELECT id, type_equipement, nom_custom FROM baie_slots WHERE client_id=? AND type_equipement IN ('UPS','PDU')",
+        (cid,)).fetchall()
+    noms = {r[0]: (r[2] or '') for r in slots_rows}
+    ups_ids = {r[0] for r in slots_rows if r[1] == 'UPS'}
+    pdu_ids = {r[0] for r in slots_rows if r[1] == 'PDU'}
+    if not ups_ids and not pdu_ids:
+        return {}
+    # Où pointe (slot_id en face) le port d'entrée de chaque PDU, s'il est
+    # lié à quelque chose.
+    entree_vers = {}
+    if pdu_ids:
+        placeholders = ','.join('?' * len(pdu_ids))
+        rows = conn.execute(
+            f'''SELECT slot_id, lie_slot_id FROM baie_slot_ports
+                WHERE numero=? AND slot_id IN ({placeholders}) AND lie_slot_id IS NOT NULL''',
+            (NUMERO_ENTREE_PDU, *pdu_ids)).fetchall()
+        entree_vers = {r[0]: r[1] for r in rows}
+    secourus = set(ups_ids)
+    changement = True
+    while changement:
+        changement = False
+        for pdu_id, cible_slot_id in entree_vers.items():
+            if pdu_id not in secourus and cible_slot_id in secourus:
+                secourus.add(pdu_id)
+                changement = True
+    if not secourus:
+        return {}
+    placeholders = ','.join('?' * len(secourus))
+    rows = conn.execute(
+        f'''SELECT bsp.appareil_id, bsp.slot_id FROM baie_slot_ports bsp
+            WHERE bsp.slot_id IN ({placeholders}) AND bsp.appareil_id IS NOT NULL AND bsp.numero != ?''',
+        (*secourus, NUMERO_ENTREE_PDU)).fetchall()
+    # Texte complet du tooltip (voir badge_ups dans liste_appareils.html) —
+    # distingue le cas direct (branché sur l'onduleur lui-même) du cas en
+    # cascade (branché sur un PDU dont l'entrée remonte à un onduleur),
+    # pour ne jamais dire à tort "alimenté par l'onduleur « PDU X »".
+    resultat = {}
+    for appareil_id, slot_id in rows:
+        nom = noms[slot_id] or ('Onduleur' if slot_id in ups_ids else 'PDU')
+        resultat[appareil_id] = (f"l'onduleur « {nom} »" if slot_id in ups_ids
+                                  else f"le PDU « {nom} », lui-même alimenté par un onduleur")
+    return resultat
 
 def _reconcilier_prises_murales(conn, slot_id, nb_ports, type_equipement, prises_existantes=None):
     """Ajuste les lignes baie_prises_murales d'un bandeau RJ à nb_ports —
@@ -6202,18 +6324,21 @@ def api_baie_ajouter_slot():
             'SELECT numero, piece, identification, appareil_id, peripherique_id, usage_libre, cable_couleur, cable_longueur '
             'FROM baie_prises_murales WHERE slot_id=?', (ancien[0],)).fetchall()}
         # Numéros qui ne seront pas recréés (nb_ports/nb_ports_sfp/
-        # nb_ports_wan réduits) : détacher leur éventuel partenaire AVANT
-        # de perdre la trace de l'ancien slot_id. Trois plages distinctes
-        # (voir SFP_NUMERO_OFFSET/WAN_NUMERO_OFFSET) : un seuil unique
-        # aurait à tort marqué TOUS les ports d'une plage haute comme
-        # "supprimés" dès que le plafond d'une AUTRE plage est comparé à
-        # leur numéro.
+        # nb_ports_wan réduits, ou entrée PDU disparue si le type change) :
+        # détacher leur éventuel partenaire AVANT de perdre la trace de
+        # l'ancien slot_id. Quatre plages distinctes (voir
+        # SFP_NUMERO_OFFSET/WAN_NUMERO_OFFSET/ENTREE_NUMERO_OFFSET) : un
+        # seuil unique aurait à tort marqué TOUS les ports d'une plage
+        # haute comme "supprimés" dès que le plafond d'une AUTRE plage est
+        # comparé à leur numéro.
         nb_ports_demande = min(_plafond_nb_ports(f.get('type_equipement', '')), max(0, int(f.get('nb_ports', 0) or 0)))
         nb_ports_sfp_demande = min(PLAFOND_SFP, max(0, int(f.get('nb_ports_sfp', 0) or 0)))
         nb_ports_wan_demande = min(PLAFOND_WAN, max(0, int(f.get('nb_ports_wan', 0) or 0)))
+        garde_entree = f.get('type_equipement', '') == 'PDU'
         supprimes = ([n for n in anciens_ports if n <= SFP_NUMERO_OFFSET and n > nb_ports_demande]
                      + [n for n in anciens_ports if SFP_NUMERO_OFFSET < n <= WAN_NUMERO_OFFSET and n > SFP_NUMERO_OFFSET + nb_ports_sfp_demande]
-                     + [n for n in anciens_ports if n > WAN_NUMERO_OFFSET and n > WAN_NUMERO_OFFSET + nb_ports_wan_demande])
+                     + [n for n in anciens_ports if WAN_NUMERO_OFFSET < n <= ENTREE_NUMERO_OFFSET and n > WAN_NUMERO_OFFSET + nb_ports_wan_demande]
+                     + ([n for n in anciens_ports if n > ENTREE_NUMERO_OFFSET] if not garde_entree else []))
         if supprimes:
             _detacher_liens_vers(conn, ancien[0], supprimes)
         conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=?', (ancien[0],))
@@ -6235,6 +6360,7 @@ def api_baie_ajouter_slot():
     nb_ports = _reconcilier_ports(conn, sid, f.get('nb_ports', 0), anciens_ports, f.get('type_equipement', ''))
     nb_ports_sfp = _reconcilier_ports_sfp(conn, sid, f.get('nb_ports_sfp', 0), anciens_ports)
     nb_ports_wan = _reconcilier_ports_wan(conn, sid, f.get('nb_ports_wan', 0), anciens_ports)
+    _reconcilier_port_entree(conn, sid, f.get('type_equipement', ''), anciens_ports)
     _reconcilier_prises_murales(conn, sid, nb_ports, f.get('type_equipement', ''), anciennes_prises)
     if ancien:
         # Le remplacement change l'id du slot (voir commentaire ci-dessus) :
@@ -6331,6 +6457,7 @@ def api_baie_slot(id):
     _reconcilier_ports(conn, id, nb_ports, type_equipement=f.get('type_equipement', ''))
     nb_ports_sfp = _reconcilier_ports_sfp(conn, id, nb_ports_sfp)
     nb_ports_wan = _reconcilier_ports_wan(conn, id, nb_ports_wan)
+    _reconcilier_port_entree(conn, id, f.get('type_equipement', ''))
     conn.execute('UPDATE baie_slots SET nb_ports_sfp=?, nb_ports_wan=? WHERE id=?', (nb_ports_sfp, nb_ports_wan, id))
     _reconcilier_prises_murales(conn, id, nb_ports, f.get('type_equipement', ''))
     conn.commit()

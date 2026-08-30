@@ -380,6 +380,11 @@
 .port:not(.port-libre).port-highlight,
 .port:not(.port-libre).port-hover-link { box-shadow:inset 0 0 0 999px rgba(8,10,16,0); }
 .port.port-libre    { color:#64748b; background:#1a2530; }
+/* Port "Entrée" d'un PDU (voir NUMERO_ENTREE_PDU) — teinte bleu-gris
+   distincte à l'état libre (le symbole 🔌 le distingue déjà, mais une
+   couleur différente évite toute confusion visuelle rapide avec une
+   simple prise de SORTIE non branchée). */
+.port.port-entree.port-libre { background:#1e2a3a; }
 .port.port-highlight,
 .port.port-hover-link { box-shadow:inset 0 0 0 999px rgba(8,10,16,0), 0 0 0 2px #fff, 0 0 6px #fff; transform:scale(1.12); z-index:4; position:relative; }
 /* Mode "Lier des ports" : premier port cliqué, en attente du second. */
@@ -1161,20 +1166,27 @@ const TYPE_CSS = {
     'Serveur':'srv','Mini PC':'srv','Switch':'sw','Routeur/Pare-feu':'fw','NAS':'nas',
     'UPS':'ups','Patch Panel':'patch','Bandeau RJ':'bandeau','Étagère':'etagere','PDU':'pdu','Borne WiFi':'ap',
 };
-// Trois plages génériques de numérotation de port, même convention que
-// côté serveur (voir SFP_NUMERO_OFFSET/WAN_NUMERO_OFFSET dans app.py) :
-// "de base" (RJ/LAN/Ethernet/prises électriques, 1-48, jamais d'offset),
-// "haute" (SFP pour un switch/serveur, Fibre pour un routeur — même
-// plage, juste relabellisée selon le type, voir appliquerReglesType), et
-// "WAN" (routeur/pare-feu uniquement, la plus haute des trois). Jamais
-// partagées entre elles, pas besoin de colonne "type de port" séparée.
+// Quatre plages génériques de numérotation de port, même convention que
+// côté serveur (voir SFP_NUMERO_OFFSET/WAN_NUMERO_OFFSET/
+// ENTREE_NUMERO_OFFSET dans app.py) : "de base" (RJ/LAN/Ethernet/prises
+// électriques, 1-48, jamais d'offset), "haute" (SFP pour un switch/
+// serveur, Fibre pour un routeur, prises protégées pour un onduleur —
+// même plage, juste relabellisée selon le type, voir appliquerReglesType),
+// "WAN" (routeur/pare-feu uniquement), et "entrée" (PDU uniquement, TOUJOURS
+// exactement 1 port — le cordon d'alimentation du PDU lui-même, typiquement
+// vers une prise d'onduleur — voir _reconcilier_port_entree côté serveur).
+// Jamais partagées entre elles, pas besoin de colonne "type de port" séparée.
 const SFP_NUMERO_OFFSET = 1000;
 const PLAFOND_SFP = 8;
 const WAN_NUMERO_OFFSET = 2000;
 const PLAFOND_WAN = 4;
+const ENTREE_NUMERO_OFFSET = 9000;
+const NUMERO_ENTREE_PDU = ENTREE_NUMERO_OFFSET + 1;
 function estPortSfp(numero) { return numero > SFP_NUMERO_OFFSET && numero <= WAN_NUMERO_OFFSET; }
-function estPortWan(numero) { return numero > WAN_NUMERO_OFFSET; }
+function estPortWan(numero) { return numero > WAN_NUMERO_OFFSET && numero <= ENTREE_NUMERO_OFFSET; }
+function estPortEntree(numero) { return numero > ENTREE_NUMERO_OFFSET; }
 function numeroAffiche(numero) {
+    if (estPortEntree(numero)) return numero;
     if (estPortWan(numero)) return numero - WAN_NUMERO_OFFSET;
     if (estPortSfp(numero)) return numero - SFP_NUMERO_OFFSET;
     return numero;
@@ -1242,7 +1254,12 @@ function tailleElec(rowH) {
 // (jamais "Port"). Un onduleur va plus loin (demandé) : "Prise ondulée"
 // (plage de base, secourue par la batterie) ou "Prise protégée" (plage
 // "haute", parafoudre seul — même mécanisme que SFP/Fibre ci-dessous).
+// "Entrée" (PDU uniquement, plage la plus haute) : le cordon
+// d'alimentation du PDU lui-même — vérifié EN PREMIER, avant le
+// typeEquipement (qui vaut toujours 'PDU' pour ce port, mais la plage
+// prime pour ne jamais tomber dans la branche "Prise X" générique du PDU).
 function libellePortAffiche(typeEquipement, numero) {
+    if (estPortEntree(numero)) return 'Entrée (alimentation du PDU)';
     if (typeEquipement === 'UPS') return (estPortSfp(numero) ? 'Prise protégée ' : 'Prise ondulée ') + numeroAffiche(numero);
     if (typeEquipement === 'PDU') return 'Prise ' + numero;
     if (estPortWan(numero)) return 'Port WAN ' + numeroAffiche(numero);
@@ -1258,6 +1275,7 @@ function libellePortAffiche(typeEquipement, numero) {
 // l'éditeur de ports (portEditorRowHTML) — même logique de plage/type,
 // juste abrégée pour tenir sur ~40px.
 function labelCourtPort(typeEquipement, numero) {
+    if (estPortEntree(numero)) return '🔌IN';
     if (typeEquipement === 'UPS') return (estPortSfp(numero) ? '⚡' : '🔋') + numeroAffiche(numero);
     if (typeEquipement === 'PDU') return `⚡${numero}`;
     if (estPortWan(numero)) return `WAN${numeroAffiche(numero)}`;
@@ -1786,6 +1804,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // périphérique/usage libre, aucun champ ni colonne supplémentaire.
     const estElec = s.type_equipement === 'UPS' || s.type_equipement === 'PDU';
     const estUPS = s.type_equipement === 'UPS';
+    const estPDU = s.type_equipement === 'PDU';
     // Taille des prises calculée depuis la hauteur RÉELLE de l'élément
     // (voir tailleElec) — UNIQUEMENT en orientation horizontale : à la
     // verticale, la vraie contrainte est la LARGEUR (hors sujet ici),
@@ -1805,9 +1824,18 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // onduleur — sa plage de base (basePorts) devient alors ses prises
     // ONDULÉES (secourues par la batterie), voir portHTML/appliquerReglesType.
     const estHautDisponible = estSwitch || estRouteur || estServeurMiniPC || estUPS;
-    const basePorts = (estSwitch || estRouteur || estServeurMiniPC || estUPS) ? ports.filter(p => !estPortSfp(p.numero) && !estPortWan(p.numero)) : ports;
+    // !estPortEntree partout : le port d'entrée d'un PDU (voir plus bas,
+    // entreePorts) a sa PROPRE zone dédiée, jamais compté parmi les prises
+    // de SORTIE — sans ce filtre il se serait retrouvé mélangé aux prises
+    // normales, avec le symbole ⚡/🔋 d'une sortie plutôt que 🔌.
+    const basePorts = (estSwitch || estRouteur || estServeurMiniPC || estUPS)
+        ? ports.filter(p => !estPortSfp(p.numero) && !estPortWan(p.numero) && !estPortEntree(p.numero))
+        : ports.filter(p => !estPortEntree(p.numero));
     const hautPorts = estHautDisponible ? ports.filter(p => estPortSfp(p.numero)) : [];
     const wanPorts  = estRouteur ? ports.filter(p => estPortWan(p.numero)) : [];
+    // Port "Entrée" d'un PDU (demandé) : le cordon d'alimentation du PDU
+    // lui-même — TOUJOURS au plus 1 (voir NUMERO_ENTREE_PDU côté serveur).
+    const entreePorts = ports.filter(p => estPortEntree(p.numero));
     // La zone 80/20 du switch (et la largeur RJ réduite qui va avec) n'a de
     // sens que s'il y a réellement une zone SFP à séparer, ou la
     // disposition 2 lignes explicitement choisie — jamais pour un switch
@@ -1821,7 +1849,13 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // rangées étiquetées seulement s'il y a vraiment un groupe Fibre/WAN
     // configuré, sinon rendu historique pleine largeur (pas de rangée
     // "LAN" à elle seule pour un serveur resté en configuration par défaut).
-    const zonesMultiGroupesActives = (estRouteur || estServeurMiniPC || estUPS) && (hautPorts.length > 0 || wanPorts.length > 0);
+    // Port "Entrée" d'un PDU (demandé) : traité comme une zone latérale de
+    // plus, CÔTÉ À CÔTÉ avec la zone principale — JAMAIS empilée en
+    // rangée au-dessus (essayé d'abord, mais deux rangées de prises
+    // rondes ne tiennent pas dans 1U, rognées par l'overflow:hidden du
+    // conteneur, trouvé en vérifiant) — même principe que WAN/SFP pour un
+    // routeur, une seule prise suffit largement à une petite zone.
+    const zonesMultiGroupesActives = (estRouteur || estServeurMiniPC || estUPS || estPDU) && (hautPorts.length > 0 || wanPorts.length > 0 || entreePorts.length > 0);
 
     let ligneRJ;
     let zonePortsPrincipale;
@@ -1836,14 +1870,14 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         // que la disposition 2 lignes d'un switch à taille de port
         // normale, voir le commentaire de .cell-ports-row en CSS).
         // Taille de rendu d'un élément par zone : 54px pour une prise
-        // électrique ronde (base ondulée d'un onduleur ; sa zone "haute"
-        // — prises protégées — est logée dans .cell-ports-sfp-zone, pas
-        // .cell-ports-elec, mais compte tout autant pour la répartition),
-        // 24px pour un port RJ/SFP/Fibre/WAN classique.
+        // électrique ronde (base ondulée d'un onduleur, ou prises de
+        // SORTIE d'un PDU ; sa zone "haute"/"entrée" — logée dans
+        // .cell-ports-sfp-zone, pas .cell-ports-elec — compte tout autant
+        // pour la répartition), 24px pour un port RJ/SFP/Fibre/WAN classique.
         const tailleBase = estElec ? 54 : 24;
         const tailleHaut = estUPS ? 54 : 24; // prises protégées = rondes aussi ; SFP/Fibre = ports classiques
-        const [largeurBase, largeurWan, largeurHaut] = repartirLargeursZones(
-            [Math.max(1, basePorts.length) * tailleBase, wanPorts.length * 24, hautPorts.length * tailleHaut], 18);
+        const [largeurBase, largeurWan, largeurHaut, largeurEntree] = repartirLargeursZones(
+            [Math.max(1, basePorts.length) * tailleBase, wanPorts.length * 24, hautPorts.length * tailleHaut, entreePorts.length * 54], 18);
         let zones = `<div class="cell-ports-rj-zone" style="flex-basis:${largeurBase}%;max-width:${largeurBase}%;">
             <div class="cell-ports${estElec ? ' cell-ports-elec' : ''}" style="${styleElec}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div></div>`;
         if (wanPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurWan}%;max-width:${largeurWan}%;" title="Ports WAN">${wanPorts.map(p => portHTML(p, false)).join('')}</div>`;
@@ -1853,6 +1887,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         // ligne(s), pas besoin de la variante .cell-ports-elec (grid) ici
         // — styleElec (vide sauf onduleur) y pose quand même --elec-size.
         if (hautPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurHaut}%;max-width:${largeurHaut}%;${styleElec}" title="${estRouteur ? 'Ports Fibre' : estUPS ? 'Prises protégées' : 'Ports SFP'}">${hautPorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
+        if (entreePorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurEntree}%;max-width:${largeurEntree}%;${styleElec}" title="Entrée (alimentation du PDU)">${entreePorts.map(p => portHTML(p, true, s.type_equipement)).join('')}</div>`;
         zonePortsPrincipale = `<div class="cell-ports-main-switch">${zones}</div>`;
     } else if (estSwitch && s.ports_disposition === 'deux_lignes') {
         // Impairs en haut, pairs en dessous (1 3 5 7.../2 4 6 8...) — même
@@ -2524,14 +2559,20 @@ function portHTML(p, estElec, typeEquipement) {
     // (avec offset pour un port SFP, voir SFP_NUMERO_OFFSET) — c'est ce que
     // le serveur attend en retour ; seul le LIBELLÉ affiché est ajusté.
     const sfp = estPortSfp(p.numero);
+    // Port "Entrée" d'un PDU (voir NUMERO_ENTREE_PDU côté serveur) : rendu
+    // avec la MÊME forme ronde qu'une prise électrique (.port-elec, voir
+    // estElec ci-dessous forcé à true), mais son propre symbole (🔌, ni
+    // batterie ni éclair — ce n'est pas une prise de SORTIE) et aucun
+    // numéro affiché (il n'y en a jamais qu'un seul par PDU).
+    const estEntree = estPortEntree(p.numero);
     // Symbole de prise (demandé, voir symbolePrise) — affiché même libre,
     // comme la sérigraphie d'un vrai onduleur sur toutes ses prises.
-    const symbole = estElec ? symbolePrise(typeEquipement, p.numero) : '';
-    const contenuNumero = estElec ? `<span class="port-elec-num">${numeroAffiche(p.numero)}</span>` : numeroAffiche(p.numero);
+    const symbole = estEntree ? '🔌' : (estElec ? symbolePrise(typeEquipement, p.numero) : '');
+    const contenuNumero = estEntree ? '' : (estElec ? `<span class="port-elec-num">${numeroAffiche(p.numero)}</span>` : numeroAffiche(p.numero));
     // Voyant de ping omis pour une prise électrique (demandé, voir
     // classePing ci-dessus) — jamais de statut réseau à montrer dessus.
     const voyant = estElec ? '' : '<span class="port-led"></span>';
-    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${estElec ? ' port-elec' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
+    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${estElec ? ' port-elec' : ''}${estEntree ? ' port-entree' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
         ${voyant}${badgeLien}${symbole ? `<span class="port-elec-symbole">${symbole}</span>` : ''}${contenuNumero}</span>`;
 }
 
@@ -3041,8 +3082,50 @@ function afficherEditeurPorts(s) {
         + wan.map(p => portEditorRowHTML(s.id, p, type)).join('');
 }
 
-function optionsAppareilsPeriph(valeurActuelle) {
-    const appOpts = Array.from(document.getElementById('cfg-app').options).slice(1).map(o =>
+// Calcule, pour la baie COURANTE, les appareil_id déjà affectés à UNE
+// connexion — dans DEUX catégories INDÉPENDANTES (demandé) : RÉSEAU (port
+// RJ/SFP/WAN d'un switch/routeur/bandeau/serveur..., ou prise murale d'un
+// bandeau RJ) et ÉLECTRIQUE (prise d'un onduleur/PDU — une alimentation,
+// pas une connexion réseau). Un appareil peut légitimement apparaître dans
+// LES DEUX à la fois (câblé en réseau ET branché sur l'onduleur) : ce
+// n'est jamais un conflit, seulement une DOUBLE connexion DANS LA MÊME
+// catégorie qui n'a pas de sens (un appareil n'a qu'un càble réseau vers
+// la baie, et une seule prise d'alimentation) — voir optionsAppareilsPeriph
+// ci-dessous, qui retire ces appareils du sélecteur pour éviter l'erreur.
+// Portée : la baie actuellement affichée seulement (slots), pas les autres
+// baies du client — les données des autres baies ne sont pas chargées
+// côté client, un appareil câblé dans une baie différente resterait donc
+// proposé ici.
+function appareilsDejaConnectes() {
+    const reseau = new Set(), electrique = new Set();
+    Object.values(slots).forEach(s => {
+        const estElecSlot = s.type_equipement === 'UPS' || s.type_equipement === 'PDU';
+        const cible = estElecSlot ? electrique : reseau;
+        (s.ports || []).forEach(p => {
+            if (p.appareil_id) cible.add(p.appareil_id);
+            // Prise murale d'un bandeau RJ : dessert un appareil EN RÉSEAU,
+            // indépendamment du port RJ lui-même (voir baie_prises_murales).
+            if (p.prise_murale && p.prise_murale.appareil_id) reseau.add(p.prise_murale.appareil_id);
+        });
+    });
+    return { reseau, electrique };
+}
+
+// valeurActuelle : la sélection déjà en place pour CE sélecteur précis —
+// toujours réaffichée même si son appareil apparaît par ailleurs comme
+// "déjà connecté" (c'est justement CETTE connexion-là), sans quoi rouvrir
+// l'éditeur ferait disparaître l'appareil actuellement assigné. estElec
+// (optionnel) : catégorie de CETTE connexion (true = électrique, une
+// prise d'onduleur/PDU ; false/omis = réseau) — demandé : ne proposer
+// QUE les appareils pas déjà pris DANS LA MÊME catégorie ailleurs dans la
+// baie (voir appareilsDejaConnectes ci-dessus), les deux catégories étant
+// indépendantes l'une de l'autre.
+function optionsAppareilsPeriph(valeurActuelle, estElec) {
+    const { reseau, electrique } = appareilsDejaConnectes();
+    const dejaPris = estElec ? electrique : reseau;
+    const appOpts = Array.from(document.getElementById('cfg-app').options).slice(1)
+        .filter(o => valeurActuelle === 'a:' + o.value || !dejaPris.has(parseInt(o.value)))
+        .map(o =>
         `<option value="a:${o.value}"${valeurActuelle==='a:'+o.value?' selected':''}>🖥 ${escH(o.textContent.trim())}</option>`).join('');
     const perOpts = Array.from(document.getElementById('cfg-periph').options).slice(1).map(o =>
         `<option value="p:${o.value}"${valeurActuelle==='p:'+o.value?' selected':''}>🖱 ${escH(o.textContent.trim())}</option>`).join('');
@@ -3067,7 +3150,7 @@ function portEditorRowHTML(slotId, p, typeEquipement) {
             <option value=""${valeur===''?' selected':''}>— Libre —</option>
             ${optionLien}
             <option value="u"${valeur==='u'?' selected':''}>✎ Usage personnalisé…</option>
-            ${optionsAppareilsPeriph(valeur)}
+            ${optionsAppareilsPeriph(valeur, typeEquipement === 'UPS' || typeEquipement === 'PDU')}
         </select>
         <input type="text" data-slot="${slotId}" data-numero="${p.numero}"
                value="${escH(p.usage_libre||'')}" placeholder="Téléphonie, alarme..."
@@ -3402,7 +3485,7 @@ const PortModal = (() => {
             sel.innerHTML = `
                 <option value="">— Libre —</option>
                 <option value="u">✎ Usage personnalisé…</option>
-                ${optionsAppareilsPeriph(valeurInitiale)}`;
+                ${optionsAppareilsPeriph(valeurInitiale, s.type_equipement === 'UPS' || s.type_equipement === 'PDU')}`;
             sel.value = valeurInitiale;
             document.getElementById('pom-usage').value = usageInitial;
             document.getElementById('pom-usage-wrap').style.display = valeurInitiale === 'u' ? '' : 'none';
@@ -3773,6 +3856,7 @@ function appliquerReglesType(prefix) {
     // garde un unique groupe de prises, comme avant.
     const estElec = type === 'UPS' || type === 'PDU';
     const estUPS = type === 'UPS';
+    const estPDU = type === 'PDU';
     const estSwitchCfg = type === 'Switch';
     const estRouteur = type === 'Routeur/Pare-feu';
     // Groupe "haut" (même plage numéro que SFP, voir SFP_NUMERO_OFFSET
@@ -3799,6 +3883,8 @@ function appliquerReglesType(prefix) {
     if (estBandeauCfg && parseInt(nbPorts.value) > 24) nbPorts.value = '24';
     g('hint-nb-ports').textContent = estUPS
         ? '0 = pas de prise ondulée affichée. 48 maximum.'
+        : estPDU
+        ? '0 = pas de prise affichée. 48 maximum. Une prise « 🔌 Entrée » est ajoutée automatiquement — à lier (🔗 Lier des ports) à une prise d\'onduleur pour que ses appareils héritent du badge UPS dans l\'inventaire.'
         : estElec
         ? '0 = pas de prise affichée. 48 maximum.'
         : (estBandeauCfg

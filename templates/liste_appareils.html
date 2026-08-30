@@ -225,6 +225,20 @@ th[data-col].sorted { color: var(--accent); }
 <span style="margin-left:{{ offset }};font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#64748b12;color:#64748b;border:1px solid #64748b35;vertical-align:middle;" title="Aucun {{ label|lower }} configuré">{{ icon }}</span>
 {%- endif -%}
 {%- endmacro %}
+<!-- Badge UPS (demandé) : appareil branché sur une prise d'onduleur de la
+     baie de brassage — directement, ou en cascade via un PDU dont
+     l'entrée remonte jusqu'à un onduleur (voir
+     _appareils_secourus_par_onduleur côté serveur, qui construit déjà le
+     texte complet du tooltip pour distinguer les deux cas) — même
+     gabarit que badge_agent ci-dessus (couleur ambre, cohérente avec la
+     puissance VA affichée dans la baie), état binaire simple (pas de
+     palier expiration/expiring comme pour un agent). texte_alimentation
+     vide/None = pas alimenté par un onduleur, rien n'est affiché. -->
+{% macro badge_ups(texte_alimentation) -%}
+{%- if texte_alimentation -%}
+<span style="margin-left:.25rem;font-size:.52rem;padding:.1rem .32rem;border-radius:3px;background:#d9770615;color:#d97706;border:1px solid #d9770640;vertical-align:middle;font-weight:700;letter-spacing:.03em;" title="Alimenté par {{ texte_alimentation }}">🔋 UPS</span>
+{%- endif -%}
+{%- endmacro %}
 <div class="page-header">
     <h1>Inventaire des <span>Appareils</span></h1>
     <p>
@@ -323,7 +337,7 @@ th[data-col].sorted { color: var(--accent); }
                      data-loc="{{ a.localisation|e }}"
                      data-av-status="{{ a.av_status }}"
                      data-av-nom="{{ (a.av_nom or a.av_marque or '')|e }}"
-                     data-av-fin="{{ a.av_date_fin_fmt|e }}">{{ a.nom_machine or '—' }}{{ badge_agent(a.av_status, a.av_nom, a.av_marque, a.av_date_fin_fmt, '🛡', 'AV', '.35rem', true, ['pc','linux','laptop','mac','serveur','nas'], a.type_appareil|type_css) }}{{ badge_agent(a.edr_status, a.edr_nom, a.edr_marque, a.edr_date_fin_fmt, '🔍', 'EDR', '.25rem', false, [], none) }}{{ badge_agent(a.rmm_status, a.rmm_nom, a.rmm_marque, a.rmm_date_fin_fmt, '📡', 'RMM', '.25rem', false, [], none) }}</a>
+                     data-av-fin="{{ a.av_date_fin_fmt|e }}">{{ a.nom_machine or '—' }}{{ badge_agent(a.av_status, a.av_nom, a.av_marque, a.av_date_fin_fmt, '🛡', 'AV', '.35rem', true, ['pc','linux','laptop','mac','serveur','nas'], a.type_appareil|type_css) }}{{ badge_agent(a.edr_status, a.edr_nom, a.edr_marque, a.edr_date_fin_fmt, '🔍', 'EDR', '.25rem', false, [], none) }}{{ badge_agent(a.rmm_status, a.rmm_nom, a.rmm_marque, a.rmm_date_fin_fmt, '📡', 'RMM', '.25rem', false, [], none) }}{{ badge_ups(a.ups_nom) }}</a>
                 <div style="color:var(--text-secondary);font-size:0.77rem;">
                     {{ a.marque or '' }} {{ a.modele or '' }}
                     {% if a.numero_serie %}<span class="mono" style="font-size:0.7rem;"> · {{ a.numero_serie }}</span>{% endif %}
