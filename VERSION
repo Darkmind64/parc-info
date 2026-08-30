@@ -1,8 +1,46 @@
-PARCINFO_VERSION=2.18.86
-RELEASE_DATE=2026-08-29
-BUILD_NUMBER=2026082910
+PARCINFO_VERSION=2.18.87
+RELEASE_DATE=2026-08-30
+BUILD_NUMBER=2026083001
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.18.87 - Baie de brassage : badge d'alimentation, mise a l'echelle des prises electriques
+# Trois ajustements demandes en usage reel sur les prises electriques
+# (onduleur/PDU) apres la 2.18.86 :
+#
+# 1. Badge d'alimentation : quand un appareil de la baie est branche sur
+#    une prise d'onduleur/PDU, son propre element affiche desormais un
+#    petit symbole (batterie ondulee / eclair protegee) dans son coin
+#    inferieur droit - repere d'un coup d'oeil, DEPUIS l'appareil, s'il
+#    est secouru par batterie ou juste protege. Calcule pour toute la
+#    baie a chaque rendu (l'appareil et la prise qui l'alimente peuvent
+#    etre n'importe ou dans le rack).
+# 2. Prises electriques agrandies de moitie (36 -> 54px, cercle) - au
+#    moins 1.5x leur taille precedente, demande explicitement.
+# 3. Repartition proportionnelle entre prises ondulees et protegees :
+#    l'ancien partage FIXE (80/20) empilait les prises protegees a la
+#    verticale des qu'il y en avait plus d'une, faute de place dans une
+#    zone a 20% trop etroite pour des prises rondes de 54px - corrige en
+#    repartissant la largeur au nombre reel d'elements de chaque cote,
+#    avec un plancher pour rester utilisable a un seul element.
+#
+# Correctif complementaire, trouve en verifiant que tout tient bien dans
+# 1U en affichage normal : la taille des prises (agrandies au point 2) est
+# desormais CALCULEE depuis la hauteur reellement disponible (meme
+# principe que la disposition 2 lignes d'un switch), pas fixee d'avance -
+# le plancher precedent (36px) debordait toujours legerement a la hauteur
+# d'1U standard, .rack-cell.has-ports prenant deja 6px de padding vertical
+# + 16px pour la ligne d'info + 3px de padding-top jamais comptes avant.
+# Bug trouve au passage : le calcul utilisait la hauteur d'UNE SEULE
+# rangee meme pour un element hauteur_u > 1, reduisant a tort les prises
+# d'un onduleur en 2U comme s'il n'en avait qu'une - corrige pour utiliser
+# la hauteur REELLE de l'element.
+#
+# Suite pytest toujours verte (174 tests) + tous les scripts de test
+# autonomes. Verifie en direct dans le navigateur : badge sur un appareil
+# alimente (ondulee et protegee), repartition proportionnelle 3 ondulees/
+# 2 protegees, onduleur en 1U (zero debordement) et en 2U (taille pleine
+# restauree).
 
 # Version 2.18.86 - Baie de brassage : correctifs sur les prises electriques (v2.18.85)
 # Signalé en usage réel juste après la 2.18.85, capture d'écran à l'appui :

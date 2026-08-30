@@ -537,27 +537,45 @@
    demandé : pas un nouveau système, juste une présentation dédiée — ronde,
    comme une vraie prise européenne 2P+T (plutôt que le carré arrondi d'un
    port RJ), pas de badge de déliaison (une prise ne se "câble" pas à un
-   autre port, elle alimente directement un appareil). Agrandie à l'échelle
-   d'une vraie prise électrique — nettement plus grosse qu'un port RJ45
-   (24×22) — demandé, avec son symbole (batterie 🔋 prise ondulée
-   d'onduleur, éclair ⚡ prise protégée d'onduleur ou prise de PDU, voir
-   portHTML) empilé au-dessus du numéro plutôt qu'à côté, pour rester
-   compacte malgré la taille augmentée. */
+   autre port, elle alimente directement un appareil). Agrandie à
+   l'échelle d'une vraie prise électrique — au moins 1.5× un port RJ45
+   (24×22), demandé explicitement — avec son symbole (batterie 🔋 prise
+   ondulée d'onduleur, éclair ⚡ prise protégée d'onduleur ou prise de PDU,
+   voir portHTML) empilé au-dessus du numéro plutôt qu'à côté, pour rester
+   compacte malgré la taille augmentée. Taille pilotée par --elec-size
+   (posée en ligne sur le conteneur, voir tailleElec côté JS) — 54px de
+   repli si jamais absente, mais RÉDUITE dynamiquement si 1U n'offre pas
+   assez de hauteur pour une prise pleine taille (voir tailleElec, même
+   principe que --port-w/h pour la disposition 2 lignes d'un switch). */
 .port-elec {
-    width: 36px; height: 36px; border-radius: 50%;
+    width: var(--elec-size, 54px); height: var(--elec-size, 54px); border-radius: 50%;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 1px; line-height: 1;
+    gap: 2px; line-height: 1;
 }
-.port-elec-symbole { font-size: .85rem; line-height: 1; }
-.port-elec-num { font-size: .58rem; line-height: 1; }
-/* Grille de prises électriques : pistes de 36px (au lieu de 24px pour un
-   port RJ, voir .cell-ports) pour correspondre à la taille agrandie
-   ci-dessus — sans ce variant, les prises débordaient de leur piste. */
-.cell-ports-elec { grid-template-columns: repeat(auto-fill, 36px); grid-auto-rows: 36px; }
+.port-elec-symbole { font-size: var(--elec-symbole-fs, 19px); line-height: 1; }
+.port-elec-num { font-size: var(--elec-num-fs, 11px); line-height: 1; }
+/* Grille de prises électriques : pistes à la taille de --elec-size (au
+   lieu de 24px pour un port RJ, voir .cell-ports) pour correspondre à la
+   taille (agrandie ou réduite dynamiquement) ci-dessus — sans ce variant,
+   les prises débordaient de leur piste. */
+.cell-ports-elec { grid-template-columns: repeat(auto-fill, var(--elec-size, 54px)); grid-auto-rows: var(--elec-size, 54px); }
 
 /* Badge de puissance (VA) d'un onduleur, demandé — même gabarit que
    .cell-ip, affiché à sa suite dans l'en-tête de l'élément. */
 .cell-va { font-size: .6rem; color: #d97706; flex-shrink: 0; margin-left: 4px; font-weight: 700; }
+
+/* Badge d'alimentation (demandé) : coin inférieur droit d'un appareil dont
+   l'alimentation est branchée sur une prise d'onduleur/PDU — même symbole
+   que la prise elle-même (voir symbolePrise), pour repérer d'un coup
+   d'œil, DEPUIS l'appareil, s'il est secouru par batterie ou juste
+   protégé. pointer-events:none : purement indicatif, ne doit jamais
+   intercepter un clic destiné à la cellule ou à une poignée de
+   redimensionnement voisine (coin bas-droit, voir .cell-resize-corner). */
+.cell-badge-alim {
+    position: absolute; right: 3px; bottom: 2px; font-size: .8rem;
+    line-height: 1; pointer-events: none; z-index: 5;
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,.7));
+}
 
 /* Orientation verticale d'un élément (demandé) — reste dans la MÊME grille
    U/colonne+hauteur_u+largeur_u qu'un élément horizontal (voir la classe
@@ -585,7 +603,7 @@
     grid-template-columns: none; grid-auto-flow: column;
     grid-template-rows: repeat(auto-fill, 24px);
 }
-.cell-vertical .cell-ports-elec { grid-template-rows: repeat(auto-fill, 36px); }
+.cell-vertical .cell-ports-elec { grid-template-rows: repeat(auto-fill, 54px); }
 </style>
 {% endblock %}
 
@@ -1087,6 +1105,11 @@ const APPAREILS  = {{ appareils | tojson }};
 let nbU    = {{ nb_u }};
 let nbCols = 1;
 let slots  = {};  // key "pos-col" → slot
+// appareil_id -> symbole (🔋/⚡) de la prise onduleur/PDU qui l'alimente,
+// recalculée à chaque renderRack() (voir plus bas) — demandé : badge coin
+// inférieur droit sur l'élément de CET appareil, quel que soit l'endroit
+// du rack où se trouve la prise qui l'alimente réellement.
+let alimentationParAppareil = {};
 let currentBaie = 'Baie principale';
 let baiesList   = ['Baie principale'];
 // Verrouillage : préférence LOCALE à ce navigateur (localStorage, comme
@@ -1185,6 +1208,30 @@ function tailleDeuxLignes(rowH) {
     const unlinkFs = Math.max(6, Math.round(9 * ratio));
     return `--port-w:${w}px;--port-h:${h}px;--port-fs:${fs}px;--port-radius:${radius}px;`
          + `--port-led:${led}px;--port-unlink:${unlink}px;--port-unlink-fs:${unlinkFs}px;`;
+}
+
+// Taille des prises électriques (voir .port-elec en CSS) — même principe
+// que tailleDeuxLignes ci-dessus : CALCULÉE depuis la hauteur RÉELLEMENT
+// disponible sur cette rangée (rowH), pas fixée d'avance. À 54px (taille
+// cible « à l'échelle d'une vraie prise », demandée), une seule rangée de
+// prises ne tient pas toujours dans 1U en affichage normal — contrairement
+// à un port RJ (24×22), bien plus fin — signalé en usage réel : à la
+// hauteur d'1U standard (~56px), le plancher précédent (36px, "au moins
+// 1.5× un port RJ") débordait toujours un peu, .rack-cell.has-ports
+// prenant déjà 6px de padding vertical (haut+bas) + 16px pour la ligne
+// d'info + 3px de padding-top de la zone ports — jamais compté ici avant.
+// Réduit désormais le nécessaire (dispo, formule corrigée ci-dessous) pour
+// tenir sans être rognée par l'overflow:hidden du conteneur ; plancher
+// abaissé à 28px (encore ~1.2× un port RJ) plutôt que bloquer le calcul
+// en dessous de l'espace réellement disponible.
+function tailleElec(rowH) {
+    const hauteurLigneInfo = 16, paddingCellule = 6, paddingHautZone = 3, margeSecurite = 3;
+    const dispo = (rowH || U_H) - hauteurLigneInfo - paddingCellule - paddingHautZone - margeSecurite;
+    const taille = Math.max(28, Math.min(54, dispo));
+    const ratio = taille / 54;
+    const symboleFs = Math.max(10, Math.round(19 * ratio));
+    const numFs = Math.max(7, Math.round(11 * ratio));
+    return `--elec-size:${taille}px;--elec-symbole-fs:${symboleFs}px;--elec-num-fs:${numFs}px;`;
 }
 
 // Libellé complet d'un port affiché (tooltip, modale d'édition d'un port,
@@ -1374,6 +1421,19 @@ function renderRack() {
     const nums = document.getElementById('rack-nums');
     const rows = document.getElementById('rack-rows');
     nums.innerHTML = ''; rows.innerHTML = '';
+
+    // Table appareil_id -> symbole de la prise onduleur/PDU qui l'alimente
+    // (demandé : badge coin inférieur droit sur l'élément de CET appareil,
+    // voir makeOccupiedCell) — reconstruite à chaque rendu en parcourant
+    // TOUTE la baie, car la prise qui alimente un appareil peut se trouver
+    // n'importe où dans le rack, pas forcément à côté de son propre slot.
+    alimentationParAppareil = {};
+    Object.values(slots).forEach(s => {
+        if (s.type_equipement !== 'UPS' && s.type_equipement !== 'PDU') return;
+        (s.ports || []).forEach(p => {
+            if (p.appareil_id) alimentationParAppareil[p.appareil_id] = symbolePrise(s.type_equipement, p.numero);
+        });
+    });
 
     // Pré-passe : pour chaque U, quels slots y ont leur origine (s.position
     // === u, rendu réel) et lesquels y débordent depuis plus haut
@@ -1597,6 +1657,31 @@ function mettreCableEnAvant(cle) {
     svg.querySelectorAll(`[data-cle="${escH(cle)}"]`).forEach(el => svg.appendChild(el));
 }
 
+// Répartit la largeur (en %) entre 2 ou 3 zones de ports côte à côte
+// (base + WAN/Fibre/protégées) PROPORTIONNELLEMENT à ce que chacune
+// contient réellement (nombre de ports × leur taille de rendu), avec un
+// plancher par zone active pour rester utilisable même à un seul élément
+// — plutôt qu'un partage FIGÉ à 80/20 (ou 60/20/20). Signalé en usage
+// réel sur un onduleur : ses prises protégées, nettement plus grosses et
+// rondes (54px) qu'un port RJ/SFP/WAN (24px), se retrouvaient empilées
+// VERTICALEMENT dans leur zone à 20% fixe — trop étroite pour plus d'une
+// prise par ligne — alors que la zone de base (80%, ses prises ondulées,
+// tout aussi grosses) avait largement la place de les aligner. `poids`
+// est un tableau de nombres (0 = zone absente/inactive) ; retourne un
+// tableau de pourcentages entiers de même longueur, sommant à 100.
+function repartirLargeursZones(poids, plancherPct) {
+    const actifs = poids.map(p => p > 0);
+    const sommePoids = poids.reduce((a, b) => a + b, 0);
+    if (sommePoids <= 0) return poids.map(() => 0);
+    // Part brute proportionnelle au poids, plancher appliqué par zone
+    // active, puis renormalisée pour sommer exactement à 100 (le plancher
+    // pousse sinon la somme au-delà de 100 dès qu'il y a ≥ 2 zones).
+    let parts = poids.map((p, i) => actifs[i] ? Math.max(plancherPct, (p / sommePoids) * 100) : 0);
+    const sommeParts = parts.reduce((a, b) => a + b, 0);
+    parts = parts.map(p => Math.round(p * 100 / sommeParts));
+    return parts;
+}
+
 // ── CELL BUILDERS ─────────────────────────────────────────────────────────────
 function makeOccupiedCell(s, u, debut, largeur, rowH) {
     const cell = document.createElement('div');
@@ -1701,6 +1786,17 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // périphérique/usage libre, aucun champ ni colonne supplémentaire.
     const estElec = s.type_equipement === 'UPS' || s.type_equipement === 'PDU';
     const estUPS = s.type_equipement === 'UPS';
+    // Taille des prises calculée depuis la hauteur RÉELLE de l'élément
+    // (voir tailleElec) — UNIQUEMENT en orientation horizontale : à la
+    // verticale, la vraie contrainte est la LARGEUR (hors sujet ici),
+    // appliquer tailleElec() y aurait réduit les prises sans raison.
+    // hauteurReelleCell, pas rowH tel quel : rowH n'est jamais que la
+    // hauteur d'UNE SEULE rangée U, alors qu'un élément hauteur_u > 1
+    // (ex. un onduleur en 2U) déborde sur plusieurs rangées et dispose de
+    // BIEN plus de hauteur que rowH seul (bug trouvé en vérifiant — un
+    // onduleur en 2U voyait ses prises réduites exactement comme en 1U).
+    const hauteurReelleCell = hu > 1 ? (hu * U_H + (hu - 1)) : (rowH || U_H);
+    const styleElec = (estElec && s.orientation !== 'vertical') ? tailleElec(hauteurReelleCell) : '';
     const estRouteur = s.type_equipement === 'Routeur/Pare-feu';
     const estServeurMiniPC = s.type_equipement === 'Serveur' || s.type_equipement === 'Mini PC';
     // Groupe "haut" (même plage numéro que SFP, voir SFP_NUMERO_OFFSET) —
@@ -1739,13 +1835,24 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         // démesurément grandi la hauteur nécessaire pour rien (même piège
         // que la disposition 2 lignes d'un switch à taille de port
         // normale, voir le commentaire de .cell-ports-row en CSS).
-        const nbZonesExtra = (wanPorts.length ? 1 : 0) + (hautPorts.length ? 1 : 0);
-        const largeurBase = nbZonesExtra === 2 ? 60 : 80;
-        const largeurExtra = nbZonesExtra === 2 ? 20 : 20;
+        // Taille de rendu d'un élément par zone : 54px pour une prise
+        // électrique ronde (base ondulée d'un onduleur ; sa zone "haute"
+        // — prises protégées — est logée dans .cell-ports-sfp-zone, pas
+        // .cell-ports-elec, mais compte tout autant pour la répartition),
+        // 24px pour un port RJ/SFP/Fibre/WAN classique.
+        const tailleBase = estElec ? 54 : 24;
+        const tailleHaut = estUPS ? 54 : 24; // prises protégées = rondes aussi ; SFP/Fibre = ports classiques
+        const [largeurBase, largeurWan, largeurHaut] = repartirLargeursZones(
+            [Math.max(1, basePorts.length) * tailleBase, wanPorts.length * 24, hautPorts.length * tailleHaut], 18);
         let zones = `<div class="cell-ports-rj-zone" style="flex-basis:${largeurBase}%;max-width:${largeurBase}%;">
-            <div class="cell-ports${estElec ? ' cell-ports-elec' : ''}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div></div>`;
-        if (wanPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurExtra}%;max-width:${largeurExtra}%;" title="Ports WAN">${wanPorts.map(p => portHTML(p, false)).join('')}</div>`;
-        if (hautPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurExtra}%;max-width:${largeurExtra}%;" title="${estRouteur ? 'Ports Fibre' : estUPS ? 'Prises protégées' : 'Ports SFP'}">${hautPorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
+            <div class="cell-ports${estElec ? ' cell-ports-elec' : ''}" style="${styleElec}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div></div>`;
+        if (wanPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurWan}%;max-width:${largeurWan}%;" title="Ports WAN">${wanPorts.map(p => portHTML(p, false)).join('')}</div>`;
+        // .cell-ports-sfp-zone reste un flex (pas grid comme .cell-ports) —
+        // avec sa largeur désormais proportionnée ci-dessus, son
+        // flex-wrap existant suffit à aligner les prises protégées en
+        // ligne(s), pas besoin de la variante .cell-ports-elec (grid) ici
+        // — styleElec (vide sauf onduleur) y pose quand même --elec-size.
+        if (hautPorts.length) zones += `<div class="cell-ports-sfp-zone" style="flex-basis:${largeurHaut}%;max-width:${largeurHaut}%;${styleElec}" title="${estRouteur ? 'Ports Fibre' : estUPS ? 'Prises protégées' : 'Ports SFP'}">${hautPorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
         zonePortsPrincipale = `<div class="cell-ports-main-switch">${zones}</div>`;
     } else if (estSwitch && s.ports_disposition === 'deux_lignes') {
         // Impairs en haut, pairs en dessous (1 3 5 7.../2 4 6 8...) — même
@@ -1763,7 +1870,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
                </div>`
             : `<div class="cell-ports-stack">${ligneRJ}</div>`;
     } else {
-        ligneRJ = `<div class="cell-ports${estElec ? ' cell-ports-elec' : ''}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
+        ligneRJ = `<div class="cell-ports${estElec ? ' cell-ports-elec' : ''}" style="${styleElec}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
         zonePortsPrincipale = (estSwitch && zonesSwitchActives)
             ? `<div class="cell-ports-main-switch">
                    <div class="cell-ports-rj-zone">${ligneRJ}</div>
@@ -1785,12 +1892,23 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             </div>`}
         </div>` : '';
 
+    // Badge d'alimentation (demandé) : coin inférieur droit d'un appareil
+    // dont l'alimentation est branchée sur une prise d'onduleur/PDU, quel
+    // que soit l'endroit du rack où se trouve cette prise (voir la table
+    // alimentationParAppareil construite dans renderRack). Même symbole
+    // que la prise elle-même (symbolePrise) : repère d'un coup d'œil,
+    // DEPUIS l'appareil, s'il est secouru par batterie ou juste protégé.
+    const symboleAlim = s.appareil_id ? alimentationParAppareil[s.appareil_id] : null;
+    const badgeAlimentation = symboleAlim
+        ? `<span class="cell-badge-alim" title="Alimenté par une prise ${symboleAlim === '🔋' ? 'ondulée (batterie)' : 'protégée (parafoudre)'}">${symboleAlim}</span>`
+        : '';
+
     // Une étagère n'a pas de hauteur ajustable (toujours 1U conceptuel, voir
     // plus haut) : ni poignée de hauteur ni poignée diagonale (qui touche
     // aussi la hauteur) — seule la largeur reste ajustable, une tablette
     // pouvant très bien ne pas couvrir toute la baie. Baie verrouillée :
     // aucune poignée de redimensionnement du tout (voir toggleVerrouBaie).
-    cell.innerHTML = ligneInfo + zonePorts
+    cell.innerHTML = ligneInfo + zonePorts + badgeAlimentation
         + (estEtagere || baieVerrouillee ? '' : `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`)
         + (baieVerrouillee ? '' : `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`)
         + (estEtagere || baieVerrouillee ? '' : `<div class="cell-resize-corner" title="Redimensionner en hauteur et largeur (glisser en diagonale)"></div>`);
@@ -2352,15 +2470,23 @@ function masquerTooltip() {
 }
 
 // ── PORTS ─────────────────────────────────────────────────────────────────────
+// Symbole d'une prise électrique selon son type d'équipement/sa plage —
+// batterie 🔋 pour une prise ondulée d'onduleur (plage de base, secourue),
+// éclair ⚡ pour sa plage protégée (parafoudre seul) ou pour un PDU (jamais
+// de batterie, un seul groupe). Centralisé ici pour être réutilisé à la
+// fois DANS la prise (portHTML) et sur l'appareil qu'elle alimente (badge
+// coin inférieur droit, voir renderRack/makeOccupiedCell — demandé) : les
+// deux doivent toujours afficher le MÊME symbole pour la même prise.
+function symbolePrise(typeEquipement, numero) {
+    return (typeEquipement === 'UPS' && !estPortSfp(numero)) ? '🔋' : '⚡';
+}
+
 // estElec (optionnel) : prise électrique d'un onduleur/PDU plutôt qu'un
 // port réseau — voir makeOccupiedCell. Purement une question de classe CSS
 // (.port-elec, forme plus grosse à l'échelle d'une vraie prise) et de
 // libellé de tooltip ; la donnée et le mécanisme d'assignation restent
 // identiques à un port RJ. typeEquipement (optionnel, seulement utile avec
-// estElec) : distingue le symbole affiché DANS la prise — batterie 🔋 pour
-// une prise ondulée d'onduleur (plage de base, secourue), éclair ⚡ pour une
-// prise protégée d'onduleur (plage "haute", parafoudre seul) ou pour un PDU
-// (jamais de batterie, un seul groupe) — demandé.
+// estElec) : quel symbole afficher (voir symbolePrise ci-dessus).
 function portHTML(p, estElec, typeEquipement) {
     // Un port câblé à un autre (lie_slot_id) n'a ni appareil_id, ni
     // peripherique_id, ni usage_libre — sans ce cas, il retombait ici dans
@@ -2398,11 +2524,9 @@ function portHTML(p, estElec, typeEquipement) {
     // (avec offset pour un port SFP, voir SFP_NUMERO_OFFSET) — c'est ce que
     // le serveur attend en retour ; seul le LIBELLÉ affiché est ajusté.
     const sfp = estPortSfp(p.numero);
-    // Symbole de prise (demandé) : uniquement pour une prise électrique
-    // (estElec) — batterie pour la plage ondulée d'un onduleur, éclair pour
-    // sa plage protégée ou pour un PDU (jamais de batterie). Affiché même
-    // libre, comme le sérigraphie d'un vrai onduleur sur toutes ses prises.
-    const symbole = estElec ? ((typeEquipement === 'UPS' && !sfp) ? '🔋' : '⚡') : '';
+    // Symbole de prise (demandé, voir symbolePrise) — affiché même libre,
+    // comme la sérigraphie d'un vrai onduleur sur toutes ses prises.
+    const symbole = estElec ? symbolePrise(typeEquipement, p.numero) : '';
     const contenuNumero = estElec ? `<span class="port-elec-num">${numeroAffiche(p.numero)}</span>` : numeroAffiche(p.numero);
     // Voyant de ping omis pour une prise électrique (demandé, voir
     // classePing ci-dessus) — jamais de statut réseau à montrer dessus.

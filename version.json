@@ -1,24 +1,25 @@
 {
-  "version": "2.18.86",
-  "release_date": "2026-08-29T00:00:00.000000",
+  "version": "2.18.87",
+  "release_date": "2026-08-30T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.86",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.86/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.87/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.87/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.87/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.18.87",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.87/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.87/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.87/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.87/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.87/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : correctifs sur les prises électriques (rondes à l'échelle, symboles corrects, ping retiré)",
+    "new_features": "Baie de brassage : badge d'alimentation sur l'appareil branché, prises électriques mises à l'échelle et calculées dynamiquement pour toujours tenir dans 1U",
     "improvements": [
-      "Signalé en usage réel juste après la 2.18.85 : les ports RJ d'un bandeau et d'un switch étaient devenus plus gros et portaient à tort le symbole ⚡ réservé à l'onduleur. Cause : plusieurs appels ports.map(portHTML) passaient la fonction par référence nue — Array.prototype.map appelle son callback avec (élément, index, tableau), donc le nouveau paramètre estElec recevait silencieusement l'index de position au lieu d'un booléen. Corrigé.",
-      "Prises électriques rondes, à l'échelle d'une vraie prise européenne 2P+T (cercle 36×36), au lieu du carré arrondi précédent.",
-      "Bouton et voyant de ping retirés des prises électriques (UPS/PDU) : une prise alimente un appareil, elle ne le relie pas au réseau."
+      "Badge d'alimentation : un appareil branché sur une prise d'onduleur/PDU affiche désormais un symbole (batterie ondulée / éclair protégée) dans son coin inférieur droit, où qu'il se trouve dans le rack.",
+      "Prises électriques agrandies de moitié (36 → 54px), au moins 1.5× leur taille précédente.",
+      "Répartition proportionnelle entre prises ondulées et protégées (au lieu d'un partage fixe 80/20) : les prises protégées ne s'empilent plus verticalement faute de place.",
+      "Taille des prises désormais calculée dynamiquement pour toujours tenir dans la hauteur disponible (comme la disposition 2 lignes d'un switch) — plus de débordement en 1U, taille pleine restaurée dès que la place le permet (2U ou plus)."
     ]
   },
   "checksums": {
@@ -29,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.86"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.87"
 }
