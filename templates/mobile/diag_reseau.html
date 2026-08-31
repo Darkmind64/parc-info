@@ -1,0 +1,47 @@
+{% extends "mobile/base.html" %}
+{% block title %}Diagnostic réseau — ParcInfo{% endblock %}
+
+{% block content %}
+<a class="back-link" href="{{ url_for('mobile_dashboard') }}">← Accueil</a>
+
+<div class="detail-head">
+    <h1>Diagnostic réseau</h1>
+    <div class="card-sub">
+        {{ client.nom }} ·
+        Surveillance {{ 'activée' if etat_moniteur.active else 'désactivée' }}
+        {% if etat_moniteur.last_cycle %} · dernier cycle {{ etat_moniteur.last_cycle.replace('T',' ').replace('Z','') }}{% endif %}
+    </div>
+</div>
+
+{% if not evenements %}
+<div class="empty-state">
+    <div class="icon">✓</div>
+    Aucun problème réseau actif.
+</div>
+{% else %}
+<div class="section-title">{{ evenements|length }} évènement(s) actif(s)</div>
+{% for e in evenements %}
+<div class="card">
+    <div class="card-row">
+        <div>
+            <div class="card-title">{{ e.categorie_libelle }}</div>
+            <div class="card-sub">{{ e.titre }}</div>
+        </div>
+        <span class="badge {{ 'badge-red' if e.gravite == 'critique' else ('badge-orange' if e.gravite == 'avertissement' else 'badge-blue') }}">
+            {{ e.gravite }}
+        </span>
+    </div>
+    <div class="card-meta">
+        {% if e.appareil_id %}
+        <a class="badge badge-grey" href="{{ url_for('mobile_appareil_detail', id=e.appareil_id) }}">🖥️ {{ e.appareil_nom or 'appareil' }}</a>
+        {% endif %}
+        {% if e.nb_occurrences and e.nb_occurrences > 1 %}
+        <span class="badge badge-grey">{{ e.nb_occurrences }}×</span>
+        {% endif %}
+        <span class="badge badge-grey">{{ (e.derniere_occurrence or '').replace('T',' ').replace('Z','') }}</span>
+    </div>
+</div>
+{% endfor %}
+<div class="cap-note">Consultation seule — résolution depuis la version bureau.</div>
+{% endif %}
+{% endblock %}

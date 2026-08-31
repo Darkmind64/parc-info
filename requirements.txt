@@ -9,3 +9,7 @@ gunicorn>=21.2.0
 zeroconf>=0.135.0
 certifi>=2024.0.0
 openpyxl>=3.1.0
+# Diagnostic réseau palier 2 (capture passive). Import protégé côté code : si le
+# paquet ou le pilote de capture (Npcap/libpcap) manque, seul le palier 1 reste
+# actif. Sous Linux, s'installe sans dépendance système.
+scapy>=2.5.0

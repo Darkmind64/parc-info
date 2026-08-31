@@ -135,6 +135,7 @@ from crypto_utils   import get_crypto_manager
 from cache_utils    import get_cache_manager, cache_result, invalidate_cache_pattern
 from search_utils   import search_global, search_autocomplete
 from app_update_routes import register_update_routes
+import network_diag  # module de diagnostic réseau (démarre son thread de surveillance)
 
 # Version de l'application (lue depuis version.json dans _resource_base)
 # _resource_base = _MEIPASS en mode PyInstaller, dossier source sinon
@@ -2110,6 +2111,40 @@ def init_db():
         except Exception:
             pass
 
+    # TABLES DIAGNOSTIC RÉSEAU (module network_diag)
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_reseau_evenements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        horodatage TEXT DEFAULT '',
+        gravite TEXT DEFAULT 'info',
+        categorie TEXT DEFAULT '',
+        titre TEXT DEFAULT '',
+        details_json TEXT DEFAULT '{}',
+        source TEXT DEFAULT 'actif',
+        signature TEXT DEFAULT '',
+        appareil_id INTEGER,
+        resolu INTEGER DEFAULT 0,
+        date_resolu TEXT,
+        premiere_occurrence TEXT DEFAULT '',
+        derniere_occurrence TEXT DEFAULT '',
+        nb_occurrences INTEGER DEFAULT 1,
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    c.execute('''CREATE INDEX IF NOT EXISTS idx_diag_evt
+        ON diag_reseau_evenements(client_id, resolu, horodatage)''')
+    if 'appareil_id' not in [r[1] for r in c.execute('PRAGMA table_info(diag_reseau_evenements)').fetchall()]:
+        try:
+            c.execute('ALTER TABLE diag_reseau_evenements ADD COLUMN appareil_id INTEGER')
+        except Exception:
+            pass
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_reseau_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        debut TEXT DEFAULT '', fin TEXT DEFAULT '', duree_s INTEGER DEFAULT 0,
+        mode TEXT DEFAULT 'snapshot', plage TEXT DEFAULT '',
+        capture_utilisee INTEGER DEFAULT 0,
+        resume_json TEXT DEFAULT '{}',
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
         now = _utcnow().isoformat()
@@ -2986,11 +3021,29 @@ def _compute_alerts_for_client(conn, cid, today):
         _item['expire_depasse'] = _item.get('av_date_fin', '') < today_iso
         av_urgents.append(_item)
 
+    # Diagnostic réseau — évènements actifs
+    diag_alertes = {'total': 0, 'critiques': 0, 'items': []}
+    try:
+        for _r in conn.execute(
+            "SELECT titre, gravite, categorie FROM diag_reseau_evenements "
+            "WHERE client_id=? AND resolu=0 "
+            "ORDER BY CASE gravite WHEN 'critique' THEN 0 WHEN 'avertissement' THEN 1 ELSE 2 END, "
+            "derniere_occurrence DESC", (cid,)).fetchall():
+            it = row_to_dict(_r)
+            diag_alertes['total'] += 1
+            if it['gravite'] == 'critique':
+                diag_alertes['critiques'] += 1
+            if len(diag_alertes['items']) < 5:
+                diag_alertes['items'].append(it)
+    except Exception:
+        pass
+
     return {
         'contrats_alertes': contrats_alertes[:5],
         'garanties_alertes': garanties_alertes[:5],
         'prochains_renouvellements': prochains_renouvellements,
         'av_urgents': av_urgents,
+        'diag_alertes': diag_alertes,
     }
 
 
@@ -3061,6 +3114,21 @@ def _compute_critical_alerts(conn, cid, today):
             severity = 'critical' if df < today else 'warning'
             alerts.append({'type': 'av_expiring', 'device': a['nom_machine'], 'date': a['av_date_fin'], 'severity': severity})
         except: pass
+
+    # Évènements de diagnostic réseau non résolus
+    try:
+        for row in conn.execute(
+            "SELECT titre, gravite, nb_occurrences FROM diag_reseau_evenements "
+            "WHERE client_id=? AND resolu=0", (cid,)).fetchall():
+            d = row_to_dict(row)
+            alerts.append({
+                'type': 'diag_reseau',
+                'device': d['titre'],
+                'severity': 'critical' if d['gravite'] == 'critique' else 'warning',
+                'link': '/diag-reseau',
+            })
+    except Exception:
+        pass  # table absente sur une très vieille base non encore migrée
 
     # Sort by severity (critical first) then by date
     severity_order = {'critical': 0, 'warning': 1}
@@ -8711,6 +8779,143 @@ def lancer_scan():
 @login_required
 def status_scan():
     with scan_lock: return jsonify(dict(scan_status))
+
+
+# ─── DIAGNOSTIC RÉSEAU (module network_diag) ─────────────────────────────────
+
+@app.route('/diag-reseau')
+@login_required
+def page_diag_reseau():
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    if not get_client_access(cid):
+        flash('Accès refusé', 'danger')
+        return redirect(url_for('index'))
+    conn = get_db()
+    parc = row_to_dict(conn.execute(
+        'SELECT * FROM parc_general WHERE client_id=?', (cid,)).fetchone() or {})
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    dernier_run = row_to_dict(conn.execute(
+        'SELECT * FROM diag_reseau_runs WHERE client_id=? ORDER BY id DESC LIMIT 1', (cid,)).fetchone() or {})
+    conn.close()
+    return render_template('diag_reseau.html',
+                           parc=parc, client=client, dernier_run=dernier_run,
+                           etat_capture=network_diag.etat_capture(),
+                           etat_moniteur=network_diag.etat_moniteur(),
+                           peut_ecrire=can_write(cid),
+                           clients=get_clients(), client_actif_id=cid)
+
+
+@app.route('/api/diag-reseau/snapshot', methods=['POST'])
+@login_required
+def api_diag_snapshot():
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    data = request.json or {}
+    plage = (data.get('plage') or '').strip()
+    avec_capture = data.get('avec_capture')  # None = suit le réglage global
+    if not network_diag.lancer_snapshot(cid, plage, avec_capture):
+        return jsonify({'error': 'Un diagnostic est déjà en cours'}), 400
+    return jsonify({'status': 'started'})
+
+
+@app.route('/api/diag-reseau/snapshot/status')
+@login_required
+def api_diag_snapshot_status():
+    st = network_diag.statut_snapshot()
+    # N'exposer le statut que s'il concerne le client actif (ou aucun)
+    if st.get('client_id') not in (None, get_client_id()):
+        st = {'running': st.get('running'), 'progress': 0, 'message': 'Diagnostic en cours pour un autre client',
+              'findings': [], 'avertissements': []}
+    for f in st.get('findings', []):
+        f['categorie_libelle'] = network_diag.libelle_categorie(f.get('categorie', ''))
+    return jsonify(st)
+
+
+@app.route('/api/diag-reseau/etat-capture')
+@login_required
+def api_diag_etat_capture():
+    return jsonify(network_diag.etat_capture())
+
+
+@app.route('/api/diag-reseau/evenements')
+@login_required
+def api_diag_evenements():
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    page = max(1, int(request.args.get('page', 1) or 1))
+    gravite = (request.args.get('gravite') or '').strip()
+    categorie = (request.args.get('categorie') or '').strip()
+    resolu = (request.args.get('resolu') or '').strip()  # '', '0', '1'
+    where = ['client_id=?']
+    params = [cid]
+    if gravite:
+        where.append('gravite=?'); params.append(gravite)
+    if categorie:
+        where.append('categorie=?'); params.append(categorie)
+    if resolu in ('0', '1'):
+        where.append('resolu=?'); params.append(int(resolu))
+    where_sql = ' AND '.join('e.' + w for w in where)
+    q = ('SELECT e.*, a.nom_machine AS appareil_nom '
+         'FROM diag_reseau_evenements e '
+         'LEFT JOIN appareils a ON a.id = e.appareil_id '
+         'WHERE ' + where_sql +
+         ' ORDER BY e.resolu ASC, CASE e.gravite WHEN "critique" THEN 0 WHEN "avertissement" THEN 1 ELSE 2 END,'
+         ' e.derniere_occurrence DESC')
+    rows, pagination = paginate(q, tuple(params), page)
+    evenements = []
+    for r in rows:
+        d = row_to_dict(r)
+        try:
+            d['details'] = json.loads(d.get('details_json') or '{}')
+        except Exception:
+            d['details'] = {}
+        d['categorie_libelle'] = network_diag.libelle_categorie(d.get('categorie', ''))
+        evenements.append(d)
+    return jsonify({'evenements': evenements, 'pagination': pagination})
+
+
+@app.route('/api/diag-reseau/evenement/<int:id>/resoudre', methods=['POST'])
+@login_required
+def api_diag_resoudre(id):
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    user = get_auth_user()
+    conn = get_db()
+    row = conn.execute('SELECT titre FROM diag_reseau_evenements WHERE id=? AND client_id=?',
+                       (id, cid)).fetchone()
+    if not row:
+        conn.close()
+        return jsonify({'error': 'Not Found'}), 404
+    reouvrir = bool((request.json or {}).get('reouvrir'))
+    conn.execute(
+        'UPDATE diag_reseau_evenements SET resolu=?, date_resolu=? WHERE id=? AND client_id=?',
+        (0 if reouvrir else 1, None if reouvrir else _utcnow().isoformat(), id, cid))
+    log_history(conn, cid, 'diag_reseau', id, row[0],
+                'DIAG_REOUVRIR' if reouvrir else 'DIAG_RESOUDRE')
+    conn.commit()
+    conn.close()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/diag-reseau/surveillance', methods=['POST'])
+@login_required
+def api_diag_surveillance():
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    user = get_auth_user()
+    actif = '1' if (request.json or {}).get('actif') else '0'
+    cfg_set('diag_surveillance_active', actif)
+    conn = get_db()
+    log_history(conn, cid, 'diag_reseau', 0, 'Surveillance réseau',
+                'DIAG_SURVEILLANCE', 'activée' if actif == '1' else 'désactivée')
+    conn.commit(); conn.close()
+    return jsonify({'ok': True, 'actif': actif == '1', 'etat': network_diag.etat_moniteur()})
 
 def _fmt_go(valeur):
     """'16' / 16.0 -> '16 Go' ; '512.5' -> '512.5 Go'. Vide si valeur absente."""
@@ -15592,6 +15797,32 @@ def mobile_identifiants():
     return render_template('mobile/identifiants.html', identifiants=ids_, wifi_parc=wifi_parc, client=client,
                            clients=get_clients(), client_actif_id=cid,
                            categories=get_liste_cached('categories_identifiants'), total=total)
+
+
+@app.route('/m/diag-reseau')
+@login_required
+def mobile_diag_reseau():
+    """Diagnostic réseau — consultation mobile, lecture seule (évènements actifs)."""
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    conn = get_db()
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    rows = conn.execute(
+        "SELECT e.*, a.nom_machine AS appareil_nom FROM diag_reseau_evenements e "
+        "LEFT JOIN appareils a ON a.id = e.appareil_id "
+        "WHERE e.client_id=? AND e.resolu=0 "
+        "ORDER BY CASE e.gravite WHEN 'critique' THEN 0 WHEN 'avertissement' THEN 1 ELSE 2 END, "
+        "e.derniere_occurrence DESC LIMIT 100", (cid,)).fetchall()
+    conn.close()
+    evenements = []
+    for r in rows:
+        d = row_to_dict(r)
+        d['categorie_libelle'] = network_diag.libelle_categorie(d.get('categorie', ''))
+        evenements.append(d)
+    return render_template('mobile/diag_reseau.html', evenements=evenements,
+                           etat_moniteur=network_diag.etat_moniteur(),
+                           client=client, clients=get_clients(), client_actif_id=cid)
 
 
 if __name__ == '__main__':

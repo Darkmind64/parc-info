@@ -779,9 +779,9 @@
                     <div style="flex:1;overflow-y:auto;">
                         {% for alert in critical.alerts %}
                         <div class="alert-strip {% if alert.severity == 'critical' %}danger{% else %}warn{% endif %}">
-                            <span>{% if alert.type == 'warranty_expired' %}🔒{% elif alert.type == 'warranty_expiring' %}🔒{% elif alert.type == 'contract_expired' %}📋{% elif alert.type == 'contract_expiring' %}📋{% elif alert.type == 'device_offline' %}📡{% elif alert.type == 'av_expiring' %}🛡{% else %}⚠{% endif %}</span>
-                            <span class="as-label">{{ alert.device or alert.contract or 'Alerte' }}</span>
-                            <span class="as-pill {% if alert.severity == 'critical' %}danger{% else %}warn{% endif %}">{{ alert.type.replace('_', ' ')|title }}</span>
+                            <span>{% if alert.type == 'warranty_expired' %}🔒{% elif alert.type == 'warranty_expiring' %}🔒{% elif alert.type == 'contract_expired' %}📋{% elif alert.type == 'contract_expiring' %}📋{% elif alert.type == 'device_offline' %}📡{% elif alert.type == 'av_expiring' %}🛡{% elif alert.type == 'diag_reseau' %}🩺{% else %}⚠{% endif %}</span>
+                            <span class="as-label">{% if alert.link %}<a href="{{ alert.link }}">{{ alert.device or 'Alerte' }}</a>{% else %}{{ alert.device or alert.contract or 'Alerte' }}{% endif %}</span>
+                            <span class="as-pill {% if alert.severity == 'critical' %}danger{% else %}warn{% endif %}">{% if alert.type == 'diag_reseau' %}Réseau{% else %}{{ alert.type.replace('_', ' ')|title }}{% endif %}</span>
                         </div>
                         {% endfor %}
                     </div>

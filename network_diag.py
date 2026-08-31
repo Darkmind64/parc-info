@@ -1,0 +1,1064 @@
+"""
+network_diag.py — Module de diagnostic réseau de ParcInfo.
+
+Deux paliers :
+
+  • Palier 1 — diagnostic *actif*, aucune dépendance : réutilise l'infrastructure
+    socket/subprocess déjà présente dans app.py (ping, ARP, NetBIOS…). Détecte les
+    conflits d'adresses IP, la qualité de liaison dégradée (perte / gigue /
+    latence), la joignabilité passerelle/DNS, les conflits de noms, et fait une
+    tentative best-effort de repérage d'un serveur DHCP pirate.
+
+  • Palier 2 — capture *passive* de trames via ``scapy`` (OFF par défaut,
+    ``diag_capture_active``). Nécessite des privilèges + un pilote de capture
+    (Npcap sous Windows, libpcap ailleurs). Détecte l'ARP spoofing / ARP gratuits
+    en rafale, le MAC flapping, les tempêtes de broadcast, la présence de
+    plusieurs serveurs DHCP, les BPDU STP en rafale, les Router Advertisements
+    IPv6 pirates et les retransmissions TCP.
+
+Modes : snapshot à la demande (``run_snapshot``) et surveillance continue
+(``_moniteur_loop``, thread démon démarré à l'import — même schéma que le
+watchdog ping d'app.py). Les évènements sont historisés dans
+``diag_reseau_evenements`` et dédoublonnés par ``signature``.
+
+Aucun import de ``app`` au niveau module (import circulaire) : les helpers d'app
+sont importés paresseusement dans les fonctions qui en ont besoin.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import ipaddress
+import json
+import logging
+import os
+import platform
+import re
+import socket
+import struct
+import threading
+import time
+from datetime import datetime, timezone
+
+logger = logging.getLogger('parcinfo')
+
+IS_WINDOWS = platform.system() == 'Windows'
+
+# ─── Gravité par défaut selon la catégorie ───────────────────────────────────
+_GRAVITE_DEFAUT = {
+    'conflit_ip':            'critique',
+    'arp_spoofing':          'critique',
+    'dhcp_pirate':           'critique',
+    'ra_pirate':             'critique',
+    'mac_flapping':          'avertissement',
+    'tempete_broadcast':     'avertissement',
+    'qualite_liaison':       'avertissement',
+    'conflit_nom':           'avertissement',
+    'stp_instable':          'avertissement',
+    'passerelle_injoignable':'critique',
+    'dns_degrade':           'avertissement',
+    'tcp_retransmissions':   'info',
+}
+
+_CATEGORIES_LIBELLES = {
+    'conflit_ip':             "Conflit d'adresse IP",
+    'arp_spoofing':           "ARP spoofing / usurpation",
+    'dhcp_pirate':            "Serveur DHCP non autorisé",
+    'ra_pirate':              "Router Advertisement IPv6 non autorisé",
+    'mac_flapping':           "MAC instable (flapping)",
+    'tempete_broadcast':      "Tempête de broadcast",
+    'qualite_liaison':        "Qualité de liaison dégradée",
+    'conflit_nom':            "Conflit de nom réseau",
+    'stp_instable':           "Topologie STP instable",
+    'passerelle_injoignable': "Passerelle injoignable",
+    'dns_degrade':            "Résolution DNS dégradée",
+    'tcp_retransmissions':    "Retransmissions TCP élevées",
+}
+
+
+def libelle_categorie(cat: str) -> str:
+    return _CATEGORIES_LIBELLES.get(cat, cat)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Utilitaires
+# ════════════════════════════════════════════════════════════════════════════
+
+def _now_z() -> str:
+    """Horodatage ISO UTC avec 'Z' explicite (même convention que _watchdog_state)."""
+    return datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
+
+
+def _cfg(cle: str, defaut=None):
+    from config_helpers import cfg_get
+    return cfg_get(cle, defaut)
+
+
+def _cfg_int(cle: str, defaut: int) -> int:
+    try:
+        return int(float(_cfg(cle, str(defaut))))
+    except (TypeError, ValueError):
+        return defaut
+
+
+def _cfg_float(cle: str, defaut: float) -> float:
+    try:
+        return float(_cfg(cle, str(defaut)))
+    except (TypeError, ValueError):
+        return defaut
+
+
+def _signature(categorie: str, *entites) -> str:
+    brut = categorie + '|' + '|'.join(sorted(str(e).lower() for e in entites if e))
+    return hashlib.sha1(brut.encode('utf-8', 'replace')).hexdigest()[:16]
+
+
+def _finding(categorie: str, titre: str, details: dict, *entites, gravite: str = None) -> dict:
+    return {
+        'categorie': categorie,
+        'gravite': gravite or _GRAVITE_DEFAUT.get(categorie, 'info'),
+        'titre': titre,
+        'details': details or {},
+        'signature': _signature(categorie, *(entites or details.values())),
+    }
+
+
+def _run(cmd, timeout=6):
+    """Exécute une commande sans fenêtre (délègue à app._run_hidden si dispo)."""
+    try:
+        from app import _run_hidden
+        return _run_hidden(cmd, capture_output=True, text=True, timeout=timeout)
+    except Exception:
+        import subprocess
+        kw = {}
+        if IS_WINDOWS:
+            kw['creationflags'] = 0x08000000  # CREATE_NO_WINDOW
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kw)
+
+
+_MAC_RE = re.compile(r'([0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}')
+_MAC_NULLES = {'ff:ff:ff:ff:ff:ff', '00:00:00:00:00:00'}
+
+
+def _norm_mac(mac: str) -> str:
+    return (mac or '').replace('-', ':').lower().strip()
+
+
+def _passerelle_defaut() -> str:
+    """Adresse IP de la passerelle par défaut du poste (best-effort)."""
+    try:
+        if IS_WINDOWS:
+            out = _run(['route', 'print', '-4'], timeout=5).stdout
+            for ligne in out.splitlines():
+                p = ligne.split()
+                if len(p) >= 3 and p[0] == '0.0.0.0' and p[1] == '0.0.0.0':
+                    try:
+                        return str(ipaddress.ip_address(p[2]))
+                    except ValueError:
+                        continue
+        else:
+            out = _run(['ip', 'route', 'show', 'default'], timeout=5).stdout
+            m = re.search(r'default\s+via\s+([0-9.]+)', out)
+            if m:
+                return m.group(1)
+            # macOS / BSD : pas de commande `ip` — repli portable via netstat
+            # (fonctionne aussi sous Linux si `ip` a échoué).
+            out = _run(['netstat', '-rn'], timeout=5).stdout
+            for ligne in out.splitlines():
+                p = ligne.split()
+                if len(p) >= 2 and p[0] in ('default', '0.0.0.0'):
+                    try:
+                        return str(ipaddress.ip_address(p[1]))
+                    except ValueError:
+                        continue
+    except Exception:
+        logger.debug('network_diag: passerelle par défaut introuvable', exc_info=True)
+    return ''
+
+
+def _table_arp() -> dict:
+    """Retourne {ip: set(mac)} depuis les tables ARP/voisins de l'OS."""
+    binding: dict[str, set] = {}
+
+    def _ajouter(ip, mac):
+        mac = _norm_mac(mac)
+        if not mac or mac in _MAC_NULLES or mac.startswith('01:') or mac.startswith('ff:'):
+            return
+        try:
+            ip = str(ipaddress.ip_address(ip))
+        except ValueError:
+            return
+        binding.setdefault(ip, set()).add(mac)
+
+    # /proc/net/arp (Linux)
+    try:
+        with open('/proc/net/arp', 'r') as f:
+            for ligne in f.readlines()[1:]:
+                p = ligne.split()
+                if len(p) >= 4:
+                    _ajouter(p[0], p[3])
+    except Exception:
+        pass
+
+    # arp -a (Windows + macOS)
+    try:
+        out = _run(['arp', '-a'], timeout=6).stdout
+        for ligne in out.splitlines():
+            m_ip = re.search(r'(\d{1,3}(?:\.\d{1,3}){3})', ligne)
+            m_mac = _MAC_RE.search(ligne)
+            if m_ip and m_mac:
+                _ajouter(m_ip.group(1), m_mac.group(0))
+    except Exception:
+        pass
+
+    # ip neigh (Linux moderne)
+    try:
+        out = _run(['ip', 'neigh', 'show'], timeout=6).stdout
+        for ligne in out.splitlines():
+            if 'FAILED' in ligne or 'INCOMPLETE' in ligne:
+                continue
+            m_ip = re.search(r'(\d{1,3}(?:\.\d{1,3}){3})', ligne)
+            m_mac = _MAC_RE.search(ligne)
+            if m_ip and m_mac:
+                _ajouter(m_ip.group(1), m_mac.group(0))
+    except Exception:
+        pass
+
+    return binding
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Palier 1 — diagnostic actif
+# ════════════════════════════════════════════════════════════════════════════
+
+def detecter_conflits_ip(passerelle: str = '', releves: int = 2, pause: float = 1.5) -> list:
+    """Une IP portant plusieurs MAC = conflit ; une MAC (hors passerelle)
+    portant beaucoup d'IP = usurpation probable / proxy ARP.
+
+    Plusieurs relevés espacés : une entrée ARP transitoire (bail DHCP qui vient
+    de changer de main) ne suffit pas — il faut voir les deux MAC coexister.
+    """
+    findings = []
+    cumul: dict[str, set] = {}
+    inverse: dict[str, set] = {}
+    for i in range(max(1, releves)):
+        for ip, macs in _table_arp().items():
+            cumul.setdefault(ip, set()).update(macs)
+            for m in macs:
+                inverse.setdefault(m, set()).add(ip)
+        if i < releves - 1:
+            time.sleep(pause)
+
+    for ip, macs in cumul.items():
+        if len(macs) >= 2:
+            findings.append(_finding(
+                'conflit_ip',
+                f"L'adresse {ip} est revendiquée par {len(macs)} machines",
+                {'ip': ip, 'macs': sorted(macs), 'fabricants': [_vendor(m) for m in sorted(macs)]},
+                ip,
+            ))
+
+    passerelle = _norm_mac_pour_ip(passerelle, cumul)
+    for mac, ips in inverse.items():
+        if mac == passerelle:
+            continue
+        # Une MAC légitime peut porter 2-3 IP (interface multi-adressée). Au-delà
+        # de 5 sur un LAN, c'est un signal d'usurpation ou de proxy ARP.
+        if len(ips) >= 6:
+            findings.append(_finding(
+                'arp_spoofing',
+                f"La machine {mac} répond pour {len(ips)} adresses IP",
+                {'mac': mac, 'fabricant': _vendor(mac), 'ips': sorted(ips)[:20], 'nb_ips': len(ips)},
+                mac,
+            ))
+    return findings
+
+
+def _norm_mac_pour_ip(ip: str, table: dict) -> str:
+    for m in table.get(ip, ()):
+        return m
+    return ''
+
+
+def _vendor(mac: str) -> str:
+    try:
+        from app import _oui_vendor
+        return _oui_vendor(mac) or ''
+    except Exception:
+        return ''
+
+
+_RE_TEMPS = re.compile(r'(?:time|temps|tiempo|zeit)[=<]\s*([0-9]+(?:[.,][0-9]+)?)\s*m?s', re.I)
+
+
+def _ping_rafale(ip: str, n: int = 20) -> dict:
+    """Envoie n echo requests et mesure perte / latence / gigue."""
+    if IS_WINDOWS:
+        cmd = ['ping', '-n', str(n), '-w', '1000', ip]
+        timeout = n * 1.3 + 5
+    else:
+        cmd = ['ping', '-c', str(n), '-i', '0.25', '-W', '1', ip]
+        timeout = n * 0.4 + 8
+    try:
+        out = _run(cmd, timeout=timeout).stdout
+    except Exception:
+        return {'ip': ip, 'envoyes': n, 'recus': 0, 'perte_pct': 100.0,
+                'min': None, 'moy': None, 'max': None, 'gigue': None}
+
+    # _RE_TEMPS capture aussi « temps<1ms » (le « < » est dans la classe [=<]) → 1.0
+    rtts = [float(x.replace(',', '.')) for x in _RE_TEMPS.findall(out)]
+    recus = len(rtts)
+    if recus == 0:
+        # dernier recours : compter les lignes de réponse
+        recus = len(re.findall(r'(?:Reply from|Réponse de|bytes from|octets de)', out, re.I))
+    perte = round(100.0 * (n - recus) / n, 1) if n else 100.0
+    stats = {'ip': ip, 'envoyes': n, 'recus': recus, 'perte_pct': max(0.0, perte)}
+    if rtts:
+        stats['min'] = round(min(rtts), 1)
+        stats['max'] = round(max(rtts), 1)
+        stats['moy'] = round(sum(rtts) / len(rtts), 1)
+        if len(rtts) > 1:
+            ecarts = [abs(rtts[i] - rtts[i - 1]) for i in range(1, len(rtts))]
+            stats['gigue'] = round(sum(ecarts) / len(ecarts), 1)
+        else:
+            stats['gigue'] = 0.0
+    else:
+        stats['min'] = stats['moy'] = stats['max'] = stats['gigue'] = None
+    return stats
+
+
+def mesurer_qualite_liaison(cibles: list, seuil_perte: float, seuil_gigue: float, n: int = 20) -> list:
+    findings = []
+    for cible in cibles:
+        ip = cible.get('ip') if isinstance(cible, dict) else cible
+        libelle = cible.get('libelle', ip) if isinstance(cible, dict) else ip
+        if not ip:
+            continue
+        st = _ping_rafale(ip, n)
+        st['libelle'] = libelle
+        if st['recus'] == 0:
+            findings.append(_finding(
+                'passerelle_injoignable' if cible.get('role') == 'passerelle' else 'qualite_liaison',
+                f"{libelle} ({ip}) ne répond à aucun des {n} paquets",
+                st, ip,
+                gravite='critique',
+            ))
+            continue
+        problemes = []
+        if st['perte_pct'] >= seuil_perte:
+            problemes.append(f"{st['perte_pct']} % de perte")
+        if st['gigue'] is not None and st['gigue'] >= seuil_gigue:
+            problemes.append(f"gigue {st['gigue']} ms")
+        if problemes:
+            findings.append(_finding(
+                'qualite_liaison',
+                f"{libelle} ({ip}) : " + ', '.join(problemes),
+                st, ip,
+            ))
+    return findings
+
+
+def verifier_dns(serveur_dns: str, noms=('www.google.com', 'www.microsoft.com', 'cloudflare.com')) -> list:
+    """Résout quelques noms témoins et mesure latence + taux d'échec."""
+    if not serveur_dns:
+        return []
+    findings = []
+    echecs, latences = 0, []
+    for nom in noms:
+        t0 = time.perf_counter()
+        ok = _requete_dns_a(serveur_dns, nom, timeout=2.0)
+        dt = (time.perf_counter() - t0) * 1000
+        if ok:
+            latences.append(dt)
+        else:
+            echecs += 1
+    taux = round(100.0 * echecs / len(noms), 0)
+    lat_moy = round(sum(latences) / len(latences), 0) if latences else None
+    if echecs == len(noms):
+        findings.append(_finding(
+            'dns_degrade', f"Le serveur DNS {serveur_dns} ne résout aucun nom témoin",
+            {'serveur': serveur_dns, 'taux_echec_pct': taux}, serveur_dns, gravite='critique'))
+    elif echecs:
+        findings.append(_finding(
+            'dns_degrade', f"Le serveur DNS {serveur_dns} échoue sur {echecs}/{len(noms)} résolutions",
+            {'serveur': serveur_dns, 'taux_echec_pct': taux, 'latence_moy_ms': lat_moy}, serveur_dns))
+    elif lat_moy and lat_moy > 300:
+        findings.append(_finding(
+            'dns_degrade', f"Le serveur DNS {serveur_dns} répond lentement ({lat_moy:.0f} ms en moyenne)",
+            {'serveur': serveur_dns, 'latence_moy_ms': lat_moy}, serveur_dns, gravite='info'))
+    return findings
+
+
+def _requete_dns_a(serveur: str, nom: str, timeout: float = 2.0) -> bool:
+    """Requête DNS A minimale, construite à la main (pas de dnspython)."""
+    try:
+        tid = 0x1234
+        entete = struct.pack('>HHHHHH', tid, 0x0100, 1, 0, 0, 0)
+        q = b''.join(struct.pack('B', len(p)) + p.encode('ascii') for p in nom.split('.')) + b'\x00'
+        paquet = entete + q + struct.pack('>HH', 1, 1)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(timeout)
+        s.sendto(paquet, (serveur, 53))
+        data, _ = s.recvfrom(2048)
+        s.close()
+        if len(data) < 12:
+            return False
+        _, flags, _, ancount = struct.unpack('>HHHH', data[:8])
+        return bool(flags & 0x8000) and (flags & 0x000F) == 0 and ancount > 0
+    except Exception:
+        return False
+
+
+def detecter_dhcp_pirate(serveurs_attendus: list) -> list:
+    """Best-effort : envoie un DHCPDISCOVER et collecte les DHCPOFFER.
+
+    Souvent bloqué sans privilèges (port 68 tenu par le client DHCP de l'OS) —
+    la détection *fiable* passe par le palier 2 (capture passive). Retourne une
+    liste vide (et journalise) si l'écoute n'a pas pu se faire.
+    """
+    try:
+        mac = _mac_locale()
+        xid = os.urandom(4)
+        paquet = _construire_dhcp_discover(mac, xid)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try:
+            s.bind(('', 68))
+        except OSError:
+            s.close()
+            logger.debug('network_diag: port 68 indisponible, détection DHCP palier 1 sautée')
+            return []
+        s.settimeout(1.0)
+        s.sendto(paquet, ('255.255.255.255', 67))
+        offres = {}
+        fin = time.time() + 4
+        while time.time() < fin:
+            try:
+                data, exp = s.recvfrom(2048)
+            except socket.timeout:
+                break
+            sid = _dhcp_server_id(data, xid)
+            if sid:
+                offres[sid] = exp[0]
+        s.close()
+    except Exception:
+        logger.debug('network_diag: détection DHCP palier 1 en échec', exc_info=True)
+        return []
+
+    attendus = {a.strip() for a in serveurs_attendus if a.strip()}
+    findings = []
+    for sid in offres:
+        if attendus and sid not in attendus:
+            findings.append(_finding(
+                'dhcp_pirate', f"Un serveur DHCP non déclaré a répondu : {sid}",
+                {'serveur': sid, 'attendus': sorted(attendus), 'source': 'discover'}, sid))
+    if not attendus and len(offres) >= 2:
+        findings.append(_finding(
+            'dhcp_pirate', f"{len(offres)} serveurs DHCP répondent sur le réseau",
+            {'serveurs': sorted(offres), 'source': 'discover'}, *sorted(offres)))
+    return findings
+
+
+def _mac_locale() -> bytes:
+    import uuid
+    n = uuid.getnode()
+    return n.to_bytes(6, 'big')
+
+
+def _construire_dhcp_discover(mac: bytes, xid: bytes) -> bytes:
+    p = struct.pack('>BBBB', 1, 1, 6, 0)          # op, htype, hlen, hops
+    p += xid + struct.pack('>HH', 0, 0x8000)      # secs, flags (broadcast)
+    p += b'\x00' * 12                              # ciaddr/yiaddr/siaddr/giaddr
+    p += mac + b'\x00' * 10                        # chaddr (16)
+    p += b'\x00' * 64 + b'\x00' * 128             # sname + file
+    p += bytes([99, 130, 83, 99])                 # magic cookie
+    p += bytes([53, 1, 1])                        # option 53 : DHCPDISCOVER
+    p += bytes([55, 3, 1, 3, 6])                  # option 55 : requête params
+    p += bytes([255])                             # fin
+    return p
+
+
+def _dhcp_server_id(data: bytes, xid: bytes) -> str:
+    try:
+        if len(data) < 240 or data[0] != 2 or data[4:8] != xid:
+            return ''
+        opts = data[240:]
+        i = 0
+        type_msg = None
+        server_id = ''
+        while i < len(opts):
+            code = opts[i]
+            if code == 255:
+                break
+            if code == 0:
+                i += 1
+                continue
+            ln = opts[i + 1]
+            val = opts[i + 2:i + 2 + ln]
+            if code == 53 and ln == 1:
+                type_msg = val[0]
+            elif code == 54 and ln == 4:
+                server_id = '.'.join(str(b) for b in val)
+            i += 2 + ln
+        return server_id if type_msg == 2 else ''
+    except Exception:
+        return ''
+
+
+def detecter_conflits_noms(client_id: int) -> list:
+    """Deux IP vivantes qui annoncent le même nom NetBIOS = conflit de nom."""
+    findings = []
+    try:
+        from database import get_db
+        from app import _netbios_name
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT adresse_ip FROM appareils WHERE client_id=? AND adresse_ip!='' "
+            "AND adresse_ip IS NOT NULL", (client_id,)).fetchall()
+        conn.close()
+    except Exception:
+        return findings
+    ips = [r[0] for r in rows[:60]]
+
+    def _nom(ip):
+        try:
+            return ip, (_netbios_name(ip) or '').strip().upper()
+        except Exception:
+            return ip, ''
+
+    par_nom: dict[str, list] = {}
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(20, len(ips) or 1)) as ex:
+        for ip, nom in ex.map(_nom, ips):
+            if nom:
+                par_nom.setdefault(nom, []).append(ip)
+    for nom, ips in par_nom.items():
+        if len(ips) >= 2:
+            findings.append(_finding(
+                'conflit_nom', f"Le nom réseau « {nom} » est utilisé par {len(ips)} machines",
+                {'nom': nom, 'ips': ips}, nom))
+    return findings
+
+
+def _cibles_ping(client_id: int, passerelle: str) -> list:
+    """Construit la liste des cibles de test de qualité de liaison."""
+    cibles = []
+    perso = str(_cfg('diag_cibles_ping', '') or '').strip()
+    if perso:
+        for x in re.split(r'[,;\s]+', perso):
+            if x:
+                cibles.append({'ip': x, 'libelle': x, 'role': 'perso'})
+        return cibles
+    serveur_dns = ''
+    try:
+        from database import get_db
+        conn = get_db()
+        row = conn.execute('SELECT passerelle, serveur_dns FROM parc_general WHERE client_id=?',
+                           (client_id,)).fetchone()
+        conn.close()
+        if row:
+            passerelle = passerelle or (row[0] or '').strip()
+            serveur_dns = (row[1] or '').strip()
+    except Exception:
+        pass
+    if passerelle:
+        cibles.append({'ip': passerelle, 'libelle': 'Passerelle', 'role': 'passerelle'})
+    for d in re.split(r'[,;\s]+', serveur_dns):
+        if d:
+            cibles.append({'ip': d, 'libelle': f'DNS {d}', 'role': 'dns'})
+    return cibles
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Palier 2 — capture passive (scapy)
+# ════════════════════════════════════════════════════════════════════════════
+
+_scapy_cache = {'teste': False, 'module': None}
+
+
+def _charger_scapy():
+    if not _scapy_cache['teste']:
+        _scapy_cache['teste'] = True
+        try:
+            from scapy.all import AsyncSniffer  # noqa: F401
+            import scapy.all as _s
+            _scapy_cache['module'] = _s
+        except Exception:
+            _scapy_cache['module'] = None
+    return _scapy_cache['module']
+
+
+def etat_capture() -> dict:
+    """{disponible, motif} — motif ∈ scapy_absent | docker_bridge |
+    privileges_insuffisants | aucune_interface | ok."""
+    if os.environ.get('RUNNING_IN_DOCKER'):
+        # En bridge Docker, la capture ne voit que le trafic conteneur : inutile
+        # tant que network_mode:host + cap_add ne sont pas activés (documenté).
+        s = _charger_scapy()
+        if s is None:
+            return {'disponible': False, 'motif': 'scapy_absent'}
+        return {'disponible': False, 'motif': 'docker_bridge'}
+    s = _charger_scapy()
+    if s is None:
+        return {'disponible': False, 'motif': 'scapy_absent'}
+    try:
+        ifaces = s.get_if_list()
+        reelles = [i for i in ifaces if i not in ('lo', 'lo0')]
+        if not reelles:
+            return {'disponible': False, 'motif': 'aucune_interface'}
+    except Exception:
+        return {'disponible': False, 'motif': 'aucune_interface'}
+    if IS_WINDOWS:
+        # Sans Npcap (ou WinPcap), scapy sait lister les interfaces mais pas
+        # capturer : conf.use_pcap/use_npcap traduit la présence du pilote.
+        try:
+            conf = s.conf
+            if not (getattr(conf, 'use_pcap', False) or getattr(conf, 'use_npcap', False)):
+                return {'disponible': False, 'motif': 'privileges_insuffisants'}
+        except Exception:
+            return {'disponible': False, 'motif': 'privileges_insuffisants'}
+    elif hasattr(os, 'geteuid') and os.geteuid() != 0:
+        return {'disponible': False, 'motif': 'privileges_insuffisants'}
+    return {'disponible': True, 'motif': 'ok'}
+
+
+def capture_passive(duree: int, seuils: dict) -> list:
+    """Sniffe pendant `duree` secondes et retourne les évènements détectés."""
+    s = _charger_scapy()
+    if s is None:
+        return []
+    findings = []
+    liaisons: dict[str, str] = {}          # ip -> mac (première vue)
+    arp_gratuits: dict[str, int] = {}
+    mac_ips: dict[str, set] = {}
+    dhcp_serveurs: set = set()
+    bpdu_tcn = [0]
+    ra_routeurs: set = set()
+    compteur = {'total': 0, 'broadcast': 0, 'debut': time.time()}
+    tcp_flux: dict = {}
+    tcp_retx: dict[str, int] = {}
+
+    def _on(pkt):
+        compteur['total'] += 1
+        try:
+            if pkt.haslayer(s.Ether) and pkt[s.Ether].dst == 'ff:ff:ff:ff:ff:ff':
+                compteur['broadcast'] += 1
+            if pkt.haslayer(s.ARP):
+                a = pkt[s.ARP]
+                ip_src, mac_src = a.psrc, _norm_mac(a.hwsrc)
+                if ip_src and ip_src != '0.0.0.0' and mac_src:
+                    mac_ips.setdefault(mac_src, set()).add(ip_src)
+                    if a.op == 2 and a.pdst == a.psrc:      # ARP gratuit
+                        arp_gratuits[ip_src] = arp_gratuits.get(ip_src, 0) + 1
+                    ancienne = liaisons.get(ip_src)
+                    if ancienne and ancienne != mac_src:
+                        findings.append(_finding(
+                            'arp_spoofing',
+                            f"L'adresse {ip_src} a changé de MAC en cours de capture "
+                            f"({ancienne} → {mac_src})",
+                            {'ip': ip_src, 'mac_avant': ancienne, 'mac_apres': mac_src,
+                             'fabricant_apres': _vendor(mac_src)}, ip_src))
+                    liaisons.setdefault(ip_src, mac_src)
+            if pkt.haslayer(s.DHCP):
+                for opt in pkt[s.DHCP].options:
+                    if isinstance(opt, tuple) and opt[0] == 'server_id':
+                        dhcp_serveurs.add(str(opt[1]))
+            if pkt.haslayer(s.IPv6) and pkt.haslayer(s.ICMPv6ND_RA):
+                ra_routeurs.add(_norm_mac(pkt[s.Ether].src))
+            if pkt.haslayer(s.STP):
+                try:
+                    if int(pkt[s.STP].bpdutype) == 0x80 or int(pkt[s.STP].bpduflags) & 0x01:
+                        bpdu_tcn[0] += 1
+                except Exception:
+                    pass
+            if pkt.haslayer(s.TCP) and pkt.haslayer(s.IP):
+                ip4, tcp = pkt[s.IP], pkt[s.TCP]
+                if pkt.haslayer(s.Raw):
+                    cle = (ip4.src, tcp.sport, ip4.dst, tcp.dport)
+                    seq = int(tcp.seq)
+                    dernier = tcp_flux.get(cle)
+                    if dernier is not None and seq < dernier:
+                        k = f"{ip4.src}:{tcp.sport}→{ip4.dst}:{tcp.dport}"
+                        tcp_retx[k] = tcp_retx.get(k, 0) + 1
+                    tcp_flux[cle] = max(seq, dernier or 0)
+        except Exception:
+            pass
+
+    try:
+        sniffer = s.AsyncSniffer(prn=_on, store=False)
+        sniffer.start()
+        time.sleep(max(3, duree))
+        sniffer.stop()
+    except PermissionError:
+        return []
+    except Exception:
+        logger.debug('network_diag: capture passive interrompue', exc_info=True)
+        return []
+
+    ecoule = max(1.0, time.time() - compteur['debut'])
+    pps_broadcast = compteur['broadcast'] / ecoule
+    seuil_bc = seuils.get('broadcast_pps', 150)
+    if pps_broadcast >= seuil_bc:
+        findings.append(_finding(
+            'tempete_broadcast',
+            f"{pps_broadcast:.0f} trames de broadcast/s (seuil {seuil_bc})",
+            {'pps': round(pps_broadcast, 1), 'seuil': seuil_bc,
+             'total_paquets': compteur['total']}, 'broadcast'))
+
+    for ip, n in arp_gratuits.items():
+        if n >= 8:
+            findings.append(_finding(
+                'arp_spoofing', f"{n} ARP gratuits émis pour {ip} pendant la capture",
+                {'ip': ip, 'nb_arp_gratuits': n, 'mac': liaisons.get(ip, '')}, ip,
+                gravite='avertissement'))
+
+    for mac, ips in mac_ips.items():
+        if len(ips) >= 6:
+            findings.append(_finding(
+                'mac_flapping', f"La MAC {mac} a été vue avec {len(ips)} adresses IP",
+                {'mac': mac, 'fabricant': _vendor(mac), 'ips': sorted(ips)[:20]}, mac))
+
+    if len(dhcp_serveurs) >= 2:
+        findings.append(_finding(
+            'dhcp_pirate', f"{len(dhcp_serveurs)} serveurs DHCP observés en capture",
+            {'serveurs': sorted(dhcp_serveurs), 'source': 'capture'}, *sorted(dhcp_serveurs)))
+
+    if len(ra_routeurs) >= 2:
+        findings.append(_finding(
+            'ra_pirate', f"{len(ra_routeurs)} routeurs IPv6 émettent des Router Advertisements",
+            {'routeurs': sorted(ra_routeurs)}, *sorted(ra_routeurs)))
+
+    if bpdu_tcn[0] >= 5:
+        findings.append(_finding(
+            'stp_instable', f"{bpdu_tcn[0]} BPDU de changement de topologie (TCN) captés",
+            {'nb_tcn': bpdu_tcn[0], 'fenetre_s': round(ecoule)}, 'stp'))
+
+    for flux, n in tcp_retx.items():
+        if n >= 15:
+            findings.append(_finding(
+                'tcp_retransmissions', f"{n} retransmissions TCP sur le flux {flux}",
+                {'flux': flux, 'nb_retransmissions': n}, flux))
+    return findings
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Orchestration : snapshot + persistance
+# ════════════════════════════════════════════════════════════════════════════
+
+_diag_status = {
+    'running': False, 'progress': 0, 'message': '', 'client_id': None,
+    'findings': [], 'avertissements': [], 'run_id': None, 'fin': None,
+}
+_diag_lock = threading.Lock()
+
+_diag_moniteur_state = {'running': False, 'last_cycle': None, 'cycle_count': 0}
+
+
+def statut_snapshot() -> dict:
+    with _diag_lock:
+        return dict(_diag_status)
+
+
+def lancer_snapshot(client_id: int, plage: str = '', avec_capture=None) -> bool:
+    """Démarre un snapshot en thread détaché. False si un run est déjà en cours."""
+    with _diag_lock:
+        if _diag_status['running']:
+            return False
+        _diag_status.update({'running': True, 'progress': 0, 'client_id': client_id,
+                             'message': 'Initialisation…', 'findings': [],
+                             'avertissements': [], 'run_id': None, 'fin': None})
+    threading.Thread(target=_run_snapshot, args=(client_id, plage, avec_capture),
+                     daemon=True, name='DiagReseauSnapshot').start()
+    return True
+
+
+def _maj_statut(**kw):
+    with _diag_lock:
+        _diag_status.update(kw)
+
+
+def _run_snapshot(client_id: int, plage: str, avec_capture):
+    debut = _now_z()
+    t0 = time.time()
+    findings, avertissements = [], []
+    if avec_capture is None:
+        avec_capture = str(_cfg('diag_capture_active', '0')) == '1'
+
+    seuil_perte = _cfg_float('diag_seuil_perte_pct', 5)
+    seuil_gigue = _cfg_float('diag_seuil_jitter_ms', 30)
+    seuil_bc = _cfg_int('diag_seuil_broadcast_pps', 150)
+    duree_capture = _cfg_int('diag_snapshot_duree_s', 20)
+    passerelle = _passerelle_defaut()
+
+    try:
+        _maj_statut(progress=10, message='Analyse des tables ARP (conflits d’adresses)…')
+        findings += detecter_conflits_ip(passerelle)
+
+        _maj_statut(progress=30, message='Test de qualité de liaison (passerelle, DNS)…')
+        cibles = _cibles_ping(client_id, passerelle)
+        findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue)
+
+        _maj_statut(progress=50, message='Contrôle de la résolution DNS…')
+        serveur_dns = next((c['ip'] for c in cibles if c.get('role') == 'dns'), '')
+        findings += verifier_dns(serveur_dns)
+
+        _maj_statut(progress=60, message='Recherche d’un serveur DHCP non autorisé…')
+        attendus = re.split(r'[,;\s]+', str(_cfg('diag_dhcp_serveurs_attendus', '') or ''))
+        findings += detecter_dhcp_pirate(attendus)
+
+        _maj_statut(progress=70, message='Détection des conflits de noms réseau…')
+        findings += detecter_conflits_noms(client_id)
+
+        capture_utilisee = False
+        if avec_capture:
+            etat = etat_capture()
+            if etat['disponible']:
+                _maj_statut(progress=80, message=f'Capture passive ({duree_capture} s)…')
+                findings += capture_passive(duree_capture, {'broadcast_pps': seuil_bc})
+                capture_utilisee = True
+            else:
+                avertissements.append(f"Capture passive indisponible : {etat['motif']}")
+        elif str(_cfg('diag_capture_active', '0')) != '1':
+            avertissements.append("Capture passive (palier 2) désactivée dans les réglages")
+
+        _maj_statut(progress=92, message='Enregistrement des évènements…')
+        nb_nouveaux = _enregistrer_evenements(client_id, findings, 'capture' if capture_utilisee else 'actif')
+
+        run_id = _enregistrer_run(client_id, debut, _now_z(), int(time.time() - t0),
+                                  'snapshot', plage, capture_utilisee,
+                                  {'nb_findings': len(findings), 'nb_nouveaux': nb_nouveaux,
+                                   'cibles': [c.get('ip') for c in cibles],
+                                   'avertissements': avertissements})
+        _maj_statut(progress=100, running=False, message=f'Terminé — {len(findings)} constat(s)',
+                    findings=findings, avertissements=avertissements, run_id=run_id, fin=_now_z())
+    except Exception as e:
+        logger.exception('network_diag: snapshot en échec')
+        _maj_statut(running=False, progress=100, message=f'Erreur : {e}',
+                    findings=findings, avertissements=avertissements, fin=_now_z())
+
+
+def _purger_anciens(conn, client_id: int):
+    """Purge paresseuse (modèle historique_max_jours) : évènements RÉSOLUS et
+    runs plus vieux que diag_reseau_max_jours. Les évènements non résolus ne
+    sont jamais supprimés par l'âge — un problème persistant reste visible."""
+    try:
+        jours = _cfg_int('diag_reseau_max_jours', 30)
+        if jours <= 0:
+            return
+        from datetime import timedelta
+        limite = (datetime.now(timezone.utc) - timedelta(days=jours)).isoformat(
+            timespec='seconds').replace('+00:00', 'Z')
+        conn.execute(
+            "DELETE FROM diag_reseau_evenements WHERE client_id=? AND resolu=1 "
+            "AND COALESCE(date_resolu, derniere_occurrence) < ?", (client_id, limite))
+        conn.execute("DELETE FROM diag_reseau_runs WHERE client_id=? AND debut < ?",
+                     (client_id, limite))
+    except Exception:
+        logger.debug('network_diag: purge par âge en échec', exc_info=True)
+
+
+def _enregistrer_run(client_id, debut, fin, duree_s, mode, plage, capture, resume: dict) -> int:
+    try:
+        from database import get_db
+        conn = get_db()
+        _purger_anciens(conn, client_id)
+        cur = conn.execute(
+            "INSERT INTO diag_reseau_runs "
+            "(client_id, debut, fin, duree_s, mode, plage, capture_utilisee, resume_json) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (client_id, debut, fin, duree_s, mode, plage or '', 1 if capture else 0,
+             json.dumps(resume, ensure_ascii=False)))
+        conn.commit()
+        rid = cur.lastrowid
+        conn.close()
+        return rid
+    except Exception:
+        logger.exception('network_diag: enregistrement du run impossible')
+        return 0
+
+
+def _appareil_pour_finding(conn, client_id: int, details: dict):
+    """Rattache l'évènement à un appareil du client par IP ou MAC, si possible."""
+    ips = [details.get('ip')] + list(details.get('ips', []) or [])
+    macs = ([details.get('mac'), details.get('mac_apres'), details.get('mac_attendue')]
+            + list(details.get('macs', []) or []))
+    for ip in [x for x in ips if x]:
+        row = conn.execute(
+            "SELECT id FROM appareils WHERE client_id=? AND adresse_ip=? LIMIT 1",
+            (client_id, ip)).fetchone()
+        if row:
+            return row[0]
+    for mac in [_norm_mac(x) for x in macs if x]:
+        row = conn.execute(
+            "SELECT id FROM appareils WHERE client_id=? AND LOWER(REPLACE(adresse_mac,'-',':'))=? LIMIT 1",
+            (client_id, mac)).fetchone()
+        if row:
+            return row[0]
+    return None
+
+
+def _enregistrer_evenements(client_id: int, findings: list, source: str) -> int:
+    """Upsert par signature. Retourne le nombre d'évènements nouveaux."""
+    if not findings:
+        return 0
+    from database import get_db
+    now = _now_z()
+    nouveaux = 0
+    critiques_nouveaux = []
+    conn = get_db()
+    try:
+        for f in findings:
+            sig = f['signature']
+            existant = conn.execute(
+                "SELECT id, resolu, nb_occurrences FROM diag_reseau_evenements "
+                "WHERE client_id=? AND signature=?", (client_id, sig)).fetchone()
+            details = json.dumps(f.get('details', {}), ensure_ascii=False)
+            appareil_id = _appareil_pour_finding(conn, client_id, f.get('details', {}))
+            if existant:
+                conn.execute(
+                    "UPDATE diag_reseau_evenements SET derniere_occurrence=?, "
+                    "nb_occurrences=nb_occurrences+1, gravite=?, titre=?, details_json=?, "
+                    "source=?, appareil_id=COALESCE(appareil_id, ?), resolu=0, "
+                    "date_resolu=CASE WHEN resolu=1 THEN NULL ELSE date_resolu END "
+                    "WHERE id=?",
+                    (now, f['gravite'], f['titre'], details, source, appareil_id, existant[0]))
+            else:
+                conn.execute(
+                    "INSERT INTO diag_reseau_evenements "
+                    "(client_id, horodatage, gravite, categorie, titre, details_json, source, "
+                    " signature, appareil_id, resolu, premiere_occurrence, derniere_occurrence, nb_occurrences) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,0,?,?,1)",
+                    (client_id, now, f['gravite'], f['categorie'], f['titre'], details,
+                     source, sig, appareil_id, now, now))
+                nouveaux += 1
+                if f['gravite'] == 'critique':
+                    critiques_nouveaux.append(f)
+        conn.commit()
+    except Exception:
+        logger.exception('network_diag: enregistrement des évènements impossible')
+    finally:
+        conn.close()
+    if critiques_nouveaux:
+        _alerter_email(client_id, critiques_nouveaux)
+    return nouveaux
+
+
+def _alerter_email(client_id: int, findings: list):
+    """E-mail sur nouvel évènement critique (opt-in : diag_alerte_email +
+    destinataire). Best-effort, ne bloque jamais le cycle."""
+    if str(_cfg('diag_alerte_email', '0')) != '1':
+        return
+    dest = str(_cfg('diag_alerte_destinataire', '') or '').strip()
+    if '@' not in dest:
+        return
+    try:
+        from html import escape as _esc
+        from app import _send_email
+        from database import get_db
+        conn = get_db()
+        row = conn.execute('SELECT nom FROM clients WHERE id=?', (client_id,)).fetchone()
+        conn.close()
+        # Les titres d'évènements embarquent des données non fiables du LAN
+        # (hostname NetBIOS, reverse-DNS, MAC) — échappées avant insertion HTML.
+        nom_client = _esc(row[0]) if row else f'client {client_id}'
+        lignes = ''.join(
+            f"<li><strong>{_esc(libelle_categorie(f['categorie']))}</strong> — {_esc(f['titre'])}</li>"
+            for f in findings)
+        corps = (f"<html><body style=\"font-family:Arial\">"
+                 f"<h2>Diagnostic réseau — {nom_client}</h2>"
+                 f"<p>{len(findings)} nouvel(le)(s) alerte(s) critique(s) détectée(s) :</p>"
+                 f"<ul>{lignes}</ul>"
+                 f"<p><em>Détail dans ParcInfo → Inventaire → Diagnostic réseau.</em></p>"
+                 f"</body></html>")
+        sujet = f"🩺 ParcInfo — alerte réseau critique ({row[0] if row else client_id})"
+        _send_email(dest, sujet, corps)
+    except Exception:
+        logger.debug('network_diag: envoi e-mail alerte en échec', exc_info=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Surveillance continue (thread démon, modèle _watchdog_loop)
+# ════════════════════════════════════════════════════════════════════════════
+
+def _moniteur_cycle():
+    if str(_cfg('diag_surveillance_active', '0')) != '1':
+        return
+    try:
+        from database import get_db
+        conn = get_db()
+        clients = [r[0] for r in conn.execute(
+            "SELECT DISTINCT client_id FROM appareils WHERE adresse_ip!='' AND adresse_ip IS NOT NULL"
+        ).fetchall()]
+        conn.close()
+    except Exception:
+        return
+    if not clients:
+        return
+
+    # Ne surveiller que les clients dont le réseau est joignable depuis ce poste
+    try:
+        from app import _reseaux_locaux_actuels, _appareil_sur_reseau_courant
+        reseaux = _reseaux_locaux_actuels()
+    except Exception:
+        reseaux, _appareil_sur_reseau_courant = set(), None
+
+    seuil_perte = _cfg_float('diag_seuil_perte_pct', 5)
+    seuil_gigue = _cfg_float('diag_seuil_jitter_ms', 30)
+    seuil_bc = _cfg_int('diag_seuil_broadcast_pps', 150)
+    avec_capture = str(_cfg('diag_capture_active', '0')) == '1'
+    passerelle = _passerelle_defaut()
+
+    capture_faite = False
+    for cid in clients:
+        try:
+            from database import get_db
+            conn = get_db()
+            row = conn.execute('SELECT plage_ip_locale FROM parc_general WHERE client_id=?',
+                               (cid,)).fetchone()
+            conn.close()
+            plage = (row[0] if row else '') or ''
+            if _appareil_sur_reseau_courant and reseaux and not _appareil_sur_reseau_courant('', plage, reseaux):
+                continue
+
+            findings = detecter_conflits_ip(passerelle, releves=1)
+            cibles = _cibles_ping(cid, passerelle)
+            findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, n=10)
+            findings += detecter_conflits_noms(cid)
+            src = 'actif'
+            if avec_capture and not capture_faite and etat_capture()['disponible']:
+                findings += capture_passive(_cfg_int('diag_snapshot_duree_s', 20),
+                                            {'broadcast_pps': seuil_bc})
+                capture_faite, src = True, 'capture'
+            _enregistrer_evenements(cid, findings, src if src == 'capture' else 'actif')
+            conn = get_db()
+            _purger_anciens(conn, cid)
+            conn.commit()
+            conn.close()
+        except Exception:
+            logger.debug('network_diag: cycle moniteur — client %s en échec', cid, exc_info=True)
+
+    _diag_moniteur_state['last_cycle'] = _now_z()
+    _diag_moniteur_state['cycle_count'] += 1
+
+
+def _moniteur_loop():
+    _diag_moniteur_state['running'] = True
+    time.sleep(15)  # laisser l'app finir de démarrer
+    while True:
+        try:
+            _moniteur_cycle()
+        except Exception:
+            logger.debug('network_diag: _moniteur_cycle', exc_info=True)
+        time.sleep(max(60, _cfg_int('diag_intervalle_s', 300)))
+
+
+def etat_moniteur() -> dict:
+    d = dict(_diag_moniteur_state)
+    d['active'] = str(_cfg('diag_surveillance_active', '0')) == '1'
+    d['intervalle_s'] = _cfg_int('diag_intervalle_s', 300)
+    return d
+
+
+_moniteur_thread = threading.Thread(target=_moniteur_loop, daemon=True, name='DiagReseauMoniteur')
+_moniteur_thread.start()

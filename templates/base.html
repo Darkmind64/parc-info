@@ -933,7 +933,7 @@
 
 <!-- NAV -->
 {% set ep = request.endpoint %}
-{% set inv_active = ep in ['liste_appareils','nouvel_appareil','editer_appareil','liste_peripheriques','nouveau_peripherique','editer_peripherique','parc_general','baie_brassage','page_scan','liste_plans','editer_plan'] %}
+{% set inv_active = ep in ['liste_appareils','nouvel_appareil','editer_appareil','liste_peripheriques','nouveau_peripherique','editer_peripherique','parc_general','baie_brassage','page_scan','page_diag_reseau','liste_plans','editer_plan'] %}
 {% set contrats_active = ep in ['liste_contrats','nouveau_contrat','editer_contrat','detail_contrat'] %}
 {% set secu_active = ep in ['liste_identifiants','nouvel_identifiant','editer_identifiant','liste_utilisateurs','nouvel_utilisateur','editer_utilisateur','droits_utilisateur'] %}
 <nav id="main-nav">
@@ -992,6 +992,9 @@
             </a>
             <a href="/scan" {% if ep == 'page_scan' %}class="active"{% endif %}>
                 <span class="nd-icon">📡</span> Scan réseau
+            </a>
+            <a href="/diag-reseau" {% if ep == 'page_diag_reseau' %}class="active"{% endif %}>
+                <span class="nd-icon">🩺</span> Diagnostic réseau
             </a>
             <a href="/qrcode-labels" {% if ep == 'qrcode_labels' %}class="active"{% endif %}>
                 <span class="nd-icon">📋</span> Étiquettes QR
@@ -1180,6 +1183,9 @@ window._flashMessages = [
     {% elif ep == 'page_scan' %}
         {% set _ = bc.append(('Inventaire', None)) %}
         {% set _ = bc.append(('Scan réseau', None)) %}
+    {% elif ep == 'page_diag_reseau' %}
+        {% set _ = bc.append(('Inventaire', None)) %}
+        {% set _ = bc.append(('Diagnostic réseau', None)) %}
     {% elif ep in ['nouveau_contrat','editer_contrat'] %}
         {% set _ = bc.append(('Contrats', '/contrats')) %}
         {% set _ = bc.append(('Ajouter' if ep == 'nouveau_contrat' else 'Modifier', None)) %}
@@ -3389,6 +3395,64 @@ function rendreConfig() {
     <div class="cfg-row">
         <label class="cfg-label">Timeout par ping (s)</label>
         <input type="number" data-cfg="ping_timeout" value="${g('ping_timeout')||'1.0'}" min="0.3" max="5" step="0.1" class="cfg-input cfg-input-sm">
+    </div>
+</div>
+
+<!-- ══ 4b. DIAGNOSTIC RÉSEAU ══ -->
+<div class="cfg-section">
+    <div class="cfg-section-title">🩺 Diagnostic réseau</div>
+    <div class="cfg-row">
+        <label class="cfg-label">Surveillance continue</label>
+        <input type="checkbox" data-cfg="diag_surveillance_active" ${g('diag_surveillance_active')==='1'?'checked':''} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Capture passive de trames (palier 2)</label>
+        <input type="checkbox" data-cfg="diag_capture_active" ${g('diag_capture_active')==='1'?'checked':''} class="cfg-check">
+    </div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:.2rem 0 .4rem;line-height:1.4;">
+        La capture passive exige des privilèges administrateur + un pilote de capture
+        (Npcap sous Windows). En conteneur, elle nécessite <code>network_mode: host</code>
+        et <code>cap_add: [NET_RAW, NET_ADMIN]</code>.
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Intervalle surveillance (s)</label>
+        <input type="number" data-cfg="diag_intervalle_s" value="${g('diag_intervalle_s')||'300'}" min="60" max="3600" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Durée d'un snapshot / capture (s)</label>
+        <input type="number" data-cfg="diag_snapshot_duree_s" value="${g('diag_snapshot_duree_s')||'20'}" min="5" max="120" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Seuil tempête broadcast (paquets/s)</label>
+        <input type="number" data-cfg="diag_seuil_broadcast_pps" value="${g('diag_seuil_broadcast_pps')||'150'}" min="10" max="10000" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Seuil perte de paquets (%)</label>
+        <input type="number" data-cfg="diag_seuil_perte_pct" value="${g('diag_seuil_perte_pct')||'5'}" min="1" max="100" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Seuil gigue (ms)</label>
+        <input type="number" data-cfg="diag_seuil_jitter_ms" value="${g('diag_seuil_jitter_ms')||'30'}" min="1" max="1000" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Serveurs DHCP autorisés (IP, séparées par des virgules)</label>
+        <input type="text" data-cfg="diag_dhcp_serveurs_attendus" value="${g('diag_dhcp_serveurs_attendus')||''}" placeholder="192.168.1.1" class="cfg-input">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Cibles de test de liaison (vide = passerelle + DNS du parc)</label>
+        <input type="text" data-cfg="diag_cibles_ping" value="${g('diag_cibles_ping')||''}" placeholder="192.168.1.1, 8.8.8.8" class="cfg-input">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Rétention des évènements résolus (jours, 0 = jamais)</label>
+        <input type="number" data-cfg="diag_reseau_max_jours" value="${g('diag_reseau_max_jours')||'30'}" min="0" max="3650" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">E-mail sur nouvel évènement critique</label>
+        <input type="checkbox" data-cfg="diag_alerte_email" ${g('diag_alerte_email')==='1'?'checked':''} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Destinataire des alertes (nécessite le SMTP configuré)</label>
+        <input type="email" data-cfg="diag_alerte_destinataire" value="${g('diag_alerte_destinataire')||''}" placeholder="admin@exemple.fr" class="cfg-input">
     </div>
 </div>
 

@@ -1,8 +1,51 @@
-PARCINFO_VERSION=2.18.89
-RELEASE_DATE=2026-08-30
-BUILD_NUMBER=2026083003
+PARCINFO_VERSION=2.19.0
+RELEASE_DATE=2026-08-31
+BUILD_NUMBER=2026083101
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.0 - Nouveau module : Diagnostic reseau
+# Demande : ajouter un module de diagnostic reseau qui intercepte les
+# trames du reseau et signale les problemes identifies (collisions,
+# pertes de paquets, conflits d'adresses, etc.).
+#
+# Architecture en deux paliers, decidee avec l'utilisateur :
+#
+# PALIER 1 - diagnostic ACTIF (aucune dependance, module network_diag.py) :
+#   - Conflits d'adresses IP : analyse croisee des tables ARP/voisins de
+#     l'OS (une IP portant plusieurs MAC ; une MAC repondant pour de
+#     nombreuses IP). Complement journal d'evenements Windows.
+#   - Qualite de liaison : ping en rafale vers passerelle + DNS du parc,
+#     mesure perte / latence / gigue (substitut honnete aux "collisions",
+#     qui n'existent plus en full-duplex commute).
+#   - Serveur DHCP non autorise : DHCPDISCOVER best-effort + liste blanche.
+#   - Conflits de noms NetBIOS ; joignabilite passerelle ; sante DNS.
+#
+# PALIER 2 - capture PASSIVE de trames via scapy (OFF par defaut,
+# diag_capture_active) : AsyncSniffer sur l'interface principale ->
+# ARP spoofing / ARP gratuits en rafale, MAC flapping, tempetes de
+# broadcast, serveurs DHCP multiples, BPDU STP en rafale, Router
+# Advertisements IPv6 pirates, retransmissions TCP. Necessite des
+# privileges + Npcap (Windows) ; en conteneur, network_mode: host +
+# cap_add NET_RAW/NET_ADMIN.
+#
+# Deux modes : snapshot a la demande (/api/diag-reseau/snapshot, meme
+# schema de polling que le scan) + surveillance continue (thread demon
+# _moniteur_loop calque sur le watchdog ping). Evenements historises et
+# dedoublonnes dans diag_reseau_evenements (nb_occurrences), page
+# /diag-reseau (Inventaire -> Diagnostic reseau) avec filtres et
+# resolution. Reglages dans Reglages -> Reseau & Scan.
+#
+# scapy ajoute a requirements.txt et embarque dans parcinfo.spec.
+#
+# Visibilite : les evenements actifs remontent dans le widget "Alertes
+# critiques" du dashboard (badge "Reseau") et sur le dashboard mobile
+# (carte -> /m/diag-reseau, consultation seule). Chaque evenement est
+# rattache a l'appareil concerne (par IP ou MAC) avec lien vers sa fiche.
+# E-mail optionnel sur nouvel evenement critique (diag_alerte_email +
+# destinataire, via le SMTP deja configure). Retention configurable des
+# evenements resolus (diag_reseau_max_jours, 30 j par defaut).
+# Detection passerelle : repli netstat pour macOS/BSD.
 
 # Version 2.18.89 - Baie de brassage : audit complet + correctif PDU vertical etroit
 # Demande : faire le point sur l'ensemble de la partie baie de brassage,

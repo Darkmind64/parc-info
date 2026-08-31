@@ -156,6 +156,19 @@ CFG_DEFAULTS = {
     'ping_timeout': '1.0',
     'scan_workers': '50',
     'scan_ports': '21,22,23,25,53,80,110,135,139,143,443,445,631,3389,5900,8080,8443,9100',
+    # ── Diagnostic réseau (module network_diag) ───────────────────────────────
+    'diag_surveillance_active': '0',   # thread de surveillance continue
+    'diag_capture_active': '0',        # palier 2 : capture passive scapy (OFF par défaut)
+    'diag_intervalle_s': '300',        # période du moniteur continu
+    'diag_snapshot_duree_s': '20',     # fenêtre d'un snapshot / d'une capture
+    'diag_seuil_broadcast_pps': '150', # seuil tempête de broadcast (paquets/s)
+    'diag_seuil_perte_pct': '5',       # seuil perte de paquets (%)
+    'diag_seuil_jitter_ms': '30',      # seuil gigue (ms)
+    'diag_dhcp_serveurs_attendus': '', # liste blanche IP serveurs DHCP (CSV)
+    'diag_cibles_ping': '',            # cibles qualité de liaison ; vide = passerelle + DNS parc
+    'diag_reseau_max_jours': '30',     # purge des évènements résolus + des runs plus vieux que N jours (0 = off)
+    'diag_alerte_email': '0',          # e-mail sur nouvel évènement critique
+    'diag_alerte_destinataire': '',    # destinataire des alertes diag (vide = pas d'envoi)
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',

@@ -6,8 +6,8 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.18.89 ⭐ **Baie de brassage : audit et correctif PDU vertical étroit**  
-**Dernière mise à jour** : 2026-08-30
+**Version** : 2.19.0 ⭐ **Nouveau module : Diagnostic réseau (conflits d'adresses, qualité de liaison, DHCP pirate, capture passive)**  
+**Dernière mise à jour** : 2026-08-31
 
 ---
 
@@ -20,6 +20,29 @@ mail, types de fichiers), extraite directement de son exécutable. Le statut
 de mise à jour logicielle distingue « à jour confirmé » de « non
 vérifiable » au lieu d'un simple silence pour les deux. Voir le
 [CHANGELOG](CHANGELOG.md).
+
+### Diagnostic réseau
+
+Le menu **Inventaire → Diagnostic réseau** analyse la santé du segment réseau
+du client actif :
+
+- **Palier 1 — diagnostic actif** (aucune installation) : conflits d'adresses
+  IP (analyse croisée des tables ARP), qualité de liaison vers la passerelle et
+  les DNS (perte de paquets, latence, gigue), serveur DHCP non autorisé
+  (best-effort + liste blanche), conflits de noms NetBIOS, santé DNS.
+- **Palier 2 — capture passive de trames** (optionnel, désactivé par défaut) :
+  ARP spoofing / ARP gratuits en rafale, tempêtes de broadcast, serveurs DHCP
+  multiples, BPDU STP en rafale, Router Advertisements IPv6 pirates,
+  retransmissions TCP. Nécessite des privilèges administrateur et un pilote de
+  capture (Npcap sous Windows). En conteneur : `network_mode: host` +
+  `cap_add: [NET_RAW, NET_ADMIN]`.
+
+Deux modes : **snapshot à la demande** et **surveillance continue** avec
+alertes historisées, dédoublonnées et filtrables (gravité, catégorie). Les
+évènements actifs remontent dans le widget « Alertes critiques » du tableau de
+bord et sur le dashboard mobile (`/m/diag-reseau`, lecture seule), rattachés à
+l'appareil concerné. E-mail optionnel sur nouvel évènement critique. Seuils,
+liste blanche DHCP et rétention configurables dans *Réglages → Réseau & Scan*.
 
 ### Rapports graphiques + inventaire USB automatique
 
@@ -82,9 +105,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Correspondance champs, détail par système d'exploitation](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-gui.exe)
-- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-Windows.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-Windows.exe)
 
 ### Interface mobile (PWA)
 Accessible sur `/m` depuis un smartphone : consultation en lecture seule du
@@ -199,25 +222,25 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.18.89
+## 📥 Téléchargements v2.19.0
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger |
 |-----------|----------|
-| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-Windows.exe) |
-| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-macOS-ARM.zip) |
-| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-macOS-Intel.zip) |
-| **Docker** | `docker pull darkmind64/parcinfo:v2.18.89` |
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-macOS-ARM.zip) |
+| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-macOS-Intel.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.19.0` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Usage |
 |------|-----------|----------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-gui.exe) | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector.exe) | Automatisation/scripts |
-| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
-| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector.exe) | Automatisation/scripts |
+| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
+| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -251,7 +274,7 @@ python system-info-collector.py --client-id 5
 > xattr -cr ParcInfo-Collector.app   # ou : xattr -cr system-info-collector
 > ```
 
-👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.18.89)
+👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.19.0)
 
 ---
 

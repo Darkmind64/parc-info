@@ -83,6 +83,12 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules('zeroconf')
 
+# Diagnostic réseau palier 2 (network_diag.py) : scapy résout ses couches de
+# protocole dynamiquement (scapy.layers.*) — non détectées par l'analyse
+# statique. Import protégé côté code : l'absence du pilote de capture
+# (Npcap/libpcap) à l'exécution ne casse pas l'app, seul le palier 1 tourne.
+hiddenimports += collect_submodules('scapy')
+
 # Scheduler cron (maintenance) + sync uploads Turso - imports dynamiques
 # (triggers/executors/jobstores résolus par nom à l'exécution, non détectés
 # par l'analyse statique de PyInstaller)

@@ -1,23 +1,23 @@
 {
-  "version": "2.18.89",
-  "release_date": "2026-08-30T00:00:00.000000",
+  "version": "2.19.0",
+  "release_date": "2026-08-31T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.18.89",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.18.89/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : audit complet des libellés de port + correctif du rendu d'un PDU/onduleur en orientation verticale très étroite",
+    "new_features": "Nouveau module Diagnostic réseau (Inventaire → Diagnostic réseau) : détection des conflits d'adresses IP, de la qualité de liaison dégradée (perte/gigue/latence), d'un serveur DHCP non autorisé et des conflits de noms ; snapshot à la demande + surveillance continue. Palier 2 optionnel : capture passive de trames (ARP spoofing, tempêtes de broadcast, RA IPv6 pirates, retransmissions TCP).",
     "improvements": [
-      "Fiche de câblage imprimable et export CSV (/baie/cablage) : affichaient jusqu'ici le numéro brut de port stocké en base (ex. « Port 1001 », « Port 9001 ») au lieu du libellé logique (« Port SFP 1 », « Entrée ») — corrigé.",
-      "PDU/onduleur en orientation verticale très étroite (largeur_u réduite) : les prises électriques débordaient/étaient rognées, la grille se dimensionnant à sa largeur de contenu non contrainte plutôt qu'à la largeur réelle de la cellule — corrigé, avec un dimensionnement dynamique des prises selon la largeur disponible."
+      "Diagnostic réseau : les évènements sont historisés et dédoublonnés (nombre d'occurrences), avec filtres par gravité/catégorie et bouton de résolution.",
+      "Palier 2 (capture passive) désactivé par défaut : nécessite des privilèges administrateur + un pilote de capture (Npcap sous Windows) ; en conteneur, network_mode: host + cap_add NET_RAW/NET_ADMIN."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.18.89"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.0"
 }

@@ -28,8 +28,20 @@
     <a class="quick-link" href="{{ url_for('mobile_identifiants') }}"><span class="icon">🔑</span> Identifiants</a>
 </div>
 
-{% if alerts.garanties_alertes or alerts.contrats_alertes or alerts.av_urgents %}
+{% if alerts.garanties_alertes or alerts.contrats_alertes or alerts.av_urgents or (alerts.diag_alertes and alerts.diag_alertes.total) %}
 <div class="section-title">⚠ Alertes</div>
+
+{% if alerts.diag_alertes and alerts.diag_alertes.total %}
+<a class="card card-link" href="{{ url_for('mobile_diag_reseau') }}">
+    <div class="card-row">
+        <div>
+            <div class="card-title">🩺 Diagnostic réseau</div>
+            <div class="card-sub">{{ alerts.diag_alertes.total }} évènement(s) actif(s){% if alerts.diag_alertes.critiques %} · {{ alerts.diag_alertes.critiques }} critique(s){% endif %}</div>
+        </div>
+        <span class="badge {{ 'badge-red' if alerts.diag_alertes.critiques else 'badge-orange' }}">{{ alerts.diag_alertes.total }}</span>
+    </div>
+</a>
+{% endif %}
 
 {% for a in alerts.garanties_alertes %}
 <a class="card card-link" href="{{ url_for('mobile_appareil_detail', id=a.id) }}">

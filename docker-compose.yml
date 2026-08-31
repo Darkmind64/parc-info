@@ -23,6 +23,18 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    # ── Diagnostic réseau — palier 2 (capture passive de trames) ────────────────
+    # En réseau bridge (défaut ci-dessus), le conteneur ne voit que son propre
+    # trafic : le palier 1 (ping / ARP / DHCP) reste utile via le NAT sortant,
+    # mais la capture passive n'a rien à observer. Pour l'activer, décommentez :
+    #
+    # network_mode: host          # le conteneur partage la pile réseau de l'hôte
+    # cap_add:
+    #   - NET_RAW                  # ouvrir des sockets de capture
+    #   - NET_ADMIN                # mode promiscuous
+    #
+    # (network_mode: host est incompatible avec la section `ports:` ci-dessus —
+    #  l'app écoute alors directement sur le port 3456 de l'hôte.)
     logging:
       driver: json-file
       options:

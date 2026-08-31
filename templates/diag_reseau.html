@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+{% block title %}Diagnostic Réseau — ParcInfo{% endblock %}
+
+{% block extra_styles %}
+<style>
+.diag-grid { display:grid; grid-template-columns: 1fr 1fr; gap:1rem; margin-bottom:1.2rem; }
+@media(max-width:900px){ .diag-grid { grid-template-columns:1fr; } }
+.diag-card {
+    background:var(--bg-card); border:1px solid var(--border);
+    border-radius:5px; padding:1rem 1.1rem;
+}
+.diag-card h2 {
+    font-family:'Rajdhani',sans-serif; font-size:.72rem; font-weight:700;
+    letter-spacing:2px; text-transform:uppercase; color:var(--accent);
+    margin:0 0 .8rem; display:flex; align-items:center; gap:.5rem;
+}
+.diag-line { font-size:.82rem; color:var(--text-secondary); margin:.3rem 0; }
+.diag-line strong { color:var(--text-primary); }
+
+.diag-progress-bar { height:6px; background:var(--bg-secondary); border-radius:3px; overflow:hidden; margin:.7rem 0 .4rem; }
+.diag-progress-fill { height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent-green)); transition:width .3s; }
+.diag-status-msg { font-family:'Share Tech Mono',monospace; font-size:.72rem; color:var(--text-muted); min-height:1em; }
+
+.diag-btn {
+    background:var(--accent); color:#001018; border:none; border-radius:4px;
+    padding:.5rem 1.1rem; font-weight:700; font-size:.8rem; cursor:pointer;
+    letter-spacing:.5px; transition:filter .15s;
+}
+.diag-btn:hover { filter:brightness(1.1); }
+.diag-btn:disabled { opacity:.5; cursor:not-allowed; }
+.diag-check { font-size:.78rem; color:var(--text-secondary); display:flex; align-items:center; gap:.4rem; margin-top:.6rem; }
+
+.toggle-pill {
+    display:inline-flex; align-items:center; gap:.5rem; cursor:pointer;
+    font-size:.8rem; color:var(--text-secondary);
+}
+.toggle-pill input { accent-color:var(--accent-green); width:16px; height:16px; }
+
+.cap-badge { font-size:.68rem; padding:2px 8px; border-radius:10px; font-weight:700; white-space:nowrap; }
+.cap-ok   { background:rgba(0,255,136,.15); color:#00e676; border:1px solid rgba(0,255,136,.4); }
+.cap-off  { background:rgba(148,163,184,.15); color:var(--text-muted); border:1px solid rgba(148,163,184,.3); }
+
+.diag-table { width:100%; border-collapse:collapse; font-size:.8rem; }
+.diag-table thead th {
+    background:var(--bg-secondary); padding:.45rem .65rem; text-align:left;
+    font-size:.62rem; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+    color:var(--text-secondary); border-bottom:1px solid var(--border); white-space:nowrap;
+}
+.diag-table tbody tr { border-bottom:1px solid rgba(30,58,95,.25); }
+.diag-table td { padding:.5rem .65rem; vertical-align:top; }
+.diag-table tr.resolu { opacity:.5; }
+
+.grav-badge { font-size:.62rem; padding:2px 7px; border-radius:8px; font-weight:700; white-space:nowrap; text-transform:uppercase; }
+.grav-critique      { background:rgba(255,51,85,.18); color:#ff6b81; border:1px solid rgba(255,51,85,.4); }
+.grav-avertissement { background:rgba(255,140,0,.18); color:#ffb057; border:1px solid rgba(255,140,0,.4); }
+.grav-info          { background:rgba(0,201,255,.15); color:#4dd0ff; border:1px solid rgba(0,201,255,.35); }
+
+.diag-detail { font-family:'Share Tech Mono',monospace; font-size:.68rem; color:var(--text-muted); margin-top:.25rem; white-space:pre-wrap; word-break:break-word; }
+.diag-filters { display:flex; gap:.6rem; flex-wrap:wrap; margin-bottom:.7rem; }
+.diag-filters select { font-size:.78rem; padding:.3rem .6rem; background:var(--bg-secondary); border:1px solid var(--border); border-radius:3px; color:var(--text-primary); }
+.link-btn { background:none; border:1px solid var(--border); color:var(--text-secondary); border-radius:3px; padding:.25rem .6rem; font-size:.7rem; cursor:pointer; }
+.link-btn:hover { border-color:var(--accent); color:var(--accent); }
+.diag-empty { color:var(--text-muted); font-size:.82rem; padding:1.2rem; text-align:center; }
+.diag-note { font-size:.74rem; color:#ffb057; margin:.3rem 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="margin-bottom:1rem;">
+    <h1>Diagnostic <span>Réseau</span></h1>
+    <p style="font-size:.78rem;">Conflits d'adresses · Qualité de liaison · DHCP pirate · ARP spoofing · Tempêtes de broadcast</p>
+</div>
+
+<div class="diag-grid">
+    <!-- ── Lancer un diagnostic ── -->
+    <div class="diag-card">
+        <h2>🩺 Diagnostic ponctuel</h2>
+        <div class="diag-line">Analyse le segment réseau de <strong>{{ client.nom }}</strong> et
+            enregistre les problèmes détectés.</div>
+        <div class="diag-progress-bar"><div class="diag-progress-fill" id="diag-prog"></div></div>
+        <div class="diag-status-msg" id="diag-msg"></div>
+        {% if peut_ecrire %}
+        <div style="margin-top:.6rem;display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;">
+            <button class="diag-btn" id="btn-diag" onclick="lancerDiag()">Lancer un diagnostic</button>
+        </div>
+        <label class="diag-check">
+            <input type="checkbox" id="chk-capture"
+                   {% if not etat_capture.disponible %}disabled{% endif %}>
+            Inclure la capture passive de trames (palier 2)
+            <span id="cap-state" class="cap-badge {{ 'cap-ok' if etat_capture.disponible else 'cap-off' }}"></span>
+        </label>
+        {% else %}
+        <div class="diag-note">Accès en lecture seule — diagnostic non disponible.</div>
+        {% endif %}
+    </div>
+
+    <!-- ── Surveillance continue ── -->
+    <div class="diag-card">
+        <h2>📡 Surveillance continue</h2>
+        <div class="diag-line">Un fil de fond relance les détections du palier 1 toutes les
+            <strong id="mon-interval">{{ etat_moniteur.intervalle_s }}</strong> s et lève des alertes.</div>
+        <div class="diag-line">Dernier cycle : <strong id="mon-cycle">{{ etat_moniteur.last_cycle or '—' }}</strong>
+            (<span id="mon-count">{{ etat_moniteur.cycle_count }}</span> cycles)</div>
+        {% if peut_ecrire %}
+        <label class="toggle-pill" style="margin-top:.7rem;">
+            <input type="checkbox" id="tgl-surveillance" {% if etat_moniteur.active %}checked{% endif %}
+                   onchange="basculerSurveillance(this.checked)">
+            <span id="tgl-label">{{ 'Activée' if etat_moniteur.active else 'Désactivée' }}</span>
+        </label>
+        {% else %}
+        <div class="diag-line">État : <strong>{{ 'activée' if etat_moniteur.active else 'désactivée' }}</strong></div>
+        {% endif %}
+        <div class="diag-line" style="margin-top:.7rem;font-size:.74rem;color:var(--text-muted);">
+            Capture passive : <span id="cap-detail"></span>
+        </div>
+    </div>
+</div>
+
+<!-- ── Résultat du dernier snapshot ── -->
+<div class="diag-card" id="snapshot-wrap" style="display:none;margin-bottom:1.2rem;">
+    <h2>Constats du diagnostic</h2>
+    <div id="snapshot-notes"></div>
+    <div id="snapshot-findings"></div>
+</div>
+
+<!-- ── Journal des évènements ── -->
+<div class="diag-card">
+    <h2>📋 Évènements réseau</h2>
+    <div class="diag-filters">
+        <select id="f-resolu" onchange="chargerEvenements(1)">
+            <option value="0">Actifs</option>
+            <option value="">Tous</option>
+            <option value="1">Résolus</option>
+        </select>
+        <select id="f-gravite" onchange="chargerEvenements(1)">
+            <option value="">Toutes gravités</option>
+            <option value="critique">Critique</option>
+            <option value="avertissement">Avertissement</option>
+            <option value="info">Info</option>
+        </select>
+        <select id="f-categorie" onchange="chargerEvenements(1)">
+            <option value="">Toutes catégories</option>
+        </select>
+        <button class="link-btn" onclick="chargerEvenements(currentPage)">↻ Rafraîchir</button>
+    </div>
+    <div style="overflow-x:auto;">
+        <table class="diag-table">
+            <thead><tr>
+                <th>Gravité</th><th>Catégorie</th><th>Description</th>
+                <th>Vu</th><th>Occ.</th><th></th>
+            </tr></thead>
+            <tbody id="evt-body"></tbody>
+        </table>
+    </div>
+    <div id="evt-empty" class="diag-empty" style="display:none;">Aucun évènement.</div>
+    <div id="evt-pagination" style="margin-top:.8rem;display:flex;gap:.5rem;align-items:center;font-size:.78rem;"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const PEUT_ECRIRE = {{ 'true' if peut_ecrire else 'false' }};
+let currentPage = 1;
+let diagInterval = null;
+
+const MOTIFS_CAPTURE = {
+    ok: "disponible",
+    scapy_absent: "indisponible — bibliothèque de capture absente",
+    docker_bridge: "indisponible — conteneur en réseau bridge (nécessite network_mode: host + NET_RAW/NET_ADMIN)",
+    privileges_insuffisants: "indisponible — privilèges administrateur requis",
+    aucune_interface: "indisponible — aucune interface réseau exploitable",
+};
+
+const CATEGORIES = {
+    conflit_ip: "Conflit d'adresse IP", arp_spoofing: "ARP spoofing",
+    dhcp_pirate: "Serveur DHCP non autorisé", ra_pirate: "Router Advertisement IPv6 pirate",
+    mac_flapping: "MAC instable", tempete_broadcast: "Tempête de broadcast",
+    qualite_liaison: "Qualité de liaison dégradée", conflit_nom: "Conflit de nom réseau",
+    stp_instable: "Topologie STP instable", passerelle_injoignable: "Passerelle injoignable",
+    dns_degrade: "Résolution DNS dégradée", tcp_retransmissions: "Retransmissions TCP",
+};
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Remplir le filtre catégories
+(function(){
+    const sel = document.getElementById('f-categorie');
+    Object.entries(CATEGORIES).forEach(([k,v]) => {
+        const o = document.createElement('option'); o.value = k; o.textContent = v; sel.appendChild(o);
+    });
+})();
+
+function majEtatCapture(etat){
+    const txt = MOTIFS_CAPTURE[etat.motif] || etat.motif;
+    const b = document.getElementById('cap-state');
+    if (b){ b.textContent = etat.disponible ? 'disponible' : 'indisponible';
+            b.className = 'cap-badge ' + (etat.disponible ? 'cap-ok' : 'cap-off'); }
+    const d = document.getElementById('cap-detail');
+    if (d) d.textContent = txt;
+    const chk = document.getElementById('chk-capture');
+    if (chk && !etat.disponible){ chk.checked = false; chk.disabled = true; }
+}
+
+fetch('/api/diag-reseau/etat-capture').then(r=>r.json()).then(majEtatCapture).catch(()=>{});
+
+function lancerDiag(){
+    const btn = document.getElementById('btn-diag');
+    btn.disabled = true;
+    const body = {};
+    const chk = document.getElementById('chk-capture');
+    if (chk && !chk.disabled) body.avec_capture = chk.checked;
+    fetch('/api/diag-reseau/snapshot', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+    }).then(r => r.json().then(d => ({ok:r.ok, d}))).then(({ok,d}) => {
+        if (!ok){ showToast(d.error || 'Erreur', 'error'); btn.disabled = false; return; }
+        document.getElementById('snapshot-wrap').style.display = 'block';
+        diagInterval = setInterval(pollDiag, 900);
+    }).catch(() => { showToast('Erreur réseau', 'error'); btn.disabled = false; });
+}
+
+function pollDiag(){
+    fetch('/api/diag-reseau/snapshot/status').then(r=>r.json()).then(d => {
+        document.getElementById('diag-prog').style.width = (d.progress||0) + '%';
+        document.getElementById('diag-msg').textContent = d.message || '';
+        if (d.findings) renderFindings(d.findings, d.avertissements || []);
+        if (!d.running){
+            clearInterval(diagInterval); diagInterval = null;
+            document.getElementById('btn-diag').disabled = false;
+            chargerEvenements(1);
+        }
+    }).catch(() => {});
+}
+
+function renderFindings(findings, notes){
+    const wrap = document.getElementById('snapshot-findings');
+    const nz = document.getElementById('snapshot-notes');
+    nz.innerHTML = (notes||[]).map(n => `<div class="diag-note">⚠ ${esc(n)}</div>`).join('');
+    if (!findings.length){
+        wrap.innerHTML = '<div class="diag-empty">Aucun problème détecté sur ce segment. ✔</div>';
+        return;
+    }
+    wrap.innerHTML = findings.map(f => `
+        <div style="padding:.5rem 0;border-bottom:1px solid rgba(30,58,95,.25);">
+            <span class="grav-badge grav-${esc(f.gravite)}">${esc(f.gravite)}</span>
+            <strong style="margin-left:.4rem;">${esc(f.categorie_libelle || CATEGORIES[f.categorie] || f.categorie)}</strong>
+            <div style="font-size:.82rem;margin-top:.2rem;">${esc(f.titre)}</div>
+            <div class="diag-detail">${esc(JSON.stringify(f.details, null, 1))}</div>
+        </div>`).join('');
+}
+
+function basculerSurveillance(actif){
+    fetch('/api/diag-reseau/surveillance', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({actif})
+    }).then(r => r.json().then(d => ({ok:r.ok, d}))).then(({ok,d}) => {
+        if (!ok){ showToast(d.error || 'Erreur', 'error');
+                  document.getElementById('tgl-surveillance').checked = !actif; return; }
+        document.getElementById('tgl-label').textContent = d.actif ? 'Activée' : 'Désactivée';
+        showToast('Surveillance ' + (d.actif ? 'activée' : 'désactivée'), 'success');
+    }).catch(() => { showToast('Erreur réseau', 'error');
+                     document.getElementById('tgl-surveillance').checked = !actif; });
+}
+
+function chargerEvenements(page){
+    currentPage = page || 1;
+    const p = new URLSearchParams({
+        page: currentPage,
+        resolu: document.getElementById('f-resolu').value,
+        gravite: document.getElementById('f-gravite').value,
+        categorie: document.getElementById('f-categorie').value,
+    });
+    fetch('/api/diag-reseau/evenements?' + p).then(r=>r.json()).then(d => {
+        const body = document.getElementById('evt-body');
+        const evts = d.evenements || [];
+        document.getElementById('evt-empty').style.display = evts.length ? 'none' : 'block';
+        body.innerHTML = evts.map(e => `
+            <tr class="${e.resolu ? 'resolu' : ''}">
+                <td><span class="grav-badge grav-${esc(e.gravite)}">${esc(e.gravite)}</span></td>
+                <td>${esc(e.categorie_libelle || e.categorie)}</td>
+                <td>${esc(e.titre)}
+                    ${e.appareil_id ? `<a class="link-btn" style="margin-left:.4rem;" href="/appareil/${e.appareil_id}/fiche-systeme">${esc(e.appareil_nom || 'appareil')} →</a>` : ''}
+                    <div class="diag-detail">${esc(JSON.stringify(e.details))}</div></td>
+                <td style="font-size:.7rem;white-space:nowrap;">${esc((e.derniere_occurrence||'').replace('T',' ').replace('Z',''))}</td>
+                <td style="text-align:center;">${e.nb_occurrences}</td>
+                <td>${PEUT_ECRIRE ? `<button class="link-btn" onclick="resoudre(${e.id}, ${e.resolu ? 'true' : 'false'})">${e.resolu ? 'Rouvrir' : 'Résoudre'}</button>` : ''}</td>
+            </tr>`).join('');
+        renderPagination(d.pagination || {});
+    }).catch(() => {});
+}
+
+function renderPagination(pg){
+    const el = document.getElementById('evt-pagination');
+    if (!pg.pages || pg.pages <= 1){ el.innerHTML = ''; return; }
+    el.innerHTML = `
+        <button class="link-btn" ${pg.page<=1?'disabled':''} onclick="chargerEvenements(${pg.page-1})">←</button>
+        <span>Page ${pg.page} / ${pg.pages} — ${pg.total} évènement(s)</span>
+        <button class="link-btn" ${pg.page>=pg.pages?'disabled':''} onclick="chargerEvenements(${pg.page+1})">→</button>`;
+}
+
+function resoudre(id, estResolu){
+    fetch(`/api/diag-reseau/evenement/${id}/resoudre`, {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({reouvrir: estResolu})
+    }).then(r => { if (r.ok) chargerEvenements(currentPage); else showToast('Erreur', 'error'); })
+      .catch(() => showToast('Erreur réseau', 'error'));
+}
+
+// Rafraîchir périodiquement l'état du moniteur
+setInterval(() => {
+    fetch('/api/diag-reseau/etat-capture').then(r=>r.json()).then(majEtatCapture).catch(()=>{});
+}, 30000);
+
+chargerEvenements(1);
+</script>
+{% endblock %}
