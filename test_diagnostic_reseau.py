@@ -143,5 +143,112 @@ etat = N.etat_capture()
 verifier(set(etat) == {'disponible', 'motif'}, "renvoie {disponible, motif}", str(etat))
 verifier(isinstance(etat['disponible'], bool), "'disponible' est un booléen")
 
+print('\n=== 7. Palier 3 — décodeurs BER SNMP ===')
+import app as A  # noqa: E402
+verifier(A._ber_decoder_oid(bytes.fromhex('2b06010201020201020a')) == '1.3.6.1.2.1.2.2.1.2.10',
+         "OID multi-octets décodé")
+verifier(A._ber_decoder_valeur(0x41, (123456).to_bytes(3, 'big')) == 123456, "Counter32")
+verifier(A._ber_decoder_valeur(0x46, (10 ** 12).to_bytes(6, 'big')) == 10 ** 12, "Counter64")
+verifier(A._ber_decoder_valeur(0x02, b'\x02') == 2, "INTEGER")
+verifier(A._ber_decoder_valeur(0x04, b'Gi1/0/1') == 'Gi1/0/1', "OCTET STRING")
+verifier(A._ber_decoder_valeur(0x82, b'') is None, "endOfMibView -> None")
+
+print('\n=== 8. Palier 3 — _snmp_walk contre un agent SNMP factice ===')
+import socket as _sock
+import threading as _th
+
+_TABLE = sorted([
+    ('1.3.6.1.2.1.2.2.1.2.1', 0x04, b'Gi1/0/1'),
+    ('1.3.6.1.2.1.2.2.1.2.2', 0x04, b'Gi1/0/2'),
+    ('1.3.6.1.2.1.2.2.1.3.1', 0x02, b'\x06'),   # hors sous-arbre ifDescr → stop
+], key=lambda t: [int(x) for x in t[0].split('.')])
+
+
+def _oid_key(o):
+    return [int(x) for x in o.split('.')]
+
+
+def _faux_agent(sock):
+    while True:
+        try:
+            data, exp = sock.recvfrom(4096)
+        except OSError:
+            return
+        try:
+            _, corps, _ = A._ber_lire_tlv(data, 0)
+            p = 0
+            _, _v, p = A._ber_lire_tlv(corps, p)
+            _, _c, p = A._ber_lire_tlv(corps, p)
+            _tag, pdu, _ = A._ber_lire_tlv(corps, p)          # 0xa1 GetNext
+            pp = 0
+            _, reqid, pp = A._ber_lire_tlv(pdu, pp)
+            _, _e, pp = A._ber_lire_tlv(pdu, pp)
+            _, _ei, pp = A._ber_lire_tlv(pdu, pp)
+            _, vbl, pp = A._ber_lire_tlv(pdu, pp)
+            bp = 0
+            _, vb, bp = A._ber_lire_tlv(vbl, bp)
+            bbp = 0
+            _, oid_brut, bbp = A._ber_lire_tlv(vb, bbp)
+            demande = A._ber_decoder_oid(oid_brut)
+            suivant = next((t for t in _TABLE if _oid_key(t[0]) > _oid_key(demande)), None)
+            if suivant is None:
+                oid_r, tag_r, val_r = demande, 0x82, b''
+            else:
+                oid_r, tag_r, val_r = suivant
+            vb_r = A._ber_sequence(0x30, A._ber_oid(oid_r) + bytes([tag_r]) + A._ber_longueur(len(val_r)) + val_r)
+            pdu_r = A._ber_sequence(0xa2, A._ber_sequence(0x02, reqid) + A._ber_entier(0)
+                                   + A._ber_entier(0) + A._ber_sequence(0x30, vb_r))
+            msg = A._ber_sequence(0x30, A._ber_entier(1) + A._ber_chaine('public') + pdu_r)
+            sock.sendto(msg, exp)
+        except Exception:
+            pass
+
+
+_srv = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+_srv.bind(('127.0.0.1', 0))
+_port = _srv.getsockname()[1]
+_th.Thread(target=_faux_agent, args=(_srv,), daemon=True).start()
+
+_r = A._snmp_walk('127.0.0.1', '1.3.6.1.2.1.2.2.1.2', ['public'], timeout=1.0, port=_port)
+_srv.close()
+verifier(_r == {'1': 'Gi1/0/1', '2': 'Gi1/0/2'},
+         "walk d'ifDescr : deux ports, s'arrête en sortie de sous-arbre", str(_r))
+
+print('\n=== 9. Palier 3 — détections SNMP (équipement simulé) ===')
+os.environ.setdefault('PARCINFO_BACKUP', '0')
+A.init_db()
+_c = A.get_db()
+_c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (901, 'Client SNMP')")
+_c.commit(); _c.close()
+
+
+def _equip(ts, **over):
+    port = dict(index=1, nom='Gi1/0/1', alias='uplink', oper=1, admin=1, speed_mbps=1000,
+                in_oct=0, out_oct=0, in_err=0, out_err=0, in_disc=0, out_disc=0,
+                align_err=0, fcs_err=0, late_coll=0, exc_coll=0, duplex=3)
+    port.update(over)
+    return {'sysname': 'sw-test', 'ts': ts, 'ports': [port]}
+
+
+verifier(N._analyser_snmp(901, '10.9.9.9', 1, _equip(1000.0)) == [],
+         "premier relevé (pas d'historique) -> aucun finding")
+_f = N._analyser_snmp(901, '10.9.9.9', 1, _equip(1030.0, late_coll=4, fcs_err=200,
+                                                 in_oct=900 * 1000 * 1000 // 8 * 30))
+_cats = sorted(x['categorie'] for x in _f)
+verifier('duplex_mismatch' in _cats, "late collisions -> duplex_mismatch", str(_cats))
+verifier('port_crc' in _cats, "Δ FCS >= seuil -> port_crc", str(_cats))
+verifier('port_sature' in _cats, "débit ~90 % de la vitesse -> port_sature", str(_cats))
+_f = N._analyser_snmp(901, '10.9.9.9', 1, _equip(1060.0, duplex=2))
+verifier([x['categorie'] for x in _f] == ['duplex_mismatch'],
+         "half-duplex négocié sur port gigabit -> duplex_mismatch", str([x['categorie'] for x in _f]))
+_e = N.etat_snmp(901)
+verifier(_e['equipements'] and _e['equipements'][0]['ip'] == '10.9.9.9',
+         "etat_snmp expose le dernier relevé par port")
+_s1 = N._finding('port_crc', 't', {'equipement': '10.0.0.1', 'port_index': 3}, '10.0.0.1', 3)
+_s2 = N._finding('port_crc', 'autre', {'equipement': '10.0.0.1', 'port_index': 3, 'x': 1}, '10.0.0.1', 3)
+_s3 = N._finding('port_crc', 't', {'equipement': '10.0.0.1', 'port_index': 4}, '10.0.0.1', 4)
+verifier(_s1['signature'] == _s2['signature'] and _s1['signature'] != _s3['signature'],
+         "signature stable par (équipement, port), distincte d'un autre port")
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

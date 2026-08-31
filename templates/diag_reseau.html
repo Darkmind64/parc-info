@@ -123,6 +123,12 @@
     <div id="snapshot-findings"></div>
 </div>
 
+<!-- ── État des ports (SNMP) ── -->
+<div class="diag-card" id="snmp-wrap" style="margin-bottom:1.2rem;">
+    <h2>🔌 État des ports (SNMP)</h2>
+    <div id="snmp-body" class="diag-line">Chargement…</div>
+</div>
+
 <!-- ── Journal des évènements ── -->
 <div class="diag-card">
     <h2>📋 Évènements réseau</h2>
@@ -178,6 +184,9 @@ const CATEGORIES = {
     qualite_liaison: "Qualité de liaison dégradée", conflit_nom: "Conflit de nom réseau",
     stp_instable: "Topologie STP instable", passerelle_injoignable: "Passerelle injoignable",
     dns_degrade: "Résolution DNS dégradée", tcp_retransmissions: "Retransmissions TCP",
+    duplex_mismatch: "Duplex mismatch (port)", port_crc: "Erreurs CRC/FCS (port)",
+    port_erreurs: "Erreurs / rejets (port)", port_sature: "Lien saturé (port)",
+    port_flapping: "Port instable (flapping)", vitesse_reduite: "Vitesse de lien réduite (port)",
 };
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -227,6 +236,7 @@ function pollDiag(){
             clearInterval(diagInterval); diagInterval = null;
             document.getElementById('btn-diag').disabled = false;
             chargerEvenements(1);
+            chargerSNMP();
         }
     }).catch(() => {});
 }
@@ -303,11 +313,55 @@ function resoudre(id, estResolu){
       .catch(() => showToast('Erreur réseau', 'error'));
 }
 
+const DUPLEX_TXT = {1:'?', 2:'half', 3:'full'};
+function chargerSNMP(){
+    fetch('/api/diag-reseau/snmp').then(r=>r.json()).then(d => {
+        const wrap = document.getElementById('snmp-body');
+        if (!d.actif){
+            wrap.innerHTML = '<span style="color:var(--text-muted);">Interrogation SNMP désactivée — à activer dans Réglages → Réseau &amp; Scan.</span>';
+            return;
+        }
+        if (!d.equipements || !d.equipements.length){
+            wrap.innerHTML = '<span style="color:var(--text-muted);">Aucun relevé. Ajoutez vos switchs/routeurs comme appareils (avec IP), puis lancez un diagnostic.</span>';
+            return;
+        }
+        wrap.innerHTML = d.equipements.map(eq => `
+            <div style="margin:.6rem 0 1rem;">
+                <div style="font-weight:700;font-size:.85rem;margin-bottom:.3rem;">
+                    ${eq.appareil_id ? `<a href="/appareil/${eq.appareil_id}/fiche-systeme">${esc(eq.ip)}</a>` : esc(eq.ip)}
+                    <span style="color:var(--text-muted);font-weight:400;">— ${eq.ports.length} port(s)</span>
+                </div>
+                <div style="overflow-x:auto;"><table class="diag-table"><thead><tr>
+                    <th>Port</th><th>État</th><th>Vitesse</th><th>Duplex</th>
+                    <th>Err. in/out</th><th>Rejets</th><th>CRC</th><th>Late coll.</th><th></th>
+                </tr></thead><tbody>
+                ${eq.ports.map(p => {
+                    const c = p.compteurs || {};
+                    const pb = (p.findings && p.findings.length) ? 'background:rgba(255,140,0,.08);' : '';
+                    return `<tr style="${pb}">
+                        <td>${esc(p.port_nom)}</td>
+                        <td>${p.oper_status === 1 ? '<span style="color:var(--accent-green);">up</span>' : '<span style="color:var(--text-muted);">down</span>'}</td>
+                        <td>${p.speed_mbps ? p.speed_mbps + ' Mb/s' : '—'}</td>
+                        <td>${p.duplex === 2 ? '<span style="color:#ff6b81;">half</span>' : DUPLEX_TXT[p.duplex] || '?'}</td>
+                        <td>${(c.in_err||0)} / ${(c.out_err||0)}</td>
+                        <td>${(c.in_disc||0) + (c.out_disc||0)}</td>
+                        <td>${(c.fcs_err||0) + (c.align_err||0)}</td>
+                        <td>${(c.late_coll||0)}</td>
+                        <td>${(p.findings||[]).map(f => `<span class="grav-badge grav-avertissement">${esc(f.libelle)}</span>`).join(' ')}</td>
+                    </tr>`;
+                }).join('')}
+                </tbody></table></div>
+            </div>`).join('');
+    }).catch(() => {});
+}
+
 // Rafraîchir périodiquement l'état du moniteur
 setInterval(() => {
     fetch('/api/diag-reseau/etat-capture').then(r=>r.json()).then(majEtatCapture).catch(()=>{});
+    chargerSNMP();
 }, 30000);
 
 chargerEvenements(1);
+chargerSNMP();
 </script>
 {% endblock %}

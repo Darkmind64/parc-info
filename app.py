@@ -2144,6 +2144,24 @@ def init_db():
         capture_utilisee INTEGER DEFAULT 0,
         resume_json TEXT DEFAULT '{}',
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    # Palier 3 — relevés SNMP par port (compteurs cumulatifs : deux relevés
+    # sont nécessaires pour calculer un taux / un delta).
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_snmp_releves (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        appareil_id INTEGER,
+        equipement_ip TEXT DEFAULT '',
+        port_index INTEGER DEFAULT 0,
+        port_nom TEXT DEFAULT '',
+        horodatage TEXT DEFAULT '',
+        epoch REAL DEFAULT 0,
+        compteurs_json TEXT DEFAULT '{}',
+        duplex INTEGER DEFAULT 0,
+        speed_mbps INTEGER DEFAULT 0,
+        oper_status INTEGER DEFAULT 0,
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    c.execute('''CREATE INDEX IF NOT EXISTS idx_snmp_releves
+        ON diag_snmp_releves(client_id, equipement_ip, port_index, epoch)''')
 
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
@@ -8508,6 +8526,118 @@ def _snmp_get(ip_str, oids, communaute='public', timeout=0.8, port=161):
         return {}
 
 
+# ── SNMP walk (GETNEXT) — palier 3 du diagnostic réseau ──────────────────────
+# _snmp_get ne fait qu'un GET sur des scalaires. Lire les compteurs par port
+# d'un switch (ifTable / ifXTable / dot3StatsTable) demande de PARCOURIR une
+# table : boucle GETNEXT jusqu'à sortir du sous-arbre demandé. Toujours en
+# lecture seule, v1/v2c, best-effort ({} au moindre souci) — même philosophie
+# que _snmp_get. Utilisé par network_diag._interroger_equipement().
+
+def _ber_decoder_oid(brut):
+    """Octets d'un OID BER → chaîne pointée ('1.3.6.1.2.1.2.2.1.2.1')."""
+    if not brut:
+        return ''
+    premier = brut[0]
+    parties = [str(premier // 40), str(premier % 40)]
+    valeur = 0
+    for octet in brut[1:]:
+        valeur = (valeur << 7) | (octet & 0x7f)
+        if not (octet & 0x80):
+            parties.append(str(valeur))
+            valeur = 0
+    return '.'.join(parties)
+
+
+# Sentinelles SNMPv2 (exception values) : l'OID existe mais pas de valeur.
+_SNMP_SENTINELLES = {0x80: 'noSuchObject', 0x81: 'noSuchInstance', 0x82: 'endOfMibView'}
+
+
+def _ber_decoder_valeur(tag, brut):
+    """Décode une valeur de varbind SNMP → int | str | None (sentinelle)."""
+    if tag in _SNMP_SENTINELLES:
+        return None
+    if tag == 0x02:  # INTEGER
+        return int.from_bytes(brut, 'big', signed=True) if brut else 0
+    if tag in (0x41, 0x42, 0x43, 0x46):  # Counter32, Gauge32/Unsigned32, TimeTicks, Counter64
+        return int.from_bytes(brut, 'big', signed=False) if brut else 0
+    if tag == 0x40:  # IpAddress
+        return '.'.join(str(b) for b in brut)
+    if tag == 0x06:  # OID
+        return _ber_decoder_oid(brut)
+    if tag == 0x05:  # NULL
+        return None
+    # 0x04 OCTET STRING et tout le reste : texte best-effort
+    return brut.decode('utf-8', errors='replace').strip()
+
+
+def _snmp_walk(ip_str, oid_base, communautes=('public',), timeout=1.2,
+               max_vars=800, port=161):
+    """Parcourt le sous-arbre `oid_base` par GETNEXT. Retourne
+    {suffixe_oid: valeur} (suffixe = ce qui suit oid_base, ex. l'ifIndex).
+    Essaie chaque communauté dans l'ordre ; s'arrête à endOfMibView, à la
+    sortie du sous-arbre, sur erreur, ou à max_vars. {} si rien ne répond."""
+    if isinstance(communautes, str):
+        communautes = [communautes]
+    prefixe = oid_base if oid_base.endswith('.') else oid_base + '.'
+    for communaute in communautes:
+        resultats = {}
+        oid_courant = oid_base
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.settimeout(timeout)
+                for _ in range(max_vars):
+                    vb = _ber_sequence(0x30, _ber_oid(oid_courant) + b'\x05\x00')
+                    pdu_corps = (_ber_entier(_snmp_walk_reqid()) + _ber_entier(0)
+                                 + _ber_entier(0) + _ber_sequence(0x30, vb))
+                    pdu = _ber_sequence(0xa1, pdu_corps)  # GetNextRequest-PDU
+                    # version 1 (v2c) : GETBULK serait mieux mais GETNEXT marche partout
+                    message = _ber_sequence(
+                        0x30, _ber_entier(1) + _ber_chaine(communaute) + pdu)
+                    s.sendto(message, (ip_str, port))
+                    data, _ = s.recvfrom(4096)
+
+                    _, corps, _ = _ber_lire_tlv(data, 0)
+                    pos = 0
+                    _, _v, pos = _ber_lire_tlv(corps, pos)
+                    _, _c, pos = _ber_lire_tlv(corps, pos)
+                    tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
+                    if tag_pdu != 0xa2:
+                        break
+                    p = 0
+                    _, _reqid, p = _ber_lire_tlv(pdu_corps_r, p)
+                    _, err, p = _ber_lire_tlv(pdu_corps_r, p)
+                    _, _ei, p = _ber_lire_tlv(pdu_corps_r, p)
+                    if err and int.from_bytes(err, 'big', signed=True) != 0:
+                        break
+                    _, vblist, p = _ber_lire_tlv(pdu_corps_r, p)
+
+                    vp = 0
+                    _tag_vb, vb_corps, vp = _ber_lire_tlv(vblist, vp)
+                    if _tag_vb != 0x30:
+                        break
+                    bp = 0
+                    _to, oid_brut, bp = _ber_lire_tlv(vb_corps, bp)
+                    tag_val, val_brut, bp = _ber_lire_tlv(vb_corps, bp)
+                    oid_ret = _ber_decoder_oid(oid_brut)
+                    if not oid_ret.startswith(prefixe) or tag_val == 0x82:
+                        break  # sorti du sous-arbre / endOfMibView
+                    resultats[oid_ret[len(prefixe):]] = _ber_decoder_valeur(tag_val, val_brut)
+                    oid_courant = oid_ret
+            if resultats:
+                return resultats
+        except Exception:
+            continue
+    return {}
+
+
+_snmp_walk_reqid_compteur = [0]
+
+
+def _snmp_walk_reqid():
+    _snmp_walk_reqid_compteur[0] = (_snmp_walk_reqid_compteur[0] + 1) & 0x7fffffff
+    return _snmp_walk_reqid_compteur[0] or 1
+
+
 def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
     """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant.
 
@@ -8838,6 +8968,36 @@ def api_diag_snapshot_status():
 @login_required
 def api_diag_etat_capture():
     return jsonify(network_diag.etat_capture())
+
+
+@app.route('/api/diag-reseau/snmp')
+@login_required
+def api_diag_snmp():
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    etat = network_diag.etat_snmp(cid)
+    # Rattacher les évènements SNMP actifs à leur port pour surligner le tableau
+    conn = get_db()
+    evts = conn.execute(
+        "SELECT categorie, details_json FROM diag_reseau_evenements "
+        "WHERE client_id=? AND resolu=0 AND categorie IN "
+        "('duplex_mismatch','port_crc','port_erreurs','port_sature','port_flapping','vitesse_reduite')",
+        (cid,)).fetchall()
+    conn.close()
+    par_port = {}
+    for cat, dj in evts:
+        try:
+            d = json.loads(dj or '{}')
+        except Exception:
+            continue
+        cle = f"{d.get('equipement')}:{d.get('port_index')}"
+        par_port.setdefault(cle, []).append({'categorie': cat,
+                                             'libelle': network_diag.libelle_categorie(cat)})
+    for eq in etat.get('equipements', []):
+        for p in eq.get('ports', []):
+            p['findings'] = par_port.get(f"{eq['ip']}:{p['port_index']}", [])
+    return jsonify(etat)
 
 
 @app.route('/api/diag-reseau/evenements')

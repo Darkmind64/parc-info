@@ -58,6 +58,12 @@ _GRAVITE_DEFAUT = {
     'passerelle_injoignable':'critique',
     'dns_degrade':           'avertissement',
     'tcp_retransmissions':   'info',
+    'duplex_mismatch':       'critique',
+    'port_crc':              'avertissement',
+    'port_erreurs':          'avertissement',
+    'port_sature':           'avertissement',
+    'port_flapping':         'avertissement',
+    'vitesse_reduite':       'info',
 }
 
 _CATEGORIES_LIBELLES = {
@@ -73,6 +79,12 @@ _CATEGORIES_LIBELLES = {
     'passerelle_injoignable': "Passerelle injoignable",
     'dns_degrade':            "Résolution DNS dégradée",
     'tcp_retransmissions':    "Retransmissions TCP élevées",
+    'duplex_mismatch':        "Duplex mismatch (port)",
+    'port_crc':               "Erreurs CRC/FCS en hausse (port)",
+    'port_erreurs':           "Erreurs / rejets de paquets (port)",
+    'port_sature':            "Lien saturé (port)",
+    'port_flapping':          "Port instable (flapping)",
+    'vitesse_reduite':        "Vitesse de lien réduite (port)",
 }
 
 
@@ -743,6 +755,301 @@ def capture_passive(duree: int, seuils: dict) -> list:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  Palier 3 — interrogation SNMP des switchs / routeurs
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Une sonde host-based ne voit ni les collisions, ni les erreurs CRC/FCS, ni un
+# duplex mismatch : ces compteurs vivent dans l'équipement. On les lit en SNMP
+# lecture seule (v1/v2c, community), on compare deux relevés successifs, et on
+# lève des évènements sur les tendances anormales. Opt-in (diag_snmp_actif).
+
+_OID_IF_DESCR       = '1.3.6.1.2.1.2.2.1.2'
+_OID_IF_TYPE        = '1.3.6.1.2.1.2.2.1.3'
+_OID_IF_SPEED       = '1.3.6.1.2.1.2.2.1.5'
+_OID_IF_ADMIN       = '1.3.6.1.2.1.2.2.1.7'
+_OID_IF_OPER        = '1.3.6.1.2.1.2.2.1.8'
+_OID_IF_IN_OCTETS   = '1.3.6.1.2.1.2.2.1.10'
+_OID_IF_IN_DISCARDS = '1.3.6.1.2.1.2.2.1.13'
+_OID_IF_IN_ERRORS   = '1.3.6.1.2.1.2.2.1.14'
+_OID_IF_OUT_OCTETS  = '1.3.6.1.2.1.2.2.1.16'
+_OID_IF_OUT_DISCARDS= '1.3.6.1.2.1.2.2.1.19'
+_OID_IF_OUT_ERRORS  = '1.3.6.1.2.1.2.2.1.20'
+_OID_IF_NAME        = '1.3.6.1.2.1.31.1.1.1.1'
+_OID_IF_HCIN        = '1.3.6.1.2.1.31.1.1.1.6'
+_OID_IF_HCOUT       = '1.3.6.1.2.1.31.1.1.1.10'
+_OID_IF_HIGHSPEED   = '1.3.6.1.2.1.31.1.1.1.15'
+_OID_IF_ALIAS       = '1.3.6.1.2.1.31.1.1.1.18'
+_OID_DOT3_ALIGN     = '1.3.6.1.2.1.10.7.2.1.2'
+_OID_DOT3_FCS       = '1.3.6.1.2.1.10.7.2.1.3'
+_OID_DOT3_LATECOLL  = '1.3.6.1.2.1.10.7.2.1.11'
+_OID_DOT3_EXCCOLL   = '1.3.6.1.2.1.10.7.2.1.12'
+_OID_DOT3_DUPLEX    = '1.3.6.1.2.1.10.7.2.1.19'
+
+_TYPES_EQUIP_SNMP = ('Switch', 'Switch/AP', 'Routeur/Pare-feu', 'NAS')
+
+
+def _snmp_walk(oid_base, ip, communautes):
+    try:
+        from app import _snmp_walk as _w
+        return _w(ip, oid_base, communautes) or {}
+    except Exception:
+        return {}
+
+
+def interroger_equipement(ip: str, communautes) -> dict | None:
+    """Walk SNMP d'un switch/routeur. None si l'agent ne répond pas."""
+    descr = _snmp_walk(_OID_IF_DESCR, ip, communautes)
+    if not descr:
+        return None
+    types = _snmp_walk(_OID_IF_TYPE, ip, communautes)
+    noms = _snmp_walk(_OID_IF_NAME, ip, communautes)
+    alias = _snmp_walk(_OID_IF_ALIAS, ip, communautes)
+    oper = _snmp_walk(_OID_IF_OPER, ip, communautes)
+    admin = _snmp_walk(_OID_IF_ADMIN, ip, communautes)
+    speed = _snmp_walk(_OID_IF_SPEED, ip, communautes)
+    highspeed = _snmp_walk(_OID_IF_HIGHSPEED, ip, communautes)
+    in_err = _snmp_walk(_OID_IF_IN_ERRORS, ip, communautes)
+    out_err = _snmp_walk(_OID_IF_OUT_ERRORS, ip, communautes)
+    in_disc = _snmp_walk(_OID_IF_IN_DISCARDS, ip, communautes)
+    out_disc = _snmp_walk(_OID_IF_OUT_DISCARDS, ip, communautes)
+    in_oct = _snmp_walk(_OID_IF_HCIN, ip, communautes) or _snmp_walk(_OID_IF_IN_OCTETS, ip, communautes)
+    out_oct = _snmp_walk(_OID_IF_HCOUT, ip, communautes) or _snmp_walk(_OID_IF_OUT_OCTETS, ip, communautes)
+    align = _snmp_walk(_OID_DOT3_ALIGN, ip, communautes)
+    fcs = _snmp_walk(_OID_DOT3_FCS, ip, communautes)
+    late = _snmp_walk(_OID_DOT3_LATECOLL, ip, communautes)
+    exc = _snmp_walk(_OID_DOT3_EXCCOLL, ip, communautes)
+    duplex = _snmp_walk(_OID_DOT3_DUPLEX, ip, communautes)
+
+    sysname = ''
+    try:
+        from app import _snmp_get, _OID_SYS_NAME
+        sysname = (_snmp_get(ip, [_OID_SYS_NAME], communautes[0] if communautes else 'public')
+                   .get(_OID_SYS_NAME, ''))
+    except Exception:
+        pass
+
+    def _i(d, k, defaut=0):
+        v = d.get(k)
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return defaut
+
+    ports = []
+    for idx in descr:
+        if _i(types, idx, 6) != 6:          # ethernetCsmacd uniquement
+            continue
+        if _i(admin, idx, 1) == 2:          # admin down : ignoré
+            continue
+        sp = _i(highspeed, idx) or (_i(speed, idx) // 1_000_000)
+        ports.append({
+            'index': int(idx.split('.')[0]) if idx.split('.')[0].isdigit() else idx,
+            'nom': (noms.get(idx) or descr.get(idx) or f'if{idx}'),
+            'alias': alias.get(idx, ''),
+            'oper': _i(oper, idx, 1),
+            'admin': _i(admin, idx, 1),
+            'speed_mbps': sp,
+            'in_oct': _i(in_oct, idx), 'out_oct': _i(out_oct, idx),
+            'in_err': _i(in_err, idx), 'out_err': _i(out_err, idx),
+            'in_disc': _i(in_disc, idx), 'out_disc': _i(out_disc, idx),
+            'align_err': _i(align, idx), 'fcs_err': _i(fcs, idx),
+            'late_coll': _i(late, idx), 'exc_coll': _i(exc, idx),
+            'duplex': _i(duplex, idx),
+        })
+    return {'sysname': sysname, 'ts': time.time(), 'ports': ports}
+
+
+_COMPTEURS_PORT = ('in_oct', 'out_oct', 'in_err', 'out_err', 'in_disc', 'out_disc',
+                   'align_err', 'fcs_err', 'late_coll', 'exc_coll')
+
+
+def _dernier_releve(conn, client_id, ip, port_index):
+    row = conn.execute(
+        "SELECT epoch, compteurs_json, oper_status FROM diag_snmp_releves "
+        "WHERE client_id=? AND equipement_ip=? AND port_index=? "
+        "ORDER BY epoch DESC LIMIT 1", (client_id, ip, port_index)).fetchone()
+    if not row:
+        return None
+    try:
+        cpt = json.loads(row[1] or '{}')
+    except Exception:
+        cpt = {}
+    return {'epoch': row[0], 'compteurs': cpt, 'oper': row[2]}
+
+
+def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> list:
+    """Compare l'équipement au dernier relevé, lève des findings, stocke le
+    nouveau relevé."""
+    from database import get_db
+    seuil_err = _cfg_int('diag_snmp_seuil_erreurs', 50)
+    seuil_sat = _cfg_float('diag_snmp_seuil_saturation_pct', 90)
+    now = _now_z()
+    findings = []
+    ports = equipement.get('ports', [])
+    gigabit_present = any(p['speed_mbps'] >= 1000 for p in ports)
+    conn = get_db()
+    try:
+        for p in ports:
+            pi = p['index']
+            precedent = _dernier_releve(conn, client_id, ip, pi)
+            libelle_port = f"{p['nom']}" + (f" ({p['alias']})" if p['alias'] else '')
+            base = {'equipement': ip, 'sysname': equipement.get('sysname', ''),
+                    'port': libelle_port, 'port_index': pi}
+
+            if precedent and precedent['epoch']:
+                dt = max(1.0, equipement['ts'] - precedent['epoch'])
+                delta = {}
+                for k in _COMPTEURS_PORT:
+                    d = p[k] - precedent['compteurs'].get(k, p[k])
+                    delta[k] = d if d >= 0 else p[k]  # reset compteur / reboot → on repart de la valeur brute
+
+                # Duplex mismatch
+                if p['oper'] == 1 and p['speed_mbps'] >= 100 and (
+                        delta['late_coll'] > 0 or p['duplex'] == 2):
+                    findings.append(_finding(
+                        'duplex_mismatch',
+                        f"{libelle_port} sur {ip} : "
+                        + ("half-duplex négocié" if p['duplex'] == 2
+                           else f"{delta['late_coll']} late collisions"),
+                        {**base, 'duplex': p['duplex'], 'delta_late_coll': delta['late_coll'],
+                         'speed_mbps': p['speed_mbps']},
+                        ip, pi))
+
+                # CRC / alignement
+                if delta['fcs_err'] + delta['align_err'] >= seuil_err:
+                    findings.append(_finding(
+                        'port_crc',
+                        f"{libelle_port} sur {ip} : {delta['fcs_err'] + delta['align_err']} "
+                        f"erreurs CRC/alignement depuis le dernier relevé",
+                        {**base, 'delta_fcs': delta['fcs_err'], 'delta_align': delta['align_err']},
+                        ip, pi))
+
+                # Erreurs / rejets génériques
+                err_io = delta['in_err'] + delta['out_err']
+                disc_io = delta['in_disc'] + delta['out_disc']
+                if max(err_io, disc_io) >= seuil_err:
+                    findings.append(_finding(
+                        'port_erreurs',
+                        f"{libelle_port} sur {ip} : {err_io} erreurs / {disc_io} rejets de paquets",
+                        {**base, 'delta_erreurs': err_io, 'delta_rejets': disc_io}, ip, pi))
+
+                # Saturation de lien
+                if p['speed_mbps'] > 0:
+                    debit_mbps = max(delta['in_oct'], delta['out_oct']) * 8 / dt / 1_000_000
+                    taux = debit_mbps / p['speed_mbps'] * 100
+                    if taux >= seuil_sat:
+                        findings.append(_finding(
+                            'port_sature',
+                            f"{libelle_port} sur {ip} : lien à {taux:.0f} % "
+                            f"({debit_mbps:.0f} / {p['speed_mbps']} Mb/s)",
+                            {**base, 'taux_pct': round(taux), 'debit_mbps': round(debit_mbps),
+                             'speed_mbps': p['speed_mbps']}, ip, pi))
+
+                # Flapping : oper_status a changé plusieurs fois récemment
+                changements = _compter_changements_oper(conn, client_id, ip, pi, p['oper'])
+                if changements >= 3:
+                    findings.append(_finding(
+                        'port_flapping',
+                        f"{libelle_port} sur {ip} : {changements} changements d'état récents",
+                        {**base, 'nb_changements': changements}, ip, pi))
+
+            # Vitesse réduite (indépendant de l'historique)
+            if p['oper'] == 1 and gigabit_present and 0 < p['speed_mbps'] < 1000:
+                findings.append(_finding(
+                    'vitesse_reduite',
+                    f"{libelle_port} sur {ip} : négocié à {p['speed_mbps']} Mb/s "
+                    f"sur un équipement gigabit",
+                    {**base, 'speed_mbps': p['speed_mbps']}, ip, pi))
+
+            conn.execute(
+                "INSERT INTO diag_snmp_releves (client_id, appareil_id, equipement_ip, "
+                "port_index, port_nom, horodatage, epoch, compteurs_json, duplex, "
+                "speed_mbps, oper_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (client_id, appareil_id, ip, pi, libelle_port, now, equipement['ts'],
+                 json.dumps({k: p[k] for k in _COMPTEURS_PORT}), p['duplex'],
+                 p['speed_mbps'], p['oper']))
+        conn.commit()
+    except Exception:
+        logger.exception('network_diag: analyse SNMP impossible')
+    finally:
+        conn.close()
+    if appareil_id:
+        for f in findings:
+            f['appareil_id'] = appareil_id
+    return findings
+
+
+def _compter_changements_oper(conn, client_id, ip, port_index, oper_actuel):
+    rows = conn.execute(
+        "SELECT oper_status FROM diag_snmp_releves WHERE client_id=? AND equipement_ip=? "
+        "AND port_index=? ORDER BY epoch DESC LIMIT 4", (client_id, ip, port_index)).fetchall()
+    suite = [oper_actuel] + [r[0] for r in rows]
+    return sum(1 for i in range(1, len(suite)) if suite[i] != suite[i - 1])
+
+
+def interroger_equipements_client(client_id: int) -> list:
+    """Poll SNMP de tous les switchs/routeurs/NAS du client. Retourne les findings."""
+    if str(_cfg('diag_snmp_actif', '0')) != '1':
+        return []
+    communautes = [c.strip() for c in re.split(r'[,;\s]+',
+                   str(_cfg('diag_snmp_communautes', 'public') or 'public')) if c.strip()]
+    if not communautes:
+        communautes = ['public']
+    try:
+        from database import get_db
+        conn = get_db()
+        placeholders = ','.join('?' * len(_TYPES_EQUIP_SNMP))
+        rows = conn.execute(
+            f"SELECT id, adresse_ip FROM appareils WHERE client_id=? "
+            f"AND type_appareil IN ({placeholders}) AND adresse_ip!='' AND adresse_ip IS NOT NULL",
+            (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
+        conn.close()
+    except Exception:
+        return []
+    findings = []
+    for appareil_id, ip in rows:
+        try:
+            equipement = interroger_equipement(ip, communautes)
+            if equipement is None:
+                continue
+            findings += _analyser_snmp(client_id, ip, appareil_id, equipement)
+        except Exception:
+            logger.debug('network_diag: SNMP %s en échec', ip, exc_info=True)
+    return findings
+
+
+def etat_snmp(client_id: int) -> dict:
+    """Dernier état par équipement / par port pour l'affichage du panneau."""
+    from database import get_db
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT r.* FROM diag_snmp_releves r "
+            "JOIN (SELECT equipement_ip, port_index, MAX(epoch) AS m "
+            "      FROM diag_snmp_releves WHERE client_id=? GROUP BY equipement_ip, port_index) d "
+            "  ON r.equipement_ip=d.equipement_ip AND r.port_index=d.port_index AND r.epoch=d.m "
+            "WHERE r.client_id=? ORDER BY r.equipement_ip, r.port_index",
+            (client_id, client_id)).fetchall()
+        cols = [c[1] for c in conn.execute("PRAGMA table_info(diag_snmp_releves)").fetchall()]
+    finally:
+        conn.close()
+    equipements = {}
+    for r in rows:
+        d = dict(zip(cols, r))
+        try:
+            d['compteurs'] = json.loads(d.pop('compteurs_json', '{}') or '{}')
+        except Exception:
+            d['compteurs'] = {}
+        equipements.setdefault(d['equipement_ip'], {
+            'ip': d['equipement_ip'], 'appareil_id': d['appareil_id'], 'ports': [],
+        })['ports'].append(d)
+    return {
+        'actif': str(_cfg('diag_snmp_actif', '0')) == '1',
+        'equipements': list(equipements.values()),
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  Orchestration : snapshot + persistance
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -810,6 +1117,10 @@ def _run_snapshot(client_id: int, plage: str, avec_capture):
         _maj_statut(progress=70, message='Détection des conflits de noms réseau…')
         findings += detecter_conflits_noms(client_id)
 
+        if str(_cfg('diag_snmp_actif', '0')) == '1':
+            _maj_statut(progress=76, message='Interrogation SNMP des équipements réseau…')
+            findings += interroger_equipements_client(client_id)
+
         capture_utilisee = False
         if avec_capture:
             etat = etat_capture()
@@ -854,6 +1165,10 @@ def _purger_anciens(conn, client_id: int):
             "AND COALESCE(date_resolu, derniere_occurrence) < ?", (client_id, limite))
         conn.execute("DELETE FROM diag_reseau_runs WHERE client_id=? AND debut < ?",
                      (client_id, limite))
+        # Relevés SNMP au-delà de la fenêtre d'âge : les deltas ne comparent
+        # jamais qu'au relevé le plus récent (quelques minutes), sans risque.
+        conn.execute("DELETE FROM diag_snmp_releves WHERE client_id=? AND horodatage < ?",
+                     (client_id, limite))
     except Exception:
         logger.debug('network_diag: purge par âge en échec', exc_info=True)
 
@@ -880,7 +1195,7 @@ def _enregistrer_run(client_id, debut, fin, duree_s, mode, plage, capture, resum
 
 def _appareil_pour_finding(conn, client_id: int, details: dict):
     """Rattache l'évènement à un appareil du client par IP ou MAC, si possible."""
-    ips = [details.get('ip')] + list(details.get('ips', []) or [])
+    ips = [details.get('ip'), details.get('equipement')] + list(details.get('ips', []) or [])
     macs = ([details.get('mac'), details.get('mac_apres'), details.get('mac_attendue')]
             + list(details.get('macs', []) or []))
     for ip in [x for x in ips if x]:
@@ -914,7 +1229,7 @@ def _enregistrer_evenements(client_id: int, findings: list, source: str) -> int:
                 "SELECT id, resolu, nb_occurrences FROM diag_reseau_evenements "
                 "WHERE client_id=? AND signature=?", (client_id, sig)).fetchone()
             details = json.dumps(f.get('details', {}), ensure_ascii=False)
-            appareil_id = _appareil_pour_finding(conn, client_id, f.get('details', {}))
+            appareil_id = f.get('appareil_id') or _appareil_pour_finding(conn, client_id, f.get('details', {}))
             if existant:
                 conn.execute(
                     "UPDATE diag_reseau_evenements SET derniere_occurrence=?, "
@@ -1007,6 +1322,7 @@ def _moniteur_cycle():
     seuil_gigue = _cfg_float('diag_seuil_jitter_ms', 30)
     seuil_bc = _cfg_int('diag_seuil_broadcast_pps', 150)
     avec_capture = str(_cfg('diag_capture_active', '0')) == '1'
+    avec_snmp = str(_cfg('diag_snmp_actif', '0')) == '1'
     passerelle = _passerelle_defaut()
 
     capture_faite = False
@@ -1025,6 +1341,8 @@ def _moniteur_cycle():
             cibles = _cibles_ping(cid, passerelle)
             findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, n=10)
             findings += detecter_conflits_noms(cid)
+            if avec_snmp:
+                findings += interroger_equipements_client(cid)
             src = 'actif'
             if avec_capture and not capture_faite and etat_capture()['disponible']:
                 findings += capture_passive(_cfg_int('diag_snapshot_duree_s', 20),

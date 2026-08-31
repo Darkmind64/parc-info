@@ -163,6 +163,43 @@ def test_page_mobile_diag(client, deux_clients):
     assert b'Diagnostic' in r.data
 
 
+def test_api_snmp_acl_et_forme(client, deux_clients):
+    login_session(client, deux_clients['lecteur'], deux_clients['cid_a'])
+    r = client.get('/api/diag-reseau/snmp')
+    assert r.status_code == 200  # lecture seule autorisée
+    body = r.get_json()
+    assert set(body) >= {'actif', 'equipements'}
+    assert isinstance(body['equipements'], list)
+
+
+def test_snmp_releve_et_findings_rattaches(client, conn, deux_clients, make_appareil):
+    cid = deux_clients['cid_a']
+    aid = make_appareil(cid, nom_machine='SW-CORE', type_appareil='Switch', adresse_ip='10.0.0.2')
+
+    def equip(ts, **o):
+        p = dict(index=1, nom='Gi1/0/1', alias='', oper=1, admin=1, speed_mbps=1000,
+                 in_oct=0, out_oct=0, in_err=0, out_err=0, in_disc=0, out_disc=0,
+                 align_err=0, fcs_err=0, late_coll=0, exc_coll=0, duplex=3)
+        p.update(o)
+        return {'sysname': 'sw', 'ts': ts, 'ports': [p]}
+
+    assert network_diag._analyser_snmp(cid, '10.0.0.2', aid, equip(1000.0)) == []
+    findings = network_diag._analyser_snmp(cid, '10.0.0.2', aid, equip(1030.0, duplex=2))
+    assert [f['categorie'] for f in findings] == ['duplex_mismatch']
+    network_diag._enregistrer_evenements(cid, findings, 'snmp')
+
+    login_session(client, deux_clients['proprio'], cid)
+    snmp = client.get('/api/diag-reseau/snmp').get_json()
+    eq = next(e for e in snmp['equipements'] if e['ip'] == '10.0.0.2')
+    assert eq['appareil_id'] == aid
+    port = eq['ports'][0]
+    assert any(f['categorie'] == 'duplex_mismatch' for f in port['findings'])
+
+    evt = next(e for e in client.get('/api/diag-reseau/evenements').get_json()['evenements']
+               if e['categorie'] == 'duplex_mismatch')
+    assert evt['appareil_id'] == aid  # rattaché au switch
+
+
 def test_alerte_email_echappe_le_titre(monkeypatch, deux_clients):
     """Le titre d'un évènement (données LAN non fiables) est échappé avant
     insertion dans le corps HTML de l'e-mail d'alerte."""

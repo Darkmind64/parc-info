@@ -1592,7 +1592,8 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 | Arrêter/redémarrer ParcInfo depuis l'app | launcher.py / app.py | `def quitter_application` / `def redemarrer_application` / route `/apropos` |
 | Build macOS Intel (croisement Rosetta) | .github/actions/setup-macos-intel-env/ + .github/actions/build-macos-intel-spec/ | actions composites partagées par build-macos-intel.yml et build-release.yml (`build-macos-intel`) — plus de duplication depuis l'audit du 2026-08-23 |
 | Toucher à l'interface mobile (PWA) | app.py / templates/mobile/ | routes `/m/*` (`grep -n "@app.route('/m"`), lecture seule uniquement |
-| Toucher au diagnostic réseau | network_diag.py / app.py | détections palier 1/2 + `_moniteur_loop` ; routes `/api/diag-reseau/*` ; page `templates/diag_reseau.html` ; tables `diag_reseau_evenements`/`diag_reseau_runs` (`init_db`) ; scapy = dépendance optionnelle à import protégé |
+| Toucher au diagnostic réseau | network_diag.py / app.py | détections palier 1/2/3 + `_moniteur_loop` ; routes `/api/diag-reseau/*` ; page `templates/diag_reseau.html` ; tables `diag_reseau_evenements`/`diag_reseau_runs`/`diag_snmp_releves` (`init_db`) ; scapy = dépendance optionnelle à import protégé |
+| Toucher au SNMP (scan + diagnostic) | app.py | `_snmp_get` (GET), `_snmp_walk` + `_ber_decoder_*` (GETNEXT, palier 3) ; OIDs `_OID_IF_*` / `_OID_DOT3_*` dans network_diag.py ; encodage BER fait main, aucune dépendance |
 
 ---
 
@@ -1610,6 +1611,6 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 
 ---
 
-**Dernier update** : 2026-08-31 (v2.19.0 — module Diagnostic réseau)
+**Dernier update** : 2026-09-01 (v2.19.1 — Diagnostic réseau palier 3 : SNMP)
 **Mainteneur** : ParcInfo Team
 **License** : Voir LICENSE

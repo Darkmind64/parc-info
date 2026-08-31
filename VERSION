@@ -1,8 +1,45 @@
-PARCINFO_VERSION=2.19.0
-RELEASE_DATE=2026-08-31
-BUILD_NUMBER=2026083101
+PARCINFO_VERSION=2.19.1
+RELEASE_DATE=2026-09-01
+BUILD_NUMBER=2026090101
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.1 - Diagnostic reseau : palier 3, interrogation SNMP des equipements
+# Demande : "passons au palier suivant" -> interroger en SNMP les switchs/
+# routeurs pour lire les compteurs d'erreurs par port. C'est LA source pour
+# detecter vraiment les collisions, les erreurs CRC/FCS et un duplex mismatch,
+# invisibles depuis une capture host-based.
+#
+# Brique technique : _snmp_walk (GETNEXT) ajoute a app.py a cote de _snmp_get,
+# reutilise tous les helpers BER existants ; decodeurs _ber_decoder_oid /
+# _ber_decoder_valeur (INTEGER, Counter32/64, Gauge, TimeTicks, IpAddress, OID,
+# sentinelles noSuchObject/endOfMibView). Aucune dependance (pas de pysnmp).
+#
+# network_diag.py section "Palier 3 - SNMP" :
+#  - interroger_equipement(ip, communautes) : walk ifTable/ifXTable/
+#    dot3StatsTable, jointure par ifIndex, filtre aux ports ethernet actifs
+#  - _analyser_snmp : compare au dernier releve (table diag_snmp_releves),
+#    calcule les deltas, leve les findings, stocke le nouveau releve
+#  - detections : duplex_mismatch (late collisions OU half-duplex sur port
+#    actif >= 100 Mb/s, critique), port_crc (Delta FCS+alignement >= seuil),
+#    port_erreurs (Delta erreurs/rejets), port_sature (>= 90 % de la vitesse),
+#    port_flapping (>= 3 changements d'oper_status recents), vitesse_reduite
+#    (10/100 sur equipement gigabit, info)
+#  - interroge tous les appareils de type Switch/Switch-AP/Routeur/NAS avec IP
+#
+# Opt-in : diag_snmp_actif (defaut off), diag_snmp_communautes (CSV, defaut
+# "public"), diag_snmp_seuil_erreurs (50), diag_snmp_seuil_saturation_pct (90).
+# Poll integre au snapshot (etape ~76 %) et au cycle de surveillance continue.
+#
+# UI : panneau "Etat des ports (SNMP)" sur /diag-reseau (tableau par
+# equipement : etat, vitesse, duplex, compteurs d'erreurs, ligne surlignee si
+# finding actif) ; route GET /api/diag-reseau/snmp ; reglages dans
+# Reglages -> Reseau & Scan. Les findings SNMP remontent comme les autres
+# (liste, dashboard, mobile, e-mail). Purge des releves selon
+# diag_reseau_max_jours.
+#
+# Tests : tests/test_diag_reseau.py + test_diagnostic_reseau.py (decodeurs BER,
+# _snmp_walk contre un agent UDP factice, detections avec equipement simule).
 
 # Version 2.19.0 - Nouveau module : Diagnostic reseau
 # Demande : ajouter un module de diagnostic reseau qui intercepte les

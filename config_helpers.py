@@ -169,6 +169,11 @@ CFG_DEFAULTS = {
     'diag_reseau_max_jours': '30',     # purge des évènements résolus + des runs plus vieux que N jours (0 = off)
     'diag_alerte_email': '0',          # e-mail sur nouvel évènement critique
     'diag_alerte_destinataire': '',    # destinataire des alertes diag (vide = pas d'envoi)
+    # ── Palier 3 : interrogation SNMP des switchs / routeurs ──────────────────
+    'diag_snmp_actif': '0',            # active le poll SNMP (opt-in)
+    'diag_snmp_communautes': 'public', # communautés v1/v2c, CSV, essayées dans l'ordre
+    'diag_snmp_seuil_erreurs': '50',   # Δ erreurs/discards/CRC par fenêtre avant alerte
+    'diag_snmp_seuil_saturation_pct': '90',  # seuil de saturation de lien (%)
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',

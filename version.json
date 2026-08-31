@@ -1,23 +1,23 @@
 {
-  "version": "2.19.0",
-  "release_date": "2026-08-31T00:00:00.000000",
+  "version": "2.19.1",
+  "release_date": "2026-09-01T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.1/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.1/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.1/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.1",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.1/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.1/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.1/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.1/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.1/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Nouveau module Diagnostic réseau (Inventaire → Diagnostic réseau) : détection des conflits d'adresses IP, de la qualité de liaison dégradée (perte/gigue/latence), d'un serveur DHCP non autorisé et des conflits de noms ; snapshot à la demande + surveillance continue. Palier 2 optionnel : capture passive de trames (ARP spoofing, tempêtes de broadcast, RA IPv6 pirates, retransmissions TCP).",
+    "new_features": "Diagnostic réseau — palier 3 : interrogation SNMP (lecture seule, v1/v2c) des switchs, routeurs et NAS inventoriés. Lit les compteurs par port et lève des alertes sur duplex mismatch (late collisions / half-duplex), erreurs CRC/FCS en hausse, erreurs et rejets de paquets, saturation de lien et ports instables (flapping). Nouveau panneau « État des ports (SNMP) » sur la page Diagnostic réseau.",
     "improvements": [
-      "Diagnostic réseau : les évènements sont historisés et dédoublonnés (nombre d'occurrences), avec filtres par gravité/catégorie et bouton de résolution.",
-      "Palier 2 (capture passive) désactivé par défaut : nécessite des privilèges administrateur + un pilote de capture (Npcap sous Windows) ; en conteneur, network_mode: host + cap_add NET_RAW/NET_ADMIN."
+      "SNMP désactivé par défaut (opt-in via Réglages → Réseau & Scan) ; communautés configurables (CSV) ; deux relevés successifs suffisent à établir une tendance.",
+      "Les alertes de ports SNMP sont rattachées à l'appareil (switch/routeur) concerné et remontent comme les autres évènements dans le dashboard, le mobile et l'e-mail d'alerte."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.1"
 }

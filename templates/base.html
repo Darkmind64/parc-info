@@ -3454,6 +3454,29 @@ function rendreConfig() {
         <label class="cfg-label">Destinataire des alertes (nécessite le SMTP configuré)</label>
         <input type="email" data-cfg="diag_alerte_destinataire" value="${g('diag_alerte_destinataire')||''}" placeholder="admin@exemple.fr" class="cfg-input">
     </div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:.5rem 0 .2rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Interrogation SNMP des équipements</div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:0 0 .4rem;line-height:1.4;">
+        Lit en SNMP lecture seule (v1/v2c) les compteurs par port des appareils de type
+        Switch / Routeur / NAS ayant une IP : détecte duplex mismatch, erreurs CRC/FCS,
+        rejets, saturation de lien, ports instables. Deux relevés successifs sont
+        nécessaires pour calculer une tendance.
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Activer l'interrogation SNMP</label>
+        <input type="checkbox" data-cfg="diag_snmp_actif" ${g('diag_snmp_actif')==='1'?'checked':''} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Communautés SNMP (séparées par des virgules)</label>
+        <input type="text" data-cfg="diag_snmp_communautes" value="${g('diag_snmp_communautes')||'public'}" placeholder="public" class="cfg-input">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Seuil d'erreurs / rejets par relevé</label>
+        <input type="number" data-cfg="diag_snmp_seuil_erreurs" value="${g('diag_snmp_seuil_erreurs')||'50'}" min="1" max="100000" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Seuil de saturation de lien (%)</label>
+        <input type="number" data-cfg="diag_snmp_seuil_saturation_pct" value="${g('diag_snmp_seuil_saturation_pct')||'90'}" min="10" max="100" class="cfg-input cfg-input-sm">
+    </div>
 </div>
 
 <!-- ══ 5. ALERTES ══ -->
