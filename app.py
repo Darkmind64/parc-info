@@ -2162,6 +2162,37 @@ def init_db():
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
     c.execute('''CREATE INDEX IF NOT EXISTS idx_snmp_releves
         ON diag_snmp_releves(client_id, equipement_ip, port_index, epoch)''')
+    # Palier 4 — topologie L2 découverte (instantané, remplacé à chaque poll).
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_topologie (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        equipement_ip TEXT DEFAULT '',
+        equipement_appareil_id INTEGER,
+        port_index INTEGER DEFAULT 0,
+        port_nom TEXT DEFAULT '',
+        mac_vue TEXT DEFAULT '',
+        appareil_vu_id INTEGER,
+        appareil_vu_nom TEXT DEFAULT '',
+        vendor TEXT DEFAULT '',
+        type_lien TEXT DEFAULT 'mac',
+        voisin_nom TEXT DEFAULT '',
+        voisin_port TEXT DEFAULT '',
+        horodatage TEXT DEFAULT '',
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    c.execute('''CREATE INDEX IF NOT EXISTS idx_diag_topo
+        ON diag_topologie(client_id, equipement_ip, port_index)''')
+    # Palier 5 — métriques temporelles (tendances / baseline).
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_metriques (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        categorie TEXT DEFAULT '',
+        cible TEXT DEFAULT '',
+        horodatage TEXT DEFAULT '',
+        epoch REAL DEFAULT 0,
+        valeur REAL DEFAULT 0,
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    c.execute('''CREATE INDEX IF NOT EXISTS idx_diag_metriques
+        ON diag_metriques(client_id, categorie, cible, epoch)''')
 
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
@@ -8961,6 +8992,7 @@ def api_diag_snapshot_status():
               'findings': [], 'avertissements': []}
     for f in st.get('findings', []):
         f['categorie_libelle'] = network_diag.libelle_categorie(f.get('categorie', ''))
+        f['remediation'] = network_diag.remediation(f.get('categorie', ''))
     return jsonify(st)
 
 
@@ -9000,6 +9032,59 @@ def api_diag_snmp():
     return jsonify(etat)
 
 
+@app.route('/api/diag-reseau/topologie')
+@login_required
+def api_diag_topologie():
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify(network_diag.etat_topologie(cid))
+
+
+@app.route('/api/diag-reseau/topologie/appliquer-baie', methods=['POST'])
+@login_required
+def api_diag_topologie_appliquer_baie():
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    res = network_diag.appliquer_topologie_baie(cid)
+    conn = get_db()
+    log_history(conn, cid, 'diag_reseau', 0, 'Topologie → baie',
+                'DIAG_TOPO_BAIE', f"{res.get('maj', 0)} port(s) renseigné(s)")
+    conn.commit(); conn.close()
+    return jsonify({'ok': True, **res})
+
+
+@app.route('/api/diag-reseau/metriques')
+@login_required
+def api_diag_metriques():
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    categorie = (request.args.get('categorie') or '').strip()
+    cible = (request.args.get('cible') or '').strip()
+    if not categorie or not cible:
+        return jsonify({'cibles': network_diag.cibles_metriques(cid)})
+    return jsonify(network_diag.serie_metrique(cid, categorie, cible))
+
+
+@app.route('/diag-reseau/rapport.pdf')
+@app.route('/diag-reseau/rapport.html')
+@login_required
+def diag_reseau_rapport():
+    cid = get_client_id()
+    if not cid or not get_client_access(cid):
+        flash('Accès refusé', 'danger')
+        return redirect(url_for('index'))
+    veut_html = request.path.endswith('.html')
+    contenu, mimetype, filename = network_diag.generer_rapport_diag(cid, forcer_html=veut_html)
+    resp = make_response(contenu)
+    resp.headers['Content-Type'] = mimetype
+    disp = 'inline' if mimetype.startswith('text/html') else 'attachment'
+    resp.headers['Content-Disposition'] = f'{disp}; filename="{filename}"'
+    return resp
+
+
 @app.route('/api/diag-reseau/evenements')
 @login_required
 def api_diag_evenements():
@@ -9034,6 +9119,7 @@ def api_diag_evenements():
         except Exception:
             d['details'] = {}
         d['categorie_libelle'] = network_diag.libelle_categorie(d.get('categorie', ''))
+        d['remediation'] = network_diag.remediation(d.get('categorie', ''))
         evenements.append(d)
     return jsonify({'evenements': evenements, 'pagination': pagination})
 

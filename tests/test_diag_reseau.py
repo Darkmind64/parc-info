@@ -200,6 +200,46 @@ def test_snmp_releve_et_findings_rattaches(client, conn, deux_clients, make_appa
     assert evt['appareil_id'] == aid  # rattaché au switch
 
 
+def test_api_topologie_et_metriques_acl(client, deux_clients):
+    login_session(client, deux_clients['lecteur'], deux_clients['cid_a'])
+    assert client.get('/api/diag-reseau/topologie').status_code == 200
+    assert client.get('/api/diag-reseau/metriques').status_code == 200
+    # lecture seule : appliquer-baie interdit
+    assert client.post('/api/diag-reseau/topologie/appliquer-baie', json={}).status_code == 403
+
+
+def test_evenements_incluent_remediation(client, conn, deux_clients):
+    cid = deux_clients['cid_a']
+    network_diag._enregistrer_evenements(
+        cid, [network_diag._finding('duplex_mismatch', 'x', {'equipement': '10.0.0.1', 'port_index': 1},
+                                    '10.0.0.1', 1)], 'snmp')
+    login_session(client, deux_clients['proprio'], cid)
+    evt = client.get('/api/diag-reseau/evenements').get_json()['evenements'][0]
+    assert evt['remediation'] and 'corriger' in evt['remediation']
+
+
+def test_rapport_pdf_route(client, deux_clients):
+    login_session(client, deux_clients['proprio'], deux_clients['cid_a'])
+    r = client.get('/diag-reseau/rapport.pdf')
+    assert r.status_code == 200
+    assert r.headers['Content-Type'].startswith(('application/pdf', 'text/html'))
+    rh = client.get('/diag-reseau/rapport.html')
+    assert rh.status_code == 200 and b'<html' in rh.data.lower()
+
+
+def test_metriques_serie(client, conn, deux_clients):
+    import time
+    cid = deux_clients['cid_a']
+    ep = time.time()
+    for i in range(12):
+        conn.execute("INSERT INTO diag_metriques (client_id,categorie,cible,horodatage,epoch,valeur) "
+                     "VALUES (?,?,?,?,?,?)", (cid, 'liaison_latence', '8.8.8.8', 'x', ep - 60 * i, 5.0 + i))
+    conn.commit()
+    login_session(client, deux_clients['proprio'], cid)
+    d = client.get('/api/diag-reseau/metriques?categorie=liaison_latence&cible=8.8.8.8').get_json()
+    assert d['points'] and d['mediane'] is not None
+
+
 def test_alerte_email_echappe_le_titre(monkeypatch, deux_clients):
     """Le titre d'un évènement (données LAN non fiables) est échappé avant
     insertion dans le corps HTML de l'e-mail d'alerte."""

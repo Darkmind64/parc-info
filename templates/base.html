@@ -3477,6 +3477,23 @@ function rendreConfig() {
         <label class="cfg-label">Seuil de saturation de lien (%)</label>
         <input type="number" data-cfg="diag_snmp_seuil_saturation_pct" value="${g('diag_snmp_seuil_saturation_pct')||'90'}" min="10" max="100" class="cfg-input cfg-input-sm">
     </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Cartographie de topologie L2 (FDB/LLDP, nécessite SNMP)</label>
+        <input type="checkbox" data-cfg="diag_topologie_active" ${g('diag_topologie_active')==='1'?'checked':''} class="cfg-check">
+    </div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:.5rem 0 .2rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Tendances & référence</div>
+    <div class="cfg-row">
+        <label class="cfg-label">Alerte sur dégradation relative à la référence</label>
+        <input type="checkbox" data-cfg="diag_baseline_active" ${g('diag_baseline_active')!=='0'?'checked':''} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Fenêtre d'historique de référence (jours)</label>
+        <input type="number" data-cfg="diag_baseline_jours" value="${g('diag_baseline_jours')||'7'}" min="1" max="90" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Facteur d'alerte (× la p90 de référence)</label>
+        <input type="number" step="0.1" data-cfg="diag_baseline_facteur" value="${g('diag_baseline_facteur')||'2.5'}" min="1.2" max="10" class="cfg-input cfg-input-sm">
+    </div>
 </div>
 
 <!-- ══ 5. ALERTES ══ -->

@@ -64,6 +64,8 @@ _GRAVITE_DEFAUT = {
     'port_sature':           'avertissement',
     'port_flapping':         'avertissement',
     'vitesse_reduite':       'info',
+    'cablage_incoherent':    'avertissement',
+    'degradation_relative':  'avertissement',
 }
 
 _CATEGORIES_LIBELLES = {
@@ -85,6 +87,8 @@ _CATEGORIES_LIBELLES = {
     'port_sature':            "Lien saturé (port)",
     'port_flapping':          "Port instable (flapping)",
     'vitesse_reduite':        "Vitesse de lien réduite (port)",
+    'cablage_incoherent':     "Câblage baie incohérent avec la topologie",
+    'degradation_relative':   "Dégradation par rapport à la référence",
 }
 
 
@@ -339,7 +343,8 @@ def _ping_rafale(ip: str, n: int = 20) -> dict:
     return stats
 
 
-def mesurer_qualite_liaison(cibles: list, seuil_perte: float, seuil_gigue: float, n: int = 20) -> list:
+def mesurer_qualite_liaison(cibles: list, seuil_perte: float, seuil_gigue: float,
+                            n: int = 20, collecte: list = None) -> list:
     findings = []
     for cible in cibles:
         ip = cible.get('ip') if isinstance(cible, dict) else cible
@@ -348,6 +353,8 @@ def mesurer_qualite_liaison(cibles: list, seuil_perte: float, seuil_gigue: float
             continue
         st = _ping_rafale(ip, n)
         st['libelle'] = libelle
+        if collecte is not None:
+            collecte.append(st)
         if st['recus'] == 0:
             findings.append(_finding(
                 'passerelle_injoignable' if cible.get('role') == 'passerelle' else 'qualite_liaison',
@@ -933,10 +940,18 @@ def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> li
                         f"{libelle_port} sur {ip} : {err_io} erreurs / {disc_io} rejets de paquets",
                         {**base, 'delta_erreurs': err_io, 'delta_rejets': disc_io}, ip, pi))
 
+                # Métriques temporelles (palier 5) : erreurs + débit par port
+                _cible_m = f"{ip}:{pi}"
+                _enregistrer_metrique(conn, client_id, 'port_erreurs', _cible_m,
+                                      err_io + disc_io + delta['fcs_err'] + delta['align_err'],
+                                      equipement['ts'])
+
                 # Saturation de lien
                 if p['speed_mbps'] > 0:
                     debit_mbps = max(delta['in_oct'], delta['out_oct']) * 8 / dt / 1_000_000
                     taux = debit_mbps / p['speed_mbps'] * 100
+                    _enregistrer_metrique(conn, client_id, 'port_debit_pct', _cible_m,
+                                          round(taux, 1), equipement['ts'])
                     if taux >= seuil_sat:
                         findings.append(_finding(
                             'port_sature',
@@ -1050,6 +1065,689 @@ def etat_snmp(client_id: int) -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  Palier 4 — cartographie de topologie L2 (FDB bridge-MIB + LLDP/CDP)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Recoupe les tables MAC des switchs (« telle MAC est vue sur tel port ») avec
+# l'inventaire ParcInfo et le câblage manuel de la baie de brassage. Signale
+# les incohérences ; peut pré-remplir les ports de baie vides.
+
+_OID_FDB_DOT1D_PORT   = '1.3.6.1.2.1.17.4.3.1.2'        # dot1dTpFdbPort : MAC -> bridge port
+_OID_FDB_BASEPORT_IF  = '1.3.6.1.2.1.17.1.4.1.2'        # dot1dBasePortIfIndex : bridge port -> ifIndex
+_OID_FDB_DOT1Q_PORT   = '1.3.6.1.2.1.17.7.1.2.2.1.2'    # dot1qTpFdbPort : VLAN.MAC -> bridge port
+_OID_LLDP_REM_SYSNAME = '1.0.8802.1.1.2.1.4.1.1.9'
+_OID_LLDP_REM_PORTID  = '1.0.8802.1.1.2.1.4.1.1.7'
+
+
+def _mac_depuis_suffixe(suffixe: str, decimal_count: int = 6) -> str:
+    """Les 6 derniers sous-identifiants d'un OID FDB = la MAC en décimal."""
+    parts = suffixe.split('.')
+    if len(parts) < decimal_count:
+        return ''
+    try:
+        return ':'.join('%02x' % int(x) for x in parts[-decimal_count:])
+    except ValueError:
+        return ''
+
+
+def decouvrir_topologie(client_id: int) -> list:
+    """Découvre la topologie L2 des switchs SNMP du client. Retourne les
+    findings de câblage incohérent ; peuple la table diag_topologie."""
+    if str(_cfg('diag_topologie_active', '0')) != '1' or str(_cfg('diag_snmp_actif', '0')) != '1':
+        return []
+    communautes = _communautes_snmp()
+    try:
+        from database import get_db
+        conn = get_db()
+        placeholders = ','.join('?' * len(_TYPES_EQUIP_SNMP))
+        equipements = conn.execute(
+            f"SELECT id, adresse_ip FROM appareils WHERE client_id=? "
+            f"AND type_appareil IN ({placeholders}) AND adresse_ip!='' AND adresse_ip IS NOT NULL",
+            (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
+        inventaire = {}
+        for aid, nom, mac in conn.execute(
+                "SELECT id, nom_machine, adresse_mac FROM appareils "
+                "WHERE client_id=? AND adresse_mac!='' AND adresse_mac IS NOT NULL", (client_id,)):
+            inventaire[_norm_mac(mac)] = (aid, nom)
+        conn.close()
+    except Exception:
+        return []
+
+    findings = []
+    now = _now_z()
+    for equip_id, ip in equipements:
+        try:
+            lignes, findings_eq = _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now)
+        except Exception:
+            logger.debug('network_diag: topologie %s en échec', ip, exc_info=True)
+            continue
+        findings += findings_eq
+        try:
+            from database import get_db
+            conn = get_db()
+            conn.execute("DELETE FROM diag_topologie WHERE client_id=? AND equipement_ip=?",
+                         (client_id, ip))
+            conn.executemany(
+                "INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
+                "port_index, port_nom, mac_vue, appareil_vu_id, appareil_vu_nom, vendor, "
+                "type_lien, voisin_nom, voisin_port, horodatage) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", lignes)
+            conn.commit()
+            conn.close()
+        except Exception:
+            logger.exception('network_diag: écriture topologie impossible')
+    return findings
+
+
+def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now):
+    """Un switch : FDB -> port -> {mac, appareil} + voisins LLDP + recoupement baie."""
+    equipement = interroger_equipement(ip, communautes)
+    noms_ports = {}
+    if equipement:
+        noms_ports = {p['index']: p['nom'] for p in equipement['ports']}
+
+    baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes)   # {bridge_port: ifIndex}
+    fdb = _snmp_walk(_OID_FDB_DOT1Q_PORT, ip, communautes)
+    decal = 6
+    if not fdb:
+        fdb = _snmp_walk(_OID_FDB_DOT1D_PORT, ip, communautes)
+    else:
+        decal = 6  # dot1q : suffixe = vlan.macs(6) → on prend quand même les 6 derniers
+
+    # port bridge -> [macs]
+    par_port = {}
+    for suffixe, bridge_port in fdb.items():
+        mac = _mac_depuis_suffixe(suffixe, decal)
+        try:
+            bp = int(bridge_port)
+        except (TypeError, ValueError):
+            continue
+        if not mac or bp <= 0:
+            continue
+        ifindex = baseport_if.get(str(bp), bp)
+        try:
+            ifindex = int(ifindex)
+        except (TypeError, ValueError):
+            ifindex = bp
+        par_port.setdefault(ifindex, []).append(mac)
+
+    # voisins LLDP
+    voisins = {}
+    lldp_noms = _snmp_walk(_OID_LLDP_REM_SYSNAME, ip, communautes)
+    lldp_ports = _snmp_walk(_OID_LLDP_REM_PORTID, ip, communautes)
+    for suffixe, nom_voisin in lldp_noms.items():
+        # suffixe LLDP = timeMark.locPortNum.remIndex → locPortNum au milieu
+        parts = suffixe.split('.')
+        loc = parts[1] if len(parts) >= 2 else parts[0]
+        try:
+            voisins[int(loc)] = {'nom': str(nom_voisin), 'port': str(lldp_ports.get(suffixe, ''))}
+        except ValueError:
+            pass
+
+    # câblage baie de ce switch : {numero_port: (appareil_id, nom)}
+    baie = {}
+    try:
+        from database import get_db
+        conn = get_db()
+        for numero, aid, anom in conn.execute(
+                "SELECT p.numero, p.appareil_id, a.nom_machine "
+                "FROM baie_slot_ports p JOIN baie_slots s ON s.id=p.slot_id "
+                "LEFT JOIN appareils a ON a.id=p.appareil_id "
+                "WHERE s.client_id=? AND s.appareil_id=? AND p.appareil_id IS NOT NULL",
+                (client_id, equip_id)):
+            baie[int(numero)] = (aid, anom)
+        conn.close()
+    except Exception:
+        pass
+
+    lignes, findings = [], []
+    for ifindex, macs in sorted(par_port.items()):
+        macs = sorted(set(macs))
+        port_nom = noms_ports.get(ifindex, f'if{ifindex}')
+        vue_appareil_id, vue_nom = None, ''
+        if len(macs) == 1 and macs[0] in inventaire:
+            vue_appareil_id, vue_nom = inventaire[macs[0]]
+        v = voisins.get(ifindex, {})
+        for mac in macs:
+            inv = inventaire.get(mac)
+            lignes.append((client_id, ip, equip_id, ifindex, port_nom, mac,
+                           inv[0] if inv else None, inv[1] if inv else '',
+                           _vendor(mac), 'lldp' if v else 'mac',
+                           v.get('nom', ''), v.get('port', ''), now))
+        # recoupement baie : le switch voit un appareil connu, seul, différent
+        # de celui déclaré dans la baie pour ce numéro de port
+        baie_port = baie.get(ifindex)
+        if vue_appareil_id and baie_port and baie_port[0] and baie_port[0] != vue_appareil_id:
+            findings.append(_finding(
+                'cablage_incoherent',
+                f"Port {port_nom} de {ip} : le switch voit « {vue_nom} », "
+                f"la baie déclare « {baie_port[1]} »",
+                {'equipement': ip, 'port_index': ifindex, 'port': port_nom,
+                 'vu_par_snmp': vue_nom, 'declare_baie': baie_port[1]},
+                ip, ifindex))
+    if findings:
+        for f in findings:
+            f['appareil_id'] = equip_id
+    return lignes, findings
+
+
+def _communautes_snmp():
+    c = [x.strip() for x in re.split(r'[,;\s]+',
+         str(_cfg('diag_snmp_communautes', 'public') or 'public')) if x.strip()]
+    return c or ['public']
+
+
+def etat_topologie(client_id: int) -> dict:
+    from database import get_db
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT t.*, a.nom_machine FROM diag_topologie t "
+            "LEFT JOIN appareils a ON a.id = t.equipement_appareil_id "
+            "WHERE t.client_id=? ORDER BY t.equipement_ip, t.port_index", (client_id,)).fetchall()
+        cols = [c[1] for c in conn.execute("PRAGMA table_info(diag_topologie)").fetchall()] + ['equipement_nom']
+        incoherents = {
+            f"{d['equipement']}:{d['port_index']}"
+            for (dj,) in conn.execute(
+                "SELECT details_json FROM diag_reseau_evenements WHERE client_id=? "
+                "AND resolu=0 AND categorie='cablage_incoherent'", (client_id,))
+            for d in [_json_charge(dj)] if d
+        }
+    finally:
+        conn.close()
+    equipements = {}
+    for r in rows:
+        d = dict(zip(cols, r))
+        cle = d['equipement_ip']
+        eq = equipements.setdefault(cle, {
+            'ip': cle, 'nom': d.get('equipement_nom') or '',
+            'appareil_id': d['equipement_appareil_id'], 'ports': {}, 'voisins': []})
+        p = eq['ports'].setdefault(d['port_index'], {
+            'port_index': d['port_index'], 'port_nom': d['port_nom'], 'hotes': [],
+            'incoherent': f"{cle}:{d['port_index']}" in incoherents})
+        p['hotes'].append({'mac': d['mac_vue'], 'appareil_id': d['appareil_vu_id'],
+                           'appareil_nom': d['appareil_vu_nom'], 'vendor': d['vendor']})
+        if d['voisin_nom'] and not any(v['nom'] == d['voisin_nom'] for v in eq['voisins']):
+            eq['voisins'].append({'nom': d['voisin_nom'], 'port': d['voisin_port'],
+                                  'port_local': d['port_nom']})
+    for eq in equipements.values():
+        eq['ports'] = sorted(eq['ports'].values(), key=lambda x: x['port_index'])
+    return {'actif': str(_cfg('diag_topologie_active', '0')) == '1',
+            'equipements': list(equipements.values())}
+
+
+def _json_charge(s):
+    try:
+        return json.loads(s or '{}')
+    except Exception:
+        return {}
+
+
+def appliquer_topologie_baie(client_id: int) -> dict:
+    """Pré-remplit les ports de baie VIDES avec l'appareil vu par SNMP. Ne
+    touche jamais un port déjà affecté. Retourne {maj: n}."""
+    from database import get_db
+    conn = get_db()
+    maj = 0
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT t.equipement_appareil_id, t.port_index, t.appareil_vu_id "
+            "FROM diag_topologie t "
+            "WHERE t.client_id=? AND t.appareil_vu_id IS NOT NULL", (client_id,)).fetchall()
+        for equip_aid, port_index, vu_aid in rows:
+            if not equip_aid:
+                continue
+            slot = conn.execute(
+                "SELECT id FROM baie_slots WHERE client_id=? AND appareil_id=? LIMIT 1",
+                (client_id, equip_aid)).fetchone()
+            if not slot:
+                continue
+            port = conn.execute(
+                "SELECT id, appareil_id, peripherique_id, usage_libre FROM baie_slot_ports "
+                "WHERE slot_id=? AND numero=?", (slot[0], port_index)).fetchone()
+            now = _now_z()
+            if port and not (port[1] or port[2] or (port[3] or '').strip()):
+                conn.execute("UPDATE baie_slot_ports SET appareil_id=?, date_maj=? WHERE id=?",
+                             (vu_aid, now, port[0]))
+                maj += 1
+            elif not port:
+                conn.execute(
+                    "INSERT OR IGNORE INTO baie_slot_ports (slot_id, numero, appareil_id, date_maj) "
+                    "VALUES (?,?,?,?)", (slot[0], port_index, vu_aid, now))
+                maj += 1
+        conn.commit()
+    except Exception:
+        logger.exception('network_diag: application topologie -> baie impossible')
+    finally:
+        conn.close()
+    return {'maj': maj}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Palier 5 — tendances & baseline
+# ════════════════════════════════════════════════════════════════════════════
+
+_METRIQUE_PLANCHER = {   # en-dessous : pas d'alerte relative, même si le ratio est élevé
+    'liaison_latence': 20.0,   # ms
+    'liaison_gigue':   15.0,   # ms
+    'liaison_perte':    2.0,   # %
+    'port_debit_pct':  50.0,   # %
+    'port_erreurs':    10.0,   # Δ erreurs
+}
+
+
+def _enregistrer_metrique(conn, client_id, categorie, cible, valeur, epoch):
+    conn.execute(
+        "INSERT INTO diag_metriques (client_id, categorie, cible, horodatage, epoch, valeur) "
+        "VALUES (?,?,?,?,?,?)",
+        (client_id, categorie, cible, _now_z(), epoch, float(valeur)))
+
+
+def enregistrer_metriques_liaison(client_id: int, stats_list: list):
+    """stats_list : sortie de _ping_rafale (une entrée par cible testée)."""
+    if not stats_list:
+        return
+    from database import get_db
+    conn = get_db()
+    ep = time.time()
+    try:
+        for st in stats_list:
+            cible = st.get('ip')
+            if not cible:
+                continue
+            if st.get('perte_pct') is not None:
+                _enregistrer_metrique(conn, client_id, 'liaison_perte', cible, st['perte_pct'], ep)
+            if st.get('moy') is not None:
+                _enregistrer_metrique(conn, client_id, 'liaison_latence', cible, st['moy'], ep)
+            if st.get('gigue') is not None:
+                _enregistrer_metrique(conn, client_id, 'liaison_gigue', cible, st['gigue'], ep)
+        conn.commit()
+    except Exception:
+        logger.exception('network_diag: enregistrement métriques liaison impossible')
+    finally:
+        conn.close()
+
+
+def _percentile(valeurs, p):
+    if not valeurs:
+        return None
+    s = sorted(valeurs)
+    k = (len(s) - 1) * p
+    f = int(k)
+    if f + 1 < len(s):
+        return s[f] + (s[f + 1] - s[f]) * (k - f)
+    return s[f]
+
+
+def evaluer_baseline(client_id: int) -> list:
+    """Compare la dernière valeur de chaque (catégorie, cible) à sa référence
+    (médiane + p90 sur diag_baseline_jours). Alerte sur écart relatif net."""
+    if str(_cfg('diag_baseline_active', '1')) != '1':
+        return []
+    jours = _cfg_int('diag_baseline_jours', 7)
+    facteur = _cfg_float('diag_baseline_facteur', 2.5)
+    from database import get_db
+    depuis = time.time() - jours * 86400
+    conn = get_db()
+    findings = []
+    try:
+        couples = conn.execute(
+            "SELECT DISTINCT categorie, cible FROM diag_metriques "
+            "WHERE client_id=? AND epoch>=?", (client_id, depuis)).fetchall()
+        for categorie, cible in couples:
+            vals = [r[0] for r in conn.execute(
+                "SELECT valeur FROM diag_metriques WHERE client_id=? AND categorie=? "
+                "AND cible=? AND epoch>=? ORDER BY epoch", (client_id, categorie, cible, depuis))]
+            if len(vals) < 8:
+                continue
+            courant = vals[-1]
+            reference = vals[:-1]
+            mediane = _percentile(reference, 0.5)
+            p90 = _percentile(reference, 0.9) or mediane or 0
+            plancher = _METRIQUE_PLANCHER.get(categorie, 0)
+            if courant >= plancher and p90 > 0 and courant >= p90 * facteur:
+                ratio = courant / (mediane or p90 or 1)
+                findings.append(_finding(
+                    'degradation_relative',
+                    f"{_libelle_metrique(categorie)} {cible} : {courant:.0f} "
+                    f"vs référence {mediane:.0f} (×{ratio:.1f})",
+                    {'categorie_metrique': categorie, 'cible': cible, 'valeur': round(courant, 1),
+                     'reference': round(mediane or 0, 1), 'p90': round(p90, 1), 'ratio': round(ratio, 1)},
+                    categorie, cible))
+        # rattache au client (pas d'appareil précis pour une cible IP générique)
+    except Exception:
+        logger.exception('network_diag: évaluation baseline impossible')
+    finally:
+        conn.close()
+    return findings
+
+
+_LIBELLE_METRIQUE = {
+    'liaison_perte': "Perte", 'liaison_latence': "Latence", 'liaison_gigue': "Gigue",
+    'port_debit_pct': "Débit", 'port_erreurs': "Erreurs",
+}
+
+
+def _libelle_metrique(cat):
+    return _LIBELLE_METRIQUE.get(cat, cat)
+
+
+def serie_metrique(client_id: int, categorie: str, cible: str, points_max: int = 120) -> dict:
+    jours = _cfg_int('diag_baseline_jours', 7)
+    depuis = time.time() - jours * 86400
+    from database import get_db
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT epoch, valeur FROM diag_metriques WHERE client_id=? AND categorie=? "
+            "AND cible=? AND epoch>=? ORDER BY epoch", (client_id, categorie, cible, depuis)).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return {'points': [], 'mediane': None, 'p90': None}
+    if len(rows) > points_max:
+        pas = len(rows) / points_max
+        rows = [rows[int(i * pas)] for i in range(points_max)]
+    vals = [r[1] for r in rows]
+    return {
+        'points': [{'t': r[0], 'v': r[1]} for r in rows],
+        'mediane': round(_percentile(vals, 0.5), 1),
+        'p90': round(_percentile(vals, 0.9), 1),
+        'libelle': _libelle_metrique(categorie),
+    }
+
+
+def cibles_metriques(client_id: int) -> list:
+    """Liste des (categorie, cible) disponibles pour le sélecteur de graphe."""
+    from database import get_db
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT categorie, cible FROM diag_metriques WHERE client_id=? "
+            "ORDER BY categorie, cible", (client_id,)).fetchall()
+    finally:
+        conn.close()
+    return [{'categorie': c, 'cible': t, 'libelle': f"{_libelle_metrique(c)} — {t}"} for c, t in rows]
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Palier 6 — remédiation guidée + rapport
+# ════════════════════════════════════════════════════════════════════════════
+
+_REMEDIATION = {
+    'conflit_ip': {
+        'cause': "Deux machines utilisent la même adresse IP (bail DHCP dupliqué, IP fixe mal choisie, VM clonée).",
+        'verifier': ["Identifier les deux MAC via la table ARP et le fabricant",
+                     "Vérifier la plage DHCP et les réservations",
+                     "Chercher une IP fixe posée dans la plage dynamique"],
+        'corriger': ["Repasser l'un des postes en DHCP, ou lui donner une IP hors plage dynamique",
+                     "Ajouter une réservation DHCP par MAC pour les équipements fixes"],
+    },
+    'arp_spoofing': {
+        'cause': "Une machine répond pour de nombreuses IP : usurpation ARP, proxy ARP mal configuré, ou passerelle mal identifiée.",
+        'verifier': ["Confirmer la MAC légitime de la passerelle",
+                     "Repérer la machine qui répond en masse (fabricant, port switch via SNMP)"],
+        'corriger': ["Isoler la machine suspecte le temps de l'analyse",
+                     "Activer Dynamic ARP Inspection / DHCP snooping sur le switch si disponible"],
+    },
+    'dhcp_pirate': {
+        'cause': "Un serveur DHCP non déclaré distribue des baux (box perso branchée, routeur Wi-Fi en mode routeur, VM avec DHCP actif).",
+        'verifier': ["Comparer l'IP du serveur DHCP vu à celle attendue",
+                     "Localiser le port switch d'où viennent les offres (SNMP / capture)"],
+        'corriger': ["Débrancher ou reconfigurer l'équipement fautif en point d'accès (DHCP désactivé)",
+                     "Activer DHCP snooping et n'autoriser que le port du serveur légitime"],
+    },
+    'ra_pirate': {
+        'cause': "Plusieurs routeurs émettent des Router Advertisements IPv6 : équipement grand public branché, IPv6 non maîtrisé.",
+        'verifier': ["Lister les adresses lien-local des routeurs RA",
+                     "Identifier l'équipement non prévu"],
+        'corriger': ["Désactiver l'IPv6 / le RA sur l'équipement parasite",
+                     "Activer RA Guard sur le switch"],
+    },
+    'tempete_broadcast': {
+        'cause': "Trafic de broadcast anormalement élevé : boucle réseau, carte défaillante, application bavarde.",
+        'verifier': ["Chercher une boucle (deux ports reliés, STP désactivé)",
+                     "Repérer le port avec le plus de trafic broadcast via SNMP"],
+        'corriger': ["Rétablir STP / RSTP sur tous les switchs",
+                     "Isoler le port ou la machine à l'origine du bruit"],
+    },
+    'stp_instable': {
+        'cause': "Changements de topologie STP fréquents : lien qui flappe, équipement qui redémarre, STP mal réglé.",
+        'verifier': ["Identifier le port qui change d'état (SNMP, logs switch)",
+                     "Vérifier le câblage et l'alimentation de l'équipement concerné"],
+        'corriger': ["Activer PortFast/edge sur les ports d'accès terminaux",
+                     "Remplacer le câble/SFP douteux, fiabiliser l'alimentation"],
+    },
+    'qualite_liaison': {
+        'cause': "Perte de paquets, latence ou gigue élevée : lien saturé, câble/connecteur abîmé, Wi-Fi encombré, équipement surchargé.",
+        'verifier': ["Tester en filaire pour écarter le Wi-Fi",
+                     "Regarder les compteurs d'erreurs du port switch (SNMP)",
+                     "Vérifier la charge CPU de la passerelle"],
+        'corriger': ["Remplacer le câble, changer de port switch",
+                     "Décharger le lien (QoS, planifier les sauvegardes hors heures ouvrées)"],
+    },
+    'passerelle_injoignable': {
+        'cause': "La passerelle ne répond plus : équipement éteint/planté, câble débranché, mauvaise IP de passerelle.",
+        'verifier': ["Vérifier l'alimentation et les LED de la box/routeur",
+                     "Confirmer l'adresse de passerelle configurée"],
+        'corriger': ["Redémarrer la passerelle", "Rétablir le câblage, corriger la configuration IP"],
+    },
+    'dns_degrade': {
+        'cause': "Le serveur DNS répond mal ou lentement : serveur surchargé, DNS distant injoignable, cache corrompu.",
+        'verifier': ["Tester la résolution vers un DNS public (8.8.8.8, 1.1.1.1)",
+                     "Regarder la charge du serveur DNS interne"],
+        'corriger': ["Ajouter un DNS secondaire fiable",
+                     "Redémarrer le service DNS, vider le cache"],
+    },
+    'conflit_nom': {
+        'cause': "Deux machines annoncent le même nom NetBIOS/hôte : clonage sans renommage, doublon de configuration.",
+        'verifier': ["Identifier les deux IP/MAC concernées"],
+        'corriger': ["Renommer l'une des machines et redémarrer"],
+    },
+    'duplex_mismatch': {
+        'cause': "Un côté du lien est en half-duplex, l'autre en full : autonégociation ratée, réglage forcé d'un seul côté.",
+        'verifier': ["Regarder le duplex négocié des deux côtés (switch SNMP + poste)",
+                     "Repérer les late collisions sur le port"],
+        'corriger': ["Remettre les DEUX extrémités en autonégociation",
+                     "Sinon forcer la même vitesse/duplex des deux côtés",
+                     "Remplacer le câble si les erreurs persistent"],
+    },
+    'port_crc': {
+        'cause': "Erreurs CRC/FCS en hausse : câble ou connecteur endommagé, interférences, SFP défaillant, duplex mismatch.",
+        'verifier': ["Vérifier le sertissage / l'état du câble et des prises",
+                     "Écarter le câble des sources d'interférence (alim, néons)",
+                     "Contrôler le duplex du port"],
+        'corriger': ["Remplacer le câble / le cordon de brassage / le SFP",
+                     "Changer de port switch pour confirmer"],
+    },
+    'port_erreurs': {
+        'cause': "Erreurs ou paquets rejetés : congestion (buffers pleins), lien de mauvaise qualité, boucle.",
+        'verifier': ["Regarder le taux d'utilisation du port",
+                     "Vérifier s'il s'agit d'erreurs d'entrée (câble) ou de sortie (congestion)"],
+        'corriger': ["Augmenter la capacité du lien (agrégation, 1G→10G)",
+                     "Répartir la charge, activer la QoS"],
+    },
+    'port_sature': {
+        'cause': "Le lien tourne près de sa capacité maximale : sauvegardes, transferts massifs, lien sous-dimensionné.",
+        'verifier': ["Identifier ce qui consomme (sens du trafic, horaires)",
+                     "Vérifier la vitesse négociée du port"],
+        'corriger': ["Planifier les gros transferts hors heures ouvrées",
+                     "Passer le lien en 10G ou agréger deux ports (LACP)"],
+    },
+    'port_flapping': {
+        'cause': "Le port change d'état sans arrêt : câble/connecteur défaillant, équipement qui redémarre, SFP incompatible.",
+        'verifier': ["Regarder l'historique d'état du port (logs switch)",
+                     "Tester avec un autre câble et un autre port"],
+        'corriger': ["Remplacer le câble / SFP", "Fiabiliser l'alimentation de l'équipement au bout"],
+    },
+    'vitesse_reduite': {
+        'cause': "Le port a négocié 10 ou 100 Mb/s sur du matériel gigabit : câble à 2 paires, câble trop long/abîmé, port forcé.",
+        'verifier': ["Vérifier la catégorie et la longueur du câble (Cat5e+ / <100 m)",
+                     "Contrôler si la vitesse est forcée quelque part"],
+        'corriger': ["Remplacer par un câble Cat5e/Cat6 4 paires en bon état",
+                     "Remettre le port en autonégociation"],
+    },
+    'mac_flapping': {
+        'cause': "La même MAC est vue sur plusieurs ports rapidement : boucle réseau, deux liens actifs vers le même équipement.",
+        'verifier': ["Chercher une boucle physique", "Vérifier les liens redondants sans agrégation"],
+        'corriger': ["Rétablir STP", "Agréger correctement (LACP) les liens redondants"],
+    },
+    'tcp_retransmissions': {
+        'cause': "Retransmissions TCP élevées : perte de paquets sur le chemin, congestion, MTU incohérente.",
+        'verifier': ["Corréler avec les erreurs de port et la saturation",
+                     "Tester la MTU de bout en bout"],
+        'corriger': ["Traiter la perte sous-jacente (câble, saturation)",
+                     "Harmoniser la MTU (jumbo frames tout ou rien)"],
+    },
+    'cablage_incoherent': {
+        'cause': "Le switch voit un appareil sur un port différent de celui déclaré dans la baie de brassage : brassage modifié sans mise à jour, erreur de saisie.",
+        'verifier': ["Suivre physiquement le cordon de brassage du port concerné",
+                     "Confronter l'étiquetage à la réalité"],
+        'corriger': ["Corriger l'affectation du port dans la baie de brassage",
+                     "Utiliser « Reporter dans la baie » pour partir de l'état réel"],
+    },
+    'degradation_relative': {
+        'cause': "Une métrique s'est nettement dégradée par rapport à sa valeur habituelle, même si le seuil absolu n'est pas franchi : début de panne, nouvelle charge, changement d'environnement.",
+        'verifier': ["Regarder la courbe : dégradation brutale ou progressive ?",
+                     "Corréler avec un changement récent (matériel, câblage, trafic)"],
+        'corriger': ["Traiter la cause identifiée sur la courbe",
+                     "Si c'est le nouveau normal (charge légitime), ajuster les attentes / dimensionner"],
+    },
+}
+
+
+def remediation(categorie: str):
+    return _REMEDIATION.get(categorie)
+
+
+def generer_rapport_diag(client_id: int, forcer_html: bool = False):
+    """Rapport de diagnostic réseau. Retourne (contenu, mimetype, filename)."""
+    from database import get_db
+    conn = get_db()
+    try:
+        client = conn.execute("SELECT nom FROM clients WHERE id=?", (client_id,)).fetchone()
+        nom_client = client[0] if client else f'client {client_id}'
+        _cols = ('gravite', 'categorie', 'titre', 'nb_occurrences', 'derniere_occurrence')
+        evts = [dict(zip(_cols, r)) for r in conn.execute(
+            "SELECT gravite, categorie, titre, nb_occurrences, derniere_occurrence "
+            "FROM diag_reseau_evenements WHERE client_id=? AND resolu=0 "
+            "ORDER BY CASE gravite WHEN 'critique' THEN 0 WHEN 'avertissement' THEN 1 ELSE 2 END",
+            (client_id,)).fetchall()]
+    finally:
+        conn.close()
+
+    par_gravite = {}
+    for e in evts:
+        par_gravite[e['gravite']] = par_gravite.get(e['gravite'], 0) + 1
+    snmp = etat_snmp(client_id)
+    topo = etat_topologie(client_id)
+    date_str = _now_z().replace('T', ' ').replace('Z', ' UTC')
+
+    try:
+        from app import REPORTLAB_AVAILABLE
+    except Exception:
+        REPORTLAB_AVAILABLE = False
+
+    if REPORTLAB_AVAILABLE and not forcer_html:
+        try:
+            return _rapport_pdf(nom_client, date_str, evts, par_gravite, snmp, topo)
+        except Exception:
+            logger.exception('network_diag: génération PDF rapport échouée, repli HTML')
+    return _rapport_html(nom_client, date_str, evts, par_gravite, snmp, topo)
+
+
+def _rapport_pdf(nom_client, date_str, evts, par_gravite, snmp, topo):
+    from io import BytesIO
+    from app import (SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+                     getSampleStyleSheet, ParagraphStyle, colors, A4, mm)
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
+                            topMargin=15 * mm, bottomMargin=15 * mm)
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle('h1', parent=styles['Heading1'], fontSize=20,
+                        textColor=colors.HexColor('#0a0d12'))
+    h2 = ParagraphStyle('h2', parent=styles['Heading2'], fontSize=13,
+                        textColor=colors.HexColor('#00558a'))
+    small = ParagraphStyle('s', parent=styles['Normal'], fontSize=8,
+                           textColor=colors.HexColor('#444'))
+    story = [Paragraph(f"Diagnostic réseau — {nom_client}", h1),
+             Paragraph(date_str, small), Spacer(1, 8)]
+
+    resume = ' · '.join(f"{n} {g}" for g, n in par_gravite.items()) or "aucun évènement actif"
+    story += [Paragraph("Résumé", h2), Paragraph(resume, styles['Normal']), Spacer(1, 10)]
+
+    if evts:
+        story.append(Paragraph("Évènements actifs", h2))
+        data = [["Gravité", "Catégorie", "Description", "Occ."]]
+        for e in evts:
+            data.append([e['gravite'], libelle_categorie(e['categorie']),
+                         Paragraph(e['titre'], small), str(e['nb_occurrences'])])
+        t = Table(data, colWidths=[22 * mm, 34 * mm, 100 * mm, 12 * mm])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0a0d12')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#ccc')),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP')]))
+        story += [t, Spacer(1, 10)]
+
+        story.append(Paragraph("Pistes de remédiation", h2))
+        for cat in dict.fromkeys(e['categorie'] for e in evts):
+            r = remediation(cat)
+            if not r:
+                continue
+            story.append(Paragraph(f"<b>{libelle_categorie(cat)}</b> — {r['cause']}", small))
+            for c in r['corriger']:
+                story.append(Paragraph(f"&nbsp;&nbsp;• {c}", small))
+            story.append(Spacer(1, 4))
+
+    if snmp.get('equipements'):
+        story += [Spacer(1, 6), Paragraph("État des ports (SNMP)", h2)]
+        for eq in snmp['equipements']:
+            story.append(Paragraph(f"<b>{eq['ip']}</b> — {len(eq['ports'])} port(s)", small))
+
+    if topo.get('equipements'):
+        story += [Spacer(1, 6), Paragraph("Topologie découverte", h2)]
+        for eq in topo['equipements']:
+            lignes = [f"{p['port_nom']}: " + ', '.join(
+                h['appareil_nom'] or h['mac'] for h in p['hotes'])
+                for p in eq['ports'] if p['hotes']]
+            story.append(Paragraph(f"<b>{eq['ip']}</b>: " + ' | '.join(lignes[:12]), small))
+
+    story += [Spacer(1, 14), Paragraph("ParcInfo — rapport généré automatiquement", small)]
+    doc.build(story)
+    buf.seek(0)
+    ts = date_str.replace(':', '').replace(' ', '-')[:15]
+    return buf.getvalue(), 'application/pdf', f'diagnostic-reseau-{ts}.pdf'
+
+
+def _rapport_html(nom_client, date_str, evts, par_gravite, snmp, topo):
+    from html import escape as e
+    resume = ' · '.join(f"{n} {g}" for g, n in par_gravite.items()) or "aucun évènement actif"
+    lignes = ''.join(
+        f"<tr><td>{e2['gravite']}</td><td>{e(libelle_categorie(e2['categorie']))}</td>"
+        f"<td>{e(e2['titre'])}</td><td>{e2['nb_occurrences']}</td></tr>" for e2 in evts)
+    remed = ''
+    for cat in dict.fromkeys(x['categorie'] for x in evts):
+        r = remediation(cat)
+        if r:
+            remed += (f"<h4>{e(libelle_categorie(cat))}</h4><p><em>{e(r['cause'])}</em></p><ul>"
+                      + ''.join(f"<li>{e(c)}</li>" for c in r['corriger']) + "</ul>")
+    html = (f"<html><head><meta charset='utf-8'><title>Diagnostic réseau — {e(nom_client)}</title>"
+            f"<style>body{{font-family:Arial;margin:2rem}}table{{border-collapse:collapse}}"
+            f"td,th{{border:1px solid #ccc;padding:4px 8px;font-size:13px}}</style></head><body>"
+            f"<h1>Diagnostic réseau — {e(nom_client)}</h1><p>{e(date_str)}</p>"
+            f"<h2>Résumé</h2><p>{e(resume)}</p>"
+            f"<h2>Évènements actifs</h2><table><tr><th>Gravité</th><th>Catégorie</th>"
+            f"<th>Description</th><th>Occ.</th></tr>{lignes}</table>"
+            f"<h2>Pistes de remédiation</h2>{remed}"
+            f"<p style='color:#888;margin-top:2rem'>ParcInfo — rapport généré automatiquement</p>"
+            f"</body></html>")
+    ts = date_str.replace(':', '').replace(' ', '-')[:15]
+    return html, 'text/html; charset=utf-8', f'diagnostic-reseau-{ts}.html'
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  Orchestration : snapshot + persistance
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -1104,7 +1802,9 @@ def _run_snapshot(client_id: int, plage: str, avec_capture):
 
         _maj_statut(progress=30, message='Test de qualité de liaison (passerelle, DNS)…')
         cibles = _cibles_ping(client_id, passerelle)
-        findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue)
+        stats_liaison = []
+        findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, collecte=stats_liaison)
+        enregistrer_metriques_liaison(client_id, stats_liaison)
 
         _maj_statut(progress=50, message='Contrôle de la résolution DNS…')
         serveur_dns = next((c['ip'] for c in cibles if c.get('role') == 'dns'), '')
@@ -1120,6 +1820,12 @@ def _run_snapshot(client_id: int, plage: str, avec_capture):
         if str(_cfg('diag_snmp_actif', '0')) == '1':
             _maj_statut(progress=76, message='Interrogation SNMP des équipements réseau…')
             findings += interroger_equipements_client(client_id)
+            if str(_cfg('diag_topologie_active', '0')) == '1':
+                _maj_statut(progress=84, message='Cartographie de topologie L2…')
+                findings += decouvrir_topologie(client_id)
+
+        _maj_statut(progress=88, message='Analyse des tendances (baseline)…')
+        findings += evaluer_baseline(client_id)
 
         capture_utilisee = False
         if avec_capture:
@@ -1168,6 +1874,8 @@ def _purger_anciens(conn, client_id: int):
         # Relevés SNMP au-delà de la fenêtre d'âge : les deltas ne comparent
         # jamais qu'au relevé le plus récent (quelques minutes), sans risque.
         conn.execute("DELETE FROM diag_snmp_releves WHERE client_id=? AND horodatage < ?",
+                     (client_id, limite))
+        conn.execute("DELETE FROM diag_metriques WHERE client_id=? AND horodatage < ?",
                      (client_id, limite))
     except Exception:
         logger.debug('network_diag: purge par âge en échec', exc_info=True)
@@ -1277,9 +1985,13 @@ def _alerter_email(client_id: int, findings: list):
         # Les titres d'évènements embarquent des données non fiables du LAN
         # (hostname NetBIOS, reverse-DNS, MAC) — échappées avant insertion HTML.
         nom_client = _esc(row[0]) if row else f'client {client_id}'
-        lignes = ''.join(
-            f"<li><strong>{_esc(libelle_categorie(f['categorie']))}</strong> — {_esc(f['titre'])}</li>"
-            for f in findings)
+
+        def _ligne(f):
+            r = remediation(f['categorie'])
+            cause = f"<br><span style=\"color:#666;font-size:.9em\">{_esc(r['cause'])}</span>" if r else ''
+            return (f"<li><strong>{_esc(libelle_categorie(f['categorie']))}</strong> — "
+                    f"{_esc(f['titre'])}{cause}</li>")
+        lignes = ''.join(_ligne(f) for f in findings)
         corps = (f"<html><body style=\"font-family:Arial\">"
                  f"<h2>Diagnostic réseau — {nom_client}</h2>"
                  f"<p>{len(findings)} nouvel(le)(s) alerte(s) critique(s) détectée(s) :</p>"
@@ -1323,6 +2035,7 @@ def _moniteur_cycle():
     seuil_bc = _cfg_int('diag_seuil_broadcast_pps', 150)
     avec_capture = str(_cfg('diag_capture_active', '0')) == '1'
     avec_snmp = str(_cfg('diag_snmp_actif', '0')) == '1'
+    avec_topo = str(_cfg('diag_topologie_active', '0')) == '1'
     passerelle = _passerelle_defaut()
 
     capture_faite = False
@@ -1339,10 +2052,16 @@ def _moniteur_cycle():
 
             findings = detecter_conflits_ip(passerelle, releves=1)
             cibles = _cibles_ping(cid, passerelle)
-            findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, n=10)
+            stats_liaison = []
+            findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, n=10,
+                                                collecte=stats_liaison)
+            enregistrer_metriques_liaison(cid, stats_liaison)
             findings += detecter_conflits_noms(cid)
             if avec_snmp:
                 findings += interroger_equipements_client(cid)
+                if avec_topo:
+                    findings += decouvrir_topologie(cid)
+            findings += evaluer_baseline(cid)
             src = 'actif'
             if avec_capture and not capture_faite and etat_capture()['disponible']:
                 findings += capture_passive(_cfg_int('diag_snapshot_duree_s', 20),

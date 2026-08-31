@@ -250,5 +250,86 @@ _s3 = N._finding('port_crc', 't', {'equipement': '10.0.0.1', 'port_index': 4}, '
 verifier(_s1['signature'] == _s2['signature'] and _s1['signature'] != _s3['signature'],
          "signature stable par (équipement, port), distincte d'un autre port")
 
+print('\n=== 10. Palier 4 — topologie L2 + recoupement baie ===')
+import time as _t
+_c = A.get_db()
+_c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (902, 'Topo')")
+_c.execute("INSERT INTO appareils (id, client_id, nom_machine, type_appareil, adresse_ip) "
+           "VALUES (500, 902, 'SW', 'Switch', '10.2.0.1')")
+_c.execute("INSERT INTO appareils (id, client_id, nom_machine, adresse_mac) "
+           "VALUES (501, 902, 'PC-VU', 'aa:00:00:00:00:11')")
+_c.execute("INSERT INTO appareils (id, client_id, nom_machine, adresse_mac) "
+           "VALUES (502, 902, 'PC-DECLARE', 'aa:00:00:00:00:22')")
+_c.execute("INSERT INTO baie_slots (id, client_id, position, appareil_id) VALUES (9, 902, 1, 500)")
+_c.execute("INSERT INTO baie_slot_ports (slot_id, numero, appareil_id) VALUES (9, 5, 502)")
+_c.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (9, 6)")
+for k in ('diag_snmp_actif', 'diag_topologie_active'):
+    _c.execute("INSERT OR REPLACE INTO config (cle, valeur) VALUES (?, '1')", (k,))
+_c.commit(); _c.close()
+from config_helpers import cfg_invalidate as _inv
+_inv()
+
+N.interroger_equipement = lambda ip, comm: {'sysname': 'sw', 'ts': _t.time(), 'ports': [
+    {'index': 5, 'nom': 'Gi0/5', 'alias': '', 'oper': 1, 'admin': 1, 'speed_mbps': 1000,
+     'in_oct': 0, 'out_oct': 0, 'in_err': 0, 'out_err': 0, 'in_disc': 0, 'out_disc': 0,
+     'align_err': 0, 'fcs_err': 0, 'late_coll': 0, 'exc_coll': 0, 'duplex': 3}]}
+_MAC_DEC = '.'.join(str(int('aa0000000011'[i:i + 2], 16)) for i in range(0, 12, 2))
+N._snmp_walk = lambda oid, ip, comm: (
+    {f'1.{_MAC_DEC}': '5'} if oid == N._OID_FDB_DOT1Q_PORT else
+    {'5': '5'} if oid == N._OID_FDB_BASEPORT_IF else {})
+_ft = N.decouvrir_topologie(902)
+verifier([f['categorie'] for f in _ft] == ['cablage_incoherent'],
+         "switch voit PC-VU sur port 5, la baie déclare PC-DECLARE -> cablage_incoherent",
+         str([f['categorie'] for f in _ft]))
+_et = N.etat_topologie(902)
+verifier(_et['equipements'] and _et['equipements'][0]['ports'][0]['hotes'][0]['appareil_nom'] == 'PC-VU',
+         "etat_topologie associe la MAC au bon appareil")
+_c = A.get_db()
+_c.execute("INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
+           "port_index, appareil_vu_id, horodatage) VALUES (902,'10.2.0.1',500,6,501,'x')")
+_c.commit(); _c.close()
+verifier(N.appliquer_topologie_baie(902)['maj'] == 1, "appliquer-baie remplit le port 6 (vide)")
+_c = A.get_db()
+_p5 = _c.execute("SELECT appareil_id FROM baie_slot_ports WHERE slot_id=9 AND numero=5").fetchone()[0]
+_p6 = _c.execute("SELECT appareil_id FROM baie_slot_ports WHERE slot_id=9 AND numero=6").fetchone()[0]
+_c.close()
+verifier(_p5 == 502 and _p6 == 501, "port occupé inchangé, port vide renseigné", f"p5={_p5} p6={_p6}")
+
+print('\n=== 11. Palier 5 — baseline (dégradation relative) ===')
+_c = A.get_db()
+_ep = _t.time()
+for i in range(30):
+    _c.execute("INSERT INTO diag_metriques (client_id,categorie,cible,horodatage,epoch,valeur) "
+               "VALUES (903,'liaison_latence','1.1.1.1','x',?,?)", (_ep - 600 * i, 6.0 + (i % 2)))
+_c.execute("INSERT INTO diag_metriques (client_id,categorie,cible,horodatage,epoch,valeur) "
+           "VALUES (903,'liaison_latence','1.1.1.1','x',?,?)", (_ep + 5, 60.0))
+_c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (903, 'BL')")
+_c.commit(); _c.close()
+_bf = N.evaluer_baseline(903)
+verifier([f['categorie'] for f in _bf] == ['degradation_relative'],
+         "60 ms vs référence ~6 ms -> degradation_relative", str([f['categorie'] for f in _bf]))
+_c = A.get_db()
+_c.execute("DELETE FROM diag_metriques WHERE client_id=903")
+_ep = _t.time()
+for i in range(30):
+    _c.execute("INSERT INTO diag_metriques (client_id,categorie,cible,horodatage,epoch,valeur) "
+               "VALUES (903,'liaison_latence','1.1.1.1','x',?,?)", (_ep - 600 * i, 6.0 + (i % 2)))
+_c.execute("INSERT INTO diag_metriques (client_id,categorie,cible,horodatage,epoch,valeur) "
+           "VALUES (903,'liaison_latence','1.1.1.1','x',?,?)", (_ep + 5, 10.0))
+_c.commit(); _c.close()
+verifier(N.evaluer_baseline(903) == [], "10 ms (sous le plancher de 20 ms) -> aucune alerte")
+_serie = N.serie_metrique(903, 'liaison_latence', '1.1.1.1')
+verifier(_serie['points'] and _serie['mediane'] is not None, "serie_metrique renvoie points + médiane")
+
+print('\n=== 12. Palier 6 — remédiation + rapport ===')
+verifier(N.remediation('duplex_mismatch') and 'corriger' in N.remediation('duplex_mismatch'),
+         "remediation('duplex_mismatch') a des étapes de correction")
+verifier(N.remediation('inconnu') is None, "catégorie inconnue -> None")
+_ct, _mt, _fn = N.generer_rapport_diag(903)
+verifier(_ct[:4] == b'%PDF' or _mt.startswith('text/html'),
+         "generer_rapport_diag -> PDF ou HTML", _mt)
+_ch, _mh, _fh = N.generer_rapport_diag(903, forcer_html=True)
+verifier(_mh.startswith('text/html') and '<html' in _ch.lower(), "forcer_html -> HTML")
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

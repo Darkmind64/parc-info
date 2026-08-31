@@ -62,13 +62,22 @@
 .link-btn:hover { border-color:var(--accent); color:var(--accent); }
 .diag-empty { color:var(--text-muted); font-size:.82rem; padding:1.2rem; text-align:center; }
 .diag-note { font-size:.74rem; color:#ffb057; margin:.3rem 0; }
+.remed { margin-top:.4rem; font-size:.76rem; }
+.remed summary { cursor:pointer; color:var(--accent); }
+.remed ul { margin:.3rem 0 .3rem 1rem; padding:0; color:var(--text-secondary); }
+.spark-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:1rem; }
+.spark-card { border:1px solid var(--border); border-radius:4px; padding:.6rem .8rem; background:var(--bg-secondary); }
+.spark-card .lbl { font-size:.72rem; color:var(--text-secondary); margin-bottom:.3rem; display:flex; justify-content:space-between; }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="page-header" style="margin-bottom:1rem;">
-    <h1>Diagnostic <span>Réseau</span></h1>
-    <p style="font-size:.78rem;">Conflits d'adresses · Qualité de liaison · DHCP pirate · ARP spoofing · Tempêtes de broadcast</p>
+<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;">
+    <div>
+        <h1>Diagnostic <span>Réseau</span></h1>
+        <p style="font-size:.78rem;">Conflits d'adresses · Qualité de liaison · DHCP · SNMP · Topologie · Tendances</p>
+    </div>
+    <a class="link-btn" href="/diag-reseau/rapport.pdf" style="padding:.45rem .9rem;font-size:.8rem;">📄 Rapport</a>
 </div>
 
 <div class="diag-grid">
@@ -127,6 +136,20 @@
 <div class="diag-card" id="snmp-wrap" style="margin-bottom:1.2rem;">
     <h2>🔌 État des ports (SNMP)</h2>
     <div id="snmp-body" class="diag-line">Chargement…</div>
+</div>
+
+<!-- ── Topologie découverte ── -->
+<div class="diag-card" id="topo-wrap" style="margin-bottom:1.2rem;">
+    <h2>🗺 Topologie découverte
+        {% if peut_ecrire %}<button class="link-btn" style="margin-left:.6rem;" onclick="appliquerBaie()">Reporter dans la baie</button>{% endif %}
+    </h2>
+    <div id="topo-body" class="diag-line">Chargement…</div>
+</div>
+
+<!-- ── Tendances ── -->
+<div class="diag-card" id="tendances-wrap" style="margin-bottom:1.2rem;">
+    <h2>📈 Tendances</h2>
+    <div id="tendances-body" class="diag-line">Chargement…</div>
 </div>
 
 <!-- ── Journal des évènements ── -->
@@ -191,6 +214,15 @@ const CATEGORIES = {
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+function remedHTML(r){
+    if (!r) return '';
+    return `<details class="remed"><summary>💡 Comment corriger ?</summary>
+        <div style="color:var(--text-muted);margin:.2rem 0;">${esc(r.cause)}</div>
+        ${r.verifier && r.verifier.length ? '<strong style="font-size:.72rem;">À vérifier</strong><ul>'+r.verifier.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>' : ''}
+        ${r.corriger && r.corriger.length ? '<strong style="font-size:.72rem;">À corriger</strong><ul>'+r.corriger.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>' : ''}
+    </details>`;
+}
+
 // Remplir le filtre catégories
 (function(){
     const sel = document.getElementById('f-categorie');
@@ -236,7 +268,7 @@ function pollDiag(){
             clearInterval(diagInterval); diagInterval = null;
             document.getElementById('btn-diag').disabled = false;
             chargerEvenements(1);
-            chargerSNMP();
+            chargerSNMP(); chargerTopologie(); chargerTendances();
         }
     }).catch(() => {});
 }
@@ -255,6 +287,7 @@ function renderFindings(findings, notes){
             <strong style="margin-left:.4rem;">${esc(f.categorie_libelle || CATEGORIES[f.categorie] || f.categorie)}</strong>
             <div style="font-size:.82rem;margin-top:.2rem;">${esc(f.titre)}</div>
             <div class="diag-detail">${esc(JSON.stringify(f.details, null, 1))}</div>
+            ${remedHTML(f.remediation)}
         </div>`).join('');
 }
 
@@ -288,7 +321,8 @@ function chargerEvenements(page){
                 <td>${esc(e.categorie_libelle || e.categorie)}</td>
                 <td>${esc(e.titre)}
                     ${e.appareil_id ? `<a class="link-btn" style="margin-left:.4rem;" href="/appareil/${e.appareil_id}/fiche-systeme">${esc(e.appareil_nom || 'appareil')} →</a>` : ''}
-                    <div class="diag-detail">${esc(JSON.stringify(e.details))}</div></td>
+                    <div class="diag-detail">${esc(JSON.stringify(e.details))}</div>
+                    ${remedHTML(e.remediation)}</td>
                 <td style="font-size:.7rem;white-space:nowrap;">${esc((e.derniere_occurrence||'').replace('T',' ').replace('Z',''))}</td>
                 <td style="text-align:center;">${e.nb_occurrences}</td>
                 <td>${PEUT_ECRIRE ? `<button class="link-btn" onclick="resoudre(${e.id}, ${e.resolu ? 'true' : 'false'})">${e.resolu ? 'Rouvrir' : 'Résoudre'}</button>` : ''}</td>
@@ -355,13 +389,81 @@ function chargerSNMP(){
     }).catch(() => {});
 }
 
+function chargerTopologie(){
+    fetch('/api/diag-reseau/topologie').then(r=>r.json()).then(d => {
+        const wrap = document.getElementById('topo-body');
+        if (!d.actif){
+            wrap.innerHTML = '<span style="color:var(--text-muted);">Cartographie de topologie désactivée — nécessite le SNMP + le réglage dédié.</span>';
+            return;
+        }
+        if (!d.equipements || !d.equipements.length){
+            wrap.innerHTML = '<span style="color:var(--text-muted);">Aucune donnée. Lancez un diagnostic avec la topologie activée.</span>';
+            return;
+        }
+        wrap.innerHTML = d.equipements.map(eq => `
+            <div style="margin:.6rem 0 1rem;">
+                <div style="font-weight:700;font-size:.85rem;margin-bottom:.3rem;">${esc(eq.nom || eq.ip)} <span style="color:var(--text-muted);font-weight:400;">${esc(eq.ip)}</span></div>
+                ${eq.voisins && eq.voisins.length ? `<div class="diag-line" style="font-size:.75rem;">Voisins LLDP : ${eq.voisins.map(v => esc(v.nom) + (v.port ? ' ('+esc(v.port)+')' : '')).join(', ')}</div>` : ''}
+                <div style="overflow-x:auto;"><table class="diag-table"><thead><tr><th>Port</th><th>Appareils vus</th><th>Fabricant</th></tr></thead><tbody>
+                ${eq.ports.map(p => `<tr style="${p.incoherent ? 'background:rgba(255,140,0,.08);' : ''}">
+                    <td>${esc(p.port_nom)}</td>
+                    <td>${p.hotes.map(h => h.appareil_id ? `<a href="/appareil/${h.appareil_id}/fiche-systeme">${esc(h.appareil_nom)}</a>` : `<span class="mono">${esc(h.mac)}</span>`).join('<br>')}
+                        ${p.incoherent ? ' <span class="grav-badge grav-avertissement">incohérent baie</span>' : ''}</td>
+                    <td style="font-size:.72rem;color:var(--text-muted);">${p.hotes.map(h => esc(h.vendor||'')).filter(Boolean).join(', ')}</td>
+                </tr>`).join('')}
+                </tbody></table></div>
+            </div>`).join('');
+    }).catch(() => {});
+}
+
+function appliquerBaie(){
+    if (!confirm('Renseigner les ports vides de la baie de brassage à partir de la topologie SNMP ?')) return;
+    fetch('/api/diag-reseau/topologie/appliquer-baie', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+        .then(r => r.json()).then(d => {
+            if (d.ok) showToast(`${d.maj} port(s) renseigné(s) dans la baie`, 'success');
+            else showToast(d.error || 'Erreur', 'error');
+        }).catch(() => showToast('Erreur réseau', 'error'));
+}
+
+function sparkline(points, mediane, w, h){
+    if (!points.length) return '';
+    const vs = points.map(p => p.v), mn = Math.min(...vs), mx = Math.max(...vs, mediane||0);
+    const rg = (mx - mn) || 1;
+    const x = i => (i/(points.length-1||1))*(w-4)+2;
+    const y = v => h-2 - ((v-mn)/rg)*(h-4);
+    const path = points.map((p,i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+    const med = mediane!=null ? `<line x1="2" x2="${w-2}" y1="${y(mediane).toFixed(1)}" y2="${y(mediane).toFixed(1)}" stroke="var(--text-muted)" stroke-dasharray="3 3" stroke-width="1"/>` : '';
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${med}<polyline points="${path}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`;
+}
+
+function chargerTendances(){
+    fetch('/api/diag-reseau/metriques').then(r=>r.json()).then(async d => {
+        const wrap = document.getElementById('tendances-body');
+        const cibles = (d.cibles || []).slice(0, 8);
+        if (!cibles.length){
+            wrap.innerHTML = '<span style="color:var(--text-muted);">Aucune métrique historisée pour l\'instant. Les tendances apparaissent après quelques cycles de diagnostic.</span>';
+            return;
+        }
+        const cards = await Promise.all(cibles.map(async c => {
+            const s = await fetch(`/api/diag-reseau/metriques?categorie=${encodeURIComponent(c.categorie)}&cible=${encodeURIComponent(c.cible)}`).then(r=>r.json());
+            return `<div class="spark-card">
+                <div class="lbl"><span>${esc(c.libelle)}</span><span>méd. ${s.mediane ?? '—'} · p90 ${s.p90 ?? '—'}</span></div>
+                ${sparkline(s.points || [], s.mediane, 220, 44)}
+            </div>`;
+        }));
+        wrap.innerHTML = `<div class="spark-grid">${cards.join('')}</div>`;
+    }).catch(() => {});
+}
+
 // Rafraîchir périodiquement l'état du moniteur
 setInterval(() => {
     fetch('/api/diag-reseau/etat-capture').then(r=>r.json()).then(majEtatCapture).catch(()=>{});
-    chargerSNMP();
+    chargerSNMP(); chargerTopologie(); chargerTendances();
 }, 30000);
 
 chargerEvenements(1);
 chargerSNMP();
+chargerTopologie();
+chargerTendances();
 </script>
 {% endblock %}

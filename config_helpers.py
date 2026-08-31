@@ -174,6 +174,12 @@ CFG_DEFAULTS = {
     'diag_snmp_communautes': 'public', # communautés v1/v2c, CSV, essayées dans l'ordre
     'diag_snmp_seuil_erreurs': '50',   # Δ erreurs/discards/CRC par fenêtre avant alerte
     'diag_snmp_seuil_saturation_pct': '90',  # seuil de saturation de lien (%)
+    # ── Palier 4 : cartographie de topologie L2 (nécessite diag_snmp_actif) ───
+    'diag_topologie_active': '0',      # découverte topologie (FDB/LLDP) + recoupement baie
+    # ── Palier 5 : tendances & baseline ──────────────────────────────────────
+    'diag_baseline_active': '1',       # alerte sur dégradation relative à la référence
+    'diag_baseline_jours': '7',        # fenêtre d'historique pour la référence
+    'diag_baseline_facteur': '2.5',    # multiple de la p90 déclenchant l'alerte
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',

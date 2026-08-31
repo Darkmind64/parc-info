@@ -1,8 +1,40 @@
-PARCINFO_VERSION=2.19.1
+PARCINFO_VERSION=2.19.2
 RELEASE_DATE=2026-09-01
-BUILD_NUMBER=2026090101
+BUILD_NUMBER=2026090102
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.2 - Diagnostic reseau : paliers 4/5/6 (topologie L2, tendances, rapports)
+# Demande : "etape suivante" -> les trois compléments restants du module,
+# livres en une release groupee.
+#
+# PALIER 4 - Cartographie de topologie L2 (diag_topologie_active, necessite
+# diag_snmp_actif) : decouvrir_topologie() walk les tables MAC bridge-MIB
+# (dot1q/dot1d FDB) + dot1dBasePortIfIndex + LLDP -> "telle MAC / tel
+# appareil est sur tel port de tel switch". Recoupe avec le cablage manuel
+# de la baie de brassage (baie_slot_ports.appareil_id) -> finding
+# cablage_incoherent quand le switch et la baie divergent. Bouton
+# "Reporter dans la baie" (appliquer_topologie_baie) : remplit UNIQUEMENT
+# les ports de baie vides. Table diag_topologie (instantane, remplace a
+# chaque poll). Route GET /api/diag-reseau/topologie (+ /appliquer-baie).
+#
+# PALIER 5 - Tendances & baseline : table diag_metriques (serie temporelle
+# par cible : liaison_perte/latence/gigue, port_debit_pct, port_erreurs),
+# alimentee a chaque snapshot/cycle. evaluer_baseline() compare la derniere
+# valeur a sa reference (mediane + p90 sur diag_baseline_jours) -> finding
+# degradation_relative quand la valeur depasse p90 x diag_baseline_facteur
+# ET un plancher absolu. Sparklines SVG faites main sur la page, route
+# GET /api/diag-reseau/metriques. Purge alignee sur diag_reseau_max_jours.
+#
+# PALIER 6 - Rapports & remediation guidee : dict _REMEDIATION (cause /
+# a verifier / a corriger) par categorie d'evenement, expose dans l'API et
+# affiche en deplile sous chaque evenement + dans l'e-mail d'alerte.
+# generer_rapport_diag() -> PDF reportlab (imports module-level deja
+# presents, garde REPORTLAB_AVAILABLE) ou repli HTML. Routes
+# GET /diag-reseau/rapport.pdf et /rapport.html, bouton en tete de page.
+#
+# Aucune nouvelle dependance (SNMP fait main, SVG fait main, reportlab
+# deja present). 4 nouvelles cles de config. Tests etendus.
 
 # Version 2.19.1 - Diagnostic reseau : palier 3, interrogation SNMP des equipements
 # Demande : "passons au palier suivant" -> interroger en SNMP les switchs/
