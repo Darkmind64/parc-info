@@ -6992,6 +6992,39 @@ def api_baie_activite():
     return jsonify(network_diag.activite_baie(cid))
 
 
+@app.route('/api/baie/activite/moniteur')
+@login_required
+def api_baie_activite_moniteur():
+    """Panneau moniteur : journal + détail par switch/port + état capture.
+    Lecture seule, aucun SNMP synchrone (données calculées en tâche de fond)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify(network_diag.moniteur_baie(cid))
+
+
+@app.route('/api/baie/activite/capture', methods=['POST'])
+@login_required
+def api_baie_activite_capture():
+    """Lance une capture de trafic courte pour l'onglet « Trafic capturé ».
+    Comme /api/diag-reseau/snapshot : déclencher une capture consomme le
+    réseau/système de la machine hôte, donc can_write (pas juste lecture)."""
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    etat = network_diag.etat_capture()
+    if not etat['disponible']:
+        return jsonify({'error': 'capture indisponible', 'motif': etat['motif']}), 409
+    from config_helpers import cfg_get as _cg
+    try:
+        duree = int(float(_cg('diag_baie_capture_duree_s', '20')))
+    except (TypeError, ValueError):
+        duree = 20
+    if not network_diag.lancer_capture_baie(cid, duree):
+        return jsonify({'error': 'une capture est déjà en cours'}), 409
+    return jsonify({'ok': True, 'duree_s': duree})
+
+
 def _liste_cablage(conn, cid):
     """Chaque lien port-à-port du client, une seule fois (pas les deux sens),
     avec le nom des deux éléments — sert à la fois à la page imprimable et à

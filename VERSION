@@ -1,8 +1,36 @@
-PARCINFO_VERSION=2.19.7
+PARCINFO_VERSION=2.19.8
 RELEASE_DATE=2026-09-01
-BUILD_NUMBER=2026090107
+BUILD_NUMBER=2026090108
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.8 - Moniteur reseau de la baie + fiabilisation des LEDs
+# Retour terrain : "les LEDs clignotent parfois en masse, parfois pas du tout,
+# sans rapport avec le nombre de machines connectees". Diagnostic : (1) une
+# perte de paquet SNMP eteignait tout un switch d'un coup, (2) le seuil de
+# clignotement (1% de la vitesse du lien = 10 Mbit/s en Gigabit) laissait le
+# trafic bureautique normal classe "calme". Demande utilisateur en parallele :
+# un panneau de monitoring (bouton au-dessus de la baie -> modale) pour rendre
+# le mecanisme transparent, avec un onglet capture de trafic en complement.
+#
+# - network_diag.py : releve SNMP CIBLE (_poll_ports_cibles, GET groupe sur
+#   les ports mappes, via _snmp_get_typed) au lieu de 6 walks de table entiere
+#   (_iftable_switch, cache 60s, remplace l'ancien _poll_switch_activite) :
+#   ~10x moins de paquets SNMP par cycle.
+# - _etat_led revu : clignotement sur les PAQUETS (ifHCInUcastPkts/
+#   ifHCOutUcastPkts + repli 32 bits), pas seulement sur un % de bande
+#   passante ; lissage EMA sur debit/paquets ; nouvel etat "stale" (donnees
+#   obsoletes apres 3 relevés manques consecutifs, jamais "down" a tort).
+# - Nouveau bouton "📊 Moniteur" sur /baie -> modale 3 onglets : Ports
+#   (compteurs bruts, delta, dt, debit, pkt/s, % lien, source du mapping),
+#   Journal (evenements horodates, dedoublonnes), Trafic capture (capture
+#   scapy a la demande : repartition broadcast/multicast/unicast, top
+#   talkers par MAC avec resolution appareil, anomalies rapides).
+# - Nouvelles routes GET /api/baie/activite/moniteur (lecture) et
+#   POST /api/baie/activite/capture (can_write, comme /api/diag-reseau/
+#   snapshot : lancer une capture consomme le reseau/systeme hote).
+# - Config : diag_baie_activite_pps_mini (1), diag_baie_capture_duree_s (20).
+# - Aucune nouvelle dependance (scapy deja optionnel, palier 2).
 
 # Version 2.19.7 - Vue d'activite baie : detection des switchs + messages clairs
 # Retour terrain : le bandeau affichait "0 switch . 0 port actif . non

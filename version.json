@@ -1,23 +1,24 @@
 {
-  "version": "2.19.7",
+  "version": "2.19.8",
   "release_date": "2026-09-01T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.7/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.7/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.7/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.7",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.7/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.7/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.7/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.7/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.7/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.8/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.8/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.8/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.8",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.8/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.8/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.8/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.8/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.8/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Vue d'activité de la baie de brassage (2.19.6) : ParcInfo interroge les compteurs SNMP des switchs de la baie toutes les ~3 s et anime les LEDs de chaque port selon le trafic réel (vert clignotant ∝ débit, orange à saturation, rouge sur erreurs).",
+    "new_features": "Moniteur réseau de la baie : bouton « 📊 Moniteur » au-dessus de la baie de brassage → modale à 3 onglets. « Ports » montre les compteurs SNMP bruts par port (avant/après, delta, débit, paquets/s, % du lien) pour comprendre exactement ce qui alimente les LEDs. « Journal » liste les évènements horodatés (switch injoignable, port devenu actif, données obsolètes…). « Trafic capturé » lance une courte capture (palier 2) à la demande : répartition broadcast/multicast/unicast et top des machines qui parlent le plus.",
     "improvements": [
-      "2.19.7 — la vue d'activité reconnaît désormais un switch de la baie même si l'appareil lié n'est pas typé « Switch » (le seul prérequis est l'adresse IP), et le bandeau explique précisément pourquoi rien ne s'affiche (aucun switch relié à une fiche avec IP, ou switch injoignable en SNMP).",
-      "Aucune donnée persistée : les débits live restent en mémoire, le poll s'arrête dès que plus personne ne regarde."
+      "Correctif LEDs : le clignotement se déclenche désormais sur les PAQUETS (comme une vraie LED de switch), pas seulement au-delà d'un seuil de bande passante — un poste avec un trafic bureautique normal restait auparavant classé « calme ».",
+      "Relevé SNMP ciblé (GET groupé sur les ports mappés) au lieu d'un walk de table entière : ~10× moins de paquets SNMP par cycle, donc moins de pertes.",
+      "Un relevé manqué conserve désormais le dernier état connu au lieu d'éteindre le switch entier ; après 3 échecs consécutifs seulement, le port passe « obsolète » (gris)."
     ]
   },
   "checksums": {
@@ -28,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.7"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.8"
 }

@@ -427,6 +427,35 @@ body.baie-activite-on .port.port-act .port-led { display:block; border-color:#00
     animation:baie-led-blink var(--act-ms,150ms) steps(1,end) infinite; }
 .port.port-act-err    .port-led { background:#ef4444; box-shadow:0 0 6px #ef4444;
     animation:baie-led-blink 250ms steps(1,end) infinite; }
+/* stale = relevé SNMP manquant depuis plusieurs cycles : gris, pas d'animation */
+.port.port-act-stale  .port-led { background:#64748b; box-shadow:none; opacity:.7; }
+
+/* ── Modale « Moniteur réseau » ─────────────────────────────────────────── */
+.mon-box { background:var(--bg-secondary); border:1px solid var(--border-glow); border-radius:8px;
+    padding:1.2rem; width:920px; max-width:96vw; box-shadow:0 20px 60px rgba(0,0,0,.4); }
+.mon-tabs { display:flex; gap:.3rem; border-bottom:1px solid var(--border); margin-bottom:.6rem; }
+.mon-tab { padding:.35rem .8rem; cursor:pointer; border:1px solid transparent; border-bottom:none;
+    font-size:.78rem; color:var(--text-muted); border-radius:4px 4px 0 0; }
+.mon-tab.actif { color:var(--accent); border-color:var(--border); background:var(--bg-secondary); }
+.mon-pane { display:none; max-height:62vh; overflow:auto; }
+.mon-pane.actif { display:block; }
+.mon-sw-head { font-family:'Share Tech Mono',monospace; font-size:.7rem; color:var(--text-muted);
+    padding:.35rem 0 .2rem; border-top:1px solid var(--border); margin-top:.4rem; }
+table.mon-table { width:100%; border-collapse:collapse; font-size:.68rem; }
+table.mon-table th, table.mon-table td { padding:.2rem .35rem; text-align:right; white-space:nowrap;
+    border-bottom:1px solid rgba(148,163,184,.12); }
+table.mon-table th:first-child, table.mon-table td:first-child,
+table.mon-table th:nth-child(2), table.mon-table td:nth-child(2) { text-align:left; }
+.mon-dot { display:inline-block; width:8px; height:8px; border-radius:50%; vertical-align:middle; }
+.mon-dot-down { background:#334155; } .mon-dot-stale { background:#64748b; }
+.mon-dot-idle { background:#15803d; } .mon-dot-traffic { background:#22c55e; }
+.mon-dot-sature { background:#f59e0b; } .mon-dot-err { background:#ef4444; }
+.mon-log { font-family:'Share Tech Mono',monospace; font-size:.7rem; }
+.mon-log-row { padding:.25rem .1rem; border-bottom:1px solid rgba(148,163,184,.1); display:flex; gap:.5rem; }
+.mon-log-ts { color:var(--text-muted); flex:0 0 auto; }
+.mon-lvl-warn { color:#f59e0b; } .mon-lvl-alerte { color:#ef4444; }
+.mon-bar { height:8px; background:var(--bg-secondary); border-radius:4px; overflow:hidden; }
+.mon-bar > i { display:block; height:100%; background:var(--accent); }
 
 /* Détacher un lien port-à-port (câblage) — coin haut-droit, visible
    seulement au survol d'un port câblé (voir delierPort()). Manquait une
@@ -777,6 +806,7 @@ body.baie-activite-on .port.port-act .port-led { display:block; border-color:#00
                     <option value="5000">⚡ activité 5 s</option>
                 </select>
                 <span id="activite-bandeau" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--accent-green);align-self:center;"></span>
+                <button onclick="MoniteurModal.ouvrir()" class="btn btn-primary btn-sm" title="Moniteur réseau : compteurs bruts des ports, journal d'évènements, capture de trafic — pour comprendre ce que montrent les LEDs">📊 Moniteur</button>
                 <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌</a>
                 <button onclick="changerU(-1)" class="btn btn-primary btn-sm" title="Réduire la baie d'1U">− U</button>
                 <button onclick="changerU(1)"  class="btn btn-primary btn-sm" title="Agrandir la baie d'1U">+ U</button>
@@ -1175,6 +1205,35 @@ body.baie-activite-on .port.port-act .port-led { display:block; border-color:#00
         <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1rem;">
             <button type="button" class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="PhotoModal.fermer()">Annuler</button>
             <button type="button" class="btn btn-success btn-sm" onclick="PhotoModal.enregistrer()">✓ Enregistrer</button>
+        </div>
+    </div>
+</div>
+
+<!-- MONITEUR RÉSEAU — modale ouverte par le bouton « 📊 Moniteur » de la barre
+     d'outils. Rend transparent ce qui alimente les LEDs de la vue d'activité :
+     compteurs SNMP bruts par port, journal d'évènements, et une capture de
+     trafic à la demande (palier 2). Tout est en lecture seule ; les données
+     viennent du thread de fond (aucun SNMP synchrone). Voir MoniteurModal. -->
+<div id="moniteur-modal" class="modal-overlay" onclick="MoniteurModal.fermerSiOverlay(event)">
+    <div class="mon-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;">
+            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">📊 Moniteur réseau — <span id="mon-sous-titre" style="color:var(--text-muted);font-weight:400;font-size:.85rem;"></span></h3>
+            <button type="button" onclick="MoniteurModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
+        </div>
+        <div class="mon-tabs">
+            <div class="mon-tab actif" data-onglet="ports" onclick="MoniteurModal.onglet('ports')">Ports</div>
+            <div class="mon-tab" data-onglet="journal" onclick="MoniteurModal.onglet('journal')">Journal</div>
+            <div class="mon-tab" data-onglet="capture" onclick="MoniteurModal.onglet('capture')">Trafic capturé</div>
+        </div>
+        <div class="mon-pane actif" data-pane="ports"><div id="mon-ports">Chargement…</div></div>
+        <div class="mon-pane" data-pane="journal"><div id="mon-journal" class="mon-log">Chargement…</div></div>
+        <div class="mon-pane" data-pane="capture">
+            <div style="display:flex;gap:.6rem;align-items:center;margin-bottom:.6rem;">
+                <button id="mon-cap-btn" class="btn btn-primary btn-sm" onclick="MoniteurModal.lancerCapture()">▶ Analyser le trafic</button>
+                <span id="mon-cap-etat" style="font-size:.72rem;color:var(--text-muted);"></span>
+            </div>
+            <div id="mon-cap-prog" class="mon-bar" style="display:none;margin-bottom:.6rem;"><i style="width:0%;"></i></div>
+            <div id="mon-capture"></div>
         </div>
     </div>
 </div>
@@ -3136,7 +3195,7 @@ function fmtDebit(bps) {
 
 function _viderActivite() {
     document.querySelectorAll('.port.port-act').forEach(el => {
-        el.classList.remove('port-act', 'port-act-down', 'port-act-idle',
+        el.classList.remove('port-act', 'port-act-down', 'port-act-idle', 'port-act-stale',
                             'port-act-traffic', 'port-act-sature', 'port-act-err');
         el.style.removeProperty('--act-ms');
     });
@@ -3219,6 +3278,148 @@ function initActivite() {
     try { ms = parseInt(localStorage.getItem('baie_activite_ms')) || 0; } catch (e) {}
     sel.value = String(ms);
     demarrerActivite(ms);
+}
+
+// ── MONITEUR RÉSEAU (modale) ─────────────────────────────────────────────────
+// Rend transparent ce qui alimente les LEDs : poll /api/baie/activite/moniteur
+// toutes les 2 s tant que la modale est ouverte (ce poll entretient aussi le
+// battement du collecteur d'activité). 3 onglets : Ports (compteurs bruts),
+// Journal (évènements horodatés), Trafic capturé (capture palier 2 à la demande).
+const MoniteurModal = {
+    _timer: null,
+    _ongletActif: 'ports',
+    _capPollTimer: null,
+
+    ouvrir() {
+        document.getElementById('moniteur-modal').classList.add('open');
+        this.rafraichir();
+        if (this._timer) clearInterval(this._timer);
+        this._timer = setInterval(() => this.rafraichir(), 2000);
+    },
+    fermer() {
+        document.getElementById('moniteur-modal').classList.remove('open');
+        if (this._timer) { clearInterval(this._timer); this._timer = null; }
+        if (this._capPollTimer) { clearInterval(this._capPollTimer); this._capPollTimer = null; }
+    },
+    fermerSiOverlay(e) { if (e.target.id === 'moniteur-modal') this.fermer(); },
+
+    onglet(nom) {
+        this._ongletActif = nom;
+        document.querySelectorAll('#moniteur-modal .mon-tab').forEach(t =>
+            t.classList.toggle('actif', t.dataset.onglet === nom));
+        document.querySelectorAll('#moniteur-modal .mon-pane').forEach(p =>
+            p.classList.toggle('actif', p.dataset.pane === nom));
+    },
+
+    async rafraichir() {
+        let d;
+        try { d = await (await fetch('/api/baie/activite/moniteur')).json(); }
+        catch (e) { return; }
+        this._maj(d);
+    },
+
+    _maj(d) {
+        const st = document.getElementById('mon-sous-titre');
+        const nbP = (d.ports || []).length, nbS = (d.switchs || []).length;
+        st.textContent = d.snmp_actif
+            ? `${nbS} switch${nbS > 1 ? 's' : ''}, ${nbP} port${nbP > 1 ? 's' : ''} suivi${nbP > 1 ? 's' : ''}`
+            : 'SNMP désactivé — active-le dans le diagnostic réseau';
+
+        // ── Onglet Ports
+        const cont = document.getElementById('mon-ports');
+        if (!nbS) {
+            cont.innerHTML = '<div style="color:var(--text-muted);font-size:.8rem;">Aucun switch de la baie interrogeable (relie le slot du switch à sa fiche appareil, avec une IP ; active le SNMP).</div>';
+        } else {
+            const parIp = {};
+            (d.ports || []).forEach(p => (parIp[p.ip] = parIp[p.ip] || []).push(p));
+            cont.innerHTML = (d.switchs || []).map(sw => {
+                const rows = (parIp[sw.ip] || []).map(p => `
+                    <tr>
+                        <td>${escH(String(p.numero))}</td>
+                        <td>${escH(p.port_nom || ('if' + p.ifindex))}</td>
+                        <td><span class="mon-dot mon-dot-${p.etat}"></span> ${p.etat}</td>
+                        <td>${fmtDebit(p.bps)}</td>
+                        <td>${(p.pps || 0).toFixed(1)}</td>
+                        <td>${(p.pct || 0).toFixed(1)}%</td>
+                        <td>${p.in_oct == null ? '—' : (p.in_oct + ' / ' + p.out_oct)}</td>
+                        <td title="Origine de l'association port ↔ interface">${p.source_mapping}${p.manques ? ' ⚠' + p.manques : ''}</td>
+                    </tr>`).join('');
+                return `<div class="mon-sw-head">${escH(sw.nom)} — ${escH(sw.ip)} · poll ${sw.duree_poll_ms} ms · comm. « ${escH(sw.communaute || '?')} » · compteurs ${sw.compteurs_64bits ? '64' : '32'} bits · ${sw.nb_ifindex_ethernet} if · ${sw.nb_ports_mappes} mappé(s)${sw.nb_manques ? ' · ' + sw.nb_manques + ' manque(s)' : ''}${sw.calibre ? '' : ' · non calibré'}</div>
+                    <table class="mon-table"><thead><tr>
+                        <th>N°</th><th>Interface</th><th>État</th><th>Débit</th><th>pkt/s</th><th>% lien</th><th>octets in/out</th><th>mapping</th>
+                    </tr></thead><tbody>${rows || '<tr><td colspan="8" style="color:var(--text-muted);">aucun port mappé</td></tr>'}</tbody></table>`;
+            }).join('');
+        }
+
+        // ── Onglet Journal
+        const jr = document.getElementById('mon-journal');
+        jr.innerHTML = (d.journal || []).length
+            ? (d.journal || []).map(l => `<div class="mon-log-row">
+                    <span class="mon-log-ts">${(l.ts || '').replace('T', ' ').replace('Z', '')}</span>
+                    <span class="mon-lvl-${l.niveau}">${escH(l.message)}${l.n > 1 ? ' ×' + l.n : ''}</span>
+                  </div>`).join('')
+            : '<div style="color:var(--text-muted);font-size:.8rem;">Aucun évènement pour l\'instant.</div>';
+
+        // ── Onglet Capture
+        const cap = d.capture || {};
+        const btn = document.getElementById('mon-cap-btn');
+        const etat = document.getElementById('mon-cap-etat');
+        const prog = document.getElementById('mon-cap-prog');
+        if (!cap.disponible) {
+            btn.disabled = true;
+            const motifs = { scapy_absent: 'scapy non installé', docker_bridge: 'conteneur en mode bridge (network_mode: host requis)',
+                             privileges_insuffisants: 'privilèges insuffisants (lancer en administrateur / root, Npcap sous Windows)',
+                             aucune_interface: 'aucune interface réseau' };
+            etat.textContent = 'Capture indisponible : ' + (motifs[cap.motif] || cap.motif);
+        } else if (cap.en_cours) {
+            btn.disabled = true;
+            prog.style.display = ''; prog.firstElementChild.style.width = (cap.progress || 0) + '%';
+            etat.textContent = 'Capture en cours…';
+        } else {
+            btn.disabled = false;
+            prog.style.display = 'none';
+            etat.textContent = '';
+        }
+        if (cap.resultat) this._majCapture(cap.resultat);
+    },
+
+    _majCapture(r) {
+        const c = document.getElementById('mon-capture');
+        if (!r || r.disponible === false) { c.innerHTML = ''; return; }
+        const tot = r.total || 1;
+        const pct = n => ((n || 0) / tot * 100).toFixed(0);
+        const talkers = (r.talkers || []).map(t => `<tr>
+            <td>${escH(t.mac)}</td><td>${escH(t.vendor || '')}</td>
+            <td>${escH(t.appareil_nom || '')}</td><td>${t.paquets}</td><td>${fmtOctets(t.octets)}</td></tr>`).join('');
+        const anos = (r.anomalies || []).map(a => `<div class="mon-log-row"><span class="mon-lvl-${a.niveau === 'alerte' ? 'alerte' : 'warn'}">${escH(a.texte)}</span></div>`).join('');
+        c.innerHTML = `
+            <div style="font-size:.72rem;color:var(--text-muted);margin-bottom:.4rem;">
+                ${r.total} paquets en ${r.duree_s} s ·
+                broadcast ${pct(r.broadcast)}% · multicast ${pct(r.multicast)}% · unicast ${pct(r.unicast)}%
+            </div>
+            ${anos ? '<div class="mon-log" style="margin-bottom:.6rem;">' + anos + '</div>' : ''}
+            <table class="mon-table"><thead><tr><th>MAC</th><th>Fabricant</th><th>Appareil</th><th>Paquets</th><th>Volume</th></tr></thead>
+            <tbody>${talkers || '<tr><td colspan="5" style="color:var(--text-muted);">aucun trafic capté</td></tr>'}</tbody></table>`;
+    },
+
+    async lancerCapture() {
+        document.getElementById('mon-cap-btn').disabled = true;
+        try {
+            const r = await fetch('/api/baie/activite/capture', { method: 'POST' });
+            if (!r.ok) {
+                const e = await r.json().catch(() => ({}));
+                document.getElementById('mon-cap-etat').textContent = e.error || 'Échec';
+            }
+        } catch (e) {}
+        this.rafraichir();
+    },
+};
+function fmtOctets(o) {
+    if (!o) return '0';
+    if (o >= 1e9) return (o / 1e9).toFixed(1) + ' Go';
+    if (o >= 1e6) return (o / 1e6).toFixed(1) + ' Mo';
+    if (o >= 1e3) return (o / 1e3).toFixed(0) + ' ko';
+    return o + ' o';
 }
 
 // ── RECHERCHE ─────────────────────────────────────────────────────────────────

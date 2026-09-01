@@ -517,23 +517,27 @@ verifier(not any(x['categorie'] == 'wifi_ap_suspect' for x in N.diagnostiquer_wi
 
 print('\n=== 18. Vue d\'activité de la baie (LEDs live SNMP) ===')
 from database import get_local_db as _get_local_db
-_se, _ss = 20, 90
-_prev = dict(in_oct=0, out_oct=0, in_err=0, out_err=0, ts=0.0)
-_cur = dict(oper=1, speed_mbps=1000, in_oct=8_000_000, out_oct=0, in_err=0, out_err=0)
-_led = N._etat_led(_prev, _cur, 1.0, _se, _ss)
+_seuils = {'err': 20, 'sat_pct': 90, 'pps_mini': 1}
+_prev = dict(in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0, ts=0.0)
+# débit faible (800 bit/s) mais 3 paquets/s : doit clignoter quand même (v2.19.8 —
+# avant, seul le % de bande passante comptait, un port bureautique restait "idle").
+_cur = dict(oper=1, speed_mbps=1000, in_oct=100, out_oct=0, in_pkts=3, out_pkts=0,
+            in_err=0, out_err=0)
+_led = N._etat_led(_prev, _cur, 1.0, _seuils)
 verifier(_led['etat'] == 'traffic' and 120 <= _led['blink_ms'] <= 1200,
-         "port up ~6 % -> 'traffic', clignotement borné", str(_led))
-verifier(N._etat_led(_prev, dict(_cur, in_oct=120_000_000), 1.0, _se, _ss)['etat'] == 'sature',
+         "port up, 3 pkt/s -> 'traffic' même à faible débit, clignotement borné", str(_led))
+verifier(N._etat_led(_prev, dict(_cur, in_oct=120_000_000, in_pkts=3000), 1.0, _seuils)['etat'] == 'sature',
          "~96 % de la vitesse -> 'sature'")
-verifier(N._etat_led(_prev, dict(_cur, in_err=30), 1.0, _se, _ss)['etat'] == 'err',
+verifier(N._etat_led(_prev, dict(_cur, in_err=30), 1.0, _seuils)['etat'] == 'err',
          "Δ erreurs 30 (> 20) -> 'err' (prioritaire sur le débit)")
-verifier(N._etat_led(_prev, dict(_cur, oper=2), 1.0, _se, _ss)['etat'] == 'down',
+verifier(N._etat_led(_prev, dict(_cur, oper=2), 1.0, _seuils)['etat'] == 'down',
          "ifOperStatus down -> 'down'")
-verifier(N._etat_led(dict(_cur, ts=0.0), _cur, 1.0, _se, _ss)['etat'] == 'idle',
-         "up sans variation de compteur -> 'idle'")
-verifier(N._etat_led(dict(in_oct=10**9, out_oct=0, in_err=0, out_err=0, ts=0.0),
-                     _cur, 1.0, _se, _ss)['debit_bps'] >= 0,
-         "compteur qui recule (reboot) -> débit jamais négatif")
+verifier(N._etat_led(_prev, dict(_cur, in_oct=0, in_pkts=0), 1.0, _seuils)['etat'] == 'idle',
+         "up, aucun paquet -> 'idle'")
+_reboot = N._etat_led(dict(in_oct=10**9, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0, ts=0.0),
+                      _cur, 1.0, _seuils)
+verifier(_reboot['bps'] >= 0 and _reboot['reset'] is True,
+         "compteur qui recule (reboot) -> débit jamais négatif, reset détecté")
 
 _c = A.get_db()
 _c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (908, 'Activite')")
@@ -546,29 +550,47 @@ _c.execute("INSERT INTO baie_slot_ports (slot_id, numero, appareil_id) VALUES (8
 _c.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (80, 9)")
 _c.commit(); _c.close()
 
-_m, _cal = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, {4, 9})
-verifier(_m == {4: 4, 9: 9} and _cal is False,
-         "sans topologie -> repli naïf numero==ifIndex, non calibré", str((_m, _cal)))
+_m, _cal, _src = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, {4, 9})
+verifier(_m == {4: 4, 9: 9} and _cal is False and _src[4] == 'repli_rj',
+         "sans topologie -> repli naïf numero==ifIndex, non calibré", str((_m, _cal, _src)))
 _c = A.get_db()
 _c.execute("INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
            "port_index, appareil_vu_id, horodatage) VALUES (908,'10.8.0.1',700,15,701,'x')")
 _c.commit(); _c.close()
-_m2, _cal2 = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, {4, 9, 15})
-verifier(_m2.get(4) == 15 and _cal2 is True,
-         "topologie : PC vu sur ifIndex 15 -> mapping calibré", str((_m2, _cal2)))
+_m2, _cal2, _src2 = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, {4, 9, 15})
+verifier(_m2.get(4) == 15 and _cal2 is True and _src2[4] == 'topologie',
+         "topologie : PC vu sur ifIndex 15 -> mapping calibré", str((_m2, _cal2, _src2)))
 
+# relevé ciblé : GET groupé au lieu d'un walk de table entière
+N._activite_iftable.pop('10.8.0.1', None)
+N._iftable_switch = lambda ip, comm: ({4, 9, 15}, {4: 'Gi0/4', 9: 'Gi0/9', 15: 'Gi0/15'})
 # le port baie 4 est mappé (topologie) vers l'ifIndex 15, le port 9 vers 9 (repli)
-N._poll_switch_activite = lambda ip, comm: {
-    15: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_err=0, out_err=0),
-    9: dict(oper=2, speed_mbps=0, in_oct=0, out_oct=0, in_err=0, out_err=0)}
+N._poll_ports_cibles = lambda ip, comm, idx: (
+    {15: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0),
+     9: dict(oper=2, speed_mbps=0, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0)},
+    True, 'public', True)
 N._cycle_activite([908])
 with N._activite_lock:
     _res = N._activite_resultat.get(908)
+    _detail = N._activite_detail.get(908)
 _num = {p['numero']: p['etat'] for p in (_res or {}).get('ports', [])}
 verifier(_res and _res['actif'] is True and _num.get(4) == 'idle' and _num.get(9) == 'down',
-         "_cycle_activite mappe et évalue chaque port de la baie", str(_res))
+         "_cycle_activite mappe (relevé ciblé) et évalue chaque port de la baie", str(_res))
+verifier(_detail and _detail['switchs'][0]['compteurs_64bits'] is True,
+         "_activite_detail peuplé pour le moniteur (compteurs 64 bits détectés)")
 verifier(N.activite_baie(908).get('actif') is True and 908 in N._activite_heartbeat,
          "activite_baie() enregistre un battement et renvoie l'état en cache")
+
+_mon = N.moniteur_baie(908)
+verifier(set(_mon) >= {'switchs', 'ports', 'journal', 'capture', 'snmp_actif'},
+         "moniteur_baie() renvoie journal + détail + état capture", str(sorted(_mon)))
+
+# capture indisponible (pas de scapy dans l'environnement de test) -> motif explicite
+_orig_etat_capture = N.etat_capture
+N.etat_capture = lambda: {'disponible': False, 'motif': 'scapy_absent'}
+verifier(N.capturer_trafic(5) == {'disponible': False, 'motif': 'scapy_absent'},
+         "capturer_trafic() renvoie le motif quand scapy est indisponible")
+N.etat_capture = _orig_etat_capture
 
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

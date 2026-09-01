@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-01 (v2.19.7). En cas de doute
+> Ce document décrit le comportement au 2026-09-01 (v2.19.8). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -29,7 +29,7 @@ démon `_moniteur_loop` calqué sur le watchdog ping, période `diag_intervalle_
 
 ---
 
-## Vue d'activité de la baie (LEDs live) — v2.19.6
+## Vue d'activité de la baie (LEDs live) — v2.19.6, revue v2.19.8
 
 Pas un palier : une **vue temps réel**, pas une détection. Tant que la page
 `/baie` (sélecteur « ⚡ activité ») **ou** le widget « Activité réseau » du
@@ -37,28 +37,70 @@ tableau de bord est ouvert, le navigateur envoie un battement à
 `GET /api/baie/activite` toutes les 3 s. Un thread démon `_activite_loop`
 (`network_diag.py`, calqué sur `_moniteur_loop`, démarré à la première requête,
 se rendort dès qu'aucun battement < 20 s) interroge alors les compteurs SNMP
-des switchs de la baie (walk réduit : `ifOperStatus`, `ifHighSpeed`/`ifSpeed`,
-`ifHCInOctets`/`ifHCOutOctets`, `ifInErrors`/`ifOutErrors`), calcule le débit
-par delta et renvoie l'état à peindre par port.
+des switchs de la baie et calcule l'état à peindre par port.
 
 - **Quels équipements** : `_switchs_baie` — un slot de baie lié à un appareil
   doté d'une **adresse IP**, dont le `type_appareil` est réseau (`_TYPES_EQUIP_SNMP`)
   **ou** dont l'étiquette de slot `type_equipement` vaut Switch/Switch·AP/Routeur.
   Le résultat porte `nb_switchs` / `nb_muets` / `motif` (`aucun_switch` |
   `sans_reponse`) pour que le bandeau explique l'absence de données.
+- **Relevé SNMP CIBLÉ** (v2.19.8) : `_iftable_switch` walk une fois par switch
+  (caché 60 s) l'ensemble des ifIndex ethernet (`ifType==6`) ; `_poll_ports_cibles`
+  fait ensuite un **GET groupé** (`_snmp_get_typed`, ~6-8 ifIndex/paquet) sur les
+  seuls ports mappés — `ifOperStatus`, `ifHighSpeed`/`ifSpeed`, `ifHCInOctets`/
+  `ifHCOutOctets` (repli 32 bits), `ifHCInUcastPkts`/`ifHCOutUcastPkts` (repli
+  32 bits), `ifInErrors`/`ifOutErrors`. Remplace l'ancien walk de table entière
+  (~300 paquets/cycle pour un switch 48 ports → ~2 paquets/switch/cycle) : bien
+  moins sensible à la perte d'un paquet UDP isolé.
 - **Association port baie ↔ ifIndex** : `_mapping_baie_ifindex` — d'abord la
   topologie (`diag_topologie` : l'appareil branché est vu par le switch sur un
-  ifIndex précis → mapping fiable, `calibre=True`), sinon repli naïf
-  `numero == ifIndex` (RJ) / `numero-1000` (SFP) / `numero-2000` (WAN). Le
-  bandeau affiche « non calibré » quand le repli sert.
+  ifIndex précis → mapping fiable, `calibre=True`, source `topologie`), sinon
+  repli naïf `numero == ifIndex` (RJ, source `repli_rj`) / `numero-1000` (SFP) /
+  `numero-2000` (WAN, source `repli_sfp`). Le bandeau affiche « non calibré »
+  quand le repli sert.
 - **Sémantique LED** (`_etat_led`, priorité décroissante) : `down` (éteinte) ·
-  `err` si Δ(in+out errors) > `diag_baie_activite_seuil_err` (rouge) ·
-  `sature` si débit ≥ `diag_snmp_seuil_saturation_pct` (orange) · `traffic` si
-  débit ≥ 1 % (vert, période de clignotement ∝ débit) · `idle` (vert fixe).
-- **Aucune persistance** : `_activite_prev` / `_activite_resultat` vivent en
-  mémoire, purgés 120 s après le dernier battement. Les tendances
-  (`diag_metriques`) restent alimentées uniquement par le cycle de surveillance
-  normal. Prérequis : `diag_snmp_actif`.
+  `stale` si ≥ 3 relevés manqués consécutifs (grise, v2.19.8 — un port ne
+  s'éteint plus jamais brutalement à cause d'un seul paquet SNMP perdu) · `err`
+  si Δ(in+out errors) > `diag_baie_activite_seuil_err` (rouge) · `sature` si
+  débit ≥ `diag_snmp_seuil_saturation_pct` % de la vitesse du lien (orange) ·
+  `traffic` si **paquets/s ≥ `diag_baie_activite_pps_mini`** OU débit > 2 kbit/s
+  (vert, période de clignotement ∝ paquets/s — v2.19.8 : clignote sur les
+  PAQUETS, pas seulement au-delà d'un % de bande passante, sinon un poste au
+  trafic bureautique normal restait classé « calme ») · `idle` (vert fixe,
+  aucune activité). Lissage EMA (α≈0,5) sur débit/paquets pour absorber la
+  variance d'un relevé à l'autre.
+- **Aucune persistance** : `_activite_prev` / `_activite_resultat` /
+  `_activite_detail` / `_activite_journal` vivent en mémoire, purgés 120 s après
+  le dernier battement. Les tendances (`diag_metriques`) restent alimentées
+  uniquement par le cycle de surveillance normal. Prérequis : `diag_snmp_actif`.
+
+### Moniteur réseau de la baie (modale) — v2.19.8
+
+Bouton **📊 Moniteur** dans la barre d'outils de `/baie` → modale à 3 onglets,
+poll `GET /api/baie/activite/moniteur` toutes les 2 s (entretient aussi le
+battement du collecteur d'activité) :
+
+- **Ports** : par switch (IP, durée du dernier poll, communauté utilisée,
+  compteurs 64/32 bits, nb d'ifIndex ethernet, nb de relevés manqués) puis par
+  port (interface, état, débit, paquets/s, % du lien, compteurs bruts in/out,
+  source du mapping). Rend transparent ce qui alimente les LEDs.
+- **Journal** : flux d'évènements horodatés et dédoublonnés (`_activite_journal`,
+  `collections.deque(maxlen=250)`, alimenté par `_journal()`) — switch injoignable
+  ou rétabli, port devenu actif/calme, port passé « obsolète », lien coupé,
+  compteur SNMP réinitialisé, vitesse de lien inconnue.
+- **Trafic capturé** : capture à la demande (`capturer_trafic`, palier 2,
+  thread démon `DiagCaptureBaie` via `lancer_capture_baie`/`statut_capture_baie`,
+  durée `diag_baie_capture_duree_s`) — répartition broadcast/multicast/unicast,
+  top 15 des MAC qui parlent le plus (fabricant + appareil résolus), anomalies
+  rapides (tempête de broadcast, ARP gratuits, DHCP multiples). Affiche le
+  `motif` d'indisponibilité (`scapy_absent`/`docker_bridge`/
+  `privileges_insuffisants`) si la capture n'est pas utilisable — voir
+  § Déploiement.
+
+`GET /api/baie/activite/moniteur` est en lecture seule (accès simple suffit).
+`POST /api/baie/activite/capture` exige `can_write` — comme
+`/api/diag-reseau/snapshot` : lancer une capture consomme le réseau/système de
+la machine hôte, ce n'est pas une simple consultation.
 
 ---
 
@@ -138,6 +180,8 @@ corriger ? »), dans le rapport et dans l'e-mail d'alerte.
 | `diag_ups_seuil_charge_pct` | `80` | charge de sortie au-delà de laquelle on alerte |
 | `diag_ups_seuil_autonomie_min` | `10` | autonomie estimée mini (min) avant alerte |
 | `diag_baie_activite_seuil_err` | `20` | vue d'activité baie : Δ erreurs (in+out) par fenêtre avant LED rouge (nécessite `diag_snmp_actif`) |
+| `diag_baie_activite_pps_mini` | `1` | vue d'activité baie : paquets/s sous lesquels un port up reste « calme » (pas de clignotement) |
+| `diag_baie_capture_duree_s` | `20` | moniteur baie : durée de la capture de trafic à la demande |
 
 SMTP : réutilise `smtp_server` / `smtp_port` / `smtp_login` / `smtp_password` /
 `from_email` (Réglages → e-mail).
@@ -226,7 +270,8 @@ GET, GET typé et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
 | Topologie (palier 4) | `decouvrir_topologie`, `_topologie_equipement`, `etat_topologie`, `appliquer_topologie_baie` |
 | Baseline (palier 5) | `enregistrer_metriques_liaison`, `evaluer_baseline`, `serie_metrique` |
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
-| Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop`, `_cycle_activite`, `_poll_switch_activite`, `_mapping_baie_ifindex`, `_etat_led`, `activite_baie` ; route `GET /api/baie/activite` ; `baie_brassage.html` (`#sel-activite`) ; widget `network-activity` (`client_dashboard.html`) |
+| Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop`, `_cycle_activite`, `_iftable_switch`, `_poll_ports_cibles`, `_mapping_baie_ifindex`, `_etat_led`, `activite_baie` ; route `GET /api/baie/activite` ; `baie_brassage.html` (`#sel-activite`) ; widget `network-activity` (`client_dashboard.html`) |
+| Moniteur réseau de la baie (modale) | `network_diag.py` : `moniteur_baie`, `_journal`/`_activite_journal`, `_activite_detail`, `capturer_trafic`, `lancer_capture_baie`/`statut_capture_baie` ; routes `GET /api/baie/activite/moniteur` + `POST /api/baie/activite/capture` ; `baie_brassage.html` (`#moniteur-modal`, `MoniteurModal`) |
 | Orchestration | `_run_snapshot` (snapshot), `_moniteur_loop` / `_moniteur_cycle` (continu), `_enregistrer_evenements`, `_purger_anciens` |
 | Walk SNMP + BER | `app.py` : `_snmp_get`, `_snmp_walk`, `_ber_decoder_oid`, `_ber_decoder_valeur` |
 | Routes | `app.py` : `grep "@app.route('/api/diag-reseau"` + `/diag-reseau` + `/diag-reseau/rapport.{pdf,html}` |

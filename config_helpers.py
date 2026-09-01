@@ -193,6 +193,8 @@ CFG_DEFAULTS = {
     'diag_ups_seuil_autonomie_min': '10',  # autonomie estimée mini avant alerte
     # ── Vue d'activité de la baie (LEDs live, nécessite diag_snmp_actif) ──────
     'diag_baie_activite_seuil_err': '20',  # Δ erreurs (in+out) par fenêtre avant LED rouge
+    'diag_baie_activite_pps_mini': '1',    # paquets/s sous lesquels un port up reste « calme » (pas de clignotement)
+    'diag_baie_capture_duree_s': '20',     # durée de la capture à la demande du moniteur réseau
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',
