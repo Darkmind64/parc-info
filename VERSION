@@ -1,8 +1,41 @@
-PARCINFO_VERSION=2.19.4
+PARCINFO_VERSION=2.19.5
 RELEASE_DATE=2026-09-01
-BUILD_NUMBER=2026090104
+BUILD_NUMBER=2026090105
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.5 - Diagnostic reseau : revue transverse + correctifs
+# Demande : passe transverse sur les 7 paliers (5 releases). Correctifs
+# issus de la revue :
+#
+# 1. [IMPORTANT] Supervision onduleurs cassee sur du vrai materiel :
+#    interroger_ups() utilisait _snmp_get, qui ne retourne QUE les OCTET
+#    STRING -> tous les scalaires INTEGER de l'UPS-MIB (source, batterie,
+#    autonomie, charge, alarmes) etaient perdus, seul le modele remontait.
+#    Ajout de _snmp_get_typed (app.py) qui decode toutes les valeurs via
+#    _ber_decoder_valeur ; interroger_ups l'utilise.
+#
+# 2. Faux positif critique wifi_ap_suspect : declenche des que 2 prefixes
+#    MAC differaient, meme sans OUI reconnu -> alerte "evil twin" + e-mail
+#    sur une borne bi-bande ou un systeme mesh legitime. Corrige : on
+#    n'alerte que sur >= 2 fabricants effectivement RESOLUS.
+#
+# 3. Performance / intrusivite Wi-Fi : etat_wifi() (donc `netsh wlan show
+#    networks` / `iw scan`) etait appele toutes les 30 s par le panneau et a
+#    chaque cycle moniteur -> scans Wi-Fi en continu, pouvant perturber la
+#    connexion du poste. Cache de 60 s.
+#
+# 4. Tendances "plus bas = pire" : wifi_rssi et ups_autonomie_min sont
+#    historises mais la logique baseline (plus haut = pire) ne les
+#    declenchait jamais -> _METRIQUES_INVERSEES + comparaison en delta
+#    absolu (perte de >= 12 dB / >= 15 min) avec plancher.
+#
+# 5. Divers : autonomie onduleur == 0 non fiable sur secteur (n'alerte
+#    plus), fuites de connexion sur exception (_ssids_parc, ecriture
+#    metrique Wi-Fi), docstring de tete de network_diag.py (7 paliers).
+#
+# Aucune nouvelle fonctionnalite, aucune nouvelle dependance, aucun schema
+# de config change.
 
 # Version 2.19.4 - Diagnostic reseau : Wi-Fi (poste) + onduleurs SNMP (palier 7)
 # Demande : etendre le diagnostic au Wi-Fi et aux onduleurs.

@@ -8557,6 +8557,52 @@ def _snmp_get(ip_str, oids, communaute='public', timeout=0.8, port=161):
         return {}
 
 
+def _snmp_get_typed(ip_str, oids, communaute='public', timeout=1.0, port=161):
+    """Comme _snmp_get mais renvoie la valeur TYPÉE (int pour INTEGER/Counter/
+    Gauge/TimeTicks, str pour OCTET STRING/IpAddress/OID). Nécessaire pour les
+    MIB où les scalaires utiles sont des entiers (UPS-MIB, etc.). {} au moindre
+    souci."""
+    try:
+        varbinds = b''.join(_ber_sequence(0x30, _ber_oid(oid) + b'\x05\x00') for oid in oids)
+        pdu_corps = _ber_entier(_snmp_walk_reqid()) + _ber_entier(0) + _ber_entier(0) + _ber_sequence(0x30, varbinds)
+        message = _ber_sequence(0x30, _ber_entier(1) + _ber_chaine(communaute)
+                                + _ber_sequence(0xa0, pdu_corps))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            s.sendto(message, (ip_str, port))
+            data, _ = s.recvfrom(4096)
+        _, corps, _ = _ber_lire_tlv(data, 0)
+        pos = 0
+        _, _v, pos = _ber_lire_tlv(corps, pos)
+        _, _c, pos = _ber_lire_tlv(corps, pos)
+        tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
+        if tag_pdu != 0xa2:
+            return {}
+        p = 0
+        _, _reqid, p = _ber_lire_tlv(pdu_corps_r, p)
+        _, err, p = _ber_lire_tlv(pdu_corps_r, p)
+        _, _ei, p = _ber_lire_tlv(pdu_corps_r, p)
+        if err and int.from_bytes(err, 'big', signed=True) != 0:
+            return {}
+        _, vblist, p = _ber_lire_tlv(pdu_corps_r, p)
+        resultats = {}
+        vp = 0
+        i = 0
+        while vp < len(vblist) and i < len(oids):
+            tag_vb, vb_corps, vp = _ber_lire_tlv(vblist, vp)
+            if tag_vb == 0x30:
+                bp = 0
+                _to2, _ob, bp = _ber_lire_tlv(vb_corps, bp)
+                tag_val, val_brut, bp = _ber_lire_tlv(vb_corps, bp)
+                val = _ber_decoder_valeur(tag_val, val_brut)
+                if val is not None and val != '':
+                    resultats[oids[i]] = val
+            i += 1
+        return resultats
+    except Exception:
+        return {}
+
+
 # ── SNMP walk (GETNEXT) — palier 3 du diagnostic réseau ──────────────────────
 # _snmp_get ne fait qu'un GET sur des scalaires. Lire les compteurs par port
 # d'un switch (ifTable / ifXTable / dot3StatsTable) demande de PARCOURIR une

@@ -1613,6 +1613,6 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 
 ---
 
-**Dernier update** : 2026-09-01 (v2.19.4 — Diagnostic réseau palier 7 : Wi-Fi poste + onduleurs SNMP)
+**Dernier update** : 2026-09-01 (v2.19.5 — Diagnostic réseau : revue transverse + correctifs)
 **Mainteneur** : ParcInfo Team
 **License** : Voir LICENSE

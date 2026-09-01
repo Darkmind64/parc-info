@@ -1,28 +1,29 @@
 """
-network_diag.py — Module de diagnostic réseau de ParcInfo.
+network_diag.py — Module de diagnostic réseau de ParcInfo (7 paliers).
 
-Deux paliers :
+Référence détaillée : ``DIAGNOSTIC_RESEAU.md`` (paliers, catégories, OIDs, clés
+de config, tables). Résumé :
 
-  • Palier 1 — diagnostic *actif*, aucune dépendance : réutilise l'infrastructure
-    socket/subprocess déjà présente dans app.py (ping, ARP, NetBIOS…). Détecte les
-    conflits d'adresses IP, la qualité de liaison dégradée (perte / gigue /
-    latence), la joignabilité passerelle/DNS, les conflits de noms, et fait une
-    tentative best-effort de repérage d'un serveur DHCP pirate.
+  1. Diagnostic *actif* (aucune dépendance) : conflits d'adresses IP, qualité de
+     liaison (perte/gigue/latence), passerelle/DNS, conflits de noms, DHCP pirate.
+  2. Capture *passive* de trames via ``scapy`` (OFF par défaut) : ARP spoofing,
+     MAC flapping, tempêtes de broadcast, DHCP multiples, BPDU STP, RA IPv6,
+     retransmissions TCP.
+  3. Interrogation *SNMP* (v1/v2c lecture seule) des switchs/routeurs/NAS :
+     compteurs par port, duplex, erreurs CRC, saturation, flapping.
+  4. Topologie *L2* (FDB bridge-MIB + LLDP), recoupée avec la baie de brassage.
+  5. *Tendances & baseline* : historique dans ``diag_metriques``, alerte sur
+     dégradation relative à la référence.
+  6. *Rapport & remédiation* : PDF/HTML + playbook par catégorie.
+  7. *Wi-Fi* (côté poste, ``netsh``/``iw``/``system_profiler``) + *onduleurs*
+     (UPS-MIB RFC 1628 + repli APC).
 
-  • Palier 2 — capture *passive* de trames via ``scapy`` (OFF par défaut,
-    ``diag_capture_active``). Nécessite des privilèges + un pilote de capture
-    (Npcap sous Windows, libpcap ailleurs). Détecte l'ARP spoofing / ARP gratuits
-    en rafale, le MAC flapping, les tempêtes de broadcast, la présence de
-    plusieurs serveurs DHCP, les BPDU STP en rafale, les Router Advertisements
-    IPv6 pirates et les retransmissions TCP.
-
-Modes : snapshot à la demande (``run_snapshot``) et surveillance continue
-(``_moniteur_loop``, thread démon démarré à l'import — même schéma que le
-watchdog ping d'app.py). Les évènements sont historisés dans
-``diag_reseau_evenements`` et dédoublonnés par ``signature``.
+Modes : snapshot à la demande (``lancer_snapshot``) et surveillance continue
+(``_moniteur_loop``, thread démon démarré à l'import). Évènements historisés
+dans ``diag_reseau_evenements``, dédoublonnés par ``signature``.
 
 Aucun import de ``app`` au niveau module (import circulaire) : les helpers d'app
-sont importés paresseusement dans les fonctions qui en ont besoin.
+sont importés paresseusement.
 """
 
 from __future__ import annotations
@@ -1118,9 +1119,12 @@ _UPS_BATT_TXT = {1: 'inconnu', 2: 'normale', 3: 'faible', 4: 'épuisée'}
 
 
 def interroger_ups(ip: str, communautes) -> dict | None:
-    """Interroge un onduleur en SNMP (UPS-MIB, repli APC). None si pas de réponse."""
+    """Interroge un onduleur en SNMP (UPS-MIB, repli APC). None si pas de réponse.
+
+    Utilise _snmp_get_typed : la plupart des scalaires UPS-MIB utiles sont des
+    INTEGER, que _snmp_get (OCTET STRING uniquement) laisserait tomber."""
     try:
-        from app import _snmp_get
+        from app import _snmp_get_typed
     except Exception:
         return None
     scalaires = [_OID_UPS_MODEL, _OID_UPS_BATT_STATUS, _OID_UPS_ON_BATT_S,
@@ -1128,7 +1132,7 @@ def interroger_ups(ip: str, communautes) -> dict | None:
                  _OID_UPS_OUT_SOURCE, _OID_UPS_ALARMS]
     rep = {}
     for comm in (communautes or ['public']):
-        rep = _snmp_get(ip, scalaires, comm, timeout=1.5)
+        rep = _snmp_get_typed(ip, scalaires, comm, timeout=1.5)
         if rep:
             _comm_ok = comm
             break
@@ -1146,7 +1150,7 @@ def interroger_ups(ip: str, communautes) -> dict | None:
     volt = _snmp_walk(_OID_UPS_IN_VOLT, ip, [_comm_ok])
     charge_pct = max((v for v in (_to_int(x) for x in load.values()) if v is not None), default=None)
     tension = next((v for v in (_to_int(x) for x in volt.values()) if v is not None), None)
-    apc = _snmp_get(ip, [_OID_APC_BATT_REPL, _OID_APC_RUNTIME], _comm_ok, timeout=1.2)
+    apc = _snmp_get_typed(ip, [_OID_APC_BATT_REPL, _OID_APC_RUNTIME], _comm_ok, timeout=1.2)
 
     autonomie = _n(_OID_UPS_MIN_REMAIN)
     if autonomie is None:
@@ -1207,8 +1211,9 @@ def _analyser_ups(client_id: int, ip: str, appareil_id, ups: dict) -> list:
              'autonomie_min': ups.get('autonomie_min')}, ip))
 
     autonomie = ups.get('autonomie_min')
-    if ups.get('batterie_statut') in (3, 4) or (autonomie is not None and autonomie < seuil_auto) \
-            or (ups.get('batterie_pct') is not None and ups['batterie_pct'] < 30):
+    # autonomie == 0 : certains agents renvoient 0 sur secteur (valeur non fiable)
+    if ups.get('batterie_statut') in (3, 4) or (autonomie is not None and 0 < autonomie < seuil_auto) \
+            or (ups.get('batterie_pct') is not None and 0 < ups['batterie_pct'] < 30):
         findings.append(_finding(
             'ups_batterie_faible',
             f"{modele} ({ip}) : batterie {ups.get('batterie_statut_txt', '?')}, "
@@ -1302,17 +1307,30 @@ def _signal_pct_vers_dbm(pct):
         return None
 
 
-def etat_wifi() -> dict:
-    """État Wi-Fi du poste + AP visibles. {connecte:False, motif} si indisponible."""
+_wifi_cache = {'ts': 0.0, 'val': None}
+_WIFI_CACHE_TTL = 60  # s — le scan (`netsh … networks` / `iw scan`) est coûteux
+                      # et peut perturber le Wi-Fi du poste ; l'UI le sollicite
+                      # toutes les 30 s et chaque cycle moniteur.
+
+
+def etat_wifi(forcer=False) -> dict:
+    """État Wi-Fi du poste + AP visibles. {connecte:False, motif} si indisponible.
+    Résultat mis en cache _WIFI_CACHE_TTL s (le scan est lent et intrusif)."""
+    if not forcer and _wifi_cache['val'] is not None \
+            and (time.time() - _wifi_cache['ts']) < _WIFI_CACHE_TTL:
+        return _wifi_cache['val']
     try:
         if IS_WINDOWS:
-            return _wifi_windows()
-        if platform.system() == 'Darwin':
-            return _wifi_macos()
-        return _wifi_linux()
+            val = _wifi_windows()
+        elif platform.system() == 'Darwin':
+            val = _wifi_macos()
+        else:
+            val = _wifi_linux()
     except Exception:
         logger.debug('network_diag: lecture Wi-Fi impossible', exc_info=True)
-        return {'connecte': False, 'motif': 'lecture impossible'}
+        val = {'connecte': False, 'motif': 'lecture impossible'}
+    _wifi_cache.update(ts=time.time(), val=val)
+    return val
 
 
 def _wifi_windows() -> dict:
@@ -1485,13 +1503,16 @@ def diagnostiquer_wifi(client_id: int) -> list:
     rssi = etat.get('rssi_dbm')
     aps = etat.get('aps') or []
 
-    # RSSI dans les métriques (baseline)
+    # RSSI dans les métriques (tendance)
     if rssi is not None and ssid:
         try:
             from database import get_db
             conn = get_db()
-            _enregistrer_metrique(conn, client_id, 'wifi_rssi', ssid, rssi, time.time())
-            conn.commit(); conn.close()
+            try:
+                _enregistrer_metrique(conn, client_id, 'wifi_rssi', ssid, rssi, time.time())
+                conn.commit()
+            finally:
+                conn.close()
         except Exception:
             pass
 
@@ -1512,17 +1533,19 @@ def diagnostiquer_wifi(client_id: int) -> list:
                 f"Canal {canal} ({bande}) : {nb} autres points d'accès sur des canaux chevauchants",
                 {'canal': canal, 'bande': bande, 'nb_aps': nb}, ssid, str(canal)))
 
-    # AP suspect : SSID du parc diffusé par un fabricant différent des autres BSSID
+    # AP suspect : SSID du parc diffusé par >= 2 fabricants RECONNUS distincts.
+    # On n'alerte que sur des OUI resolus (2 prefixes inconnus differents sont
+    # normaux : bornes dual-band/mesh derivent souvent des BSSID hors OUI).
     ssids_parc = _ssids_parc(client_id)
     if ssids_parc:
         par_ssid = {}
         for a in aps:
             if a.get('ssid') in ssids_parc and a.get('bssid'):
                 par_ssid.setdefault(a['ssid'], set()).add(a['bssid'][:8])
-        if bssid:
-            par_ssid.setdefault(ssid, set()).add(bssid[:8]) if ssid in ssids_parc else None
+        if bssid and ssid in ssids_parc:
+            par_ssid.setdefault(ssid, set()).add(bssid[:8])
         for s, prefixes in par_ssid.items():
-            vendors = {_vendor(p + ':00:00:00') or p for p in prefixes}
+            vendors = {v for p in prefixes if (v := _vendor(p + ':00:00:00'))}
             if len(vendors) >= 2:
                 findings.append(_finding(
                     'wifi_ap_suspect',
@@ -1543,9 +1566,11 @@ def _ssids_parc(client_id: int) -> set:
     try:
         from database import get_db
         conn = get_db()
-        row = conn.execute("SELECT wifi_ssid, wifi_ssid2 FROM parc_general WHERE client_id=?",
-                           (client_id,)).fetchone()
-        conn.close()
+        try:
+            row = conn.execute("SELECT wifi_ssid, wifi_ssid2 FROM parc_general WHERE client_id=?",
+                               (client_id,)).fetchone()
+        finally:
+            conn.close()
         return {(row[0] or '').strip(), (row[1] or '').strip()} - {''} if row else set()
     except Exception:
         return set()
@@ -1832,7 +1857,13 @@ _METRIQUE_PLANCHER = {   # en-dessous : pas d'alerte relative, même si le ratio
     'liaison_perte':    2.0,   # %
     'port_debit_pct':  50.0,   # %
     'port_erreurs':    10.0,   # Δ erreurs
+    'wifi_rssi':      -60.0,   # dBm — n'alerte que si le signal est vraiment tombé bas
+    'ups_autonomie_min': 20.0,  # min — n'alerte que si l'autonomie est vraiment courte
 }
+# Métriques où « plus bas = pire » (l'inverse du cas général) :
+_METRIQUES_INVERSEES = {'wifi_rssi', 'ups_autonomie_min'}
+# Perte absolue minimale (unités de la métrique) pour alerter sur ces métriques :
+_DELTA_INVERSE = {'wifi_rssi': 12.0, 'ups_autonomie_min': 15.0}
 
 
 def _enregistrer_metrique(conn, client_id, categorie, cible, valeur, epoch):
@@ -1902,6 +1933,21 @@ def evaluer_baseline(client_id: int) -> list:
             courant = vals[-1]
             reference = vals[:-1]
             mediane = _percentile(reference, 0.5)
+            if categorie in _METRIQUES_INVERSEES:
+                # « plus bas = pire » (RSSI Wi-Fi, autonomie onduleur) : on alerte
+                # sur une perte absolue nette ET une valeur devenue basse.
+                delta_min = _DELTA_INVERSE.get(categorie, 0)
+                plancher = _METRIQUE_PLANCHER.get(categorie, 0)
+                if mediane is None or (mediane - courant) < delta_min or courant > plancher:
+                    continue
+                findings.append(_finding(
+                    'degradation_relative',
+                    f"{_libelle_metrique(categorie)} {cible} : {courant:.0f} "
+                    f"vs référence {mediane:.0f} ({courant - mediane:+.0f})",
+                    {'categorie_metrique': categorie, 'cible': cible, 'valeur': round(courant, 1),
+                     'reference': round(mediane, 1), 'delta': round(courant - mediane, 1)},
+                    categorie, cible))
+                continue
             p90 = _percentile(reference, 0.9) or mediane or 0
             plancher = _METRIQUE_PLANCHER.get(categorie, 0)
             if courant >= plancher and p90 > 0 and courant >= p90 * facteur:
@@ -1924,6 +1970,8 @@ def evaluer_baseline(client_id: int) -> list:
 _LIBELLE_METRIQUE = {
     'liaison_perte': "Perte", 'liaison_latence': "Latence", 'liaison_gigue': "Gigue",
     'port_debit_pct': "Débit", 'port_erreurs': "Erreurs",
+    'wifi_rssi': "Signal Wi-Fi", 'ups_charge_pct': "Charge onduleur",
+    'ups_autonomie_min': "Autonomie onduleur",
 }
 
 

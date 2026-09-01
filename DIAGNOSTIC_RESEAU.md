@@ -148,9 +148,11 @@ Le Wi-Fi (palier 7a) n'utilise **pas** SNMP : lecture côté poste via
 `iw dev … link` / `… scan` (Linux), `system_profiler -json SPAirPortDataType`
 (macOS, best-effort). Aucune dépendance.
 
-GET et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
-`_snmp_get` / `_snmp_walk` / `_ber_decoder_*`). **Aucune dépendance** (pas de
-pysnmp).
+GET, GET typé et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
+`_snmp_get` / `_snmp_get_typed` / `_snmp_walk` / `_ber_decoder_*`).
+`_snmp_get` ne renvoie que les OCTET STRING (sysDescr/sysName) ; **utiliser
+`_snmp_get_typed`** dès qu'un scalaire entier est attendu (UPS-MIB, etc.).
+**Aucune dépendance** (pas de pysnmp).
 
 ---
 

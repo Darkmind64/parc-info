@@ -402,21 +402,24 @@ _c = A.get_db()
 _c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (905, 'WiFi')")
 _c.execute("INSERT INTO parc_general (client_id, wifi_ssid) VALUES (905, 'PARC-WIFI')")
 _c.commit(); _c.close()
-N.etat_wifi = lambda: {'connecte': True, 'ssid': 'PARC-WIFI', 'bssid': 'a0:b1:c2:d3:e4:f5',
+N.etat_wifi = lambda forcer=False: {'connecte': True, 'ssid': 'PARC-WIFI', 'bssid': 'aa:bb:cc:d3:e4:f5',
                        'rssi_dbm': -80, 'canal': 6, 'bande': '2.4 GHz', 'debit_mbps': 72,
                        'aps': [
-                           {'ssid': 'PARC-WIFI', 'bssid': 'a0:b1:c2:d3:e4:f5', 'canal': 6, 'bande': '2.4 GHz'},
-                           {'ssid': 'PARC-WIFI', 'bssid': 'ff:ff:ff:00:00:01', 'canal': 6, 'bande': '2.4 GHz'},
+                           {'ssid': 'PARC-WIFI', 'bssid': 'aa:bb:cc:d3:e4:f5', 'canal': 6, 'bande': '2.4 GHz'},
+                           {'ssid': 'PARC-WIFI', 'bssid': 'dd:ee:ff:00:00:01', 'canal': 6, 'bande': '2.4 GHz'},
                            {'ssid': 'X', 'bssid': '00:00:01:00:00:01', 'canal': 5, 'bande': '2.4 GHz'},
                            {'ssid': 'Y', 'bssid': '00:00:02:00:00:01', 'canal': 7, 'bande': '2.4 GHz'},
                            {'ssid': 'Z', 'bssid': '00:00:03:00:00:01', 'canal': 8, 'bande': '2.4 GHz'},
                        ]}
+_orig_vendor = N._vendor
+N._vendor = lambda mac: {'aa:bb:cc': 'FabricantA', 'dd:ee:ff': 'FabricantB'}.get(mac[:8], '')
 _wf = [x['categorie'] for x in N.diagnostiquer_wifi(905)]
+N._vendor = _orig_vendor
 verifier('wifi_signal_faible' in _wf, "RSSI -80 -> wifi_signal_faible", str(_wf))
 verifier('wifi_canal_sature' in _wf, "5 AP sur canaux chevauchants -> wifi_canal_sature", str(_wf))
 verifier('wifi_ap_suspect' in _wf,
-         "SSID du parc diffusé par 2 fabricants différents -> wifi_ap_suspect", str(_wf))
-N.etat_wifi = lambda: {'connecte': False, 'motif': 'aucun adaptateur Wi-Fi'}
+         "SSID du parc diffusé par 2 fabricants RECONNUS -> wifi_ap_suspect", str(_wf))
+N.etat_wifi = lambda forcer=False: {'connecte': False, 'motif': 'aucun adaptateur Wi-Fi'}
 verifier(N.diagnostiquer_wifi(905) == [], "pas de Wi-Fi -> aucun finding")
 
 print('\n=== 16. Palier 7b — onduleurs SNMP ===')
@@ -430,13 +433,14 @@ _c = A.get_db()
 _c.execute("INSERT OR REPLACE INTO config (cle, valeur) VALUES ('diag_snmp_actif', '1')")
 _c.commit(); _c.close(); _inv3()
 
-def _fake_ups_get(ip, oids, comm='public', timeout=1.5):
-    m = {N._OID_UPS_MODEL: 'Smart-UPS 1500', N._OID_UPS_OUT_SOURCE: '5',
-         N._OID_UPS_MIN_REMAIN: '5', N._OID_UPS_BATT_STATUS: '3',
-         N._OID_UPS_ON_BATT_S: '90', N._OID_UPS_ALARMS: '1',
-         N._OID_APC_BATT_REPL: '2', N._OID_UPS_CHARGE_PCT: '20'}
+def _fake_ups_get(ip, oids, comm='public', timeout=1.5, port=161):
+    m = {N._OID_UPS_MODEL: 'Smart-UPS 1500', N._OID_UPS_OUT_SOURCE: 5,
+         N._OID_UPS_MIN_REMAIN: 5, N._OID_UPS_BATT_STATUS: 3,
+         N._OID_UPS_ON_BATT_S: 90, N._OID_UPS_ALARMS: 1,
+         N._OID_APC_BATT_REPL: 2, N._OID_UPS_CHARGE_PCT: 20}
     return {o: m[o] for o in oids if o in m}
-A._snmp_get = _fake_ups_get
+_orig_get_typed = A._snmp_get_typed
+A._snmp_get_typed = _fake_ups_get
 N._snmp_walk = lambda oid, ip, comm: ({'1': '95'} if oid == N._OID_UPS_OUT_LOAD else {})
 _ups = N.interroger_ups('10.6.0.1', ['public'])
 verifier(_ups and _ups['source_txt'] == 'batterie' and _ups['charge_pct'] == 95,
@@ -454,6 +458,62 @@ N.interroger_ups, N.interroger_equipement = _orig_iu, _orig_ie
 verifier(_routes == [('ups', '10.6.0.1')], "l'appareil Onduleur/UPS est routé vers interroger_ups", str(_routes))
 _e = N.etat_ups(906)
 verifier(_e['onduleurs'] and _e['onduleurs'][0]['ip'] == '10.6.0.1', "etat_ups liste l'onduleur")
+
+A._snmp_get_typed = _orig_get_typed  # restaure la vraie fonction pour le test 17
+
+print('\n=== 17. Revue — décodeur SNMP typé + faux positif wifi_ap_suspect ===')
+# _snmp_get_typed doit rendre les INTEGER (que _snmp_get laisse tomber)
+_srv2 = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+_srv2.bind(('127.0.0.1', 0))
+_port2 = _srv2.getsockname()[1]
+
+
+def _agent_scalaire(sock):
+    while True:
+        try:
+            data, exp = sock.recvfrom(4096)
+        except OSError:
+            return
+        try:
+            _, corps, _ = A._ber_lire_tlv(data, 0)
+            p = 0
+            _, _v, p = A._ber_lire_tlv(corps, p)
+            _, _c, p = A._ber_lire_tlv(corps, p)
+            _t, pdu, _ = A._ber_lire_tlv(corps, p)
+            pp = 0
+            _, reqid, pp = A._ber_lire_tlv(pdu, pp)
+            _, _e2, pp = A._ber_lire_tlv(pdu, pp)
+            _, _ei, pp = A._ber_lire_tlv(pdu, pp)
+            _, vbl, pp = A._ber_lire_tlv(pdu, pp)
+            _, vb, _ = A._ber_lire_tlv(vbl, 0)
+            _, oid_brut, _ = A._ber_lire_tlv(vb, 0)
+            # repond INTEGER 42 pour n'importe quel OID demande
+            vb_r = A._ber_sequence(0x30, A._ber_oid(A._ber_decoder_oid(oid_brut))
+                                   + A._ber_sequence(0x02, (42).to_bytes(1, 'big')))
+            pdu_r = A._ber_sequence(0xa2, A._ber_sequence(0x02, reqid) + A._ber_entier(0)
+                                    + A._ber_entier(0) + A._ber_sequence(0x30, vb_r))
+            sock.sendto(A._ber_sequence(0x30, A._ber_entier(1) + A._ber_chaine('public') + pdu_r), exp)
+        except Exception:
+            pass
+
+
+_th.Thread(target=_agent_scalaire, args=(_srv2,), daemon=True).start()
+_gt = A._snmp_get_typed('127.0.0.1', ['1.3.6.1.2.1.33.1.4.1.0'], ['public'][0], timeout=1.0, port=_port2)
+_srv2.close()
+verifier(_gt.get('1.3.6.1.2.1.33.1.4.1.0') == 42, "_snmp_get_typed rend un INTEGER", str(_gt))
+
+# wifi_ap_suspect : 2 prefixes MAC inconnus (OUI non resolu) -> AUCUNE alerte
+_c = A.get_db()
+_c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (907, 'W2')")
+_c.execute("INSERT INTO parc_general (client_id, wifi_ssid) VALUES (907, 'PARC-W')")
+_c.commit(); _c.close()
+N._vendor = _orig_vendor
+N.etat_wifi = lambda forcer=False: {'connecte': True, 'ssid': 'PARC-W', 'bssid': 'ab:cd:ef:00:00:01',
+    'rssi_dbm': -50, 'canal': 6, 'bande': '2.4 GHz', 'aps': [
+        {'ssid': 'PARC-W', 'bssid': 'ab:cd:ef:00:00:01', 'canal': 6, 'bande': '2.4 GHz'},
+        {'ssid': 'PARC-W', 'bssid': 'fe:dc:ba:00:00:02', 'canal': 6, 'bande': '2.4 GHz'}]}
+verifier(not any(x['categorie'] == 'wifi_ap_suspect' for x in N.diagnostiquer_wifi(907)),
+         "2 préfixes MAC de fabricant INCONNU -> pas de faux positif wifi_ap_suspect")
 
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

@@ -275,6 +275,41 @@ def test_ups_finding_rattache_appareil(client, conn, deux_clients, make_appareil
     assert evt['appareil_id'] == aid and evt['remediation']
 
 
+def test_interroger_ups_utilise_snmp_get_typed(deux_clients, monkeypatch):
+    """Régression v2.19.5 : les scalaires INTEGER de l'UPS-MIB doivent être lus
+    (interroger_ups() utilisait _snmp_get qui ne renvoie que les OCTET STRING)."""
+    import app as A
+    appele = {'typed': False}
+
+    def _typed(ip, oids, comm='public', timeout=1.5, port=161):
+        appele['typed'] = True
+        return {A._OID_UPS_MODEL if hasattr(A, '_OID_UPS_MODEL') else '': ''} or {}
+
+    # network_diag importe app._snmp_get_typed paresseusement
+    monkeypatch.setattr(A, '_snmp_get_typed',
+                        lambda ip, oids, comm='public', timeout=1.5, port=161: (
+                            appele.__setitem__('typed', True) or
+                            {network_diag._OID_UPS_OUT_SOURCE: 5,
+                             network_diag._OID_UPS_MODEL: 'X'}))
+    monkeypatch.setattr(network_diag, '_snmp_walk', lambda oid, ip, c: {})
+    ups = network_diag.interroger_ups('10.0.0.9', ['public'])
+    assert appele['typed'] and ups and ups['source'] == 5
+
+
+def test_wifi_cache(monkeypatch):
+    """etat_wifi() met son résultat en cache (le scan est lent/intrusif)."""
+    network_diag._wifi_cache.update(ts=0.0, val=None)
+    appels = []
+    monkeypatch.setattr(network_diag, 'IS_WINDOWS', True)
+    monkeypatch.setattr(network_diag, '_wifi_windows',
+                        lambda: appels.append(1) or {'connecte': False, 'motif': 'x'})
+    network_diag.etat_wifi()
+    network_diag.etat_wifi()
+    assert len(appels) == 1  # 2e appel servi par le cache
+    assert len(network_diag.etat_wifi(forcer=True)) or True
+    assert len(appels) == 2  # forcer=True re-scanne
+
+
 def test_metriques_serie(client, conn, deux_clients):
     import time
     cid = deux_clients['cid_a']
