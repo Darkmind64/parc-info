@@ -191,6 +191,8 @@ CFG_DEFAULTS = {
     'diag_ups_active': '1',            # supervision SNMP des onduleurs (nécessite diag_snmp_actif)
     'diag_ups_seuil_charge_pct': '80', # charge de sortie au-delà de laquelle on alerte
     'diag_ups_seuil_autonomie_min': '10',  # autonomie estimée mini avant alerte
+    # ── Vue d'activité de la baie (LEDs live, nécessite diag_snmp_actif) ──────
+    'diag_baie_activite_seuil_err': '20',  # Δ erreurs (in+out) par fenêtre avant LED rouge
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',
@@ -300,8 +302,8 @@ CFG_DEFAULTS = {
     'show_back_button': '1',      # Show "Back to overview" button (personal preference)
     'confirm_client_switch': '1', # Show confirmation modal before switching clients (personal preference)
     # ── Dashboard Widget Preferences ───────────────────────────────────────────────
-    'dashboard_widgets_enabled': 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info',
-    'dashboard_widgets_order': 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info',
+    'dashboard_widgets_enabled': 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info,network-activity',
+    'dashboard_widgets_order': 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info,network-activity',
     'dashboard_widgets_size': '{}',  # JSON: {"widget-id": "size-class"} — empty defaults to widget-specific sizes
     'dashboard_widgets_height': '{}',  # JSON: {"widget-id": "height-class"} — empty defaults to widget-specific heights
     # ── User Dashboard View Preferences ────────────────────────────────────────────

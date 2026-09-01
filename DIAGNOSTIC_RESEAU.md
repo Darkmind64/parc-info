@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-01 (v2.19.3). En cas de doute
+> Ce document décrit le comportement au 2026-09-01 (v2.19.6). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -26,6 +26,34 @@ du **client actif** ; les évènements sont rattachés à ce client.
 **Deux modes** : *snapshot* à la demande (bouton « Lancer un diagnostic », mode
 rapide possible) et *surveillance continue* (`diag_surveillance_active`, thread
 démon `_moniteur_loop` calqué sur le watchdog ping, période `diag_intervalle_s`).
+
+---
+
+## Vue d'activité de la baie (LEDs live) — v2.19.6
+
+Pas un palier : une **vue temps réel**, pas une détection. Tant que la page
+`/baie` (sélecteur « ⚡ activité ») **ou** le widget « Activité réseau » du
+tableau de bord est ouvert, le navigateur envoie un battement à
+`GET /api/baie/activite` toutes les 3 s. Un thread démon `_activite_loop`
+(`network_diag.py`, calqué sur `_moniteur_loop`, démarré à la première requête,
+se rendort dès qu'aucun battement < 20 s) interroge alors les compteurs SNMP
+des switchs de la baie (walk réduit : `ifOperStatus`, `ifHighSpeed`/`ifSpeed`,
+`ifHCInOctets`/`ifHCOutOctets`, `ifInErrors`/`ifOutErrors`), calcule le débit
+par delta et renvoie l'état à peindre par port.
+
+- **Association port baie ↔ ifIndex** : `_mapping_baie_ifindex` — d'abord la
+  topologie (`diag_topologie` : l'appareil branché est vu par le switch sur un
+  ifIndex précis → mapping fiable, `calibre=True`), sinon repli naïf
+  `numero == ifIndex` (RJ) / `numero-1000` (SFP) / `numero-2000` (WAN). Le
+  bandeau affiche « non calibré » quand le repli sert.
+- **Sémantique LED** (`_etat_led`, priorité décroissante) : `down` (éteinte) ·
+  `err` si Δ(in+out errors) > `diag_baie_activite_seuil_err` (rouge) ·
+  `sature` si débit ≥ `diag_snmp_seuil_saturation_pct` (orange) · `traffic` si
+  débit ≥ 1 % (vert, période de clignotement ∝ débit) · `idle` (vert fixe).
+- **Aucune persistance** : `_activite_prev` / `_activite_resultat` vivent en
+  mémoire, purgés 120 s après le dernier battement. Les tendances
+  (`diag_metriques`) restent alimentées uniquement par le cycle de surveillance
+  normal. Prérequis : `diag_snmp_actif`.
 
 ---
 
@@ -104,6 +132,7 @@ corriger ? »), dans le rapport et dans l'e-mail d'alerte.
 | `diag_ups_active` | `1` | palier 7b (supervision SNMP des onduleurs) — nécessite `diag_snmp_actif` |
 | `diag_ups_seuil_charge_pct` | `80` | charge de sortie au-delà de laquelle on alerte |
 | `diag_ups_seuil_autonomie_min` | `10` | autonomie estimée mini (min) avant alerte |
+| `diag_baie_activite_seuil_err` | `20` | vue d'activité baie : Δ erreurs (in+out) par fenêtre avant LED rouge (nécessite `diag_snmp_actif`) |
 
 SMTP : réutilise `smtp_server` / `smtp_port` / `smtp_login` / `smtp_password` /
 `from_email` (Réglages → e-mail).
@@ -192,6 +221,7 @@ GET, GET typé et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
 | Topologie (palier 4) | `decouvrir_topologie`, `_topologie_equipement`, `etat_topologie`, `appliquer_topologie_baie` |
 | Baseline (palier 5) | `enregistrer_metriques_liaison`, `evaluer_baseline`, `serie_metrique` |
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
+| Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop`, `_cycle_activite`, `_poll_switch_activite`, `_mapping_baie_ifindex`, `_etat_led`, `activite_baie` ; route `GET /api/baie/activite` ; `baie_brassage.html` (`#sel-activite`) ; widget `network-activity` (`client_dashboard.html`) |
 | Orchestration | `_run_snapshot` (snapshot), `_moniteur_loop` / `_moniteur_cycle` (continu), `_enregistrer_evenements`, `_purger_anciens` |
 | Walk SNMP + BER | `app.py` : `_snmp_get`, `_snmp_walk`, `_ber_decoder_oid`, `_ber_decoder_valeur` |
 | Routes | `app.py` : `grep "@app.route('/api/diag-reseau"` + `/diag-reseau` + `/diag-reseau/rapport.{pdf,html}` |

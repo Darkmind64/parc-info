@@ -1,8 +1,29 @@
-PARCINFO_VERSION=2.19.5
+PARCINFO_VERSION=2.19.6
 RELEASE_DATE=2026-09-01
-BUILD_NUMBER=2026090105
+BUILD_NUMBER=2026090106
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.6 - Vue d'activite de la baie : LEDs des ports en direct (SNMP)
+# Demande : "integrer une sorte de moniteur reseau qui affiche les trames qui
+# circulent [...] je verrais bien un clignotement des leds sur les appareils
+# reseau de la baie de brassage." Option retenue : plutot que capturer les
+# trames (impossible en reseau commute depuis le poste), on lit les compteurs
+# d'octets/erreurs par port des switchs en SNMP toutes les ~3 s et on anime les
+# LEDs de la page baie selon le trafic reel.
+#
+# - network_diag.py : nouvelle section "Vue d'activite baie" — thread demon
+#   _activite_loop (poll uniquement tant qu'un navigateur bat, via
+#   /api/baie/activite ; se rendort sinon), _poll_switch_activite (walk SNMP
+#   reduit), _mapping_baie_ifindex (topologie FDB + repli naif numero==ifIndex),
+#   _etat_led (down/idle/traffic/sature/err). Aucune persistance.
+# - Page baie : selecteur "activite off/3s/5s", LEDs .port-act-* animees
+#   (keyframes), bandeau + legende. Le mode masque la LED de ping le temps
+#   qu'il est actif.
+# - Dashboard : widget "Activite reseau" (debit live par switch), masque si
+#   aucun switch de baie n'a d'IP.
+# - Config : diag_baie_activite_seuil_err (defaut 20). Necessite diag_snmp_actif.
+# - Aucune nouvelle dependance.
 
 # Version 2.19.5 - Diagnostic reseau : revue transverse + correctifs
 # Demande : passe transverse sur les 7 paliers (5 releases). Correctifs

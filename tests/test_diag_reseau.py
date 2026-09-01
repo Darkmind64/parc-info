@@ -340,3 +340,93 @@ def test_alerte_email_echappe_le_titre(monkeypatch, deux_clients):
     corps = envois[0][2]
     assert '<script>' not in corps
     assert '&lt;script&gt;' in corps
+
+
+# ── Vue d'activité de la baie (LEDs live SNMP, v2.19.6) ───────────────────────
+
+def test_etat_led_transitions():
+    se, ss = 20, 90
+    prev = dict(in_oct=0, out_oct=0, in_err=0, out_err=0, ts=0.0)
+    cur = dict(oper=1, speed_mbps=1000, in_oct=8_000_000, out_oct=0, in_err=0, out_err=0)
+
+    led = network_diag._etat_led(prev, cur, 1.0, se, ss)          # ~6,4 % -> trafic
+    assert led['etat'] == 'traffic' and 120 <= led['blink_ms'] <= 1200
+
+    sat = dict(cur, in_oct=120_000_000)                            # ~96 % -> saturé
+    assert network_diag._etat_led(prev, sat, 1.0, se, ss)['etat'] == 'sature'
+
+    err = dict(cur, in_err=30)                                     # Δerr 30 > 20 -> err (prioritaire)
+    assert network_diag._etat_led(prev, err, 1.0, se, ss)['etat'] == 'err'
+
+    assert network_diag._etat_led(prev, dict(cur, oper=2), 1.0, se, ss)['etat'] == 'down'
+    assert network_diag._etat_led(dict(cur, ts=0.0), cur, 1.0, se, ss)['etat'] == 'idle'
+
+    reboot = network_diag._etat_led(dict(in_oct=1_000_000_000, out_oct=0, in_err=0, out_err=0, ts=0.0),
+                                    cur, 1.0, se, ss)
+    assert reboot['debit_bps'] >= 0                                # compteur qui recule : jamais négatif
+
+
+def test_mapping_baie_ifindex(conn, deux_clients, make_appareil):
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
+    pc = make_appareil(cid, nom_machine='PC', adresse_ip='10.0.0.50')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero, appareil_id) VALUES (?,3,?)", (slot_id, pc))
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,7)", (slot_id,))
+    conn.commit()
+
+    m, calibre = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, {3, 7})
+    assert m == {3: 3, 7: 7} and calibre is False           # repli naïf numero==ifindex
+
+    conn.execute("INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
+                 "port_index, appareil_vu_id, horodatage) VALUES (?,?,?,?,?,'x')",
+                 (cid, '10.0.0.2', sw, 12, pc))
+    conn.commit()
+    m2, calibre2 = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, {3, 7, 12})
+    assert m2[3] == 12 and calibre2 is True                 # topologie : PC vu sur ifIndex 12
+
+
+def test_poll_switch_activite(monkeypatch):
+    table = {
+        network_diag._OID_IF_OPER:      {'1': '1', '2': '2'},
+        network_diag._OID_IF_HIGHSPEED: {'1': '1000', '2': '1000'},
+        network_diag._OID_IF_HCIN:      {'1': '5000', '2': '0'},
+        network_diag._OID_IF_HCOUT:     {'1': '9000', '2': '0'},
+        network_diag._OID_IF_IN_ERRORS: {'1': '0', '2': '0'},
+        network_diag._OID_IF_OUT_ERRORS: {'1': '0', '2': '0'},
+    }
+    monkeypatch.setattr(network_diag, '_snmp_walk', lambda oid, ip, c: table.get(oid, {}))
+    res = network_diag._poll_switch_activite('10.0.0.2', ['public'])
+    assert res[1]['oper'] == 1 and res[1]['speed_mbps'] == 1000 and res[1]['out_oct'] == 9000
+    assert res[2]['oper'] == 2
+
+    monkeypatch.setattr(network_diag, '_snmp_walk', lambda *a: {})
+    assert network_diag._poll_switch_activite('10.0.0.2', ['public']) is None
+
+
+def test_api_baie_activite_route_sans_snmp_synchrone(client, conn, deux_clients, make_appareil, monkeypatch):
+    cid = deux_clients['cid_a']
+    monkeypatch.setattr(network_diag, '_poll_switch_activite',
+                        lambda *a: (_ for _ in ()).throw(AssertionError('SNMP synchrone dans le handler')))
+    login_session(client, deux_clients['lecteur'], cid)          # lecture seule suffit
+    r = client.get('/api/baie/activite')
+    assert r.status_code == 200 and 'actif' in r.get_json()
+
+
+def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, monkeypatch):
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1)", (slot_id,))
+    conn.commit()
+    monkeypatch.setattr(network_diag, '_poll_switch_activite',
+                        lambda ip, c: {1: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0,
+                                               in_err=0, out_err=0)})
+    network_diag._cycle_activite([cid])
+    with network_diag._activite_lock:
+        res = network_diag._activite_resultat.get(cid)
+    assert res and res['actif'] is True
+    assert any(p['numero'] == 1 for p in res['ports'])
+    assert res['equipements'][0]['ip'] == '10.0.0.2'

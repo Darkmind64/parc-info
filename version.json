@@ -1,23 +1,23 @@
 {
-  "version": "2.19.5",
+  "version": "2.19.6",
   "release_date": "2026-09-01T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.5/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.5/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.5/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.5",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.5/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.5/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.5/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.5/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.5/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.6/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.6/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.6/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.6",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.6/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.6/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.6/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.6/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.6/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Diagnostic réseau — revue transverse du module (7 paliers). Correctifs : la supervision des onduleurs récupère désormais bien les valeurs SNMP numériques (elle ne lisait que le modèle) ; l'alerte « point d'accès Wi-Fi suspect » ne se déclenche plus à tort sur des bornes légitimes bi-bande/mesh ; le scan Wi-Fi est mis en cache (il était relancé toutes les 30 s et pouvait perturber la connexion du poste) ; les tendances suivent maintenant aussi la baisse du signal Wi-Fi et de l'autonomie onduleur.",
+    "new_features": "Vue d'activité de la baie de brassage : pendant que la page « baie » (ou le nouveau widget « Activité réseau » du tableau de bord) est ouverte, ParcInfo interroge les compteurs SNMP des switchs toutes les ~3 s et anime les LEDs de chaque port selon le trafic réel — vert clignotant proportionnel au débit, orange à saturation, rouge sur erreurs CRC. Les ports sont associés à leur interface via la topologie déjà cartographiée (repli sur numéro = ifIndex sinon).",
     "improvements": [
-      "Nouveau décodeur SNMP typé (_snmp_get_typed) pour les MIB à scalaires entiers.",
-      "Documentation de tête de network_diag.py remise à jour (7 paliers)."
+      "Aucune donnée persistée : les débits live restent en mémoire et le poll s'arrête dès que plus personne ne regarde.",
+      "Nouveau réglage diag_baie_activite_seuil_err (nécessite le SNMP activé dans le diagnostic réseau)."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.5"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.6"
 }

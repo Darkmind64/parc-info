@@ -409,6 +409,25 @@
 .port.port-ping-ok .port-led, .prise-murale.pm-ping-ok .port-led   { display:block; background:#22c55e; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #22c55e; }
 .port.port-ping-fail .port-led, .prise-murale.pm-ping-fail .port-led { display:block; background:#ef4444; box-shadow:0 0 0 1px rgba(0,0,0,.6), 0 0 4px #ef4444; }
 
+/* Vue d'activité en direct (voir chargerActivite()) : quand le mode est actif
+   (body.baie-activite-on), les .port-led des ports mappés à un ifIndex SNMP
+   reflètent le trafic réel du switch. Clignotement franc (steps(1,end), pas de
+   fondu) — moins coûteux à composer et plus proche d'une vraie LED. La période
+   vient de --act-ms (calculée serveur ∝ débit). Pendant ce mode, la LED de ping
+   est masquée pour éviter deux voyants concurrents sur le même port. */
+@keyframes baie-led-blink { 0%,100% { opacity:1; } 50% { opacity:.12; } }
+body.baie-activite-on .port.port-ping-ok .port-led,
+body.baie-activite-on .port.port-ping-fail .port-led { display:none; }
+body.baie-activite-on .port.port-act .port-led { display:block; border-color:#000; }
+.port.port-act-down   .port-led { display:none !important; }
+.port.port-act-idle   .port-led { background:#15803d; box-shadow:0 0 0 1px rgba(0,0,0,.6); }
+.port.port-act-traffic .port-led { background:#22c55e; box-shadow:0 0 4px #22c55e;
+    animation:baie-led-blink var(--act-ms,600ms) steps(1,end) infinite; }
+.port.port-act-sature .port-led { background:#f59e0b; box-shadow:0 0 5px #f59e0b;
+    animation:baie-led-blink var(--act-ms,150ms) steps(1,end) infinite; }
+.port.port-act-err    .port-led { background:#ef4444; box-shadow:0 0 6px #ef4444;
+    animation:baie-led-blink 250ms steps(1,end) infinite; }
+
 /* Détacher un lien port-à-port (câblage) — coin haut-droit, visible
    seulement au survol d'un port câblé (voir delierPort()). Manquait une
    action directe pour ça : jusqu'ici, la seule façon était de rouvrir
@@ -752,6 +771,12 @@
                     <option value="60000">🔁 60 s</option>
                     <option value="300000">🔁 300 s</option>
                 </select>
+                <select id="sel-activite" onchange="changerActivite(this)" class="btn btn-primary btn-sm" style="width:auto;flex:0 0 auto;padding-right:1.2rem;" title="Activité en direct : anime les LEDs des ports des switchs selon le trafic réel (SNMP). Nécessite le SNMP activé dans le diagnostic réseau.">
+                    <option value="0">⚡ activité off</option>
+                    <option value="3000">⚡ activité 3 s</option>
+                    <option value="5000">⚡ activité 5 s</option>
+                </select>
+                <span id="activite-bandeau" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--accent-green);align-self:center;"></span>
                 <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌</a>
                 <button onclick="changerU(-1)" class="btn btn-primary btn-sm" title="Réduire la baie d'1U">− U</button>
                 <button onclick="changerU(1)"  class="btn btn-primary btn-sm" title="Agrandir la baie d'1U">+ U</button>
@@ -788,6 +813,13 @@
             {% endfor %}
             <span class="legend-item"><span class="cell-led led-on" style="display:inline-block;"></span> En ligne</span>
             <span class="legend-item"><span class="cell-led led-off" style="display:inline-block;"></span> Hors ligne</span>
+        </div>
+        <div class="legend-wrap" id="legende-activite" style="display:none;">
+            <span style="font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--text-muted);">Activité :</span>
+            <span class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#15803d;"></span> lien actif</span>
+            <span class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;"></span> trafic (clignote ∝ débit)</span>
+            <span class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;"></span> saturation ≥ 80 %</span>
+            <span class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;"></span> erreurs CRC/rejets</span>
         </div>
 
         <!-- PHOTOS -->
@@ -1408,6 +1440,7 @@ async function init() {
     // Calcul des proportions après chargement initial
     setTimeout(() => calcUH(true), 50);
     initPingAuto();
+    initActivite();
     // Recalcul si la fenêtre est redimensionnée — calcUH() ne redessine
     // (renderRack, donc renderCableLinks) que si U_H a réellement changé ;
     // un changement de largeur SANS changement de U_H (ex: la fenêtre
@@ -3082,6 +3115,103 @@ function initPingAuto() {
     try { ms = parseInt(localStorage.getItem('baie_ping_auto_ms')) || 0; } catch (e) {}
     sel.value = String(ms);
     demarrerPingAuto(ms);
+}
+
+// ── ACTIVITÉ EN DIRECT (SNMP → LEDs) ──────────────────────────────────────────
+// Tant que le mode est actif, on interroge /api/baie/activite à intervalle
+// régulier : le serveur poll les compteurs SNMP des switchs de la baie en tâche
+// de fond (débit par delta, mappé vers (slot_id, numero) de la baie) et renvoie
+// juste l'état à peindre. L'UI ne fait que poser des classes .port-act-*.
+// Préférence locale au navigateur (baie_activite_ms) — mode de vue, pas un
+// réglage serveur. Nécessite le SNMP activé côté diagnostic réseau.
+let _activiteTimer = null;
+
+function fmtDebit(bps) {
+    if (!bps) return '0 b/s';
+    if (bps >= 1e9) return (bps / 1e9).toFixed(1) + ' Gb/s';
+    if (bps >= 1e6) return (bps / 1e6).toFixed(1) + ' Mb/s';
+    if (bps >= 1e3) return (bps / 1e3).toFixed(0) + ' kb/s';
+    return Math.round(bps) + ' b/s';
+}
+
+function _viderActivite() {
+    document.querySelectorAll('.port.port-act').forEach(el => {
+        el.classList.remove('port-act', 'port-act-down', 'port-act-idle',
+                            'port-act-traffic', 'port-act-sature', 'port-act-err');
+        el.style.removeProperty('--act-ms');
+    });
+}
+
+function majBandeauActivite(d) {
+    const b = document.getElementById('activite-bandeau');
+    if (!b) return;
+    if (!d || d.actif !== true) {
+        b.style.display = 'none';
+        b.textContent = '';
+        if (d && d.actif === false) { b.style.display = ''; b.style.color = 'var(--accent-red)';
+            b.textContent = '⚡ SNMP désactivé — active-le dans le diagnostic réseau'; }
+        return;
+    }
+    const eqs = d.equipements || [];
+    const nbActifs = eqs.reduce((n, e) => n + (e.nb_actifs || 0), 0);
+    const debit = eqs.reduce((n, e) => n + (e.debit_total_bps || 0), 0);
+    b.style.display = '';
+    b.style.color = d.calibre ? 'var(--accent-green)' : 'var(--accent-orange, #f59e0b)';
+    b.textContent = `⚡ ${eqs.length} switch${eqs.length > 1 ? 's' : ''} · ${nbActifs} port${nbActifs > 1 ? 's' : ''} actif${nbActifs > 1 ? 's' : ''} · ${fmtDebit(debit)}`
+                    + (d.calibre ? '' : ' · non calibré');
+}
+
+async function chargerActivite() {
+    let d;
+    try {
+        const r = await fetch('/api/baie/activite');
+        d = await r.json();
+    } catch (e) { return; }
+    document.body.classList.toggle('baie-activite-on', d.actif === true);
+    const leg = document.getElementById('legende-activite');
+    if (leg) leg.style.display = (d.actif === true) ? '' : 'none';
+    _viderActivite();
+    if (d.actif === true) {
+        for (const p of (d.ports || [])) {
+            const el = document.querySelector(
+                `.port[data-slot="${p.slot_id}"][data-numero="${p.numero}"]`);
+            if (!el) continue;
+            el.classList.add('port-act', 'port-act-' + p.etat);
+            if (p.blink_ms) el.style.setProperty('--act-ms', p.blink_ms + 'ms');
+            el.title = `${numeroAffiche(p.numero)} — ${fmtDebit(p.debit_bps)}`
+                       + (p.err_delta ? ` — ${p.err_delta} err` : '');
+        }
+    }
+    majBandeauActivite(d);
+}
+
+function demarrerActivite(ms) {
+    if (_activiteTimer) { clearInterval(_activiteTimer); _activiteTimer = null; }
+    const leg = document.getElementById('legende-activite');
+    if (ms > 0) {
+        chargerActivite();   // affiche la légende si des données remontent
+        _activiteTimer = setInterval(chargerActivite, ms);
+    } else {
+        if (leg) leg.style.display = 'none';
+        document.body.classList.remove('baie-activite-on');
+        _viderActivite();
+        majBandeauActivite(null);
+    }
+}
+
+function changerActivite(sel) {
+    const ms = parseInt(sel.value) || 0;
+    try { localStorage.setItem('baie_activite_ms', String(ms)); } catch (e) {}
+    demarrerActivite(ms);
+}
+
+function initActivite() {
+    const sel = document.getElementById('sel-activite');
+    if (!sel) return;
+    let ms = 0;
+    try { ms = parseInt(localStorage.getItem('baie_activite_ms')) || 0; } catch (e) {}
+    sel.value = String(ms);
+    demarrerActivite(ms);
 }
 
 // ── RECHERCHE ─────────────────────────────────────────────────────────────────

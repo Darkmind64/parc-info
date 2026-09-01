@@ -765,7 +765,7 @@
         {% if widget_id in enabled_widgets %}
         <!-- Widget wrapper with size & height classes (Phase 9-10) - data-widget-id for real-time updates -->
         <!-- KPI widget: no height resizing, use natural height -->
-        {% set _hide = widget_id == 'critical-alerts' and not (widget_data and widget_data.critical_alerts and widget_data.critical_alerts.alerts) %}
+        {% set _hide = (widget_id == 'critical-alerts' and not (widget_data and widget_data.critical_alerts and widget_data.critical_alerts.alerts)) or (widget_id == 'network-activity' and not a_switchs_baie) %}
         <div class="widget-{{ widget_sizes.get(widget_id, 'large') if widget_sizes else 'large' }}{% if widget_id != 'kpi' %} widget-h-{{ widget_heights.get(widget_id, 'm') if widget_heights else 'm' }}{% endif %}" data-widget-id="{{ widget_id }}"{% if _hide %} data-auto-hide="1"{% endif %} style="display:{{ 'none' if _hide else 'flex' }};flex-direction:column;">
 
             <!-- ══ WIDGET: CRITICAL ALERTS ════════════════════════════════════════ -->
@@ -916,6 +916,16 @@
                             <div style="font-size:.7rem;color:var(--text-muted);padding:.3rem 0;">+ {{ en_ligne_list|length - 4 }} autre(s)</div>
                             {% endif %}
                             {% endif %}
+                        </div>
+                </div>
+
+            <!-- ══ WIDGET: NETWORK ACTIVITY (LEDs live SNMP) ══════════════════════ -->
+            {% elif widget_id == 'network-activity' %}
+                <div class="card" data-activite-widget style="flex:1;display:flex;flex-direction:column;margin-bottom:0;overflow:hidden;">
+                        <div class="s-head">⚡ Activité réseau <a href="/baie">Baie →</a></div>
+                        <div class="activite-body" style="flex:1;overflow-y:auto;font-size:.72rem;"></div>
+                        <div class="activite-vide" style="display:none;color:var(--text-muted);font-size:.72rem;padding:.4rem 0;">
+                            Active le SNMP dans le diagnostic réseau, ou déclare un switch avec une IP dans la baie.
                         </div>
                 </div>
 
@@ -1245,6 +1255,56 @@ function ignorerGarantie(id, btn) {
         }
     }, { title: 'Confirmation', icon: '⚠️', ok: 'Ignorer', btnClass: 'btn-warning' });
 }
+
+// ── WIDGET « ACTIVITÉ RÉSEAU » (SNMP live) ────────────────────────────────────
+// Poll /api/baie/activite toutes les 5 s tant que le widget est présent. Le
+// serveur poll les switchs de la baie en tâche de fond ; ce fetch ne fait
+// qu'entretenir le battement et récupérer les débits agrégés par switch.
+(function () {
+    const card = document.querySelector('[data-activite-widget]');
+    if (!card) return;
+    const body = card.querySelector('.activite-body');
+    const vide = card.querySelector('.activite-vide');
+
+    function fmtDebit(bps) {
+        if (!bps) return '0 b/s';
+        if (bps >= 1e9) return (bps / 1e9).toFixed(1) + ' Gb/s';
+        if (bps >= 1e6) return (bps / 1e6).toFixed(1) + ' Mb/s';
+        if (bps >= 1e3) return (bps / 1e3).toFixed(0) + ' kb/s';
+        return Math.round(bps) + ' b/s';
+    }
+
+    async function tick() {
+        let d;
+        try { d = await (await fetch('/api/baie/activite')).json(); }
+        catch (e) { return; }
+        const eqs = (d && d.actif === true) ? (d.equipements || []) : [];
+        if (!eqs.length) {
+            body.innerHTML = '';
+            body.style.display = 'none';
+            vide.style.display = '';
+            return;
+        }
+        body.style.display = '';
+        vide.style.display = 'none';
+        body.innerHTML = eqs.map(function (e) {
+            const pct = Math.max(2, Math.min(100, Math.log10((e.debit_total_bps || 0) + 1) / 9 * 100));
+            const err = e.erreurs > 0
+                ? ' <span style="color:var(--accent-red);">● ' + e.erreurs + ' err</span>' : '';
+            return '<div style="margin:.35rem 0;">'
+                 + '<div style="display:flex;justify-content:space-between;">'
+                 + '<span>' + (e.nom || e.ip) + (e.calibre ? '' : ' <span style="color:var(--text-muted);">·nc</span>') + '</span>'
+                 + '<span class="mono">' + fmtDebit(e.debit_total_bps) + '</span></div>'
+                 + '<div style="height:5px;background:var(--bg-secondary);border-radius:3px;overflow:hidden;margin:.15rem 0;">'
+                 + '<div style="height:100%;width:' + pct + '%;background:var(--accent-green);"></div></div>'
+                 + '<div style="color:var(--text-muted);font-size:.65rem;">'
+                 + e.nb_actifs + '/' + e.nb_ports_up + ' ports actifs' + err + '</div></div>';
+        }).join('');
+    }
+
+    tick();
+    setInterval(tick, 5000);
+})();
 
 // ── PRÉ-CHARGER LA CONFIGURATION AU DÉMARRAGE ─────────────────────────────────
 // Cela s'assure que cfgData est rempli avant que l'utilisateur n'interact avec les widgets

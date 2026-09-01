@@ -2594,6 +2594,7 @@ const WIDGET_DEFAULT_SIZES = {
     'interventions': 'small',
     'business-software': 'medium',
     'network-info': 'medium',
+    'network-activity': 'medium',
 };
 
 const WIDGET_DEFAULT_HEIGHTS = {
@@ -2609,6 +2610,7 @@ const WIDGET_DEFAULT_HEIGHTS = {
     'interventions': 's',
     'business-software': 's',
     'network-info': 's',
+    'network-activity': 'm',
 };
 
 // Niveaux de hauteur disponibles avec descriptions
@@ -2636,14 +2638,15 @@ const DASHBOARD_WIDGETS = [
     { id: 'interventions', name: '🔧 Interventions', desc: 'Actions de maintenance' },
     { id: 'business-software', name: '💼 Logiciels métier', desc: 'Logiciels installés' },
     { id: 'network-info', name: '🔗 Info réseau', desc: 'Configuration réseau et ISP' },
+    { id: 'network-activity', name: '⚡ Activité réseau', desc: 'Débit live des switchs de la baie (SNMP)' },
 ];
 
 function initDashboardWidgetConfig() {
     const container = document.getElementById('dashboard-widgets-config');
     if (!container) return;
 
-    const enabledStr = g('dashboard_widgets_enabled') || 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info';
-    const orderStr = g('dashboard_widgets_order') || 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info';
+    const enabledStr = g('dashboard_widgets_enabled') || 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info,network-activity';
+    const orderStr = g('dashboard_widgets_order') || 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info,network-activity';
 
     // Parse widget sizes from cfgData (Phase 9)
     let sizeStr = g('dashboard_widgets_size') || '{}';
@@ -2808,7 +2811,7 @@ function applyWidgetChangesToDashboard() {
 
     // CRITIQUE: Lire depuis cfgData qui est la source de vérité, pas depuis les variables temporaires
     // Utiliser les valeurs par défaut si cfgData est vide
-    const DEFAULT_ENABLED = 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info';
+    const DEFAULT_ENABLED = 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info,network-activity';
     const enabledStr = g('dashboard_widgets_enabled') || DEFAULT_ENABLED;
     const enabledWidgets = new Set(enabledStr.split(',').map(s => s.trim()).filter(s => s));
 
@@ -3480,6 +3483,10 @@ function rendreConfig() {
     <div class="cfg-row">
         <label class="cfg-label">Cartographie de topologie L2 (FDB/LLDP, nécessite SNMP)</label>
         <input type="checkbox" data-cfg="diag_topologie_active" ${g('diag_topologie_active')==='1'?'checked':''} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Vue d'activité baie — Δ erreurs avant LED rouge</label>
+        <input type="number" data-cfg="diag_baie_activite_seuil_err" value="${g('diag_baie_activite_seuil_err')||'20'}" min="1" max="100000" class="cfg-input cfg-input-sm">
     </div>
     <div class="cfg-row">
         <label class="cfg-label">Supervision SNMP des onduleurs (appareils type « Onduleur / UPS »)</label>

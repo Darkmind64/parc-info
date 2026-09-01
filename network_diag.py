@@ -2832,3 +2832,257 @@ def etat_moniteur() -> dict:
 
 _moniteur_thread = threading.Thread(target=_moniteur_loop, daemon=True, name='DiagReseauMoniteur')
 _moniteur_thread.start()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Vue d'activité de la baie — LEDs SNMP « live »
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Pendant qu'un opérateur regarde la page « baie de brassage » (ou le widget
+# tableau de bord « Activité réseau »), on interroge les compteurs d'octets et
+# d'erreurs par port des switchs de la baie toutes les ~3 s et on calcule le
+# débit par delta. Le navigateur envoie un « battement » (GET /api/baie/activite) ;
+# tant qu'il bat, un thread démon poll en tâche de fond ; sans battement, le
+# thread se rendort. Aucune persistance : tout vit en mémoire et disparaît quand
+# plus personne ne regarde. Les tendances (diag_metriques) restent alimentées
+# par le cycle de surveillance normal (5 min), inchangé.
+
+_ACTIVITE_INTERVAL      = 3.0     # s — cadence de poll
+_ACTIVITE_TTL_HEARTBEAT = 20.0    # s — au-delà, on cesse de poller ce client
+_ACTIVITE_MAX_SWITCHS   = 8       # garde-fou par cycle
+_ACTIVITE_SEUIL_ACTIF   = 1.0     # % de la vitesse du lien = « trafic »
+_ACTIVITE_PURGE         = 120.0   # s — oubli des compteurs/résultats d'un client parti
+
+_activite_lock      = threading.Lock()
+_activite_heartbeat = {}   # client_id -> epoch du dernier battement
+_activite_prev      = {}   # (client_id, ip, ifindex) -> {compteurs..., 'ts'}
+_activite_resultat  = {}   # client_id -> dict prêt pour l'UI
+_activite_thread    = None
+
+
+def _switchs_baie(conn, client_id):
+    """Switchs (et assimilés SNMP) montés en baie et dotés d'une IP.
+    Dédupe par IP (un même équipement peut apparaître dans deux slots)."""
+    placeholders = ','.join('?' * len(_TYPES_EQUIP_SNMP))
+    rows = conn.execute(
+        f"SELECT s.id AS slot_id, s.appareil_id, a.adresse_ip, a.nom_machine "
+        f"FROM baie_slots s JOIN appareils a ON a.id = s.appareil_id "
+        f"WHERE s.client_id=? AND a.type_appareil IN ({placeholders}) "
+        f"AND COALESCE(a.adresse_ip,'') <> '' "
+        f"ORDER BY s.position", (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
+    vus, switchs = set(), []
+    for slot_id, aid, ip, nom in rows:
+        if ip in vus:
+            continue
+        vus.add(ip)
+        switchs.append({'slot_id': slot_id, 'appareil_id': aid, 'ip': ip, 'nom': nom or ip})
+    return switchs
+
+
+def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, ifindex_dispo):
+    """Retourne ({numero_baie: ifindex}, calibre).
+    1) topologie FDB (diag_topologie) : l'appareil branché est vu par le switch
+       sur un ifIndex précis → mapping fiable (calibre=True).
+    2) repli naïf numero==ifindex pour les ports RJ (≤ 48), si l'ifIndex existe.
+    3) repli doux SFP/WAN : numero-1000 / numero-2000, si l'ifIndex existe."""
+    ports = conn.execute(
+        "SELECT numero, appareil_id FROM baie_slot_ports WHERE slot_id=?",
+        (slot_id,)).fetchall()
+    if not ports:
+        return {}, False
+
+    topo = {}   # appareil_vu_id -> ifindex
+    if appareil_id_switch:
+        for vu_aid, pidx in conn.execute(
+                "SELECT appareil_vu_id, port_index FROM diag_topologie "
+                "WHERE client_id=? AND equipement_appareil_id=? AND appareil_vu_id IS NOT NULL",
+                (client_id, appareil_id_switch)):
+            try:
+                topo.setdefault(int(vu_aid), int(pidx))
+            except (TypeError, ValueError):
+                continue
+
+    mapping, calibre = {}, False
+    for numero, p_aid in ports:
+        try:
+            numero = int(numero)
+        except (TypeError, ValueError):
+            continue
+        if p_aid and p_aid in topo:
+            mapping[numero] = topo[p_aid]
+            calibre = True
+        elif 1 <= numero <= 48 and numero in ifindex_dispo:
+            mapping[numero] = numero
+        elif 1000 < numero <= 2000 and (numero - 1000) in ifindex_dispo:
+            mapping[numero] = numero - 1000
+        elif 2000 < numero <= 9000 and (numero - 2000) in ifindex_dispo:
+            mapping[numero] = numero - 2000
+    return mapping, calibre
+
+
+def _poll_switch_activite(ip, communautes):
+    """Walk SNMP réduit d'un switch pour l'affichage live.
+    {ifindex: {'oper','speed_mbps','in_oct','out_oct','in_err','out_err'}} ;
+    None si l'agent ne répond pas."""
+    oper = _snmp_walk(_OID_IF_OPER, ip, communautes)
+    if not oper:
+        return None
+    hs = _snmp_walk(_OID_IF_HIGHSPEED, ip, communautes)
+    sp = {} if hs else _snmp_walk(_OID_IF_SPEED, ip, communautes)
+    in_oct = _snmp_walk(_OID_IF_HCIN, ip, communautes) or _snmp_walk(_OID_IF_IN_OCTETS, ip, communautes)
+    out_oct = _snmp_walk(_OID_IF_HCOUT, ip, communautes) or _snmp_walk(_OID_IF_OUT_OCTETS, ip, communautes)
+    in_err = _snmp_walk(_OID_IF_IN_ERRORS, ip, communautes)
+    out_err = _snmp_walk(_OID_IF_OUT_ERRORS, ip, communautes)
+
+    def _i(d, k, defaut=0):
+        try:
+            return int(d.get(k))
+        except (TypeError, ValueError):
+            return defaut
+
+    res = {}
+    for idx in oper:
+        try:
+            ifindex = int(str(idx).split('.')[0])
+        except (TypeError, ValueError):
+            continue
+        speed = _i(hs, idx) or (_i(sp, idx) // 1_000_000)
+        res[ifindex] = {
+            'oper': _i(oper, idx, 1),
+            'speed_mbps': speed,
+            'in_oct': _i(in_oct, idx), 'out_oct': _i(out_oct, idx),
+            'in_err': _i(in_err, idx), 'out_err': _i(out_err, idx),
+        }
+    return res
+
+
+def _etat_led(prev, cur, dt, seuil_err, seuil_sat):
+    """État d'un port pour l'UI (priorité : down > err > sature > traffic > idle)."""
+    if cur.get('oper', 1) != 1:
+        return {'etat': 'down', 'debit_bps': 0, 'debit_pct': 0.0, 'blink_ms': 0, 'err_delta': 0}
+
+    if prev and dt > 0:
+        def _d(k):
+            d = cur.get(k, 0) - prev.get(k, cur.get(k, 0))
+            return d if d >= 0 else cur.get(k, 0)   # compteur remis à zéro (reboot)
+        debit_bps = max(_d('in_oct'), _d('out_oct')) * 8 / dt
+        err_delta = _d('in_err') + _d('out_err')
+    else:
+        debit_bps, err_delta = 0.0, 0
+
+    speed = cur.get('speed_mbps', 0)
+    debit_pct = (debit_bps / (speed * 1e6) * 100) if speed else 0.0
+    base = {'debit_bps': round(debit_bps), 'debit_pct': round(debit_pct, 1),
+            'err_delta': int(err_delta)}
+
+    if err_delta > seuil_err:
+        return {'etat': 'err', 'blink_ms': 250, **base}
+    if debit_pct >= seuil_sat:
+        return {'etat': 'sature', 'blink_ms': 150, **base}
+    if debit_pct >= _ACTIVITE_SEUIL_ACTIF:
+        return {'etat': 'traffic',
+                'blink_ms': int(max(120, min(1200, 1500 / max(1.0, debit_pct)))), **base}
+    return {'etat': 'idle', 'blink_ms': 0, **base}
+
+
+def _cycle_activite(clients):
+    from database import get_local_db
+    communautes = _communautes_snmp()
+    seuil_err = _cfg_int('diag_baie_activite_seuil_err', 20)
+    seuil_sat = _cfg_float('diag_snmp_seuil_saturation_pct', 90)
+    now = time.time()
+    for cid in clients:
+        try:
+            conn = get_local_db()
+            try:
+                switchs = _switchs_baie(conn, cid)[:_ACTIVITE_MAX_SWITCHS]
+                equipements, ports_ui = [], []
+                for sw in switchs:
+                    cur = _poll_switch_activite(sw['ip'], communautes)
+                    if not cur:
+                        continue
+                    mapping, calibre = _mapping_baie_ifindex(
+                        conn, cid, sw['slot_id'], sw['appareil_id'], set(cur))
+                    debit_total, nb_up, nb_actifs, err_total = 0.0, 0, 0, 0
+                    for numero, ifindex in mapping.items():
+                        p = cur.get(ifindex)
+                        if not p:
+                            continue
+                        cle = (cid, sw['ip'], ifindex)
+                        prev = _activite_prev.get(cle)
+                        dt = (now - prev['ts']) if prev else _ACTIVITE_INTERVAL
+                        led = _etat_led(prev, p, dt, seuil_err, seuil_sat)
+                        _activite_prev[cle] = {
+                            'in_oct': p['in_oct'], 'out_oct': p['out_oct'],
+                            'in_err': p['in_err'], 'out_err': p['out_err'], 'ts': now}
+                        ports_ui.append({'slot_id': sw['slot_id'], 'numero': numero, **led})
+                        if led['etat'] != 'down':
+                            nb_up += 1
+                        if led['etat'] in ('traffic', 'sature', 'err'):
+                            nb_actifs += 1
+                        debit_total += led['debit_bps']
+                        err_total += led['err_delta']
+                    equipements.append({
+                        'ip': sw['ip'], 'nom': sw['nom'], 'appareil_id': sw['appareil_id'],
+                        'calibre': calibre, 'debit_total_bps': round(debit_total),
+                        'nb_ports_up': nb_up, 'nb_actifs': nb_actifs, 'erreurs': err_total})
+            finally:
+                conn.close()
+            with _activite_lock:
+                _activite_resultat[cid] = {
+                    'actif': True, 'ts': now,
+                    'calibre': all(e['calibre'] for e in equipements) if equipements else False,
+                    'equipements': equipements, 'ports': ports_ui}
+        except Exception:
+            logger.debug('network_diag: cycle activité — client %s en échec', cid, exc_info=True)
+
+
+def _activite_loop():
+    time.sleep(12)   # laisser l'app finir de démarrer
+    while True:
+        try:
+            now = time.time()
+            with _activite_lock:
+                clients = [c for c, t in _activite_heartbeat.items()
+                           if now - t < _ACTIVITE_TTL_HEARTBEAT]
+                for c in [c for c, t in list(_activite_heartbeat.items())
+                          if now - t > _ACTIVITE_PURGE]:
+                    _activite_heartbeat.pop(c, None)
+                    _activite_resultat.pop(c, None)
+                for k in [k for k, v in list(_activite_prev.items())
+                          if now - v['ts'] > _ACTIVITE_PURGE]:
+                    _activite_prev.pop(k, None)
+            if not clients:
+                time.sleep(5)
+                continue
+            if str(_cfg('diag_snmp_actif', '0')) != '1':
+                with _activite_lock:
+                    for c in clients:
+                        _activite_resultat[c] = {'actif': False}
+                time.sleep(5)
+                continue
+            _cycle_activite(clients)
+        except Exception:
+            logger.debug('network_diag: _activite_loop', exc_info=True)
+        time.sleep(_ACTIVITE_INTERVAL)
+
+
+def _demarrer_activite_thread():
+    """Démarre le thread d'activité si besoin (idempotent, lazy)."""
+    global _activite_thread
+    if _activite_thread and _activite_thread.is_alive():
+        return
+    _activite_thread = threading.Thread(target=_activite_loop, daemon=True,
+                                        name='DiagBaieActivite')
+    _activite_thread.start()
+
+
+def activite_baie(client_id: int) -> dict:
+    """Enregistre un battement et renvoie l'état d'activité déjà calculé.
+    Réponse instantanée (aucun SNMP synchrone). `actif` : True = données
+    présentes, False = SNMP désactivé, None = premier passage pas encore fait."""
+    with _activite_lock:
+        _activite_heartbeat[client_id] = time.time()
+        res = dict(_activite_resultat.get(client_id, {'actif': None}))
+    _demarrer_activite_thread()
+    return res

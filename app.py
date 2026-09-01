@@ -3429,8 +3429,8 @@ def single_client_dashboard(cid):
         # PHASE 8.4: Fetch and parse user's widget preferences
         # ═══════════════════════════════════════════════════════════════════
         user_id = user['id'] if user else None
-        default_enabled = 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info'
-        default_order = 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info'
+        default_enabled = 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info,network-activity'
+        default_order = 'critical-alerts,kpi,av-status,network-status,device-types,peripherals,device-age,contracts-timeline,recent-activity,interventions,business-software,network-info,network-activity'
 
         enabled_widgets_str = cfg_get('dashboard_widgets_enabled', default_enabled, user_id)
         widget_order_str = cfg_get('dashboard_widgets_order', default_order, user_id)
@@ -3475,6 +3475,7 @@ def single_client_dashboard(cid):
             'interventions': 'small',
             'business-software': 'medium',
             'network-info': 'medium',
+            'network-activity': 'medium',
         }
 
         # Parse user's widget size preferences (JSON)
@@ -3509,6 +3510,7 @@ def single_client_dashboard(cid):
             'interventions': 'm',        # Changed from 'compact' to 'm' for consistency
             'business-software': 'm',    # Changed from 'compact' to 'm' for consistency
             'network-info': 'm',         # Changed from 'compact' to 'm' for consistency
+            'network-activity': 'm',
         }
 
         # Parse user's widget height preferences (JSON)
@@ -3560,10 +3562,23 @@ def single_client_dashboard(cid):
                 'network_info': {},
             }
 
+        # Widget « Activité réseau » : présent seulement si au moins un switch
+        # (ou assimilé SNMP) est monté en baie avec une IP.
+        try:
+            _ph = ','.join('?' * len(network_diag._TYPES_EQUIP_SNMP))
+            a_switchs_baie = conn.execute(
+                f"SELECT 1 FROM baie_slots s JOIN appareils a ON a.id=s.appareil_id "
+                f"WHERE s.client_id=? AND a.type_appareil IN ({_ph}) "
+                f"AND COALESCE(a.adresse_ip,'')<>'' LIMIT 1",
+                (cid, *network_diag._TYPES_EQUIP_SNMP)).fetchone() is not None
+        except Exception:
+            a_switchs_baie = False
+
         # Combine all data for template
         template_data = {
             'parc': parc,
             'client': client,
+            'a_switchs_baie': a_switchs_baie,
             'appareils': stats['appareils'],
             'nb_en_ligne': stats['nb_en_ligne'],
             'nb_hors_ligne': stats['nb_hors_ligne'],
@@ -6963,6 +6978,19 @@ def api_baie_slots():
     if 'Baie principale' not in baies: baies.insert(0, 'Baie principale')
     conn.close()
     return jsonify({'slots': slots, 'nb_u': parc.get('baie_nb_u', 12) or 12, 'baies': baies})
+
+
+@app.route('/api/baie/activite')
+@login_required
+def api_baie_activite():
+    """Vue d'activité de la baie : débit/erreurs par port des switchs SNMP,
+    calculé en tâche de fond tant que la page est regardée. Lecture seule,
+    aucune écriture, aucun SNMP synchrone dans la requête."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify(network_diag.activite_baie(cid))
+
 
 def _liste_cablage(conn, cid):
     """Chaque lien port-à-port du client, une seule fois (pas les deux sens),

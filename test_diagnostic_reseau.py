@@ -515,5 +515,60 @@ N.etat_wifi = lambda forcer=False: {'connecte': True, 'ssid': 'PARC-W', 'bssid':
 verifier(not any(x['categorie'] == 'wifi_ap_suspect' for x in N.diagnostiquer_wifi(907)),
          "2 préfixes MAC de fabricant INCONNU -> pas de faux positif wifi_ap_suspect")
 
+print('\n=== 18. Vue d\'activité de la baie (LEDs live SNMP) ===')
+from database import get_local_db as _get_local_db
+_se, _ss = 20, 90
+_prev = dict(in_oct=0, out_oct=0, in_err=0, out_err=0, ts=0.0)
+_cur = dict(oper=1, speed_mbps=1000, in_oct=8_000_000, out_oct=0, in_err=0, out_err=0)
+_led = N._etat_led(_prev, _cur, 1.0, _se, _ss)
+verifier(_led['etat'] == 'traffic' and 120 <= _led['blink_ms'] <= 1200,
+         "port up ~6 % -> 'traffic', clignotement borné", str(_led))
+verifier(N._etat_led(_prev, dict(_cur, in_oct=120_000_000), 1.0, _se, _ss)['etat'] == 'sature',
+         "~96 % de la vitesse -> 'sature'")
+verifier(N._etat_led(_prev, dict(_cur, in_err=30), 1.0, _se, _ss)['etat'] == 'err',
+         "Δ erreurs 30 (> 20) -> 'err' (prioritaire sur le débit)")
+verifier(N._etat_led(_prev, dict(_cur, oper=2), 1.0, _se, _ss)['etat'] == 'down',
+         "ifOperStatus down -> 'down'")
+verifier(N._etat_led(dict(_cur, ts=0.0), _cur, 1.0, _se, _ss)['etat'] == 'idle',
+         "up sans variation de compteur -> 'idle'")
+verifier(N._etat_led(dict(in_oct=10**9, out_oct=0, in_err=0, out_err=0, ts=0.0),
+                     _cur, 1.0, _se, _ss)['debit_bps'] >= 0,
+         "compteur qui recule (reboot) -> débit jamais négatif")
+
+_c = A.get_db()
+_c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (908, 'Activite')")
+_c.execute("INSERT INTO appareils (id, client_id, nom_machine, type_appareil, adresse_ip) "
+           "VALUES (700, 908, 'SW-ACT', 'Switch', '10.8.0.1')")
+_c.execute("INSERT INTO appareils (id, client_id, nom_machine, adresse_ip) "
+           "VALUES (701, 908, 'PC-ACT', '10.8.0.50')")
+_c.execute("INSERT INTO baie_slots (id, client_id, position, appareil_id) VALUES (80, 908, 1, 700)")
+_c.execute("INSERT INTO baie_slot_ports (slot_id, numero, appareil_id) VALUES (80, 4, 701)")
+_c.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (80, 9)")
+_c.commit(); _c.close()
+
+_m, _cal = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, {4, 9})
+verifier(_m == {4: 4, 9: 9} and _cal is False,
+         "sans topologie -> repli naïf numero==ifIndex, non calibré", str((_m, _cal)))
+_c = A.get_db()
+_c.execute("INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
+           "port_index, appareil_vu_id, horodatage) VALUES (908,'10.8.0.1',700,15,701,'x')")
+_c.commit(); _c.close()
+_m2, _cal2 = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, {4, 9, 15})
+verifier(_m2.get(4) == 15 and _cal2 is True,
+         "topologie : PC vu sur ifIndex 15 -> mapping calibré", str((_m2, _cal2)))
+
+# le port baie 4 est mappé (topologie) vers l'ifIndex 15, le port 9 vers 9 (repli)
+N._poll_switch_activite = lambda ip, comm: {
+    15: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_err=0, out_err=0),
+    9: dict(oper=2, speed_mbps=0, in_oct=0, out_oct=0, in_err=0, out_err=0)}
+N._cycle_activite([908])
+with N._activite_lock:
+    _res = N._activite_resultat.get(908)
+_num = {p['numero']: p['etat'] for p in (_res or {}).get('ports', [])}
+verifier(_res and _res['actif'] is True and _num.get(4) == 'idle' and _num.get(9) == 'down',
+         "_cycle_activite mappe et évalue chaque port de la baie", str(_res))
+verifier(N.activite_baie(908).get('actif') is True and 908 in N._activite_heartbeat,
+         "activite_baie() enregistre un battement et renvoie l'état en cache")
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)
