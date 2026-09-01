@@ -1,23 +1,23 @@
 {
-  "version": "2.19.2",
+  "version": "2.19.3",
   "release_date": "2026-09-01T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.2/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.2/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.2/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.2",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.2/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.2/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.2/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.2/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.2/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.3",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Diagnostic réseau — paliers 4/5/6. Cartographie de topologie L2 : à partir des tables MAC (SNMP bridge-MIB) et de LLDP, « quel appareil est sur quel port de quel switch », recoupé avec le câblage de la baie de brassage (alerte si divergence) ; bouton « Reporter dans la baie ». Tendances & baseline : historisation des métriques, alerte sur dégradation relative à la référence habituelle (pas seulement un seuil absolu), sparklines d'évolution. Rapports & remédiation : export PDF/HTML du diagnostic + un guide de résolution (cause / à vérifier / à corriger) par type d'évènement, affiché sous chaque alerte et dans l'e-mail.",
+    "new_features": "Diagnostic réseau — consolidation. La page est réorganisée en onglets (Vue d'ensemble / Ports & topologie / Tendances / Évènements) avec un panneau de configuration à bascules rapides et un bouton « Tester SNMP ». Un mode rapide (moins de pings, sans capture) et un budget de temps bornent la durée d'un snapshot ; le temps par phase est affiché. Rapport de diagnostic envoyable périodiquement par e-mail (réglage « HH:MM » ou « lun HH:MM »). Nouvelle documentation de référence : DIAGNOSTIC_RESEAU.md.",
     "improvements": [
-      "Topologie et baseline désactivables dans Réglages → Réseau & Scan ; la topologie nécessite le SNMP actif.",
-      "Le bouton « Reporter dans la baie » ne renseigne que les ports de baie encore vides, jamais d'écrasement."
+      "Chaque snapshot enregistre le détail des temps par phase dans son résumé.",
+      "Le dernier onglet consulté est mémorisé dans le navigateur."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.2"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.3"
 }

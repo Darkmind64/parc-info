@@ -68,6 +68,18 @@
 .spark-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:1rem; }
 .spark-card { border:1px solid var(--border); border-radius:4px; padding:.6rem .8rem; background:var(--bg-secondary); }
 .spark-card .lbl { font-size:.72rem; color:var(--text-secondary); margin-bottom:.3rem; display:flex; justify-content:space-between; }
+.diag-tabs { display:flex; gap:.3rem; border-bottom:1px solid var(--border); margin-bottom:1.2rem; flex-wrap:wrap; }
+.diag-tab { background:none; border:none; border-bottom:2px solid transparent; color:var(--text-secondary);
+    padding:.55rem .9rem; font-size:.82rem; font-weight:600; cursor:pointer; }
+.diag-tab:hover { color:var(--text-primary); }
+.diag-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+.diag-pane { display:none; }
+.diag-pane.active { display:block; }
+.cfg-etat { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:.5rem .9rem; }
+.cfg-etat-row { display:flex; align-items:center; justify-content:space-between; gap:.5rem; font-size:.8rem;
+    border:1px solid var(--border); border-radius:4px; padding:.4rem .6rem; background:var(--bg-secondary); }
+.cfg-etat-row .sub { font-size:.68rem; color:var(--text-muted); }
+.phase-times { font-family:'Share Tech Mono',monospace; font-size:.68rem; color:var(--text-muted); margin-top:.4rem; }
 </style>
 {% endblock %}
 
@@ -78,6 +90,40 @@
         <p style="font-size:.78rem;">Conflits d'adresses · Qualité de liaison · DHCP · SNMP · Topologie · Tendances</p>
     </div>
     <a class="link-btn" href="/diag-reseau/rapport.pdf" style="padding:.45rem .9rem;font-size:.8rem;">📄 Rapport</a>
+</div>
+
+<div class="diag-tabs" id="diag-tabs">
+    <button class="diag-tab" data-pane="pane-apercu">Vue d'ensemble</button>
+    <button class="diag-tab" data-pane="pane-ports">Ports & topologie</button>
+    <button class="diag-tab" data-pane="pane-tendances">Tendances</button>
+    <button class="diag-tab" data-pane="pane-evenements">Évènements</button>
+</div>
+
+<div class="diag-pane active" id="pane-apercu">
+
+<!-- ── Panneau Configuration ── -->
+<div class="diag-card" style="margin-bottom:1.2rem;">
+    <h2>⚙️ Configuration du diagnostic
+        {% if peut_ecrire %}<button class="link-btn" style="margin-left:.6rem;" onclick="testerSNMP(this)">Tester SNMP</button>{% endif %}
+    </h2>
+    <div class="cfg-etat">
+        {% set _toggles = [
+            ('diag_surveillance_active', 'Surveillance continue', etat_moniteur.intervalle_s ~ ' s'),
+            ('diag_snmp_actif', 'Interrogation SNMP', diag_cfg.diag_snmp_communautes),
+            ('diag_topologie_active', 'Topologie L2', 'nécessite le SNMP'),
+            ('diag_capture_active', 'Capture passive (palier 2)', etat_capture.motif),
+            ('diag_baseline_active', 'Tendances / baseline', ''),
+            ('diag_alerte_email', 'Alerte e-mail', diag_cfg.diag_alerte_destinataire or 'aucun destinataire'),
+        ] %}
+        {% for cle, libelle, sub in _toggles %}
+        <label class="cfg-etat-row">
+            <span>{{ libelle }}<br><span class="sub">{{ sub }}</span></span>
+            <input type="checkbox" data-diagcfg="{{ cle }}" {% if diag_cfg[cle] == '1' %}checked{% endif %}
+                   {% if not peut_ecrire %}disabled{% endif %} onchange="basculerCfg(this)">
+        </label>
+        {% endfor %}
+    </div>
+    <div id="snmp-test-res" class="diag-line" style="margin-top:.5rem;font-size:.76rem;"></div>
 </div>
 
 <div class="diag-grid">
@@ -98,6 +144,11 @@
             Inclure la capture passive de trames (palier 2)
             <span id="cap-state" class="cap-badge {{ 'cap-ok' if etat_capture.disponible else 'cap-off' }}"></span>
         </label>
+        <label class="diag-check">
+            <input type="checkbox" id="chk-rapide" {% if diag_cfg.diag_snapshot_rapide == '1' %}checked{% endif %}>
+            Mode rapide (moins de pings, sans capture)
+        </label>
+        <div class="phase-times" id="phase-times"></div>
         {% else %}
         <div class="diag-note">Accès en lecture seule — diagnostic non disponible.</div>
         {% endif %}
@@ -132,6 +183,9 @@
     <div id="snapshot-findings"></div>
 </div>
 
+</div><!-- /pane-apercu -->
+
+<div class="diag-pane" id="pane-ports">
 <!-- ── État des ports (SNMP) ── -->
 <div class="diag-card" id="snmp-wrap" style="margin-bottom:1.2rem;">
     <h2>🔌 État des ports (SNMP)</h2>
@@ -145,13 +199,17 @@
     </h2>
     <div id="topo-body" class="diag-line">Chargement…</div>
 </div>
+</div><!-- /pane-ports -->
 
+<div class="diag-pane" id="pane-tendances">
 <!-- ── Tendances ── -->
 <div class="diag-card" id="tendances-wrap" style="margin-bottom:1.2rem;">
     <h2>📈 Tendances</h2>
     <div id="tendances-body" class="diag-line">Chargement…</div>
 </div>
+</div><!-- /pane-tendances -->
 
+<div class="diag-pane" id="pane-evenements">
 <!-- ── Journal des évènements ── -->
 <div class="diag-card">
     <h2>📋 Évènements réseau</h2>
@@ -184,6 +242,7 @@
     <div id="evt-empty" class="diag-empty" style="display:none;">Aucun évènement.</div>
     <div id="evt-pagination" style="margin-top:.8rem;display:flex;gap:.5rem;align-items:center;font-size:.78rem;"></div>
 </div>
+</div><!-- /pane-evenements -->
 {% endblock %}
 
 {% block extra_scripts %}
@@ -244,12 +303,50 @@ function majEtatCapture(etat){
 
 fetch('/api/diag-reseau/etat-capture').then(r=>r.json()).then(majEtatCapture).catch(()=>{});
 
+// ── Onglets ──
+(function(){
+    const tabs = document.querySelectorAll('#diag-tabs .diag-tab');
+    function show(pane){
+        document.querySelectorAll('.diag-pane').forEach(p => p.classList.toggle('active', p.id === pane));
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.pane === pane));
+        try { localStorage.setItem('diag_tab', pane); } catch(e){}
+    }
+    tabs.forEach(t => t.addEventListener('click', () => show(t.dataset.pane)));
+    let init = 'pane-apercu';
+    try { const s = localStorage.getItem('diag_tab'); if (s && document.getElementById(s)) init = s; } catch(e){}
+    show(init);
+})();
+
+function basculerCfg(el){
+    const cle = el.dataset.diagcfg, val = el.checked ? '1' : '0';
+    fetch('/api/config', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({[cle]: val})})
+        .then(r => { if (!r.ok){ el.checked = !el.checked; showToast('Erreur', 'error'); }
+                     else showToast('Enregistré', 'success'); })
+        .catch(() => { el.checked = !el.checked; showToast('Erreur réseau', 'error'); });
+}
+
+function testerSNMP(btn){
+    btn.disabled = true;
+    const res = document.getElementById('snmp-test-res');
+    res.textContent = 'Test en cours…';
+    fetch('/api/diag-reseau/test-snmp', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+        .then(r => r.json()).then(d => {
+            res.style.color = d.ok ? 'var(--accent-green)' : '#ffb057';
+            res.textContent = d.ok
+                ? `✔ ${d.equipement} (${d.ip}) répond — communauté « ${d.communaute} », sysName « ${d.sysname || '?'} »`
+                : `✖ ${d.motif}`;
+        }).catch(() => { res.textContent = 'Erreur réseau'; })
+        .finally(() => { btn.disabled = false; });
+}
+
 function lancerDiag(){
     const btn = document.getElementById('btn-diag');
     btn.disabled = true;
     const body = {};
     const chk = document.getElementById('chk-capture');
     if (chk && !chk.disabled) body.avec_capture = chk.checked;
+    const chkR = document.getElementById('chk-rapide');
+    if (chkR) body.rapide = chkR.checked;
     fetch('/api/diag-reseau/snapshot', {
         method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
     }).then(r => r.json().then(d => ({ok:r.ok, d}))).then(({ok,d}) => {
@@ -264,6 +361,11 @@ function pollDiag(){
         document.getElementById('diag-prog').style.width = (d.progress||0) + '%';
         document.getElementById('diag-msg').textContent = d.message || '';
         if (d.findings) renderFindings(d.findings, d.avertissements || []);
+        if (d.phases && Object.keys(d.phases).length){
+            const pt = document.getElementById('phase-times');
+            if (pt) pt.textContent = 'Temps par phase : ' +
+                Object.entries(d.phases).map(([k,v]) => `${k} ${v}s`).join(' · ');
+        }
         if (!d.running){
             clearInterval(diagInterval); diagInterval = null;
             document.getElementById('btn-diag').disabled = false;

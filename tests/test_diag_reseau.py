@@ -227,6 +227,26 @@ def test_rapport_pdf_route(client, deux_clients):
     assert rh.status_code == 200 and b'<html' in rh.data.lower()
 
 
+def test_api_test_snmp(client, conn, deux_clients, make_appareil, monkeypatch):
+    cid = deux_clients['cid_a']
+    make_appareil(cid, nom_machine='SW-T', type_appareil='Switch', adresse_ip='10.0.0.5')
+    import app as A
+    monkeypatch.setattr(A, '_snmp_get', lambda ip, oids, comm='public', timeout=1.5: {
+        A._OID_SYS_NAME: 'SW-CORE', A._OID_SYS_DESCR: 'Test switch'} if comm == 'public' else {})
+    login_session(client, deux_clients['proprio'], cid)
+    d = client.post('/api/diag-reseau/test-snmp', json={}).get_json()
+    assert d['ok'] is True and d['sysname'] == 'SW-CORE' and d['communaute'] == 'public'
+    # lecture seule -> 403
+    login_session(client, deux_clients['lecteur'], cid)
+    assert client.post('/api/diag-reseau/test-snmp', json={}).status_code == 403
+
+
+def test_api_test_snmp_sans_equipement(client, deux_clients, monkeypatch):
+    login_session(client, deux_clients['proprio'], deux_clients['cid_b'])
+    d = client.post('/api/diag-reseau/test-snmp', json={}).get_json()
+    assert d['ok'] is False and 'motif' in d
+
+
 def test_metriques_serie(client, conn, deux_clients):
     import time
     cid = deux_clients['cid_a']

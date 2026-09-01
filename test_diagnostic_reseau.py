@@ -331,5 +331,35 @@ verifier(_ct[:4] == b'%PDF' or _mt.startswith('text/html'),
 _ch, _mh, _fh = N.generer_rapport_diag(903, forcer_html=True)
 verifier(_mh.startswith('text/html') and '<html' in _ch.lower(), "forcer_html -> HTML")
 
+print('\n=== 13. Consolidation — parse_rapport_cron ===')
+verifier(N.parse_rapport_cron('08:00') == {'hour': 8, 'minute': 0}, "'08:00' -> quotidien 08h00")
+verifier(N.parse_rapport_cron('lun 07:30') == {'hour': 7, 'minute': 30, 'day_of_week': 'mon'},
+         "'lun 07:30' -> hebdo lundi")
+verifier(N.parse_rapport_cron('') is None and N.parse_rapport_cron('n\'importe quoi') is None
+         and N.parse_rapport_cron('25:00') is None, "entrées vides / invalides -> None")
+
+print('\n=== 14. Consolidation — mode rapide + budget du snapshot ===')
+_c = A.get_db()
+_c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (904, 'Rapide')")
+_c.commit(); _c.close()
+_calls = {'n': None, 'capture': 0}
+_orig_ping = N._ping_rafale
+N._ping_rafale = lambda ip, n=20: (_calls.__setitem__('n', n) or
+                                   {'ip': ip, 'envoyes': n, 'recus': n, 'perte_pct': 0.0,
+                                    'min': 1.0, 'moy': 1.0, 'max': 1.0, 'gigue': 0.0})
+_orig_capt = N.capture_passive
+N.capture_passive = lambda *a, **k: (_calls.__setitem__('capture', _calls['capture'] + 1) or [])
+N._passerelle_defaut = lambda: '192.168.255.254'
+from config_helpers import cfg_invalidate as _inv2
+_c = A.get_db()
+_c.execute("INSERT OR REPLACE INTO config (cle, valeur) VALUES ('diag_capture_active', '1')")
+_c.commit(); _c.close(); _inv2()
+N._run_snapshot(904, '', None, rapide=True)
+verifier(_calls['n'] == 8, "mode rapide -> ping n=8", str(_calls['n']))
+verifier(_calls['capture'] == 0, "mode rapide -> capture passive non exécutée")
+st = N.statut_snapshot()
+verifier(isinstance(st.get('phases'), dict) and st['phases'], "resume phases renseigné", str(st.get('phases')))
+N._ping_rafale, N.capture_passive = _orig_ping, _orig_capt
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

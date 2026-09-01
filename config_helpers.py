@@ -180,6 +180,10 @@ CFG_DEFAULTS = {
     'diag_baseline_active': '1',       # alerte sur dégradation relative à la référence
     'diag_baseline_jours': '7',        # fenêtre d'historique pour la référence
     'diag_baseline_facteur': '2.5',    # multiple de la p90 déclenchant l'alerte
+    # ── Consolidation ────────────────────────────────────────────────────────
+    'diag_snapshot_rapide': '0',       # mode court : moins de pings, pas de capture
+    'diag_snapshot_budget_s': '120',   # plafond souple ; au-delà, phases lourdes sautées
+    'diag_rapport_cron': '',           # rapport périodique par e-mail ('HH:MM' ou 'lun HH:MM')
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',

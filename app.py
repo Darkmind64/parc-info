@@ -8960,10 +8960,16 @@ def page_diag_reseau():
     dernier_run = row_to_dict(conn.execute(
         'SELECT * FROM diag_reseau_runs WHERE client_id=? ORDER BY id DESC LIMIT 1', (cid,)).fetchone() or {})
     conn.close()
+    diag_cfg = {k: cfg_get(k) for k in (
+        'diag_surveillance_active', 'diag_snmp_actif', 'diag_topologie_active',
+        'diag_capture_active', 'diag_baseline_active', 'diag_alerte_email',
+        'diag_snapshot_rapide', 'diag_intervalle_s', 'diag_snmp_communautes',
+        'diag_alerte_destinataire', 'diag_rapport_cron')}
     return render_template('diag_reseau.html',
                            parc=parc, client=client, dernier_run=dernier_run,
                            etat_capture=network_diag.etat_capture(),
                            etat_moniteur=network_diag.etat_moniteur(),
+                           diag_cfg=diag_cfg,
                            peut_ecrire=can_write(cid),
                            clients=get_clients(), client_actif_id=cid)
 
@@ -8977,9 +8983,37 @@ def api_diag_snapshot():
     data = request.json or {}
     plage = (data.get('plage') or '').strip()
     avec_capture = data.get('avec_capture')  # None = suit le réglage global
-    if not network_diag.lancer_snapshot(cid, plage, avec_capture):
+    rapide = data.get('rapide')              # None = suit le réglage global
+    if not network_diag.lancer_snapshot(cid, plage, avec_capture, rapide):
         return jsonify({'error': 'Un diagnostic est déjà en cours'}), 400
     return jsonify({'status': 'started'})
+
+
+@app.route('/api/diag-reseau/test-snmp', methods=['POST'])
+@login_required
+def api_diag_test_snmp():
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    conn = get_db()
+    row = conn.execute(
+        "SELECT nom_machine, adresse_ip FROM appareils WHERE client_id=? "
+        "AND type_appareil IN ('Switch','Switch/AP','Routeur/Pare-feu','NAS') "
+        "AND adresse_ip!='' AND adresse_ip IS NOT NULL ORDER BY id LIMIT 1", (cid,)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'ok': False, 'motif': "Aucun appareil de type Switch/Routeur/NAS avec une IP"})
+    nom, ip = row
+    communautes = [c.strip() for c in re.split(r'[,;\s]+',
+                   (cfg_get('diag_snmp_communautes', 'public') or 'public')) if c.strip()] or ['public']
+    for comm in communautes:
+        res = _snmp_get(ip, [_OID_SYS_NAME, _OID_SYS_DESCR], comm, timeout=1.5)
+        if res:
+            return jsonify({'ok': True, 'equipement': nom, 'ip': ip, 'communaute': comm,
+                            'sysname': res.get(_OID_SYS_NAME, ''),
+                            'sysdescr': res.get(_OID_SYS_DESCR, '')[:200]})
+    return jsonify({'ok': False, 'equipement': nom, 'ip': ip,
+                    'motif': f"Aucune réponse SNMP (communautés essayées : {', '.join(communautes)})"})
 
 
 @app.route('/api/diag-reseau/snapshot/status')
@@ -11565,6 +11599,44 @@ def _send_email(to_email, subject, body):
         return True
     except Exception as e:
         logger.error(f'Erreur envoi email: {e}')
+        return False
+
+
+def _envoyer_email_piece_jointe(to_email, subject, body_html, nom_fichier, contenu, mimetype):
+    """Envoie un email HTML avec une pièce jointe (rapport PDF/HTML). True si succès."""
+    try:
+        smtp_server = cfg_get('smtp_server', '')
+        smtp_port = int(cfg_get('smtp_port', '587'))
+        smtp_login = cfg_get('smtp_login', '')
+        smtp_password = cfg_get('smtp_password', '')
+        from_email = cfg_get('from_email', smtp_login)
+        if not all([smtp_server, smtp_login, smtp_password]):
+            logger.warning('SMTP non configuré - rapport planifié ignoré')
+            return False
+
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.application import MIMEApplication
+
+        msg = MIMEMultipart('mixed')
+        msg['Subject'] = subject
+        msg['From'] = from_email
+        msg['To'] = to_email
+        msg.attach(MIMEText(body_html, 'html'))
+        sous_type = 'pdf' if 'pdf' in (mimetype or '') else 'octet-stream'
+        piece = MIMEApplication(contenu, _subtype=sous_type)
+        piece.add_header('Content-Disposition', 'attachment', filename=nom_fichier)
+        msg.attach(piece)
+
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_login, smtp_password)
+        server.sendmail(from_email, [to_email], msg.as_string())
+        server.quit()
+        return True
+    except Exception as e:
+        logger.error(f'Erreur envoi email avec pièce jointe: {e}')
         return False
 
 
@@ -16083,6 +16155,11 @@ if __name__ == '__main__':
     # nécessaire en plus du téléchargement au démarrage pour une instance
     # qui tourne en continu (Docker) sans jamais redémarrer.
     scheduler.add_job(lambda: _oui_telecharger(force=False), 'cron', hour=3, minute=30)
+    # Cron job optionnel : rapport de diagnostic réseau par e-mail
+    _diag_cron = network_diag.parse_rapport_cron(cfg_get('diag_rapport_cron', ''))
+    if _diag_cron:
+        scheduler.add_job(network_diag.tache_rapport_planifie, 'cron', **_diag_cron)
+        logger.info("Cron : rapport diagnostic réseau planifié (%s)", _diag_cron)
     scheduler.start()
     logger.info("Cron scheduler démarré (régénération à 02:00, notifications à 08:00, base OUI à 03:30)")
 

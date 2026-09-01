@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.19.2
+PARCINFO_VERSION=2.19.3
 RELEASE_DATE=2026-09-01
-BUILD_NUMBER=2026090102
+BUILD_NUMBER=2026090103
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.3 - Diagnostic reseau : consolidation
+# Demande : "consolider le module diagnostic" apres 3 releases (6 paliers).
+# Aucune nouvelle detection.
+#
+# 1. Page /diag-reseau en 4 onglets (Vue d'ensemble / Ports & topologie /
+#    Tendances / Evenements) - les 7 blocs empiles devenaient illisibles.
+#    Dernier onglet memorise dans localStorage.
+# 2. Panneau "Configuration du diagnostic" en tete : bascules rapides pour
+#    surveillance / SNMP / topologie / capture / baseline / alerte e-mail
+#    (via /api/config), + bouton "Tester SNMP" (POST /api/diag-reseau/
+#    test-snmp : essaie les communautes sur le premier switch/routeur du
+#    client, renvoie sysName).
+# 3. Bornage du temps de snapshot :
+#    - mode rapide (diag_snapshot_rapide + case a cocher) : ping n=8, 1 releve
+#      ARP, pas de capture
+#    - chronometrage par phase, affiche dans le statut et stocke dans
+#      resume_json.phases du run
+#    - budget souple (diag_snapshot_budget_s, 120 s) : au-dela, SNMP /
+#      topologie / capture sont sautees avec un avertissement
+# 4. Rapport periodique par e-mail : diag_rapport_cron ("HH:MM" ou
+#    "lun HH:MM") -> job APScheduler (app.py __main__ + launcher.py) ->
+#    tache_rapport_planifie() genere generer_rapport_diag() et l'envoie en
+#    piece jointe (_envoyer_email_piece_jointe) a diag_alerte_destinataire.
+# 5. Documentation : DIAGNOSTIC_RESEAU.md (6 paliers, table des categories
+#    avec detection + remediation, toutes les cles diag_*, les OIDs SNMP, les
+#    tables DB, notes de deploiement). Reference depuis CLAUDE.md et README.
+#
+# 3 nouvelles cles de config. Aucune nouvelle dependance.
 
 # Version 2.19.2 - Diagnostic reseau : paliers 4/5/6 (topologie L2, tendances, rapports)
 # Demande : "etape suivante" -> les trois compléments restants du module,

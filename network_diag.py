@@ -1747,6 +1747,67 @@ def _rapport_html(nom_client, date_str, evts, par_gravite, snmp, topo):
     return html, 'text/html; charset=utf-8', f'diagnostic-reseau-{ts}.html'
 
 
+_JOURS_CRON = {'lun': 'mon', 'mar': 'tue', 'mer': 'wed', 'jeu': 'thu',
+               'ven': 'fri', 'sam': 'sat', 'dim': 'sun'}
+
+
+def parse_rapport_cron(chaine: str):
+    """'08:00' -> {hour:8, minute:0} (quotidien) ; 'lun 08:00' -> + day_of_week.
+    None si vide/invalide."""
+    chaine = (chaine or '').strip().lower()
+    if not chaine:
+        return None
+    jour = None
+    m = re.match(r'^([a-zéûù]{3})\s+(\d{1,2}):(\d{2})$', chaine)
+    if m:
+        jour = _JOURS_CRON.get(m.group(1))
+        h, mn = int(m.group(2)), int(m.group(3))
+    else:
+        m = re.match(r'^(\d{1,2}):(\d{2})$', chaine)
+        if not m:
+            return None
+        h, mn = int(m.group(1)), int(m.group(2))
+    if not (0 <= h <= 23 and 0 <= mn <= 59):
+        return None
+    args = {'hour': h, 'minute': mn}
+    if jour:
+        args['day_of_week'] = jour
+    return args
+
+
+def tache_rapport_planifie():
+    """Job cron : envoie le rapport de diagnostic à diag_alerte_destinataire
+    pour chaque client ayant des appareils. No-op si SMTP/destinataire absent."""
+    dest = str(_cfg('diag_alerte_destinataire', '') or '').strip()
+    if '@' not in dest:
+        logger.info('network_diag: rapport planifié — pas de destinataire, ignoré')
+        return
+    try:
+        from database import get_db
+        from app import _envoyer_email_piece_jointe
+        conn = get_db()
+        clients = conn.execute(
+            "SELECT DISTINCT c.id, c.nom FROM clients c "
+            "JOIN appareils a ON a.client_id = c.id").fetchall()
+        conn.close()
+    except Exception:
+        logger.exception('network_diag: rapport planifié — préparation impossible')
+        return
+    for cid, nom in clients:
+        try:
+            contenu, mimetype, fichier = generer_rapport_diag(cid)
+            if isinstance(contenu, str):
+                contenu = contenu.encode('utf-8')
+            corps = (f"<html><body style=\"font-family:Arial\">"
+                     f"<p>Rapport de diagnostic réseau pour <strong>{nom}</strong>, "
+                     f"généré automatiquement par ParcInfo.</p></body></html>")
+            _envoyer_email_piece_jointe(dest, f"🩺 ParcInfo — diagnostic réseau ({nom})",
+                                        corps, fichier, contenu, mimetype)
+            logger.info('network_diag: rapport planifié envoyé pour %s', nom)
+        except Exception:
+            logger.exception('network_diag: rapport planifié — échec pour client %s', cid)
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  Orchestration : snapshot + persistance
 # ════════════════════════════════════════════════════════════════════════════
@@ -1765,15 +1826,15 @@ def statut_snapshot() -> dict:
         return dict(_diag_status)
 
 
-def lancer_snapshot(client_id: int, plage: str = '', avec_capture=None) -> bool:
+def lancer_snapshot(client_id: int, plage: str = '', avec_capture=None, rapide=None) -> bool:
     """Démarre un snapshot en thread détaché. False si un run est déjà en cours."""
     with _diag_lock:
         if _diag_status['running']:
             return False
         _diag_status.update({'running': True, 'progress': 0, 'client_id': client_id,
                              'message': 'Initialisation…', 'findings': [],
-                             'avertissements': [], 'run_id': None, 'fin': None})
-    threading.Thread(target=_run_snapshot, args=(client_id, plage, avec_capture),
+                             'avertissements': [], 'run_id': None, 'fin': None, 'phases': {}})
+    threading.Thread(target=_run_snapshot, args=(client_id, plage, avec_capture, rapide),
                      daemon=True, name='DiagReseauSnapshot').start()
     return True
 
@@ -1783,60 +1844,91 @@ def _maj_statut(**kw):
         _diag_status.update(kw)
 
 
-def _run_snapshot(client_id: int, plage: str, avec_capture):
+def _run_snapshot(client_id: int, plage: str, avec_capture, rapide=None):
     debut = _now_z()
     t0 = time.time()
     findings, avertissements = [], []
+    phases = {}
     if avec_capture is None:
         avec_capture = str(_cfg('diag_capture_active', '0')) == '1'
+    if rapide is None:
+        rapide = str(_cfg('diag_snapshot_rapide', '0')) == '1'
+    budget = _cfg_int('diag_snapshot_budget_s', 120)
 
     seuil_perte = _cfg_float('diag_seuil_perte_pct', 5)
     seuil_gigue = _cfg_float('diag_seuil_jitter_ms', 30)
     seuil_bc = _cfg_int('diag_seuil_broadcast_pps', 150)
     duree_capture = _cfg_int('diag_snapshot_duree_s', 20)
+    n_ping = 8 if rapide else 20
     passerelle = _passerelle_defaut()
 
-    try:
-        _maj_statut(progress=10, message='Analyse des tables ARP (conflits d’adresses)…')
-        findings += detecter_conflits_ip(passerelle)
+    def _phase(nom, progress, libelle):
+        _maj_statut(progress=progress,
+                    message=f"{libelle} — {int(time.time() - t0)} s")
+        return time.time()
 
-        _maj_statut(progress=30, message='Test de qualité de liaison (passerelle, DNS)…')
+    def _fin_phase(nom, tp):
+        phases[nom] = round(time.time() - tp, 1)
+
+    def _budget_ok(quoi):
+        if budget and (time.time() - t0) > budget:
+            avertissements.append(f"{quoi} sautée (budget de {budget} s dépassé)")
+            return False
+        return True
+
+    try:
+        tp = _phase('arp', 10, 'Analyse des tables ARP (conflits d’adresses)')
+        findings += detecter_conflits_ip(passerelle, releves=1 if rapide else 2)
+        _fin_phase('arp', tp)
+
+        tp = _phase('liaison', 30, 'Test de qualité de liaison (passerelle, DNS)')
         cibles = _cibles_ping(client_id, passerelle)
         stats_liaison = []
-        findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, collecte=stats_liaison)
+        findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue,
+                                            n=n_ping, collecte=stats_liaison)
         enregistrer_metriques_liaison(client_id, stats_liaison)
+        _fin_phase('liaison', tp)
 
-        _maj_statut(progress=50, message='Contrôle de la résolution DNS…')
+        tp = _phase('dns', 50, 'Contrôle de la résolution DNS')
         serveur_dns = next((c['ip'] for c in cibles if c.get('role') == 'dns'), '')
         findings += verifier_dns(serveur_dns)
+        _fin_phase('dns', tp)
 
-        _maj_statut(progress=60, message='Recherche d’un serveur DHCP non autorisé…')
+        tp = _phase('dhcp', 60, 'Recherche d’un serveur DHCP non autorisé')
         attendus = re.split(r'[,;\s]+', str(_cfg('diag_dhcp_serveurs_attendus', '') or ''))
         findings += detecter_dhcp_pirate(attendus)
+        _fin_phase('dhcp', tp)
 
-        _maj_statut(progress=70, message='Détection des conflits de noms réseau…')
+        tp = _phase('noms', 70, 'Détection des conflits de noms réseau')
         findings += detecter_conflits_noms(client_id)
+        _fin_phase('noms', tp)
 
-        if str(_cfg('diag_snmp_actif', '0')) == '1':
-            _maj_statut(progress=76, message='Interrogation SNMP des équipements réseau…')
+        if str(_cfg('diag_snmp_actif', '0')) == '1' and _budget_ok('Interrogation SNMP'):
+            tp = _phase('snmp', 76, 'Interrogation SNMP des équipements réseau')
             findings += interroger_equipements_client(client_id)
-            if str(_cfg('diag_topologie_active', '0')) == '1':
-                _maj_statut(progress=84, message='Cartographie de topologie L2…')
+            _fin_phase('snmp', tp)
+            if str(_cfg('diag_topologie_active', '0')) == '1' and _budget_ok('Cartographie de topologie'):
+                tp = _phase('topologie', 84, 'Cartographie de topologie L2')
                 findings += decouvrir_topologie(client_id)
+                _fin_phase('topologie', tp)
 
-        _maj_statut(progress=88, message='Analyse des tendances (baseline)…')
+        tp = _phase('baseline', 88, 'Analyse des tendances (baseline)')
         findings += evaluer_baseline(client_id)
+        _fin_phase('baseline', tp)
 
         capture_utilisee = False
-        if avec_capture:
+        if rapide and avec_capture:
+            avertissements.append("Capture passive ignorée (mode rapide)")
+        elif avec_capture and _budget_ok('Capture passive'):
             etat = etat_capture()
             if etat['disponible']:
-                _maj_statut(progress=80, message=f'Capture passive ({duree_capture} s)…')
+                tp = _phase('capture', 90, f'Capture passive ({duree_capture} s)')
                 findings += capture_passive(duree_capture, {'broadcast_pps': seuil_bc})
+                _fin_phase('capture', tp)
                 capture_utilisee = True
             else:
                 avertissements.append(f"Capture passive indisponible : {etat['motif']}")
-        elif str(_cfg('diag_capture_active', '0')) != '1':
+        elif not avec_capture and str(_cfg('diag_capture_active', '0')) != '1':
             avertissements.append("Capture passive (palier 2) désactivée dans les réglages")
 
         _maj_statut(progress=92, message='Enregistrement des évènements…')
@@ -1846,9 +1938,12 @@ def _run_snapshot(client_id: int, plage: str, avec_capture):
                                   'snapshot', plage, capture_utilisee,
                                   {'nb_findings': len(findings), 'nb_nouveaux': nb_nouveaux,
                                    'cibles': [c.get('ip') for c in cibles],
+                                   'rapide': rapide, 'phases': phases,
                                    'avertissements': avertissements})
-        _maj_statut(progress=100, running=False, message=f'Terminé — {len(findings)} constat(s)',
-                    findings=findings, avertissements=avertissements, run_id=run_id, fin=_now_z())
+        _maj_statut(progress=100, running=False,
+                    message=f'Terminé en {int(time.time() - t0)} s — {len(findings)} constat(s)',
+                    findings=findings, avertissements=avertissements, run_id=run_id,
+                    phases=phases, fin=_now_z())
     except Exception as e:
         logger.exception('network_diag: snapshot en échec')
         _maj_statut(running=False, progress=100, message=f'Erreur : {e}',
@@ -2053,7 +2148,8 @@ def _moniteur_cycle():
             findings = detecter_conflits_ip(passerelle, releves=1)
             cibles = _cibles_ping(cid, passerelle)
             stats_liaison = []
-            findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, n=10,
+            _n = 8 if str(_cfg('diag_snapshot_rapide', '0')) == '1' else 10
+            findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, n=_n,
                                                 collecte=stats_liaison)
             enregistrer_metriques_liaison(cid, stats_liaison)
             findings += detecter_conflits_noms(cid)

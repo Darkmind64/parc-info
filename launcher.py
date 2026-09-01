@@ -365,6 +365,13 @@ def main():
     try:
         flask_app.scheduler.add_job(flask_app._regenerate_all_maintenance_occurrences, 'cron', hour=2, minute=0)
         flask_app.scheduler.add_job(flask_app._notify_upcoming_maintenances, 'cron', hour=8, minute=0)
+        try:
+            import network_diag as _nd
+            _dc = _nd.parse_rapport_cron(flask_app.cfg_get('diag_rapport_cron', ''))
+            if _dc:
+                flask_app.scheduler.add_job(_nd.tache_rapport_planifie, 'cron', **_dc)
+        except Exception:
+            pass
         flask_app.scheduler.start()
         logger.info("Cron scheduler démarré (régénération à 02:00, notifications à 08:00)")
     except Exception as e:
