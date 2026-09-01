@@ -1283,6 +1283,12 @@ function ignorerGarantie(id, btn) {
             body.innerHTML = '';
             body.style.display = 'none';
             vide.style.display = '';
+            if (d && d.actif === true && d.motif === 'sans_reponse')
+                vide.textContent = (d.nb_switchs || 0) + ' switch(s) dans la baie — aucune réponse SNMP (communauté / pare-feu ?).';
+            else if (d && d.actif === true && d.motif === 'aucun_switch')
+                vide.textContent = 'Reliez le slot du switch de la baie à sa fiche appareil (avec une adresse IP).';
+            else if (d && d.actif === false)
+                vide.textContent = 'Active le SNMP dans le diagnostic réseau.';
             return;
         }
         body.style.display = '';

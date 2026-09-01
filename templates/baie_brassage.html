@@ -3153,9 +3153,16 @@ function majBandeauActivite(d) {
         return;
     }
     const eqs = d.equipements || [];
+    b.style.display = '';
+    if (!eqs.length) {
+        b.style.color = 'var(--accent-orange, #f59e0b)';
+        b.textContent = d.motif === 'sans_reponse'
+            ? `⚡ ${d.nb_switchs} switch${d.nb_switchs > 1 ? 's' : ''} dans la baie — aucune réponse SNMP (communauté / pare-feu / SNMP désactivé sur l'équipement ?)`
+            : `⚡ Aucun switch de la baie associé à un appareil avec adresse IP — reliez le slot du switch à sa fiche appareil`;
+        return;
+    }
     const nbActifs = eqs.reduce((n, e) => n + (e.nb_actifs || 0), 0);
     const debit = eqs.reduce((n, e) => n + (e.debit_total_bps || 0), 0);
-    b.style.display = '';
     b.style.color = d.calibre ? 'var(--accent-green)' : 'var(--accent-orange, #f59e0b)';
     b.textContent = `⚡ ${eqs.length} switch${eqs.length > 1 ? 's' : ''} · ${nbActifs} port${nbActifs > 1 ? 's' : ''} actif${nbActifs > 1 ? 's' : ''} · ${fmtDebit(debit)}`
                     + (d.calibre ? '' : ' · non calibré');

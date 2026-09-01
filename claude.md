@@ -1614,6 +1614,6 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 
 ---
 
-**Dernier update** : 2026-09-01 (v2.19.6 — Vue d'activité de la baie : LEDs des ports animées en direct via SNMP)
+**Dernier update** : 2026-09-01 (v2.19.7 — Vue d'activité baie : détection élargie des switchs + bandeau explicite)
 **Mainteneur** : ParcInfo Team
 **License** : Voir LICENSE

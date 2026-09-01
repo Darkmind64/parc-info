@@ -2860,16 +2860,25 @@ _activite_resultat  = {}   # client_id -> dict prêt pour l'UI
 _activite_thread    = None
 
 
+_TYPES_EQUIP_BAIE_RESEAU = ('Switch', 'Switch/AP', 'Routeur/Pare-feu')
+
+
 def _switchs_baie(conn, client_id):
-    """Switchs (et assimilés SNMP) montés en baie et dotés d'une IP.
+    """Équipements réseau montés en baie et interrogeables en SNMP : un slot
+    associé à un appareil doté d'une IP. On accepte soit un `type_appareil`
+    réseau connu, soit un slot dont le `type_equipement` (étiquette de la baie)
+    dit « Switch »/« Routeur » même si l'appareil lié est typé autrement — le
+    seul vrai prérequis pour lire les compteurs SNMP est l'adresse IP.
     Dédupe par IP (un même équipement peut apparaître dans deux slots)."""
-    placeholders = ','.join('?' * len(_TYPES_EQUIP_SNMP))
+    ph = ','.join('?' * len(_TYPES_EQUIP_SNMP))
+    ph2 = ','.join('?' * len(_TYPES_EQUIP_BAIE_RESEAU))
     rows = conn.execute(
         f"SELECT s.id AS slot_id, s.appareil_id, a.adresse_ip, a.nom_machine "
         f"FROM baie_slots s JOIN appareils a ON a.id = s.appareil_id "
-        f"WHERE s.client_id=? AND a.type_appareil IN ({placeholders}) "
-        f"AND COALESCE(a.adresse_ip,'') <> '' "
-        f"ORDER BY s.position", (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
+        f"WHERE s.client_id=? AND COALESCE(a.adresse_ip,'') <> '' "
+        f"AND (a.type_appareil IN ({ph}) OR s.type_equipement IN ({ph2})) "
+        f"ORDER BY s.position",
+        (client_id, *_TYPES_EQUIP_SNMP, *_TYPES_EQUIP_BAIE_RESEAU)).fetchall()
     vus, switchs = set(), []
     for slot_id, aid, ip, nom in rows:
         if ip in vus:
@@ -2997,9 +3006,11 @@ def _cycle_activite(clients):
             try:
                 switchs = _switchs_baie(conn, cid)[:_ACTIVITE_MAX_SWITCHS]
                 equipements, ports_ui = [], []
+                nb_muets = 0
                 for sw in switchs:
                     cur = _poll_switch_activite(sw['ip'], communautes)
                     if not cur:
+                        nb_muets += 1
                         continue
                     mapping, calibre = _mapping_baie_ifindex(
                         conn, cid, sw['slot_id'], sw['appareil_id'], set(cur))
@@ -3028,10 +3039,16 @@ def _cycle_activite(clients):
                         'nb_ports_up': nb_up, 'nb_actifs': nb_actifs, 'erreurs': err_total})
             finally:
                 conn.close()
+            motif = ''
+            if not switchs:
+                motif = 'aucun_switch'   # aucun slot réseau lié à un appareil avec IP
+            elif not equipements:
+                motif = 'sans_reponse'   # switch(s) trouvé(s) mais muet(s) en SNMP
             with _activite_lock:
                 _activite_resultat[cid] = {
-                    'actif': True, 'ts': now,
-                    'calibre': all(e['calibre'] for e in equipements) if equipements else False,
+                    'actif': True, 'ts': now, 'nb_switchs': len(switchs), 'nb_muets': nb_muets,
+                    'motif': motif,
+                    'calibre': bool(equipements) and all(e['calibre'] for e in equipements),
                     'equipements': equipements, 'ports': ports_ui}
         except Exception:
             logger.debug('network_diag: cycle activité — client %s en échec', cid, exc_info=True)

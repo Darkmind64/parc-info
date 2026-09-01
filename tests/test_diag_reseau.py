@@ -430,3 +430,26 @@ def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, mo
     assert res and res['actif'] is True
     assert any(p['numero'] == 1 for p in res['ports'])
     assert res['equipements'][0]['ip'] == '10.0.0.2'
+
+
+def test_switchs_baie_repli_type_equipement(conn, deux_clients, make_appareil):
+    """Un slot étiqueté « Switch » dans la baie, lié à un appareil qui a une IP
+    mais n'est PAS typé Switch, doit quand même être interrogé (le seul vrai
+    prérequis SNMP est l'adresse IP)."""
+    cid = deux_clients['cid_a']
+    aid = make_appareil(cid, nom_machine='SW-X', type_appareil='Autre', adresse_ip='10.0.0.7')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id, type_equipement) "
+                 "VALUES (?,1,?,'Switch')", (cid, aid))
+    conn.commit()
+    ips = [s['ip'] for s in network_diag._switchs_baie(conn, cid)]
+    assert '10.0.0.7' in ips
+
+
+def test_cycle_activite_motif_sans_switch(conn, deux_clients):
+    """Aucun switch de baie -> motif 'aucun_switch', calibre False, pas d'erreur."""
+    cid = deux_clients['cid_b']
+    network_diag._cycle_activite([cid])
+    with network_diag._activite_lock:
+        res = network_diag._activite_resultat.get(cid)
+    assert res['actif'] is True and res['motif'] == 'aucun_switch'
+    assert res['nb_switchs'] == 0 and res['calibre'] is False

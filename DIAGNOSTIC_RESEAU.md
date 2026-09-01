@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-01 (v2.19.6). En cas de doute
+> Ce document décrit le comportement au 2026-09-01 (v2.19.7). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -41,6 +41,11 @@ des switchs de la baie (walk réduit : `ifOperStatus`, `ifHighSpeed`/`ifSpeed`,
 `ifHCInOctets`/`ifHCOutOctets`, `ifInErrors`/`ifOutErrors`), calcule le débit
 par delta et renvoie l'état à peindre par port.
 
+- **Quels équipements** : `_switchs_baie` — un slot de baie lié à un appareil
+  doté d'une **adresse IP**, dont le `type_appareil` est réseau (`_TYPES_EQUIP_SNMP`)
+  **ou** dont l'étiquette de slot `type_equipement` vaut Switch/Switch·AP/Routeur.
+  Le résultat porte `nb_switchs` / `nb_muets` / `motif` (`aucun_switch` |
+  `sans_reponse`) pour que le bandeau explique l'absence de données.
 - **Association port baie ↔ ifIndex** : `_mapping_baie_ifindex` — d'abord la
   topologie (`diag_topologie` : l'appareil branché est vu par le switch sur un
   ifIndex précis → mapping fiable, `calibre=True`), sinon repli naïf

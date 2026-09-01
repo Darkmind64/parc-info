@@ -1,8 +1,21 @@
-PARCINFO_VERSION=2.19.6
+PARCINFO_VERSION=2.19.7
 RELEASE_DATE=2026-09-01
-BUILD_NUMBER=2026090106
+BUILD_NUMBER=2026090107
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.7 - Vue d'activite baie : detection des switchs + messages clairs
+# Retour terrain : le bandeau affichait "0 switch . 0 port actif . non
+# calibre" sans expliquer pourquoi.
+#
+# - _switchs_baie() : un slot etiquete "Switch"/"Switch/AP"/"Routeur" dans la
+#   baie est desormais interroge meme si l'appareil lie n'est pas type
+#   "Switch" (le seul vrai prerequis SNMP est l'adresse IP).
+# - Le resultat porte nb_switchs / nb_muets / motif ; le bandeau de la page
+#   baie et le widget dashboard disent precisement : "aucun switch relie a une
+#   fiche avec IP" vs "N switch(s) trouves, aucune reponse SNMP (communaute /
+#   pare-feu ?)". Plus de "non calibre" quand il n'y a rien a calibrer.
+# - Aucune nouvelle dependance, aucun schema change.
 
 # Version 2.19.6 - Vue d'activite de la baie : LEDs des ports en direct (SNMP)
 # Demande : "integrer une sorte de moniteur reseau qui affiche les trames qui
