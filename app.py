@@ -1777,7 +1777,11 @@ def init_db():
     # référencent mutuellement (lie_slot_id+lie_port_numero sur CHACUN des
     # deux, pas une seule ligne de jonction) — reste dans le même schéma
     # d'adressage (slot_id, numero) que tout le reste de baie_slot_ports.
-    for col_add, defval in [('lie_slot_id', 'INTEGER'), ('lie_port_numero', 'INTEGER')]:
+    # if_index : calibration manuelle port de baie <-> interface SNMP du switch
+    # (le numéro de port n'est presque jamais égal à l'ifIndex) — voir la modale
+    # « Moniteur » de la baie, network_diag._mapping_baie_ifindex / calibrer_port_baie.
+    for col_add, defval in [('lie_slot_id', 'INTEGER'), ('lie_port_numero', 'INTEGER'),
+                            ('if_index', 'INTEGER')]:
         try:
             c.execute(f"ALTER TABLE baie_slot_ports ADD COLUMN {col_add} {defval}")
         except: pass
@@ -7025,6 +7029,25 @@ def api_baie_activite_capture():
     return jsonify({'ok': True, 'duree_s': duree})
 
 
+@app.route('/api/baie/activite/calibrer', methods=['POST'])
+@login_required
+def api_baie_activite_calibrer():
+    """Fixe (ou efface) l'ifIndex SNMP d'un port de baie — le numéro de port
+    n'est presque jamais égal à l'ifIndex du switch."""
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    d = request.json or {}
+    try:
+        slot_id = int(d.get('slot_id'))
+        numero = int(d.get('numero'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'slot_id/numero requis'}), 400
+    ok = network_diag.calibrer_port_baie(cid, slot_id, numero, d.get('if_index'))
+    return (jsonify({'ok': True}) if ok
+            else (jsonify({'error': 'slot introuvable'}), 404))
+
+
 def _liste_cablage(conn, cid):
     """Chaque lien port-à-port du client, une seule fois (pas les deux sens),
     avec le nom des deux éléments — sert à la fois à la page imprimable et à
@@ -8724,21 +8747,33 @@ def _snmp_walk(ip_str, oid_base, communautes=('public',), timeout=1.2,
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.settimeout(timeout)
                 for _ in range(max_vars):
+                    reqid_env = _snmp_walk_reqid()
                     vb = _ber_sequence(0x30, _ber_oid(oid_courant) + b'\x05\x00')
-                    pdu_corps = (_ber_entier(_snmp_walk_reqid()) + _ber_entier(0)
+                    pdu_corps = (_ber_entier(reqid_env) + _ber_entier(0)
                                  + _ber_entier(0) + _ber_sequence(0x30, vb))
                     pdu = _ber_sequence(0xa1, pdu_corps)  # GetNextRequest-PDU
                     # version 1 (v2c) : GETBULK serait mieux mais GETNEXT marche partout
                     message = _ber_sequence(
                         0x30, _ber_entier(1) + _ber_chaine(communaute) + pdu)
                     s.sendto(message, (ip_str, port))
-                    data, _ = s.recvfrom(4096)
 
-                    _, corps, _ = _ber_lire_tlv(data, 0)
-                    pos = 0
-                    _, _v, pos = _ber_lire_tlv(corps, pos)
-                    _, _c, pos = _ber_lire_tlv(corps, pos)
-                    tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
+                    # Lire jusqu'à la réponse qui porte NOTRE request-id : un
+                    # switch bas de gamme, lent, renvoie parfois une réponse
+                    # tardive à la requête précédente — l'associer à celle-ci
+                    # décalerait tout le walk (ports fantômes, valeurs répétées).
+                    for _drain in range(4):
+                        data, _ = s.recvfrom(4096)
+                        _, corps, _ = _ber_lire_tlv(data, 0)
+                        pos = 0
+                        _, _v, pos = _ber_lire_tlv(corps, pos)
+                        _, _c, pos = _ber_lire_tlv(corps, pos)
+                        tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
+                        _p0 = 0
+                        _, _rid_b, _p0 = _ber_lire_tlv(pdu_corps_r, _p0)
+                        if int.from_bytes(_rid_b, 'big', signed=True) == reqid_env:
+                            break
+                    else:
+                        break
                     if tag_pdu != 0xa2:
                         break
                     p = 0
@@ -8774,6 +8809,117 @@ _snmp_walk_reqid_compteur = [0]
 def _snmp_walk_reqid():
     _snmp_walk_reqid_compteur[0] = (_snmp_walk_reqid_compteur[0] + 1) & 0x7fffffff
     return _snmp_walk_reqid_compteur[0] or 1
+
+
+def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
+                    max_rows=600, port=161):
+    """Parcourt PLUSIEURS colonnes de table en parallèle par GETBULK (SNMPv2c).
+    Retourne {oid_base: {suffixe: valeur}} — chaque varbind de la réponse porte
+    son OID, donc l'association est faite par comparaison de préfixe (aucune
+    hypothèse d'ordre, contrairement à _snmp_get_typed qui associe par
+    position et se trompe sur les agents qui ne respectent pas la RFC 1157).
+    Bien moins de paquets qu'un GETNEXT par colonne. Repli GETNEXT
+    (_snmp_walk) par colonne si l'agent ne répond pas au GETBULK."""
+    if isinstance(communautes, str):
+        communautes = [communautes]
+    oid_bases = list(oid_bases)
+    prefs = [b if b.endswith('.') else b + '.' for b in oid_bases]
+    for communaute in communautes:
+        res = {b: {} for b in oid_bases}
+        courant = {b: b for b in oid_bases}     # base -> dernier OID interrogé
+        rows = 0
+        ok = False
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.settimeout(timeout)
+                while courant and rows < max_rows:
+                    actifs = list(courant.items())
+                    vb = b''.join(_ber_sequence(0x30, _ber_oid(o) + b'\x05\x00')
+                                  for _, o in actifs)
+                    max_rep = max(1, min(25, (max_rows - rows) // len(actifs) + 1))
+                    reqid_env = _snmp_walk_reqid()
+                    pdu_corps = (_ber_entier(reqid_env) + _ber_entier(0)
+                                 + _ber_entier(max_rep) + _ber_sequence(0x30, vb))
+                    pdu = _ber_sequence(0xa5, pdu_corps)     # GetBulkRequest-PDU
+                    message = _ber_sequence(
+                        0x30, _ber_entier(1) + _ber_chaine(communaute) + pdu)
+                    s.sendto(message, (ip_str, port))
+
+                    for _drain in range(4):     # ignorer une réponse tardive à la requête précédente
+                        data, _ = s.recvfrom(65535)
+                        _, corps, _ = _ber_lire_tlv(data, 0)
+                        p = 0
+                        _, _v, p = _ber_lire_tlv(corps, p)
+                        _, _c, p = _ber_lire_tlv(corps, p)
+                        tag_pdu, pdu_r, _ = _ber_lire_tlv(corps, p)
+                        _q0 = 0
+                        _, _rid_b, _q0 = _ber_lire_tlv(pdu_r, _q0)
+                        if int.from_bytes(_rid_b, 'big', signed=True) == reqid_env:
+                            break
+                    else:
+                        break
+                    if tag_pdu != 0xa2:
+                        break
+                    q = 0
+                    _, _rid, q = _ber_lire_tlv(pdu_r, q)
+                    _, err, q = _ber_lire_tlv(pdu_r, q)
+                    _, _ei, q = _ber_lire_tlv(pdu_r, q)
+                    if err and int.from_bytes(err, 'big', signed=True) != 0:
+                        break
+                    _, vblist, q = _ber_lire_tlv(pdu_r, q)
+
+                    progres, fini = {}, set()
+                    vp = 0
+                    while vp < len(vblist):
+                        tvb, vbc, vp = _ber_lire_tlv(vblist, vp)
+                        if tvb != 0x30:
+                            break
+                        bp = 0
+                        _, oid_brut, bp = _ber_lire_tlv(vbc, bp)
+                        tval, vbrut, bp = _ber_lire_tlv(vbc, bp)
+                        oid_ret = _ber_decoder_oid(oid_brut)
+                        rows += 1
+                        for base, pref in zip(oid_bases, prefs):
+                            if base not in courant:
+                                continue
+                            if oid_ret.startswith(pref):
+                                if tval == 0x82:          # endOfMibView : colonne finie
+                                    fini.add(base)
+                                else:
+                                    res[base][oid_ret[len(pref):]] = _ber_decoder_valeur(tval, vbrut)
+                                    progres[base] = oid_ret
+                                break
+                    # Prochaine ronde : colonnes NON terminées. Une colonne qui a
+                    # progressé repart de son dernier OID ; une colonne muette ce
+                    # tour-ci (agent bas de gamme qui ne renvoie pas toutes les
+                    # colonnes) est CONSERVÉE et retentée depuis son OID courant.
+                    suivant = {}
+                    for base, oc in courant.items():
+                        if base in fini:
+                            continue
+                        if base in progres:
+                            suivant[base] = progres[base]
+                        elif base not in res or not res[base]:
+                            # jamais rien reçu : on abandonne cette colonne (évite
+                            # une boucle infinie si l'agent ne la supporte pas)
+                            continue
+                        else:
+                            suivant[base] = oc          # retente au même point
+                    if progres:
+                        ok = True
+                    if suivant == courant and not progres:
+                        break                            # aucun progrès possible
+                    courant = suivant
+            if ok and any(res.values()):
+                # colonnes restées vides : repli GETNEXT ciblé
+                for b in oid_bases:
+                    if not res.get(b):
+                        res[b] = _snmp_walk(ip_str, b, communautes, timeout=timeout, port=port)
+                return res
+        except Exception:
+            continue
+    return {b: _snmp_walk(ip_str, b, communautes, timeout=timeout, port=port)
+            for b in oid_bases}
 
 
 def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):

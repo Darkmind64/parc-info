@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.19.8
+PARCINFO_VERSION=2.19.9
 RELEASE_DATE=2026-09-01
-BUILD_NUMBER=2026090108
+BUILD_NUMBER=2026090109
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.9 - Vue d'activite baie : mapping port<->interface + SNMP robuste
+# Retour terrain sur 2.19.8 : "ca montre une activite sur des ports ou il n'y a
+# rien de branche et certains ports ou il y a des appareils sont inactifs".
+# Cause : le numero de port de la baie n'est presque JAMAIS egal a l'ifIndex
+# SNMP du switch. Le repli naif "numero == ifIndex" tombait juste par hasard
+# sur certains ports. Compounde par deux bugs SNMP.
+#
+# - _mapping_baie_ifindex : nouvelle priorite manuel > topologie > NOM
+#   d'interface (_port_physique_depuis_nom : "GigabitEthernet1/0/12" -> 12,
+#   "Gi1/0/12" -> 12, "Port: 12 Gigabit - Level" (Netgear/Realtek) -> 12) >
+#   repli naif (desactive par defaut, opt-in diag_baie_activite_repli_naif).
+# - Nouvelle colonne baie_slot_ports.if_index + route POST
+#   /api/baie/activite/calibrer + tableau de calibration dans le moniteur
+#   (onglet Ports) : associer chaque port de la baie a son interface, avec le
+#   debit en direct de chaque interface pour s'y retrouver.
+# - app.py _snmp_bulk_cols : nouveau parcours GETBULK v2c multi-colonnes,
+#   auto-descriptif (attribution par prefixe d'OID, pas par position comme
+#   _snmp_get_typed qui produisait des valeurs identiques par lot sur les
+#   agents ne respectant pas la RFC 1157). Repli GETNEXT par colonne.
+# - _snmp_walk ET _snmp_bulk_cols : verification du request-id de la reponse
+#   (un switch lent renvoyait une reponse tardive a la requete precedente ->
+#   walk decale, ports fantomes, valeurs repetees).
+# - Compteurs 32 bits figes a 0x7FFFFFFF (agent defectueux) detectes et
+#   signales ("compteur bloque") ; l'activite bascule alors sur les paquets/s.
+# - _noms_interfaces : rafraichissement en tache de fond (ne bloque plus le
+#   releve sur un switch SNMP lent) ; cadence du thread adaptative.
+# - _poll_switch_ports remplace _poll_ports_cibles (walk cible casse).
+# - Aucune nouvelle dependance.
 
 # Version 2.19.8 - Moniteur reseau de la baie + fiabilisation des LEDs
 # Retour terrain : "les LEDs clignotent parfois en masse, parfois pas du tout,

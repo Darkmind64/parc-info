@@ -539,6 +539,11 @@ _reboot = N._etat_led(dict(in_oct=10**9, out_oct=0, in_pkts=0, out_pkts=0, in_er
 verifier(_reboot['bps'] >= 0 and _reboot['reset'] is True,
          "compteur qui recule (reboot) -> débit jamais négatif, reset détecté")
 
+verifier(N._port_physique_depuis_nom('GigabitEthernet1/0/12') == 12
+         and N._port_physique_depuis_nom('xe-0/0/5.0') == 5
+         and N._port_physique_depuis_nom('swp8') == 8,
+         "_port_physique_depuis_nom : dernier segment du nom d'interface")
+
 _c = A.get_db()
 _c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (908, 'Activite')")
 _c.execute("INSERT INTO appareils (id, client_id, nom_machine, type_appareil, adresse_ip) "
@@ -550,40 +555,54 @@ _c.execute("INSERT INTO baie_slot_ports (slot_id, numero, appareil_id) VALUES (8
 _c.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (80, 9)")
 _c.commit(); _c.close()
 
-_m, _cal, _src = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, {4, 9})
-verifier(_m == {4: 4, 9: 9} and _cal is False and _src[4] == 'repli_rj',
-         "sans topologie -> repli naïf numero==ifIndex, non calibré", str((_m, _cal, _src)))
+# l'ifIndex n'est PAS le numéro de port : port baie 4 = Gi1/0/4 = ifIndex 44
+_infos = {44: {'nom': 'Gi1/0/4', 'alias': '', 'ethernet': True, 'speed_mbps': 1000},
+          49: {'nom': 'Gi1/0/9', 'alias': '', 'ethernet': True, 'speed_mbps': 1000}}
+_m, _src, _cal = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, _infos)
+verifier(_m == {4: 44, 9: 49} and _cal is True and _src[4] == 'nom_port',
+         "mapping par NOM d'interface (Gi1/0/4 -> port 4), pas par ifIndex brut", str((_m, _src)))
 _c = A.get_db()
 _c.execute("INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
            "port_index, appareil_vu_id, horodatage) VALUES (908,'10.8.0.1',700,15,701,'x')")
 _c.commit(); _c.close()
-_m2, _cal2, _src2 = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, {4, 9, 15})
-verifier(_m2.get(4) == 15 and _cal2 is True and _src2[4] == 'topologie',
-         "topologie : PC vu sur ifIndex 15 -> mapping calibré", str((_m2, _cal2, _src2)))
+_m2, _src2, _cal2 = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, _infos)
+verifier(_m2.get(4) == 15 and _src2[4] == 'topologie',
+         "topologie : PC vu sur ifIndex 15 -> l'emporte sur le nom", str((_m2, _src2)))
+_c = A.get_db()
+_c.execute("DELETE FROM diag_topologie WHERE client_id=908")   # suite : mapping par nom
+_c.commit(); _c.close()
 
-# relevé ciblé : GET groupé au lieu d'un walk de table entière
-N._activite_iftable.pop('10.8.0.1', None)
-N._iftable_switch = lambda ip, comm: ({4, 9, 15}, {4: 'Gi0/4', 9: 'Gi0/9', 15: 'Gi0/15'})
-# le port baie 4 est mappé (topologie) vers l'ifIndex 15, le port 9 vers 9 (repli)
-N._poll_ports_cibles = lambda ip, comm, idx: (
-    {15: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0),
-     9: dict(oper=2, speed_mbps=0, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0)},
-    True, 'public', True)
+# relevé par GETBULK multi-colonnes (mock) + liste complète des interfaces
+N._activite_noms.pop('10.8.0.1', None)
+N._noms_interfaces = lambda ip, comm: dict(_infos)
+N._poll_switch_ports = lambda ip, comm, infos=None: (
+    {44: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0),
+     49: dict(oper=2, speed_mbps=0, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0)},
+    True, True)
 N._cycle_activite([908])
 with N._activite_lock:
     _res = N._activite_resultat.get(908)
     _detail = N._activite_detail.get(908)
 _num = {p['numero']: p['etat'] for p in (_res or {}).get('ports', [])}
 verifier(_res and _res['actif'] is True and _num.get(4) == 'idle' and _num.get(9) == 'down',
-         "_cycle_activite mappe (relevé ciblé) et évalue chaque port de la baie", str(_res))
-verifier(_detail and _detail['switchs'][0]['compteurs_64bits'] is True,
-         "_activite_detail peuplé pour le moniteur (compteurs 64 bits détectés)")
+         "_cycle_activite : port 4 -> Gi1/0/4/ifIndex 44 (up, calme) ; port 9 -> ifIndex 49 (down)",
+         str(_num))
+verifier(_detail and _detail['switchs'][0]['compteurs_64bits'] is True
+         and any(i['ifindex'] == 44 for i in _detail.get('interfaces', [])),
+         "_activite_detail : compteurs 64 bits + liste complète des interfaces pour la calibration")
 verifier(N.activite_baie(908).get('actif') is True and 908 in N._activite_heartbeat,
          "activite_baie() enregistre un battement et renvoie l'état en cache")
 
+verifier(N.calibrer_port_baie(908, 80, 9, 49) is True,
+         "calibrer_port_baie() fixe l'ifIndex d'un port de baie")
+_c = A.get_db()
+_iv = _c.execute("SELECT if_index FROM baie_slot_ports WHERE slot_id=80 AND numero=9").fetchone()[0]
+_c.close()
+verifier(_iv == 49, "calibration persistée dans baie_slot_ports.if_index", str(_iv))
+
 _mon = N.moniteur_baie(908)
-verifier(set(_mon) >= {'switchs', 'ports', 'journal', 'capture', 'snmp_actif'},
-         "moniteur_baie() renvoie journal + détail + état capture", str(sorted(_mon)))
+verifier(set(_mon) >= {'switchs', 'ports', 'interfaces', 'ports_baie', 'journal', 'capture', 'snmp_actif'},
+         "moniteur_baie() renvoie interfaces + ports_baie + journal + capture", str(sorted(_mon)))
 
 # capture indisponible (pas de scapy dans l'environnement de test) -> motif explicite
 _orig_etat_capture = N.etat_capture
@@ -591,6 +610,70 @@ N.etat_capture = lambda: {'disponible': False, 'motif': 'scapy_absent'}
 verifier(N.capturer_trafic(5) == {'disponible': False, 'motif': 'scapy_absent'},
          "capturer_trafic() renvoie le motif quand scapy est indisponible")
 N.etat_capture = _orig_etat_capture
+
+print('\n=== 19. GETBULK multi-colonnes (_snmp_bulk_cols) contre agent factice ===')
+_BULK = {
+    '1.3.6.1.2.1.31.1.1.1.1': {1: (0x04, b'Gi1/0/1'), 2: (0x04, b'Gi1/0/2'), 3: (0x04, b'Gi1/0/3')},
+    '1.3.6.1.2.1.2.2.1.8':     {1: (0x02, b'\x01'),   2: (0x02, b'\x02'),   3: (0x02, b'\x01')},
+}
+
+
+def _agent_bulk(sock):
+    while True:
+        try:
+            data, exp = sock.recvfrom(65535)
+        except OSError:
+            return
+        try:
+            _, corps, _ = A._ber_lire_tlv(data, 0)
+            p = 0
+            _, _v, p = A._ber_lire_tlv(corps, p)
+            _, _c, p = A._ber_lire_tlv(corps, p)
+            tag, pdu, _ = A._ber_lire_tlv(corps, p)          # 0xa5 = GetBulk
+            pp = 0
+            _, reqid, pp = A._ber_lire_tlv(pdu, pp)
+            _, _nr, pp = A._ber_lire_tlv(pdu, pp)
+            _, maxrep_b, pp = A._ber_lire_tlv(pdu, pp)
+            maxrep = int.from_bytes(maxrep_b, 'big') if maxrep_b else 1
+            _, vbl, pp = A._ber_lire_tlv(pdu, pp)
+            demandes = []
+            bp = 0
+            while bp < len(vbl):
+                _, vb, bp = A._ber_lire_tlv(vbl, bp)
+                bbp = 0
+                _, ob, bbp = A._ber_lire_tlv(vb, bbp)
+                demandes.append(A._ber_decoder_oid(ob))
+            colonnes = []
+            for d in demandes:
+                base = next((b for b in _BULK if d == b or d.startswith(b + '.')), None)
+                dep = int(d[len(base) + 1:]) if (base and d != base and d[len(base) + 1:].isdigit()) else 0
+                suivants = [(f'{base}.{i}', t, v) for i, (t, v) in sorted(_BULK.get(base, {}).items())
+                            if i > dep][:maxrep]
+                colonnes.append(suivants)
+            # ordre COLONNE-majeur (≠ ordre des OID demandés) → prouve l'attribution par préfixe
+            vbs = b''
+            for col in colonnes:
+                for oid_r, tag_r, val_r in col:
+                    vbs += A._ber_sequence(0x30, A._ber_oid(oid_r) + bytes([tag_r])
+                                           + A._ber_longueur(len(val_r)) + val_r)
+            pdu_r = A._ber_sequence(0xa2, A._ber_sequence(0x02, reqid) + A._ber_entier(0)
+                                    + A._ber_entier(0) + A._ber_sequence(0x30, vbs))
+            sock.sendto(A._ber_sequence(0x30, A._ber_entier(1) + A._ber_chaine('public') + pdu_r), exp)
+        except Exception:
+            pass
+
+
+_srv2 = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+_srv2.bind(('127.0.0.1', 0))
+_port_b = _srv2.getsockname()[1]
+_th.Thread(target=_agent_bulk, args=(_srv2,), daemon=True).start()
+_rb = A._snmp_bulk_cols('127.0.0.1', ['1.3.6.1.2.1.31.1.1.1.1', '1.3.6.1.2.1.2.2.1.8'],
+                        ['public'], timeout=1.0, port=_port_b)
+_srv2.close()
+verifier(_rb.get('1.3.6.1.2.1.31.1.1.1.1') == {'1': 'Gi1/0/1', '2': 'Gi1/0/2', '3': 'Gi1/0/3'}
+         and _rb.get('1.3.6.1.2.1.2.2.1.8') == {'1': 1, '2': 2, '3': 1},
+         "GETBULK 2 colonnes, réponse en ordre colonne-majeur -> attribution par préfixe (pas par position)",
+         str(_rb))
 
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

@@ -3325,29 +3325,60 @@ const MoniteurModal = {
             ? `${nbS} switch${nbS > 1 ? 's' : ''}, ${nbP} port${nbP > 1 ? 's' : ''} suivi${nbP > 1 ? 's' : ''}`
             : 'SNMP désactivé — active-le dans le diagnostic réseau';
 
-        // ── Onglet Ports
+        // ── Onglet Ports (+ calibration). On ne re-render pas pendant que
+        //    l'utilisateur manipule un menu déroulant (rafraîchissement 2 s).
         const cont = document.getElementById('mon-ports');
-        if (!nbS) {
+        const ae = document.activeElement;
+        if (ae && ae.tagName === 'SELECT' && ae.closest && ae.closest('#mon-ports')) {
+            // maj des débits live seulement, sans toucher aux <select>
+            (d.interfaces || []).forEach(i => {
+                const s = document.querySelector(`[data-if-live="${i.ip}|${i.ifindex}"]`);
+                if (s) s.textContent = fmtDebit(i.bps);
+            });
+        } else if (!nbS) {
             cont.innerHTML = '<div style="color:var(--text-muted);font-size:.8rem;">Aucun switch de la baie interrogeable (relie le slot du switch à sa fiche appareil, avec une IP ; active le SNMP).</div>';
         } else {
-            const parIp = {};
-            (d.ports || []).forEach(p => (parIp[p.ip] = parIp[p.ip] || []).push(p));
+            const parIpMap = {}, parIpIf = {}, portsBaie = d.ports_baie || {};
+            (d.ports || []).forEach(p => (parIpMap[p.ip] = parIpMap[p.ip] || {})[p.numero] = p);
+            (d.interfaces || []).forEach(i => (parIpIf[i.ip] = parIpIf[i.ip] || []).push(i));
+
             cont.innerHTML = (d.switchs || []).map(sw => {
-                const rows = (parIp[sw.ip] || []).map(p => `
-                    <tr>
-                        <td>${escH(String(p.numero))}</td>
-                        <td>${escH(p.port_nom || ('if' + p.ifindex))}</td>
-                        <td><span class="mon-dot mon-dot-${p.etat}"></span> ${p.etat}</td>
-                        <td>${fmtDebit(p.bps)}</td>
-                        <td>${(p.pps || 0).toFixed(1)}</td>
-                        <td>${(p.pct || 0).toFixed(1)}%</td>
-                        <td>${p.in_oct == null ? '—' : (p.in_oct + ' / ' + p.out_oct)}</td>
-                        <td title="Origine de l'association port ↔ interface">${p.source_mapping}${p.manques ? ' ⚠' + p.manques : ''}</td>
+                const ifs = (parIpIf[sw.ip] || []).slice().sort((a, b) => a.ifindex - b.ifindex);
+                const mapByNum = parIpMap[sw.ip] || {};
+                const bp = portsBaie[sw.ip] || [];
+                const dbg = (i) => i.cpt_pegge ? 'compteur bloqué' : (fmtDebit(i.bps) + ' · ' + (i.pps || 0).toFixed(0) + ' pkt/s');
+                const opts = (sel) => '<option value="">— auto —</option>'
+                    + ifs.map(i => `<option value="${i.ifindex}"${sel == i.ifindex ? ' selected' : ''}>`
+                        + `[${i.ifindex}] ${escH(i.nom)}${i.alias ? ' — ' + escH(i.alias) : ''} · ${dbg(i)}${i.oper != 1 ? ' (down)' : ''}</option>`).join('');
+                const pegge = ifs.some(i => i.cpt_pegge);
+                const calRows = bp.map(b => {
+                    const p = mapByNum[b.numero];
+                    const src = p ? p.source_mapping : (b.if_index ? 'manuel' : '—');
+                    const etat = p ? `<span class="mon-dot mon-dot-${p.etat}"></span> ${p.cpt_pegge ? (p.pps || 0).toFixed(0) + ' pkt/s' : fmtDebit(p.bps)}` : '—';
+                    return `<tr>
+                        <td>${escH(String(b.numero))}</td>
+                        <td>${escH(b.cible || '')}</td>
+                        <td><select class="cfg-input cfg-input-sm" style="max-width:340px;"
+                              onchange="MoniteurModal.calibrer(${sw.slot_id}, ${b.numero}, this.value)">${opts(b.if_index)}</select></td>
+                        <td style="color:var(--text-muted);">${src}</td>
+                        <td>${etat}</td>
+                    </tr>`;
+                }).join('');
+                const ifRows = ifs.map(i => `<tr>
+                        <td>${i.ifindex}</td><td>${escH(i.nom)}</td><td>${escH(i.alias || '')}</td>
+                        <td><span class="mon-dot mon-dot-${i.etat}"></span> ${i.etat}</td>
+                        <td data-if-live="${i.ip}|${i.ifindex}">${i.cpt_pegge ? '—' : fmtDebit(i.bps)}</td>
+                        <td>${(i.pps || 0).toFixed(1)}</td>
                     </tr>`).join('');
-                return `<div class="mon-sw-head">${escH(sw.nom)} — ${escH(sw.ip)} · poll ${sw.duree_poll_ms} ms · comm. « ${escH(sw.communaute || '?')} » · compteurs ${sw.compteurs_64bits ? '64' : '32'} bits · ${sw.nb_ifindex_ethernet} if · ${sw.nb_ports_mappes} mappé(s)${sw.nb_manques ? ' · ' + sw.nb_manques + ' manque(s)' : ''}${sw.calibre ? '' : ' · non calibré'}</div>
+                return `<div class="mon-sw-head">${escH(sw.nom)} — ${escH(sw.ip)} · poll ${sw.duree_poll_ms} ms · comm. « ${escH(sw.communaute || '?')} » · compteurs ${sw.compteurs_64bits ? '64' : '32'} bits · ${sw.nb_ifindex_ethernet} interface(s) · ${sw.nb_ports_calibres}/${sw.nb_ports_mappes} calibré(s)${sw.nb_manques ? ' · ' + sw.nb_manques + ' manque(s)' : ''}</div>
+                    ${pegge ? '<div style="font-size:.66rem;color:var(--accent-orange,#f59e0b);margin:.2rem 0;">⚠ Cet équipement bloque ses compteurs d’octets à 2 Go (agent SNMP défectueux) — l’activité est estimée sur les paquets/s seulement.</div>' : ''}
+                    <div style="font-size:.66rem;color:var(--text-muted);margin:.2rem 0;">Calibration : associe chaque port de la baie à son interface sur le switch (le numéro de port n'est presque jamais égal à l'ifIndex). « auto » = topologie ou nom d'interface.</div>
                     <table class="mon-table"><thead><tr>
-                        <th>N°</th><th>Interface</th><th>État</th><th>Débit</th><th>pkt/s</th><th>% lien</th><th>octets in/out</th><th>mapping</th>
-                    </tr></thead><tbody>${rows || '<tr><td colspan="8" style="color:var(--text-muted);">aucun port mappé</td></tr>'}</tbody></table>`;
+                        <th>Port baie</th><th>Appareil branché</th><th>Interface du switch</th><th>source</th><th>débit</th>
+                    </tr></thead><tbody>${calRows || '<tr><td colspan="5" style="color:var(--text-muted);">ce slot n’a pas de ports</td></tr>'}</tbody></table>
+                    <details style="margin:.4rem 0;"><summary style="cursor:pointer;font-size:.7rem;color:var(--text-muted);">Toutes les interfaces du switch (${ifs.length})</summary>
+                    <table class="mon-table"><thead><tr><th>ifIndex</th><th>Nom</th><th>Alias</th><th>État</th><th>Débit</th><th>pkt/s</th></tr></thead>
+                    <tbody>${ifRows || '<tr><td colspan="6" style="color:var(--text-muted);">aucune interface</td></tr>'}</tbody></table></details>`;
             }).join('');
         }
 
@@ -3412,6 +3443,17 @@ const MoniteurModal = {
             }
         } catch (e) {}
         this.rafraichir();
+    },
+
+    async calibrer(slotId, numero, ifIndex) {
+        try {
+            await fetch('/api/baie/activite/calibrer', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slot_id: slotId, numero: numero, if_index: ifIndex || null })
+            });
+        } catch (e) {}
+        if (document.activeElement) document.activeElement.blur();
+        setTimeout(() => this.rafraichir(), 300);
     },
 };
 function fmtOctets(o) {

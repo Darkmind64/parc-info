@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-01 (v2.19.8). En cas de doute
+> Ce document décrit le comportement au 2026-09-01 (v2.19.9). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -29,7 +29,7 @@ démon `_moniteur_loop` calqué sur le watchdog ping, période `diag_intervalle_
 
 ---
 
-## Vue d'activité de la baie (LEDs live) — v2.19.6, revue v2.19.8
+## Vue d'activité de la baie (LEDs live) — v2.19.6, revues v2.19.8 / v2.19.9
 
 Pas un palier : une **vue temps réel**, pas une détection. Tant que la page
 `/baie` (sélecteur « ⚡ activité ») **ou** le widget « Activité réseau » du
@@ -44,20 +44,34 @@ des switchs de la baie et calcule l'état à peindre par port.
   **ou** dont l'étiquette de slot `type_equipement` vaut Switch/Switch·AP/Routeur.
   Le résultat porte `nb_switchs` / `nb_muets` / `motif` (`aucun_switch` |
   `sans_reponse`) pour que le bandeau explique l'absence de données.
-- **Relevé SNMP CIBLÉ** (v2.19.8) : `_iftable_switch` walk une fois par switch
-  (caché 60 s) l'ensemble des ifIndex ethernet (`ifType==6`) ; `_poll_ports_cibles`
-  fait ensuite un **GET groupé** (`_snmp_get_typed`, ~6-8 ifIndex/paquet) sur les
-  seuls ports mappés — `ifOperStatus`, `ifHighSpeed`/`ifSpeed`, `ifHCInOctets`/
-  `ifHCOutOctets` (repli 32 bits), `ifHCInUcastPkts`/`ifHCOutUcastPkts` (repli
-  32 bits), `ifInErrors`/`ifOutErrors`. Remplace l'ancien walk de table entière
-  (~300 paquets/cycle pour un switch 48 ports → ~2 paquets/switch/cycle) : bien
-  moins sensible à la perte d'un paquet UDP isolé.
-- **Association port baie ↔ ifIndex** : `_mapping_baie_ifindex` — d'abord la
-  topologie (`diag_topologie` : l'appareil branché est vu par le switch sur un
-  ifIndex précis → mapping fiable, `calibre=True`, source `topologie`), sinon
-  repli naïf `numero == ifIndex` (RJ, source `repli_rj`) / `numero-1000` (SFP) /
-  `numero-2000` (WAN, source `repli_sfp`). Le bandeau affiche « non calibré »
-  quand le repli sert.
+- **Relevé SNMP** (v2.19.9) : `_noms_interfaces` récupère nom/alias/type/vitesse
+  de toutes les interfaces (caché ~90 s, **rafraîchi en tâche de fond** pour ne
+  pas bloquer le relevé sur un switch lent) ; `_poll_switch_ports` relève chaque
+  cycle `ifOperStatus` + octets + paquets (in/out, 64 bits si l'`ifXTable`
+  existe, sinon 32 bits) via **`_snmp_bulk_cols`** (`app.py`) — un parcours
+  **GETBULK v2c multi-colonnes auto-descriptif** : chaque varbind porte son OID,
+  l'association est faite par préfixe (jamais par position, contrairement à
+  `_snmp_get_typed` qui se trompait sur les agents ne respectant pas l'ordre
+  RFC 1157 → valeurs identiques par lot). Repli GETNEXT par colonne.
+  `_snmp_walk` **et** `_snmp_bulk_cols` vérifient le request-id de la réponse
+  (un switch lent renvoyait parfois une réponse tardive à la requête
+  précédente → relevé décalé). Erreurs relevées 1 cycle sur 8.
+- **Compteurs bloqués** : certains agents bas de gamme figent leurs compteurs
+  32 bits à `0x7FFFFFFF` (2 Go) — détecté (`_CPT_SENTINELLE_32`), remonté
+  (`cpt_pegge`, journal « compteurs bloqués »), et l'activité bascule alors sur
+  les paquets/s.
+- **Cadence adaptative** : `_activite_loop` espace ses cycles en proportion du
+  relevé le plus lent (plafond 30 s) — inutile de re-solliciter un agent SNMP
+  qui met 10 s à répondre toutes les 3 s.
+- **Association port baie ↔ ifIndex** (v2.19.9) : `_mapping_baie_ifindex` —
+  priorité **manuel** (`baie_slot_ports.if_index`, source `manuel`) > **topologie**
+  (`diag_topologie`, source `topologie`) > **nom d'interface**
+  (`_port_physique_depuis_nom` : `GigabitEthernet1/0/12` → 12, `Gi1/0/12` → 12,
+  `Port: 12 …` → 12, `swp12` → 12 ; source `nom_port`) > **repli naïf**
+  `numero == ifIndex` (**désactivé par défaut** — souvent faux ;
+  `diag_baie_activite_repli_naif='1'` pour l'activer ; source `repli`).
+  Le numéro de port de la baie n'est presque jamais l'ifIndex du switch : le
+  repli naïf de v2.19.6-.8 allumait des LEDs sur les mauvais ports.
 - **Sémantique LED** (`_etat_led`, priorité décroissante) : `down` (éteinte) ·
   `stale` si ≥ 3 relevés manqués consécutifs (grise, v2.19.8 — un port ne
   s'éteint plus jamais brutalement à cause d'un seul paquet SNMP perdu) · `err`
@@ -80,10 +94,14 @@ Bouton **📊 Moniteur** dans la barre d'outils de `/baie` → modale à 3 ongle
 poll `GET /api/baie/activite/moniteur` toutes les 2 s (entretient aussi le
 battement du collecteur d'activité) :
 
-- **Ports** : par switch (IP, durée du dernier poll, communauté utilisée,
-  compteurs 64/32 bits, nb d'ifIndex ethernet, nb de relevés manqués) puis par
-  port (interface, état, débit, paquets/s, % du lien, compteurs bruts in/out,
-  source du mapping). Rend transparent ce qui alimente les LEDs.
+- **Ports** : par switch (IP, durée du dernier poll, communauté, compteurs
+  64/32 bits, nb d'interfaces, `nb_ports_calibres/nb_ports_mappes`, avertissement
+  « compteurs bloqués » le cas échéant) puis un **tableau de calibration** : pour
+  chaque port de la baie (numéro + appareil branché), un menu déroulant listant
+  toutes les interfaces du switch avec leur débit en direct → choix enregistré
+  via `POST /api/baie/activite/calibrer` (`can_write`) dans
+  `baie_slot_ports.if_index`. Section repliable « toutes les interfaces » avec
+  leur état/débit/pps. Rend transparent ce qui alimente les LEDs.
 - **Journal** : flux d'évènements horodatés et dédoublonnés (`_activite_journal`,
   `collections.deque(maxlen=250)`, alimenté par `_journal()`) — switch injoignable
   ou rétabli, port devenu actif/calme, port passé « obsolète », lien coupé,
@@ -182,6 +200,7 @@ corriger ? »), dans le rapport et dans l'e-mail d'alerte.
 | `diag_baie_activite_seuil_err` | `20` | vue d'activité baie : Δ erreurs (in+out) par fenêtre avant LED rouge (nécessite `diag_snmp_actif`) |
 | `diag_baie_activite_pps_mini` | `1` | vue d'activité baie : paquets/s sous lesquels un port up reste « calme » (pas de clignotement) |
 | `diag_baie_capture_duree_s` | `20` | moniteur baie : durée de la capture de trafic à la demande |
+| `diag_baie_activite_repli_naif` | `0` | vue d'activité baie : dernier recours `numero de port == ifIndex` (souvent faux — désactivé) |
 
 SMTP : réutilise `smtp_server` / `smtp_port` / `smtp_login` / `smtp_password` /
 `from_email` (Réglages → e-mail).
@@ -270,8 +289,8 @@ GET, GET typé et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
 | Topologie (palier 4) | `decouvrir_topologie`, `_topologie_equipement`, `etat_topologie`, `appliquer_topologie_baie` |
 | Baseline (palier 5) | `enregistrer_metriques_liaison`, `evaluer_baseline`, `serie_metrique` |
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
-| Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop`, `_cycle_activite`, `_iftable_switch`, `_poll_ports_cibles`, `_mapping_baie_ifindex`, `_etat_led`, `activite_baie` ; route `GET /api/baie/activite` ; `baie_brassage.html` (`#sel-activite`) ; widget `network-activity` (`client_dashboard.html`) |
+| Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite`, `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports`, `_mapping_baie_ifindex` + `_port_physique_depuis_nom`, `_etat_led`, `activite_baie`, `calibrer_port_baie` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer` ; `baie_brassage.html` (`#sel-activite`) ; widget `network-activity` (`client_dashboard.html`) ; colonne `baie_slot_ports.if_index` |
 | Moniteur réseau de la baie (modale) | `network_diag.py` : `moniteur_baie`, `_journal`/`_activite_journal`, `_activite_detail`, `capturer_trafic`, `lancer_capture_baie`/`statut_capture_baie` ; routes `GET /api/baie/activite/moniteur` + `POST /api/baie/activite/capture` ; `baie_brassage.html` (`#moniteur-modal`, `MoniteurModal`) |
 | Orchestration | `_run_snapshot` (snapshot), `_moniteur_loop` / `_moniteur_cycle` (continu), `_enregistrer_evenements`, `_purger_anciens` |
-| Walk SNMP + BER | `app.py` : `_snmp_get`, `_snmp_walk`, `_ber_decoder_oid`, `_ber_decoder_valeur` |
+| Walk SNMP + BER | `app.py` : `_snmp_get`, `_snmp_get_typed`, `_snmp_walk` (GETNEXT), `_snmp_bulk_cols` (GETBULK v2c multi-colonnes, auto-descriptif), `_ber_decoder_oid`, `_ber_decoder_valeur` — tous vérifient le request-id de la réponse |
 | Routes | `app.py` : `grep "@app.route('/api/diag-reseau"` + `/diag-reseau` + `/diag-reseau/rapport.{pdf,html}` |

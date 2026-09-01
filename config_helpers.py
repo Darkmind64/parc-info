@@ -195,6 +195,7 @@ CFG_DEFAULTS = {
     'diag_baie_activite_seuil_err': '20',  # Δ erreurs (in+out) par fenêtre avant LED rouge
     'diag_baie_activite_pps_mini': '1',    # paquets/s sous lesquels un port up reste « calme » (pas de clignotement)
     'diag_baie_capture_duree_s': '20',     # durée de la capture à la demande du moniteur réseau
+    'diag_baie_activite_repli_naif': '0',  # dernier recours : mapper numero de port == ifIndex (souvent faux, désactivé)
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',
