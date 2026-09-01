@@ -66,6 +66,17 @@ _GRAVITE_DEFAUT = {
     'vitesse_reduite':       'info',
     'cablage_incoherent':    'avertissement',
     'degradation_relative':  'avertissement',
+    'wifi_signal_faible':    'avertissement',
+    'wifi_canal_sature':     'avertissement',
+    'wifi_ap_suspect':       'critique',
+    'wifi_bande_2ghz':       'info',
+    'wifi_debit_faible':     'info',
+    'ups_sur_batterie':      'critique',
+    'ups_batterie_faible':   'critique',
+    'ups_surcharge':         'avertissement',
+    'ups_batterie_usee':     'avertissement',
+    'ups_alarme':            'avertissement',
+    'ups_secteur_instable':  'info',
 }
 
 _CATEGORIES_LIBELLES = {
@@ -89,6 +100,17 @@ _CATEGORIES_LIBELLES = {
     'vitesse_reduite':        "Vitesse de lien réduite (port)",
     'cablage_incoherent':     "Câblage baie incohérent avec la topologie",
     'degradation_relative':   "Dégradation par rapport à la référence",
+    'wifi_signal_faible':     "Signal Wi-Fi faible (poste)",
+    'wifi_canal_sature':      "Canal Wi-Fi encombré",
+    'wifi_ap_suspect':        "Point d'accès Wi-Fi suspect (evil twin)",
+    'wifi_bande_2ghz':        "Wi-Fi en 2.4 GHz alors que 5 GHz est disponible",
+    'wifi_debit_faible':      "Débit Wi-Fi négocié faible",
+    'ups_sur_batterie':       "Onduleur sur batterie (coupure secteur)",
+    'ups_batterie_faible':    "Onduleur — batterie faible / autonomie critique",
+    'ups_surcharge':          "Onduleur en surcharge",
+    'ups_batterie_usee':      "Onduleur — batterie à remplacer",
+    'ups_alarme':             "Onduleur — alarme active",
+    'ups_secteur_instable':   "Onduleur — tension d'entrée hors plage",
 }
 
 
@@ -792,7 +814,8 @@ _OID_DOT3_LATECOLL  = '1.3.6.1.2.1.10.7.2.1.11'
 _OID_DOT3_EXCCOLL   = '1.3.6.1.2.1.10.7.2.1.12'
 _OID_DOT3_DUPLEX    = '1.3.6.1.2.1.10.7.2.1.19'
 
-_TYPES_EQUIP_SNMP = ('Switch', 'Switch/AP', 'Routeur/Pare-feu', 'NAS')
+_TYPES_EQUIP_SNMP = ('Switch', 'Switch/AP', 'Routeur/Pare-feu', 'NAS', 'Onduleur / UPS')
+_TYPE_UPS = 'Onduleur / UPS'
 
 
 def _snmp_walk(oid_base, ip, communautes):
@@ -1015,15 +1038,23 @@ def interroger_equipements_client(client_id: int) -> list:
         conn = get_db()
         placeholders = ','.join('?' * len(_TYPES_EQUIP_SNMP))
         rows = conn.execute(
-            f"SELECT id, adresse_ip FROM appareils WHERE client_id=? "
+            f"SELECT id, adresse_ip, type_appareil FROM appareils WHERE client_id=? "
             f"AND type_appareil IN ({placeholders}) AND adresse_ip!='' AND adresse_ip IS NOT NULL",
             (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
         conn.close()
     except Exception:
         return []
+    ups_actif = str(_cfg('diag_ups_active', '1')) == '1'
     findings = []
-    for appareil_id, ip in rows:
+    for appareil_id, ip, type_app in rows:
         try:
+            if type_app == _TYPE_UPS:
+                if not ups_actif:
+                    continue
+                ups = interroger_ups(ip, communautes)
+                if ups is not None:
+                    findings += _analyser_ups(client_id, ip, appareil_id, ups)
+                continue
             equipement = interroger_equipement(ip, communautes)
             if equipement is None:
                 continue
@@ -1062,6 +1093,474 @@ def etat_snmp(client_id: int) -> dict:
         'actif': str(_cfg('diag_snmp_actif', '0')) == '1',
         'equipements': list(equipements.values()),
     }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Palier 7a — supervision SNMP des onduleurs (UPS-MIB RFC 1628 + APC)
+# ════════════════════════════════════════════════════════════════════════════
+
+_OID_UPS_MODEL       = '1.3.6.1.2.1.33.1.1.2.0'
+_OID_UPS_BATT_STATUS = '1.3.6.1.2.1.33.1.2.1.0'      # 2 normal | 3 low | 4 depleted
+_OID_UPS_ON_BATT_S   = '1.3.6.1.2.1.33.1.2.2.0'
+_OID_UPS_MIN_REMAIN  = '1.3.6.1.2.1.33.1.2.3.0'
+_OID_UPS_CHARGE_PCT  = '1.3.6.1.2.1.33.1.2.4.0'
+_OID_UPS_BATT_TEMP   = '1.3.6.1.2.1.33.1.2.7.0'
+_OID_UPS_OUT_SOURCE  = '1.3.6.1.2.1.33.1.4.1.0'      # 3 normal | 5 battery | 6 booster | 7 reducer
+_OID_UPS_IN_VOLT     = '1.3.6.1.2.1.33.1.3.3.1.3'    # walk (par ligne)
+_OID_UPS_OUT_LOAD    = '1.3.6.1.2.1.33.1.4.4.1.5'    # walk (par ligne)
+_OID_UPS_ALARMS      = '1.3.6.1.2.1.33.1.6.1.0'
+_OID_APC_BATT_REPL   = '1.3.6.1.4.1.318.1.1.1.2.2.4.0'   # 2 = batterie à remplacer
+_OID_APC_RUNTIME     = '1.3.6.1.4.1.318.1.1.1.2.2.3.0'   # TimeTicks
+
+_UPS_SOURCE_TXT = {1: 'inconnu', 2: 'aucune', 3: 'secteur', 4: 'bypass',
+                   5: 'batterie', 6: 'survolteur', 7: 'dévolteur'}
+_UPS_BATT_TXT = {1: 'inconnu', 2: 'normale', 3: 'faible', 4: 'épuisée'}
+
+
+def interroger_ups(ip: str, communautes) -> dict | None:
+    """Interroge un onduleur en SNMP (UPS-MIB, repli APC). None si pas de réponse."""
+    try:
+        from app import _snmp_get
+    except Exception:
+        return None
+    scalaires = [_OID_UPS_MODEL, _OID_UPS_BATT_STATUS, _OID_UPS_ON_BATT_S,
+                 _OID_UPS_MIN_REMAIN, _OID_UPS_CHARGE_PCT, _OID_UPS_BATT_TEMP,
+                 _OID_UPS_OUT_SOURCE, _OID_UPS_ALARMS]
+    rep = {}
+    for comm in (communautes or ['public']):
+        rep = _snmp_get(ip, scalaires, comm, timeout=1.5)
+        if rep:
+            _comm_ok = comm
+            break
+    else:
+        return None
+
+    def _n(oid, defaut=None):
+        v = rep.get(oid)
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return defaut
+
+    load = _snmp_walk(_OID_UPS_OUT_LOAD, ip, [_comm_ok])
+    volt = _snmp_walk(_OID_UPS_IN_VOLT, ip, [_comm_ok])
+    charge_pct = max((v for v in (_to_int(x) for x in load.values()) if v is not None), default=None)
+    tension = next((v for v in (_to_int(x) for x in volt.values()) if v is not None), None)
+    apc = _snmp_get(ip, [_OID_APC_BATT_REPL, _OID_APC_RUNTIME], _comm_ok, timeout=1.2)
+
+    autonomie = _n(_OID_UPS_MIN_REMAIN)
+    if autonomie is None:
+        rt = _to_int(apc.get(_OID_APC_RUNTIME))
+        if rt:
+            autonomie = rt // 6000  # TimeTicks (1/100 s) -> minutes
+
+    return {
+        'modele': (rep.get(_OID_UPS_MODEL) or '').strip(),
+        'source': _n(_OID_UPS_OUT_SOURCE, 1),
+        'source_txt': _UPS_SOURCE_TXT.get(_n(_OID_UPS_OUT_SOURCE, 1), '?'),
+        'charge_pct': charge_pct,
+        'autonomie_min': autonomie,
+        'batterie_pct': _n(_OID_UPS_CHARGE_PCT),
+        'batterie_statut': _n(_OID_UPS_BATT_STATUS, 1),
+        'batterie_statut_txt': _UPS_BATT_TXT.get(_n(_OID_UPS_BATT_STATUS, 1), '?'),
+        'sur_batterie_s': _n(_OID_UPS_ON_BATT_S, 0) or 0,
+        'temp_c': _n(_OID_UPS_BATT_TEMP),
+        'tension_entree': tension,
+        'remplacer_batterie': _to_int(apc.get(_OID_APC_BATT_REPL)) == 2,
+        'alarmes': _n(_OID_UPS_ALARMS, 0) or 0,
+        'ts': time.time(),
+    }
+
+
+def _to_int(v):
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _analyser_ups(client_id: int, ip: str, appareil_id, ups: dict) -> list:
+    seuil_charge = _cfg_int('diag_ups_seuil_charge_pct', 80)
+    seuil_auto = _cfg_int('diag_ups_seuil_autonomie_min', 10)
+    findings = []
+    modele = ups.get('modele') or 'onduleur'
+    base = {'equipement': ip, 'modele': modele}
+
+    from database import get_db
+    conn = get_db()
+    try:
+        if ups.get('charge_pct') is not None:
+            _enregistrer_metrique(conn, client_id, 'ups_charge_pct', ip, ups['charge_pct'], ups['ts'])
+        if ups.get('autonomie_min') is not None:
+            _enregistrer_metrique(conn, client_id, 'ups_autonomie_min', ip, ups['autonomie_min'], ups['ts'])
+        conn.commit()
+    except Exception:
+        logger.exception('network_diag: métriques UPS impossibles')
+    finally:
+        conn.close()
+
+    if ups.get('source') == 5 or ups.get('sur_batterie_s', 0) > 0:
+        findings.append(_finding(
+            'ups_sur_batterie',
+            f"{modele} ({ip}) est sur batterie depuis {ups.get('sur_batterie_s', 0)} s",
+            {**base, 'sur_batterie_s': ups.get('sur_batterie_s', 0),
+             'autonomie_min': ups.get('autonomie_min')}, ip))
+
+    autonomie = ups.get('autonomie_min')
+    if ups.get('batterie_statut') in (3, 4) or (autonomie is not None and autonomie < seuil_auto) \
+            or (ups.get('batterie_pct') is not None and ups['batterie_pct'] < 30):
+        findings.append(_finding(
+            'ups_batterie_faible',
+            f"{modele} ({ip}) : batterie {ups.get('batterie_statut_txt', '?')}, "
+            f"autonomie {autonomie if autonomie is not None else '?'} min",
+            {**base, 'batterie_statut': ups.get('batterie_statut_txt'),
+             'autonomie_min': autonomie, 'batterie_pct': ups.get('batterie_pct')}, ip))
+
+    if ups.get('charge_pct') is not None and ups['charge_pct'] > seuil_charge:
+        findings.append(_finding(
+            'ups_surcharge', f"{modele} ({ip}) : charge de sortie à {ups['charge_pct']} %",
+            {**base, 'charge_pct': ups['charge_pct']}, ip))
+
+    if ups.get('remplacer_batterie') or (ups.get('temp_c') is not None and ups['temp_c'] > 40):
+        raison = "l'onduleur signale une batterie à remplacer" if ups.get('remplacer_batterie') \
+            else f"température batterie {ups.get('temp_c')} °C"
+        findings.append(_finding(
+            'ups_batterie_usee', f"{modele} ({ip}) : {raison}",
+            {**base, 'remplacer_batterie': ups.get('remplacer_batterie'), 'temp_c': ups.get('temp_c')}, ip))
+
+    if ups.get('alarmes', 0) > 0:
+        findings.append(_finding(
+            'ups_alarme', f"{modele} ({ip}) : {ups['alarmes']} alarme(s) active(s)",
+            {**base, 'alarmes': ups['alarmes']}, ip))
+
+    v = ups.get('tension_entree')
+    if v is not None and v > 0:
+        ok = (195 <= v <= 255) or (95 <= v <= 130)
+        if not ok:
+            findings.append(_finding(
+                'ups_secteur_instable', f"{modele} ({ip}) : tension d'entrée {v} V hors plage",
+                {**base, 'tension_entree': v}, ip))
+
+    if appareil_id:
+        for f in findings:
+            f['appareil_id'] = appareil_id
+    return findings
+
+
+def etat_ups(client_id: int) -> dict:
+    """Dernier état connu de chaque onduleur (métriques + évènements actifs)."""
+    from database import get_db
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, adresse_ip, nom_machine FROM appareils WHERE client_id=? "
+            "AND type_appareil=? AND adresse_ip!='' AND adresse_ip IS NOT NULL",
+            (client_id, _TYPE_UPS)).fetchall()
+        evts = {}
+        for cat, dj in conn.execute(
+                "SELECT categorie, details_json FROM diag_reseau_evenements WHERE client_id=? "
+                "AND resolu=0 AND categorie LIKE 'ups_%'", (client_id,)):
+            d = _json_charge(dj)
+            evts.setdefault(d.get('equipement'), []).append(
+                {'categorie': cat, 'libelle': libelle_categorie(cat)})
+        ups_list = []
+        for aid, ip, nom in rows:
+            def _last(cat):
+                r = conn.execute(
+                    "SELECT valeur FROM diag_metriques WHERE client_id=? AND categorie=? "
+                    "AND cible=? ORDER BY epoch DESC LIMIT 1", (client_id, cat, ip)).fetchone()
+                return r[0] if r else None
+            ups_list.append({
+                'appareil_id': aid, 'ip': ip, 'nom': nom,
+                'charge_pct': _last('ups_charge_pct'),
+                'autonomie_min': _last('ups_autonomie_min'),
+                'findings': evts.get(ip, []),
+            })
+    finally:
+        conn.close()
+    return {'actif': str(_cfg('diag_ups_active', '1')) == '1'
+            and str(_cfg('diag_snmp_actif', '0')) == '1',
+            'onduleurs': ups_list}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  Palier 7b — diagnostic Wi-Fi (côté poste)
+# ════════════════════════════════════════════════════════════════════════════
+
+def _canal_vers_bande(canal):
+    try:
+        c = int(canal)
+    except (TypeError, ValueError):
+        return ''
+    return '2.4 GHz' if 1 <= c <= 14 else ('5 GHz' if c < 200 else '6 GHz')
+
+
+def _signal_pct_vers_dbm(pct):
+    try:
+        return round(int(str(pct).rstrip('%')) / 2 - 100)
+    except (TypeError, ValueError):
+        return None
+
+
+def etat_wifi() -> dict:
+    """État Wi-Fi du poste + AP visibles. {connecte:False, motif} si indisponible."""
+    try:
+        if IS_WINDOWS:
+            return _wifi_windows()
+        if platform.system() == 'Darwin':
+            return _wifi_macos()
+        return _wifi_linux()
+    except Exception:
+        logger.debug('network_diag: lecture Wi-Fi impossible', exc_info=True)
+        return {'connecte': False, 'motif': 'lecture impossible'}
+
+
+def _wifi_windows() -> dict:
+    out = _run(['netsh', 'wlan', 'show', 'interfaces'], timeout=8).stdout
+    if 'no wireless' in out.lower() or 'aucune interface' in out.lower() or not out.strip():
+        return {'connecte': False, 'motif': 'aucun adaptateur Wi-Fi'}
+
+    def champ(*cles):
+        for ligne in out.splitlines():
+            for cle in cles:
+                if re.match(rf'^\s*{re.escape(cle)}\b[^:]*:', ligne, re.I):
+                    return ligne.split(':', 1)[1].strip()
+        return ''
+
+    ssid = champ('SSID')
+    if not ssid or champ('State', 'État').lower() not in ('connected', 'connecté', 'connectée'):
+        etat = {'connecte': False, 'motif': 'non connecté'}
+    else:
+        signal = champ('Signal')
+        debit_rx = champ('Receive rate', 'Réception', 'Vitesse de réception')
+        debit_tx = champ('Transmit rate', 'Transmission', 'Vitesse de transmission')
+        canal = champ('Channel', 'Canal')
+        etat = {
+            'connecte': True, 'ssid': ssid, 'bssid': champ('BSSID').lower(),
+            'rssi_dbm': _signal_pct_vers_dbm(signal), 'signal_pct': signal,
+            'canal': _to_int(canal), 'bande': _canal_vers_bande(canal),
+            'debit_mbps': _to_int((debit_rx or debit_tx or '').split()[0] if (debit_rx or debit_tx) else None),
+            'radio': champ('Radio type', 'Type de radio'),
+        }
+    etat['aps'] = _wifi_windows_aps()
+    return etat
+
+
+def _wifi_windows_aps() -> list:
+    try:
+        out = _run(['netsh', 'wlan', 'show', 'networks', 'mode=bssid'], timeout=10).stdout
+    except Exception:
+        return []
+    aps, ssid_courant = [], ''
+    for ligne in out.splitlines():
+        m = re.match(r'^\s*SSID\s+\d+\s*:\s*(.*)$', ligne, re.I)
+        if m:
+            ssid_courant = m.group(1).strip()
+            continue
+        m = re.match(r'^\s*BSSID\s+\d+\s*:\s*([0-9a-f:]{17})', ligne, re.I)
+        if m:
+            aps.append({'ssid': ssid_courant, 'bssid': m.group(1).lower(),
+                        'rssi_dbm': None, 'signal_pct': None, 'canal': None, 'bande': ''})
+            continue
+        if aps:
+            m = re.match(r'^\s*(Signal|Signal)\s*:\s*(\d+)%', ligne, re.I)
+            if m:
+                aps[-1]['signal_pct'] = m.group(2) + '%'
+                aps[-1]['rssi_dbm'] = _signal_pct_vers_dbm(m.group(2))
+            m = re.match(r'^\s*(Channel|Canal)\s*:\s*(\d+)', ligne, re.I)
+            if m:
+                aps[-1]['canal'] = int(m.group(2))
+                aps[-1]['bande'] = _canal_vers_bande(m.group(2))
+    return aps
+
+
+def _wifi_linux() -> dict:
+    dev = ''
+    try:
+        for ligne in _run(['iw', 'dev'], timeout=5).stdout.splitlines():
+            m = re.match(r'\s*Interface\s+(\S+)', ligne)
+            if m:
+                dev = m.group(1)
+                break
+    except Exception:
+        pass
+    if not dev:
+        return {'connecte': False, 'motif': 'aucun adaptateur Wi-Fi'}
+    link = _run(['iw', 'dev', dev, 'link'], timeout=5).stdout
+    if 'Not connected' in link:
+        etat = {'connecte': False, 'motif': 'non connecté'}
+    else:
+        ssid = (re.search(r'SSID:\s*(.+)', link) or [None, ''])[1].strip()
+        rssi = re.search(r'signal:\s*(-?\d+)', link)
+        freq = re.search(r'freq:\s*(\d+)', link)
+        rx = re.search(r'rx bitrate:\s*([\d.]+)', link)
+        canal = _freq_vers_canal(int(freq.group(1))) if freq else None
+        etat = {'connecte': True, 'ssid': ssid,
+                'bssid': (re.search(r'Connected to ([0-9a-f:]{17})', link) or [None, ''])[1],
+                'rssi_dbm': int(rssi.group(1)) if rssi else None,
+                'canal': canal, 'bande': _canal_vers_bande(canal),
+                'debit_mbps': int(float(rx.group(1))) if rx else None, 'radio': ''}
+    etat['aps'] = _wifi_linux_aps(dev)
+    return etat
+
+
+def _freq_vers_canal(freq):
+    if 2412 <= freq <= 2484:
+        return 14 if freq == 2484 else (freq - 2407) // 5
+    if 5000 <= freq <= 5900:
+        return (freq - 5000) // 5
+    if 5955 <= freq <= 7115:
+        return (freq - 5950) // 5
+    return None
+
+
+def _wifi_linux_aps(dev) -> list:
+    aps = []
+    try:
+        out = _run(['iw', 'dev', dev, 'scan'], timeout=12).stdout
+    except Exception:
+        return aps
+    bloc = {}
+    for ligne in out.splitlines():
+        m = re.match(r'BSS ([0-9a-f:]{17})', ligne)
+        if m:
+            if bloc.get('bssid'):
+                aps.append(bloc)
+            bloc = {'bssid': m.group(1), 'ssid': '', 'rssi_dbm': None, 'canal': None, 'bande': ''}
+        elif bloc:
+            m = re.search(r'signal:\s*(-?[\d.]+)', ligne)
+            if m:
+                bloc['rssi_dbm'] = int(float(m.group(1)))
+            m = re.search(r'SSID:\s*(.+)', ligne)
+            if m:
+                bloc['ssid'] = m.group(1).strip()
+            m = re.search(r'DS Parameter set: channel (\d+)', ligne) or re.search(r'primary channel:\s*(\d+)', ligne)
+            if m:
+                bloc['canal'] = int(m.group(1))
+                bloc['bande'] = _canal_vers_bande(m.group(1))
+    if bloc.get('bssid'):
+        aps.append(bloc)
+    return aps
+
+
+def _wifi_macos() -> dict:
+    try:
+        out = _run(['system_profiler', '-json', 'SPAirPortDataType'], timeout=15).stdout
+        data = json.loads(out)
+        ifaces = data.get('SPAirPortDataType', [{}])[0].get('spairport_airport_interfaces', [])
+    except Exception:
+        return {'connecte': False, 'motif': 'lecture impossible (macOS)'}
+    if not ifaces:
+        return {'connecte': False, 'motif': 'aucun adaptateur Wi-Fi'}
+    cur = ifaces[0].get('spairport_current_network_information', {})
+    if not cur:
+        return {'connecte': False, 'motif': 'non connecté', 'aps': []}
+    canal = _to_int(str(cur.get('spairport_network_channel', '')).split()[0]
+                    if cur.get('spairport_network_channel') else None)
+    etat = {'connecte': True, 'ssid': cur.get('_name', ''),
+            'bssid': (cur.get('spairport_network_bssid') or '').lower(),
+            'rssi_dbm': _to_int(str(cur.get('spairport_signal_noise', '')).split()[0]
+                                if cur.get('spairport_signal_noise') else None),
+            'canal': canal, 'bande': _canal_vers_bande(canal), 'debit_mbps': None, 'radio': ''}
+    aps = []
+    for res in ifaces[0].get('spairport_airport_other_local_wireless_networks', []):
+        c = _to_int(str(res.get('spairport_network_channel', '')).split()[0]
+                    if res.get('spairport_network_channel') else None)
+        aps.append({'ssid': res.get('_name', ''), 'bssid': '', 'canal': c,
+                    'bande': _canal_vers_bande(c), 'rssi_dbm': None})
+    etat['aps'] = aps
+    return etat
+
+
+def diagnostiquer_wifi(client_id: int) -> list:
+    if str(_cfg('diag_wifi_active', '1')) != '1':
+        return []
+    etat = etat_wifi()
+    if not etat.get('connecte'):
+        return []
+    findings = []
+    seuil_rssi = _cfg_int('diag_wifi_seuil_rssi', -72)
+    seuil_aps = _cfg_int('diag_wifi_seuil_aps_canal', 4)
+    ssid, bssid, canal, bande = etat.get('ssid'), etat.get('bssid'), etat.get('canal'), etat.get('bande')
+    rssi = etat.get('rssi_dbm')
+    aps = etat.get('aps') or []
+
+    # RSSI dans les métriques (baseline)
+    if rssi is not None and ssid:
+        try:
+            from database import get_db
+            conn = get_db()
+            _enregistrer_metrique(conn, client_id, 'wifi_rssi', ssid, rssi, time.time())
+            conn.commit(); conn.close()
+        except Exception:
+            pass
+
+    if rssi is not None and rssi <= seuil_rssi:
+        findings.append(_finding(
+            'wifi_signal_faible',
+            f"Le poste est connecté à « {ssid} » avec un signal faible ({rssi} dBm)",
+            {'ssid': ssid, 'rssi_dbm': rssi, 'canal': canal}, ssid, bssid or ''))
+
+    if canal:
+        chevauchants = {canal}
+        if bande == '2.4 GHz':
+            chevauchants = set(range(max(1, canal - 4), canal + 5))
+        nb = sum(1 for a in aps if a.get('canal') in chevauchants and a.get('bssid') != bssid)
+        if nb >= seuil_aps:
+            findings.append(_finding(
+                'wifi_canal_sature',
+                f"Canal {canal} ({bande}) : {nb} autres points d'accès sur des canaux chevauchants",
+                {'canal': canal, 'bande': bande, 'nb_aps': nb}, ssid, str(canal)))
+
+    # AP suspect : SSID du parc diffusé par un fabricant différent des autres BSSID
+    ssids_parc = _ssids_parc(client_id)
+    if ssids_parc:
+        par_ssid = {}
+        for a in aps:
+            if a.get('ssid') in ssids_parc and a.get('bssid'):
+                par_ssid.setdefault(a['ssid'], set()).add(a['bssid'][:8])
+        if bssid:
+            par_ssid.setdefault(ssid, set()).add(bssid[:8]) if ssid in ssids_parc else None
+        for s, prefixes in par_ssid.items():
+            vendors = {_vendor(p + ':00:00:00') or p for p in prefixes}
+            if len(vendors) >= 2:
+                findings.append(_finding(
+                    'wifi_ap_suspect',
+                    f"Le SSID du parc « {s} » est diffusé par des équipements de fabricants différents "
+                    f"({', '.join(sorted(vendors))}) — point d'accès pirate possible",
+                    {'ssid': s, 'fabricants': sorted(vendors), 'bssids': sorted(prefixes)}, s))
+
+    if bande == '2.4 GHz' and any(a.get('ssid') == ssid and a.get('bande') == '5 GHz' for a in aps):
+        findings.append(_finding(
+            'wifi_bande_2ghz',
+            f"Le poste utilise « {ssid} » en 2.4 GHz alors que le 5 GHz est disponible",
+            {'ssid': ssid}, ssid, 'bande'))
+
+    return findings
+
+
+def _ssids_parc(client_id: int) -> set:
+    try:
+        from database import get_db
+        conn = get_db()
+        row = conn.execute("SELECT wifi_ssid, wifi_ssid2 FROM parc_general WHERE client_id=?",
+                           (client_id,)).fetchone()
+        conn.close()
+        return {(row[0] or '').strip(), (row[1] or '').strip()} - {''} if row else set()
+    except Exception:
+        return set()
+
+
+def diag_wifi_apercu(client_id: int) -> dict:
+    """État Wi-Fi + occupation par canal, pour le panneau."""
+    etat = etat_wifi()
+    etat['actif'] = str(_cfg('diag_wifi_active', '1')) == '1'
+    par_canal = {}
+    for a in etat.get('aps', []) or []:
+        if a.get('canal'):
+            par_canal[a['canal']] = par_canal.get(a['canal'], 0) + 1
+    etat['par_canal'] = dict(sorted(par_canal.items()))
+    return etat
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1613,6 +2112,89 @@ _REMEDIATION = {
         'corriger': ["Traiter la cause identifiée sur la courbe",
                      "Si c'est le nouveau normal (charge légitime), ajuster les attentes / dimensionner"],
     },
+    'wifi_signal_faible': {
+        'cause': "Le poste capte mal le Wi-Fi : trop loin de la borne, obstacles (murs, métal), borne mal placée ou sous-dimensionnée.",
+        'verifier': ["Mesurer le signal à différents endroits",
+                     "Compter les murs/planchers entre le poste et la borne"],
+        'corriger': ["Rapprocher la borne ou en ajouter une",
+                     "Repasser en filaire les postes fixes",
+                     "Vérifier la puissance d'émission et l'antenne de la borne"],
+    },
+    'wifi_canal_sature': {
+        'cause': "Trop de réseaux Wi-Fi sur le même canal (ou des canaux qui se chevauchent en 2.4 GHz) : interférences, débit qui s'effondre aux heures de pointe.",
+        'verifier': ["Lister l'occupation par canal (panneau Wi-Fi)",
+                     "Regarder les réseaux des voisins"],
+        'corriger': ["En 2.4 GHz, n'utiliser que les canaux 1, 6 ou 11",
+                     "Privilégier le 5 GHz (bien plus de canaux)",
+                     "Réduire la largeur de canal (20 MHz en 2.4 GHz)"],
+    },
+    'wifi_ap_suspect': {
+        'cause': "Un point d'accès diffuse le nom de votre réseau Wi-Fi mais provient d'un équipement d'un autre fabricant : borne pirate (evil twin) cherchant à capter des identifiants, ou borne grand public ajoutée sans coordination.",
+        'verifier': ["Identifier physiquement toutes les bornes légitimes et leurs MAC",
+                     "Comparer aux BSSID vus pour ce SSID"],
+        'corriger': ["Localiser et débrancher la borne non autorisée",
+                     "Passer en WPA2/WPA3-Entreprise (802.1X) pour empêcher l'usurpation",
+                     "Activer la détection de rogue AP sur le contrôleur Wi-Fi si disponible"],
+    },
+    'wifi_bande_2ghz': {
+        'cause': "Le poste s'est accroché au 2.4 GHz (plus lent, plus encombré) alors que le 5 GHz du même réseau est à portée.",
+        'verifier': ["Vérifier que la carte Wi-Fi du poste supporte le 5 GHz",
+                     "Regarder si le 5 GHz est activé sur la borne pour ce SSID"],
+        'corriger': ["Activer le band steering sur la borne",
+                     "Forcer le 5 GHz dans les propriétés de la carte (postes fixes)"],
+    },
+    'wifi_debit_faible': {
+        'cause': "Le débit Wi-Fi négocié est très en dessous de ce que la carte peut faire : signal faible, canal encombré, norme ancienne, largeur de canal réduite.",
+        'verifier': ["Corréler avec le signal et l'occupation du canal",
+                     "Vérifier la norme (Wi-Fi 4/5/6) des deux côtés"],
+        'corriger': ["Traiter le signal / le canal en premier",
+                     "Mettre à jour le pilote de la carte Wi-Fi",
+                     "Remplacer une borne ou une carte trop ancienne"],
+    },
+    'ups_sur_batterie': {
+        'cause': "Coupure ou forte anomalie du secteur en cours : l'onduleur alimente la charge sur sa batterie. L'autonomie est limitée.",
+        'verifier': ["Confirmer la coupure (disjoncteur, autres équipements)",
+                     "Regarder l'autonomie restante estimée"],
+        'corriger': ["Si la coupure dure, arrêter proprement les serveurs avant l'épuisement",
+                     "Vérifier le disjoncteur / l'alimentation de la baie",
+                     "Contacter le fournisseur d'électricité si la coupure est externe"],
+    },
+    'ups_batterie_faible': {
+        'cause': "La batterie de l'onduleur est faible ou l'autonomie estimée est très courte : batterie vieillissante, charge trop élevée, ou coupure prolongée.",
+        'verifier': ["Regarder l'âge de la batterie et la date du dernier remplacement",
+                     "Vérifier la charge de sortie"],
+        'corriger': ["Planifier le remplacement du bloc batterie",
+                     "Réduire la charge branchée sur l'onduleur",
+                     "Lancer un test d'autonomie une fois le secteur rétabli"],
+    },
+    'ups_surcharge': {
+        'cause': "La charge branchée sur l'onduleur dépasse le seuil de confort : autonomie fortement réduite, risque de coupure de l'onduleur en cas de pic.",
+        'verifier': ["Lister ce qui est branché sur l'onduleur",
+                     "Comparer la puissance totale à la capacité (VA/W) de l'onduleur"],
+        'corriger': ["Débrancher les équipements non critiques de l'onduleur",
+                     "Répartir sur un second onduleur ou en installer un plus puissant"],
+    },
+    'ups_batterie_usee': {
+        'cause': "L'onduleur signale une batterie à remplacer (ou une température anormale) : la batterie ne tiendra pas l'autonomie annoncée.",
+        'verifier': ["Confirmer via l'interface de l'onduleur",
+                     "Vérifier la ventilation autour de l'onduleur"],
+        'corriger': ["Commander et poser un bloc batterie neuf (référence constructeur)",
+                     "Après remplacement, réinitialiser le compteur d'âge et tester l'autonomie"],
+    },
+    'ups_alarme': {
+        'cause': "L'onduleur remonte une ou plusieurs alarmes actives : la cause exacte est dans son interface (surchauffe, ventilateur, bypass, auto-test échoué…).",
+        'verifier': ["Se connecter à la carte réseau / l'écran de l'onduleur pour lire l'alarme",
+                     "Noter le code d'alarme"],
+        'corriger': ["Traiter selon le code (ventilation, remplacement de pièce, contrat de maintenance)",
+                     "Ouvrir un ticket auprès du constructeur si sous garantie"],
+    },
+    'ups_secteur_instable': {
+        'cause': "La tension d'entrée mesurée par l'onduleur sort de la plage normale : réseau électrique instable, neutre défectueux, ou onduleur qui bascule souvent en survolteur/dévolteur.",
+        'verifier': ["Historiser la tension d'entrée sur quelques jours",
+                     "Corréler avec des bascules fréquentes sur batterie"],
+        'corriger': ["Faire contrôler l'installation électrique par un électricien",
+                     "Envisager un onduleur online (double conversion) sur les charges sensibles"],
+    },
 }
 
 
@@ -1889,6 +2471,11 @@ def _run_snapshot(client_id: int, plage: str, avec_capture, rapide=None):
         enregistrer_metriques_liaison(client_id, stats_liaison)
         _fin_phase('liaison', tp)
 
+        if str(_cfg('diag_wifi_active', '1')) == '1':
+            tp = _phase('wifi', 40, 'Diagnostic Wi-Fi du poste')
+            findings += diagnostiquer_wifi(client_id)
+            _fin_phase('wifi', tp)
+
         tp = _phase('dns', 50, 'Contrôle de la résolution DNS')
         serveur_dns = next((c['ip'] for c in cibles if c.get('role') == 'dns'), '')
         findings += verifier_dns(serveur_dns)
@@ -2153,6 +2740,8 @@ def _moniteur_cycle():
                                                 collecte=stats_liaison)
             enregistrer_metriques_liaison(cid, stats_liaison)
             findings += detecter_conflits_noms(cid)
+            if str(_cfg('diag_wifi_active', '1')) == '1':
+                findings += diagnostiquer_wifi(cid)
             if avec_snmp:
                 findings += interroger_equipements_client(cid)
                 if avec_topo:

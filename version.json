@@ -1,23 +1,23 @@
 {
-  "version": "2.19.3",
+  "version": "2.19.4",
   "release_date": "2026-09-01T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.3",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.3/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.4/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.4/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.4/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.4",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.4/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.4/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.4/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.4/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.4/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Diagnostic réseau — consolidation. La page est réorganisée en onglets (Vue d'ensemble / Ports & topologie / Tendances / Évènements) avec un panneau de configuration à bascules rapides et un bouton « Tester SNMP ». Un mode rapide (moins de pings, sans capture) et un budget de temps bornent la durée d'un snapshot ; le temps par phase est affiché. Rapport de diagnostic envoyable périodiquement par e-mail (réglage « HH:MM » ou « lun HH:MM »). Nouvelle documentation de référence : DIAGNOSTIC_RESEAU.md.",
+    "new_features": "Diagnostic réseau — Wi-Fi et onduleurs. Diagnostic Wi-Fi côté poste : signal faible, canal encombré, point d'accès pirate diffusant le SSID du parc (evil twin), 2.4 GHz alors que le 5 GHz est disponible. Supervision SNMP des onduleurs (nouveau type d'appareil « Onduleur / UPS ») : sur secteur / sur batterie, charge, autonomie, batterie à remplacer, alarmes. Panneaux « Wi-Fi » et « Onduleurs » sur la page, guide de résolution par cas.",
     "improvements": [
-      "Chaque snapshot enregistre le détail des temps par phase dans son résumé.",
-      "Le dernier onglet consulté est mémorisé dans le navigateur."
+      "Wi-Fi et onduleurs désactivables dans Réglages → Réseau & Scan ; le Wi-Fi ne fait rien sans adaptateur.",
+      "Le RSSI Wi-Fi et l'autonomie de l'onduleur sont historisés (tendances / alerte sur dégradation)."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.3"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.4"
 }

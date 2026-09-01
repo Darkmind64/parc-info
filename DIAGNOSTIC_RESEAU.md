@@ -20,6 +20,8 @@ du **client actif** ; les évènements sont rattachés à ce client.
 | 4 | **Topologie L2** | Tables MAC (bridge-MIB FDB) + LLDP → quel appareil sur quel port | Palier 3 actif + `diag_topologie_active` | FDB volatile ; VLAN non pris en compte finement |
 | 5 | **Tendances & baseline** | Historique des métriques (liaison, ports) → dégradation *relative* | `diag_baseline_active` (défaut on) ; ~8 points d'historique | Ne remplace pas les seuils absolus, les complète |
 | 6 | **Rapport & remédiation** | — (synthèse) | reportlab pour le PDF (repli HTML sinon) | — |
+| 7a | **Wi-Fi (poste)** | État Wi-Fi du poste ParcInfo + AP visibles (`netsh wlan` / `iw` / `system_profiler`) | `diag_wifi_active` (défaut on) ; un adaptateur Wi-Fi | Vision depuis un seul point ; scan macOS best-effort |
+| 7b | **Onduleurs SNMP** | UPS-MIB (source secteur/batterie, charge, autonomie, batterie, alarmes) + repli APC | Palier 3 actif + `diag_ups_active` ; appareil de type `Onduleur / UPS` avec IP | Dépend de ce que la carte réseau de l'onduleur expose |
 
 **Deux modes** : *snapshot* à la demande (bouton « Lancer un diagnostic », mode
 rapide possible) et *surveillance continue* (`diag_surveillance_active`, thread
@@ -51,6 +53,17 @@ démon `_moniteur_loop` calqué sur le watchdog ping, période `diag_intervalle_
 | `vitesse_reduite` | Vitesse de lien réduite (port) | info | 3 | port actif à 10/100 Mb/s sur un équipement gigabit | câble Cat5e+ 4 paires ; autonégociation |
 | `cablage_incoherent` | Câblage baie incohérent avec la topologie | avertissement | 4 | le switch (FDB) voit un appareil connu, seul, ≠ de celui déclaré dans `baie_slot_ports` pour ce port | corriger la baie ; « Reporter dans la baie » |
 | `degradation_relative` | Dégradation par rapport à la référence | avertissement | 5 | valeur courante ≥ p90 × `diag_baseline_facteur` **et** au-dessus d'un plancher absolu | traiter la cause vue sur la courbe |
+| `wifi_signal_faible` | Signal Wi-Fi faible (poste) | avertissement | 7a | RSSI du poste ≤ `diag_wifi_seuil_rssi` (−72) | rapprocher/ajouter une borne ; filaire pour les fixes |
+| `wifi_canal_sature` | Canal Wi-Fi encombré | avertissement | 7a | ≥ `diag_wifi_seuil_aps_canal` BSSID sur des canaux chevauchants | canaux 1/6/11 en 2.4 GHz ; privilégier le 5 GHz |
+| `wifi_ap_suspect` | Point d'accès Wi-Fi suspect (evil twin) | critique | 7a | le SSID du parc (`parc_general.wifi_ssid`) diffusé par des fabricants (`_vendor`) différents | localiser/débrancher la borne pirate ; WPA2/3-Entreprise |
+| `wifi_bande_2ghz` | Wi-Fi en 2.4 GHz alors que 5 GHz dispo | info | 7a | poste en 2.4 GHz + BSSID du même SSID en 5 GHz | band steering ; forcer le 5 GHz sur les fixes |
+| `wifi_debit_faible` | Débit Wi-Fi négocié faible | info | 7a | débit < 25 % de la capacité radio | traiter signal/canal ; MàJ pilote ; borne/carte récente |
+| `ups_sur_batterie` | Onduleur sur batterie (coupure secteur) | critique | 7b | `upsOutputSource == battery` ou `upsSecondsOnBattery > 0` | arrêter proprement avant l'épuisement ; vérifier le secteur |
+| `ups_batterie_faible` | Onduleur — batterie faible / autonomie critique | critique | 7b | statut low/depleted, ou autonomie < `diag_ups_seuil_autonomie_min`, ou batterie < 30 % | remplacer le bloc batterie ; réduire la charge |
+| `ups_surcharge` | Onduleur en surcharge | avertissement | 7b | charge de sortie > `diag_ups_seuil_charge_pct` (80 %) | débrancher le non-critique ; onduleur plus puissant |
+| `ups_batterie_usee` | Onduleur — batterie à remplacer | avertissement | 7b | APC replace indicator, ou température > 40 °C | poser un bloc batterie neuf ; tester l'autonomie |
+| `ups_alarme` | Onduleur — alarme active | avertissement | 7b | `upsAlarmsPresent > 0` | lire le code d'alarme sur l'onduleur ; ticket constructeur |
+| `ups_secteur_instable` | Onduleur — tension d'entrée hors plage | info | 7b | tension d'entrée hors [195, 255] V (ou [95, 130]) | faire contrôler l'installation électrique ; onduleur online |
 
 Le texte complet (cause / à vérifier / à corriger) est dans
 `network_diag.py:_REMEDIATION`, affiché sous chaque évènement (« 💡 Comment
@@ -85,6 +98,12 @@ corriger ? »), dans le rapport et dans l'e-mail d'alerte.
 | `diag_baseline_jours` | `7` | fenêtre d'historique pour la référence |
 | `diag_baseline_facteur` | `2.5` | multiple de la p90 déclenchant l'alerte |
 | `diag_rapport_cron` | `` | envoi périodique du rapport (`HH:MM` quotidien ou `lun HH:MM` hebdo) ; redémarrage requis |
+| `diag_wifi_active` | `1` | palier 7a (diagnostic Wi-Fi côté poste) — sans effet sans adaptateur |
+| `diag_wifi_seuil_rssi` | `-72` | RSSI (dBm) sous lequel on alerte |
+| `diag_wifi_seuil_aps_canal` | `4` | nb de BSSID sur des canaux chevauchants avant « canal encombré » |
+| `diag_ups_active` | `1` | palier 7b (supervision SNMP des onduleurs) — nécessite `diag_snmp_actif` |
+| `diag_ups_seuil_charge_pct` | `80` | charge de sortie au-delà de laquelle on alerte |
+| `diag_ups_seuil_autonomie_min` | `10` | autonomie estimée mini (min) avant alerte |
 
 SMTP : réutilise `smtp_server` / `smtp_port` / `smtp_login` / `smtp_password` /
 `from_email` (Réglages → e-mail).
@@ -113,9 +132,21 @@ dot1qTpFdbPort        1.3.6.1.2.1.17.7.1.2.2.1.2
 # LLDP-MIB
 lldpRemSysName  1.0.8802.1.1.2.1.4.1.1.9
 lldpRemPortId   1.0.8802.1.1.2.1.4.1.1.7
+# UPS-MIB (RFC 1628, 1.3.6.1.2.1.33.1.x) — onduleurs
+upsIdentModel .1.1.2   upsBatteryStatus .1.2.1   upsSecondsOnBattery .1.2.2
+upsEstimatedMinutesRemaining .1.2.3   upsEstimatedChargeRemaining .1.2.4
+upsBatteryTemperature .1.2.7   upsInputVoltage .1.3.3.1.3   upsOutputSource .1.4.1
+upsOutputPercentLoad .1.4.4.1.5   upsAlarmsPresent .1.6.1
+# APC PowerNet (repli) 1.3.6.1.4.1.318.1.1.1.2.2.x
+upsAdvBatteryReplaceIndicator .4   upsAdvBatteryRunTimeRemaining .3
 # scalaires (scan + test SNMP)
 sysDescr 1.3.6.1.2.1.1.1.0   sysName 1.3.6.1.2.1.1.5.0
 ```
+
+Le Wi-Fi (palier 7a) n'utilise **pas** SNMP : lecture côté poste via
+`netsh wlan show interfaces` / `… networks mode=bssid` (Windows),
+`iw dev … link` / `… scan` (Linux), `system_profiler -json SPAirPortDataType`
+(macOS, best-effort). Aucune dépendance.
 
 GET et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
 `_snmp_get` / `_snmp_walk` / `_ber_decoder_*`). **Aucune dépendance** (pas de

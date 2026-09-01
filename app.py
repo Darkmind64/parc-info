@@ -8964,7 +8964,8 @@ def page_diag_reseau():
         'diag_surveillance_active', 'diag_snmp_actif', 'diag_topologie_active',
         'diag_capture_active', 'diag_baseline_active', 'diag_alerte_email',
         'diag_snapshot_rapide', 'diag_intervalle_s', 'diag_snmp_communautes',
-        'diag_alerte_destinataire', 'diag_rapport_cron')}
+        'diag_alerte_destinataire', 'diag_rapport_cron',
+        'diag_wifi_active', 'diag_ups_active')}
     return render_template('diag_reseau.html',
                            parc=parc, client=client, dernier_run=dernier_run,
                            etat_capture=network_diag.etat_capture(),
@@ -9087,6 +9088,24 @@ def api_diag_topologie_appliquer_baie():
                 'DIAG_TOPO_BAIE', f"{res.get('maj', 0)} port(s) renseigné(s)")
     conn.commit(); conn.close()
     return jsonify({'ok': True, **res})
+
+
+@app.route('/api/diag-reseau/wifi')
+@login_required
+def api_diag_wifi():
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify(network_diag.diag_wifi_apercu(cid))
+
+
+@app.route('/api/diag-reseau/ups')
+@login_required
+def api_diag_ups():
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify(network_diag.etat_ups(cid))
 
 
 @app.route('/api/diag-reseau/metriques')

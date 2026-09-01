@@ -3481,6 +3481,31 @@ function rendreConfig() {
         <label class="cfg-label">Cartographie de topologie L2 (FDB/LLDP, nécessite SNMP)</label>
         <input type="checkbox" data-cfg="diag_topologie_active" ${g('diag_topologie_active')==='1'?'checked':''} class="cfg-check">
     </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Supervision SNMP des onduleurs (appareils type « Onduleur / UPS »)</label>
+        <input type="checkbox" data-cfg="diag_ups_active" ${g('diag_ups_active')!=='0'?'checked':''} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Onduleur — seuil de charge (%)</label>
+        <input type="number" data-cfg="diag_ups_seuil_charge_pct" value="${g('diag_ups_seuil_charge_pct')||'80'}" min="10" max="100" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Onduleur — autonomie mini avant alerte (min)</label>
+        <input type="number" data-cfg="diag_ups_seuil_autonomie_min" value="${g('diag_ups_seuil_autonomie_min')||'10'}" min="1" max="120" class="cfg-input cfg-input-sm">
+    </div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:.5rem 0 .2rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Diagnostic Wi-Fi (côté poste)</div>
+    <div class="cfg-row">
+        <label class="cfg-label">Activer le diagnostic Wi-Fi</label>
+        <input type="checkbox" data-cfg="diag_wifi_active" ${g('diag_wifi_active')!=='0'?'checked':''} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Seuil de signal faible (dBm)</label>
+        <input type="number" data-cfg="diag_wifi_seuil_rssi" value="${g('diag_wifi_seuil_rssi')||'-72'}" min="-90" max="-40" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Nb d'AP sur un canal avant « canal encombré »</label>
+        <input type="number" data-cfg="diag_wifi_seuil_aps_canal" value="${g('diag_wifi_seuil_aps_canal')||'4'}" min="2" max="30" class="cfg-input cfg-input-sm">
+    </div>
     <div style="font-size:.7rem;color:var(--text-secondary);padding:.5rem 0 .2rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Tendances & référence</div>
     <div class="cfg-row">
         <label class="cfg-label">Alerte sur dégradation relative à la référence</label>

@@ -1,8 +1,42 @@
-PARCINFO_VERSION=2.19.3
+PARCINFO_VERSION=2.19.4
 RELEASE_DATE=2026-09-01
-BUILD_NUMBER=2026090103
+BUILD_NUMBER=2026090104
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.4 - Diagnostic reseau : Wi-Fi (poste) + onduleurs SNMP (palier 7)
+# Demande : etendre le diagnostic au Wi-Fi et aux onduleurs.
+#
+# A. Diagnostic Wi-Fi cote poste (extension palier 1, aucune dependance) :
+#    etat_wifi() lit l'etat Wi-Fi du poste et les AP visibles via
+#    `netsh wlan` (Windows), `iw dev` (Linux), `system_profiler -json`
+#    (macOS best-effort). diagnostiquer_wifi() -> findings :
+#    - wifi_signal_faible : RSSI du poste <= diag_wifi_seuil_rssi (-72 dBm)
+#    - wifi_canal_sature : >= diag_wifi_seuil_aps_canal BSSID sur des canaux
+#      chevauchants
+#    - wifi_ap_suspect (critique) : le SSID du parc (parc_general.wifi_ssid)
+#      diffuse par des fabricants differents -> evil twin possible
+#    - wifi_bande_2ghz, wifi_debit_faible (info)
+#    RSSI historise dans diag_metriques (wifi_rssi).
+#
+# B. Supervision SNMP des onduleurs (extension palier 3) :
+#    - nouveau type d'appareil "Onduleur / UPS" (types_appareils +
+#      _TYPES_EQUIP_SNMP)
+#    - interroger_ups() : UPS-MIB RFC 1628 (1.3.6.1.2.1.33) + repli APC
+#      PowerNet (upsAdvBatteryReplaceIndicator)
+#    - _analyser_ups() -> findings : ups_sur_batterie (critique),
+#      ups_batterie_faible (critique), ups_surcharge, ups_batterie_usee,
+#      ups_alarme, ups_secteur_instable
+#    - charge et autonomie historisees dans diag_metriques
+#    - routage par type dans interroger_equipements_client
+#
+# UI : panneau "Wi-Fi" (onglet Vue d'ensemble : SSID, RSSI + barre, canal,
+# occupation par canal) + panneau "Onduleurs" (onglet Equipements : source
+# secteur/batterie, charge, autonomie). Routes GET /api/diag-reseau/wifi et
+# /ups. Reglages + bascules dans le panneau Configuration. Remediation pour
+# les 11 nouvelles categories. DIAGNOSTIC_RESEAU.md mis a jour.
+#
+# 6 nouvelles cles de config. Aucune nouvelle dependance.
 
 # Version 2.19.3 - Diagnostic reseau : consolidation
 # Demande : "consolider le module diagnostic" apres 3 releases (6 paliers).

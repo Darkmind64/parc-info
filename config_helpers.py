@@ -55,8 +55,8 @@ LISTE_DEFAULTS = {
     'types_appareils': [
         'PC', 'PC (Windows)', 'PC/Serveur (Linux)', 'Laptop', 'MacBook',
         'Serveur', 'Imprimante', 'Switch', 'Switch/AP', 'Routeur/Pare-feu',
-        'NAS', 'Telephone IP', 'Tablette', 'Camera IP', 'Borne Wi-Fi',
-        'Objet connecté', 'Autre'
+        'NAS', 'Onduleur / UPS', 'Telephone IP', 'Tablette', 'Camera IP',
+        'Borne Wi-Fi', 'Objet connecté', 'Autre'
     ],
     'categories_peripheriques': [
         'Ecran', 'Clavier', 'Souris', 'Webcam', 'Casque / Micro', 'Haut-parleurs',
@@ -184,6 +184,13 @@ CFG_DEFAULTS = {
     'diag_snapshot_rapide': '0',       # mode court : moins de pings, pas de capture
     'diag_snapshot_budget_s': '120',   # plafond souple ; au-delà, phases lourdes sautées
     'diag_rapport_cron': '',           # rapport périodique par e-mail ('HH:MM' ou 'lun HH:MM')
+    # ── Palier 7 : Wi-Fi (poste) + onduleurs SNMP ────────────────────────────
+    'diag_wifi_active': '1',           # diagnostic Wi-Fi côté poste (rien sans adaptateur)
+    'diag_wifi_seuil_rssi': '-72',     # RSSI (dBm) en dessous duquel on alerte
+    'diag_wifi_seuil_aps_canal': '4',  # nb de BSSID sur le canal avant "canal saturé"
+    'diag_ups_active': '1',            # supervision SNMP des onduleurs (nécessite diag_snmp_actif)
+    'diag_ups_seuil_charge_pct': '80', # charge de sortie au-delà de laquelle on alerte
+    'diag_ups_seuil_autonomie_min': '10',  # autonomie estimée mini avant alerte
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',

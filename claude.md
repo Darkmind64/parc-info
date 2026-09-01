@@ -1594,6 +1594,7 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 | Toucher à l'interface mobile (PWA) | app.py / templates/mobile/ | routes `/m/*` (`grep -n "@app.route('/m"`), lecture seule uniquement |
 | Toucher au diagnostic réseau | network_diag.py / app.py | **doc de référence : `DIAGNOSTIC_RESEAU.md`** ; détections palier 1→6 + `_moniteur_loop` ; routes `/api/diag-reseau/*` + `/diag-reseau/rapport.{pdf,html}` ; page `templates/diag_reseau.html` (4 onglets) ; tables `diag_reseau_evenements`/`diag_reseau_runs`/`diag_snmp_releves`/`diag_topologie`/`diag_metriques` (`init_db`) ; scapy = dépendance optionnelle à import protégé |
 | Toucher à la topologie / baseline / rapport diag | network_diag.py | sections « Palier 4/5/6 » : `decouvrir_topologie` (FDB bridge-MIB + LLDP, recoupe `baie_slot_ports`), `evaluer_baseline` (médiane/p90 sur `diag_metriques`), `_REMEDIATION` + `generer_rapport_diag` (reportlab, repli HTML) |
+| Toucher au Wi-Fi / onduleurs du diag | network_diag.py | « Palier 7 » : `etat_wifi` / `diagnostiquer_wifi` (`netsh wlan`/`iw`/`system_profiler`, côté poste, sans dépendance), `interroger_ups` / `_analyser_ups` (UPS-MIB RFC 1628 + repli APC) ; type appareil `Onduleur / UPS` ; routes `/api/diag-reseau/wifi` et `/ups` |
 | Toucher au SNMP (scan + diagnostic) | app.py | `_snmp_get` (GET), `_snmp_walk` + `_ber_decoder_*` (GETNEXT, palier 3) ; OIDs `_OID_IF_*` / `_OID_DOT3_*` dans network_diag.py ; encodage BER fait main, aucune dépendance |
 
 ---
@@ -1612,6 +1613,6 @@ que par position — `grep -n "^def nom_de_la_fonction"`.
 
 ---
 
-**Dernier update** : 2026-09-01 (v2.19.3 — Diagnostic réseau : consolidation, onglets, doc DIAGNOSTIC_RESEAU.md)
+**Dernier update** : 2026-09-01 (v2.19.4 — Diagnostic réseau palier 7 : Wi-Fi poste + onduleurs SNMP)
 **Mainteneur** : ParcInfo Team
 **License** : Voir LICENSE

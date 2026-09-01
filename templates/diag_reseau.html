@@ -94,7 +94,7 @@
 
 <div class="diag-tabs" id="diag-tabs">
     <button class="diag-tab" data-pane="pane-apercu">Vue d'ensemble</button>
-    <button class="diag-tab" data-pane="pane-ports">Ports & topologie</button>
+    <button class="diag-tab" data-pane="pane-ports">Équipements</button>
     <button class="diag-tab" data-pane="pane-tendances">Tendances</button>
     <button class="diag-tab" data-pane="pane-evenements">Évènements</button>
 </div>
@@ -113,6 +113,8 @@
             ('diag_topologie_active', 'Topologie L2', 'nécessite le SNMP'),
             ('diag_capture_active', 'Capture passive (palier 2)', etat_capture.motif),
             ('diag_baseline_active', 'Tendances / baseline', ''),
+            ('diag_wifi_active', 'Diagnostic Wi-Fi', 'côté poste'),
+            ('diag_ups_active', 'Supervision onduleurs', 'via SNMP'),
             ('diag_alerte_email', 'Alerte e-mail', diag_cfg.diag_alerte_destinataire or 'aucun destinataire'),
         ] %}
         {% for cle, libelle, sub in _toggles %}
@@ -176,6 +178,12 @@
     </div>
 </div>
 
+<!-- ── Wi-Fi ── -->
+<div class="diag-card" id="wifi-wrap" style="margin-bottom:1.2rem;">
+    <h2>📶 Wi-Fi (poste)</h2>
+    <div id="wifi-body" class="diag-line">Chargement…</div>
+</div>
+
 <!-- ── Résultat du dernier snapshot ── -->
 <div class="diag-card" id="snapshot-wrap" style="display:none;margin-bottom:1.2rem;">
     <h2>Constats du diagnostic</h2>
@@ -186,6 +194,12 @@
 </div><!-- /pane-apercu -->
 
 <div class="diag-pane" id="pane-ports">
+<!-- ── Onduleurs ── -->
+<div class="diag-card" id="ups-wrap" style="margin-bottom:1.2rem;">
+    <h2>🔋 Onduleurs</h2>
+    <div id="ups-body" class="diag-line">Chargement…</div>
+</div>
+
 <!-- ── État des ports (SNMP) ── -->
 <div class="diag-card" id="snmp-wrap" style="margin-bottom:1.2rem;">
     <h2>🔌 État des ports (SNMP)</h2>
@@ -269,6 +283,13 @@ const CATEGORIES = {
     duplex_mismatch: "Duplex mismatch (port)", port_crc: "Erreurs CRC/FCS (port)",
     port_erreurs: "Erreurs / rejets (port)", port_sature: "Lien saturé (port)",
     port_flapping: "Port instable (flapping)", vitesse_reduite: "Vitesse de lien réduite (port)",
+    cablage_incoherent: "Câblage baie incohérent", degradation_relative: "Dégradation vs référence",
+    wifi_signal_faible: "Signal Wi-Fi faible", wifi_canal_sature: "Canal Wi-Fi encombré",
+    wifi_ap_suspect: "Point d'accès Wi-Fi suspect", wifi_bande_2ghz: "Wi-Fi en 2.4 GHz",
+    wifi_debit_faible: "Débit Wi-Fi faible",
+    ups_sur_batterie: "Onduleur sur batterie", ups_batterie_faible: "Onduleur batterie faible",
+    ups_surcharge: "Onduleur en surcharge", ups_batterie_usee: "Onduleur batterie à remplacer",
+    ups_alarme: "Onduleur alarme", ups_secteur_instable: "Onduleur tension hors plage",
 };
 
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -370,7 +391,7 @@ function pollDiag(){
             clearInterval(diagInterval); diagInterval = null;
             document.getElementById('btn-diag').disabled = false;
             chargerEvenements(1);
-            chargerSNMP(); chargerTopologie(); chargerTendances();
+            chargerSNMP(); chargerTopologie(); chargerTendances(); chargerWifi(); chargerUps();
         }
     }).catch(() => {});
 }
@@ -557,15 +578,68 @@ function chargerTendances(){
     }).catch(() => {});
 }
 
+function chargerWifi(){
+    fetch('/api/diag-reseau/wifi').then(r=>r.json()).then(d => {
+        const wrap = document.getElementById('wifi-body');
+        if (!d.actif){ wrap.innerHTML = '<span style="color:var(--text-muted);">Diagnostic Wi-Fi désactivé.</span>'; return; }
+        if (!d.connecte){
+            wrap.innerHTML = `<span style="color:var(--text-muted);">Poste non connecté en Wi-Fi${d.motif ? ' — ' + esc(d.motif) : ''}.</span>`;
+            return;
+        }
+        const rssi = d.rssi_dbm;
+        const qual = rssi == null ? 50 : Math.max(0, Math.min(100, 2 * (rssi + 100)));
+        const canaux = Object.entries(d.par_canal || {});
+        wrap.innerHTML = `
+            <div style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:flex-start;">
+              <div>
+                <div style="font-weight:700;">${esc(d.ssid)} <span style="color:var(--text-muted);font-weight:400;">${esc(d.bande||'')} · canal ${d.canal||'?'}</span></div>
+                <div style="font-size:.78rem;color:var(--text-secondary);">${d.rssi_dbm!=null?d.rssi_dbm+' dBm':'signal ?'}${d.debit_mbps?' · '+d.debit_mbps+' Mb/s':''}${d.radio?' · '+esc(d.radio):''}</div>
+                <div class="diag-progress-bar" style="width:200px;margin-top:.4rem;"><div class="diag-progress-fill" style="width:${qual}%;"></div></div>
+              </div>
+              <div>
+                <div style="font-size:.72rem;color:var(--text-secondary);margin-bottom:.2rem;">${(d.aps||[]).length} AP visibles · occupation par canal</div>
+                ${canaux.map(([c,n]) => `<div style="font-family:'Share Tech Mono',monospace;font-size:.7rem;">c${c} <span style="display:inline-block;height:8px;background:var(--accent);width:${Math.min(120,n*14)}px;vertical-align:middle;"></span> ${n}</div>`).join('') || '<span style="color:var(--text-muted);font-size:.72rem;">—</span>'}
+              </div>
+            </div>`;
+    }).catch(() => {});
+}
+
+function chargerUps(){
+    fetch('/api/diag-reseau/ups').then(r=>r.json()).then(d => {
+        const wrap = document.getElementById('ups-body');
+        if (!d.actif){ wrap.innerHTML = '<span style="color:var(--text-muted);">Supervision des onduleurs désactivée (nécessite le SNMP).</span>'; return; }
+        if (!d.onduleurs || !d.onduleurs.length){
+            wrap.innerHTML = '<span style="color:var(--text-muted);">Aucun appareil de type « Onduleur / UPS » avec une IP.</span>';
+            return;
+        }
+        wrap.innerHTML = `<div style="overflow-x:auto;"><table class="diag-table"><thead><tr>
+            <th>Onduleur</th><th>Source</th><th>Charge</th><th>Autonomie</th><th></th></tr></thead><tbody>
+            ${d.onduleurs.map(u => {
+                const surBatt = (u.findings||[]).some(f => f.categorie === 'ups_sur_batterie');
+                const pb = (u.findings && u.findings.length) ? 'background:rgba(255,140,0,.08);' : '';
+                return `<tr style="${pb}">
+                    <td>${u.appareil_id ? `<a href="/appareil/${u.appareil_id}/fiche-systeme">${esc(u.nom||u.ip)}</a>` : esc(u.nom||u.ip)}<div style="font-size:.68rem;color:var(--text-muted);">${esc(u.ip)}</div></td>
+                    <td>${surBatt ? '<span style="color:#ff6b81;">● batterie</span>' : '<span style="color:var(--accent-green);">● secteur</span>'}</td>
+                    <td>${u.charge_pct!=null ? Math.round(u.charge_pct)+' %' : '—'}</td>
+                    <td>${u.autonomie_min!=null ? Math.round(u.autonomie_min)+' min' : '—'}</td>
+                    <td>${(u.findings||[]).map(f => `<span class="grav-badge grav-avertissement">${esc(f.libelle)}</span>`).join(' ')}</td>
+                </tr>`;
+            }).join('')}
+            </tbody></table></div>`;
+    }).catch(() => {});
+}
+
 // Rafraîchir périodiquement l'état du moniteur
 setInterval(() => {
     fetch('/api/diag-reseau/etat-capture').then(r=>r.json()).then(majEtatCapture).catch(()=>{});
-    chargerSNMP(); chargerTopologie(); chargerTendances();
+    chargerSNMP(); chargerTopologie(); chargerTendances(); chargerWifi(); chargerUps();
 }, 30000);
 
 chargerEvenements(1);
 chargerSNMP();
 chargerTopologie();
 chargerTendances();
+chargerWifi();
+chargerUps();
 </script>
 {% endblock %}

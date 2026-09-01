@@ -247,6 +247,34 @@ def test_api_test_snmp_sans_equipement(client, deux_clients, monkeypatch):
     assert d['ok'] is False and 'motif' in d
 
 
+def test_api_wifi_et_ups(client, deux_clients, monkeypatch):
+    monkeypatch.setattr(network_diag, 'etat_wifi',
+                        lambda: {'connecte': False, 'motif': 'aucun adaptateur Wi-Fi'})
+    login_session(client, deux_clients['lecteur'], deux_clients['cid_a'])
+    w = client.get('/api/diag-reseau/wifi').get_json()
+    assert 'actif' in w and w['connecte'] is False
+    u = client.get('/api/diag-reseau/ups').get_json()
+    assert 'actif' in u and isinstance(u['onduleurs'], list)
+
+
+def test_ups_finding_rattache_appareil(client, conn, deux_clients, make_appareil):
+    cid = deux_clients['cid_a']
+    aid = make_appareil(cid, nom_machine='UPS-1', type_appareil='Onduleur / UPS', adresse_ip='10.0.0.9')
+    ups = {'modele': 'APC', 'source': 5, 'source_txt': 'batterie', 'charge_pct': 40,
+           'autonomie_min': 3, 'batterie_pct': 50, 'batterie_statut': 3,
+           'batterie_statut_txt': 'faible', 'sur_batterie_s': 30, 'temp_c': 25,
+           'tension_entree': 230, 'remplacer_batterie': False, 'alarmes': 0, 'ts': 1000.0}
+    findings = network_diag._analyser_ups(cid, '10.0.0.9', aid, ups)
+    cats = {f['categorie'] for f in findings}
+    assert 'ups_sur_batterie' in cats and 'ups_batterie_faible' in cats
+    assert all(f['appareil_id'] == aid for f in findings)
+    network_diag._enregistrer_evenements(cid, findings, 'snmp')
+    login_session(client, deux_clients['proprio'], cid)
+    evt = next(e for e in client.get('/api/diag-reseau/evenements').get_json()['evenements']
+               if e['categorie'] == 'ups_sur_batterie')
+    assert evt['appareil_id'] == aid and evt['remediation']
+
+
 def test_metriques_serie(client, conn, deux_clients):
     import time
     cid = deux_clients['cid_a']

@@ -361,5 +361,99 @@ st = N.statut_snapshot()
 verifier(isinstance(st.get('phases'), dict) and st['phases'], "resume phases renseigné", str(st.get('phases')))
 N._ping_rafale, N.capture_passive = _orig_ping, _orig_capt
 
+print('\n=== 15. Palier 7a — Wi-Fi (parsing + détections) ===')
+_SAMPLE_IF = """
+    Name                   : Wi-Fi
+    State                  : connected
+    SSID                   : PARC-WIFI
+    BSSID                  : a0:b1:c2:d3:e4:f5
+    Signal                 : 30%
+    Channel                : 6
+    Receive rate (Mbps)    : 72
+"""
+_SAMPLE_NET = """
+SSID 1 : PARC-WIFI
+    BSSID 1 : a0:b1:c2:d3:e4:f5
+         Signal : 30%
+         Channel : 6
+    BSSID 2 : 00:11:22:33:44:55
+         Signal : 55%
+         Channel : 6
+SSID 2 : VOISIN-A
+    BSSID 1 : de:ad:be:ef:00:01
+         Signal : 60%
+         Channel : 4
+SSID 3 : VOISIN-B
+    BSSID 1 : de:ad:be:ef:00:02
+         Signal : 62%
+         Channel : 8
+"""
+_orig_run = N._run
+N.IS_WINDOWS = True
+N._run = lambda cmd, timeout=6: type('R', (), {
+    'stdout': _SAMPLE_IF if 'interfaces' in cmd else _SAMPLE_NET, 'returncode': 0})()
+w = N._wifi_windows()
+verifier(w['connecte'] and w['ssid'] == 'PARC-WIFI' and w['canal'] == 6 and w['rssi_dbm'] == -85,
+         "netsh : SSID / canal / RSSI (30% -> -85 dBm)", str({k: w[k] for k in ('ssid', 'canal', 'rssi_dbm')}))
+verifier(len(w['aps']) == 4, "netsh networks : 4 BSSID extraits", str(len(w['aps'])))
+N._run = _orig_run
+
+_c = A.get_db()
+_c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (905, 'WiFi')")
+_c.execute("INSERT INTO parc_general (client_id, wifi_ssid) VALUES (905, 'PARC-WIFI')")
+_c.commit(); _c.close()
+N.etat_wifi = lambda: {'connecte': True, 'ssid': 'PARC-WIFI', 'bssid': 'a0:b1:c2:d3:e4:f5',
+                       'rssi_dbm': -80, 'canal': 6, 'bande': '2.4 GHz', 'debit_mbps': 72,
+                       'aps': [
+                           {'ssid': 'PARC-WIFI', 'bssid': 'a0:b1:c2:d3:e4:f5', 'canal': 6, 'bande': '2.4 GHz'},
+                           {'ssid': 'PARC-WIFI', 'bssid': 'ff:ff:ff:00:00:01', 'canal': 6, 'bande': '2.4 GHz'},
+                           {'ssid': 'X', 'bssid': '00:00:01:00:00:01', 'canal': 5, 'bande': '2.4 GHz'},
+                           {'ssid': 'Y', 'bssid': '00:00:02:00:00:01', 'canal': 7, 'bande': '2.4 GHz'},
+                           {'ssid': 'Z', 'bssid': '00:00:03:00:00:01', 'canal': 8, 'bande': '2.4 GHz'},
+                       ]}
+_wf = [x['categorie'] for x in N.diagnostiquer_wifi(905)]
+verifier('wifi_signal_faible' in _wf, "RSSI -80 -> wifi_signal_faible", str(_wf))
+verifier('wifi_canal_sature' in _wf, "5 AP sur canaux chevauchants -> wifi_canal_sature", str(_wf))
+verifier('wifi_ap_suspect' in _wf,
+         "SSID du parc diffusé par 2 fabricants différents -> wifi_ap_suspect", str(_wf))
+N.etat_wifi = lambda: {'connecte': False, 'motif': 'aucun adaptateur Wi-Fi'}
+verifier(N.diagnostiquer_wifi(905) == [], "pas de Wi-Fi -> aucun finding")
+
+print('\n=== 16. Palier 7b — onduleurs SNMP ===')
+_c = A.get_db()
+_c.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (906, 'UPS')")
+_c.execute("INSERT INTO appareils (id, client_id, nom_machine, type_appareil, adresse_ip) "
+           "VALUES (600, 906, 'UPS-SRV', 'Onduleur / UPS', '10.6.0.1')")
+_c.commit(); _c.close()
+from config_helpers import cfg_invalidate as _inv3
+_c = A.get_db()
+_c.execute("INSERT OR REPLACE INTO config (cle, valeur) VALUES ('diag_snmp_actif', '1')")
+_c.commit(); _c.close(); _inv3()
+
+def _fake_ups_get(ip, oids, comm='public', timeout=1.5):
+    m = {N._OID_UPS_MODEL: 'Smart-UPS 1500', N._OID_UPS_OUT_SOURCE: '5',
+         N._OID_UPS_MIN_REMAIN: '5', N._OID_UPS_BATT_STATUS: '3',
+         N._OID_UPS_ON_BATT_S: '90', N._OID_UPS_ALARMS: '1',
+         N._OID_APC_BATT_REPL: '2', N._OID_UPS_CHARGE_PCT: '20'}
+    return {o: m[o] for o in oids if o in m}
+A._snmp_get = _fake_ups_get
+N._snmp_walk = lambda oid, ip, comm: ({'1': '95'} if oid == N._OID_UPS_OUT_LOAD else {})
+_ups = N.interroger_ups('10.6.0.1', ['public'])
+verifier(_ups and _ups['source_txt'] == 'batterie' and _ups['charge_pct'] == 95,
+         "interroger_ups : source batterie, charge 95 %", str(_ups and _ups.get('source_txt')))
+_uf = sorted(x['categorie'] for x in N._analyser_ups(906, '10.6.0.1', 600, _ups))
+verifier({'ups_sur_batterie', 'ups_batterie_faible', 'ups_surcharge', 'ups_batterie_usee', 'ups_alarme'}
+         <= set(_uf), "_analyser_ups : les 5 findings attendus", str(_uf))
+# routage : un appareil UPS passe par interroger_ups
+_routes = []
+_orig_iu, _orig_ie = N.interroger_ups, N.interroger_equipement
+N.interroger_ups = lambda ip, c: _routes.append(('ups', ip)) or None
+N.interroger_equipement = lambda ip, c: _routes.append(('equip', ip)) or None
+N.interroger_equipements_client(906)
+N.interroger_ups, N.interroger_equipement = _orig_iu, _orig_ie
+verifier(_routes == [('ups', '10.6.0.1')], "l'appareil Onduleur/UPS est routé vers interroger_ups", str(_routes))
+_e = N.etat_ups(906)
+verifier(_e['onduleurs'] and _e['onduleurs'][0]['ip'] == '10.6.0.1', "etat_ups liste l'onduleur")
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)
