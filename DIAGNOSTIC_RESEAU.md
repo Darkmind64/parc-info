@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-02 (v2.19.11). En cas de doute
+> Ce document décrit le comportement au 2026-09-02 (v2.19.12). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -97,12 +97,19 @@ des switchs de la baie et calcule l'état à peindre par port.
   s'éteint plus jamais brutalement à cause d'un seul paquet SNMP perdu) · `err`
   si Δ(in+out errors) > `diag_baie_activite_seuil_err` (rouge) · `sature` si
   débit ≥ `diag_snmp_seuil_saturation_pct` % de la vitesse du lien (orange) ·
-  `traffic` si **paquets/s ≥ `diag_baie_activite_pps_mini`** OU débit > 2 kbit/s
-  (vert, période de clignotement ∝ paquets/s — v2.19.8 : clignote sur les
-  PAQUETS, pas seulement au-delà d'un % de bande passante, sinon un poste au
-  trafic bureautique normal restait classé « calme ») · `idle` (vert fixe,
-  aucune activité). Lissage EMA (α≈0,5) sur débit/paquets pour absorber la
-  variance d'un relevé à l'autre.
+  `traffic` si **paquets/s ≥ `diag_baie_activite_pps_mini`** (défaut **15**
+  depuis v2.19.12 — à 1, le bruit de fond L2 (BPDU STP, ARP, mDNS, LLDP)
+  suffisait à marquer presque tout port « actif », d'où des comptes différents
+  d'une instance à l'autre) OU débit > 2 kbit/s (vert, période de clignotement
+  ∝ paquets/s — v2.19.8 : clignote sur les PAQUETS, pas seulement au-delà d'un %
+  de bande passante) · `idle` (vert fixe, aucune activité).
+- **Anti-rebond** (v2.19.12, `_ACTIVITE_DEBOUNCE = 2`) : le passage
+  `idle`↔`traffic` n'est retenu qu'après **deux relevés consécutifs** qui le
+  demandent — un port marginal ne fait plus scintiller la LED, et les instances
+  convergent sur le même compte. La décision d'état se prend sur les valeurs
+  **instantanées** (l'anti-rebond lisse l'état) ; les chiffres affichés restent
+  lissés par EMA (α≈0,5) pour la lisibilité. `down`/`stale`/`err`/`sature`
+  basculent immédiatement (pas d'anti-rebond).
 - **Aucune persistance** : `_activite_prev` / `_activite_resultat` /
   `_activite_detail` / `_activite_journal` vivent en mémoire, purgés 120 s après
   le dernier battement. Les tendances (`diag_metriques`) restent alimentées
@@ -224,7 +231,7 @@ corriger ? »), dans le rapport et dans l'e-mail d'alerte.
 | `diag_ups_seuil_charge_pct` | `80` | charge de sortie au-delà de laquelle on alerte |
 | `diag_ups_seuil_autonomie_min` | `10` | autonomie estimée mini (min) avant alerte |
 | `diag_baie_activite_seuil_err` | `20` | vue d'activité baie : Δ erreurs (in+out) par fenêtre avant LED rouge (nécessite `diag_snmp_actif`) |
-| `diag_baie_activite_pps_mini` | `1` | vue d'activité baie : paquets/s sous lesquels un port up reste « calme » (pas de clignotement) |
+| `diag_baie_activite_pps_mini` | `15` | vue d'activité baie : paquets/s sous lesquels un port up reste « calme » (au-dessus de 1, le bruit de fond L2 ne suffit plus à le marquer actif) |
 | `diag_baie_capture_duree_s` | `20` | moniteur baie : durée de la capture de trafic à la demande |
 | `diag_baie_activite_repli_naif` | `0` | vue d'activité baie : dernier recours `numero de port == ifIndex` (souvent faux — désactivé) |
 

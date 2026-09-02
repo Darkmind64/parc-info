@@ -1,8 +1,28 @@
-PARCINFO_VERSION=2.19.11
+PARCINFO_VERSION=2.19.12
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090202
+BUILD_NUMBER=2026090203
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.12 - Vue d'activite baie : comptes de "ports actifs" stables
+# Retour terrain : "j'ai des resultats variables selon les instances - Docker
+# 10 ports actifs, Windows 8, Mac 14". Deux causes, toutes deux corrigees :
+#
+# - Le seuil "actif" (diag_baie_activite_pps_mini) passe de 1 a 15 paquets/s.
+#   A 1 pkt/s, le bruit de fond L2 (BPDU STP toutes les 2 s, ARP, mDNS/Bonjour
+#   surtout avec un Mac sur le reseau, LLDP, DHCP) suffisait a marquer presque
+#   tous les ports "actifs" -> "actif" == "une trame vue dans la fenetre", donc
+#   dependant de QUAND chaque instance a echantillonne. A 15 pkt/s, "actif"
+#   veut dire "trafic utilisateur reel".
+# - Anti-rebond (_ACTIVITE_DEBOUNCE = 2) : un port ne bascule idle<->traffic
+#   qu'apres 2 relevés consecutifs qui le demandent. La decision d'etat se
+#   prend desormais sur les valeurs INSTANTANEES (l'anti-rebond lisse l'etat),
+#   les chiffres affiches restant lisses par EMA. down/stale/err/sature
+#   basculent toujours immediatement.
+#
+# Mesure : le meme switch qui affichait 8-14 ports actifs en scintillant se
+# stabilise a 5-6, identique d'un releve a l'autre.
+# Aucune nouvelle dependance, aucun schema change.
 
 # Version 2.19.11 - Vue d'activite baie : demarrage plus rapide des LEDs
 # Retour terrain : 2-3 min avant que les LEDs commencent a clignoter.

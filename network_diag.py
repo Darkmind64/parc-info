@@ -2864,6 +2864,7 @@ _ACTIVITE_MANQUES_STALE = 3       # relevés manqués consécutifs avant l'état
 _ACTIVITE_EMA           = 0.5     # lissage exponentiel du débit / pps
 _ACTIVITE_BPS_MINI      = 2000    # bit/s en dessous : pas de clignotement (bruit)
 _ACTIVITE_PPS_MAX_PORT  = 15_000_000   # pps — plafond absolu (10 GbE ≈ 14,9 Mpps) : au-delà = artefact de compteur
+_ACTIVITE_DEBOUNCE      = 2       # cycles consécutifs demandant idle<->traffic avant de basculer (anti-scintillement)
 _CPT_SENTINELLE_32      = {2**31 - 1, 2**32 - 1}   # valeurs "compteur indisponible" de certains agents
 
 # OIDs PoE (POWER-ETHERNET-MIB, RFC 3621) — table pethPsePortTable indexée
@@ -3291,11 +3292,18 @@ def _etat_led(prev, cur, dt, seuils):
     """État d'un port. seuils = {'err', 'sat_pct', 'pps_mini'}.
     Priorité : down > stale > err > sature > traffic > idle. Le clignotement
     « traffic » se déclenche sur les PAQUETS (comme une vraie LED de switch),
-    pas seulement au-delà d'un % de bande passante."""
+    pas seulement au-delà d'un % de bande passante.
+
+    Anti-rebond : le passage idle<->traffic n'est retenu qu'après
+    `_ACTIVITE_DEBOUNCE` cycles consécutifs qui le demandent (le bruit de fond
+    L2 et l'imprécision des compteurs faisaient scintiller les LEDs et donnaient
+    des comptes de « ports actifs » différents d'une instance à l'autre). Les
+    états down/stale/err/sature, eux, basculent immédiatement."""
     if cur.get('oper', 1) != 1:
         return {'etat': 'down', 'bps': 0, 'pps': 0.0, 'pct': 0.0,
                 'blink_ms': 0, 'err_delta': 0, 'reset': False,
-                'bps_ema': 0.0, 'pps_ema': 0.0}
+                'bps_ema': 0.0, 'pps_ema': 0.0,
+                'etat_pending': None, 'etat_pending_n': 0}
 
     speed = cur.get('speed_mbps', 0)
     if prev and dt > 0 and 'in_oct' in prev:
@@ -3331,21 +3339,51 @@ def _etat_led(prev, cur, dt, seuils):
         bps = min(bps, cap_bps)
         pps = min(pps, cap_pps)
     else:
-        bps = pps = 0.0
+        bps = pps = bps_inst = pps_inst = 0.0
         err_delta = 0
         reset = False
 
     pct = (bps / (speed * 1e6) * 100) if speed else 0.0
+    pend = (prev or {}).get('etat_pending')
+    pend_n = (prev or {}).get('etat_pending_n', 0)
     base = {'bps': round(bps), 'pps': round(pps, 1), 'pct': round(pct, 1),
             'err_delta': int(err_delta), 'reset': reset,
-            'bps_ema': bps, 'pps_ema': pps}
+            'bps_ema': bps, 'pps_ema': pps,
+            'etat_pending': None, 'etat_pending_n': 0}
 
     if err_delta > seuils['err']:
         return {'etat': 'err', 'blink_ms': 250, **base}
     if speed and pct >= seuils['sat_pct']:
         return {'etat': 'sature', 'blink_ms': 150, **base}
-    if pps >= seuils['pps_mini'] or bps > _ACTIVITE_BPS_MINI:
-        blink = int(max(120, min(1200, 1200 / math.log2(max(2.0, pps + 2)))))
+
+    def _blink(p):
+        return int(max(120, min(1200, 1200 / math.log2(max(2.0, p + 2)))))
+
+    # état voulu par CE cycle — sur les valeurs instantanées (pas l'EMA) :
+    # l'anti-rebond ci-dessous fournit le lissage de l'état, l'EMA celui des
+    # chiffres affichés.
+    if pps_inst >= seuils['pps_mini'] or bps_inst > _ACTIVITE_BPS_MINI:
+        etat_brut, blink = 'traffic', _blink(pps)
+    else:
+        etat_brut, blink = 'idle', 0
+
+    # anti-rebond idle<->traffic : il faut _ACTIVITE_DEBOUNCE cycles consécutifs
+    # demandant le changement avant de l'appliquer (un port marginal ne
+    # scintille plus, et les instances convergent sur le même compte).
+    etat_prec = (prev or {}).get('etat')
+    if etat_prec in ('idle', 'traffic') and etat_brut != etat_prec:
+        pend_n = pend_n + 1 if pend == etat_brut else 1
+        pend = etat_brut
+        if pend_n < _ACTIVITE_DEBOUNCE:          # pas encore confirmé
+            etat_brut = etat_prec
+            blink = _blink(pps) if etat_prec == 'traffic' else 0
+        else:
+            pend, pend_n = None, 0
+    else:
+        pend, pend_n = None, 0
+    base['etat_pending'], base['etat_pending_n'] = pend, pend_n
+
+    if etat_brut == 'traffic':
         return {'etat': 'traffic', 'blink_ms': blink, **base}
     return {'etat': 'idle', 'blink_ms': 0, **base}
 
@@ -3355,7 +3393,7 @@ def _cycle_activite(clients):
     communautes = _communautes_snmp()
     seuils = {'err': _cfg_int('diag_baie_activite_seuil_err', 20),
               'sat_pct': _cfg_float('diag_snmp_seuil_saturation_pct', 90),
-              'pps_mini': _cfg_float('diag_baie_activite_pps_mini', 1)}
+              'pps_mini': _cfg_float('diag_baie_activite_pps_mini', 15)}
     for cid in clients:
         journal_ops = []          # (message, niveau, cible) — émis hors lock
         try:
@@ -3406,7 +3444,9 @@ def _cycle_activite(clients):
                             'in_err': p.get('in_err', _pr.get('in_err', 0)),
                             'out_err': p.get('out_err', _pr.get('out_err', 0)),
                             'bps_ema': led_all['bps_ema'], 'pps_ema': led_all['pps_ema'],
-                            'etat': led_all['etat'], 'manques': 0, 'ts': now}
+                            'etat': led_all['etat'], 'manques': 0, 'ts': now,
+                            'etat_pending': led_all.get('etat_pending'),
+                            'etat_pending_n': led_all.get('etat_pending_n', 0)}
                         etats[ifindex] = led_all
                         meta = infos.get(ifindex, {})
                         if meta.get('ethernet', True):

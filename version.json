@@ -1,23 +1,22 @@
 {
-  "version": "2.19.11",
+  "version": "2.19.12",
   "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.11/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.11/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.11/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.11",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.11/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.11/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.11/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.11/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.11/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.12",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Vue d'activité de la baie — démarrage plus rapide : les premiers cycles de relevé SNMP ne subissent plus la cadence lente (30 s) réservée au régime établi, et un bandeau « démarrage du relevé… » s'affiche pendant la mise en route. Les LEDs commencent à s'animer en ~30-40 s au lieu de 2-3 min sur un switch lent (il reste inhérent que deux relevés espacés sont nécessaires pour mesurer un débit).",
+    "new_features": "Vue d'activité de la baie — comptes de « ports actifs » stables et cohérents entre instances : le seuil « actif » passe de 1 à 15 paquets/s (en dessous, le bruit de fond L2 — ARP, STP, mDNS — suffisait à marquer un port actif), et un anti-rebond exige deux relevés consécutifs avant qu'un port bascule actif ↔ calme. Fini le scintillement des LEDs et les comptes qui variaient de 8 à 14 selon l'instance (Docker/Windows/Mac).",
     "improvements": [
-      "Le thread de relevé démarre 2 s après la première requête du navigateur (au lieu de 12 s).",
-      "Une réouverture rapide de la page réutilise le cache (noms d'interfaces, mode 32/64 bits) et repart quasi instantanément."
+      "La décision d'état d'un port se prend sur les valeurs instantanées (l'anti-rebond fournit le lissage), les chiffres affichés restent lissés (EMA) pour la lisibilité."
     ]
   },
   "checksums": {
@@ -28,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.11"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.12"
 }

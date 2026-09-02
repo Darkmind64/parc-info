@@ -401,6 +401,46 @@ def test_etat_led_plafond_compteur_aberrant():
     assert ls['pps'] <= network_diag._ACTIVITE_PPS_MAX_PORT
 
 
+def test_etat_led_antirebond_idle_traffic():
+    """Le passage idle<->traffic n'est retenu qu'après _ACTIVITE_DEBOUNCE cycles
+    consécutifs — un port marginal ne fait plus scintiller la LED ni varier le
+    compte de « ports actifs » d'une instance à l'autre."""
+    assert network_diag._ACTIVITE_DEBOUNCE == 2
+    seuils = {'err': 20, 'sat_pct': 90, 'pps_mini': 15}
+    p0 = dict(in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0,
+              ts=0.0, etat='idle', bps_ema=0.0, pps_ema=0.0)
+    traf = dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0,
+                in_pkts=100, out_pkts=100, in_err=0, out_err=0)   # 200 pkt/s
+
+    # 1er cycle avec du trafic : encore « idle », mais transition en attente
+    l1 = network_diag._etat_led(p0, traf, 1.0, seuils)
+    assert l1['etat'] == 'idle'
+    assert l1['etat_pending'] == 'traffic' and l1['etat_pending_n'] == 1
+
+    # 2e cycle consécutif : bascule confirmée
+    p1 = dict(p0, etat=l1['etat'], etat_pending=l1['etat_pending'],
+              etat_pending_n=l1['etat_pending_n'],
+              bps_ema=l1['bps_ema'], pps_ema=l1['pps_ema'])
+    l2 = network_diag._etat_led(p1, dict(traf, in_pkts=200, out_pkts=200), 1.0, seuils)
+    assert l2['etat'] == 'traffic' and l2['etat_pending'] is None
+
+    # trafic qui s'arrête : un seul cycle calme ne coupe pas la LED tout de suite
+    p2 = dict(p0, etat='traffic', bps_ema=l2['bps_ema'], pps_ema=0.0,
+              in_pkts=200, out_pkts=200)
+    calme = dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0,
+                 in_pkts=200, out_pkts=200, in_err=0, out_err=0)   # 0 pkt/s
+    l3 = network_diag._etat_led(p2, calme, 1.0, seuils)
+    assert l3['etat'] == 'traffic' and l3['etat_pending'] == 'idle'
+    p3 = dict(p2, etat=l3['etat'], etat_pending='idle', etat_pending_n=l3['etat_pending_n'],
+              pps_ema=l3['pps_ema'])
+    l4 = network_diag._etat_led(p3, calme, 1.0, seuils)
+    assert l4['etat'] == 'idle'
+
+    # un défaut (err/sature/down) ignore l'anti-rebond
+    down = network_diag._etat_led(dict(p0, etat='traffic'), dict(traf, oper=2), 1.0, seuils)
+    assert down['etat'] == 'down'
+
+
 def test_port_physique_depuis_nom():
     f = network_diag._port_physique_depuis_nom
     assert f('GigabitEthernet1/0/12') == 12
