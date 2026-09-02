@@ -1,22 +1,22 @@
 {
-  "version": "2.19.17",
+  "version": "2.19.18",
   "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.17/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.17/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.17/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.17",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.17/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.17/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.17/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.17/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.17/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.18/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.18/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.18/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.18",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.18/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.18/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.18/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.18/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.18/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Moniteur réseau de la baie — les courbes de tendance (sparklines) suivent maintenant les paquets/s sur les ports dont le switch bloque ses compteurs d'octets (elles restaient plates), et les valeurs délirantes des compteurs défectueux (des centaines de milliers de pkt/s sur un port calme) sont écartées par cohérence octets/paquets. La barre de défilement ne masque plus les sparklines.",
+    "new_features": "Baie de brassage — les prises murales d'un bandeau RJ ont maintenant leur LED d'activité : elle reflète le trafic du port de switch au bout du cordon de brassage (aucun SNMP sur la prise, qui est passive). En prime, un contrôle de câblage : si la topologie L2 montre que le switch voit un AUTRE appareil que celui déclaré sur la prise, un symbole d'avertissement s'affiche (câble mal brassé, ou fiche baie à corriger).",
     "improvements": [
-      "Sur un switch aux compteurs bloqués, un port actif reste allumé plus longtemps entre deux à-coups du compteur."
+      "Un switch réparti sur plusieurs éléments de rack, et les prises murales, partagent le même relevé SNMP par IP."
     ]
   },
   "checksums": {
@@ -27,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.17"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.18"
 }

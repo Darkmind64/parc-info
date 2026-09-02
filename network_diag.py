@@ -2940,6 +2940,7 @@ def _journal(message, niveau='info', cible=''):
 
 
 _TYPES_EQUIP_BAIE_RESEAU = ('Switch', 'Switch/AP', 'Routeur/Pare-feu')
+_TYPES_BANDEAU = ('Bandeau RJ', 'Patch Panel')
 
 
 def _switchs_baie(conn, client_id):
@@ -3567,6 +3568,63 @@ def _modele_court(sysdescr):
     return sysdescr.split('\n')[0].split(',')[0].strip()[:48]
 
 
+def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot,
+                            noms_par_ip, topo_par_ip, etats_prec_get):
+    """LEDs d'activité + contrôle de câblage pour les prises murales d'un bandeau RJ.
+    Une prise murale N est reliée par le cordon de brassage (baie_slot_ports.lie_*)
+    à un port de switch : on réutilise l'état SNMP de ce port, déjà relevé. La
+    topologie L2 (`diag_topologie`) dit quel appareil est réellement vu sur ce
+    port → on le compare à celui déclaré sur la prise (`baie_prises_murales`).
+    Retourne (ports_ui, journal_ops)."""
+    ports_ui, journal_ops = [], []
+    ph = ','.join('?' * len(_TYPES_BANDEAU))
+    for (b_slot_id,) in conn.execute(
+            f"SELECT id FROM baie_slots WHERE client_id=? AND type_equipement IN ({ph})",
+            (cid, *_TYPES_BANDEAU)).fetchall():
+        liens = conn.execute(
+            "SELECT numero, lie_slot_id, lie_port_numero FROM baie_slot_ports "
+            "WHERE slot_id=? AND lie_slot_id IS NOT NULL AND lie_port_numero IS NOT NULL",
+            (b_slot_id,)).fetchall()
+        if not liens:
+            continue
+        declare = {r[0]: (r[1], r[2] or '') for r in conn.execute(
+            "SELECT pm.numero, pm.appareil_id, a.nom_machine FROM baie_prises_murales pm "
+            "LEFT JOIN appareils a ON a.id = pm.appareil_id WHERE pm.slot_id=?", (b_slot_id,))}
+        _prec = etats_prec_get(b_slot_id)
+        for numero, lie_sid, lie_pnum in liens:
+            sw_ip = ip_par_slot.get(lie_sid)
+            etats = etats_par_ip.get(sw_ip)
+            if not etats:
+                continue
+            try:
+                ifindex = (mapping_par_slot.get(lie_sid) or {}).get(int(lie_pnum))
+            except (TypeError, ValueError):
+                ifindex = None
+            led = etats.get(ifindex) if ifindex is not None else None
+            if led is None:
+                continue
+            decl_aid, decl_nom = declare.get(numero, (None, ''))
+            vus = (topo_par_ip.get(sw_ip) or {}).get(ifindex, set())
+            if decl_aid and vus:
+                cable = 'ok' if decl_aid in vus else 'incoherent'
+            elif decl_aid and not vus:
+                cable = 'inconnu'
+            else:
+                cable = ''            # rien de déclaré sur la prise : pas de contrôle
+            if cable == 'incoherent' and _prec.get(('cable', numero)) != 'incoherent':
+                journal_ops.append((f"Prise {numero} — câblage incohérent : le switch voit un autre "
+                                    f"appareil que « {decl_nom} » sur ce port", 'warn', sw_ip))
+            _prec[('cable', numero)] = cable
+            meta = (noms_par_ip.get(sw_ip) or {}).get(ifindex, {})
+            ports_ui.append({
+                'slot_id': b_slot_id, 'numero': numero, 'prise_murale': True,
+                'etat': led['etat'], 'blink_ms': led['blink_ms'],
+                'debit_bps': round(led['bps']), 'pps': round(led['pps'], 1),
+                'err_delta': led.get('err_delta', 0),
+                'nom': meta.get('nom', ''), 'cible': decl_nom, 'cable': cable})
+    return ports_ui, journal_ops
+
+
 def _cycle_activite(clients):
     from database import get_local_db
     communautes = _communautes_snmp()
@@ -3584,6 +3642,9 @@ def _cycle_activite(clients):
                 equipements, ports_ui, detail_sw, detail_ports, detail_ifs = [], [], [], [], []
                 nb_muets = 0
                 poll_par_ip = {}   # ip -> (infos, cur_ports, ok, hc, dt_switch, reboot, poe, sysinfo, uptime_s)
+                etats_par_ip = {}     # ip -> {ifindex: led}  (pour les prises murales d'un bandeau)
+                mapping_par_slot = {} # slot_id switch -> {numero: ifindex}
+                ip_par_slot = {}      # slot_id switch -> ip
 
                 for sw in switchs:
                     ip, slot_id = sw['ip'], sw['slot_id']
@@ -3638,8 +3699,10 @@ def _cycle_activite(clients):
                         nb_muets += 1
                     dt_def = dt_switch or _ACTIVITE_INTERVAL
 
+                    ip_par_slot[slot_id] = ip
                     mapping, sources, calibre, divergences = _mapping_baie_ifindex(
                         conn, cid, slot_id, sw['appareil_id'], infos)
+                    mapping_par_slot[slot_id] = mapping
                     cibles = {r[0]: (r[1] or r[2] or '') for r in conn.execute(
                         "SELECT bp.numero, a.nom_machine, p.categorie FROM baie_slot_ports bp "
                         "LEFT JOIN appareils a ON a.id = bp.appareil_id "
@@ -3685,6 +3748,7 @@ def _cycle_activite(clients):
                                 'etat': led_all['etat'], 'cpt_pegge': p.get('cpt_pegge', False),
                                 'poe': poe_ports.get(_pp) if _pp is not None else None})
 
+                    etats_par_ip[ip] = etats     # pour les prises murales reliées à ce switch
                     nb_ethernet = sum(1 for m in infos.values() if m.get('ethernet', True)) or len(cur_ports)
 
                     debit_total, nb_up, nb_actifs, err_total, nb_manques = 0.0, 0, 0, 0, 0
@@ -3819,6 +3883,25 @@ def _cycle_activite(clients):
                         'poe_total_w': poe.get('total_w'), 'poe_budget_w': poe.get('budget_w'),
                         'poe_nb_alimentes': sum(1 for x in poe_ports.values() if x['statut'] == 3),
                         'calibre': calibre})
+
+                # ── prises murales d'un bandeau RJ : LED via le port de switch du
+                #    cordon de brassage + contrôle de câblage via la topologie ──
+                if etats_par_ip:
+                    topo_par_ip = {}
+                    for eip, pidx, vaid in conn.execute(
+                            "SELECT equipement_ip, port_index, appareil_vu_id FROM diag_topologie "
+                            "WHERE client_id=? AND appareil_vu_id IS NOT NULL", (cid,)):
+                        try:
+                            topo_par_ip.setdefault(eip, {}).setdefault(int(pidx), set()).add(int(vaid))
+                        except (TypeError, ValueError):
+                            continue
+                    noms_par_ip = {ipx: v[0] for ipx, v in poll_par_ip.items()}
+                    pm_ports, pm_journal = _prises_murales_activite(
+                        conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot,
+                        noms_par_ip, topo_par_ip,
+                        lambda sid: _activite_etat_mappe.setdefault((cid, sid), {}))
+                    ports_ui.extend(pm_ports)
+                    journal_ops.extend(pm_journal)
             finally:
                 conn.close()
             motif = ''

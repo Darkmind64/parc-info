@@ -1,8 +1,34 @@
-PARCINFO_VERSION=2.19.17
+PARCINFO_VERSION=2.19.18
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090208
+BUILD_NUMBER=2026090209
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.18 - Baie : LED d'activite sur les prises murales + controle de cablage
+# Demande : "appliquer le meme principe de LEDs signalant l'activite sur les
+# prises murales". Une prise murale est passive (pas de SNMP), mais elle est
+# reliee par le cordon de brassage a un port de switch, lui interrogeable.
+#
+# - _prises_murales_activite : pour chaque bandeau RJ, suit le lien
+#   baie_slot_ports.lie_slot_id/lie_port_numero (le cordon "Lier des ports")
+#   jusqu'au port de switch, resout son ifIndex via _mapping_baie_ifindex du
+#   slot switch, et reutilise l'etat SNMP deja releve (etats_par_ip) -> LED
+#   de la prise murale animee comme celles des ports de switch. Aucun releve
+#   supplementaire.
+# - Controle de cablage : la topologie L2 (diag_topologie, palier 4) dit quel
+#   appareil est reellement vu sur ce port de switch. Si c'est un AUTRE que
+#   celui declare sur la prise (baie_prises_murales.appareil_id) -> etat
+#   'incoherent' : badge rouge d'avertissement sur la prise + evenement
+#   journal (une fois). 'ok' quand ca correspond, 'inconnu' sans topologie.
+# - _cycle_activite : etats_par_ip / mapping_par_slot / ip_par_slot collectes
+#   pendant la boucle des switchs, exploites apres pour les prises murales.
+# - Front : priseMuraleHTML porte data-slot ; chargerActivite peint aussi les
+#   .prise-murale (classes pm-act-*, pm-cable-ko) ; CSS + entree de legende.
+#
+# Verifie en navigateur sur un HP ProCurve reel + un bandeau RJ de test :
+# prise reliee au port 18 -> LED "traffic" ; prise dont la topologie montre
+# un autre appareil -> badge rouge + infobulle "cablage incoherent".
+# Aucune nouvelle dependance, aucun schema change. pytest 232 + scripts OK.
 
 # Version 2.19.17 - Moniteur baie : sparklines des ports pegges + compteurs delirants
 # Retour terrain (capture d'ecran) : "les graphiques de tendance de certains
