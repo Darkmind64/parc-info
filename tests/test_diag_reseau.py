@@ -373,6 +373,34 @@ def test_etat_led_transitions():
     assert reboot['bps'] >= 0 and reboot['reset'] is True         # compteur qui recule : jamais négatif
 
 
+def test_etat_led_plafond_compteur_aberrant():
+    """Un compteur qui dépègue / boucle / bascule 64<->32 bits injecte un delta
+    gigantesque : le débit et le pps ne doivent jamais dépasser la capacité du
+    lien (régression du moniteur qui affichait des millions de pkt/s)."""
+    seuils = {'err': 20, 'sat_pct': 90, 'pps_mini': 1}
+    prev = dict(in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0,
+                ts=0.0, bps_ema=4_000.0, pps_ema=12.0)
+    # +1,4 milliard de paquets en 14 s sur un lien 1 Gb/s : impossible -> on garde
+    # la dernière valeur lissée connue, pas le pic
+    aberrant = dict(oper=1, speed_mbps=1000, in_oct=10**12, out_oct=0,
+                    in_pkts=1_400_000_000, out_pkts=0, in_err=0, out_err=0)
+    led = network_diag._etat_led(prev, aberrant, 14.0, seuils)
+    assert led['pps'] <= 1000 * 1500 and led['bps'] <= 1000 * 1e6 * 1.05
+    assert abs(led['pps_ema'] - 12.0) < 1.0        # revenu vers la valeur connue
+
+    # compteur explicitement pégé -> aucun débit inventé
+    pegge = dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0,
+                 in_err=0, out_err=0, cpt_pegge=True)
+    lp = network_diag._etat_led(prev, pegge, 14.0, seuils)
+    assert lp['pps'] <= 12.0 and lp['bps'] <= 4_000.0
+
+    # lien inconnu : plafond absolu
+    sans_vitesse = dict(oper=1, speed_mbps=0, in_oct=10**12, out_oct=0,
+                        in_pkts=5_000_000_000, out_pkts=0, in_err=0, out_err=0)
+    ls = network_diag._etat_led(dict(prev, bps_ema=0.0, pps_ema=0.0), sans_vitesse, 14.0, seuils)
+    assert ls['pps'] <= network_diag._ACTIVITE_PPS_MAX_PORT
+
+
 def test_port_physique_depuis_nom():
     f = network_diag._port_physique_depuis_nom
     assert f('GigabitEthernet1/0/12') == 12
@@ -602,6 +630,86 @@ def test_route_calibrer_acl(client, conn, deux_clients, make_appareil):
     login_session(client, deux_clients['proprio'], cid)
     assert client.post('/api/baie/activite/calibrer',
                        json={'slot_id': slot_id, 'numero': 5, 'if_index': 12}).get_json()['ok'] is True
+
+
+def test_interroger_equipement_getbulk(monkeypatch):
+    """interroger_equipement lit par GETBULK ; ifType 117 (gigabitEthernet,
+    déprécié — HP ProCurve) est bien reconnu comme port ethernet."""
+    import app as A
+    table = {
+        network_diag._OID_IF_DESCR:     {'1': 'Gi1/0/1', '2': 'Gi1/0/2', '3': 'Vlan1'},
+        network_diag._OID_IF_TYPE:      {'1': 117, '2': 6, '3': 53},   # 117 & 6 -> ethernet ; 53 -> non
+        network_diag._OID_IF_OPER:      {'1': 1, '2': 2, '3': 1},
+        network_diag._OID_IF_ADMIN:     {'1': 1, '2': 1, '3': 1},
+        network_diag._OID_IF_HIGHSPEED: {'1': 1000, '2': 1000},
+    }
+    monkeypatch.setattr(A, '_snmp_bulk_cols',
+                        lambda ip, bases, comm, **k: {b: dict(table.get(b, {})) for b in bases})
+    monkeypatch.setattr(A, '_snmp_get', lambda *a, **k: {A._OID_SYS_NAME: 'SW-CORE'})
+    eq = network_diag.interroger_equipement('10.0.0.2', ['public'])
+    assert eq and eq['sysname'] == 'SW-CORE'
+    idxs = {p['index'] for p in eq['ports']}
+    assert idxs == {1, 2}          # Vlan1 (ifType 53) exclu
+    assert next(p for p in eq['ports'] if p['index'] == 1)['speed_mbps'] == 1000
+
+
+def test_poll_poe(monkeypatch):
+    import app as A
+    table = {
+        network_diag._OID_POE_DETECT: {'1.5': 3, '1.6': 4, '1.7': 1},   # port 5 alimenté, 6 défaut, 7 off
+        network_diag._OID_POE_CLASS:  {'1.5': 4, '1.6': 2},
+        network_diag._OID_POE_MAIN_W: {'1': 370},
+        network_diag._OID_POE_CONS_W: {'1': 62},
+    }
+    monkeypatch.setattr(A, '_snmp_bulk_cols',
+                        lambda ip, bases, comm, **k: {b: dict(table.get(b, {})) for b in bases})
+    network_diag._activite_poe.pop('10.0.0.2', None)
+    poe = network_diag._poll_poe('10.0.0.2', ['public'])
+    assert poe['budget_w'] == 370 and poe['total_w'] == 62
+    assert poe['ports'][5]['statut_txt'] == 'alimenté' and poe['ports'][5]['classe'] == 3
+    assert poe['ports'][5]['watts_max'] == 15.4
+    assert poe['ports'][6]['statut'] == 4          # défaut
+    assert poe['ports'][7]['watts_max'] is None
+
+    # switch sans PoE -> {} et on ne le re-sollicite plus
+    monkeypatch.setattr(A, '_snmp_bulk_cols', lambda *a, **k: {})
+    network_diag._activite_poe.pop('10.0.0.9', None)
+    assert network_diag._poll_poe('10.0.0.9', ['public']) == {}
+    assert network_diag._activite_poe['10.0.0.9'] is False
+
+
+def test_assistant_calibration_detecte_transition():
+    """L'interface qui fait down→up pendant la fenêtre est celle du port."""
+    network_diag._activite_calib.clear()
+    cid, sid, num = 900, 7, 12
+    network_diag.assistant_calibration(cid, sid, num, 'start')
+
+    # cycle 1 : état de référence (tout up)
+    network_diag._maj_assistant_calibration(cid, sid, '10.0.0.2',
+                                            {5: {'oper': 1}, 6: {'oper': 1}, 7: {'oper': 1}})
+    # cycle 2 : if6 débranché
+    network_diag._maj_assistant_calibration(cid, sid, '10.0.0.2',
+                                            {5: {'oper': 1}, 6: {'oper': 2}, 7: {'oper': 1}})
+    # cycle 3 : if6 rebranché -> 2 transitions -> détecté
+    network_diag._maj_assistant_calibration(cid, sid, '10.0.0.2',
+                                            {5: {'oper': 1}, 6: {'oper': 1}, 7: {'oper': 1}})
+    assert network_diag._activite_calib[(cid, sid)]['trouve'] == 6
+    network_diag._activite_calib.clear()
+
+
+def test_route_assistant_acl(client, conn, deux_clients, make_appareil):
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.commit()
+    login_session(client, deux_clients['lecteur'], cid)
+    assert client.post('/api/baie/activite/calibrer/assistant',
+                       json={'slot_id': slot_id, 'numero': 5}).status_code == 403
+    login_session(client, deux_clients['proprio'], cid)
+    r = client.post('/api/baie/activite/calibrer/assistant', json={'slot_id': slot_id, 'numero': 5})
+    assert r.get_json()['etat'] == 'attente'
+    network_diag._activite_calib.clear()
 
 
 def test_journal_dedoublonne():

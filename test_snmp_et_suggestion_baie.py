@@ -52,10 +52,18 @@ def agent_snmp_factice(sysdescr, sysname):
     def repondre():
         try:
             sock.settimeout(3)
-            _data, addr = sock.recvfrom(2048)
+            data, addr = sock.recvfrom(2048)
+            # écho du request-id de la requête (comme un vrai agent SNMP)
+            _, corps, _ = A._ber_lire_tlv(data, 0)
+            _pp = 0
+            _, _v, _pp = A._ber_lire_tlv(corps, _pp)
+            _, _c, _pp = A._ber_lire_tlv(corps, _pp)
+            _, pdu_req, _ = A._ber_lire_tlv(corps, _pp)
+            _, rid_b, _ = A._ber_lire_tlv(pdu_req, 0)
             varbinds = (A._ber_sequence(0x30, A._ber_oid(A._OID_SYS_DESCR) + A._ber_chaine(sysdescr))
                         + A._ber_sequence(0x30, A._ber_oid(A._OID_SYS_NAME) + A._ber_chaine(sysname)))
-            pdu_corps = A._ber_entier(1) + A._ber_entier(0) + A._ber_entier(0) + A._ber_sequence(0x30, varbinds)
+            pdu_corps = (b'\x02' + A._ber_longueur(len(rid_b)) + rid_b
+                         + A._ber_entier(0) + A._ber_entier(0) + A._ber_sequence(0x30, varbinds))
             pdu = A._ber_sequence(0xa2, pdu_corps)
             message = A._ber_sequence(0x30, A._ber_entier(0) + A._ber_chaine('public') + pdu)
             sock.sendto(message, addr)

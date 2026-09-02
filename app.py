@@ -7048,6 +7048,31 @@ def api_baie_activite_calibrer():
             else (jsonify({'error': 'slot introuvable'}), 404))
 
 
+@app.route('/api/baie/activite/calibrer/assistant', methods=['POST'])
+@login_required
+def api_baie_activite_calibrer_assistant():
+    """Assistant de calibration « débranche/rebranche le câble » : détecte
+    quelle interface du switch correspond à un port de la baie."""
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    d = request.json or {}
+    action = d.get('action', 'start')
+    try:
+        slot_id = int(d.get('slot_id'))
+        numero = int(d.get('numero'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'slot_id/numero requis'}), 400
+    # le slot doit appartenir au client
+    conn = get_db()
+    ok = conn.execute("SELECT 1 FROM baie_slots WHERE id=? AND client_id=?",
+                      (slot_id, cid)).fetchone() is not None
+    conn.close()
+    if not ok:
+        return jsonify({'error': 'slot introuvable'}), 404
+    return jsonify(network_diag.assistant_calibration(cid, slot_id, numero, action))
+
+
 def _liste_cablage(conn, cid):
     """Chaque lien port-à-port du client, une seule fois (pas les deux sens),
     avec le nom des deux éléments — sert à la fois à la page imprimable et à
@@ -8590,76 +8615,41 @@ def _snmp_get(ip_str, oids, communaute='public', timeout=0.8, port=161):
     inattendue) : ce n'est qu'un signal supplémentaire, jamais bloquant.
     `port` n'existe que pour les tests (agent factice sur un port non
     privilégié) ; toujours 161 en usage réel."""
+    r = _snmp_get_typed(ip_str, oids, communaute, timeout=timeout, port=port, version=0)
+    return {o: v for o, v in r.items() if isinstance(v, str) and v}
+
+
+def _snmp_get_typed(ip_str, oids, communaute='public', timeout=1.0, port=161, version=1):
+    """GET SNMP (v2c par défaut, v1 si version=0). Renvoie la valeur TYPÉE
+    (int pour INTEGER/Counter/Gauge/TimeTicks, str pour OCTET STRING/IpAddress/
+    OID). {} au moindre souci.
+    Robuste : vérifie le request-id de la réponse (draine une réponse tardive à
+    une requête précédente) et associe chaque varbind à SON OID retourné (pas
+    par position — certains agents renvoient moins de varbinds ou dans le
+    désordre, ce qui décalait tout le reste)."""
     try:
+        reqid = _snmp_walk_reqid()
         varbinds = b''.join(_ber_sequence(0x30, _ber_oid(oid) + b'\x05\x00') for oid in oids)
-        pdu_corps = _ber_entier(1) + _ber_entier(0) + _ber_entier(0) + _ber_sequence(0x30, varbinds)
-        pdu = _ber_sequence(0xa0, pdu_corps)
-        message = _ber_sequence(
-            0x30, _ber_entier(0) + _ber_chaine(communaute) + pdu)
-
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.settimeout(timeout)
-            s.sendto(message, (ip_str, port))
-            data, _ = s.recvfrom(2048)
-
-        # SEQUENCE { version, communaute, GetResponse-PDU(0xA2) { ..., varbindlist } }
-        _, corps, _ = _ber_lire_tlv(data, 0)
-        pos = 0
-        _, _version, pos = _ber_lire_tlv(corps, pos)
-        _, _comm, pos = _ber_lire_tlv(corps, pos)
-        tag_pdu, pdu_corps, _ = _ber_lire_tlv(corps, pos)
-        if tag_pdu != 0xa2:
-            return {}
-        p = 0
-        _, _reqid, p = _ber_lire_tlv(pdu_corps, p)
-        _, err_status, p = _ber_lire_tlv(pdu_corps, p)
-        _, _err_idx, p = _ber_lire_tlv(pdu_corps, p)
-        if err_status and int.from_bytes(err_status, 'big', signed=True) != 0:
-            return {}
-        _, varbindlist, p = _ber_lire_tlv(pdu_corps, p)
-
-        # Un agent SNMP répond dans le MÊME ordre que les OID demandés (RFC
-        # 1157) — associer varbind #i à oids[i] directement, plutôt que de
-        # tenter de ré-identifier l'OID retourné : un varbind en erreur (type
-        # différent d'OCTET STRING) ne doit pas décaler les suivants.
-        resultats = {}
-        vp = 0
-        i = 0
-        while vp < len(varbindlist) and i < len(oids):
-            tag_vb, vb_corps, vp = _ber_lire_tlv(varbindlist, vp)
-            if tag_vb == 0x30:
-                vbp = 0
-                _tag_oid, _oid_brut, vbp = _ber_lire_tlv(vb_corps, vbp)
-                tag_val, val_brut, vbp = _ber_lire_tlv(vb_corps, vbp)
-                if tag_val == 0x04:  # OCTET STRING
-                    texte = val_brut.decode('utf-8', errors='replace').strip()
-                    if texte:
-                        resultats[oids[i]] = texte
-            i += 1
-        return resultats
-    except Exception:
-        return {}
-
-
-def _snmp_get_typed(ip_str, oids, communaute='public', timeout=1.0, port=161):
-    """Comme _snmp_get mais renvoie la valeur TYPÉE (int pour INTEGER/Counter/
-    Gauge/TimeTicks, str pour OCTET STRING/IpAddress/OID). Nécessaire pour les
-    MIB où les scalaires utiles sont des entiers (UPS-MIB, etc.). {} au moindre
-    souci."""
-    try:
-        varbinds = b''.join(_ber_sequence(0x30, _ber_oid(oid) + b'\x05\x00') for oid in oids)
-        pdu_corps = _ber_entier(_snmp_walk_reqid()) + _ber_entier(0) + _ber_entier(0) + _ber_sequence(0x30, varbinds)
-        message = _ber_sequence(0x30, _ber_entier(1) + _ber_chaine(communaute)
+        pdu_corps = _ber_entier(reqid) + _ber_entier(0) + _ber_entier(0) + _ber_sequence(0x30, varbinds)
+        message = _ber_sequence(0x30, _ber_entier(version) + _ber_chaine(communaute)
                                 + _ber_sequence(0xa0, pdu_corps))
+        oidset = set(oids)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.settimeout(timeout)
             s.sendto(message, (ip_str, port))
-            data, _ = s.recvfrom(4096)
-        _, corps, _ = _ber_lire_tlv(data, 0)
-        pos = 0
-        _, _v, pos = _ber_lire_tlv(corps, pos)
-        _, _c, pos = _ber_lire_tlv(corps, pos)
-        tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
+            for _drain in range(4):
+                data, _ = s.recvfrom(4096)
+                _, corps, _ = _ber_lire_tlv(data, 0)
+                pos = 0
+                _, _v, pos = _ber_lire_tlv(corps, pos)
+                _, _c, pos = _ber_lire_tlv(corps, pos)
+                tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
+                _pp = 0
+                _, _rid_b, _pp = _ber_lire_tlv(pdu_corps_r, _pp)
+                if int.from_bytes(_rid_b, 'big', signed=True) == reqid:
+                    break
+            else:
+                return {}
         if tag_pdu != 0xa2:
             return {}
         p = 0
@@ -8671,17 +8661,19 @@ def _snmp_get_typed(ip_str, oids, communaute='public', timeout=1.0, port=161):
         _, vblist, p = _ber_lire_tlv(pdu_corps_r, p)
         resultats = {}
         vp = 0
-        i = 0
-        while vp < len(vblist) and i < len(oids):
+        while vp < len(vblist):
             tag_vb, vb_corps, vp = _ber_lire_tlv(vblist, vp)
-            if tag_vb == 0x30:
-                bp = 0
-                _to2, _ob, bp = _ber_lire_tlv(vb_corps, bp)
-                tag_val, val_brut, bp = _ber_lire_tlv(vb_corps, bp)
-                val = _ber_decoder_valeur(tag_val, val_brut)
-                if val is not None and val != '':
-                    resultats[oids[i]] = val
-            i += 1
+            if tag_vb != 0x30:
+                break
+            bp = 0
+            _to2, oid_brut, bp = _ber_lire_tlv(vb_corps, bp)
+            tag_val, val_brut, bp = _ber_lire_tlv(vb_corps, bp)
+            oid_ret = _ber_decoder_oid(oid_brut)
+            if oid_ret not in oidset:
+                continue
+            val = _ber_decoder_valeur(tag_val, val_brut)
+            if val is not None and val != '':
+                resultats[oid_ret] = val
         return resultats
     except Exception:
         return {}

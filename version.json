@@ -1,24 +1,25 @@
 {
-  "version": "2.19.9",
-  "release_date": "2026-09-01T00:00:00.000000",
+  "version": "2.19.10",
+  "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.9/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.9/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.9/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.9",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.9/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.9/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.9/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.9/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.9/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.10/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.10/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.10/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.10",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.10/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.10/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.10/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.10/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.10/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Vue d'activité de la baie — correctif majeur du mapping port ↔ interface : le numéro de port de la baie n'est presque jamais égal à l'ifIndex SNMP du switch, ce qui allumait des LEDs sur les mauvais ports. Désormais l'association se fait par le NOM d'interface (GigabitEthernet1/0/12 → port 12, « Port: 12 … » → port 12), en plus de la topologie ; le repli hasardeux « numéro = ifIndex » est désactivé. Dans le moniteur (onglet Ports), un tableau de calibration permet d'associer manuellement chaque port de la baie à son interface (avec le débit en direct pour s'y retrouver), enregistré une fois pour toutes.",
+    "new_features": "Vue d'activité de la baie — PoE par port (POWER-ETHERNET-MIB) : statut, classe et puissance de chaque port alimenté, budget et consommation du switch, dans le moniteur (onglet Ports). Assistant de calibration « par débranchement » : un bouton par port, on débranche puis rebranche le câble et l'interface qui a changé d'état est associée automatiquement.",
     "improvements": [
-      "SNMP fiabilisé : lecture par GETBULK multi-colonnes (auto-descriptive, insensible à l'ordre des réponses) au lieu d'un GET groupé qui se fiait à la position ; vérification du request-id (un switch lent renvoyait parfois une réponse tardive, décalant tout le relevé) ; cadence adaptative sur les agents SNMP lents.",
-      "Compteurs bloqués : certains switchs bas de gamme figent leurs compteurs d'octets à 2 Go — c'est détecté, signalé dans le moniteur, et l'activité est alors estimée sur les paquets/s.",
-      "Interrogation en tâche de fond des noms/types d'interface (ne bloque plus le relevé quand le switch est lent)."
+      "Plafond de plausibilité sur le débit et les paquets/s : un compteur SNMP 32 bits qui « dépègue », boucle, ou bascule 64↔32 bits injectait un delta gigantesque et le moniteur affichait des millions de pkt/s sur des ports inactifs — c'est désormais détecté et écarté.",
+      "Interrogation SNMP des équipements (palier 3) consolidée sur le même GETBULK multi-colonnes ; les switchs HP ProCurve (ifType 117) renvoient enfin leurs ports.",
+      "Onduleurs (palier 7) : lecture SNMP associée par OID retourné et non par position — plus de valeurs mélangées sur les agents qui ne respectent pas l'ordre RFC.",
+      "Libellés de port issus de ifAlias, indicateur « prochaine actualisation dans ~X s », réglages des seuils pps/capture dans Réglages → Réseau & Scan."
     ]
   },
   "checksums": {
@@ -29,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.9"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.10"
 }

@@ -3223,7 +3223,8 @@ function majBandeauActivite(d) {
     const nbActifs = eqs.reduce((n, e) => n + (e.nb_actifs || 0), 0);
     const debit = eqs.reduce((n, e) => n + (e.debit_total_bps || 0), 0);
     b.style.color = d.calibre ? 'var(--accent-green)' : 'var(--accent-orange, #f59e0b)';
-    b.textContent = `⚡ ${eqs.length} switch${eqs.length > 1 ? 's' : ''} · ${nbActifs} port${nbActifs > 1 ? 's' : ''} actif${nbActifs > 1 ? 's' : ''} · ${fmtDebit(debit)}`
+    const cad = (d.cadence_s && d.cadence_s > 3) ? ` · maj ~${d.cadence_s} s` : '';
+    b.textContent = `⚡ ${eqs.length} switch${eqs.length > 1 ? 's' : ''} · ${nbActifs} port${nbActifs > 1 ? 's' : ''} actif${nbActifs > 1 ? 's' : ''} · ${fmtDebit(debit)}${cad}`
                     + (d.calibre ? '' : ' · non calibré');
 }
 
@@ -3244,8 +3245,9 @@ async function chargerActivite() {
             if (!el) continue;
             el.classList.add('port-act', 'port-act-' + p.etat);
             if (p.blink_ms) el.style.setProperty('--act-ms', p.blink_ms + 'ms');
-            el.title = `${numeroAffiche(p.numero)} — ${fmtDebit(p.debit_bps)}`
-                       + (p.err_delta ? ` — ${p.err_delta} err` : '');
+            const deb = p.cpt_pegge ? `${(p.pps || 0).toFixed(0)} pkt/s` : fmtDebit(p.debit_bps);
+            el.title = `${numeroAffiche(p.numero)}${p.nom ? ' · ' + p.nom : ''}${p.alias ? ' (' + p.alias + ')' : ''}`
+                       + ` — ${p.etat} · ${deb}` + (p.err_delta ? ` · ${p.err_delta} err` : '');
         }
     }
     majBandeauActivite(d);
@@ -3321,8 +3323,9 @@ const MoniteurModal = {
     _maj(d) {
         const st = document.getElementById('mon-sous-titre');
         const nbP = (d.ports || []).length, nbS = (d.switchs || []).length;
+        const cad = (d.cadence_s && d.cadence_s > 3) ? ` · actualisé toutes les ~${d.cadence_s} s` : '';
         st.textContent = d.snmp_actif
-            ? `${nbS} switch${nbS > 1 ? 's' : ''}, ${nbP} port${nbP > 1 ? 's' : ''} suivi${nbP > 1 ? 's' : ''}`
+            ? `${nbS} switch${nbS > 1 ? 's' : ''}, ${nbP} port${nbP > 1 ? 's' : ''} suivi${nbP > 1 ? 's' : ''}${cad}`
             : 'SNMP désactivé — active-le dans le diagnostic réseau';
 
         // ── Onglet Ports (+ calibration). On ne re-render pas pendant que
@@ -3342,7 +3345,23 @@ const MoniteurModal = {
             (d.ports || []).forEach(p => (parIpMap[p.ip] = parIpMap[p.ip] || {})[p.numero] = p);
             (d.interfaces || []).forEach(i => (parIpIf[i.ip] = parIpIf[i.ip] || []).push(i));
 
-            cont.innerHTML = (d.switchs || []).map(sw => {
+            const ca = d.calibration_assistant;
+            let caBanner = '';
+            if (ca) {
+                if (ca.etat === 'attente')
+                    caBanner = `<div style="background:rgba(0,201,255,.12);border:1px solid var(--accent);border-radius:4px;padding:.4rem .6rem;margin-bottom:.5rem;font-size:.75rem;">
+                        🔌 <b>Détection du port ${ca.numero}</b> — débranche le câble de ce port, attends que le moniteur se rafraîchisse, puis rebranche-le.
+                        ${ca.restant_s != null ? ' <span style="color:var(--text-muted);">(' + ca.restant_s + ' s restantes)</span>' : ''}
+                        <button class="btn btn-sm" style="margin-left:.5rem;padding:.05rem .4rem;" onclick="MoniteurModal.assistantStop(${ca.slot_id}, ${ca.numero})">annuler</button></div>`;
+                else if (ca.etat === 'trouve')
+                    caBanner = `<div style="background:rgba(0,255,136,.12);border:1px solid var(--accent-green);border-radius:4px;padding:.4rem .6rem;margin-bottom:.5rem;font-size:.75rem;">
+                        ✓ Port ${ca.numero} associé à l'interface <b>${escH(ca.nom)}</b> (ifIndex ${ca.ifindex}).</div>`;
+                else if (ca.etat === 'expire')
+                    caBanner = `<div style="background:rgba(245,158,11,.12);border:1px solid var(--accent-orange,#f59e0b);border-radius:4px;padding:.4rem .6rem;margin-bottom:.5rem;font-size:.75rem;">
+                        ⚠ Détection du port ${ca.numero} expirée — aucune interface n'a changé d'état. Réessaie ou calibre manuellement.</div>`;
+            }
+
+            cont.innerHTML = caBanner + (d.switchs || []).map(sw => {
                 const ifs = (parIpIf[sw.ip] || []).slice().sort((a, b) => a.ifindex - b.ifindex);
                 const mapByNum = parIpMap[sw.ip] || {};
                 const bp = portsBaie[sw.ip] || [];
@@ -3351,6 +3370,13 @@ const MoniteurModal = {
                     + ifs.map(i => `<option value="${i.ifindex}"${sel == i.ifindex ? ' selected' : ''}>`
                         + `[${i.ifindex}] ${escH(i.nom)}${i.alias ? ' — ' + escH(i.alias) : ''} · ${dbg(i)}${i.oper != 1 ? ' (down)' : ''}</option>`).join('');
                 const pegge = ifs.some(i => i.cpt_pegge);
+                const aPoe = sw.poe;
+                const poeCell = (poe) => {
+                    if (!poe) return '';
+                    if (poe.statut === 3) return `<span style="color:var(--accent-green);">⚡ ${poe.watts_max ? poe.watts_max + ' W' : ''}${poe.classe != null ? ' cl.' + poe.classe : ''}</span>`;
+                    if (poe.statut === 4) return '<span style="color:var(--accent-red);">⚡ défaut</span>';
+                    return `<span style="color:var(--text-muted);">${escH(poe.statut_txt || '')}</span>`;
+                };
                 const calRows = bp.map(b => {
                     const p = mapByNum[b.numero];
                     const src = p ? p.source_mapping : (b.if_index ? 'manuel' : '—');
@@ -3358,10 +3384,13 @@ const MoniteurModal = {
                     return `<tr>
                         <td>${escH(String(b.numero))}</td>
                         <td>${escH(b.cible || '')}</td>
-                        <td><select class="cfg-input cfg-input-sm" style="max-width:340px;"
-                              onchange="MoniteurModal.calibrer(${sw.slot_id}, ${b.numero}, this.value)">${opts(b.if_index)}</select></td>
+                        <td style="white-space:nowrap;"><select class="cfg-input cfg-input-sm" style="max-width:300px;"
+                              onchange="MoniteurModal.calibrer(${sw.slot_id}, ${b.numero}, this.value)">${opts(b.if_index)}</select>
+                          <button class="btn btn-sm" style="padding:.1rem .4rem;" title="Détecter l'interface : débranche puis rebranche le câble de ce port"
+                              onclick="MoniteurModal.assistant(${sw.slot_id}, ${b.numero})">🔌</button></td>
                         <td style="color:var(--text-muted);">${src}</td>
                         <td>${etat}</td>
+                        ${aPoe ? `<td>${p ? poeCell(p.poe) : ''}</td>` : ''}
                     </tr>`;
                 }).join('');
                 const ifRows = ifs.map(i => `<tr>
@@ -3369,16 +3398,20 @@ const MoniteurModal = {
                         <td><span class="mon-dot mon-dot-${i.etat}"></span> ${i.etat}</td>
                         <td data-if-live="${i.ip}|${i.ifindex}">${i.cpt_pegge ? '—' : fmtDebit(i.bps)}</td>
                         <td>${(i.pps || 0).toFixed(1)}</td>
+                        ${aPoe ? `<td>${poeCell(i.poe)}</td>` : ''}
                     </tr>`).join('');
-                return `<div class="mon-sw-head">${escH(sw.nom)} — ${escH(sw.ip)} · poll ${sw.duree_poll_ms} ms · comm. « ${escH(sw.communaute || '?')} » · compteurs ${sw.compteurs_64bits ? '64' : '32'} bits · ${sw.nb_ifindex_ethernet} interface(s) · ${sw.nb_ports_calibres}/${sw.nb_ports_mappes} calibré(s)${sw.nb_manques ? ' · ' + sw.nb_manques + ' manque(s)' : ''}</div>
+                const poeHead = aPoe
+                    ? ` · PoE ${sw.poe_total_w != null ? sw.poe_total_w + (sw.poe_budget_w ? '/' + sw.poe_budget_w : '') + ' W' : ''} · ${sw.poe_nb_alimentes} port(s) alimenté(s)`
+                    : '';
+                return `<div class="mon-sw-head">${escH(sw.nom)} — ${escH(sw.ip)} · poll ${sw.duree_poll_ms} ms · comm. « ${escH(sw.communaute || '?')} » · compteurs ${sw.compteurs_64bits ? '64' : '32'} bits · ${sw.nb_ifindex_ethernet} interface(s) · ${sw.nb_ports_calibres}/${sw.nb_ports_mappes} calibré(s)${sw.nb_manques ? ' · ' + sw.nb_manques + ' manque(s)' : ''}${poeHead}</div>
                     ${pegge ? '<div style="font-size:.66rem;color:var(--accent-orange,#f59e0b);margin:.2rem 0;">⚠ Cet équipement bloque ses compteurs d’octets à 2 Go (agent SNMP défectueux) — l’activité est estimée sur les paquets/s seulement.</div>' : ''}
                     <div style="font-size:.66rem;color:var(--text-muted);margin:.2rem 0;">Calibration : associe chaque port de la baie à son interface sur le switch (le numéro de port n'est presque jamais égal à l'ifIndex). « auto » = topologie ou nom d'interface.</div>
                     <table class="mon-table"><thead><tr>
-                        <th>Port baie</th><th>Appareil branché</th><th>Interface du switch</th><th>source</th><th>débit</th>
-                    </tr></thead><tbody>${calRows || '<tr><td colspan="5" style="color:var(--text-muted);">ce slot n’a pas de ports</td></tr>'}</tbody></table>
+                        <th>Port baie</th><th>Appareil branché</th><th>Interface du switch</th><th>source</th><th>débit</th>${aPoe ? '<th>PoE</th>' : ''}
+                    </tr></thead><tbody>${calRows || `<tr><td colspan="${aPoe ? 6 : 5}" style="color:var(--text-muted);">ce slot n’a pas de ports</td></tr>`}</tbody></table>
                     <details style="margin:.4rem 0;"><summary style="cursor:pointer;font-size:.7rem;color:var(--text-muted);">Toutes les interfaces du switch (${ifs.length})</summary>
-                    <table class="mon-table"><thead><tr><th>ifIndex</th><th>Nom</th><th>Alias</th><th>État</th><th>Débit</th><th>pkt/s</th></tr></thead>
-                    <tbody>${ifRows || '<tr><td colspan="6" style="color:var(--text-muted);">aucune interface</td></tr>'}</tbody></table></details>`;
+                    <table class="mon-table"><thead><tr><th>ifIndex</th><th>Nom</th><th>Alias</th><th>État</th><th>Débit</th><th>pkt/s</th>${aPoe ? '<th>PoE</th>' : ''}</tr></thead>
+                    <tbody>${ifRows || `<tr><td colspan="${aPoe ? 7 : 6}" style="color:var(--text-muted);">aucune interface</td></tr>`}</tbody></table></details>`;
             }).join('');
         }
 
@@ -3454,6 +3487,25 @@ const MoniteurModal = {
         } catch (e) {}
         if (document.activeElement) document.activeElement.blur();
         setTimeout(() => this.rafraichir(), 300);
+    },
+
+    async assistant(slotId, numero) {
+        try {
+            await fetch('/api/baie/activite/calibrer/assistant', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slot_id: slotId, numero: numero, action: 'start' })
+            });
+        } catch (e) {}
+        this.rafraichir();
+    },
+    async assistantStop(slotId, numero) {
+        try {
+            await fetch('/api/baie/activite/calibrer/assistant', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ slot_id: slotId, numero: numero, action: 'stop' })
+            });
+        } catch (e) {}
+        this.rafraichir();
     },
 };
 function fmtOctets(o) {

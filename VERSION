@@ -1,8 +1,38 @@
-PARCINFO_VERSION=2.19.9
-RELEASE_DATE=2026-09-01
-BUILD_NUMBER=2026090109
+PARCINFO_VERSION=2.19.10
+RELEASE_DATE=2026-09-02
+BUILD_NUMBER=2026090201
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.10 - Vue d'activite baie : PoE, assistant de calibration, SNMP consolide
+# Suite de la 2.19.9. Consolidation du sous-systeme + deux ajouts terrain.
+#
+# - _etat_led : plafond de plausibilite sur le debit ET les paquets/s. Un
+#   compteur 32 bits qui "depeguait" (0x7FFFFFFF -> valeur reelle), bouclait,
+#   ou basculait 64<->32 bits injectait un delta gigantesque -> le moniteur
+#   affichait des millions de pkt/s sur des ports ou rien n'etait branche.
+#   Au-dela de la capacite physique du lien, c'est un artefact : on garde la
+#   derniere valeur lissee. Compteur explicitement pege -> aucun debit invente.
+# - PoE par port (POWER-ETHERNET-MIB RFC 3621) : _poll_poe lit
+#   pethPsePortTable (statut deliveringPower/fault, classe 0-4, puissance) +
+#   les scalaires pethMainPse (budget / consommation). Colonne PoE dans le
+#   moniteur (onglet Ports), total dans l'entete du switch, evenement sur
+#   defaut PoE. Absent sur les switchs sans PoE (colonne masquee).
+# - Assistant de calibration ("Calibrer par debranchement") : bouton 🔌 par
+#   port dans le moniteur -> on debranche/rebranche le cable, l'assistant
+#   detecte quelle interface a change d'etat (oper down puis up) sur une
+#   fenetre de 90 s et l'associe automatiquement. Route POST
+#   /api/baie/activite/calibrer/assistant (can_write).
+# - interroger_equipement (palier 3) passe aussi en GETBULK multi-colonnes ;
+#   _IFTYPE_ETHERNET (6/7/62/69/117) au lieu de "== 6" -> les switchs HP
+#   ProCurve (ifType 117 gigabitEthernet-obsolete) ne renvoyaient aucun port.
+# - interroger_ups (palier 7b) : _snmp_get_typed associe desormais par OID
+#   retourne (comme _snmp_bulk_cols) et non par position -> plus de valeurs
+#   melangees sur les onduleurs dont l'agent ne respecte pas l'ordre RFC.
+# - Petits plus : ifAlias -> libelle/tooltip des ports ; indicateur
+#   "prochaine actualisation dans ~X s" ; reglages des cles pps/capture dans
+#   Reglages -> Reseau & Scan.
+# - Aucune nouvelle dependance.
 
 # Version 2.19.9 - Vue d'activite baie : mapping port<->interface + SNMP robuste
 # Retour terrain sur 2.19.8 : "ca montre une activite sur des ports ou il n'y a

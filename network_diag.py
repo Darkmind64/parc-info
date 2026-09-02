@@ -816,6 +816,10 @@ _OID_DOT3_FCS       = '1.3.6.1.2.1.10.7.2.1.3'
 _OID_DOT3_LATECOLL  = '1.3.6.1.2.1.10.7.2.1.11'
 _OID_DOT3_EXCCOLL   = '1.3.6.1.2.1.10.7.2.1.12'
 _OID_DOT3_DUPLEX    = '1.3.6.1.2.1.10.7.2.1.19'
+# ifType « port physique ethernet » : 6 (ethernetCsmacd) est la norme, mais des
+# switchs réels annoncent encore 117 (gigabitEthernet, déprécié), 62/69
+# (fast/100BaseFX), 7 (iso88023Csmacd) — HP ProCurve annonce 117 par ex.
+_IFTYPE_ETHERNET = frozenset({6, 7, 62, 69, 117})
 
 _TYPES_EQUIP_SNMP = ('Switch', 'Switch/AP', 'Routeur/Pare-feu', 'NAS', 'Onduleur / UPS')
 _TYPE_UPS = 'Onduleur / UPS'
@@ -830,28 +834,30 @@ def _snmp_walk(oid_base, ip, communautes):
 
 
 def interroger_equipement(ip: str, communautes) -> dict | None:
-    """Walk SNMP d'un switch/routeur. None si l'agent ne répond pas."""
-    descr = _snmp_walk(_OID_IF_DESCR, ip, communautes)
+    """Relevé SNMP d'un switch/routeur (ifTable + ifXTable + dot3StatsTable),
+    par GETBULK multi-colonnes (`_snmp_bulk` → `app._snmp_bulk_cols`, repli
+    GETNEXT par colonne) : ~10× moins de paquets qu'un walk par colonne.
+    None si l'agent ne répond pas."""
+    grp1 = _snmp_bulk(ip, [_OID_IF_DESCR, _OID_IF_TYPE, _OID_IF_NAME, _OID_IF_ALIAS,
+                           _OID_IF_OPER, _OID_IF_ADMIN, _OID_IF_SPEED, _OID_IF_HIGHSPEED],
+                      communautes)
+    descr = grp1.get(_OID_IF_DESCR, {})
     if not descr:
         return None
-    types = _snmp_walk(_OID_IF_TYPE, ip, communautes)
-    noms = _snmp_walk(_OID_IF_NAME, ip, communautes)
-    alias = _snmp_walk(_OID_IF_ALIAS, ip, communautes)
-    oper = _snmp_walk(_OID_IF_OPER, ip, communautes)
-    admin = _snmp_walk(_OID_IF_ADMIN, ip, communautes)
-    speed = _snmp_walk(_OID_IF_SPEED, ip, communautes)
-    highspeed = _snmp_walk(_OID_IF_HIGHSPEED, ip, communautes)
-    in_err = _snmp_walk(_OID_IF_IN_ERRORS, ip, communautes)
-    out_err = _snmp_walk(_OID_IF_OUT_ERRORS, ip, communautes)
-    in_disc = _snmp_walk(_OID_IF_IN_DISCARDS, ip, communautes)
-    out_disc = _snmp_walk(_OID_IF_OUT_DISCARDS, ip, communautes)
-    in_oct = _snmp_walk(_OID_IF_HCIN, ip, communautes) or _snmp_walk(_OID_IF_IN_OCTETS, ip, communautes)
-    out_oct = _snmp_walk(_OID_IF_HCOUT, ip, communautes) or _snmp_walk(_OID_IF_OUT_OCTETS, ip, communautes)
-    align = _snmp_walk(_OID_DOT3_ALIGN, ip, communautes)
-    fcs = _snmp_walk(_OID_DOT3_FCS, ip, communautes)
-    late = _snmp_walk(_OID_DOT3_LATECOLL, ip, communautes)
-    exc = _snmp_walk(_OID_DOT3_EXCCOLL, ip, communautes)
-    duplex = _snmp_walk(_OID_DOT3_DUPLEX, ip, communautes)
+    grp2 = _snmp_bulk(ip, [_OID_IF_IN_ERRORS, _OID_IF_OUT_ERRORS, _OID_IF_IN_DISCARDS,
+                           _OID_IF_OUT_DISCARDS, _OID_IF_HCIN, _OID_IF_HCOUT,
+                           _OID_IF_IN_OCTETS, _OID_IF_OUT_OCTETS], communautes)
+    grp3 = _snmp_bulk(ip, [_OID_DOT3_ALIGN, _OID_DOT3_FCS, _OID_DOT3_LATECOLL,
+                           _OID_DOT3_EXCCOLL, _OID_DOT3_DUPLEX], communautes)
+    types, noms, alias = grp1.get(_OID_IF_TYPE, {}), grp1.get(_OID_IF_NAME, {}), grp1.get(_OID_IF_ALIAS, {})
+    oper, admin = grp1.get(_OID_IF_OPER, {}), grp1.get(_OID_IF_ADMIN, {})
+    speed, highspeed = grp1.get(_OID_IF_SPEED, {}), grp1.get(_OID_IF_HIGHSPEED, {})
+    in_err, out_err = grp2.get(_OID_IF_IN_ERRORS, {}), grp2.get(_OID_IF_OUT_ERRORS, {})
+    in_disc, out_disc = grp2.get(_OID_IF_IN_DISCARDS, {}), grp2.get(_OID_IF_OUT_DISCARDS, {})
+    in_oct = grp2.get(_OID_IF_HCIN, {}) or grp2.get(_OID_IF_IN_OCTETS, {})
+    out_oct = grp2.get(_OID_IF_HCOUT, {}) or grp2.get(_OID_IF_OUT_OCTETS, {})
+    align, fcs = grp3.get(_OID_DOT3_ALIGN, {}), grp3.get(_OID_DOT3_FCS, {})
+    late, exc, duplex = grp3.get(_OID_DOT3_LATECOLL, {}), grp3.get(_OID_DOT3_EXCCOLL, {}), grp3.get(_OID_DOT3_DUPLEX, {})
 
     sysname = ''
     try:
@@ -870,7 +876,7 @@ def interroger_equipement(ip: str, communautes) -> dict | None:
 
     ports = []
     for idx in descr:
-        if _i(types, idx, 6) != 6:          # ethernetCsmacd uniquement
+        if _i(types, idx, 6) not in _IFTYPE_ETHERNET:   # port physique ethernet uniquement
             continue
         if _i(admin, idx, 1) == 2:          # admin down : ignoré
             continue
@@ -2857,16 +2863,24 @@ _ACTIVITE_NOMS_TTL      = 90.0    # s — cache des noms/types d'interface (quas
 _ACTIVITE_MANQUES_STALE = 3       # relevés manqués consécutifs avant l'état « stale »
 _ACTIVITE_EMA           = 0.5     # lissage exponentiel du débit / pps
 _ACTIVITE_BPS_MINI      = 2000    # bit/s en dessous : pas de clignotement (bruit)
+_ACTIVITE_PPS_MAX_PORT  = 15_000_000   # pps — plafond absolu (10 GbE ≈ 14,9 Mpps) : au-delà = artefact de compteur
 _CPT_SENTINELLE_32      = {2**31 - 1, 2**32 - 1}   # valeurs "compteur indisponible" de certains agents
+
+# OIDs PoE (POWER-ETHERNET-MIB, RFC 3621) — table pethPsePortTable indexée
+# groupe.port (PAS l'ifIndex ; le composant « port » = le port physique, qu'on
+# recoupe donc directement au numéro de port de la baie).
+_OID_POE_DETECT  = '1.3.6.1.2.1.105.1.1.1.6'    # 1 disabled 2 searching 3 deliveringPower 4 fault ...
+_OID_POE_CLASS   = '1.3.6.1.2.1.105.1.1.1.7'    # 1..5 -> classe 0..4
+_OID_POE_MAIN_W  = '1.3.6.1.2.1.105.1.3.1.2.1'  # pethMainPsePower : budget W (groupe 1)
+_OID_POE_CONS_W  = '1.3.6.1.2.1.105.1.3.1.4.1'  # pethMainPseConsumptionPower : W consommés (groupe 1)
+_POE_DETECT_TXT  = {1: 'désactivé', 2: 'recherche', 3: 'alimenté', 4: 'défaut', 5: 'test', 6: 'défaut'}
+_POE_CLASSE_W    = {1: 15.4, 2: 4.0, 3: 7.0, 4: 15.4, 5: 30.0}   # classe 0..4 -> W max indicatif
 
 # OIDs paquets (ifXTable / ifTable), lecture seule — complètent _OID_IF_* du palier 3
 _OID_IF_HCIN_UCAST  = '1.3.6.1.2.1.31.1.1.1.7'
 _OID_IF_HCOUT_UCAST = '1.3.6.1.2.1.31.1.1.1.11'
 _OID_IF_IN_UCAST    = '1.3.6.1.2.1.2.2.1.11'
 _OID_IF_OUT_UCAST   = '1.3.6.1.2.1.2.2.1.17'
-# ifType consideres comme "port physique ethernet" (6 ethernetCsmacd est la
-# norme ; certains agents utilisent encore les valeurs historiques)
-_IFTYPE_ETHERNET    = {6, 7, 62, 69, 117}
 
 _activite_lock       = threading.Lock()
 _activite_heartbeat  = {}   # client_id -> epoch du dernier battement
@@ -3031,7 +3045,8 @@ def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, infos):
     return mapping, sources, calibre
 
 
-_poll_max_ms = [0]   # durée du plus lent relevé du cycle courant (cadence adaptative)
+_poll_max_ms = [0]         # durée du plus lent relevé du cycle courant (cadence adaptative)
+_cadence     = [_ACTIVITE_INTERVAL]   # intervalle effectif entre deux cycles (affiché dans l'UI)
 
 
 def _noms_interfaces(ip, communautes):
@@ -3104,7 +3119,90 @@ def _snmp_bulk(ip, oid_bases, communautes):
 
 
 _activite_hc  = {}   # ip -> bool : le switch expose-t-il les compteurs 64 bits (ifXTable) ?
+_activite_poe = {}   # ip -> bool | None : le switch expose-t-il du PoE (POWER-ETHERNET-MIB) ?
 _activite_cyc = [0]  # compteur global de cycles (relève des erreurs espacée)
+_activite_calib = {}       # (cid, slot_id) -> {numero, ip, debut, last_oper, transitions, trouve}
+_CALIB_FENETRE = 90.0      # s — durée de la détection « débranche/rebranche »
+
+
+def assistant_calibration(client_id, slot_id, numero, action):
+    """Calibration « par débranchement » : on note l'état oper de toutes les
+    interfaces du switch, l'utilisateur débranche puis rebranche le câble du
+    port, et l'interface qui a changé d'état est celle du port. action ∈
+    'start' | 'stop'. Retourne l'état courant."""
+    cle = (client_id, slot_id)
+    if action == 'stop':
+        _activite_calib.pop(cle, None)
+        return {'etat': 'arrete'}
+    _activite_calib[cle] = {'numero': int(numero), 'debut': time.time(),
+                            'last_oper': None, 'transitions': {}, 'trouve': None}
+    _demarrer_activite_thread()
+    return {'etat': 'attente', 'numero': int(numero)}
+
+
+def _maj_assistant_calibration(cid, slot_id, ip, cur_ports):
+    """Appelé par _cycle_activite : suit les transitions oper pendant la fenêtre."""
+    a = _activite_calib.get((cid, slot_id))
+    if not a or a['trouve']:
+        return
+    if time.time() - a['debut'] > _CALIB_FENETRE:
+        a['trouve'] = a.get('trouve') or 0     # 0 = expiré sans résultat
+        return
+    oper_now = {ix: p['oper'] for ix, p in cur_ports.items()}
+    if a['last_oper'] is not None:
+        for ix, o in oper_now.items():
+            if ix in a['last_oper'] and o != a['last_oper'][ix]:
+                a['transitions'][ix] = a['transitions'].get(ix, 0) + 1
+        # une interface qui a fait ≥ 2 transitions (down puis up) est LA bonne
+        gagnant = next((ix for ix, n in a['transitions'].items() if n >= 2), None)
+        if gagnant is None and len(a['transitions']) == 1:
+            gagnant = next(iter(a['transitions']))     # une seule a bougé
+        if gagnant:
+            a['trouve'] = gagnant
+    a['last_oper'] = oper_now
+
+
+def _poll_poe(ip, communautes):
+    """PoE par port (POWER-ETHERNET-MIB). {'ports': {numero: {statut, statut_txt,
+    classe, watts_max}}, 'total_w', 'budget_w'} — {} si le switch n'a pas de PoE.
+    La table pethPsePortTable est indexée `groupe.port` : le composant `port`
+    correspond au port physique (donc au numéro de port de la baie)."""
+    if _activite_poe.get(ip) is False:
+        return {}
+    cols = _snmp_bulk(ip, [_OID_POE_DETECT, _OID_POE_CLASS], communautes)
+    detect = cols.get(_OID_POE_DETECT, {})
+    if not detect:
+        _activite_poe[ip] = False
+        return {}
+    _activite_poe[ip] = True
+    classe = cols.get(_OID_POE_CLASS, {})
+    ports = {}
+    for suf, val in detect.items():
+        parts = str(suf).split('.')
+        try:
+            numero = int(parts[-1])          # composant « port » = dernier
+            st = int(val)
+        except (TypeError, ValueError):
+            continue
+        cl = None
+        try:
+            cl = int(classe.get(suf))
+        except (TypeError, ValueError):
+            pass
+        ports[numero] = {
+            'statut': st, 'statut_txt': _POE_DETECT_TXT.get(st, '?'),
+            'classe': (cl - 1) if cl else None,      # 1..5 -> classe 0..4
+            'watts_max': _POE_CLASSE_W.get(cl) if st == 3 else None,
+        }
+    scal = _snmp_bulk(ip, [_OID_POE_MAIN_W, _OID_POE_CONS_W], communautes)
+
+    def _w(d):
+        try:
+            return int(next(iter(d.values())))
+        except (StopIteration, TypeError, ValueError):
+            return None
+    return {'ports': ports, 'budget_w': _w(scal.get(_OID_POE_MAIN_W, {})),
+            'total_w': _w(scal.get(_OID_POE_CONS_W, {}))}
 
 
 def _poll_switch_ports(ip, communautes, infos=None):
@@ -3196,6 +3294,7 @@ def _etat_led(prev, cur, dt, seuils):
                 'blink_ms': 0, 'err_delta': 0, 'reset': False,
                 'bps_ema': 0.0, 'pps_ema': 0.0}
 
+    speed = cur.get('speed_mbps', 0)
     if prev and dt > 0 and 'in_oct' in prev:
         raw_in = cur.get('in_oct', 0) - prev.get('in_oct', 0)
         raw_out = cur.get('out_oct', 0) - prev.get('out_oct', 0)
@@ -3207,15 +3306,32 @@ def _etat_led(prev, cur, dt, seuils):
         bps_inst = max(_d('in_oct'), _d('out_oct')) * 8 / dt
         pps_inst = (_d('in_pkts') + _d('out_pkts')) / dt
         err_delta = _d('in_err') + _d('out_err')
+        # Un compteur qui vient de « dépéguer » (0x7FFFFFFF → valeur réelle), de
+        # boucler, ou de basculer 64↔32 bits d'un cycle à l'autre produit un delta
+        # gigantesque et un pic de débit/pps fantaisiste. Un port ne peut pas
+        # dépasser la capacité physique de son lien : au-delà, c'est un artefact —
+        # on garde la dernière valeur lissée connue plutôt que d'injecter le pic.
+        cap_bps = speed * 1e6 * 1.05 if speed else 12e9
+        cap_pps = speed * 1500 if speed else _ACTIVITE_PPS_MAX_PORT
+        if cur.get('cpt_pegge'):
+            # compteurs inexploitables sur ce port : on n'invente pas de débit
+            bps_inst = pps_inst = 0.0
+        if bps_inst > cap_bps:
+            bps_inst = prev.get('bps_ema', 0.0)
+        if pps_inst > cap_pps:
+            pps_inst = prev.get('pps_ema', 0.0)
         a = _ACTIVITE_EMA
         bps = a * bps_inst + (1 - a) * prev.get('bps_ema', bps_inst)
         pps = a * pps_inst + (1 - a) * prev.get('pps_ema', pps_inst)
+        # garde-fou : un `bps_ema`/`pps_ema` hérité d'un pic passé (compteur ayant
+        # bouclé avant la mise en place du plafond) doit pouvoir se résorber vite
+        bps = min(bps, cap_bps)
+        pps = min(pps, cap_pps)
     else:
         bps = pps = 0.0
         err_delta = 0
         reset = False
 
-    speed = cur.get('speed_mbps', 0)
     pct = (bps / (speed * 1e6) * 100) if speed else 0.0
     base = {'bps': round(bps), 'pps': round(pps, 1), 'pct': round(pct, 1),
             'err_delta': int(err_delta), 'reset': reset,
@@ -3252,6 +3368,10 @@ def _cycle_activite(clients):
                     mapping, sources, calibre = _mapping_baie_ifindex(
                         conn, cid, slot_id, sw['appareil_id'], infos)
                     cur_ports, ok, hc = _poll_switch_ports(ip, communautes, infos)
+                    if ok:
+                        _maj_assistant_calibration(cid, slot_id, ip, cur_ports)
+                    poe = _poll_poe(ip, communautes) if ok else {}
+                    poe_ports = poe.get('ports', {})
                     poll_ms = int((time.time() - t0) * 1000)
                     _poll_max_ms[0] = max(_poll_max_ms[0], poll_ms)
                     now = time.time()
@@ -3287,13 +3407,15 @@ def _cycle_activite(clients):
                         etats[ifindex] = led_all
                         meta = infos.get(ifindex, {})
                         if meta.get('ethernet', True):
+                            _pp = _port_physique_depuis_nom(meta.get('nom'))
                             detail_ifs.append({
                                 'ip': ip, 'switch_nom': sw['nom'], 'ifindex': ifindex,
                                 'nom': meta.get('nom') or f'if{ifindex}',
                                 'alias': meta.get('alias') or '',
                                 'oper': p['oper'], 'speed_mbps': p['speed_mbps'],
                                 'bps': round(led_all['bps']), 'pps': round(led_all['pps'], 1),
-                                'etat': led_all['etat'], 'cpt_pegge': p.get('cpt_pegge', False)})
+                                'etat': led_all['etat'], 'cpt_pegge': p.get('cpt_pegge', False),
+                                'poe': poe_ports.get(_pp) if _pp is not None else None})
 
                     nb_ethernet = sum(1 for m in infos.values() if m.get('ethernet', True)) or len(cur_ports)
 
@@ -3342,7 +3464,11 @@ def _cycle_activite(clients):
 
                         ports_ui.append({'slot_id': slot_id, 'numero': numero,
                                          'etat': led['etat'], 'blink_ms': led['blink_ms'],
-                                         'debit_bps': round(led['bps']), 'err_delta': led['err_delta']})
+                                         'debit_bps': round(led['bps']), 'pps': round(led['pps'], 1),
+                                         'err_delta': led['err_delta'],
+                                         'nom': (infos.get(ifindex) or {}).get('nom', ''),
+                                         'alias': (infos.get(ifindex) or {}).get('alias', ''),
+                                         'cpt_pegge': (p or {}).get('cpt_pegge', False)})
                         if led['etat'] not in ('down', 'stale'):
                             nb_up += 1
                         if led['etat'] in ('traffic', 'sature', 'err'):
@@ -3364,7 +3490,13 @@ def _cycle_activite(clients):
                             'source_mapping': sources.get(numero, 'non_mappé'),
                             'manques': pr.get('manques', 0),
                             'cpt_pegge': (p or {}).get('cpt_pegge', False),
+                            'poe': poe_ports.get(numero),
                             'stale': led['etat'] == 'stale'})
+                        _poe_p = poe_ports.get(numero)
+                        if _poe_p and _poe_p['statut'] == 4 and _etats_prec.get(('poe', numero)) != 4:
+                            journal_ops.append((f"{sw['nom']} port {numero} — défaut PoE", 'warn', ip))
+                        if _poe_p:
+                            _etats_prec[('poe', numero)] = _poe_p['statut']
 
                     equipements.append({
                         'ip': ip, 'nom': sw['nom'], 'appareil_id': sw['appareil_id'],
@@ -3379,6 +3511,9 @@ def _cycle_activite(clients):
                         'nb_ports_mappes': len(mapping), 'nb_manques': nb_manques,
                         'nb_ports_calibres': sum(1 for s in sources.values()
                                                  if s in ('manuel', 'topologie', 'nom_port')),
+                        'poe': bool(poe_ports),
+                        'poe_total_w': poe.get('total_w'), 'poe_budget_w': poe.get('budget_w'),
+                        'poe_nb_alimentes': sum(1 for x in poe_ports.values() if x['statut'] == 3),
                         'calibre': calibre})
             finally:
                 conn.close()
@@ -3390,7 +3525,7 @@ def _cycle_activite(clients):
             with _activite_lock:
                 _activite_resultat[cid] = {
                     'actif': True, 'ts': time.time(), 'nb_switchs': len(switchs),
-                    'nb_muets': nb_muets, 'motif': motif,
+                    'nb_muets': nb_muets, 'motif': motif, 'cadence_s': round(_cadence[0]),
                     'calibre': bool(equipements) and all(e['calibre'] for e in equipements),
                     'equipements': equipements, 'ports': ports_ui}
                 _activite_detail[cid] = {'ts': _now_z(), 'switchs': detail_sw,
@@ -3437,7 +3572,8 @@ def _activite_loop():
         # cadence adaptative : un switch SNMP lent (bas de gamme) met plusieurs
         # secondes à répondre — inutile (et contre-productif) de le re-solliciter
         # toutes les 3 s. On espace en proportion, plafonné à 30 s.
-        time.sleep(max(_ACTIVITE_INTERVAL, min(30.0, _poll_max_ms[0] / 1000.0 * 1.3)))
+        _cadence[0] = max(_ACTIVITE_INTERVAL, min(30.0, _poll_max_ms[0] / 1000.0 * 1.3))
+        time.sleep(_cadence[0])
 
 
 def _demarrer_activite_thread():
@@ -3499,8 +3635,30 @@ def moniteur_baie(client_id: int) -> dict:
     except Exception:
         pass
 
+    # assistant de calibration « par débranchement » en cours pour ce client
+    calib = None
+    for (c, sid), a in list(_activite_calib.items()):
+        if c != client_id:
+            continue
+        if a['trouve'] and a['trouve'] > 0:
+            ifx = a['trouve']
+            calibrer_port_baie(client_id, sid, a['numero'], ifx)
+            _activite_calib.pop((c, sid), None)
+            nom = next((i['nom'] for i in detail.get('interfaces', []) if i['ifindex'] == ifx), f'if{ifx}')
+            calib = {'slot_id': sid, 'numero': a['numero'], 'etat': 'trouve',
+                     'ifindex': ifx, 'nom': nom}
+        elif a['trouve'] == 0:
+            _activite_calib.pop((c, sid), None)
+            calib = {'slot_id': sid, 'numero': a['numero'], 'etat': 'expire'}
+        else:
+            calib = {'slot_id': sid, 'numero': a['numero'], 'etat': 'attente',
+                     'restant_s': max(0, round(_CALIB_FENETRE - (time.time() - a['debut'])))}
+        break
+
     return {
         'ts': detail.get('ts'),
+        'cadence_s': round(_cadence[0]),
+        'calibration_assistant': calib,
         'switchs': detail.get('switchs', []),
         'ports': detail.get('ports', []),
         'interfaces': detail.get('interfaces', []),
