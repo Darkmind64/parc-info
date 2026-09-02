@@ -3047,6 +3047,9 @@ def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, infos):
 
 _poll_max_ms = [0]         # durée du plus lent relevé du cycle courant (cadence adaptative)
 _cadence     = [_ACTIVITE_INTERVAL]   # intervalle effectif entre deux cycles (affiché dans l'UI)
+_activite_rechauffe = [0]  # nb de cycles consécutifs avec des clients actifs (0 = à froid)
+_ACTIVITE_RECHAUFFE_CYCLES = 3   # tant qu'on est sous ce seuil, on n'applique pas la cadence lente
+                                 # (il faut 2 relevés pour un delta — inutile d'attendre 30 s entre-eux)
 
 
 def _noms_interfaces(ip, communautes):
@@ -3537,7 +3540,7 @@ def _cycle_activite(clients):
 
 
 def _activite_loop():
-    time.sleep(12)   # laisser l'app finir de démarrer
+    time.sleep(2)   # le thread est démarré à la 1re requête navigateur : l'app tourne déjà
     while True:
         try:
             now = time.time()
@@ -3556,6 +3559,7 @@ def _activite_loop():
                           if now - v['ts'] > max(_ACTIVITE_PURGE, _ACTIVITE_NOMS_TTL * 2)]:
                     _activite_noms.pop(k, None)
             if not clients:
+                _activite_rechauffe[0] = 0
                 time.sleep(5)
                 continue
             if str(_cfg('diag_snmp_actif', '0')) != '1':
@@ -3567,12 +3571,18 @@ def _activite_loop():
                 continue
             _poll_max_ms[0] = 0
             _cycle_activite(clients)
+            _activite_rechauffe[0] += 1
         except Exception:
             logger.debug('network_diag: _activite_loop', exc_info=True)
         # cadence adaptative : un switch SNMP lent (bas de gamme) met plusieurs
         # secondes à répondre — inutile (et contre-productif) de le re-solliciter
         # toutes les 3 s. On espace en proportion, plafonné à 30 s.
+        # MAIS à froid (les 2-3 premiers cycles), on garde une cadence courte :
+        # il faut deux relevés pour calculer un débit, l'utilisateur attend ce
+        # deuxième passage — pas la peine de lui imposer 30 s d'attente en plus.
         _cadence[0] = max(_ACTIVITE_INTERVAL, min(30.0, _poll_max_ms[0] / 1000.0 * 1.3))
+        if _activite_rechauffe[0] < _ACTIVITE_RECHAUFFE_CYCLES:
+            _cadence[0] = _ACTIVITE_INTERVAL
         time.sleep(_cadence[0])
 
 

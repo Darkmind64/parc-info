@@ -3209,6 +3209,8 @@ function majBandeauActivite(d) {
         b.textContent = '';
         if (d && d.actif === false) { b.style.display = ''; b.style.color = 'var(--accent-red)';
             b.textContent = '⚡ SNMP désactivé — active-le dans le diagnostic réseau'; }
+        else if (d && d.actif === null) { b.style.display = ''; b.style.color = 'var(--text-muted, #94a3b8)';
+            b.textContent = '⚡ démarrage du relevé SNMP… (deux passages sont nécessaires pour mesurer le trafic, ~1 min sur un switch lent)'; }
         return;
     }
     const eqs = d.equipements || [];

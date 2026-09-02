@@ -1,8 +1,28 @@
-PARCINFO_VERSION=2.19.10
+PARCINFO_VERSION=2.19.11
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090201
+BUILD_NUMBER=2026090202
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.11 - Vue d'activite baie : demarrage plus rapide des LEDs
+# Retour terrain : 2-3 min avant que les LEDs commencent a clignoter.
+# En partie inherent (il faut DEUX releves SNMP espaces pour mesurer un debit,
+# 5-25 s chacun sur un switch bas de gamme + ~20 s de decouverte des noms
+# d'interfaces au 1er passage), en partie evitable :
+#
+# - La cadence adaptative (espace les cycles jusqu'a 30 s pour ne pas harceler
+#   un agent lent) s'appliquait des le 2e cycle -> 30 s d'attente en plus
+#   AVANT le premier delta, justement celui qu'attend l'utilisateur. Desormais
+#   cadence courte forcee sur les 3 premiers cycles (_ACTIVITE_RECHAUFFE_CYCLES),
+#   la cadence lente ne s'active qu'en regime etabli. Compteur remis a zero des
+#   qu'il n'y a plus de navigateur -> re-rechauffe a la reouverture.
+# - Bandeau "demarrage du releve SNMP..." pendant la mise en route (actif=null)
+#   au lieu d'un ecran vide qui parait bloque.
+# - Thread de releve demarre 2 s apres la 1re requete navigateur (au lieu de
+#   12 s : il est lance en lazy, l'app tourne deja).
+#
+# Mesure : ~35 s activation -> LEDs clignotantes (contre 2-3 min).
+# Aucune nouvelle dependance, aucun schema change.
 
 # Version 2.19.10 - Vue d'activite baie : PoE, assistant de calibration, SNMP consolide
 # Suite de la 2.19.9. Consolidation du sous-systeme + deux ajouts terrain.

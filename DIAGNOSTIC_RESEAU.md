@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-02 (v2.19.10). En cas de doute
+> Ce document décrit le comportement au 2026-09-02 (v2.19.11). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -77,7 +77,12 @@ des switchs de la baie et calcule l'état à peindre par port.
   PoE. Silencieux sur un switch sans PoE (`_activite_poe[ip] = False`).
 - **Cadence adaptative** : `_activite_loop` espace ses cycles en proportion du
   relevé le plus lent (plafond 30 s) — inutile de re-solliciter un agent SNMP
-  qui met 10 s à répondre toutes les 3 s.
+  qui met 10 s à répondre toutes les 3 s. **Exception au démarrage** (v2.19.11) :
+  les `_ACTIVITE_RECHAUFFE_CYCLES` (3) premiers cycles gardent une cadence courte
+  — il faut deux relevés pour un premier débit, autant ne pas ajouter 30 s
+  d'attente entre eux. Le compteur `_activite_rechauffe` repart de zéro dès
+  qu'aucun navigateur ne bat → re-chauffe à la réouverture. Le bandeau affiche
+  « démarrage du relevé SNMP… » tant que `actif` vaut `null`.
 - **Association port baie ↔ ifIndex** (v2.19.9) : `_mapping_baie_ifindex` —
   priorité **manuel** (`baie_slot_ports.if_index`, source `manuel`) > **topologie**
   (`diag_topologie`, source `topologie`) > **nom d'interface**
