@@ -2862,7 +2862,8 @@ _ACTIVITE_PURGE         = 120.0   # s — oubli des compteurs/résultats d'un cl
 _ACTIVITE_NOMS_TTL      = 90.0    # s — cache des noms/types d'interface (quasi statiques)
 _ACTIVITE_MANQUES_STALE = 3       # relevés manqués consécutifs avant l'état « stale »
 _ACTIVITE_EMA           = 0.5     # lissage exponentiel du débit / pps
-_ACTIVITE_BPS_MINI      = 2000    # bit/s en dessous : pas de clignotement (bruit)
+_ACTIVITE_BPS_MINI      = 500     # bit/s (défaut de `diag_baie_activite_bps_mini`) en dessous : pas de clignotement
+_ACTIVITE_DEBOUNCE_ON   = 1       # cycles avant de PASSER en « traffic » (1 = immédiat, comme une vraie LED)
 _ACTIVITE_PPS_MAX_PORT  = 15_000_000   # pps — plafond absolu (10 GbE ≈ 14,9 Mpps) : au-delà = artefact de compteur
 _ACTIVITE_DEBOUNCE      = 2       # cycles consécutifs demandant idle<->traffic avant de basculer (anti-scintillement)
 _CPT_SENTINELLE_32      = {2**31 - 1, 2**32 - 1}   # valeurs "compteur indisponible" de certains agents
@@ -2882,6 +2883,11 @@ _OID_IF_HCIN_UCAST  = '1.3.6.1.2.1.31.1.1.1.7'
 _OID_IF_HCOUT_UCAST = '1.3.6.1.2.1.31.1.1.1.11'
 _OID_IF_IN_UCAST    = '1.3.6.1.2.1.2.2.1.11'
 _OID_IF_OUT_UCAST   = '1.3.6.1.2.1.2.2.1.17'
+# Paquets NON unicast (broadcast + multicast) — Counter32, deprecated mais quasi
+# toujours peuplé. Une vraie LED de switch clignote sur CES trames aussi (ARP,
+# STP, mDNS, DHCP…), un port de VLAN calme n'a souvent que ça.
+_OID_IF_IN_NUCAST   = '1.3.6.1.2.1.2.2.1.12'
+_OID_IF_OUT_NUCAST  = '1.3.6.1.2.1.2.2.1.18'
 
 _activite_lock       = threading.Lock()
 _activite_thread_lock = threading.Lock()   # démarrage idempotent du thread (course page+modale)
@@ -3307,7 +3313,7 @@ def _poll_switch_ports(ip, communautes, infos=None):
                and _activite_cyc[0] >= _activite_capa_reprobe.get(ip, {}).get('hc', 0))
     veut_hc = (a_hc is not False) or reprobe   # on demande l'ifXTable ?
     veut_32 = (a_hc is not True) or reprobe    # on demande l'ifTable ?  (au démarrage : les deux, 1 cycle)
-    oct_cols = []
+    oct_cols = [_OID_IF_IN_NUCAST, _OID_IF_OUT_NUCAST]   # bcast+mcast (Counter32, toujours demandé)
     if veut_hc:
         oct_cols += [_OID_IF_HCIN, _OID_IF_HCOUT, _OID_IF_HCIN_UCAST, _OID_IF_HCOUT_UCAST]
     if veut_32:
@@ -3370,6 +3376,8 @@ def _poll_switch_ports(ip, communautes, infos=None):
         out_o, h2 = _cpt(_OID_IF_HCOUT, _OID_IF_OUT_OCTETS, suf)
         in_p, h3 = _cpt(_OID_IF_HCIN_UCAST, _OID_IF_IN_UCAST, suf)
         out_p, h4 = _cpt(_OID_IF_HCOUT_UCAST, _OID_IF_OUT_UCAST, suf)
+        in_np = _i(_OID_IF_IN_NUCAST, suf)      # broadcast + multicast (Counter32)
+        out_np = _i(_OID_IF_OUT_NUCAST, suf)
         h = h1 or h2 or h3 or h4
         hc_seen = hc_seen or h
         d = {
@@ -3381,6 +3389,7 @@ def _poll_switch_ports(ip, communautes, infos=None):
             'oper_ok': suf in oper,
             'speed_mbps': (infos.get(ifx) or {}).get('speed_mbps', 0),
             'in_oct': in_o, 'out_oct': out_o, 'in_pkts': in_p, 'out_pkts': out_p,
+            'in_npkts': in_np, 'out_npkts': out_np,
             'cpt_pegge': peg[0], 'hc': h,     # compteurs 64 bits ? sinon bouclage 32 bits possible
         }
         if avec_err:      # sinon : clés absentes → l'appelant conserve la valeur connue
@@ -3430,7 +3439,10 @@ def _etat_led(prev, cur, dt, seuils, reboot=False):
         reset = ((raw_in < 0 and prev.get('in_oct', 0) <= (oct_large or 2**32) // 2)
                  or (raw_out < 0 and prev.get('out_oct', 0) <= (oct_large or 2**32) // 2))
         bps_inst = max(_d('in_oct', oct_large), _d('out_oct', oct_large)) * 8 / dt
-        pps_inst = (_d('in_pkts', oct_large) + _d('out_pkts', oct_large)) / dt
+        # pps = TOUS les paquets (unicast + broadcast/multicast) comme une vraie
+        # LED de switch : un port de VLAN calme n'a souvent que du non-unicast.
+        pps_inst = (_d('in_pkts', oct_large) + _d('out_pkts', oct_large)
+                    + _d('in_npkts', 2 ** 32) + _d('out_npkts', 2 ** 32)) / dt
         err_delta = _d('in_err') + _d('out_err')
         # Un compteur qui vient de « dépéguer » (0x7FFFFFFF → valeur réelle), de
         # boucler, ou de basculer 64↔32 bits d'un cycle à l'autre produit un delta
@@ -3440,8 +3452,11 @@ def _etat_led(prev, cur, dt, seuils, reboot=False):
         cap_bps = speed * 1e6 * 1.05 if speed else 12e9
         cap_pps = speed * 1500 if speed else _ACTIVITE_PPS_MAX_PORT
         if cur.get('cpt_pegge'):
-            # compteurs inexploitables sur ce port : on n'invente pas de débit
-            bps_inst = pps_inst = 0.0
+            # les compteurs d'OCTETS sont bloqués (agent défectueux) -> pas de
+            # débit fiable. Les compteurs de PAQUETS, eux, restent souvent bons :
+            # on garde le pps (borné plus bas) pour que la LED clignote quand
+            # même. C'est le cas d'un HP ProCurve bas de gamme.
+            bps_inst = 0.0
         if bps_inst > cap_bps:
             bps_inst = prev.get('bps_ema', 0.0)
         if pps_inst > cap_pps:
@@ -3477,19 +3492,22 @@ def _etat_led(prev, cur, dt, seuils, reboot=False):
     # état voulu par CE cycle — sur les valeurs instantanées (pas l'EMA) :
     # l'anti-rebond ci-dessous fournit le lissage de l'état, l'EMA celui des
     # chiffres affichés.
-    if pps_inst >= seuils['pps_mini'] or bps_inst > _ACTIVITE_BPS_MINI:
+    bps_mini = seuils.get('bps_mini', _ACTIVITE_BPS_MINI)
+    if pps_inst >= seuils['pps_mini'] or bps_inst > bps_mini:
         etat_brut, blink = 'traffic', _blink(pps)
     else:
         etat_brut, blink = 'idle', 0
 
-    # anti-rebond idle<->traffic : il faut _ACTIVITE_DEBOUNCE cycles consécutifs
-    # demandant le changement avant de l'appliquer (un port marginal ne
-    # scintille plus, et les instances convergent sur le même compte).
+    # anti-rebond ASYMÉTRIQUE : on PASSE en « traffic » vite (_ACTIVITE_DEBOUNCE_ON,
+    # défaut 1 = dès le premier relevé, comme une vraie LED de switch) et on en
+    # SORT plus lentement (_ACTIVITE_DEBOUNCE relevés calmes), ce qui donne la
+    # « persistance » visuelle d'un voyant sans scintiller.
     etat_prec = (prev or {}).get('etat')
     if etat_prec in ('idle', 'traffic') and etat_brut != etat_prec:
+        seuil_deb = _ACTIVITE_DEBOUNCE_ON if etat_brut == 'traffic' else _ACTIVITE_DEBOUNCE
         pend_n = pend_n + 1 if pend == etat_brut else 1
         pend = etat_brut
-        if pend_n < _ACTIVITE_DEBOUNCE:          # pas encore confirmé
+        if pend_n < seuil_deb:                   # pas encore confirmé
             etat_brut = etat_prec
             blink = _blink(pps) if etat_prec == 'traffic' else 0
         else:
@@ -3534,7 +3552,8 @@ def _cycle_activite(clients):
     communautes = _communautes_snmp()
     seuils = {'err': _cfg_int('diag_baie_activite_seuil_err', 20),
               'sat_pct': _cfg_float('diag_snmp_seuil_saturation_pct', 90),
-              'pps_mini': _cfg_float('diag_baie_activite_pps_mini', 15)}
+              'pps_mini': _cfg_float('diag_baie_activite_pps_mini', 15),
+              'bps_mini': _cfg_float('diag_baie_activite_bps_mini', _ACTIVITE_BPS_MINI)}
     for cid in clients:
         journal_ops = []          # (message, niveau, cible) — émis hors lock
         calib_a_appliquer = []    # (slot_id, numero, ifindex) — écrits après conn.close()
@@ -3626,6 +3645,7 @@ def _cycle_activite(clients):
                         _activite_prev[cle_all] = {
                             'in_oct': p['in_oct'], 'out_oct': p['out_oct'],
                             'in_pkts': p['in_pkts'], 'out_pkts': p['out_pkts'],
+                            'in_npkts': p.get('in_npkts', 0), 'out_npkts': p.get('out_npkts', 0),
                             'in_err': p.get('in_err', _pr.get('in_err', 0)),
                             'out_err': p.get('out_err', _pr.get('out_err', 0)),
                             'bps_ema': led_all['bps_ema'], 'pps_ema': led_all['pps_ema'],

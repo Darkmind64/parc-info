@@ -3493,6 +3493,10 @@ function rendreConfig() {
         <input type="number" data-cfg="diag_baie_activite_pps_mini" value="${g('diag_baie_activite_pps_mini')||'15'}" min="0" max="100000" class="cfg-input cfg-input-sm">
     </div>
     <div class="cfg-row">
+        <label class="cfg-label">Vue d'activité baie — débit minimum (bit/s) pour « actif » (baisser pour clignoter comme un vrai switch)</label>
+        <input type="number" data-cfg="diag_baie_activite_bps_mini" value="${g('diag_baie_activite_bps_mini')||'500'}" min="0" max="100000000" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
         <label class="cfg-label">Vue d'activité baie — durée de la capture de trafic à la demande (s)</label>
         <input type="number" data-cfg="diag_baie_capture_duree_s" value="${g('diag_baie_capture_duree_s')||'20'}" min="5" max="120" class="cfg-input cfg-input-sm">
     </div>

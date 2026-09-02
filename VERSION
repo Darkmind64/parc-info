@@ -1,8 +1,32 @@
-PARCINFO_VERSION=2.19.15
+PARCINFO_VERSION=2.19.16
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090206
+BUILD_NUMBER=2026090207
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.16 - Vue d'activite baie : les LEDs clignotent comme un vrai switch
+# Retour terrain : "des ports restent vert (lien actif) sans jamais clignoter
+# alors qu'ils clignotent sur mon switch". Une vraie LED de switch clignote sur
+# TOUTE trame ; ParcInfo ne comptait que l'unicast, avec un seuil et un
+# anti-rebond symetrique.
+#
+# - Paquets NON unicast comptes : ifInNUcastPkts / ifOutNUcastPkts
+#   (1.3.6.1.2.1.2.2.1.12 / .18, Counter32, +2 colonnes toujours demandees)
+#   ajoutes au pps. Un port de VLAN calme n'a souvent que du broadcast/
+#   multicast (ARP, STP, mDNS, DHCP, IGMP) -> il clignote maintenant.
+# - Anti-rebond ASYMETRIQUE : _ACTIVITE_DEBOUNCE_ON = 1 (on passe en "traffic"
+#   des le 1er releve, comme une vraie LED) ; on en sort apres
+#   _ACTIVITE_DEBOUNCE (2) releves calmes (persistance visuelle).
+# - cpt_pegge (compteurs d'OCTETS bloques a 2 Go) ne met plus le pps a zero :
+#   les compteurs de PAQUETS restent souvent bons -> la LED clignote quand
+#   meme (cas d'un HP ProCurve bas de gamme). Le plafond de plausibilite
+#   protege des valeurs aberrantes.
+# - Seuil bas de debit : 2000 -> 500 bit/s par defaut, et configurable
+#   (diag_baie_activite_bps_mini, a cote de diag_baie_activite_pps_mini).
+#
+# Mesure sur le HP ProCurve de test (compteurs d'octets pegges) : 13 ports
+# clignotent au lieu de 2-3, correspondant a ce que montre le switch.
+# Aucune nouvelle dependance, aucun schema change. pytest 231 + scripts OK.
 
 # Version 2.19.15 - Vue d'activite baie : une reponse SNMP partielle n'allume plus toutes les LEDs
 # Retour terrain apres 2.19.14 : "parfois l'ensemble des ports affichent une

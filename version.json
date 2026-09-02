@@ -1,22 +1,22 @@
 {
-  "version": "2.19.15",
+  "version": "2.19.16",
   "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.15/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.15/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.15/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.15",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.15/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.15/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.15/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.15/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.15/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.16/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.16/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.16/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.16",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.16/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.16/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.16/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.16/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.16/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Vue d'activité de la baie — correctif : quand la réponse SNMP d'un switch est partielle (tronquée, ou au démarrage), la colonne ifOperStatus pouvait manquer pour certains ports et ils passaient tous « allumés » (LED verte) pendant quelques dizaines de secondes, y compris les ports débranchés. Un port dont l'état de lien n'est pas relevé garde désormais son état précédent.",
+    "new_features": "Vue d'activité de la baie — les LEDs clignotent comme un vrai switch : les paquets broadcast/multicast (ARP, STP, mDNS…) sont maintenant comptés en plus de l'unicast, un port passe « actif » dès le premier relevé (et le reste brièvement après), et un switch qui bloque ses compteurs d'octets à 2 Go garde quand même son estimation par paquets. Nouveau réglage « débit minimum » (bit/s) à côté du seuil paquets/s.",
     "improvements": [
-      "L'assistant de calibration ignore les ports dont l'état de lien n'a pas été relevé (plus de fausses transitions)."
+      "Le seuil bas de débit passe de 2000 à 500 bit/s par défaut et devient configurable (diag_baie_activite_bps_mini)."
     ]
   },
   "checksums": {
@@ -27,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.15"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.16"
 }
