@@ -550,18 +550,26 @@ def test_poll_switch_ports(monkeypatch):
     assert res[1]['oper'] == 1 and res[1]['speed_mbps'] == 1000 and res[1]['out_oct'] == 9000
     assert res[1]['in_pkts'] == 10 and res[2]['oper'] == 2
 
-    # valeur sentinelle 32 bits (« compteur indisponible » de certains agents) -> 0
-    network_diag._activite_hc.pop('10.0.0.5', None)
+    # valeur sentinelle 32 bits (« compteur indisponible » de certains agents) -> 0.
+    # Il faut _ACTIVITE_NEG_CONFIRME relevés sans ifXTable avant de basculer en
+    # 32 bits (un paquet HC perdu ne doit pas condamner le mode 64 bits).
+    for d in (network_diag._activite_hc, network_diag._activite_capa_neg,
+              network_diag._activite_capa_reprobe):
+        d.pop('10.0.0.5', None)
     _T2 = {network_diag._OID_IF_OPER: {'1': 1},
            network_diag._OID_IF_IN_OCTETS: {'1': 2**31 - 1},
            network_diag._OID_IF_OUT_OCTETS: {'1': 12345}}
     monkeypatch.setattr(A, '_snmp_bulk_cols',
                         lambda ip, bases, comm, **k: {b: dict(_T2.get(b, {})) for b in bases})
-    res2, ok2, hc2 = network_diag._poll_switch_ports('10.0.0.5', ['public'], {})
+    network_diag._poll_switch_ports('10.0.0.5', ['public'], {})          # 1er négatif
+    assert network_diag._activite_hc.get('10.0.0.5') is None             # pas encore basculé
+    res2, ok2, hc2 = network_diag._poll_switch_ports('10.0.0.5', ['public'], {})   # 2e -> 32 bits
     assert res2[1]['in_oct'] == 0 and res2[1]['out_oct'] == 12345 and hc2 is False
     assert res2[1]['cpt_pegge'] is True
 
-    network_diag._activite_hc.pop('10.0.0.6', None)
+    for d in (network_diag._activite_hc, network_diag._activite_capa_neg,
+              network_diag._activite_capa_reprobe):
+        d.pop('10.0.0.6', None)
     monkeypatch.setattr(A, '_snmp_bulk_cols', lambda *a, **k: {})
     res3, ok3, _ = network_diag._poll_switch_ports('10.0.0.6', ['public'], {})
     assert ok3 is False and res3 == {}
@@ -655,6 +663,34 @@ def test_calibrer_port_baie(conn, deux_clients, make_appareil):
     c.close()
     # slot d'un autre client -> refusé
     assert network_diag.calibrer_port_baie(deux_clients['cid_b'], slot_id, 5, 12) is False
+    # numéro qui n'est pas un port réel du slot -> refusé, aucune ligne créée
+    assert network_diag.calibrer_port_baie(cid, slot_id, 999, 12) is False
+    c = get_db()
+    assert c.execute("SELECT COUNT(*) FROM baie_slot_ports WHERE slot_id=? AND numero=999",
+                     (slot_id,)).fetchone()[0] == 0
+    c.close()
+
+
+def test_poll_capa_reprobe(monkeypatch):
+    """Une capacité (PoE) déclarée absente est re-testée après
+    _ACTIVITE_REPROBE_CYCLES — un paquet perdu ne la condamne pas pour toujours."""
+    import app as A
+    for d in (network_diag._activite_poe, network_diag._activite_capa_neg,
+              network_diag._activite_capa_reprobe):
+        d.pop('10.9.9.9', None)
+    monkeypatch.setattr(A, '_snmp_bulk_cols', lambda *a, **k: {})
+    network_diag._poll_poe('10.9.9.9', ['public'])
+    network_diag._poll_poe('10.9.9.9', ['public'])
+    assert network_diag._activite_poe['10.9.9.9'] is False
+    # avant l'échéance de re-test : on ne sollicite plus le switch
+    appels = []
+    monkeypatch.setattr(A, '_snmp_bulk_cols', lambda ip, bases, comm, **k: appels.append(1) or {})
+    network_diag._poll_poe('10.9.9.9', ['public'])
+    assert appels == []
+    # échéance atteinte -> nouveau relevé
+    network_diag._activite_capa_reprobe['10.9.9.9']['poe'] = network_diag._activite_cyc[0] - 1
+    network_diag._poll_poe('10.9.9.9', ['public'])
+    assert appels == [1]
 
 
 def test_route_calibrer_acl(client, conn, deux_clients, make_appareil):
@@ -711,29 +747,56 @@ def test_poll_poe(monkeypatch):
     assert poe['ports'][6]['statut'] == 4          # défaut
     assert poe['ports'][7]['watts_max'] is None
 
-    # switch sans PoE -> {} et on ne le re-sollicite plus
+    # switch sans PoE -> {} ; il faut _ACTIVITE_NEG_CONFIRME relevés vides avant
+    # d'arrêter de le solliciter (un paquet perdu ne condamne pas le PoE)
     monkeypatch.setattr(A, '_snmp_bulk_cols', lambda *a, **k: {})
-    network_diag._activite_poe.pop('10.0.0.9', None)
+    for d in (network_diag._activite_poe, network_diag._activite_capa_neg,
+              network_diag._activite_capa_reprobe):
+        d.pop('10.0.0.9', None)
     assert network_diag._poll_poe('10.0.0.9', ['public']) == {}
-    assert network_diag._activite_poe['10.0.0.9'] is False
+    assert network_diag._activite_poe.get('10.0.0.9') is None       # pas encore confirmé
+    assert network_diag._poll_poe('10.0.0.9', ['public']) == {}
+    assert network_diag._activite_poe['10.0.0.9'] is False          # confirmé après 2
+
+
+def _calib_cycle(cid, sid, ports):
+    network_diag._activite_cyc[0] += 1
+    return network_diag._maj_assistant_calibration(cid, sid, '10.0.0.2', ports)
 
 
 def test_assistant_calibration_detecte_transition():
-    """L'interface qui fait down→up pendant la fenêtre est celle du port."""
+    """L'interface débranchée puis rebranchée pendant la fenêtre est celle du
+    port ; la décision attend un cycle sans nouveau mouvement."""
     network_diag._activite_calib.clear()
     cid, sid, num = 900, 7, 12
     network_diag.assistant_calibration(cid, sid, num, 'start')
 
-    # cycle 1 : état de référence (tout up)
-    network_diag._maj_assistant_calibration(cid, sid, '10.0.0.2',
-                                            {5: {'oper': 1}, 6: {'oper': 1}, 7: {'oper': 1}})
-    # cycle 2 : if6 débranché
-    network_diag._maj_assistant_calibration(cid, sid, '10.0.0.2',
-                                            {5: {'oper': 1}, 6: {'oper': 2}, 7: {'oper': 1}})
-    # cycle 3 : if6 rebranché -> 2 transitions -> détecté
-    network_diag._maj_assistant_calibration(cid, sid, '10.0.0.2',
-                                            {5: {'oper': 1}, 6: {'oper': 1}, 7: {'oper': 1}})
+    _calib_cycle(cid, sid, {5: {'oper': 1}, 6: {'oper': 1}, 7: {'oper': 1}})   # référence
+    _calib_cycle(cid, sid, {5: {'oper': 1}, 6: {'oper': 2}, 7: {'oper': 1}})   # if6 débranché
+    _calib_cycle(cid, sid, {5: {'oper': 1}, 6: {'oper': 1}, 7: {'oper': 1}})   # if6 rebranché (2 transitions)
+    assert network_diag._activite_calib[(cid, sid)]['trouve'] is None          # réseau pas encore calme
+    r = _calib_cycle(cid, sid, {5: {'oper': 1}, 6: {'oper': 1}, 7: {'oper': 1}})   # cycle calme -> décision
     assert network_diag._activite_calib[(cid, sid)]['trouve'] == 6
+    assert r == (sid, num, 6)
+    network_diag._activite_calib.clear()
+
+
+def test_assistant_calibration_multi_flap():
+    """Si un voisin flappe avant la fin du geste, on retient l'interface
+    débranchée/rebranchée en DERNIER (celle sur laquelle on agit vraiment)."""
+    network_diag._activite_calib.clear()
+    cid, sid, num = 901, 8, 4
+    network_diag.assistant_calibration(cid, sid, num, 'start')
+    up = lambda extra=None: {**{3: {'oper': 1}, 4: {'oper': 1}, 9: {'oper': 1}}, **(extra or {})}
+
+    _calib_cycle(cid, sid, up())                       # référence
+    _calib_cycle(cid, sid, up({9: {'oper': 2}}))       # if9 (voisin) flappe
+    _calib_cycle(cid, sid, up())                       # if9 rebranché (geste complet, mauvais port)
+    _calib_cycle(cid, sid, up({4: {'oper': 2}}))       # if4 (le vrai) débranché, plus tard
+    _calib_cycle(cid, sid, up())                       # if4 rebranché
+    r = _calib_cycle(cid, sid, up())                   # cycle calme -> décision
+    assert network_diag._activite_calib[(cid, sid)]['trouve'] == 4
+    assert r == (sid, num, 4)
     network_diag._activite_calib.clear()
 
 

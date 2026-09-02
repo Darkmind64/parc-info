@@ -1,8 +1,47 @@
-PARCINFO_VERSION=2.19.12
+PARCINFO_VERSION=2.19.13
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090203
+BUILD_NUMBER=2026090204
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.13 - Moniteur reseau de la baie : audit + corrections de fiabilite
+# Relecture complete du sous-systeme (thread de releve, mapping, LEDs, assistant
+# de calibration, capture, routes, modale). 11 correctifs :
+#
+# FIABILITE
+# - Une capacite SNMP (compteurs 64 bits _activite_hc, PoE _activite_poe) n'est
+#   plus declaree ABSENTE sur UN seul releve rate (un paquet UDP perdu sur un
+#   agent bas de gamme = frequent) : il faut _ACTIVITE_NEG_CONFIRME=2 negatifs
+#   consecutifs, et elle est re-testee tous les _ACTIVITE_REPROBE_CYCLES=50.
+# - _activite_calib (assistant de calibration) place sous _activite_lock :
+#   partage entre le thread _activite_loop et les threads de requete Flask.
+#   _noms_interfaces : le flag maj_en_cours est teste-et-pose sous le verrou.
+# - L'ecriture de calibration (calibrer_port_baie) ne part plus du GET
+#   moniteur_baie mais du thread _activite_loop (_maj_assistant_calibration
+#   retourne le gagnant, _cycle_activite l'ecrit apres avoir ferme sa connexion
+#   de lecture).
+# - Purge : _activite_switch_ok / _activite_etat_mappe / _activite_calib d'un
+#   client parti sont nettoyes ; un assistant abandonne est retire apres
+#   _CALIB_FENETRE*2.
+# - _maj_noms_interfaces : back-off (_ACTIVITE_NOMS_RETRY=30 s) au lieu de
+#   relancer un thread DiagBaieNoms a chaque cycle sur un switch au SNMP de
+#   noms casse.
+# - Assistant : cadence courte forcee tant qu'un assistant attend (30 s
+#   d'ecart entre deux releves le rendaient inutilisable) ; decision quand le
+#   reseau s'est calme (un cycle sans nouveau mouvement) et sur l'interface
+#   debranchee/rebranchee EN DERNIER -> un voisin qui flappe ne gagne plus.
+# - calibrer_port_baie refuse un numero de port qui n'existe pas dans le slot
+#   (plus de ligne baie_slot_ports incomplete creee par un INSERT OR IGNORE).
+#
+# CONFORT
+# - Le menu deroulant de calibration ne se referme plus au rafraichissement
+#   2 s quand on est en train de choisir une interface (fenetre de 6 s).
+# - Releve suspendu quand l'onglet est en arriere-plan (document.hidden),
+#   repris a son retour (visibilitychange).
+# - Pourcentages de la capture calcules sur les trames reellement classees
+#   (une trame malformee comptait dans total mais pas en b/m/u).
+#
+# Aucune nouvelle dependance, aucun schema change. pytest 227 + scripts OK.
 
 # Version 2.19.12 - Vue d'activite baie : comptes de "ports actifs" stables
 # Retour terrain : "j'ai des resultats variables selon les instances - Docker

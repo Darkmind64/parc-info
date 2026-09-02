@@ -2884,14 +2884,20 @@ _OID_IF_IN_UCAST    = '1.3.6.1.2.1.2.2.1.11'
 _OID_IF_OUT_UCAST   = '1.3.6.1.2.1.2.2.1.17'
 
 _activite_lock       = threading.Lock()
+# Écrits SOUS _activite_lock (lus par les threads de requête Flask) :
 _activite_heartbeat  = {}   # client_id -> epoch du dernier battement
-_activite_prev       = {}   # (client_id, ip, ifindex) -> {compteurs, etat, *_ema, manques, ts}
 _activite_resultat   = {}   # client_id -> dict prêt pour l'UI (LEDs)
 _activite_detail     = {}   # client_id -> {ts, switchs:[...], ports:[...], interfaces:[...]}
-_activite_noms       = {}   # ip -> {'ts', 'infos': {ifindex: {'nom','alias','ethernet'}}}
+_activite_journal    = collections.deque(maxlen=250)   # évènements, récent en tête
+_activite_calib      = None  # (défini plus bas) — SOUS _activite_lock : partagé loop <-> requête
+# Touchés UNIQUEMENT par le thread _activite_loop (_cycle_activite + purge, séquentiels) :
+_activite_prev       = {}   # (client_id, ip, ifindex) -> {compteurs, etat, *_ema, manques, ts}
 _activite_switch_ok  = {}   # (client_id, ip) -> bool (dernier relevé répondu ?)
 _activite_etat_mappe = {}   # (client_id, slot_id) -> {numero_baie: dernier etat} (transitions journal)
-_activite_journal    = collections.deque(maxlen=250)   # évènements, récent en tête
+# _activite_noms : loop + threads DiagBaieNoms détachés → le flag 'maj_en_cours'
+# est testé-et-posé sous _activite_lock (voir _noms_interfaces) ; le reste est
+# de l'écriture atomique de clé (remplacement de dict).
+_activite_noms       = {}   # ip -> {'ts', 'infos': {ifindex: {'nom','alias','ethernet'}}, 'maj_en_cours', 'retry_after'}
 _activite_thread     = None
 
 _capture_baie_lock   = threading.Lock()
@@ -3066,8 +3072,12 @@ def _noms_interfaces(ip, communautes):
     if ent and ent['infos'] and age < _ACTIVITE_NOMS_TTL:
         return ent['infos']
     if ent and ent['infos']:            # cache périmé mais utilisable → refresh async
-        if not ent.get('maj_en_cours'):
-            ent['maj_en_cours'] = True
+        with _activite_lock:            # test-et-pose atomique : jamais deux threads
+            lancer = (not ent.get('maj_en_cours')
+                      and time.time() >= ent.get('retry_after', 0))
+            if lancer:
+                ent['maj_en_cours'] = True
+        if lancer:
             threading.Thread(target=_maj_noms_interfaces, args=(ip, communautes),
                              daemon=True, name='DiagBaieNoms').start()
         return ent['infos']
@@ -3110,7 +3120,10 @@ def _maj_noms_interfaces(ip, communautes):
     else:
         ent = _activite_noms.get(ip)
         if ent:
-            ent['maj_en_cours'] = False      # échec : on retentera au prochain cycle
+            # échec : on ne relance PAS un thread au prochain cycle (sinon un par
+            # cycle, indéfiniment, sur un switch au SNMP de noms cassé) — back-off.
+            ent['maj_en_cours'] = False
+            ent['retry_after'] = time.time() + _ACTIVITE_NOMS_RETRY
     return infos
 
 
@@ -3128,6 +3141,18 @@ _activite_cyc = [0]  # compteur global de cycles (relève des erreurs espacée)
 _activite_calib = {}       # (cid, slot_id) -> {numero, ip, debut, last_oper, transitions, trouve}
 _CALIB_FENETRE = 90.0      # s — durée de la détection « débranche/rebranche »
 
+# Une capacité (compteurs 64 bits, PoE) n'est déclarée ABSENTE qu'après plusieurs
+# relevés négatifs consécutifs — un seul paquet SNMP perdu au premier passage ne
+# doit pas la condamner pour toute la vie du process (agents bas de gamme = perte
+# UDP fréquente). Et on la re-teste périodiquement même une fois « absente ».
+_activite_capa_neg     = {}   # ip -> {'hc': n, 'poe': n} : négatifs consécutifs
+_activite_capa_reprobe = {}   # ip -> {'hc': cycle, 'poe': cycle} : prochain re-test
+_ACTIVITE_NEG_CONFIRME   = 2
+_ACTIVITE_REPROBE_CYCLES = 50
+
+_ACTIVITE_NOMS_RETRY = 30.0    # s — après un échec du relevé des noms d'interface,
+                               # délai avant de relancer un thread (sinon : un par cycle)
+
 
 def assistant_calibration(client_id, slot_id, numero, action):
     """Calibration « par débranchement » : on note l'état oper de toutes les
@@ -3135,35 +3160,61 @@ def assistant_calibration(client_id, slot_id, numero, action):
     port, et l'interface qui a changé d'état est celle du port. action ∈
     'start' | 'stop'. Retourne l'état courant."""
     cle = (client_id, slot_id)
-    if action == 'stop':
-        _activite_calib.pop(cle, None)
-        return {'etat': 'arrete'}
-    _activite_calib[cle] = {'numero': int(numero), 'debut': time.time(),
-                            'last_oper': None, 'transitions': {}, 'trouve': None}
+    with _activite_lock:
+        if action == 'stop':
+            _activite_calib.pop(cle, None)
+            return {'etat': 'arrete'}
+        _activite_calib[cle] = {'numero': int(numero), 'slot_id': slot_id,
+                                'debut': time.time(), 'last_oper': None,
+                                'transitions': {}, 'up_cyc': {},
+                                'dernier_mouv_cyc': -1, 'trouve': None}
     _demarrer_activite_thread()
     return {'etat': 'attente', 'numero': int(numero)}
 
 
 def _maj_assistant_calibration(cid, slot_id, ip, cur_ports):
-    """Appelé par _cycle_activite : suit les transitions oper pendant la fenêtre."""
-    a = _activite_calib.get((cid, slot_id))
-    if not a or a['trouve']:
-        return
-    if time.time() - a['debut'] > _CALIB_FENETRE:
-        a['trouve'] = a.get('trouve') or 0     # 0 = expiré sans résultat
-        return
-    oper_now = {ix: p['oper'] for ix, p in cur_ports.items()}
-    if a['last_oper'] is not None:
-        for ix, o in oper_now.items():
-            if ix in a['last_oper'] and o != a['last_oper'][ix]:
-                a['transitions'][ix] = a['transitions'].get(ix, 0) + 1
-        # une interface qui a fait ≥ 2 transitions (down puis up) est LA bonne
-        gagnant = next((ix for ix, n in a['transitions'].items() if n >= 2), None)
-        if gagnant is None and len(a['transitions']) == 1:
-            gagnant = next(iter(a['transitions']))     # une seule a bougé
+    """Appelé par _cycle_activite (thread _activite_loop) : suit les transitions
+    oper pendant la fenêtre. Retourne (slot_id, numero, ifindex) quand un gagnant
+    se dégage — l'appelant applique la calibration APRÈS avoir fermé sa connexion
+    de lecture (pas d'écriture depuis le GET moniteur_baie)."""
+    with _activite_lock:
+        a = _activite_calib.get((cid, slot_id))
+        if not a or a['trouve']:
+            return None
+        oper_now = {ix: p['oper'] for ix, p in cur_ports.items()}
+        expire = time.time() - a['debut'] > _CALIB_FENETRE
+
+        if a['last_oper'] is not None:
+            for ix, o in oper_now.items():
+                anc = a['last_oper'].get(ix)
+                if anc is not None and o != anc:
+                    a['transitions'][ix] = a['transitions'].get(ix, 0) + 1
+                    a['dernier_mouv_cyc'] = _activite_cyc[0]
+                    if o == 1:              # (re)passe UP : on rebranche à la fin du geste
+                        a['up_cyc'][ix] = _activite_cyc[0]
+        a['last_oper'] = oper_now
+
+        # débranché PUIS rebranché (>= 2 transitions, état final up) = geste complet.
+        complets = [ix for ix, n in a['transitions'].items()
+                    if n >= 2 and oper_now.get(ix) == 1]
+        # on ne décide QUE lorsque le réseau s'est calmé (un cycle sans nouvelle
+        # transition) : sinon un voisin qui flappe avant la fin du geste gagnerait.
+        calme = _activite_cyc[0] - a['dernier_mouv_cyc'] >= 1
+
+        gagnant = None
+        if complets and calme:
+            gagnant = max(complets, key=lambda ix: a['up_cyc'].get(ix, -1))
+        elif expire:
+            # fenêtre écoulée : on prend la seule interface qui a bougé, sinon rien
+            gagnant = (next(iter(a['transitions'])) if len(a['transitions']) == 1
+                       else None)
+
         if gagnant:
             a['trouve'] = gagnant
-    a['last_oper'] = oper_now
+            return (slot_id, a['numero'], gagnant)
+        if expire:
+            a['trouve'] = 0                 # 0 = expiré sans résultat
+        return None
 
 
 def _poll_poe(ip, communautes):
@@ -3171,14 +3222,20 @@ def _poll_poe(ip, communautes):
     classe, watts_max}}, 'total_w', 'budget_w'} — {} si le switch n'a pas de PoE.
     La table pethPsePortTable est indexée `groupe.port` : le composant `port`
     correspond au port physique (donc au numéro de port de la baie)."""
-    if _activite_poe.get(ip) is False:
+    if _activite_poe.get(ip) is False and \
+            _activite_cyc[0] < _activite_capa_reprobe.get(ip, {}).get('poe', 0):
         return {}
     cols = _snmp_bulk(ip, [_OID_POE_DETECT, _OID_POE_CLASS], communautes)
     detect = cols.get(_OID_POE_DETECT, {})
     if not detect:
-        _activite_poe[ip] = False
+        neg = _activite_capa_neg.setdefault(ip, {})
+        neg['poe'] = neg.get('poe', 0) + 1
+        if neg['poe'] >= _ACTIVITE_NEG_CONFIRME:      # confirmé : pas de PoE sur ce switch
+            _activite_poe[ip] = False
+            _activite_capa_reprobe.setdefault(ip, {})['poe'] = _activite_cyc[0] + _ACTIVITE_REPROBE_CYCLES
         return {}
     _activite_poe[ip] = True
+    _activite_capa_neg.get(ip, {}).pop('poe', None)
     classe = cols.get(_OID_POE_CLASS, {})
     ports = {}
     for suf, val in detect.items():
@@ -3220,9 +3277,13 @@ def _poll_switch_ports(ip, communautes, infos=None):
     NB : requêtes SÉRIE, jamais parallèles — un agent SNMP de switch bas de
     gamme est mono-thread et *drop* les requêtes concurrentes."""
     infos = infos or {}
-    a_hc = _activite_hc.get(ip)
     _activite_cyc[0] += 1
     avec_err = (_activite_cyc[0] % 8 == 1)
+    a_hc = _activite_hc.get(ip)
+    if a_hc is False and \
+            _activite_cyc[0] >= _activite_capa_reprobe.get(ip, {}).get('hc', 0):
+        a_hc = None                       # re-teste les compteurs 64 bits (peut-être perdus au 1er essai)
+        _activite_hc.pop(ip, None)
     # 64 bits d'abord (ifXTable) ; si le switch ne les expose pas, on bascule
     # définitivement en 32 bits (ifTable) — on ne demande jamais les deux jeux.
     if a_hc is False:
@@ -3235,11 +3296,17 @@ def _poll_switch_ports(ip, communautes, infos=None):
     oper = cols.get(_OID_IF_OPER, {})
     a_du_hc = bool(cols.get(_OID_IF_HCIN) or cols.get(_OID_IF_HCOUT))
     if a_hc is None:
-        if oper and not a_du_hc:       # oper répond mais pas ifXTable → 32 bits, on retente ce cycle
-            _activite_hc[ip] = False
-            return _poll_switch_ports(ip, communautes, infos)
         if a_du_hc:
             _activite_hc[ip] = True
+            _activite_capa_neg.get(ip, {}).pop('hc', None)
+        elif oper:                     # oper répond mais pas l'ifXTable → peut-être 32 bits,
+            neg = _activite_capa_neg.setdefault(ip, {})   # ou juste des paquets HC perdus
+            neg['hc'] = neg.get('hc', 0) + 1
+            if neg['hc'] >= _ACTIVITE_NEG_CONFIRME:       # confirmé : le switch n'a pas de compteurs 64 bits
+                _activite_hc[ip] = False
+                _activite_capa_reprobe.setdefault(ip, {})['hc'] = _activite_cyc[0] + _ACTIVITE_REPROBE_CYCLES
+                return _poll_switch_ports(ip, communautes, infos)   # relève tout de suite en 32 bits
+            # pas encore sûr : ce cycle n'aura que oper (compteurs à 0), on réessaiera l'HC au suivant
 
     if not oper and not cols.get(_OID_IF_HCIN) and not cols.get(_OID_IF_IN_OCTETS):
         return {}, False, bool(a_hc)
@@ -3396,6 +3463,7 @@ def _cycle_activite(clients):
               'pps_mini': _cfg_float('diag_baie_activite_pps_mini', 15)}
     for cid in clients:
         journal_ops = []          # (message, niveau, cible) — émis hors lock
+        calib_a_appliquer = []    # (slot_id, numero, ifindex) — écrits après conn.close()
         try:
             conn = get_local_db()
             try:
@@ -3410,7 +3478,9 @@ def _cycle_activite(clients):
                         conn, cid, slot_id, sw['appareil_id'], infos)
                     cur_ports, ok, hc = _poll_switch_ports(ip, communautes, infos)
                     if ok:
-                        _maj_assistant_calibration(cid, slot_id, ip, cur_ports)
+                        c = _maj_assistant_calibration(cid, slot_id, ip, cur_ports)
+                        if c:
+                            calib_a_appliquer.append(c)
                     poe = _poll_poe(ip, communautes) if ok else {}
                     poe_ports = poe.get('ports', {})
                     poll_ms = int((time.time() - t0) * 1000)
@@ -3577,6 +3647,9 @@ def _cycle_activite(clients):
             logger.debug('network_diag: cycle activité — client %s en échec', cid, exc_info=True)
         for msg, niv, cib in journal_ops:
             _journal(msg, niv, cib)
+        for sid, num, ifx in calib_a_appliquer:      # écriture hors de la connexion de lecture
+            if calibrer_port_baie(cid, sid, num, ifx):
+                _journal(f"port {num} calibré automatiquement (interface ifIndex {ifx})", 'info')
 
 
 def _activite_loop():
@@ -3587,17 +3660,28 @@ def _activite_loop():
             with _activite_lock:
                 clients = [c for c, t in _activite_heartbeat.items()
                            if now - t < _ACTIVITE_TTL_HEARTBEAT]
-                for c in [c for c, t in list(_activite_heartbeat.items())
-                          if now - t > _ACTIVITE_PURGE]:
+                partis = [c for c, t in list(_activite_heartbeat.items())
+                          if now - t > _ACTIVITE_PURGE]
+                for c in partis:
                     _activite_heartbeat.pop(c, None)
                     _activite_resultat.pop(c, None)
                     _activite_detail.pop(c, None)
+                if partis:      # structures par (client, …) d'un client qui ne regarde plus
+                    pset = set(partis)
+                    for reg in (_activite_switch_ok, _activite_etat_mappe, _activite_calib):
+                        for k in [k for k in reg if k[0] in pset]:
+                            reg.pop(k, None)
                 for k in [k for k, v in list(_activite_prev.items())
                           if now - v.get('ts', 0) > _ACTIVITE_PURGE]:
                     _activite_prev.pop(k, None)
                 for k in [k for k, v in list(_activite_noms.items())
                           if now - v['ts'] > max(_ACTIVITE_PURGE, _ACTIVITE_NOMS_TTL * 2)]:
                     _activite_noms.pop(k, None)
+                # assistant lancé puis abandonné (modale fermée) : bien au-delà de
+                # sa fenêtre → personne ne viendra le récupérer, on le retire.
+                for k in [k for k, v in list(_activite_calib.items())
+                          if now - v.get('debut', 0) > _CALIB_FENETRE * 2]:
+                    _activite_calib.pop(k, None)
             if not clients:
                 _activite_rechauffe[0] = 0
                 time.sleep(5)
@@ -3621,7 +3705,10 @@ def _activite_loop():
         # il faut deux relevés pour calculer un débit, l'utilisateur attend ce
         # deuxième passage — pas la peine de lui imposer 30 s d'attente en plus.
         _cadence[0] = max(_ACTIVITE_INTERVAL, min(30.0, _poll_max_ms[0] / 1000.0 * 1.3))
-        if _activite_rechauffe[0] < _ACTIVITE_RECHAUFFE_CYCLES:
+        # cadence courte : au réchauffement (2 relevés = 1er débit) OU tant qu'un
+        # assistant de calibration attend (il compare oper entre deux relevés —
+        # 30 s d'écart le rendraient inutilisable).
+        if _activite_rechauffe[0] < _ACTIVITE_RECHAUFFE_CYCLES or _activite_calib:
             _cadence[0] = _ACTIVITE_INTERVAL
         time.sleep(_cadence[0])
 
@@ -3685,25 +3772,28 @@ def moniteur_baie(client_id: int) -> dict:
     except Exception:
         pass
 
-    # assistant de calibration « par débranchement » en cours pour ce client
+    # assistant de calibration « par débranchement » en cours pour ce client.
+    # LECTURE SEULE : l'application de la calibration est faite par le thread
+    # _activite_loop (_maj_assistant_calibration), pas ici.
     calib = None
-    for (c, sid), a in list(_activite_calib.items()):
-        if c != client_id:
-            continue
-        if a['trouve'] and a['trouve'] > 0:
-            ifx = a['trouve']
-            calibrer_port_baie(client_id, sid, a['numero'], ifx)
-            _activite_calib.pop((c, sid), None)
-            nom = next((i['nom'] for i in detail.get('interfaces', []) if i['ifindex'] == ifx), f'if{ifx}')
-            calib = {'slot_id': sid, 'numero': a['numero'], 'etat': 'trouve',
-                     'ifindex': ifx, 'nom': nom}
-        elif a['trouve'] == 0:
-            _activite_calib.pop((c, sid), None)
-            calib = {'slot_id': sid, 'numero': a['numero'], 'etat': 'expire'}
-        else:
-            calib = {'slot_id': sid, 'numero': a['numero'], 'etat': 'attente',
-                     'restant_s': max(0, round(_CALIB_FENETRE - (time.time() - a['debut'])))}
-        break
+    with _activite_lock:
+        for (c, sid), a in list(_activite_calib.items()):
+            if c != client_id:
+                continue
+            if a['trouve'] and a['trouve'] > 0:
+                ifx = a['trouve']
+                _activite_calib.pop((c, sid), None)          # affiché une fois, puis oublié
+                nom = next((i['nom'] for i in detail.get('interfaces', [])
+                            if i['ifindex'] == ifx), f'if{ifx}')
+                calib = {'slot_id': sid, 'numero': a['numero'], 'etat': 'trouve',
+                         'ifindex': ifx, 'nom': nom}
+            elif a['trouve'] == 0:
+                _activite_calib.pop((c, sid), None)
+                calib = {'slot_id': sid, 'numero': a['numero'], 'etat': 'expire'}
+            else:
+                calib = {'slot_id': sid, 'numero': a['numero'], 'etat': 'attente',
+                         'restant_s': max(0, round(_CALIB_FENETRE - (time.time() - a['debut'])))}
+            break
 
     return {
         'ts': detail.get('ts'),
@@ -3740,11 +3830,11 @@ def calibrer_port_baie(client_id: int, slot_id: int, numero: int, if_index) -> b
                 val = int(if_index)
             except (TypeError, ValueError):
                 return False
-        conn.execute("UPDATE baie_slot_ports SET if_index=?, date_maj=? WHERE slot_id=? AND numero=?",
-                     (val, _now_z(), slot_id, numero))
-        if conn.total_changes == 0:
-            conn.execute("INSERT OR IGNORE INTO baie_slot_ports (slot_id, numero, if_index, date_maj) "
-                         "VALUES (?,?,?,?)", (slot_id, numero, val, _now_z()))
+        cur = conn.execute(
+            "UPDATE baie_slot_ports SET if_index=?, date_maj=? WHERE slot_id=? AND numero=?",
+            (val, _now_z(), slot_id, numero))
+        if cur.rowcount == 0:      # ce numéro n'est pas un port réel du slot → refus
+            return False           # (les lignes baie_slot_ports sont créées d'avance, cf. _reconcilier_ports)
         conn.commit()
         return True
     except Exception:

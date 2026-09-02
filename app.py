@@ -7045,7 +7045,7 @@ def api_baie_activite_calibrer():
         return jsonify({'error': 'slot_id/numero requis'}), 400
     ok = network_diag.calibrer_port_baie(cid, slot_id, numero, d.get('if_index'))
     return (jsonify({'ok': True}) if ok
-            else (jsonify({'error': 'slot introuvable'}), 404))
+            else (jsonify({'error': 'slot ou port introuvable'}), 404))
 
 
 @app.route('/api/baie/activite/calibrer/assistant', methods=['POST'])

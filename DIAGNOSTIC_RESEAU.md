@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-02 (v2.19.12). En cas de doute
+> Ce document décrit le comportement au 2026-09-02 (v2.19.13). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -74,15 +74,22 @@ des switchs de la baie et calcule l'état à peindre par port.
   `groupe.port` : le composant `port` **est** le numéro de port physique, donc
   recoupé directement au numéro de baie (pas de mapping ifIndex). Colonne PoE
   dans le moniteur, total dans l'en-tête du switch, évènement journal sur défaut
-  PoE. Silencieux sur un switch sans PoE (`_activite_poe[ip] = False`).
+  PoE.
+- **Capacités SNMP (compteurs 64 bits, PoE) non condamnées sur un seul échec**
+  (v2.19.13) : `_activite_hc[ip]` / `_activite_poe[ip]` ne passent à `False`
+  qu'après `_ACTIVITE_NEG_CONFIRME` (2) relevés négatifs consécutifs — un paquet
+  UDP perdu au premier passage (fréquent sur les agents bas de gamme) ne fige
+  plus le mode dégradé pour la vie du process. Re-test périodique tous les
+  `_ACTIVITE_REPROBE_CYCLES` (50) cycles même une fois « absente ».
 - **Cadence adaptative** : `_activite_loop` espace ses cycles en proportion du
   relevé le plus lent (plafond 30 s) — inutile de re-solliciter un agent SNMP
-  qui met 10 s à répondre toutes les 3 s. **Exception au démarrage** (v2.19.11) :
-  les `_ACTIVITE_RECHAUFFE_CYCLES` (3) premiers cycles gardent une cadence courte
-  — il faut deux relevés pour un premier débit, autant ne pas ajouter 30 s
-  d'attente entre eux. Le compteur `_activite_rechauffe` repart de zéro dès
-  qu'aucun navigateur ne bat → re-chauffe à la réouverture. Le bandeau affiche
-  « démarrage du relevé SNMP… » tant que `actif` vaut `null`.
+  qui met 10 s à répondre toutes les 3 s. **Exceptions, cadence forcée courte** :
+  les `_ACTIVITE_RECHAUFFE_CYCLES` (3) premiers cycles (v2.19.11 — il faut deux
+  relevés pour un premier débit), **et tant qu'un assistant de calibration
+  attend** (v2.19.13 — il compare `oper` entre deux relevés, 30 s d'écart le
+  rendraient inutilisable). `_activite_rechauffe` repart de zéro dès qu'aucun
+  navigateur ne bat. Le bandeau affiche « démarrage du relevé SNMP… » tant que
+  `actif` vaut `null`.
 - **Association port baie ↔ ifIndex** (v2.19.9) : `_mapping_baie_ifindex` —
   priorité **manuel** (`baie_slot_ports.if_index`, source `manuel`) > **topologie**
   (`diag_topologie`, source `topologie`) > **nom d'interface**
@@ -133,8 +140,14 @@ battement du collecteur d'activité) :
   transitions `oper` de toutes les interfaces sur une fenêtre de 90 s
   (`_CALIB_FENETRE`) et associe automatiquement celle qui a bougé —
   `POST /api/baie/activite/calibrer/assistant` (`can_write`), action
-  `start`/`stop`. Section repliable « toutes les interfaces » avec leur
-  état/débit/pps. Rend transparent ce qui alimente les LEDs.
+  `start`/`stop`. **Décision** (v2.19.13) : prise quand le réseau s'est calmé
+  (un cycle sans nouvelle transition) sur l'interface débranchée **puis
+  rebranchée en dernier** (≥ 2 transitions, état final up) → un voisin qui
+  flappe pendant le geste ne gagne plus ; à défaut, à l'expiration de la
+  fenêtre, la seule interface qui a bougé. L'écriture (`calibrer_port_baie`)
+  est faite par le thread `_activite_loop`, jamais par le GET moniteur.
+  Section repliable « toutes les interfaces » avec leur état/débit/pps. Rend
+  transparent ce qui alimente les LEDs.
 - **Journal** : flux d'évènements horodatés et dédoublonnés (`_activite_journal`,
   `collections.deque(maxlen=250)`, alimenté par `_journal()`) — switch injoignable
   ou rétabli, port devenu actif/calme, port passé « obsolète », lien coupé,
@@ -323,7 +336,7 @@ GET, GET typé et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
 | Baseline (palier 5) | `enregistrer_metriques_liaison`, `evaluer_baseline`, `serie_metrique` |
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
 | Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite`, `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports`, `_poll_poe` (POWER-ETHERNET-MIB), `_mapping_baie_ifindex` + `_port_physique_depuis_nom`, `_etat_led` (plafond de plausibilité débit/pps), `activite_baie`, `calibrer_port_baie` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer` ; `baie_brassage.html` (`#sel-activite`) ; widget `network-activity` (`client_dashboard.html`) ; colonne `baie_slot_ports.if_index` |
-| Moniteur réseau de la baie (modale) | `network_diag.py` : `moniteur_baie`, `_journal`/`_activite_journal`, `_activite_detail`, `assistant_calibration`/`_maj_assistant_calibration` (calibrer par débranchement), `capturer_trafic`, `lancer_capture_baie`/`statut_capture_baie` ; routes `GET /api/baie/activite/moniteur` + `POST /api/baie/activite/capture` + `POST /api/baie/activite/calibrer/assistant` ; `baie_brassage.html` (`#moniteur-modal`, `MoniteurModal`) |
+| Moniteur réseau de la baie (modale) | `network_diag.py` : `moniteur_baie` (GET, lecture seule), `_journal`/`_activite_journal`, `_activite_detail`, `assistant_calibration`/`_maj_assistant_calibration` (calibrer par débranchement — décision quand le réseau se calme, écriture par `_activite_loop`), `capturer_trafic`, `lancer_capture_baie`/`statut_capture_baie` ; `_activite_calib` + `_noms_interfaces` (flag `maj_en_cours`) sous `_activite_lock` ; routes `GET /api/baie/activite/moniteur` + `POST /api/baie/activite/capture` + `POST /api/baie/activite/calibrer/assistant` ; `baie_brassage.html` (`#moniteur-modal`, `MoniteurModal`, gel du re-render pendant qu'un `<select>` est manipulé, poll suspendu sur `document.hidden`) |
 | Orchestration | `_run_snapshot` (snapshot), `_moniteur_loop` / `_moniteur_cycle` (continu), `_enregistrer_evenements`, `_purger_anciens` |
 | Walk SNMP + BER | `app.py` : `_snmp_get`, `_snmp_get_typed`, `_snmp_walk` (GETNEXT), `_snmp_bulk_cols` (GETBULK v2c multi-colonnes, auto-descriptif), `_ber_decoder_oid`, `_ber_decoder_valeur` — tous vérifient le request-id de la réponse |
 | Routes | `app.py` : `grep "@app.route('/api/diag-reseau"` + `/diag-reseau` + `/diag-reseau/rapport.{pdf,html}` |

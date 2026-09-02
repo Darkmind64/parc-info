@@ -1,22 +1,26 @@
 {
-  "version": "2.19.12",
+  "version": "2.19.13",
   "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.12",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.12/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.13",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Vue d'activité de la baie — comptes de « ports actifs » stables et cohérents entre instances : le seuil « actif » passe de 1 à 15 paquets/s (en dessous, le bruit de fond L2 — ARP, STP, mDNS — suffisait à marquer un port actif), et un anti-rebond exige deux relevés consécutifs avant qu'un port bascule actif ↔ calme. Fini le scintillement des LEDs et les comptes qui variaient de 8 à 14 selon l'instance (Docker/Windows/Mac).",
+    "new_features": "Moniteur réseau de la baie — audit et corrections de fiabilité : une capacité SNMP (compteurs 64 bits, PoE) n'est plus déclarée absente sur un seul relevé raté et est re-testée périodiquement ; l'assistant de calibration garde une cadence courte et retient l'interface débranchée/rebranchée en dernier même si un voisin flappe ; l'écriture de calibration ne part plus d'une requête de lecture ; ménage complet des états en mémoire quand un poste cesse de regarder.",
     "improvements": [
-      "La décision d'état d'un port se prend sur les valeurs instantanées (l'anti-rebond fournit le lissage), les chiffres affichés restent lissés (EMA) pour la lisibilité."
+      "Menu déroulant de calibration : ne se referme plus au rafraîchissement pendant qu'on choisit une interface.",
+      "Relevé suspendu quand l'onglet passe en arrière-plan, repris à son retour.",
+      "Un port inexistant refusé à la calibration (plus de ligne bâtarde en base).",
+      "Pourcentages de la capture calculés sur les trames réellement classées.",
+      "Threads de relevé des noms d'interface : back-off au lieu d'un thread par cycle sur un switch au SNMP cassé."
     ]
   },
   "checksums": {
@@ -27,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.12"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.13"
 }

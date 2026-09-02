@@ -3231,6 +3231,7 @@ function majBandeauActivite(d) {
 }
 
 async function chargerActivite() {
+    if (document.hidden) return;   // onglet caché : ne pas entretenir le relevé SNMP pour rien
     let d;
     try {
         const r = await fetch('/api/baie/activite');
@@ -3282,6 +3283,13 @@ function initActivite() {
     try { ms = parseInt(localStorage.getItem('baie_activite_ms')) || 0; } catch (e) {}
     sel.value = String(ms);
     demarrerActivite(ms);
+    // en revenant sur l'onglet, rafraîchir tout de suite plutôt que d'attendre le
+    // prochain tick (le relevé de fond s'était rendormi faute de battement)
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) return;
+        if (_activiteTimer) chargerActivite();
+        if (MoniteurModal._timer) MoniteurModal.rafraichir();
+    });
 }
 
 // ── MONITEUR RÉSEAU (modale) ─────────────────────────────────────────────────
@@ -3293,9 +3301,20 @@ const MoniteurModal = {
     _timer: null,
     _ongletActif: 'ports',
     _capPollTimer: null,
+    _selInteract: 0,   // dernier contact souris/clavier avec un <select> de calibration
 
     ouvrir() {
         document.getElementById('moniteur-modal').classList.add('open');
+        const ports = document.getElementById('mon-ports');
+        if (ports && !ports._monWired) {
+            ports._monWired = true;
+            // ne pas reconstruire le panneau pendant que l'utilisateur choisit une
+            // interface (le menu déroulant se refermerait) — fenêtre de 6 s
+            ports.addEventListener('pointerdown', e => {
+                if (e.target.closest('select')) this._selInteract = Date.now();
+            });
+            ports.addEventListener('change', () => { this._selInteract = 0; });
+        }
         this.rafraichir();
         if (this._timer) clearInterval(this._timer);
         this._timer = setInterval(() => this.rafraichir(), 2000);
@@ -3316,6 +3335,7 @@ const MoniteurModal = {
     },
 
     async rafraichir() {
+        if (document.hidden) return;   // onglet en arrière-plan : inutile d'entretenir le relevé SNMP
         let d;
         try { d = await (await fetch('/api/baie/activite/moniteur')).json(); }
         catch (e) { return; }
@@ -3334,11 +3354,14 @@ const MoniteurModal = {
         //    l'utilisateur manipule un menu déroulant (rafraîchissement 2 s).
         const cont = document.getElementById('mon-ports');
         const ae = document.activeElement;
-        if (ae && ae.tagName === 'SELECT' && ae.closest && ae.closest('#mon-ports')) {
-            // maj des débits live seulement, sans toucher aux <select>
+        const selActif = (ae && ae.tagName === 'SELECT' && ae.closest && ae.closest('#mon-ports'));
+        const selRecent = (Date.now() - this._selInteract) < 6000;
+        if (selActif || selRecent) {
+            // l'utilisateur manipule un menu déroulant : maj des débits live
+            // seulement, sans reconstruire le panneau (le menu se refermerait)
             (d.interfaces || []).forEach(i => {
                 const s = document.querySelector(`[data-if-live="${i.ip}|${i.ifindex}"]`);
-                if (s) s.textContent = fmtDebit(i.bps);
+                if (s) s.textContent = i.cpt_pegge ? '—' : fmtDebit(i.bps);
             });
         } else if (!nbS) {
             cont.innerHTML = '<div style="color:var(--text-muted);font-size:.8rem;">Aucun switch de la baie interrogeable (relie le slot du switch à sa fiche appareil, avec une IP ; active le SNMP).</div>';
@@ -3352,7 +3375,7 @@ const MoniteurModal = {
             if (ca) {
                 if (ca.etat === 'attente')
                     caBanner = `<div style="background:rgba(0,201,255,.12);border:1px solid var(--accent);border-radius:4px;padding:.4rem .6rem;margin-bottom:.5rem;font-size:.75rem;">
-                        🔌 <b>Détection du port ${ca.numero}</b> — débranche le câble de ce port, attends que le moniteur se rafraîchisse, puis rebranche-le.
+                        🔌 <b>Détection du port ${ca.numero}</b> — débranche le câble de ce port, laisse passer un relevé (le moniteur poll toutes les ~3 s pendant la détection), puis rebranche-le.
                         ${ca.restant_s != null ? ' <span style="color:var(--text-muted);">(' + ca.restant_s + ' s restantes)</span>' : ''}
                         <button class="btn btn-sm" style="margin-left:.5rem;padding:.05rem .4rem;" onclick="MoniteurModal.assistantStop(${ca.slot_id}, ${ca.numero})">annuler</button></div>`;
                 else if (ca.etat === 'trouve')
@@ -3452,8 +3475,10 @@ const MoniteurModal = {
     _majCapture(r) {
         const c = document.getElementById('mon-capture');
         if (!r || r.disponible === false) { c.innerHTML = ''; return; }
-        const tot = r.total || 1;
-        const pct = n => ((n || 0) / tot * 100).toFixed(0);
+        // % calculés sur les trames effectivement classées (une trame malformée
+        // compte dans `total` mais pas en broadcast/multicast/unicast)
+        const classees = (r.broadcast || 0) + (r.multicast || 0) + (r.unicast || 0) || 1;
+        const pct = n => ((n || 0) / classees * 100).toFixed(0);
         const talkers = (r.talkers || []).map(t => `<tr>
             <td>${escH(t.mac)}</td><td>${escH(t.vendor || '')}</td>
             <td>${escH(t.appareil_nom || '')}</td><td>${t.paquets}</td><td>${fmtOctets(t.octets)}</td></tr>`).join('');
