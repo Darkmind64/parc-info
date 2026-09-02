@@ -1,8 +1,34 @@
-PARCINFO_VERSION=2.19.18
+PARCINFO_VERSION=2.19.19
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090209
+BUILD_NUMBER=2026090210
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.19 - Baie : controle de cablage sur la FDB live + voisins par port
+# Retour terrain : "le controle du cablage ne fonctionne pas. J'ai volontairement
+# branche un port du switch avec un PC branche sur un autre port et l'anomalie
+# n'est pas signalee. Il serait aussi interessant d'afficher dans les infobulles
+# des ports les appareils dont le trafic passe par le port en question."
+#
+# 1. Controle de cablage refait sur la table d'apprentissage MAC LIVE du switch
+#    (bridge-MIB), pas sur diag_topologie (un instantane periodique qui exige que
+#    la decouverte de topologie ait tourne ET que l'appareil vu soit deja en
+#    inventaire ; sinon -> 'inconnu', silencieux). _fdb_switch releve la FDB a
+#    chaque cycle (cache long) -> {ifIndex: set(mac)}. Pour une prise murale :
+#    la MAC de l'appareil declare doit figurer sur le port de switch au bout du
+#    cordon ; sinon, si le port apprend d'autres MAC -> 'incoherent', badge rouge
+#    + evenement journal nommant l'appareil reellement vu. Repli sur la topologie
+#    L2 quand le switch ne repond pas a la bridge-MIB.
+# 2. Infobulles des ports (switch ET prises murales) : liste des appareils dont
+#    une MAC est apprise sur le port ("trafic : PC-A, PC-B +3"), nom d'inventaire
+#    sinon fabricant OUI. _voisins_port. Aussi dans le detail du moniteur.
+# 3. Walk FDB resilient face a un agent SNMP lent (HP ProCurve 1810G) : releve
+#    en TETE de cycle (avant les GETBULK qui saturent l'agent), memorisation du
+#    dialecte qui repond (dot1q/dot1d) pour ne pas refaire le walk mort, cache
+#    _ACTIVITE_FDB_TTL 150 s, backoff 45 s apres echec, service de la derniere
+#    valeur connue jusqu'a _ACTIVITE_FDB_PERIME (15 min).
+#
+# Verifie en navigateur sur un HP ProCurve reel. pytest 233 + scripts OK.
 
 # Version 2.19.18 - Baie : LED d'activite sur les prises murales + controle de cablage
 # Demande : "appliquer le meme principe de LEDs signalant l'activite sur les

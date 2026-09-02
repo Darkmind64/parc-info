@@ -3283,11 +3283,22 @@ async function chargerActivite() {
             if (p.blink_ms) el.style.setProperty('--act-ms', p.blink_ms + 'ms');
             if (p.cable === 'incoherent') el.classList.add('pm-cable-ko');
             const deb = p.cpt_pegge ? `${(p.pps || 0).toFixed(0)} pkt/s` : fmtDebit(p.debit_bps);
-            const cbl = p.cable === 'incoherent' ? ' · ⚠ câblage incohérent (le switch voit un autre appareil)'
-                      : p.cable === 'ok' ? ' · câblage confirmé' : '';
+            let cbl = '';
+            if (p.cable === 'incoherent') {
+                const v = p.voisins || [];
+                const vu = v.length ? ' : ' + v.slice(0, 3).join(', ') + (v.length > 3 ? '…' : '') : '';
+                cbl = ` · ⚠ câblage incohérent (le switch voit un autre appareil${vu})`;
+            } else if (p.cable === 'ok') {
+                cbl = ' · câblage confirmé';
+            }
+            let traf = '';
+            if (p.voisins && p.voisins.length && p.cable !== 'incoherent') {
+                traf = ` — trafic : ${p.voisins.join(', ')}`
+                     + (p.voisins_restants ? ` +${p.voisins_restants}` : '');
+            }
             el.title = `${numeroAffiche(p.numero)}${p.cible ? ' · ' + p.cible : ''}`
                        + `${p.nom ? ' · ' + p.nom : ''}${p.alias ? ' (' + p.alias + ')' : ''}`
-                       + ` — ${p.etat} · ${deb}` + (p.err_delta ? ` · ${p.err_delta} err` : '') + cbl;
+                       + ` — ${p.etat} · ${deb}` + (p.err_delta ? ` · ${p.err_delta} err` : '') + cbl + traf;
         }
     }
     majBandeauActivite(d);

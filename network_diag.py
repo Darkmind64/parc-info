@@ -2868,6 +2868,10 @@ _ACTIVITE_PPS_PEGGE_MAX = 50_000  # pps — sur un switch dont les compteurs d'o
                                   # paquets le sont souvent aussi : au-delà, on ne les croit pas
 _ACTIVITE_PPS_MAX_PORT  = 15_000_000   # pps — plafond absolu (10 GbE ≈ 14,9 Mpps) : au-delà = artefact de compteur
 _ACTIVITE_DEBOUNCE      = 2       # cycles consécutifs demandant idle<->traffic avant de basculer (anti-scintillement)
+_ACTIVITE_FDB_TTL       = 150.0   # s — cache de la table d'apprentissage MAC (bridge-MIB) par switch
+_ACTIVITE_FDB_BACKOFF   = 45.0    # s — attente avant de retenter un walk FDB infructueux
+_ACTIVITE_FDB_PERIME    = 900.0   # s — au-delà, on cesse de servir une FDB périmée (une MAC bouge peu)
+_ACTIVITE_VOISINS_MAX   = 6       # noms d'appareils listés dans l'infobulle d'un port (au-delà : « +N »)
 _CPT_SENTINELLE_32      = {2**31 - 1, 2**32 - 1}   # valeurs "compteur indisponible" de certains agents
 
 # OIDs PoE (POWER-ETHERNET-MIB, RFC 3621) — table pethPsePortTable indexée
@@ -2906,6 +2910,10 @@ _activite_etat_mappe = {}   # (client_id, slot_id) -> {clé: dernier etat} (tran
 _activite_hist       = {}   # (client_id, ip, ifindex) -> deque[(ts, bps, pps)] (sparkline moniteur)
 _activite_sysinfo    = {}   # ip -> {'ts', 'sysname', 'sysdescr'} (cache ~10 min)
 _activite_sut        = {}   # (client_id, ip) -> (sysUpTime_ticks, epoch) : dt exact via l'horloge de l'agent
+_activite_fdb        = {}   # ip -> (epoch, {ifindex: set(mac normalisée)}) : FDB bridge-MIB, cache _ACTIVITE_FDB_TTL
+_activite_fdb_baseport = {} # ip -> (epoch, {bridge_port: ifIndex}) : dot1dBasePortIfIndex, quasi statique
+_activite_fdb_dialecte = {} # ip -> 'dot1q' | 'dot1d' : quel jeu FDB répond (switch lent = 1 walk au lieu de 2)
+_activite_fdb_echec  = {}   # ip -> epoch du dernier walk FDB infructueux (backoff)
 _activite_echecs     = {}   # client_id -> nb d'échecs consécutifs de _cycle_activite
 _ACTIVITE_HIST_MAX   = 60   # échantillons conservés par port pour la sparkline
 _ACTIVITE_SYSINFO_TTL = 600.0
@@ -3568,13 +3576,104 @@ def _modele_court(sysdescr):
     return sysdescr.split('\n')[0].split(',')[0].strip()[:48]
 
 
+def _fdb_switch(ip, communautes):
+    """Table d'apprentissage MAC du switch (bridge-MIB), `{ifIndex: set(mac)}`.
+    Relevé « live » à chaque cycle (cache `_ACTIVITE_FDB_TTL` s) — sert au
+    contrôle de câblage des prises murales et à lister, dans l'infobulle d'un
+    port, les appareils dont le trafic y transite. Sur échec de walk, on
+    conserve la dernière valeur connue si elle n'est pas trop vieille."""
+    hit = _activite_fdb.get(ip)
+    if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_TTL:
+        return hit[1]
+    # backoff : un switch qui ne répond pas à la bridge-MIB ferait sinon un walk
+    # lent (~7 s) à chaque cycle. Après un échec sans repli, on patiente.
+    ech = _activite_fdb_echec.get(ip)
+    if ech and (time.time() - ech) < _ACTIVITE_FDB_BACKOFF and not hit:
+        return {}
+
+    # bridge_port -> ifIndex : quasi statique → cache long (un switch lent finit
+    # par lâcher des paquets SNMP quand on enchaîne les walks : on en économise).
+    bp_hit = _activite_fdb_baseport.get(ip)
+    if bp_hit and (time.time() - bp_hit[0]) < _ACTIVITE_SYSINFO_TTL:
+        baseport_if = bp_hit[1]
+    else:
+        baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes)
+        if baseport_if:
+            _activite_fdb_baseport[ip] = (time.time(), baseport_if)
+        elif bp_hit:
+            baseport_if = bp_hit[1]
+
+    # FDB : on interroge d'abord le dialecte qui a répondu la dernière fois
+    # (dot1q OU dot1d), pas les deux — le walk mort coûte plusieurs secondes.
+    dialecte = _activite_fdb_dialecte.get(ip)
+    ordre = ([('dot1d', _OID_FDB_DOT1D_PORT)] if dialecte == 'dot1d'
+             else [('dot1q', _OID_FDB_DOT1Q_PORT)] if dialecte == 'dot1q'
+             else [('dot1q', _OID_FDB_DOT1Q_PORT), ('dot1d', _OID_FDB_DOT1D_PORT)])
+    fdb = {}
+    for nom, oid in ordre:
+        fdb = _snmp_walk(oid, ip, communautes)
+        if fdb:
+            _activite_fdb_dialecte[ip] = nom
+            break
+    par_if = {}
+    for suffixe, bridge_port in fdb.items():
+        mac = _mac_depuis_suffixe(suffixe, 6)
+        try:
+            bp = int(bridge_port)
+        except (TypeError, ValueError):
+            continue
+        if not mac or bp <= 0:
+            continue
+        ifindex = baseport_if.get(str(bp), bp)
+        try:
+            ifindex = int(ifindex)
+        except (TypeError, ValueError):
+            ifindex = bp
+        par_if.setdefault(ifindex, set()).add(_norm_mac(mac))
+    if par_if:
+        _activite_fdb[ip] = (time.time(), par_if)
+        _activite_fdb_echec.pop(ip, None)
+        return par_if
+    _activite_fdb_echec[ip] = time.time()
+    if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_PERIME:
+        return hit[1]
+    return {}
+
+
+def _voisins_port(macs, inv_mac):
+    """Décrit les appareils dont une MAC est apprise sur un port : nom
+    d'inventaire si connu, sinon fabricant (OUI), sinon la MAC brute.
+    Retourne `{'noms': [...max _ACTIVITE_VOISINS_MAX...], 'n': total,
+    'ids': set(appareil_id connus)}`."""
+    noms, ids, restants = [], set(), 0
+    for mac in sorted(macs):
+        hit = inv_mac.get(mac)
+        if hit:
+            ids.add(hit[0])
+            libelle = hit[1] or _vendor(mac) or mac
+        else:
+            libelle = _vendor(mac) or mac
+        if len(noms) < _ACTIVITE_VOISINS_MAX:
+            if libelle not in noms:
+                noms.append(libelle)
+        else:
+            restants += 1
+    return {'noms': noms, 'n': len(macs), 'ids': ids,
+            'restants': max(0, len(macs) - len(noms))}
+
+
 def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot,
-                            noms_par_ip, topo_par_ip, etats_prec_get):
+                            noms_par_ip, topo_par_ip, fdb_par_ip, inv_mac, etats_prec_get):
     """LEDs d'activité + contrôle de câblage pour les prises murales d'un bandeau RJ.
     Une prise murale N est reliée par le cordon de brassage (baie_slot_ports.lie_*)
-    à un port de switch : on réutilise l'état SNMP de ce port, déjà relevé. La
-    topologie L2 (`diag_topologie`) dit quel appareil est réellement vu sur ce
-    port → on le compare à celui déclaré sur la prise (`baie_prises_murales`).
+    à un port de switch : on réutilise l'état SNMP de ce port, déjà relevé.
+
+    Contrôle de câblage : la table d'apprentissage MAC « live » du switch
+    (`fdb_par_ip`, relevée à chaque cycle) dit quelles MAC transitent réellement
+    par ce port. Si la MAC de l'appareil déclaré sur la prise (`baie_prises_murales`)
+    n'y figure pas alors que le port apprend d'autres MAC → câblage incohérent.
+    La topologie L2 (`diag_topologie`, palier 4) sert de repli quand le switch ne
+    répond pas à la bridge-MIB.
     Retourne (ports_ui, journal_ops)."""
     ports_ui, journal_ops = [], []
     ph = ','.join('?' * len(_TYPES_BANDEAU))
@@ -3587,8 +3686,9 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
             (b_slot_id,)).fetchall()
         if not liens:
             continue
-        declare = {r[0]: (r[1], r[2] or '') for r in conn.execute(
-            "SELECT pm.numero, pm.appareil_id, a.nom_machine FROM baie_prises_murales pm "
+        declare = {r[0]: (r[1], r[2] or '', _norm_mac(r[3] or '')) for r in conn.execute(
+            "SELECT pm.numero, pm.appareil_id, a.nom_machine, a.adresse_mac "
+            "FROM baie_prises_murales pm "
             "LEFT JOIN appareils a ON a.id = pm.appareil_id WHERE pm.slot_id=?", (b_slot_id,))}
         _prec = etats_prec_get(b_slot_id)
         for numero, lie_sid, lie_pnum in liens:
@@ -3603,17 +3703,30 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
             led = etats.get(ifindex) if ifindex is not None else None
             if led is None:
                 continue
-            decl_aid, decl_nom = declare.get(numero, (None, ''))
-            vus = (topo_par_ip.get(sw_ip) or {}).get(ifindex, set())
-            if decl_aid and vus:
-                cable = 'ok' if decl_aid in vus else 'incoherent'
-            elif decl_aid and not vus:
-                cable = 'inconnu'
+            decl_aid, decl_nom, decl_mac = declare.get(numero, (None, '', ''))
+            macs_port = (fdb_par_ip.get(sw_ip) or {}).get(ifindex, set())
+            vus_topo = (topo_par_ip.get(sw_ip) or {}).get(ifindex, set())
+            voisins = _voisins_port(macs_port, inv_mac) if macs_port else None
+            cable, vu_txt = '', ''
+            if not decl_aid:
+                cable = ''                      # rien de déclaré : pas de contrôle
+            elif decl_mac and decl_mac in macs_port:
+                cable = 'ok'
+            elif macs_port:                      # le port apprend d'autres MAC, pas la bonne
+                cable = 'incoherent'
+                _n = (voisins or {}).get('noms', [])
+                vu_txt = ', '.join(_n[:3]) + ('…' if len(_n) > 3 else '') if _n else 'un autre appareil'
+            elif decl_aid in vus_topo:
+                cable = 'ok'
+            elif vus_topo:
+                cable = 'incoherent'
             else:
-                cable = ''            # rien de déclaré sur la prise : pas de contrôle
+                cable = 'inconnu'                # ni FDB ni topologie exploitables
             if cable == 'incoherent' and _prec.get(('cable', numero)) != 'incoherent':
-                journal_ops.append((f"Prise {numero} — câblage incohérent : le switch voit un autre "
-                                    f"appareil que « {decl_nom} » sur ce port", 'warn', sw_ip))
+                journal_ops.append((f"Prise {numero} — câblage incohérent : le switch voit "
+                                    f"{('« ' + vu_txt + ' »') if vu_txt else 'un autre appareil'} "
+                                    f"sur ce port, pas « {decl_nom or 'l’appareil déclaré'} »",
+                                    'warn', sw_ip))
             _prec[('cable', numero)] = cable
             meta = (noms_par_ip.get(sw_ip) or {}).get(ifindex, {})
             ports_ui.append({
@@ -3621,7 +3734,9 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
                 'etat': led['etat'], 'blink_ms': led['blink_ms'],
                 'debit_bps': round(led['bps']), 'pps': round(led['pps'], 1),
                 'err_delta': led.get('err_delta', 0),
-                'nom': meta.get('nom', ''), 'cible': decl_nom, 'cable': cable})
+                'nom': meta.get('nom', ''), 'cible': decl_nom, 'cable': cable,
+                'voisins': (voisins or {}).get('noms', []),
+                'voisins_restants': (voisins or {}).get('restants', 0)})
     return ports_ui, journal_ops
 
 
@@ -3645,12 +3760,23 @@ def _cycle_activite(clients):
                 etats_par_ip = {}     # ip -> {ifindex: led}  (pour les prises murales d'un bandeau)
                 mapping_par_slot = {} # slot_id switch -> {numero: ifindex}
                 ip_par_slot = {}      # slot_id switch -> ip
+                fdb_par_ip = {}       # ip -> {ifindex: set(mac)} : FDB live (câblage + voisins)
+                inv_mac = {}          # mac normalisée -> (appareil_id, nom_machine) du client
+                if switchs:
+                    for _aid, _nom, _mac in conn.execute(
+                            "SELECT id, nom_machine, adresse_mac FROM appareils "
+                            "WHERE client_id=? AND adresse_mac!='' AND adresse_mac IS NOT NULL", (cid,)):
+                        inv_mac[_norm_mac(_mac)] = (_aid, _nom)
 
                 for sw in switchs:
                     ip, slot_id = sw['ip'], sw['slot_id']
 
                     # ── relevé SNMP : UNE fois par IP, partagé entre ses slots ──
                     if ip not in poll_par_ip:
+                        # FDB en premier : quand il est dû (TTL long), le switch n'a
+                        # pas encore été martelé par les GETBULK du cycle — un agent
+                        # SNMP lent lâche les walks enchaînés (cas HP ProCurve 1810G).
+                        fdb_par_ip[ip] = _fdb_switch(ip, communautes)
                         t0 = time.time()
                         infos = _noms_interfaces(ip, communautes)
                         cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos)
@@ -3804,6 +3930,10 @@ def _cycle_activite(clients):
                         h = _activite_hist.setdefault(cle, collections.deque(maxlen=_ACTIVITE_HIST_MAX))
                         h.append((round(now), round(led['bps']), round(led['pps'], 1)))
 
+                        # appareils dont une MAC est apprise sur ce port (FDB live)
+                        _macs_port = (fdb_par_ip.get(ip) or {}).get(ifindex, set())
+                        _vois = _voisins_port(_macs_port, inv_mac) if _macs_port else None
+
                         ports_ui.append({'slot_id': slot_id, 'numero': numero,
                                          'etat': led['etat'], 'blink_ms': led['blink_ms'],
                                          'debit_bps': round(led['bps']), 'pps': round(led['pps'], 1),
@@ -3811,6 +3941,8 @@ def _cycle_activite(clients):
                                          'nom': (infos.get(ifindex) or {}).get('nom', ''),
                                          'alias': (infos.get(ifindex) or {}).get('alias', ''),
                                          'cible': cibles.get(numero, ''),
+                                         'voisins': (_vois or {}).get('noms', []),
+                                         'voisins_restants': (_vois or {}).get('restants', 0),
                                          'cpt_pegge': (p or {}).get('cpt_pegge', False)})
                         if led['etat'] not in ('down', 'stale'):
                             nb_up += 1
@@ -3837,6 +3969,8 @@ def _cycle_activite(clients):
                             'cpt_pegge': (p or {}).get('cpt_pegge', False),
                             'poe': poe_ports.get(numero),
                             'hist': [[t, b, pp] for t, b, pp in list(h)],   # [ts, bps, pps]
+                            'voisins': (_vois or {}).get('noms', []),
+                            'voisins_n': (_vois or {}).get('n', 0),
                             'stale': led['etat'] == 'stale'})
                         _poe_p = poe_ports.get(numero)
                         if _poe_p and _poe_p['statut'] == 4 and _etats_prec.get(('poe', numero)) != 4:
@@ -3885,7 +4019,7 @@ def _cycle_activite(clients):
                         'calibre': calibre})
 
                 # ── prises murales d'un bandeau RJ : LED via le port de switch du
-                #    cordon de brassage + contrôle de câblage via la topologie ──
+                #    cordon de brassage + contrôle de câblage (FDB live, repli topologie) ──
                 if etats_par_ip:
                     topo_par_ip = {}
                     for eip, pidx, vaid in conn.execute(
@@ -3898,7 +4032,7 @@ def _cycle_activite(clients):
                     noms_par_ip = {ipx: v[0] for ipx, v in poll_par_ip.items()}
                     pm_ports, pm_journal = _prises_murales_activite(
                         conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot,
-                        noms_par_ip, topo_par_ip,
+                        noms_par_ip, topo_par_ip, fdb_par_ip, inv_mac,
                         lambda sid: _activite_etat_mappe.setdefault((cid, sid), {}))
                     ports_ui.extend(pm_ports)
                     journal_ops.extend(pm_journal)
@@ -3963,6 +4097,14 @@ def _activite_loop():
                 for k in [k for k, v in list(_activite_sysinfo.items())
                           if now - v['ts'] > max(_ACTIVITE_PURGE, _ACTIVITE_SYSINFO_TTL * 2)]:
                     _activite_sysinfo.pop(k, None)
+                for k in [k for k, v in list(_activite_fdb.items())
+                          if now - v[0] > max(_ACTIVITE_PURGE, _ACTIVITE_FDB_PERIME + 60)]:
+                    _activite_fdb.pop(k, None)
+                    _activite_fdb_dialecte.pop(k, None)
+                    _activite_fdb_echec.pop(k, None)
+                for k in [k for k, v in list(_activite_fdb_baseport.items())
+                          if now - v[0] > max(_ACTIVITE_PURGE, _ACTIVITE_SYSINFO_TTL * 2)]:
+                    _activite_fdb_baseport.pop(k, None)
                 for k in [k for k, v in list(_activite_noms.items())
                           if now - v['ts'] > max(_ACTIVITE_PURGE, _ACTIVITE_NOMS_TTL * 2)]:
                     _activite_noms.pop(k, None)

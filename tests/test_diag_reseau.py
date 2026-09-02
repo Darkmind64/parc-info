@@ -679,13 +679,15 @@ def test_api_baie_activite_route_sans_snmp_synchrone(client, conn, deux_clients,
     assert r.status_code == 200 and 'actif' in r.get_json()
 
 
-def _mock_snmp_switch(monkeypatch, ports):
-    """ports = {ifindex: dict(oper,speed_mbps,in_oct,out_oct,in_pkts,out_pkts,in_err,out_err)}"""
+def _mock_snmp_switch(monkeypatch, ports, fdb=None):
+    """ports = {ifindex: dict(oper,speed_mbps,in_oct,out_oct,in_pkts,out_pkts,in_err,out_err)}
+    fdb   = {ifindex: set(mac)} appris (FDB live) — vide par défaut."""
     monkeypatch.setattr(network_diag, '_noms_interfaces',
                         lambda ip, c: {i: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True,
                                            'speed_mbps': ports[i].get('speed_mbps', 0)} for i in ports})
     monkeypatch.setattr(network_diag, '_poll_switch_ports',
                         lambda ip, c, infos=None: (dict(ports), bool(ports), True, None))
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: dict(fdb or {}))
 
 
 def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, monkeypatch):
@@ -712,11 +714,12 @@ def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, mo
 
 def test_prises_murales_activite(conn, deux_clients, make_appareil):
     """LED d'une prise murale via le port de switch du cordon de brassage, +
-    contrôle de câblage : le switch doit voir l'appareil déclaré sur la prise."""
+    contrôle de câblage : la MAC déclarée sur la prise doit être apprise (FDB
+    live) sur le port ; sinon repli sur la topologie L2."""
     cid = deux_clients['cid_a']
     sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
-    pc = make_appareil(cid, nom_machine='PC-COMPTA')
-    autre = make_appareil(cid, nom_machine='PC-ACCUEIL')
+    pc = make_appareil(cid, nom_machine='PC-COMPTA', adresse_mac='AA:BB:CC:00:00:01')
+    autre = make_appareil(cid, nom_machine='PC-ACCUEIL', adresse_mac='AA:BB:CC:00:00:02')
     conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
     sw_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
     conn.execute("INSERT INTO baie_slots (client_id, position, type_equipement) VALUES (?,2,'Bandeau RJ')", (cid,))
@@ -728,27 +731,59 @@ def test_prises_murales_activite(conn, deux_clients, make_appareil):
     conn.commit()
 
     etats_par_ip = {'10.0.0.2': {42: {'etat': 'traffic', 'blink_ms': 300, 'bps': 1e6, 'pps': 50.0}}}
-    args = dict(ip_par_slot={sw_slot: '10.0.0.2'}, etats_par_ip=etats_par_ip,
-               mapping_par_slot={sw_slot: {8: 42}},          # port de switch 8 -> ifIndex 42
-               noms_par_ip={'10.0.0.2': {42: {'nom': 'Gi1/0/8'}}})
+    ip_par_slot = {sw_slot: '10.0.0.2'}
+    mapping_par_slot = {sw_slot: {8: 42}}          # port de switch 8 -> ifIndex 42
+    noms_par_ip = {'10.0.0.2': {42: {'nom': 'Gi1/0/8'}}}
+    inv_mac = {'aa:bb:cc:00:00:01': (pc, 'PC-COMPTA'), 'aa:bb:cc:00:00:02': (autre, 'PC-ACCUEIL')}
     prec = {}
     _f = network_diag._prises_murales_activite
 
-    pu, jo = _f(conn, cid, args['ip_par_slot'], args['etats_par_ip'], args['mapping_par_slot'],
-                args['noms_par_ip'], {'10.0.0.2': {42: {pc}}}, lambda s: prec)
+    # FDB : la bonne MAC est apprise sur l'ifIndex 42 -> câblage confirmé
+    pu, jo = _f(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot, noms_par_ip,
+                {}, {'10.0.0.2': {42: {'aa:bb:cc:00:00:01'}}}, inv_mac, lambda s: prec)
     assert len(pu) == 1 and pu[0]['prise_murale'] is True and pu[0]['numero'] == 5
     assert pu[0]['etat'] == 'traffic' and pu[0]['cable'] == 'ok' and pu[0]['cible'] == 'PC-COMPTA'
     assert jo == []
 
+    # FDB : le port apprend une AUTRE MAC -> incohérent, appareil vu nommé dans le journal
     prec.clear()
-    pu2, jo2 = _f(conn, cid, args['ip_par_slot'], args['etats_par_ip'], args['mapping_par_slot'],
-                  args['noms_par_ip'], {'10.0.0.2': {42: {autre}}}, lambda s: prec)
-    assert pu2[0]['cable'] == 'incoherent' and any('incohérent' in m[0] for m in jo2)
+    pu2, jo2 = _f(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot, noms_par_ip,
+                  {}, {'10.0.0.2': {42: {'aa:bb:cc:00:00:02'}}}, inv_mac, lambda s: prec)
+    assert pu2[0]['cable'] == 'incoherent' and pu2[0]['voisins'] == ['PC-ACCUEIL']
+    assert any('incohérent' in m[0] and 'PC-ACCUEIL' in m[0] for m in jo2)
 
+    # pas de FDB : repli sur la topologie L2 (appareil_id)
     prec.clear()
-    pu3, jo3 = _f(conn, cid, args['ip_par_slot'], args['etats_par_ip'], args['mapping_par_slot'],
-                  args['noms_par_ip'], {}, lambda s: prec)
-    assert pu3[0]['cable'] == 'inconnu' and jo3 == []
+    pu3, jo3 = _f(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot, noms_par_ip,
+                  {'10.0.0.2': {42: {autre}}}, {}, inv_mac, lambda s: prec)
+    assert pu3[0]['cable'] == 'incoherent'
+
+    # ni FDB ni topologie -> inconnu, pas d'alerte
+    prec.clear()
+    pu4, jo4 = _f(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot, noms_par_ip,
+                  {}, {}, inv_mac, lambda s: prec)
+    assert pu4[0]['cable'] == 'inconnu' and jo4 == []
+
+
+def test_fdb_switch_et_voisins(monkeypatch):
+    """_fdb_switch agrège la FDB bridge-MIB en {ifIndex: set(mac)} ; _voisins_port
+    résout les MAC en noms d'inventaire / fabricant."""
+    network_diag._activite_fdb.clear()
+    walks = {
+        network_diag._OID_FDB_BASEPORT_IF: {'1': '10', '2': '20'},   # bridge port -> ifIndex
+        network_diag._OID_FDB_DOT1Q_PORT: {'1.170.187.204.0.0.1': '1',
+                                           '1.170.187.204.0.0.2': '1',
+                                           '1.170.187.204.0.0.9': '2'},
+        network_diag._OID_FDB_DOT1D_PORT: {},
+    }
+    monkeypatch.setattr(network_diag, '_snmp_walk', lambda oid, ip, c: walks.get(oid, {}))
+    fdb = network_diag._fdb_switch('10.0.0.2', ['public'])
+    assert fdb[10] == {'aa:bb:cc:00:00:01', 'aa:bb:cc:00:00:02'}
+    assert fdb[20] == {'aa:bb:cc:00:00:09'}
+
+    inv = {'aa:bb:cc:00:00:01': (7, 'PC-A')}
+    v = network_diag._voisins_port(fdb[10], inv)
+    assert 'PC-A' in v['noms'] and v['n'] == 2
 
 
 def test_cycle_activite_stale_apres_echecs(conn, deux_clients, make_appareil, monkeypatch):
