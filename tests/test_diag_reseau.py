@@ -387,11 +387,19 @@ def test_etat_led_plafond_compteur_aberrant():
     assert led['pps'] <= 1000 * 1500 and led['bps'] <= 1000 * 1e6 * 1.05
     assert abs(led['pps_ema'] - 12.0) < 1.0        # revenu vers la valeur connue
 
-    # compteur explicitement pégé -> aucun débit inventé
+    # compteur d'octets pégé : pas de débit (bps), mais le pps PLAUSIBLE est gardé
     pegge = dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0,
                  in_err=0, out_err=0, cpt_pegge=True)
     lp = network_diag._etat_led(prev, pegge, 14.0, seuils)
     assert lp['pps'] <= 12.0 and lp['bps'] <= 4_000.0
+
+    # compteur d'octets pégé ET pps délirant (les compteurs de paquets mentent
+    # aussi) -> on n'y croit pas
+    pegge_faux = dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0,
+                      in_pkts=10_000_000, out_pkts=0, in_npkts=0, out_npkts=0,
+                      in_err=0, out_err=0, cpt_pegge=True)
+    lpf = network_diag._etat_led(dict(prev, bps_ema=0.0, pps_ema=0.0), pegge_faux, 14.0, seuils)
+    assert lpf['pps'] == 0.0
 
     # lien inconnu : plafond absolu
     sans_vitesse = dict(oper=1, speed_mbps=0, in_oct=10**12, out_oct=0,

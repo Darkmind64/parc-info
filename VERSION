@@ -1,8 +1,33 @@
-PARCINFO_VERSION=2.19.16
+PARCINFO_VERSION=2.19.17
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090207
+BUILD_NUMBER=2026090208
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.17 - Moniteur baie : sparklines des ports pegges + compteurs delirants
+# Retour terrain (capture d'ecran) : "les graphiques de tendance de certains
+# ports restent plats alors qu'il y a de l'activite. La barre de defilement
+# gene la vue des graphiques."
+#
+# - La sparkline tracait le DEBIT (bps). Sur un port dont le switch bloque ses
+#   compteurs d'octets, bps = 0 en permanence -> courbe plate. Elle trace
+#   maintenant les paquets/s (pps) pour ces ports (hist = [ts, bps, pps],
+#   le JS choisit selon cpt_pegge). Une courbe tout a zero n'est pas dessinee.
+# - Compteurs de paquets delirants (198 000, 754 000 pkt/s sur un port calme,
+#   vus apres 2.19.16 qui a cesse de mettre le pps a zero sur un port pegge) :
+#   ecartes par COHERENCE octets/paquets (un paquet fait >= 64 octets, donc
+#   pps <= bps / 512) quand le debit est fiable ; sinon plafond absolu
+#   _ACTIVITE_PPS_PEGGE_MAX (50 000). Un cycle delirant -> pps = 0, sans
+#   trainer de pic dans l'EMA. NUCAST verifie aussi contre la sentinelle.
+# - Sur un switch pegge, la sortie de "traffic" attend _ACTIVITE_DEBOUNCE * 2
+#   releves calmes (les compteurs bougent par a-coups, un port actif y semble
+#   calme un cycle sur deux).
+# - CSS : .mon-pane a scrollbar-gutter:stable + padding-right, la barre de
+#   defilement ne recouvre plus la colonne "tendance".
+#
+# Mesure sur le HP ProCurve de test : 13-14 ports clignotent de facon stable,
+# sparklines lisibles, plus aucune valeur de compteur aberrante affichee.
+# Aucune nouvelle dependance, aucun schema change. pytest 231 + scripts OK.
 
 # Version 2.19.16 - Vue d'activite baie : les LEDs clignotent comme un vrai switch
 # Retour terrain : "des ports restent vert (lien actif) sans jamais clignoter

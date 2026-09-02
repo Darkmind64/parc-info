@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-02 (v2.19.16). En cas de doute
+> Ce document décrit le comportement au 2026-09-02 (v2.19.17). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -74,11 +74,16 @@ des switchs de la baie et calcule l'état à peindre par port.
   gamme figent leurs compteurs d'octets 32 bits à `0x7FFFFFFF` (2 Go) — détecté
   (`_CPT_SENTINELLE_32`), remonté (`cpt_pegge`, journal « compteurs bloqués »
   une fois), pas de débit inventé. Depuis v2.19.16, `cpt_pegge` ne touche plus
-  au **pps** : les compteurs de paquets restent bons sur ces switchs, la LED
-  clignote donc quand même (bornée par le plafond de plausibilité). Un compteur
-  32 bits qui **boucle** (v2.19.14 : `prev` proche de 2³²)
-  donne désormais le vrai delta `(2³² - prev) + cur` au lieu d'être pris pour un
-  redémarrage — sur un lien Gigabit chargé, `ifInOctets` boucle toutes les 34 s.
+  au **pps** : les compteurs de paquets restent souvent bons sur ces switchs, la
+  LED clignote donc quand même. Garde-fous (v2.19.17) : les compteurs de paquets
+  eux aussi menteurs sont écartés par **cohérence octets/paquets** (un paquet
+  fait ≥ 64 octets → `pps ≤ bps / 512`) quand le débit est fiable, sinon plafond
+  absolu `_ACTIVITE_PPS_PEGGE_MAX` (50 000) ; un cycle délirant → `pps = 0` sans
+  traîner de pic dans l'EMA ; la sortie de `traffic` attend `_ACTIVITE_DEBOUNCE`
+  × 2 relevés calmes (ces compteurs bougent par à-coups). Un compteur 32 bits
+  qui **boucle** (v2.19.14 : `prev` proche de 2³²) donne le vrai delta
+  `(2³² - prev) + cur` au lieu d'être pris pour un redémarrage — sur un lien
+  Gigabit chargé, `ifInOctets` boucle toutes les 34 s.
 - **Plafond de plausibilité** (v2.19.10) : un compteur qui « dépègue »
   (`0x7FFFFFFF` → valeur réelle), boucle, ou bascule 64↔32 bits d'un cycle à
   l'autre injecte un delta gigantesque. `_etat_led` borne débit et paquets/s à
@@ -101,8 +106,10 @@ des switchs de la baie et calcule l'état à peindre par port.
   12 min ») dans l'en-tête du moniteur — un redémarrage explique les resets de
   compteurs.
 - **Mini-courbe par port** (v2.19.14) : `_activite_hist`, une deque de
-  `_ACTIVITE_HIST_MAX` (60) échantillons de débit par port mappé, en mémoire,
-  affichée en sparkline dans le moniteur (colonne « tendance »).
+  `_ACTIVITE_HIST_MAX` (60) échantillons `[ts, bps, pps]` par port mappé, en
+  mémoire, affichée en sparkline dans le moniteur (colonne « tendance »). La
+  sparkline trace le **débit**, ou les **paquets/s** pour un port dont les
+  compteurs d'octets sont bloqués (v2.19.17 — sinon elle restait plate).
 - **Capacités SNMP (compteurs 64 bits, PoE) non condamnées sur un seul échec**
   (v2.19.13) : `_activite_hc[ip]` / `_activite_poe[ip]` ne passent à `False`
   qu'après `_ACTIVITE_NEG_CONFIRME` (2) relevés négatifs consécutifs — un paquet

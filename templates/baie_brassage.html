@@ -437,7 +437,7 @@ body.baie-activite-on .port.port-act .port-led { display:block; border-color:#00
 .mon-tab { padding:.35rem .8rem; cursor:pointer; border:1px solid transparent; border-bottom:none;
     font-size:.78rem; color:var(--text-muted); border-radius:4px 4px 0 0; }
 .mon-tab.actif { color:var(--accent); border-color:var(--border); background:var(--bg-secondary); }
-.mon-pane { display:none; max-height:62vh; overflow:auto; }
+.mon-pane { display:none; max-height:62vh; overflow:auto; scrollbar-gutter:stable; padding-right:10px; }
 .mon-pane.actif { display:block; }
 .mon-sw-head { font-family:'Share Tech Mono',monospace; font-size:.7rem; color:var(--text-muted);
     padding:.35rem 0 .2rem; border-top:1px solid var(--border); margin-top:.4rem; }
@@ -3423,7 +3423,7 @@ const MoniteurModal = {
                               onclick="MoniteurModal.assistant(${sw.slot_id}, ${b.numero})">🔌</button></td>
                         <td style="color:var(--text-muted);">${src}${div}</td>
                         <td>${etat}</td>
-                        <td>${p ? sparkline(p.hist) : ''}</td>
+                        <td>${p ? sparkline(p.hist, p.cpt_pegge) : ''}</td>
                         ${aPoe ? `<td>${p ? poeCell(p.poe) : ''}</td>` : ''}
                     </tr>`;
                 }).join('');
@@ -3567,11 +3567,13 @@ const MoniteurModal = {
         setTimeout(() => this.rafraichir(), 300);
     },
 };
-function sparkline(hist, w = 60, h = 14) {
+function sparkline(hist, usePps = false, w = 60, h = 14) {
     if (!hist || hist.length < 3) return '';
-    const vals = hist.map(x => x[1] || 0);
+    const idx = usePps ? 2 : 1;   // hist = [ts, bps, pps] ; pps pour les ports à compteurs d'octets bloqués
+    const vals = hist.map(x => x[idx] || 0);
     const max = Math.max(...vals, 1), n = hist.length;
-    const pts = hist.map((x, i) => `${(i / (n - 1) * w).toFixed(1)},${(h - (x[1] || 0) / max * (h - 2) - 1).toFixed(1)}`).join(' ');
+    if (!vals.some(v => v > 0)) return '';   // tout à plat : rien à tracer
+    const pts = hist.map((x, i) => `${(i / (n - 1) * w).toFixed(1)},${(h - (x[idx] || 0) / max * (h - 2) - 1).toFixed(1)}`).join(' ');
     return `<svg width="${w}" height="${h}" style="vertical-align:middle;opacity:.8;"><polyline points="${pts}" fill="none" stroke="var(--accent,#00c9ff)" stroke-width="1"/></svg>`;
 }
 function fmtUptime(s) {

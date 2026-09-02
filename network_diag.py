@@ -2864,6 +2864,8 @@ _ACTIVITE_MANQUES_STALE = 3       # relevés manqués consécutifs avant l'état
 _ACTIVITE_EMA           = 0.5     # lissage exponentiel du débit / pps
 _ACTIVITE_BPS_MINI      = 500     # bit/s (défaut de `diag_baie_activite_bps_mini`) en dessous : pas de clignotement
 _ACTIVITE_DEBOUNCE_ON   = 1       # cycles avant de PASSER en « traffic » (1 = immédiat, comme une vraie LED)
+_ACTIVITE_PPS_PEGGE_MAX = 50_000  # pps — sur un switch dont les compteurs d'octets sont bloqués, ceux de
+                                  # paquets le sont souvent aussi : au-delà, on ne les croit pas
 _ACTIVITE_PPS_MAX_PORT  = 15_000_000   # pps — plafond absolu (10 GbE ≈ 14,9 Mpps) : au-delà = artefact de compteur
 _ACTIVITE_DEBOUNCE      = 2       # cycles consécutifs demandant idle<->traffic avant de basculer (anti-scintillement)
 _CPT_SENTINELLE_32      = {2**31 - 1, 2**32 - 1}   # valeurs "compteur indisponible" de certains agents
@@ -3378,6 +3380,10 @@ def _poll_switch_ports(ip, communautes, infos=None):
         out_p, h4 = _cpt(_OID_IF_HCOUT_UCAST, _OID_IF_OUT_UCAST, suf)
         in_np = _i(_OID_IF_IN_NUCAST, suf)      # broadcast + multicast (Counter32)
         out_np = _i(_OID_IF_OUT_NUCAST, suf)
+        if in_np in _CPT_SENTINELLE_32:
+            in_np, peg[0] = 0, True
+        if out_np in _CPT_SENTINELLE_32:
+            out_np, peg[0] = 0, True
         h = h1 or h2 or h3 or h4
         hc_seen = hc_seen or h
         d = {
@@ -3451,19 +3457,29 @@ def _etat_led(prev, cur, dt, seuils, reboot=False):
         # on garde la dernière valeur lissée connue plutôt que d'injecter le pic.
         cap_bps = speed * 1e6 * 1.05 if speed else 12e9
         cap_pps = speed * 1500 if speed else _ACTIVITE_PPS_MAX_PORT
+        pps_delirant = False
         if cur.get('cpt_pegge'):
             # les compteurs d'OCTETS sont bloqués (agent défectueux) -> pas de
-            # débit fiable. Les compteurs de PAQUETS, eux, restent souvent bons :
-            # on garde le pps (borné plus bas) pour que la LED clignote quand
-            # même. C'est le cas d'un HP ProCurve bas de gamme.
+            # débit fiable. Les compteurs de PAQUETS restent souvent bons : on
+            # garde un pps PLAUSIBLE (HP ProCurve bas de gamme), mais s'il est
+            # délirant c'est qu'ils mentent aussi -> ce cycle ne compte pas.
             bps_inst = 0.0
+            if pps_inst > _ACTIVITE_PPS_PEGGE_MAX:
+                pps_inst, pps_delirant = 0.0, True
+        elif bps_inst > 0:
+            # cohérence octets/paquets : un paquet fait ≥ 64 octets (512 bits).
+            # Un compteur de paquets qui donne bien plus que ce que les octets
+            # permettent est menteur (fréquent sur les mêmes switchs bas de gamme).
+            pps_coherent = bps_inst / 512 * 1.1
+            if pps_inst > max(pps_coherent, 50):
+                pps_inst = pps_coherent
         if bps_inst > cap_bps:
             bps_inst = prev.get('bps_ema', 0.0)
         if pps_inst > cap_pps:
             pps_inst = prev.get('pps_ema', 0.0)
         a = _ACTIVITE_EMA
         bps = a * bps_inst + (1 - a) * prev.get('bps_ema', bps_inst)
-        pps = a * pps_inst + (1 - a) * prev.get('pps_ema', pps_inst)
+        pps = 0.0 if pps_delirant else a * pps_inst + (1 - a) * prev.get('pps_ema', pps_inst)
         # garde-fou : un `bps_ema`/`pps_ema` hérité d'un pic passé (compteur ayant
         # bouclé avant la mise en place du plafond) doit pouvoir se résorber vite
         bps = min(bps, cap_bps)
@@ -3504,7 +3520,11 @@ def _etat_led(prev, cur, dt, seuils, reboot=False):
     # « persistance » visuelle d'un voyant sans scintiller.
     etat_prec = (prev or {}).get('etat')
     if etat_prec in ('idle', 'traffic') and etat_brut != etat_prec:
-        seuil_deb = _ACTIVITE_DEBOUNCE_ON if etat_brut == 'traffic' else _ACTIVITE_DEBOUNCE
+        # sortie de « traffic » : plus lente encore sur un switch aux compteurs
+        # bloqués (ils bougent par à-coups, un port réellement actif y semble
+        # calme un cycle sur deux).
+        seuil_off = _ACTIVITE_DEBOUNCE * 2 if cur.get('cpt_pegge') else _ACTIVITE_DEBOUNCE
+        seuil_deb = _ACTIVITE_DEBOUNCE_ON if etat_brut == 'traffic' else seuil_off
         pend_n = pend_n + 1 if pend == etat_brut else 1
         pend = etat_brut
         if pend_n < seuil_deb:                   # pas encore confirmé
@@ -3752,7 +3772,7 @@ def _cycle_activite(clients):
                             'manques': pr.get('manques', 0),
                             'cpt_pegge': (p or {}).get('cpt_pegge', False),
                             'poe': poe_ports.get(numero),
-                            'hist': [[t, b] for t, b, _pp2 in list(h)],
+                            'hist': [[t, b, pp] for t, b, pp in list(h)],   # [ts, bps, pps]
                             'stale': led['etat'] == 'stale'})
                         _poe_p = poe_ports.get(numero)
                         if _poe_p and _poe_p['statut'] == 4 and _etats_prec.get(('poe', numero)) != 4:
