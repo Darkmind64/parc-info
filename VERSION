@@ -1,8 +1,56 @@
-PARCINFO_VERSION=2.19.13
+PARCINFO_VERSION=2.19.14
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090204
+BUILD_NUMBER=2026090205
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.14 - Moniteur reseau de la baie : exactitude des chiffres + ajouts
+# 2e passe d'audit apres 2.19.13, ciblee sur la justesse de ce qui est affiche.
+# 15 points validated.
+#
+# EXACTITUDE
+# - dt via sysUpTime (1.3.6.1.2.1.1.3.0, lu dans le meme GETBULK) : l'horloge
+#   de l'agent, exacte quelle que soit la duree du poll (qui varie de 5 a 25 s
+#   sur un switch lent et faussait le debit de ~20 %). _activite_sut.
+# - _etat_led : le bouclage d'un compteur 32 bits (prev proche de 2^32) donne
+#   le VRAI delta au lieu d'etre pris pour un reset (sous-estimation du debit,
+#   journal "compteur reinitialise" a chaque bouclage). Parametre `hc` du port.
+# - Redemarrage du switch detecte (sysUpTime a recule) -> reboot=True :
+#   deltas ignores ce cycle, un seul message journal (pas port par port).
+# - PoE : "classe N (<= X W)" et non "X W" (plafond de classe, pas une mesure).
+# - _mapping_baie_ifindex : le nom d'interface ne mappe QUE les ports RJ
+#   (numero <= 48) — un port SFP de baie (1001+) collisionnait avec le RJ du
+#   meme rang.
+# - Journal : "vitesse inconnue" / "compteurs bloques" emis une fois a
+#   l'apparition, plus a chaque cycle (la file de 250 se remplissait en 2 min).
+#
+# FIABILITE
+# - _demarrer_activite_thread sous _activite_thread_lock (course page+modale
+#   -> deux threads _activite_loop).
+# - _cycle_activite : compteur d'echecs consecutifs par client (_activite_echecs) ;
+#   au 3e, {'actif': False, 'motif': 'erreur_interne'} + log WARNING au lieu de
+#   figer l'affichage en silence (DEBUG).
+# - _switchs_baie : plus de dedup par IP ; un switch sur deux slots anime les
+#   deux (releve SNMP mutualise par IP dans _cycle_activite).
+# - Re-test d'une capacite (compteurs 64 bits) : on demande l'ifXTable EN PLUS
+#   du jeu 32 bits pendant le re-test -> plus de cycles "tout calme". Fin de la
+#   recursion dans _poll_switch_ports.
+#
+# AJOUTS
+# - Contexte switch dans l'entete du moniteur : sysName, modele (sysDescr),
+#   uptime ("up 48 j" / "redemarre il y a 12 min"). _lire_sysinfo, cache 10 min.
+# - Mini-courbe de tendance par port (sparkline) : _activite_hist, deque de 60
+#   echantillons en memoire, colonne "tendance" du moniteur.
+# - Bouton "decaler tous les ports RJ de N" : calibrer_decalage_baie, route
+#   POST /api/baie/activite/calibrer/decalage (can_write).
+# - Avertissement quand topologie et nom d'interface divergent sur un port
+#   (marque dans le tableau + journal + compteur nb_divergences).
+# - Alerte budget PoE (> 90 % du budget -> journal warn + badge rouge).
+# - LED de la page baie : l'infobulle inclut le nom de l'appareil branche.
+# - Onglet capture : rappel "capture depuis ce poste, ne voit que le broadcast".
+#
+# Aucune nouvelle dependance, aucun schema change. pytest 231 + scripts OK.
+# Verifie en navigateur sur un HP ProCurve reel (modele/uptime/Δt/sparkline OK).
 
 # Version 2.19.13 - Moniteur reseau de la baie : audit + corrections de fiabilite
 # Relecture complete du sous-systeme (thread de releve, mapping, LEDs, assistant

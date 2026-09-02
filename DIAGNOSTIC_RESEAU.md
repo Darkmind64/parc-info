@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-02 (v2.19.13). En cas de doute
+> Ce document décrit le comportement au 2026-09-02 (v2.19.14). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -56,10 +56,19 @@ des switchs de la baie et calcule l'état à peindre par port.
   `_snmp_walk` **et** `_snmp_bulk_cols` vérifient le request-id de la réponse
   (un switch lent renvoyait parfois une réponse tardive à la requête
   précédente → relevé décalé). Erreurs relevées 1 cycle sur 8.
-- **Compteurs bloqués** : certains agents bas de gamme figent leurs compteurs
-  32 bits à `0x7FFFFFFF` (2 Go) — détecté (`_CPT_SENTINELLE_32`), remonté
-  (`cpt_pegge`, journal « compteurs bloqués »), et **aucun débit/pps n'est plus
-  inventé pour ce port**.
+- **Δt via l'horloge de l'agent** (v2.19.14) : `sysUpTime` (`1.3.6.1.2.1.1.3.0`)
+  est lu dans le même GETBULK ; le débit se calcule sur
+  `(sysUpTime_now - sysUpTime_prev) / 100`, exact quelle que soit la durée du
+  poll (5 à 25 s sur un switch lent, variable d'un cycle à l'autre, faussait le
+  débit de ~20 %). `_activite_sut`. Repli sur l'horloge du poste si `sysUpTime`
+  manque. Un `sysUpTime` qui **recule** = redémarrage du switch → un message
+  journal, deltas ignorés ce cycle.
+- **Compteurs bloqués / bouclage 32 bits** : certains agents bas de gamme figent
+  leurs compteurs 32 bits à `0x7FFFFFFF` (2 Go) — détecté (`_CPT_SENTINELLE_32`),
+  remonté (`cpt_pegge`, journal « compteurs bloqués » une fois), aucun débit
+  inventé. Un compteur 32 bits qui **boucle** (v2.19.14 : `prev` proche de 2³²)
+  donne désormais le vrai delta `(2³² - prev) + cur` au lieu d'être pris pour un
+  redémarrage — sur un lien Gigabit chargé, `ifInOctets` boucle toutes les 34 s.
 - **Plafond de plausibilité** (v2.19.10) : un compteur qui « dépègue »
   (`0x7FFFFFFF` → valeur réelle), boucle, ou bascule 64↔32 bits d'un cycle à
   l'autre injecte un delta gigantesque. `_etat_led` borne débit et paquets/s à
@@ -69,12 +78,21 @@ des switchs de la baie et calcule l'état à peindre par port.
   inactifs.
 - **PoE par port** (v2.19.10, `_poll_poe`) : si le switch expose la
   POWER-ETHERNET-MIB (RFC 3621), `pethPsePortTable` est relevée à chaque cycle —
-  statut (`deliveringPower` / `fault`), classe 0-4, puissance estimée — plus les
-  scalaires `pethMainPse` (budget / consommation). La table est indexée
+  statut (`deliveringPower` / `fault`), classe 0-4 — plus les scalaires
+  `pethMainPse` (budget / consommation, **eux réels**). La table est indexée
   `groupe.port` : le composant `port` **est** le numéro de port physique, donc
-  recoupé directement au numéro de baie (pas de mapping ifIndex). Colonne PoE
-  dans le moniteur, total dans l'en-tête du switch, évènement journal sur défaut
-  PoE.
+  recoupé directement au numéro de baie (pas de mapping ifIndex). La puissance
+  par port affichée est le **plafond de sa classe** (`≤ X W`), pas une mesure —
+  la RFC ne l'expose pas. Colonne PoE dans le moniteur, total dans l'en-tête,
+  évènement journal sur défaut PoE **et sur budget presque atteint** (v2.19.14,
+  > 90 % du budget).
+- **Contexte du switch** (v2.19.14, `_lire_sysinfo`, cache 10 min) : `sysName`,
+  modèle (`sysDescr` tronqué) et uptime (« up 48 j » / « redémarré il y a
+  12 min ») dans l'en-tête du moniteur — un redémarrage explique les resets de
+  compteurs.
+- **Mini-courbe par port** (v2.19.14) : `_activite_hist`, une deque de
+  `_ACTIVITE_HIST_MAX` (60) échantillons de débit par port mappé, en mémoire,
+  affichée en sparkline dans le moniteur (colonne « tendance »).
 - **Capacités SNMP (compteurs 64 bits, PoE) non condamnées sur un seul échec**
   (v2.19.13) : `_activite_hc[ip]` / `_activite_poe[ip]` ne passent à `False`
   qu'après `_ACTIVITE_NEG_CONFIRME` (2) relevés négatifs consécutifs — un paquet
@@ -94,11 +112,17 @@ des switchs de la baie et calcule l'état à peindre par port.
   priorité **manuel** (`baie_slot_ports.if_index`, source `manuel`) > **topologie**
   (`diag_topologie`, source `topologie`) > **nom d'interface**
   (`_port_physique_depuis_nom` : `GigabitEthernet1/0/12` → 12, `Gi1/0/12` → 12,
-  `Port: 12 …` → 12, `swp12` → 12 ; source `nom_port`) > **repli naïf**
-  `numero == ifIndex` (**désactivé par défaut** — souvent faux ;
-  `diag_baie_activite_repli_naif='1'` pour l'activer ; source `repli`).
-  Le numéro de port de la baie n'est presque jamais l'ifIndex du switch : le
-  repli naïf de v2.19.6-.8 allumait des LEDs sur les mauvais ports.
+  `Port: 12 …` → 12, `swp12` → 12 ; source `nom_port` ; **plage RJ 1-48
+  uniquement** depuis v2.19.14 — un port SFP de baie 1001+ collisionnait avec le
+  RJ du même rang) > **repli naïf** `numero == ifIndex` (**désactivé par
+  défaut** — souvent faux ; `diag_baie_activite_repli_naif='1'` pour l'activer ;
+  source `repli`). Le numéro de port de la baie n'est presque jamais l'ifIndex
+  du switch : le repli naïf de v2.19.6-.8 allumait des LEDs sur les mauvais
+  ports. Quand **topologie et nom d'interface s'accordent tous deux mais
+  divergent** sur un port (v2.19.14), c'est signalé (`divergences`, marqueur ⚠
+  dans le moniteur + journal). Bouton **« décaler tous les ports RJ de N »**
+  (`calibrer_decalage_baie`, route `POST /api/baie/activite/calibrer/decalage`,
+  `can_write`) pour le cas fréquent ifIndex = n° de port + constante.
 - **Sémantique LED** (`_etat_led`, priorité décroissante) : `down` (éteinte) ·
   `stale` si ≥ 3 relevés manqués consécutifs (grise, v2.19.8 — un port ne
   s'éteint plus jamais brutalement à cause d'un seul paquet SNMP perdu) · `err`
@@ -335,8 +359,8 @@ GET, GET typé et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
 | Topologie (palier 4) | `decouvrir_topologie`, `_topologie_equipement`, `etat_topologie`, `appliquer_topologie_baie` |
 | Baseline (palier 5) | `enregistrer_metriques_liaison`, `evaluer_baseline`, `serie_metrique` |
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
-| Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite`, `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports`, `_poll_poe` (POWER-ETHERNET-MIB), `_mapping_baie_ifindex` + `_port_physique_depuis_nom`, `_etat_led` (plafond de plausibilité débit/pps), `activite_baie`, `calibrer_port_baie` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer` ; `baie_brassage.html` (`#sel-activite`) ; widget `network-activity` (`client_dashboard.html`) ; colonne `baie_slot_ports.if_index` |
-| Moniteur réseau de la baie (modale) | `network_diag.py` : `moniteur_baie` (GET, lecture seule), `_journal`/`_activite_journal`, `_activite_detail`, `assistant_calibration`/`_maj_assistant_calibration` (calibrer par débranchement — décision quand le réseau se calme, écriture par `_activite_loop`), `capturer_trafic`, `lancer_capture_baie`/`statut_capture_baie` ; `_activite_calib` + `_noms_interfaces` (flag `maj_en_cours`) sous `_activite_lock` ; routes `GET /api/baie/activite/moniteur` + `POST /api/baie/activite/capture` + `POST /api/baie/activite/calibrer/assistant` ; `baie_brassage.html` (`#moniteur-modal`, `MoniteurModal`, gel du re-render pendant qu'un `<select>` est manipulé, poll suspendu sur `document.hidden`) |
+| Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite` (relevé SNMP mutualisé par IP → switch multi-slots), `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports` (+ `sysUpTime` pour un Δt exact), `_poll_poe` (POWER-ETHERNET-MIB), `_lire_sysinfo` (modèle/uptime), `_mapping_baie_ifindex` (nom_port RJ seulement, `divergences`) + `_port_physique_depuis_nom`, `_etat_led` (plafond débit/pps, bouclage 32 bits, `reboot`), `activite_baie`, `calibrer_port_baie` / `calibrer_decalage_baie` ; état : `_activite_sut` (Δt), `_activite_hist` (sparkline), `_activite_sysinfo`, `_activite_echecs`, `_activite_thread_lock` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer{,/decalage}` ; `baie_brassage.html` (`#sel-activite`) ; widget `network-activity` ; colonne `baie_slot_ports.if_index` |
+| Moniteur réseau de la baie (modale) | `network_diag.py` : `moniteur_baie` (GET, lecture seule), `_journal`/`_activite_journal` (conditions permanentes émises une seule fois), `_activite_detail`, `assistant_calibration`/`_maj_assistant_calibration` (calibrer par débranchement — décision quand le réseau se calme, écriture par `_activite_loop`), `capturer_trafic`, `lancer_capture_baie`/`statut_capture_baie` ; `_activite_calib` + `_noms_interfaces` (flag `maj_en_cours`) sous `_activite_lock` ; routes `GET /api/baie/activite/moniteur` + `POST /api/baie/activite/capture` + `POST /api/baie/activite/calibrer/assistant` ; `baie_brassage.html` (`#moniteur-modal`, `MoniteurModal` : en-tête modèle/uptime, colonne « tendance » (`sparkline`), « décaler de N », marqueur divergence, gel du re-render pendant qu'un `<select>` est manipulé, poll suspendu sur `document.hidden`) |
 | Orchestration | `_run_snapshot` (snapshot), `_moniteur_loop` / `_moniteur_cycle` (continu), `_enregistrer_evenements`, `_purger_anciens` |
 | Walk SNMP + BER | `app.py` : `_snmp_get`, `_snmp_get_typed`, `_snmp_walk` (GETNEXT), `_snmp_bulk_cols` (GETBULK v2c multi-colonnes, auto-descriptif), `_ber_decoder_oid`, `_ber_decoder_valeur` — tous vérifient le request-id de la réponse |
 | Routes | `app.py` : `grep "@app.route('/api/diag-reseau"` + `/diag-reseau` + `/diag-reseau/rapport.{pdf,html}` |

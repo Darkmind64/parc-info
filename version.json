@@ -1,26 +1,26 @@
 {
-  "version": "2.19.13",
+  "version": "2.19.14",
   "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.13",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.13/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.14/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.14/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.14/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.14",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.14/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.14/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.14/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.14/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.14/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Moniteur réseau de la baie — audit et corrections de fiabilité : une capacité SNMP (compteurs 64 bits, PoE) n'est plus déclarée absente sur un seul relevé raté et est re-testée périodiquement ; l'assistant de calibration garde une cadence courte et retient l'interface débranchée/rebranchée en dernier même si un voisin flappe ; l'écriture de calibration ne part plus d'une requête de lecture ; ménage complet des états en mémoire quand un poste cesse de regarder.",
+    "new_features": "Moniteur réseau de la baie — exactitude des chiffres : le débit est calculé sur l'horloge de l'agent (sysUpTime), exacte quelle que soit la durée du poll ; le bouclage des compteurs 32 bits est traité comme tel et non comme un redémarrage ; un redémarrage du switch est détecté et affiché. La modale gagne le modèle et l'uptime du switch, une mini-courbe de tendance par port, un bouton « décaler tous les ports de N » et un avertissement quand topologie et nom d'interface divergent.",
     "improvements": [
-      "Menu déroulant de calibration : ne se referme plus au rafraîchissement pendant qu'on choisit une interface.",
-      "Relevé suspendu quand l'onglet passe en arrière-plan, repris à son retour.",
-      "Un port inexistant refusé à la calibration (plus de ligne bâtarde en base).",
-      "Pourcentages de la capture calculés sur les trames réellement classées.",
-      "Threads de relevé des noms d'interface : back-off au lieu d'un thread par cycle sur un switch au SNMP cassé."
+      "PoE : la valeur par port est étiquetée « classe N (≤ X W) » et non plus comme une mesure ; alerte quand le budget PoE est presque atteint.",
+      "Un switch réparti sur deux éléments de rack anime bien les ports des deux (relevé SNMP mutualisé par IP).",
+      "Le journal ne répète plus les conditions permanentes (vitesse inconnue, compteurs bloqués) à chaque cycle.",
+      "Démarrage du thread de relevé protégé ; un cycle en échec répété est signalé au lieu de figer l'affichage.",
+      "Onglet capture : rappel que le relevé se fait depuis le poste."
     ]
   },
   "checksums": {
@@ -31,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.13"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.14"
 }

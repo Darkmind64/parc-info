@@ -401,6 +401,30 @@ def test_etat_led_plafond_compteur_aberrant():
     assert ls['pps'] <= network_diag._ACTIVITE_PPS_MAX_PORT
 
 
+def test_etat_led_bouclage_32bits():
+    """Un compteur d'octets 32 bits qui boucle (prev proche de 2^32) doit donner
+    le VRAI delta, pas être pris pour un reboot (sous-estimation du débit)."""
+    seuils = {'err': 20, 'sat_pct': 90, 'pps_mini': 15}
+    # prev = 2^32 - 1 Go, cur = 2 Go, dt 10 s : 3 Go passés (1 avant bouclage, 2 après)
+    prev = dict(in_oct=2**32 - 1_000_000_000, out_oct=0, in_pkts=0, out_pkts=0,
+                in_err=0, out_err=0, ts=0.0, bps_ema=0.0, pps_ema=0.0)
+    cur = dict(oper=1, speed_mbps=10000, in_oct=2_000_000_000, out_oct=0,
+               in_pkts=0, out_pkts=0, in_err=0, out_err=0, hc=False)   # ifTable = Counter32
+    led = network_diag._etat_led(prev, cur, 10.0, seuils)
+    # 3 Go / 10 s * 8 = 2,4 Gb/s instantané ; EMA (1er échantillon) -> ~1,2 Gb/s.
+    # Si le bouclage était pris pour un reset (delta = cur = 2 Go), on aurait ~0,8 Gb/s.
+    assert led['bps'] > 1_000_000_000 and led['reset'] is False
+
+    # vrai redémarrage : prev petit, cur repart de ~0
+    prev2 = dict(prev, in_oct=5_000_000)
+    led2 = network_diag._etat_led(prev2, dict(cur, in_oct=1_000), 10.0, seuils)
+    assert led2['reset'] is True and led2['bps'] >= 0
+
+    # switch redémarré (sysUpTime a reculé) : reboot=True -> aucun débit
+    led3 = network_diag._etat_led(prev, dict(cur, in_oct=99), 10.0, seuils, reboot=True)
+    assert led3['bps'] == 0 and led3['reset'] is True
+
+
 def test_etat_led_antirebond_idle_traffic():
     """Le passage idle<->traffic n'est retenu qu'après _ACTIVITE_DEBOUNCE cycles
     consécutifs — un port marginal ne fait plus scintiller la LED ni varier le
@@ -464,7 +488,7 @@ def test_mapping_baie_ifindex(conn, deux_clients, make_appareil):
     infos = {37: {'nom': 'Gi1/0/12', 'alias': '', 'ethernet': True},
              5:  {'nom': 'Gi1/0/7',  'alias': '', 'ethernet': True}}
 
-    m, src, cal = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
+    m, src, cal, _div = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
     assert m == {12: 37, 7: 5} and cal is True           # via le NOM d'interface
     assert src[12] == 'nom_port' and src[7] == 'nom_port'
 
@@ -473,21 +497,72 @@ def test_mapping_baie_ifindex(conn, deux_clients, make_appareil):
                  "port_index, appareil_vu_id, horodatage) VALUES (?,?,?,?,?,'x')",
                  (cid, '10.0.0.2', sw, 99, pc))
     conn.commit()
-    m2, src2, _ = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
+    m2, src2, _, _ = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
     assert m2[12] == 99 and src2[12] == 'topologie'
 
     # calibration manuelle : l'emporte sur tout
     conn.execute("UPDATE baie_slot_ports SET if_index=42 WHERE slot_id=? AND numero=12", (slot_id,))
     conn.commit()
-    m3, src3, _ = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
+    m3, src3, _, _ = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
     assert m3[12] == 42 and src3[12] == 'manuel'
 
     # repli naïf désactivé par défaut : un port sans topo/nom/manuel n'est PAS mappé
     conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,3)", (slot_id,))
     conn.commit()
-    m4, _, _ = network_diag._mapping_baie_ifindex(
+    m4, _, _, _ = network_diag._mapping_baie_ifindex(
         conn, cid, slot_id, sw, {3: {'nom': 'bizarre', 'alias': '', 'ethernet': True}})
     assert 3 not in m4
+
+
+def test_mapping_sfp_pas_de_nom_port(conn, deux_clients, make_appareil):
+    """Un port de baie SFP (numéro 1001+) ne doit PAS être mappé par nom
+    d'interface : son numéro logique (1) collisionnerait avec le port RJ 1."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1)", (slot_id,))      # RJ 1
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1001)", (slot_id,))   # SFP 1
+    conn.commit()
+    infos = {1:  {'nom': 'Gi1/0/1',  'alias': '', 'ethernet': True},
+             49: {'nom': 'Te1/1/1',  'alias': '', 'ethernet': True}}
+    m, src, _, _ = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
+    assert m.get(1) == 1 and src.get(1) == 'nom_port'
+    assert 1001 not in m                              # SFP non mappé par nom
+
+
+def test_mapping_divergence(conn, deux_clients, make_appareil):
+    """topologie et nom d'interface désaccordés sur un port -> signalé."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
+    pc = make_appareil(cid, nom_machine='PC', adresse_ip='10.0.0.50')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero, appareil_id) VALUES (?,3,?)", (slot_id, pc))
+    conn.execute("INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
+                 "port_index, appareil_vu_id, horodatage) VALUES (?,?,?,?,?,'x')",
+                 (cid, '10.0.0.2', sw, 99, pc))       # topo dit ifIndex 99
+    conn.commit()
+    infos = {5: {'nom': 'Gi1/0/3', 'alias': '', 'ethernet': True}}   # nom dit ifIndex 5
+    m, src, _, div = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
+    assert m[3] == 99 and src[3] == 'topologie' and div == [3]
+
+
+def test_calibrer_decalage_baie(conn, deux_clients, make_appareil):
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    for n in (1, 2, 3, 1001):
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (slot_id, n))
+    conn.commit()
+    assert network_diag.calibrer_decalage_baie(cid, slot_id, 10) == 3      # RJ seulement
+    from database import get_db
+    c = get_db()
+    rows = dict(c.execute("SELECT numero, if_index FROM baie_slot_ports WHERE slot_id=?", (slot_id,)).fetchall())
+    c.close()
+    assert rows[1] == 11 and rows[2] == 12 and rows[3] == 13 and rows[1001] is None
+    assert network_diag.calibrer_decalage_baie(deux_clients['cid_b'], slot_id, 5) == 0   # autre client
 
 
 def test_mapping_repli_naif_optin(conn, deux_clients, make_appareil, monkeypatch):
@@ -499,7 +574,7 @@ def test_mapping_repli_naif_optin(conn, deux_clients, make_appareil, monkeypatch
     slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
     conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,5)", (slot_id,))
     conn.commit()
-    m, src, cal = network_diag._mapping_baie_ifindex(
+    m, src, cal, _ = network_diag._mapping_baie_ifindex(
         conn, cid, slot_id, sw, {5: {'nom': 'bizarre', 'alias': '', 'ethernet': True}})
     assert m == {5: 5} and src[5] == 'repli' and cal is False
 
@@ -543,10 +618,11 @@ def test_poll_switch_ports(monkeypatch):
               network_diag._OID_IF_HCIN_UCAST:  {'1': 10, '2': 0},
               network_diag._OID_IF_HCOUT_UCAST: {'1': 20, '2': 0}}
 
+    _TABLE[network_diag._OID_SYS_UPTIME] = {'0': 123456}
     monkeypatch.setattr(A, '_snmp_bulk_cols',
                         lambda ip, bases, comm, **k: {b: dict(_TABLE.get(b, {})) for b in bases})
-    res, ok, hc = network_diag._poll_switch_ports('10.0.0.2', ['public'], _infos)
-    assert ok is True and hc is True
+    res, ok, hc, sut = network_diag._poll_switch_ports('10.0.0.2', ['public'], _infos)
+    assert ok is True and hc is True and sut == 123456    # sysUpTime lu dans le même GETBULK
     assert res[1]['oper'] == 1 and res[1]['speed_mbps'] == 1000 and res[1]['out_oct'] == 9000
     assert res[1]['in_pkts'] == 10 and res[2]['oper'] == 2
 
@@ -563,7 +639,7 @@ def test_poll_switch_ports(monkeypatch):
                         lambda ip, bases, comm, **k: {b: dict(_T2.get(b, {})) for b in bases})
     network_diag._poll_switch_ports('10.0.0.5', ['public'], {})          # 1er négatif
     assert network_diag._activite_hc.get('10.0.0.5') is None             # pas encore basculé
-    res2, ok2, hc2 = network_diag._poll_switch_ports('10.0.0.5', ['public'], {})   # 2e -> 32 bits
+    res2, ok2, hc2, _sut2 = network_diag._poll_switch_ports('10.0.0.5', ['public'], {})   # 2e -> 32 bits
     assert res2[1]['in_oct'] == 0 and res2[1]['out_oct'] == 12345 and hc2 is False
     assert res2[1]['cpt_pegge'] is True
 
@@ -571,7 +647,7 @@ def test_poll_switch_ports(monkeypatch):
               network_diag._activite_capa_reprobe):
         d.pop('10.0.0.6', None)
     monkeypatch.setattr(A, '_snmp_bulk_cols', lambda *a, **k: {})
-    res3, ok3, _ = network_diag._poll_switch_ports('10.0.0.6', ['public'], {})
+    res3, ok3, _, _ = network_diag._poll_switch_ports('10.0.0.6', ['public'], {})
     assert ok3 is False and res3 == {}
 
 
@@ -590,7 +666,7 @@ def _mock_snmp_switch(monkeypatch, ports):
                         lambda ip, c: {i: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True,
                                            'speed_mbps': ports[i].get('speed_mbps', 0)} for i in ports})
     monkeypatch.setattr(network_diag, '_poll_switch_ports',
-                        lambda ip, c, infos=None: (dict(ports), bool(ports), True))
+                        lambda ip, c, infos=None: (dict(ports), bool(ports), True, None))
 
 
 def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, monkeypatch):
@@ -628,7 +704,7 @@ def test_cycle_activite_stale_apres_echecs(conn, deux_clients, make_appareil, mo
                                             in_pkts=1, out_pkts=0, in_err=0, out_err=0)})
     network_diag._cycle_activite([cid])
 
-    monkeypatch.setattr(network_diag, '_poll_switch_ports', lambda ip, c, infos=None: ({}, False, False))
+    monkeypatch.setattr(network_diag, '_poll_switch_ports', lambda ip, c, infos=None: ({}, False, False, None))
     for _ in range(2):
         network_diag._cycle_activite([cid])
         with network_diag._activite_lock:

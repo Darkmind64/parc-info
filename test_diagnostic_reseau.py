@@ -558,14 +558,14 @@ _c.commit(); _c.close()
 # l'ifIndex n'est PAS le numéro de port : port baie 4 = Gi1/0/4 = ifIndex 44
 _infos = {44: {'nom': 'Gi1/0/4', 'alias': '', 'ethernet': True, 'speed_mbps': 1000},
           49: {'nom': 'Gi1/0/9', 'alias': '', 'ethernet': True, 'speed_mbps': 1000}}
-_m, _src, _cal = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, _infos)
+_m, _src, _cal, _div = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, _infos)
 verifier(_m == {4: 44, 9: 49} and _cal is True and _src[4] == 'nom_port',
          "mapping par NOM d'interface (Gi1/0/4 -> port 4), pas par ifIndex brut", str((_m, _src)))
 _c = A.get_db()
 _c.execute("INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
            "port_index, appareil_vu_id, horodatage) VALUES (908,'10.8.0.1',700,15,701,'x')")
 _c.commit(); _c.close()
-_m2, _src2, _cal2 = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, _infos)
+_m2, _src2, _cal2, _div2 = N._mapping_baie_ifindex(_get_local_db(), 908, 80, 700, _infos)
 verifier(_m2.get(4) == 15 and _src2[4] == 'topologie',
          "topologie : PC vu sur ifIndex 15 -> l'emporte sur le nom", str((_m2, _src2)))
 _c = A.get_db()
@@ -578,7 +578,7 @@ N._noms_interfaces = lambda ip, comm: dict(_infos)
 N._poll_switch_ports = lambda ip, comm, infos=None: (
     {44: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0),
      49: dict(oper=2, speed_mbps=0, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0)},
-    True, True)
+    True, True, None)
 N._cycle_activite([908])
 with N._activite_lock:
     _res = N._activite_resultat.get(908)

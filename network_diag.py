@@ -2884,6 +2884,7 @@ _OID_IF_IN_UCAST    = '1.3.6.1.2.1.2.2.1.11'
 _OID_IF_OUT_UCAST   = '1.3.6.1.2.1.2.2.1.17'
 
 _activite_lock       = threading.Lock()
+_activite_thread_lock = threading.Lock()   # démarrage idempotent du thread (course page+modale)
 # Écrits SOUS _activite_lock (lus par les threads de requête Flask) :
 _activite_heartbeat  = {}   # client_id -> epoch du dernier battement
 _activite_resultat   = {}   # client_id -> dict prêt pour l'UI (LEDs)
@@ -2891,14 +2892,25 @@ _activite_detail     = {}   # client_id -> {ts, switchs:[...], ports:[...], inte
 _activite_journal    = collections.deque(maxlen=250)   # évènements, récent en tête
 _activite_calib      = None  # (défini plus bas) — SOUS _activite_lock : partagé loop <-> requête
 # Touchés UNIQUEMENT par le thread _activite_loop (_cycle_activite + purge, séquentiels) :
-_activite_prev       = {}   # (client_id, ip, ifindex) -> {compteurs, etat, *_ema, manques, ts}
+_activite_prev       = {}   # (client_id, ip, ifindex) -> {compteurs, etat, *_ema, manques, ts, sut}
 _activite_switch_ok  = {}   # (client_id, ip) -> bool (dernier relevé répondu ?)
-_activite_etat_mappe = {}   # (client_id, slot_id) -> {numero_baie: dernier etat} (transitions journal)
+_activite_etat_mappe = {}   # (client_id, slot_id) -> {clé: dernier etat} (transitions journal)
+_activite_hist       = {}   # (client_id, ip, ifindex) -> deque[(ts, bps, pps)] (sparkline moniteur)
+_activite_sysinfo    = {}   # ip -> {'ts', 'sysname', 'sysdescr'} (cache ~10 min)
+_activite_sut        = {}   # (client_id, ip) -> (sysUpTime_ticks, epoch) : dt exact via l'horloge de l'agent
+_activite_echecs     = {}   # client_id -> nb d'échecs consécutifs de _cycle_activite
+_ACTIVITE_HIST_MAX   = 60   # échantillons conservés par port pour la sparkline
+_ACTIVITE_SYSINFO_TTL = 600.0
+_ACTIVITE_ECHECS_MAX = 3    # au-delà : on publie {'actif': False, 'motif': 'erreur_interne'}
 # _activite_noms : loop + threads DiagBaieNoms détachés → le flag 'maj_en_cours'
 # est testé-et-posé sous _activite_lock (voir _noms_interfaces) ; le reste est
 # de l'écriture atomique de clé (remplacement de dict).
 _activite_noms       = {}   # ip -> {'ts', 'infos': {ifindex: {'nom','alias','ethernet'}}, 'maj_en_cours', 'retry_after'}
 _activite_thread     = None
+
+_OID_SYS_UPTIME = '1.3.6.1.2.1.1.3'    # sysUpTime (TimeTicks, 1/100 s) — base : GETBULK renvoie .0
+_OID_SYS_DESCR_B = '1.3.6.1.2.1.1.1'
+_OID_SYS_NAME_B  = '1.3.6.1.2.1.1.5'
 
 _capture_baie_lock   = threading.Lock()
 _capture_baie_status = {'running': False, 'progress': 0, 'message': '',
@@ -2923,12 +2935,13 @@ _TYPES_EQUIP_BAIE_RESEAU = ('Switch', 'Switch/AP', 'Routeur/Pare-feu')
 
 
 def _switchs_baie(conn, client_id):
-    """Équipements réseau montés en baie et interrogeables en SNMP : un slot
-    associé à un appareil doté d'une IP. On accepte soit un `type_appareil`
-    réseau connu, soit un slot dont le `type_equipement` (étiquette de la baie)
-    dit « Switch »/« Routeur » même si l'appareil lié est typé autrement — le
-    seul vrai prérequis pour lire les compteurs SNMP est l'adresse IP.
-    Dédupe par IP (un même équipement peut apparaître dans deux slots)."""
+    """Slots de baie interrogeables en SNMP : un slot associé à un appareil doté
+    d'une IP. On accepte soit un `type_appareil` réseau connu, soit un slot dont
+    le `type_equipement` (étiquette de la baie) dit « Switch »/« Routeur » même
+    si l'appareil lié est typé autrement — le seul vrai prérequis SNMP est l'IP.
+    UN slot par entrée (un switch 48 ports affiché en deux éléments de rack de
+    24 → deux entrées, même IP) ; l'appelant mutualise le relevé SNMP par IP.
+    Limité à `_ACTIVITE_MAX_SWITCHS` IP distinctes."""
     ph = ','.join('?' * len(_TYPES_EQUIP_SNMP))
     ph2 = ','.join('?' * len(_TYPES_EQUIP_BAIE_RESEAU))
     rows = conn.execute(
@@ -2938,11 +2951,12 @@ def _switchs_baie(conn, client_id):
         f"AND (a.type_appareil IN ({ph}) OR s.type_equipement IN ({ph2})) "
         f"ORDER BY s.position",
         (client_id, *_TYPES_EQUIP_SNMP, *_TYPES_EQUIP_BAIE_RESEAU)).fetchall()
-    vus, switchs = set(), []
+    ips, switchs = [], []
     for slot_id, aid, ip, nom in rows:
-        if ip in vus:
-            continue
-        vus.add(ip)
+        if ip not in ips:
+            if len(ips) >= _ACTIVITE_MAX_SWITCHS:
+                continue
+            ips.append(ip)
         switchs.append({'slot_id': slot_id, 'appareil_id': aid, 'ip': ip, 'nom': nom or ip})
     return switchs
 
@@ -2988,7 +3002,7 @@ def _numero_logique(numero):
 
 
 def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, infos):
-    """Retourne ({numero_baie: ifindex}, {numero: source}, calibre).
+    """Retourne ({numero_baie: ifindex}, {numero: source}, calibre, divergences).
     `infos` = {ifindex: {'nom', 'alias', 'ethernet'}} (les interfaces vues par
     SNMP). Priorité par port :
       1. calibration manuelle (baie_slot_ports.if_index)        → 'manuel'
@@ -2996,12 +3010,13 @@ def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, infos):
       3. nom d'interface (Gi1/0/12 → port 12)                   → 'nom_port'
       4. repli naïf numero==ifIndex — désactivé par défaut,
          `diag_baie_activite_repli_naif` = '1' pour l'activer   → 'repli'
-    calibre = True dès qu'au moins un mapping fiable (1/2/3) est trouvé."""
+    calibre = True dès qu'au moins un mapping fiable (1/2/3) est trouvé.
+    divergences = [numero] où topologie et nom d'interface ne s'accordent pas."""
     ports = conn.execute(
         "SELECT numero, appareil_id, if_index FROM baie_slot_ports WHERE slot_id=?",
         (slot_id,)).fetchall()
     if not ports:
-        return {}, {}, False
+        return {}, {}, False, []
 
     topo = {}   # appareil_vu_id -> ifindex
     if appareil_id_switch:
@@ -3023,33 +3038,40 @@ def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, infos):
             par_nom.setdefault(pp, ifx)
 
     repli_naif = str(_cfg('diag_baie_activite_repli_naif', '0')) == '1'
-    mapping, sources, calibre = {}, {}, False
+    mapping, sources, calibre, divergences = {}, {}, False, []
     for numero, p_aid, if_manuel in ports:
         try:
             numero = int(numero)
         except (TypeError, ValueError):
             continue
-        logique = _numero_logique(numero)
+        if_topo = topo.get(p_aid) if p_aid else None
+        # nom d'interface : seulement pour la plage RJ (1-48). Un port SFP de baie
+        # (1001+) partage son numéro logique avec le port RJ du même rang → il
+        # serait mappé à tort sur le RJ. SFP/WAN se calibrent par topologie/manuel.
+        if_nom = par_nom.get(numero) if numero <= 48 else None
         if if_manuel:
             try:
                 mapping[numero] = int(if_manuel)
                 sources[numero] = 'manuel'
                 calibre = True
-                continue
             except (TypeError, ValueError):
                 pass
-        if p_aid and p_aid in topo:
-            mapping[numero] = topo[p_aid]
+            else:
+                continue
+        if if_topo is not None and if_nom is not None and if_topo != if_nom:
+            divergences.append(numero)
+        if if_topo is not None:
+            mapping[numero] = if_topo
             sources[numero] = 'topologie'
             calibre = True
-        elif logique in par_nom:
-            mapping[numero] = par_nom[logique]
+        elif if_nom is not None:
+            mapping[numero] = if_nom
             sources[numero] = 'nom_port'
             calibre = True
         elif repli_naif and numero in infos:
             mapping[numero] = numero
             sources[numero] = 'repli'
-    return mapping, sources, calibre
+    return mapping, sources, calibre, divergences
 
 
 _poll_max_ms = [0]         # durée du plus lent relevé du cycle courant (cadence adaptative)
@@ -3273,43 +3295,49 @@ def _poll_switch_ports(ip, communautes, infos=None):
     paquets = 5 colonnes (les erreurs, plus coûteuses, ne sont relevées qu'1
     cycle sur 8 — l'état « rouge » reste surtout du ressort du palier 3).
     nom/type/vitesse viennent de `_noms_interfaces` (caché). Retourne
-    ({ifindex: {...}}, ok, hc).
+    ({ifindex: {...}}, ok, hc, sysuptime_ticks).
     NB : requêtes SÉRIE, jamais parallèles — un agent SNMP de switch bas de
     gamme est mono-thread et *drop* les requêtes concurrentes."""
     infos = infos or {}
     _activite_cyc[0] += 1
     avec_err = (_activite_cyc[0] % 8 == 1)
     a_hc = _activite_hc.get(ip)
-    if a_hc is False and \
-            _activite_cyc[0] >= _activite_capa_reprobe.get(ip, {}).get('hc', 0):
-        a_hc = None                       # re-teste les compteurs 64 bits (peut-être perdus au 1er essai)
-        _activite_hc.pop(ip, None)
-    # 64 bits d'abord (ifXTable) ; si le switch ne les expose pas, on bascule
-    # définitivement en 32 bits (ifTable) — on ne demande jamais les deux jeux.
-    if a_hc is False:
-        oct_cols = [_OID_IF_IN_OCTETS, _OID_IF_OUT_OCTETS, _OID_IF_IN_UCAST, _OID_IF_OUT_UCAST]
-    else:
-        oct_cols = [_OID_IF_HCIN, _OID_IF_HCOUT, _OID_IF_HCIN_UCAST, _OID_IF_HCOUT_UCAST]
-    demandes = [_OID_IF_OPER] + oct_cols + ([_OID_IF_IN_ERRORS, _OID_IF_OUT_ERRORS] if avec_err else [])
+    reprobe = (a_hc is False
+               and _activite_cyc[0] >= _activite_capa_reprobe.get(ip, {}).get('hc', 0))
+    veut_hc = (a_hc is not False) or reprobe   # on demande l'ifXTable ?
+    veut_32 = (a_hc is not True) or reprobe    # on demande l'ifTable ?  (au démarrage : les deux, 1 cycle)
+    oct_cols = []
+    if veut_hc:
+        oct_cols += [_OID_IF_HCIN, _OID_IF_HCOUT, _OID_IF_HCIN_UCAST, _OID_IF_HCOUT_UCAST]
+    if veut_32:
+        oct_cols += [_OID_IF_IN_OCTETS, _OID_IF_OUT_OCTETS, _OID_IF_IN_UCAST, _OID_IF_OUT_UCAST]
+    demandes = ([_OID_SYS_UPTIME, _OID_IF_OPER] + oct_cols
+                + ([_OID_IF_IN_ERRORS, _OID_IF_OUT_ERRORS] if avec_err else []))
     cols = _snmp_bulk(ip, demandes, communautes)
+
+    try:
+        sysuptime = int(next(iter(cols.get(_OID_SYS_UPTIME, {}).values())))
+    except (StopIteration, TypeError, ValueError):
+        sysuptime = None
 
     oper = cols.get(_OID_IF_OPER, {})
     a_du_hc = bool(cols.get(_OID_IF_HCIN) or cols.get(_OID_IF_HCOUT))
-    if a_hc is None:
+    if a_hc is not True:
         if a_du_hc:
             _activite_hc[ip] = True
             _activite_capa_neg.get(ip, {}).pop('hc', None)
-        elif oper:                     # oper répond mais pas l'ifXTable → peut-être 32 bits,
-            neg = _activite_capa_neg.setdefault(ip, {})   # ou juste des paquets HC perdus
+            _activite_capa_reprobe.get(ip, {}).pop('hc', None)
+        elif oper and veut_hc:                # ifXTable demandée, oper répond, HC absent
+            neg = _activite_capa_neg.setdefault(ip, {})
             neg['hc'] = neg.get('hc', 0) + 1
-            if neg['hc'] >= _ACTIVITE_NEG_CONFIRME:       # confirmé : le switch n'a pas de compteurs 64 bits
+            if neg['hc'] >= _ACTIVITE_NEG_CONFIRME:   # confirmé : le switch n'a pas de compteurs 64 bits
                 _activite_hc[ip] = False
+                _activite_capa_neg.get(ip, {}).pop('hc', None)
                 _activite_capa_reprobe.setdefault(ip, {})['hc'] = _activite_cyc[0] + _ACTIVITE_REPROBE_CYCLES
-                return _poll_switch_ports(ip, communautes, infos)   # relève tout de suite en 32 bits
-            # pas encore sûr : ce cycle n'aura que oper (compteurs à 0), on réessaiera l'HC au suivant
+    hc_mode = _activite_hc.get(ip) is True or a_du_hc
 
     if not oper and not cols.get(_OID_IF_HCIN) and not cols.get(_OID_IF_IN_OCTETS):
-        return {}, False, bool(a_hc)
+        return {}, False, bool(a_hc), sysuptime
 
     def _i(col, suf, defaut=0):
         try:
@@ -3339,23 +3367,24 @@ def _poll_switch_ports(ip, communautes, infos=None):
         peg[0] = False
         in_o, h1 = _cpt(_OID_IF_HCIN, _OID_IF_IN_OCTETS, suf)
         out_o, h2 = _cpt(_OID_IF_HCOUT, _OID_IF_OUT_OCTETS, suf)
-        in_p, _ = _cpt(_OID_IF_HCIN_UCAST, _OID_IF_IN_UCAST, suf)
-        out_p, _ = _cpt(_OID_IF_HCOUT_UCAST, _OID_IF_OUT_UCAST, suf)
-        hc_seen = hc_seen or h1 or h2
+        in_p, h3 = _cpt(_OID_IF_HCIN_UCAST, _OID_IF_IN_UCAST, suf)
+        out_p, h4 = _cpt(_OID_IF_HCOUT_UCAST, _OID_IF_OUT_UCAST, suf)
+        h = h1 or h2 or h3 or h4
+        hc_seen = hc_seen or h
         d = {
             'oper': _i(_OID_IF_OPER, suf, 1),
             'speed_mbps': (infos.get(ifx) or {}).get('speed_mbps', 0),
             'in_oct': in_o, 'out_oct': out_o, 'in_pkts': in_p, 'out_pkts': out_p,
-            'cpt_pegge': peg[0],
+            'cpt_pegge': peg[0], 'hc': h,     # compteurs 64 bits ? sinon bouclage 32 bits possible
         }
         if avec_err:      # sinon : clés absentes → l'appelant conserve la valeur connue
             d['in_err'] = _i(_OID_IF_IN_ERRORS, suf)
             d['out_err'] = _i(_OID_IF_OUT_ERRORS, suf)
         res[ifx] = d
-    return res, bool(res), hc_seen
+    return res, bool(res), hc_seen, sysuptime
 
 
-def _etat_led(prev, cur, dt, seuils):
+def _etat_led(prev, cur, dt, seuils, reboot=False):
     """État d'un port. seuils = {'err', 'sat_pct', 'pps_mini'}.
     Priorité : down > stale > err > sature > traffic > idle. Le clignotement
     « traffic » se déclenche sur les PAQUETS (comme une vraie LED de switch),
@@ -3373,16 +3402,29 @@ def _etat_led(prev, cur, dt, seuils):
                 'etat_pending': None, 'etat_pending_n': 0}
 
     speed = cur.get('speed_mbps', 0)
+    hc = cur.get('hc', True)          # compteurs 64 bits ? sinon bouclage 32 bits à gérer
+    if reboot:
+        # le switch a redémarré (sysUpTime a reculé) : tous les deltas sont faux
+        prev = None
     if prev and dt > 0 and 'in_oct' in prev:
+        def _d(k, large=0):
+            c = cur.get(k, 0)
+            p = prev.get(k, c)
+            d = c - p
+            if d >= 0:
+                return d
+            # delta négatif : bouclage d'un compteur 32 bits (prev proche du
+            # plafond) OU vrai redémarrage (le compteur repart de ~0).
+            if large and p > large // 2:
+                return (large - p) + c        # bouclage : delta réel
+            return c                          # redémarrage
+        oct_large = 0 if hc else 2 ** 32       # ifTable = Counter32
         raw_in = cur.get('in_oct', 0) - prev.get('in_oct', 0)
         raw_out = cur.get('out_oct', 0) - prev.get('out_oct', 0)
-        reset = raw_in < 0 or raw_out < 0
-
-        def _d(k):
-            d = cur.get(k, 0) - prev.get(k, cur.get(k, 0))
-            return d if d >= 0 else cur.get(k, 0)   # compteur remis à zéro (reboot)
-        bps_inst = max(_d('in_oct'), _d('out_oct')) * 8 / dt
-        pps_inst = (_d('in_pkts') + _d('out_pkts')) / dt
+        reset = ((raw_in < 0 and prev.get('in_oct', 0) <= (oct_large or 2**32) // 2)
+                 or (raw_out < 0 and prev.get('out_oct', 0) <= (oct_large or 2**32) // 2))
+        bps_inst = max(_d('in_oct', oct_large), _d('out_oct', oct_large)) * 8 / dt
+        pps_inst = (_d('in_pkts', oct_large) + _d('out_pkts', oct_large)) / dt
         err_delta = _d('in_err') + _d('out_err')
         # Un compteur qui vient de « dépéguer » (0x7FFFFFFF → valeur réelle), de
         # boucler, ou de basculer 64↔32 bits d'un cycle à l'autre produit un delta
@@ -3408,7 +3450,7 @@ def _etat_led(prev, cur, dt, seuils):
     else:
         bps = pps = bps_inst = pps_inst = 0.0
         err_delta = 0
-        reset = False
+        reset = bool(reboot)
 
     pct = (bps / (speed * 1e6) * 100) if speed else 0.0
     pend = (prev or {}).get('etat_pending')
@@ -3455,6 +3497,32 @@ def _etat_led(prev, cur, dt, seuils):
     return {'etat': 'idle', 'blink_ms': 0, **base}
 
 
+def _lire_sysinfo(ip, communautes):
+    """{'sysname', 'sysdescr'} du switch — caché ~10 min (quasi statique)."""
+    ent = _activite_sysinfo.get(ip)
+    if ent and time.time() - ent['ts'] < _ACTIVITE_SYSINFO_TTL:
+        return ent
+
+    def _first(d):
+        try:
+            return str(next(iter(d.values())) or '')
+        except (StopIteration, TypeError):
+            return ''
+    cols = _snmp_bulk(ip, [_OID_SYS_NAME_B, _OID_SYS_DESCR_B], communautes)
+    ent = {'ts': time.time(),
+           'sysname': _first(cols.get(_OID_SYS_NAME_B, {})),
+           'sysdescr': _first(cols.get(_OID_SYS_DESCR_B, {}))}
+    if ent['sysname'] or ent['sysdescr']:
+        _activite_sysinfo[ip] = ent
+    return ent
+
+
+def _modele_court(sysdescr):
+    if not sysdescr:
+        return ''
+    return sysdescr.split('\n')[0].split(',')[0].strip()[:48]
+
+
 def _cycle_activite(clients):
     from database import get_local_db
     communautes = _communautes_snmp()
@@ -3467,50 +3535,86 @@ def _cycle_activite(clients):
         try:
             conn = get_local_db()
             try:
-                switchs = _switchs_baie(conn, cid)[:_ACTIVITE_MAX_SWITCHS]
+                switchs = _switchs_baie(conn, cid)
                 equipements, ports_ui, detail_sw, detail_ports, detail_ifs = [], [], [], [], []
                 nb_muets = 0
+                poll_par_ip = {}   # ip -> (infos, cur_ports, ok, hc, dt_switch, reboot, poe, sysinfo, uptime_s)
+
                 for sw in switchs:
                     ip, slot_id = sw['ip'], sw['slot_id']
-                    t0 = time.time()
-                    infos = _noms_interfaces(ip, communautes)
-                    mapping, sources, calibre = _mapping_baie_ifindex(
-                        conn, cid, slot_id, sw['appareil_id'], infos)
-                    cur_ports, ok, hc = _poll_switch_ports(ip, communautes, infos)
-                    if ok:
-                        c = _maj_assistant_calibration(cid, slot_id, ip, cur_ports)
-                        if c:
-                            calib_a_appliquer.append(c)
-                    poe = _poll_poe(ip, communautes) if ok else {}
+
+                    # ── relevé SNMP : UNE fois par IP, partagé entre ses slots ──
+                    if ip not in poll_par_ip:
+                        t0 = time.time()
+                        infos = _noms_interfaces(ip, communautes)
+                        cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos)
+                        poe = _poll_poe(ip, communautes) if ok else {}
+                        sysinfo = _lire_sysinfo(ip, communautes) if ok else {'sysname': '', 'sysdescr': ''}
+                        _poll_max_ms[0] = max(_poll_max_ms[0], int((time.time() - t0) * 1000))
+                        now = time.time()
+
+                        # dt via l'horloge de l'agent (sysUpTime), exact quelle que
+                        # soit la durée du poll ; détection de redémarrage.
+                        prev_sut = _activite_sut.get((cid, ip))
+                        dt_switch, reboot, uptime_s = None, False, (sut / 100.0 if sut else None)
+                        if sut and prev_sut:
+                            d_ticks = sut - prev_sut[0]
+                            if d_ticks < 0:
+                                reboot = True
+                            elif 0 < d_ticks < 2 ** 31:
+                                dt_switch = d_ticks / 100.0
+                        if sut:
+                            _activite_sut[(cid, ip)] = (sut, now)
+                        if dt_switch is None and prev_sut:
+                            dt_switch = max(0.5, now - prev_sut[1])   # repli horloge poste
+                        if reboot:
+                            journal_ops.append((f"{sw['nom']} ({ip}) — le switch a redémarré "
+                                                f"(compteurs remis à zéro)", 'warn', ip))
+
+                        poll_par_ip[ip] = (infos, cur_ports, ok, hc, dt_switch, reboot,
+                                           poe, sysinfo, uptime_s)
+                        etait_ok = _activite_switch_ok.get((cid, ip), True)
+                        if not ok and etait_ok:
+                            journal_ops.append((f"{sw['nom']} ({ip}) — relevé SNMP sans réponse", 'warn', ip))
+                        elif ok and not etait_ok:
+                            journal_ops.append((f"{sw['nom']} ({ip}) — relevé SNMP rétabli", 'info', ip))
+                        _activite_switch_ok[(cid, ip)] = ok
+                        if ok:
+                            c = _maj_assistant_calibration(cid, slot_id, ip, cur_ports)
+                            if c:
+                                calib_a_appliquer.append(c)
+
+                    (infos, cur_ports, ok, hc, dt_switch, reboot,
+                     poe, sysinfo, uptime_s) = poll_par_ip[ip]
                     poe_ports = poe.get('ports', {})
-                    poll_ms = int((time.time() - t0) * 1000)
-                    _poll_max_ms[0] = max(_poll_max_ms[0], poll_ms)
                     now = time.time()
                     comm = communautes[0] if communautes else 'public'
-
-                    etait_ok = _activite_switch_ok.get((cid, ip), True)
                     if not ok:
                         nb_muets += 1
-                        if etait_ok:
-                            journal_ops.append((f"{sw['nom']} ({ip}) — relevé SNMP sans réponse",
-                                                'warn', ip))
-                    elif ok and not etait_ok:
-                        journal_ops.append((f"{sw['nom']} ({ip}) — relevé SNMP rétabli", 'info', ip))
-                    _activite_switch_ok[(cid, ip)] = ok
+                    dt_def = dt_switch or _ACTIVITE_INTERVAL
 
-                    # ── état LED de CHAQUE port poll (mappé ou non) : sert aux LEDs
-                    #    (ports mappés) ET à la liste d'interfaces du moniteur ──
+                    mapping, sources, calibre, divergences = _mapping_baie_ifindex(
+                        conn, cid, slot_id, sw['appareil_id'], infos)
+                    cibles = {r[0]: (r[1] or r[2] or '') for r in conn.execute(
+                        "SELECT bp.numero, a.nom_machine, p.categorie FROM baie_slot_ports bp "
+                        "LEFT JOIN appareils a ON a.id = bp.appareil_id "
+                        "LEFT JOIN peripheriques p ON p.id = bp.peripherique_id "
+                        "WHERE bp.slot_id=?", (slot_id,))}
+
+                    _etats_prec = _activite_etat_mappe.setdefault((cid, slot_id), {})
+
+                    # ── état LED de CHAQUE port poll (mappé ou non) ──
                     etats = {}
                     for ifindex, p in cur_ports.items():
                         cle_all = (cid, ip, ifindex)
                         pr_all = _activite_prev.get(cle_all)
-                        dt_all = (now - pr_all['ts']) if (pr_all and 'ts' in pr_all) else _ACTIVITE_INTERVAL
-                        led_all = _etat_led(pr_all, p, dt_all, seuils)
+                        dt_all = dt_switch or ((now - pr_all['ts']) if (pr_all and 'ts' in pr_all)
+                                               else _ACTIVITE_INTERVAL)
+                        led_all = _etat_led(pr_all, p, dt_all, seuils, reboot=reboot)
                         _pr = pr_all or {}
                         _activite_prev[cle_all] = {
                             'in_oct': p['in_oct'], 'out_oct': p['out_oct'],
                             'in_pkts': p['in_pkts'], 'out_pkts': p['out_pkts'],
-                            # erreurs non relevées ce cycle → on conserve la dernière valeur connue
                             'in_err': p.get('in_err', _pr.get('in_err', 0)),
                             'out_err': p.get('out_err', _pr.get('out_err', 0)),
                             'bps_ema': led_all['bps_ema'], 'pps_ema': led_all['pps_ema'],
@@ -3533,13 +3637,17 @@ def _cycle_activite(clients):
                     nb_ethernet = sum(1 for m in infos.values() if m.get('ethernet', True)) or len(cur_ports)
 
                     debit_total, nb_up, nb_actifs, err_total, nb_manques = 0.0, 0, 0, 0, 0
-                    _etats_prec = _activite_etat_mappe.setdefault((cid, slot_id), {})
+                    pegge_sw = any(p.get('cpt_pegge') for p in cur_ports.values())
+                    if pegge_sw and not _etats_prec.get('_pegge'):
+                        journal_ops.append((f"{sw['nom']} ({ip}) — compteurs SNMP d'octets bloqués à 2 Go "
+                                            f"(agent défectueux) : activité estimée sur les paquets", 'warn', ip))
+                    _etats_prec['_pegge'] = pegge_sw
+
                     for numero, ifindex in sorted(mapping.items()):
                         cle = (cid, ip, ifindex)
                         p = cur_ports.get(ifindex)
                         led = etats.get(ifindex)
                         if led is None:
-                            # relevé manqué pour ce port : on conserve le dernier état
                             prev = _activite_prev.get(cle)
                             if not prev:
                                 continue
@@ -3559,13 +3667,15 @@ def _cycle_activite(clients):
                             if led.get('reset'):
                                 journal_ops.append(
                                     (f"{sw['nom']} port {numero} — compteur SNMP réinitialisé", 'info', ip))
-                            if not p.get('speed_mbps'):
-                                journal_ops.append(
-                                    (f"{sw['nom']} port {numero} — vitesse de lien inconnue", 'info', ip))
-                            if p.get('cpt_pegge'):
-                                journal_ops.append(
-                                    (f"{sw['nom']} ({ip}) — compteurs SNMP bloqués à 2 Go (agent défectueux) : "
-                                     f"activité estimée sur les paquets seulement", 'warn', ip))
+                            # vitesse inconnue : une seule fois, à l'apparition
+                            cle_vit = ('vit', numero)
+                            if p and not p.get('speed_mbps'):
+                                if not _etats_prec.get(cle_vit):
+                                    journal_ops.append(
+                                        (f"{sw['nom']} port {numero} — vitesse de lien inconnue", 'info', ip))
+                                _etats_prec[cle_vit] = True
+                            elif _etats_prec.get(cle_vit):
+                                _etats_prec[cle_vit] = False
                             _a, _b = _etats_prec.get(numero), led['etat']
                             if _a in ('idle', 'stale') and _b == 'traffic':
                                 journal_ops.append((f"{sw['nom']} port {numero} — devient actif", 'info', ip))
@@ -3575,12 +3685,17 @@ def _cycle_activite(clients):
                                 journal_ops.append((f"{sw['nom']} port {numero} — lien coupé", 'warn', ip))
                         _etats_prec[numero] = led['etat']
 
+                        # historique (sparkline) : uniquement pour les ports mappés
+                        h = _activite_hist.setdefault(cle, collections.deque(maxlen=_ACTIVITE_HIST_MAX))
+                        h.append((round(now), round(led['bps']), round(led['pps'], 1)))
+
                         ports_ui.append({'slot_id': slot_id, 'numero': numero,
                                          'etat': led['etat'], 'blink_ms': led['blink_ms'],
                                          'debit_bps': round(led['bps']), 'pps': round(led['pps'], 1),
                                          'err_delta': led['err_delta'],
                                          'nom': (infos.get(ifindex) or {}).get('nom', ''),
                                          'alias': (infos.get(ifindex) or {}).get('alias', ''),
+                                         'cible': cibles.get(numero, ''),
                                          'cpt_pegge': (p or {}).get('cpt_pegge', False)})
                         if led['etat'] not in ('down', 'stale'):
                             nb_up += 1
@@ -3595,21 +3710,41 @@ def _cycle_activite(clients):
                             'ip': ip, 'switch_nom': sw['nom'], 'numero': numero, 'ifindex': ifindex,
                             'port_nom': meta.get('nom') or f'if{ifindex}',
                             'port_alias': meta.get('alias') or '',
+                            'cible': cibles.get(numero, ''),
                             'oper': (p or {}).get('oper', 0), 'speed_mbps': (p or {}).get('speed_mbps', 0),
                             'in_oct': (p or {}).get('in_oct'), 'out_oct': (p or {}).get('out_oct'),
                             'in_pkts': (p or {}).get('in_pkts'), 'out_pkts': (p or {}).get('out_pkts'),
                             'bps': round(led['bps']), 'pps': round(led['pps'], 1),
                             'pct': round(led.get('pct', 0), 1), 'etat': led['etat'],
                             'source_mapping': sources.get(numero, 'non_mappé'),
+                            'divergence': numero in divergences,
                             'manques': pr.get('manques', 0),
                             'cpt_pegge': (p or {}).get('cpt_pegge', False),
                             'poe': poe_ports.get(numero),
+                            'hist': [[t, b] for t, b, _pp2 in list(h)],
                             'stale': led['etat'] == 'stale'})
                         _poe_p = poe_ports.get(numero)
                         if _poe_p and _poe_p['statut'] == 4 and _etats_prec.get(('poe', numero)) != 4:
                             journal_ops.append((f"{sw['nom']} port {numero} — défaut PoE", 'warn', ip))
                         if _poe_p:
                             _etats_prec[('poe', numero)] = _poe_p['statut']
+
+                    if divergences and set(divergences) != set(_etats_prec.get('_div', [])):
+                        journal_ops.append(
+                            (f"{sw['nom']} ({ip}) — la topologie et le nom d'interface divergent sur "
+                             f"le(s) port(s) {', '.join(map(str, sorted(divergences)))} : calibration à vérifier",
+                             'warn', ip))
+                    _etats_prec['_div'] = list(divergences)
+
+                    # alerte budget PoE
+                    poe_alerte = False
+                    if poe.get('total_w') and poe.get('budget_w'):
+                        poe_alerte = poe['total_w'] / poe['budget_w'] > 0.9
+                        if poe_alerte and not _etats_prec.get('_poe_budget'):
+                            journal_ops.append(
+                                (f"{sw['nom']} ({ip}) — budget PoE presque atteint "
+                                 f"({poe['total_w']}/{poe['budget_w']} W)", 'warn', ip))
+                        _etats_prec['_poe_budget'] = poe_alerte
 
                     equipements.append({
                         'ip': ip, 'nom': sw['nom'], 'appareil_id': sw['appareil_id'],
@@ -3618,13 +3753,18 @@ def _cycle_activite(clients):
                     detail_sw.append({
                         'ip': ip, 'nom': sw['nom'], 'appareil_id': sw['appareil_id'],
                         'slot_id': slot_id,
-                        'derniere_maj': _now_z(), 'duree_poll_ms': poll_ms,
+                        'sysname': sysinfo.get('sysname', ''),
+                        'modele': _modele_court(sysinfo.get('sysdescr', '')),
+                        'uptime_s': uptime_s, 'redemarre': reboot,
+                        'derniere_maj': _now_z(), 'duree_poll_ms': _poll_max_ms[0],
+                        'dt_s': round(dt_switch, 1) if dt_switch else None,
                         'communaute': comm, 'compteurs_64bits': hc,
                         'nb_ifindex_ethernet': nb_ethernet,
                         'nb_ports_mappes': len(mapping), 'nb_manques': nb_manques,
+                        'nb_divergences': len(divergences),
                         'nb_ports_calibres': sum(1 for s in sources.values()
                                                  if s in ('manuel', 'topologie', 'nom_port')),
-                        'poe': bool(poe_ports),
+                        'poe': bool(poe_ports), 'poe_alerte': poe_alerte,
                         'poe_total_w': poe.get('total_w'), 'poe_budget_w': poe.get('budget_w'),
                         'poe_nb_alimentes': sum(1 for x in poe_ports.values() if x['statut'] == 3),
                         'calibre': calibre})
@@ -3637,14 +3777,22 @@ def _cycle_activite(clients):
                 motif = 'sans_reponse'
             with _activite_lock:
                 _activite_resultat[cid] = {
-                    'actif': True, 'ts': time.time(), 'nb_switchs': len(switchs),
+                    'actif': True, 'ts': time.time(), 'nb_switchs': len({s['ip'] for s in switchs}),
                     'nb_muets': nb_muets, 'motif': motif, 'cadence_s': round(_cadence[0]),
                     'calibre': bool(equipements) and all(e['calibre'] for e in equipements),
                     'equipements': equipements, 'ports': ports_ui}
                 _activite_detail[cid] = {'ts': _now_z(), 'switchs': detail_sw,
                                          'ports': detail_ports, 'interfaces': detail_ifs}
+            _activite_echecs[cid] = 0
         except Exception:
-            logger.debug('network_diag: cycle activité — client %s en échec', cid, exc_info=True)
+            n = _activite_echecs.get(cid, 0) + 1
+            _activite_echecs[cid] = n
+            if n >= _ACTIVITE_ECHECS_MAX:
+                logger.warning('network_diag: cycle activité — client %s en échec %d fois', cid, n)
+                with _activite_lock:
+                    _activite_resultat[cid] = {'actif': False, 'motif': 'erreur_interne'}
+            else:
+                logger.debug('network_diag: cycle activité — client %s en échec', cid, exc_info=True)
         for msg, niv, cib in journal_ops:
             _journal(msg, niv, cib)
         for sid, num, ifx in calib_a_appliquer:      # écriture hors de la connexion de lecture
@@ -3668,12 +3816,19 @@ def _activite_loop():
                     _activite_detail.pop(c, None)
                 if partis:      # structures par (client, …) d'un client qui ne regarde plus
                     pset = set(partis)
-                    for reg in (_activite_switch_ok, _activite_etat_mappe, _activite_calib):
+                    for reg in (_activite_switch_ok, _activite_etat_mappe, _activite_calib,
+                                _activite_hist, _activite_sut):
                         for k in [k for k in reg if k[0] in pset]:
                             reg.pop(k, None)
+                    for c in pset:
+                        _activite_echecs.pop(c, None)
                 for k in [k for k, v in list(_activite_prev.items())
                           if now - v.get('ts', 0) > _ACTIVITE_PURGE]:
                     _activite_prev.pop(k, None)
+                    _activite_hist.pop(k, None)
+                for k in [k for k, v in list(_activite_sysinfo.items())
+                          if now - v['ts'] > max(_ACTIVITE_PURGE, _ACTIVITE_SYSINFO_TTL * 2)]:
+                    _activite_sysinfo.pop(k, None)
                 for k in [k for k, v in list(_activite_noms.items())
                           if now - v['ts'] > max(_ACTIVITE_PURGE, _ACTIVITE_NOMS_TTL * 2)]:
                     _activite_noms.pop(k, None)
@@ -3714,13 +3869,15 @@ def _activite_loop():
 
 
 def _demarrer_activite_thread():
-    """Démarre le thread d'activité si besoin (idempotent, lazy)."""
+    """Démarre le thread d'activité si besoin (idempotent, lazy). Sous verrou :
+    la page et la modale peuvent appeler simultanément au chargement."""
     global _activite_thread
-    if _activite_thread and _activite_thread.is_alive():
-        return
-    _activite_thread = threading.Thread(target=_activite_loop, daemon=True,
-                                        name='DiagBaieActivite')
-    _activite_thread.start()
+    with _activite_thread_lock:
+        if _activite_thread and _activite_thread.is_alive():
+            return
+        _activite_thread = threading.Thread(target=_activite_loop, daemon=True,
+                                            name='DiagBaieActivite')
+        _activite_thread.start()
 
 
 def activite_baie(client_id: int) -> dict:
@@ -3840,6 +3997,39 @@ def calibrer_port_baie(client_id: int, slot_id: int, numero: int, if_index) -> b
     except Exception:
         logger.exception('network_diag: calibrer_port_baie')
         return False
+    finally:
+        conn.close()
+
+
+def calibrer_decalage_baie(client_id: int, slot_id: int, offset) -> int:
+    """Calibre tous les ports RJ (1-48) d'un slot en une fois : if_index =
+    numero + offset. Retourne le nombre de ports mis à jour (0 si slot absent
+    du client ou offset invalide)."""
+    from database import get_db
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        return 0
+    conn = get_db()
+    try:
+        if not conn.execute("SELECT 1 FROM baie_slots WHERE id=? AND client_id=?",
+                            (slot_id, client_id)).fetchone():
+            return 0
+        n = 0
+        for (numero,) in conn.execute(
+                "SELECT numero FROM baie_slot_ports WHERE slot_id=? AND numero<=48 ORDER BY numero",
+                (slot_id,)).fetchall():
+            v = numero + offset
+            if v < 1:
+                continue
+            conn.execute("UPDATE baie_slot_ports SET if_index=?, date_maj=? "
+                         "WHERE slot_id=? AND numero=?", (v, _now_z(), slot_id, numero))
+            n += 1
+        conn.commit()
+        return n
+    except Exception:
+        logger.exception('network_diag: calibrer_decalage_baie')
+        return 0
     finally:
         conn.close()
 

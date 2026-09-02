@@ -7048,6 +7048,25 @@ def api_baie_activite_calibrer():
             else (jsonify({'error': 'slot ou port introuvable'}), 404))
 
 
+@app.route('/api/baie/activite/calibrer/decalage', methods=['POST'])
+@login_required
+def api_baie_activite_calibrer_decalage():
+    """Calibre tous les ports RJ d'un slot d'un coup : ifIndex = numéro + offset
+    (cas fréquent où l'ifIndex du switch est le n° de port physique + une
+    constante). L'utilisateur ajuste ensuite les exceptions."""
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    d = request.json or {}
+    try:
+        slot_id = int(d.get('slot_id'))
+        offset = int(d.get('offset'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'slot_id/offset requis'}), 400
+    n = network_diag.calibrer_decalage_baie(cid, slot_id, offset)
+    return jsonify({'ok': n > 0, 'ports': n})
+
+
 @app.route('/api/baie/activite/calibrer/assistant', methods=['POST'])
 @login_required
 def api_baie_activite_calibrer_assistant():
