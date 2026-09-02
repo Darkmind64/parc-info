@@ -3203,7 +3203,8 @@ def _maj_assistant_calibration(cid, slot_id, ip, cur_ports):
         a = _activite_calib.get((cid, slot_id))
         if not a or a['trouve']:
             return None
-        oper_now = {ix: p['oper'] for ix, p in cur_ports.items()}
+        oper_now = {ix: p['oper'] for ix, p in cur_ports.items()
+                    if p.get('oper_ok', True) and p.get('oper') is not None}
         expire = time.time() - a['debut'] > _CALIB_FENETRE
 
         if a['last_oper'] is not None:
@@ -3372,7 +3373,12 @@ def _poll_switch_ports(ip, communautes, infos=None):
         h = h1 or h2 or h3 or h4
         hc_seen = hc_seen or h
         d = {
-            'oper': _i(_OID_IF_OPER, suf, 1),
+            # ifOperStatus PAS relevé pour ce port ce cycle (réponse GETBULK
+            # partielle/tronquée) : on NE fabrique PAS un « up » — l'appelant
+            # gardera le dernier état connu. Sinon les ports débranchés
+            # s'allumaient tous pendant un ou deux cycles dégradés.
+            'oper': _i(_OID_IF_OPER, suf, None),
+            'oper_ok': suf in oper,
             'speed_mbps': (infos.get(ifx) or {}).get('speed_mbps', 0),
             'in_oct': in_o, 'out_oct': out_o, 'in_pkts': in_p, 'out_pkts': out_p,
             'cpt_pegge': peg[0], 'hc': h,     # compteurs 64 bits ? sinon bouclage 32 bits possible
@@ -3606,6 +3612,11 @@ def _cycle_activite(clients):
                     # ── état LED de CHAQUE port poll (mappé ou non) ──
                     etats = {}
                     for ifindex, p in cur_ports.items():
+                        if not p.get('oper_ok', True):
+                            # ifOperStatus pas relevé ce cycle (réponse partielle) :
+                            # on ne touche à rien, l'état précédent est conservé
+                            # (branche « relevé manqué » plus bas).
+                            continue
                         cle_all = (cid, ip, ifindex)
                         pr_all = _activite_prev.get(cle_all)
                         dt_all = dt_switch or ((now - pr_all['ts']) if (pr_all and 'ts' in pr_all)
@@ -3711,7 +3722,7 @@ def _cycle_activite(clients):
                             'port_nom': meta.get('nom') or f'if{ifindex}',
                             'port_alias': meta.get('alias') or '',
                             'cible': cibles.get(numero, ''),
-                            'oper': (p or {}).get('oper', 0), 'speed_mbps': (p or {}).get('speed_mbps', 0),
+                            'oper': (p or {}).get('oper') or 0, 'speed_mbps': (p or {}).get('speed_mbps', 0),
                             'in_oct': (p or {}).get('in_oct'), 'out_oct': (p or {}).get('out_oct'),
                             'in_pkts': (p or {}).get('in_pkts'), 'out_pkts': (p or {}).get('out_pkts'),
                             'bps': round(led['bps']), 'pps': round(led['pps'], 1),

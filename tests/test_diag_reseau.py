@@ -650,6 +650,20 @@ def test_poll_switch_ports(monkeypatch):
     res3, ok3, _, _ = network_diag._poll_switch_ports('10.0.0.6', ['public'], {})
     assert ok3 is False and res3 == {}
 
+    # réponse partielle : les octets répondent mais PAS ifOperStatus pour if 2
+    # -> on ne fabrique pas un « up » (oper=None, oper_ok=False)
+    for d in (network_diag._activite_hc, network_diag._activite_capa_neg):
+        d['10.0.0.7'] = d.get('10.0.0.7')
+    network_diag._activite_hc['10.0.0.7'] = True
+    _T3 = {network_diag._OID_IF_OPER: {'1': 1},          # if 2 absent
+           network_diag._OID_IF_HCIN: {'1': 100, '2': 200},
+           network_diag._OID_IF_HCOUT: {'1': 0, '2': 0}}
+    monkeypatch.setattr(A, '_snmp_bulk_cols',
+                        lambda ip, bases, comm, **k: {b: dict(_T3.get(b, {})) for b in bases})
+    r4, _, _, _ = network_diag._poll_switch_ports('10.0.0.7', ['public'], {})
+    assert r4[1]['oper'] == 1 and r4[1]['oper_ok'] is True
+    assert r4[2]['oper'] is None and r4[2]['oper_ok'] is False
+
 
 def test_api_baie_activite_route_sans_snmp_synchrone(client, conn, deux_clients, make_appareil, monkeypatch):
     cid = deux_clients['cid_a']

@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-02 (v2.19.14). En cas de doute
+> Ce document décrit le comportement au 2026-09-02 (v2.19.15). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -56,6 +56,13 @@ des switchs de la baie et calcule l'état à peindre par port.
   `_snmp_walk` **et** `_snmp_bulk_cols` vérifient le request-id de la réponse
   (un switch lent renvoyait parfois une réponse tardive à la requête
   précédente → relevé décalé). Erreurs relevées 1 cycle sur 8.
+- **Réponse partielle** (v2.19.15) : si la colonne `ifOperStatus` manque pour un
+  port (réponse GETBULK tronquée, ou démarrage où 10 colonnes sont demandées le
+  temps que `_activite_hc` se fixe) alors que les octets répondent,
+  `_poll_switch_ports` renvoie `oper=None` + `oper_ok=False` — **jamais un
+  « up » fabriqué**. `_cycle_activite` traite ce port comme un relevé manqué
+  (dernier état conservé). Avant : tous les ports, débranchés compris,
+  s'allumaient une ou deux secondes.
 - **Δt via l'horloge de l'agent** (v2.19.14) : `sysUpTime` (`1.3.6.1.2.1.1.3.0`)
   est lu dans le même GETBULK ; le débit se calcule sur
   `(sysUpTime_now - sysUpTime_prev) / 100`, exact quelle que soit la durée du

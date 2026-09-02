@@ -1,8 +1,31 @@
-PARCINFO_VERSION=2.19.14
+PARCINFO_VERSION=2.19.15
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090205
+BUILD_NUMBER=2026090206
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.15 - Vue d'activite baie : une reponse SNMP partielle n'allume plus toutes les LEDs
+# Retour terrain apres 2.19.14 : "parfois l'ensemble des ports affichent une
+# LED (meme ceux debranches) pendant quelques dizaines de secondes".
+#
+# Cause : quand la reponse GETBULK est partielle (tronquee sur un switch lent,
+# ou au demarrage ou le releve demande 10 colonnes le temps que _activite_hc
+# se fixe), la colonne ifOperStatus pouvait manquer pour certains ports alors
+# que les octets repondaient. _poll_switch_ports mettait alors oper=1 par
+# defaut -> les ports debranches passaient "up" -> LED allumee, pendant 1 a 2
+# cycles degrades.
+#
+# - _poll_switch_ports : oper=None + oper_ok=False quand ifOperStatus n'est pas
+#   dans la reponse pour ce port (au lieu de oper=1 par defaut).
+# - _cycle_activite : un port oper_ok=False est traite comme un releve manque
+#   (dernier etat conserve, "stale" apres 3 manques) au lieu de fabriquer un
+#   etat a partir des seuls octets.
+# - _maj_assistant_calibration : ignore les ports dont oper n'a pas ete releve
+#   (evite les fausses transitions).
+#
+# Aucune nouvelle dependance, aucun schema change. pytest 231 + scripts OK.
+# Verifie en navigateur : 9 ports down restent eteints pendant 84 s d'observation
+# (demarrage inclus), plus de flash "tous allumes".
 
 # Version 2.19.14 - Moniteur reseau de la baie : exactitude des chiffres + ajouts
 # 2e passe d'audit apres 2.19.13, ciblee sur la justesse de ce qui est affiche.
