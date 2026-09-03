@@ -3763,6 +3763,12 @@ const BrassageModal = {
             avert += `<div style="font-size:.7rem;color:var(--accent-orange,#f59e0b);margin-bottom:.35rem;">`
                   + `⚠ Relevé partiel (budget dépassé) — non interrogé(s) : ${(d.switchs_non_releves).map(escH).join(', ')}.</div>`;
         }
+        if ((d.switchs_snmp_refuse || []).length) {
+            avert += `<div style="font-size:.7rem;color:var(--accent-orange,#f59e0b);margin-bottom:.35rem;">`
+                  + `🔒 SNMP présent mais non exploitable : `
+                  + d.switchs_snmp_refuse.map(s => `${escH(s.nom)} (${escH(s.detail || 'refusé')})`).join(', ')
+                  + `. Vérifiez la communauté, l'ACL, ou renseignez un utilisateur SNMPv3 (Réglages → Réseau &amp; Scan).</div>`;
+        }
         if (avert) avert = `<div style="margin-bottom:.5rem;">${avert}</div>`;
         let html = '';
         const faible = p => p.confiance === 'faible'

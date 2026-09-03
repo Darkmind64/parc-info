@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-03 (v2.19.28). En cas de doute
+> Ce document décrit le comportement au 2026-09-03 (v2.19.29). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -16,7 +16,7 @@ du **client actif** ; les évènements sont rattachés à ce client.
 |---|-----|------------------|-----------|---------|
 | 1 | **Diagnostic actif** | Tables ARP de l'OS, ping en rafale (perte/latence/gigue), DHCPDISCOVER, requêtes NBNS/DNS | Aucun | Le DHCP pirate est best-effort (port 68 souvent occupé) |
 | 2 | **Capture passive** | Trames vues sur l'interface (ARP, DHCP, STP, RA IPv6, en-têtes TCP) | `scapy` + privilèges + Npcap (Windows) ; en conteneur `network_mode: host` + `cap_add: [NET_RAW, NET_ADMIN]` | Ne voit que le trafic qui atteint la sonde (pas au-delà du switch) |
-| 3 | **Interrogation SNMP** | Compteurs par port des switchs/routeurs/NAS (erreurs, duplex, débit, état) | SNMP v1/v2c en lecture seule sur les équipements ; `diag_snmp_actif` | Deux relevés successifs nécessaires pour un delta |
+| 3 | **Interrogation SNMP** | Compteurs par port des switchs/routeurs/NAS (erreurs, duplex, débit, état) | SNMP v1/v2c **ou v3 authNoPriv** en lecture seule ; `diag_snmp_actif` | Deux relevés successifs nécessaires pour un delta |
 | 4 | **Topologie L2** | Tables MAC (bridge-MIB FDB) + LLDP → quel appareil sur quel port | Palier 3 actif + `diag_topologie_active` | FDB volatile ; VLAN non pris en compte finement |
 | 5 | **Tendances & baseline** | Historique des métriques (liaison, ports) → dégradation *relative* | `diag_baseline_active` (défaut on) ; ~8 points d'historique | Ne remplace pas les seuils absolus, les complète |
 | 6 | **Rapport & remédiation** | — (synthèse) | reportlab pour le PDF (repli HTML sinon) | — |
@@ -407,6 +407,9 @@ corriger ? »), dans le rapport et dans l'e-mail d'alerte.
 | `diag_alerte_destinataire` | `` | destinataire des alertes et du rapport périodique |
 | `diag_snmp_actif` | `0` | palier 3 (interrogation SNMP) |
 | `diag_snmp_communautes` | `public` | communautés v1/v2c, CSV, essayées dans l'ordre |
+| `diag_snmp_v3_user` | `` | utilisateur SNMPv3 (USM) — vide = v3 désactivé ; essayé avant les communautés |
+| `diag_snmp_v3_auth_proto` | `SHA` | protocole d'auth v3 : `MD5` / `SHA` (SHA-1) / `SHA224` / `SHA256` / `SHA384` / `SHA512` |
+| `diag_snmp_v3_auth_pass` | `` | mot de passe d'authentification v3 (authNoPriv — pas de chiffrement) |
 | `diag_snmp_seuil_erreurs` | `50` | Δ erreurs/discards/CRC par relevé avant alerte |
 | `diag_snmp_seuil_saturation_pct` | `90` | seuil de saturation de lien (%) |
 | `diag_topologie_active` | `0` | palier 4 (topologie L2, nécessite le SNMP) |
@@ -474,6 +477,33 @@ GET, GET typé et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
 `_snmp_get` ne renvoie que les OCTET STRING (sysDescr/sysName) ; **utiliser
 `_snmp_get_typed`** dès qu'un scalaire entier est attendu (UPS-MIB, etc.).
 **Aucune dépendance** (pas de pysnmp).
+
+### SNMPv3 (USM, authNoPriv — v2.19.29)
+
+Constat d'audit #7 : les pare-feux, box de FAI récentes et caméras managées
+sont souvent en v3 uniquement, et un échec SNMP ne disait pas s'il s'agissait
+d'un refus ou d'un appareil qui ne fait pas de SNMP.
+
+- **`_v3_discover(ip)`** : découverte d'engine SNMPv3, **sans authentification**
+  — tout agent SNMP (même v3-only, même mal configuré en v1/v2c) y répond.
+  C'est LA sonde universelle « y a-t-il un agent SNMP ici ? ». Cache 300 s
+  (positif) / 90 s (négatif).
+- **authNoPriv** (MD5 / SHA-1 / SHA-224/256/384/512, **pas de priv**) : quand
+  `diag_snmp_v3_user` + `diag_snmp_v3_auth_pass` sont renseignés,
+  `_snmp_get_typed` et `_snmp_walk` tentent une requête v3 **en premier**, avec
+  repli automatique sur les communautés v1/v2c (jamais de régression pour un
+  agent réellement v2c). `_v3_ku`/`_v3_kul` (RFC 3414 §2.6, vecteurs A.3
+  vérifiés), HMAC tronqué inséré dans `msgAuthenticationParameters`
+  (`_v3_signer`), resynchronisation `notInTimeWindow`/`unknownEngineID`
+  (une seule nouvelle tentative). Crypto = `hashlib` + `hmac` (stdlib).
+- **Le scan réseau reste en v1/v2c pur** (`_scan_host` passe `_essai_v3=False`)
+  : une découverte d'engine par hôte non-SNMP ajouterait ~1,5 s à chaque
+  adresse d'un /24.
+- **`_snmp_presence(ip, communautes) → (present, exploitable, detail)`** :
+  distingue « agent SNMP présent mais refusé » (mauvaise communauté, ACL,
+  v3 exigé) de « pas de matériel SNMP ». Utilisé par le bouton **« Tester
+  SNMP »** (`api_diag_test_snmp`) et par **« Deviner le brassage »**
+  (`analyser_brassage_baie` → `switchs_snmp_refuse`, bannière 🔒 dans la modale).
 
 ---
 

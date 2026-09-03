@@ -1,9 +1,41 @@
-PARCINFO_VERSION=2.19.28
+PARCINFO_VERSION=2.19.29
 RELEASE_DATE=2026-09-03
 BUILD_NUMBER=2026090301
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.29 - Audit reseau, lot 5 : SNMPv3 + "SNMP present mais refuse"
+# Constat #7 de l'audit "baie de brassage".
+#
+# SNMPv3 (USM, authNoPriv) - app.py
+#   _v3_ku / _v3_kul       : password->key + localisation (RFC 3414, vecteurs
+#                            de test A.3 verifies MD5 et SHA-1).
+#   _v3_message/_v3_signer : assemblage SNMPv3Message + HMAC tronque insere a
+#                            la place de msgAuthenticationParameters.
+#   _v3_parse/_v3_pdu_varbinds : decodage message + varbinds de reponse.
+#   _v3_discover           : decouverte d'engine (SANS auth) - cache 300 s
+#                            positif / 90 s negatif.
+#   _snmp_v3_exchange      : GET/GETNEXT/GETBULK authNoPriv, resync
+#                            notInTimeWindow/unknownEngineID (1 retry).
+#   _v3_walk               : GETNEXT en boucle.
+#   Protocoles : MD5, SHA-1, SHA-224/256/384/512. Pas de priv (chiffrement).
+#   Encodage BER fait main, crypto = stdlib (hashlib + hmac), zero dependance.
+#
+# Integration
+#   _snmp_get_typed / _snmp_walk tentent v3 en premier (parametre _essai_v3),
+#   repli auto sur les communautes v1/v2c. Le scan (_scan_host) reste en v1/v2c
+#   pur (_essai_v3=False) pour ne pas ajouter une decouverte v3 par hote.
+#   Config : diag_snmp_v3_user / _auth_proto / _auth_pass (Reglages -> Reseau
+#   & Scan, panneau SNMP de base.html).
+#
+# "SNMP present mais refuse" vs "pas de materiel SNMP" (#7 court terme)
+#   _snmp_presence(ip, communautes) -> (present, exploitable, detail).
+#   - api_diag_test_snmp : essaie v3 puis communautes, sinon _snmp_presence
+#     -> "SNMP present mais non exploitable - <detail>".
+#   - analyser_brassage_baie : pour chaque switch qui n'a RIEN renvoye,
+#     _snmp_presence -> switchs_snmp_refuse [{nom, ip, detail}] ; banniere
+#     "SNMP present mais non exploitable" dans la modale.
+#
 # Version 2.19.28 - Audit baie de brassage, lot 4 : tache de fond, confiance, capture
 # Constats #18, #19, #20 de l'audit "baie de brassage".
 #

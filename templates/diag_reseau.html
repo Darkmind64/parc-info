@@ -109,7 +109,7 @@
     <div class="cfg-etat">
         {% set _toggles = [
             ('diag_surveillance_active', 'Surveillance continue', etat_moniteur.intervalle_s ~ ' s'),
-            ('diag_snmp_actif', 'Interrogation SNMP', diag_cfg.diag_snmp_communautes),
+            ('diag_snmp_actif', 'Interrogation SNMP', (('v3 : ' ~ diag_cfg.diag_snmp_v3_user ~ ' + ') if diag_cfg.diag_snmp_v3_user else '') ~ diag_cfg.diag_snmp_communautes),
             ('diag_topologie_active', 'Topologie L2', 'nécessite le SNMP'),
             ('diag_capture_active', 'Capture passive (palier 2)', etat_capture.motif),
             ('diag_baseline_active', 'Tendances / baseline', ''),

@@ -3469,8 +3469,28 @@ function rendreConfig() {
         <input type="checkbox" data-cfg="diag_snmp_actif" ${g('diag_snmp_actif')==='1'?'checked':''} class="cfg-check">
     </div>
     <div class="cfg-row">
-        <label class="cfg-label">Communautés SNMP (séparées par des virgules)</label>
+        <label class="cfg-label">Communautés SNMP v1/v2c (séparées par des virgules)</label>
         <input type="text" data-cfg="diag_snmp_communautes" value="${g('diag_snmp_communautes')||'public'}" placeholder="public" class="cfg-input">
+    </div>
+    <div style="font-size:.68rem;color:var(--text-secondary);padding:.2rem 0 .3rem;line-height:1.4;">
+        SNMPv3 (authNoPriv) — essayé en premier si un utilisateur est renseigné, repli
+        automatique sur les communautés ci-dessus. Pour les pare-feux / box FAI / caméras
+        managées qui n'acceptent que v3. Le chiffrement (priv) n'est pas géré : n'utilisez
+        pas un compte v3 dont l'accès en lecture serait sensible.
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">SNMPv3 — utilisateur (USM)</label>
+        <input type="text" data-cfg="diag_snmp_v3_user" value="${g('diag_snmp_v3_user')||''}" placeholder="(vide = désactivé)" class="cfg-input" autocomplete="off">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">SNMPv3 — protocole d'authentification</label>
+        <select data-cfg="diag_snmp_v3_auth_proto" class="cfg-input cfg-input-sm">
+            ${['MD5','SHA','SHA224','SHA256','SHA384','SHA512'].map(p=>`<option value="${p}" ${(g('diag_snmp_v3_auth_proto')||'SHA')===p?'selected':''}>${p==='SHA'?'SHA-1':p}</option>`).join('')}
+        </select>
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">SNMPv3 — mot de passe d'authentification</label>
+        <input type="password" data-cfg="diag_snmp_v3_auth_pass" value="${g('diag_snmp_v3_auth_pass')||''}" placeholder="(8 caractères minimum)" class="cfg-input" autocomplete="new-password">
     </div>
     <div class="cfg-row">
         <label class="cfg-label">Seuil d'erreurs / rejets par relevé</label>

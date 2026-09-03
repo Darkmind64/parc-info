@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, flash, session, send_from_directory, make_response, send_file, abort, get_flashed_messages
 from werkzeug.utils import secure_filename
 from datetime import datetime, date, timedelta, timezone
-import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, secrets, logging, json, time, io, colorsys
+import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, concurrent.futures, hashlib, hmac, secrets, logging, json, time, io, colorsys
 from PIL import Image
 from io import BytesIO
 try:
@@ -9023,21 +9023,41 @@ def _snmp_get(ip_str, oids, communaute='public', timeout=0.8, port=161):
     return {o: v for o, v in r.items() if isinstance(v, str) and v}
 
 
-def _snmp_get_typed(ip_str, oids, communaute='public', timeout=1.0, port=161, version=1):
+def _snmp_get_typed(ip_str, oids, communaute='public', timeout=1.0, port=161,
+                    version=1, _essai_v3=True):
     """GET SNMP (v2c par défaut, v1 si version=0). Renvoie la valeur TYPÉE
     (int pour INTEGER/Counter/Gauge/TimeTicks, str pour OCTET STRING/IpAddress/
     OID). {} au moindre souci.
     Robuste : vérifie le request-id de la réponse (draine une réponse tardive à
     une requête précédente) et associe chaque varbind à SON OID retourné (pas
     par position — certains agents renvoient moins de varbinds ou dans le
-    désordre, ce qui décalait tout le reste)."""
+    désordre, ce qui décalait tout le reste).
+
+    Si un utilisateur SNMPv3 est configuré, on tente d'abord une requête
+    authNoPriv ; en cas d'échec on retombe sur la communauté v1/v2c (jamais de
+    régression pour un agent réellement v2c)."""
+    oidset = set(oids)
+    _v3 = _snmp_v3_params() if _essai_v3 else None
+    if _v3:
+        _vb = b''.join(_ber_sequence(0x30, _ber_oid(oid) + b'\x05\x00') for oid in oids)
+        _pdu = _ber_sequence(0xa0, _ber_entier(_snmp_walk_reqid()) + _ber_entier(0)
+                             + _ber_entier(0) + _ber_sequence(0x30, _vb))
+        _body, _st = _snmp_v3_exchange(ip_str, _pdu, port, timeout, _v3)
+        if _st == 'ok' and _body is not None:
+            _r = {}
+            for _o, _tv, _vv in _v3_pdu_varbinds(_body):
+                if _o in oidset:
+                    _val = _ber_decoder_valeur(_tv, _vv)
+                    if _val is not None and _val != '':
+                        _r[_o] = _val
+            if _r:
+                return _r
     try:
         reqid = _snmp_walk_reqid()
         varbinds = b''.join(_ber_sequence(0x30, _ber_oid(oid) + b'\x05\x00') for oid in oids)
         pdu_corps = _ber_entier(reqid) + _ber_entier(0) + _ber_entier(0) + _ber_sequence(0x30, varbinds)
         message = _ber_sequence(0x30, _ber_entier(version) + _ber_chaine(communaute)
                                 + _ber_sequence(0xa0, pdu_corps))
-        oidset = set(oids)
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.settimeout(timeout)
             s.sendto(message, (ip_str, port))
@@ -9132,10 +9152,16 @@ def _snmp_walk(ip_str, oid_base, communautes=('public',), timeout=1.2,
     """Parcourt le sous-arbre `oid_base` par GETNEXT. Retourne
     {suffixe_oid: valeur} (suffixe = ce qui suit oid_base, ex. l'ifIndex).
     Essaie chaque communauté dans l'ordre ; s'arrête à endOfMibView, à la
-    sortie du sous-arbre, sur erreur, ou à max_vars. {} si rien ne répond."""
+    sortie du sous-arbre, sur erreur, ou à max_vars. {} si rien ne répond.
+    Un utilisateur SNMPv3 configuré est tenté en premier (authNoPriv)."""
     if isinstance(communautes, str):
         communautes = [communautes]
     prefixe = oid_base if oid_base.endswith('.') else oid_base + '.'
+    _v3 = _snmp_v3_params()
+    if _v3:
+        _r = _v3_walk(ip_str, oid_base, _v3, timeout, max_vars, port)
+        if _r:
+            return _r
     for communaute in communautes:
         resultats = {}
         oid_courant = oid_base
@@ -9215,6 +9241,327 @@ _snmp_walk_reqid_compteur = [0]
 def _snmp_walk_reqid():
     _snmp_walk_reqid_compteur[0] = (_snmp_walk_reqid_compteur[0] + 1) & 0x7fffffff
     return _snmp_walk_reqid_compteur[0] or 1
+
+
+# ── SNMPv3 (USM, authNoPriv) ────────────────────────────────────────────────
+# Constat d'audit #7 : v1/v2c seuls, et un échec SNMP ne disait pas s'il
+# s'agissait d'un refus (mauvaise communauté, ACL, v3 exigé) ou d'un appareil
+# qui ne fait tout simplement pas de SNMP. Deux apports :
+#   1. `_v3_discover(ip)` — sonde d'engine SNMPv3, SANS authentification : tout
+#      agent SNMP (même v3-only, même mal configuré en v1/v2c) répond. C'est LA
+#      sonde universelle « y a-t-il un agent SNMP ici ? ».
+#   2. authNoPriv (MD5 / SHA-1 / SHA-256) : GET / GETNEXT / GETBULK authentifiés
+#      quand un utilisateur v3 est configuré (Réglages → Réseau & Scan).
+# Encodage BER fait main (comme le reste du SNMP du projet), crypto = stdlib
+# (hashlib + hmac), aucune dépendance nouvelle. Pas de chiffrement (priv) :
+# authNoPriv suffit pour lire des compteurs et une table MAC en lecture seule.
+
+_V3_AUTH_PROTO = {   # nom -> (fonction de hachage, longueur du tag HMAC tronqué)
+    'MD5':    (hashlib.md5,    12),
+    'SHA':    (hashlib.sha1,   12),
+    'SHA1':   (hashlib.sha1,   12),
+    'SHA224': (hashlib.sha224, 16),
+    'SHA256': (hashlib.sha256, 24),
+    'SHA384': (hashlib.sha384, 32),
+    'SHA512': (hashlib.sha512, 48),
+}
+
+_V3_STATS_OID = {   # OID d'un compteur usmStats* dans un Report -> cause lisible
+    '1.3.6.1.6.3.15.1.1.1.0': 'niveau de sécurité non supporté',
+    '1.3.6.1.6.3.15.1.1.2.0': 'horloge désynchronisée',
+    '1.3.6.1.6.3.15.1.1.3.0': "nom d'utilisateur SNMPv3 inconnu",
+    '1.3.6.1.6.3.15.1.1.4.0': 'engine ID inconnu',
+    '1.3.6.1.6.3.15.1.1.5.0': 'authentification refusée (mot de passe / protocole)',
+    '1.3.6.1.6.3.15.1.1.6.0': 'déchiffrement refusé',
+}
+
+_v3_engine_cache = {}          # ip -> (engine_id, boots, time, monotonic_au_relevé)
+_v3_engine_negatif = {}        # ip -> monotonic : découverte en échec, ne pas re-tenter tout de suite
+_v3_engine_lock = threading.Lock()
+_V3_ENGINE_TTL = 300           # s — au-delà, on refait la découverte
+_V3_ENGINE_TTL_NEG = 90        # s — un hôte qui n'a pas répondu à la découverte v3
+
+
+def _v3_ku(hfn, password):
+    """Mot de passe -> clé (RFC 3414 §2.6) : haché des 1 048 576 premiers octets
+    du mot de passe répété à l'infini."""
+    pw = (password or '').encode('utf-8') or b'\x00'
+    rep = (pw * (1048576 // len(pw) + 1))[:1048576]
+    h = hfn(); h.update(rep)
+    return h.digest()
+
+
+def _v3_kul(hfn, ku, engine_id):
+    """Localisation de clé (RFC 3414 §2.6) : H(Ku || engineID || Ku)."""
+    h = hfn(); h.update(ku + engine_id + ku)
+    return h.digest()
+
+
+def _v3_usm(engine_id, boots, time_, user, auth_params):
+    """msgSecurityParameters : SEQUENCE USM encodée, emballée en OCTET STRING."""
+    seq = (_ber_chaine(engine_id) + _ber_entier(boots) + _ber_entier(time_)
+           + _ber_chaine(user) + _ber_chaine(auth_params) + _ber_chaine(b''))
+    return _ber_chaine(_ber_sequence(0x30, seq))
+
+
+def _v3_message(msg_id, engine_id, boots, time_, user, pdu, taglen=0):
+    """Assemble un SNMPv3Message. `taglen`>0 -> authNoPriv (placeholder de
+    `taglen` zéros dans msgAuthenticationParameters) ; 0 -> noAuthNoPriv."""
+    flags = bytes([(0x01 if taglen else 0x00) | 0x04])   # bit 2 = reportable
+    global_data = _ber_sequence(0x30, _ber_entier(msg_id) + _ber_entier(65507)
+                                + _ber_chaine(flags) + _ber_entier(3))
+    scoped = _ber_sequence(0x30, _ber_chaine(engine_id) + _ber_chaine(b'') + pdu)
+    usm = _v3_usm(engine_id, boots, time_, user, b'\x00' * taglen)
+    return _ber_sequence(0x30, _ber_entier(3) + global_data + usm + scoped)
+
+
+def _v3_signer(msg, hfn, taglen, kul):
+    """Remplace les `taglen` zéros de msgAuthenticationParameters par
+    HMAC(kul, msg)[:taglen]. None si le placeholder est absent ou ambigu."""
+    marque = b'\x04' + bytes([taglen]) + b'\x00' * taglen
+    i = msg.find(marque)
+    if i < 0 or msg.find(marque, i + 1) >= 0:
+        return None
+    tag = hmac.new(kul, msg, hfn).digest()[:taglen]
+    return msg[:i + 2] + tag + msg[i + 2 + taglen:]
+
+
+def _v3_parse(data):
+    """Décode un SNMPv3Message en clair (noAuthNoPriv / authNoPriv). Retourne
+    {engine_id, boots, time, user, pdu_tag, report_oid, varbinds} ou None."""
+    try:
+        _, corps, _ = _ber_lire_tlv(data, 0)
+        p = 0
+        _, _v, p = _ber_lire_tlv(corps, p)           # msgVersion
+        _, _gd, p = _ber_lire_tlv(corps, p)          # msgGlobalData
+        _, secp, p = _ber_lire_tlv(corps, p)         # msgSecurityParameters (OCTET STRING)
+        _, msgdata, p = _ber_lire_tlv(corps, p)      # msgData (ScopedPDU en clair)
+        _, usm, _ = _ber_lire_tlv(secp, 0)
+        q = 0
+        _, eid, q = _ber_lire_tlv(usm, q)
+        _, boots_b, q = _ber_lire_tlv(usm, q)
+        _, time_b, q = _ber_lire_tlv(usm, q)
+        _, uname, q = _ber_lire_tlv(usm, q)
+        r = 0
+        _, _ceid, r = _ber_lire_tlv(msgdata, r)      # contextEngineID
+        _, _cname, r = _ber_lire_tlv(msgdata, r)     # contextName
+        pdu_tag, pdu_body, _ = _ber_lire_tlv(msgdata, r)
+        d = {'engine_id': eid, 'boots': int.from_bytes(boots_b, 'big'),
+             'time': int.from_bytes(time_b, 'big'), 'user': uname,
+             'pdu_tag': pdu_tag, 'pdu_body': pdu_body, 'report_oid': '', 'varbinds': {}}
+        s = 0
+        _, _rid, s = _ber_lire_tlv(pdu_body, s)
+        _, _es, s = _ber_lire_tlv(pdu_body, s)
+        _, _ei, s = _ber_lire_tlv(pdu_body, s)
+        _, vbl, s = _ber_lire_tlv(pdu_body, s)
+        vp = 0
+        while vp < len(vbl):
+            t, vbc, vp = _ber_lire_tlv(vbl, vp)
+            if t != 0x30:
+                break
+            bp = 0
+            _, oidb, bp = _ber_lire_tlv(vbc, bp)
+            tv, vv, bp = _ber_lire_tlv(vbc, bp)
+            o = _ber_decoder_oid(oidb)
+            d['varbinds'][o] = _ber_decoder_valeur(tv, vv)
+            if pdu_tag == 0xa8 and not d['report_oid']:
+                d['report_oid'] = o
+        return d
+    except Exception:
+        return None
+
+
+def _v3_pdu_varbinds(pdu_body):
+    """Corps d'une PDU de réponse (request-id, error-status, error-index,
+    varbinds) -> [(oid, tag_valeur, valeur_brute)]. error-status ≠ 0 -> []."""
+    try:
+        s = 0
+        _, _rid, s = _ber_lire_tlv(pdu_body, s)
+        _, es, s = _ber_lire_tlv(pdu_body, s)
+        _, _ei, s = _ber_lire_tlv(pdu_body, s)
+        if es and int.from_bytes(es, 'big', signed=True) != 0:
+            return []
+        _, vbl, s = _ber_lire_tlv(pdu_body, s)
+        out = []
+        vp = 0
+        while vp < len(vbl):
+            t, vbc, vp = _ber_lire_tlv(vbl, vp)
+            if t != 0x30:
+                break
+            bp = 0
+            _, oidb, bp = _ber_lire_tlv(vbc, bp)
+            tv, vv, bp = _ber_lire_tlv(vbc, bp)
+            out.append((_ber_decoder_oid(oidb), tv, vv))
+        return out
+    except Exception:
+        return []
+
+
+def _v3_discover(ip, port=161, timeout=1.5):
+    """Découverte d'engine (RFC 3414 §4), sans authentification. Retourne
+    (engine_id, boots, time) si un agent SNMP répond, sinon None."""
+    now = time.monotonic()
+    with _v3_engine_lock:
+        c = _v3_engine_cache.get(ip)
+        if c and now - c[3] < _V3_ENGINE_TTL:
+            return c[0], c[1], c[2] + int(now - c[3])
+        neg = _v3_engine_negatif.get(ip)
+        if neg is not None and now - neg < _V3_ENGINE_TTL_NEG:
+            return None
+    try:
+        rid = _snmp_walk_reqid()
+        pdu = _ber_sequence(0xa0, _ber_entier(rid) + _ber_entier(0)
+                            + _ber_entier(0) + _ber_sequence(0x30, b''))
+        msg = _v3_message(rid, b'', 0, 0, b'', pdu, taglen=0)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            s.sendto(msg, (ip, port))
+            data, _ = s.recvfrom(65535)
+        d = _v3_parse(data)
+        if not d or not d['engine_id']:
+            with _v3_engine_lock:
+                _v3_engine_negatif[ip] = now
+            return None
+        with _v3_engine_lock:
+            _v3_engine_cache[ip] = (d['engine_id'], d['boots'], d['time'], now)
+            _v3_engine_negatif.pop(ip, None)
+        return d['engine_id'], d['boots'], d['time']
+    except Exception:
+        with _v3_engine_lock:
+            _v3_engine_negatif[ip] = time.monotonic()
+        return None
+
+
+def _snmp_v3_params():
+    """(user, proto, password) si un utilisateur SNMPv3 est configuré, sinon None."""
+    try:
+        user = (cfg_get('diag_snmp_v3_user', '') or '').strip()
+        pwd = cfg_get('diag_snmp_v3_auth_pass', '') or ''
+        proto = (cfg_get('diag_snmp_v3_auth_proto', 'SHA') or 'SHA').strip().upper()
+        if user and pwd and proto in _V3_AUTH_PROTO:
+            return (user, proto, pwd)
+    except Exception:
+        pass
+    return None
+
+
+def _snmp_v3_exchange(ip, pdu, port=161, timeout=1.5, params=None):
+    """Envoie `pdu` (GetRequest/GetNext/GetBulk déjà encodé) en SNMPv3
+    authNoPriv. Retourne (corps_pdu_reponse | None, statut) où statut ∈
+    {'ok', 'refuse:<raison>', 'silence', 'non_configure', 'erreur'}.
+    `corps_pdu_reponse` = tout ce qui suit le tag de PDU (request-id,
+    error-status, error-index, varbinds) — à parser comme une réponse v1."""
+    params = params or _snmp_v3_params()
+    if not params:
+        return None, 'non_configure'
+    user, proto, pwd = params
+    hfn, taglen = _V3_AUTH_PROTO[proto]
+    disc = _v3_discover(ip, port, timeout)
+    if not disc:
+        return None, 'silence'
+    engine, boots, etime = disc
+    ku = _v3_ku(hfn, pwd)
+    kul = _v3_kul(hfn, ku, engine)
+    ubytes = user.encode('utf-8')
+
+    def _try(boots_, time_):
+        mid = _snmp_walk_reqid()
+        base = _v3_message(mid, engine, boots_, time_, ubytes, pdu, taglen)
+        signed = _v3_signer(base, hfn, taglen, kul)
+        if signed is None:
+            return None, 'erreur'
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.settimeout(timeout)
+                s.sendto(signed, (ip, port))
+                data, _ = s.recvfrom(65535)
+        except Exception:
+            return None, 'silence'
+        d = _v3_parse(data)
+        if not d:
+            return None, 'erreur'
+        if d['pdu_tag'] == 0xa8:   # Report -> échec, la raison est dans l'OID
+            return d, 'report'
+        if d['pdu_tag'] == 0xa2:
+            return d, 'ok'
+        return d, 'erreur'
+
+    d, st = _try(boots, etime)
+    # notInTimeWindow / unknownEngineID : l'agent nous renvoie ses vrais
+    # compteurs de temps dans le Report -> une seule nouvelle tentative.
+    if st == 'report' and d['report_oid'] in (
+            '1.3.6.1.6.3.15.1.1.2.0', '1.3.6.1.6.3.15.1.1.4.0') and d['engine_id']:
+        with _v3_engine_lock:
+            _v3_engine_cache[ip] = (d['engine_id'], d['boots'], d['time'], time.monotonic())
+        d, st = _try(d['boots'], d['time'])
+    if st == 'ok':
+        return d['pdu_body'], 'ok'
+    if st == 'report':
+        return None, 'refuse:' + _V3_STATS_OID.get(d['report_oid'], 'SNMPv3 refusé')
+    return None, st
+
+
+def _v3_walk(ip, oid_base, params, timeout=1.5, max_vars=800, port=161):
+    """GETNEXT en boucle sur `oid_base`, en SNMPv3 authNoPriv.
+    Retourne {suffixe_oid: valeur} (mêmes garanties que `_snmp_walk` : OID
+    strictement croissant, sortie du sous-arbre, endOfMibView). {} si échec."""
+    prefixe = oid_base if oid_base.endswith('.') else oid_base + '.'
+    resultats = {}
+    oid_courant = oid_base
+    for _ in range(max_vars):
+        pdu = _ber_sequence(0xa1, _ber_entier(_snmp_walk_reqid()) + _ber_entier(0)
+                            + _ber_entier(0)
+                            + _ber_sequence(0x30, _ber_sequence(
+                                0x30, _ber_oid(oid_courant) + b'\x05\x00')))
+        body, st = _snmp_v3_exchange(ip, pdu, port, timeout, params)
+        if st != 'ok' or body is None:
+            break
+        vbs = _v3_pdu_varbinds(body)
+        if not vbs:
+            break
+        oid_ret, tag_val, val_brut = vbs[0]
+        if not oid_ret.startswith(prefixe) or tag_val == 0x82:
+            break
+        try:
+            _tr = tuple(int(x) for x in oid_ret.split('.'))
+            _tc = tuple(int(x) for x in oid_courant.split('.'))
+            if _tc and _tr <= _tc:
+                break
+        except ValueError:
+            pass
+        resultats[oid_ret[len(prefixe):]] = _ber_decoder_valeur(tag_val, val_brut)
+        oid_courant = oid_ret
+    return resultats
+
+
+def _snmp_presence(ip, communautes=('public',), port=161, timeout=1.2):
+    """« Y a-t-il un agent SNMP à cette adresse, et peut-on le lire ? »
+    Retourne (present: bool, exploitable: bool, detail: str).
+    - exploitable True  : une communauté v1/v2c OU l'utilisateur v3 a répondu
+    - present True, exploitable False : un agent répond à la découverte v3 mais
+      ni les communautés ni (le cas échéant) l'utilisateur v3 configuré ne
+      passent -> « SNMP présent mais refusé »
+    - present False : silence total, probablement pas de SNMP sur cette IP."""
+    v3 = _snmp_v3_params()
+    v3_refus = ''
+    if v3:
+        _pdu = _ber_sequence(0xa0, _ber_entier(_snmp_walk_reqid()) + _ber_entier(0)
+                             + _ber_entier(0) + _ber_sequence(
+                                 0x30, _ber_sequence(0x30, _ber_oid(_OID_SYS_DESCR) + b'\x05\x00')))
+        _b, st = _snmp_v3_exchange(ip, _pdu, port, timeout, v3)
+        if st == 'ok':
+            return True, True, 'SNMPv3 (%s)' % v3[0]
+        if st.startswith('refuse:'):
+            v3_refus = st[7:]
+    for comm in communautes:
+        if _snmp_get_typed(ip, [_OID_SYS_DESCR], comm, timeout=timeout,
+                           version=0, _essai_v3=False):
+            return True, True, 'v1/v2c (%s)' % comm
+    if v3_refus:
+        return True, False, 'SNMPv3 : ' + v3_refus
+    if _v3_discover(ip, port, timeout):
+        return True, False, 'agent SNMP présent, ni communauté ni utilisateur v3 valides'
+    return False, False, 'aucune réponse SNMP'
 
 
 def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
@@ -9365,9 +9712,12 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
         f_netbios  = ex.submit(_netbios_name, ip_str)
         f_os       = ex.submit(_ttl_os_guess, ip_str)
         f_ports    = ex.submit(_scan_ports,   ip_str)
+        # Scan : communauté publique uniquement (v1/v2c). Ne pas tenter SNMPv3
+        # ici — une découverte d'engine par hôte non-SNMP ajouterait ~1,5 s à
+        # chaque adresse d'un /24. Le SNMPv3 sert au diagnostic / à la baie.
         f_snmp     = ex.submit(_snmp_get_typed, ip_str,
                                [_OID_SYS_DESCR, _OID_SYS_NAME, _OID_SYS_OBJECTID, _OID_SYS_SERVICES],
-                               timeout=1.5)
+                               timeout=1.5, _essai_v3=False)
         try: hostname  = f_hostname.result(timeout=5)
         except Exception: hostname = ""
         try: netbios   = f_netbios.result(timeout=5)
@@ -9650,6 +10000,7 @@ def page_diag_reseau():
         'diag_surveillance_active', 'diag_snmp_actif', 'diag_topologie_active',
         'diag_capture_active', 'diag_baseline_active', 'diag_alerte_email',
         'diag_snapshot_rapide', 'diag_intervalle_s', 'diag_snmp_communautes',
+        'diag_snmp_v3_user', 'diag_snmp_v3_auth_proto',
         'diag_alerte_destinataire', 'diag_rapport_cron',
         'diag_wifi_active', 'diag_ups_active')}
     return render_template('diag_reseau.html',
@@ -9693,14 +10044,27 @@ def api_diag_test_snmp():
     nom, ip = row
     communautes = [c.strip() for c in re.split(r'[,;\s]+',
                    (cfg_get('diag_snmp_communautes', 'public') or 'public')) if c.strip()] or ['public']
+    v3 = _snmp_v3_params()
+    if v3:
+        r3 = _snmp_get_typed(ip, [_OID_SYS_NAME, _OID_SYS_DESCR], timeout=1.5)
+        if r3:
+            return jsonify({'ok': True, 'equipement': nom, 'ip': ip,
+                            'communaute': 'SNMPv3 (%s)' % v3[0],
+                            'sysname': str(r3.get(_OID_SYS_NAME, '')),
+                            'sysdescr': str(r3.get(_OID_SYS_DESCR, ''))[:200]})
     for comm in communautes:
         res = _snmp_get(ip, [_OID_SYS_NAME, _OID_SYS_DESCR], comm, timeout=1.5)
         if res:
             return jsonify({'ok': True, 'equipement': nom, 'ip': ip, 'communaute': comm,
                             'sysname': res.get(_OID_SYS_NAME, ''),
                             'sysdescr': res.get(_OID_SYS_DESCR, '')[:200]})
-    return jsonify({'ok': False, 'equipement': nom, 'ip': ip,
-                    'motif': f"Aucune réponse SNMP (communautés essayées : {', '.join(communautes)})"})
+    # Rien n'a répondu : un agent SNMP est-il quand même là (mauvaise
+    # communauté / v3 exigé / ACL) ou l'appareil ne fait-il pas de SNMP ?
+    present, exploitable, detail = _snmp_presence(ip, communautes)
+    return jsonify({'ok': False, 'equipement': nom, 'ip': ip, 'snmp_present': present,
+                    'motif': (('SNMP présent mais non exploitable — %s' % detail) if present
+                              else f"Aucune réponse SNMP (communautés : {', '.join(communautes)}"
+                                   + (', + utilisateur v3' if v3 else '') + ")")})
 
 
 @app.route('/api/diag-reseau/snapshot/status')

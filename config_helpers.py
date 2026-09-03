@@ -174,6 +174,12 @@ CFG_DEFAULTS = {
     # ── Palier 3 : interrogation SNMP des switchs / routeurs ──────────────────
     'diag_snmp_actif': '0',            # active le poll SNMP (opt-in)
     'diag_snmp_communautes': 'public', # communautés v1/v2c, CSV, essayées dans l'ordre
+    # SNMPv3 (authNoPriv) : essayé en premier quand un utilisateur est renseigné,
+    # repli automatique sur les communautés v1/v2c. Pare-feux, box FAI récentes
+    # et caméras managées sont souvent en v3 uniquement.
+    'diag_snmp_v3_user': '',           # nom d'utilisateur USM (vide = v3 désactivé)
+    'diag_snmp_v3_auth_proto': 'SHA',  # MD5 | SHA | SHA224 | SHA256 | SHA384 | SHA512
+    'diag_snmp_v3_auth_pass': '',      # mot de passe d'authentification
     'diag_snmp_seuil_erreurs': '50',   # Δ erreurs/discards/CRC par fenêtre avant alerte
     'diag_snmp_seuil_saturation_pct': '90',  # seuil de saturation de lien (%)
     # ── Palier 4 : cartographie de topologie L2 (nécessite diag_snmp_actif) ───

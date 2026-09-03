@@ -4905,7 +4905,7 @@ def analyser_brassage_baie(client_id: int, _progress=None, budget_s: float = 0) 
     vide = {'prises_appareils': [], 'ports_appareils': [], 'cordons': [],
             'liens_baie': [], 'cascades': [], 'hors_inventaire': [], 'retypage': [],
             'switchs_illisibles': [], 'switchs_tronques': [], 'switchs_non_releves': [],
-            'fdb': []}
+            'switchs_snmp_refuse': [], 'fdb': []}
 
     def _prog(pct, msg=''):
         if _progress:
@@ -4970,11 +4970,30 @@ def analyser_brassage_baie(client_id: int, _progress=None, budget_s: float = 0) 
                 if _aid_sw:
                     mac_infra.setdefault(mm, _aid_sw)
         switchs_non_releves = sorted({nom_par_ip.get(ip, ip) for ip in ips_non_releves})
-        # ne garder que les switchs effectivement relevés pour la suite
+
+        # #7 : un switch qui n'a RIEN renvoyé — est-ce un refus SNMP (mauvaise
+        # communauté, ACL, v3 exigé) ou un appareil qui ne fait pas de SNMP ?
+        switchs_snmp_refuse = []
+        try:
+            from app import _snmp_presence
+            for ip in ips_a_relever:
+                if ip in ips_non_releves or infos_par_ip.get(ip) or fdb_par_ip.get(ip):
+                    continue
+                present, exploitable, detail = _snmp_presence(ip, communautes)
+                if present and not exploitable:
+                    switchs_snmp_refuse.append(
+                        {'nom': nom_par_ip.get(ip, ip), 'ip': ip, 'detail': detail})
+        except Exception:
+            logger.debug('network_diag: _snmp_presence', exc_info=True)
+
+        # ne garder que les switchs qu'on a effectivement tenté de relever
+        # (un relevé vide reste dans la liste : il ne casse rien et évite un
+        # « aucun switch » trompeur quand l'agent a répondu mais sans donnée).
         switchs = [s for s in switchs if s['ip'] in infos_par_ip]
         _prog(88, 'Corrélation…')
         if not switchs:
-            return {'ok': False, 'motif': 'switchs_muets', **vide}
+            return {'ok': False, 'motif': 'switchs_muets', **vide,
+                    'switchs_snmp_refuse': switchs_snmp_refuse}
 
         sw_ctx = []
         for sw in switchs:
@@ -5279,7 +5298,8 @@ def analyser_brassage_baie(client_id: int, _progress=None, budget_s: float = 0) 
                 'cordons': cordons, 'liens_baie': liens_baie,
                 'cascades': cascades, 'hors_inventaire': hors_inv, 'retypage': retypage,
                 'switchs_illisibles': switchs_illisibles, 'switchs_tronques': tronques,
-                'switchs_non_releves': switchs_non_releves, 'fdb': fdb_ui}
+                'switchs_non_releves': switchs_non_releves,
+                'switchs_snmp_refuse': switchs_snmp_refuse, 'fdb': fdb_ui}
     except Exception:
         logger.exception('network_diag: analyser_brassage_baie')
         return {'ok': False, 'motif': 'erreur_interne', **vide}

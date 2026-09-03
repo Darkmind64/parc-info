@@ -1030,14 +1030,37 @@ def test_analyser_brassage_budget(conn, deux_clients, make_appareil, monkeypatch
 
     def _lent(ip, c):
         time.sleep(0.15)
-        return {}
+        return {11: {'nom': 'Gi0/1', 'alias': '', 'ethernet': True}}
 
     monkeypatch.setattr(network_diag, '_noms_interfaces', _lent)
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {11: {'aa:bb:cc:dd:ee:ff'}})
+    import app as _app
+    monkeypatch.setattr(_app, '_snmp_presence', lambda *a, **k: (False, False, ''))
 
     d = network_diag.analyser_brassage_baie(cid, budget_s=0.05)
     assert d['ok'] is True
     assert len(d['switchs_non_releves']) == 1   # 1 relevé, 1 sauté
+
+
+def test_analyser_brassage_snmp_refuse(conn, deux_clients, make_appareil, monkeypatch):
+    """Un switch qui ne répond à rien mais dont _snmp_presence dit « agent
+    présent, non exploitable » -> switchs_snmp_refuse (#7)."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='FW-EDGE', type_appareil='Routeur/Pare-feu', adresse_ip='10.0.0.254')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    conn.commit()
+    monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
+    monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
+    monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
+    monkeypatch.setattr(network_diag, '_noms_interfaces', lambda ip, c: {})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {})
+    import app as _app
+    monkeypatch.setattr(_app, '_snmp_presence',
+                        lambda ip, comm, **k: (True, False, 'SNMPv3 : authentification refusée'))
+
+    d = network_diag.analyser_brassage_baie(cid)
+    assert [s['nom'] for s in d['switchs_snmp_refuse']] == ['FW-EDGE']
+    assert 'refus' in d['switchs_snmp_refuse'][0]['detail']
 
 
 def test_analyser_brassage_capture(conn, deux_clients, make_appareil, monkeypatch):

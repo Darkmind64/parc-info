@@ -1,24 +1,24 @@
 {
-  "version": "2.19.28",
+  "version": "2.19.29",
   "release_date": "2026-09-03T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.28/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.28/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.28/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.28",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.28/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.28/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.28/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.28/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.28/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.29",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage — audit de fiabilité, lot 4/n. « Deviner le brassage » relève désormais les switchs en tâche de fond avec une barre de progression, au lieu de bloquer la requête HTTP 1 à 2 minutes sur un rack chargé. Les adresses MAC ambiguës d'un switch à table MAC déformée (2 appareils qui partagent leurs 4 premiers octets) ne sont plus jetées : quand un seul port est cohérent, elles deviennent une proposition « à confiance faible », décochée par défaut. La dernière capture passive (palier 2) alimente la liste des appareils vus hors inventaire — utile là où aucun switch ne répond en SNMP.",
+    "new_features": "Réseau — audit de fiabilité, lot 5/n : SNMPv3. Le diagnostic et la baie de brassage acceptent désormais un utilisateur SNMPv3 authNoPriv (MD5 / SHA-1 / SHA-256, Réglages → Réseau & Scan), essayé en premier avec repli automatique sur les communautés v1/v2c — pour les pare-feux, box de FAI récentes et caméras managées qui n'acceptent que v3. Surtout, un échec SNMP ne se confond plus avec l'absence de matériel : une découverte d'engine SNMPv3 (sans authentification) sert de sonde universelle « y a-t-il un agent ici ? », et « SNMP présent mais refusé » (mauvaise communauté, ACL, v3 exigé) est affiché comme tel dans « Deviner le brassage » et le bouton « Tester SNMP ».",
     "improvements": [
-      "Budget de sécurité (150 s) sur le relevé : résultat partiel + liste des switchs non interrogés.",
-      "Un relevé de moins de 90 s est resservi tel quel (pas de nouveau balayage SNMP à chaque ouverture de la modale).",
-      "Message d'erreur distinct quand des switchs sont configurés mais qu'aucun ne répond en SNMP."
+      "Encodage BER fait main, crypto = bibliothèque standard (hashlib + hmac) : aucune dépendance nouvelle.",
+      "Le scan réseau reste en communauté publique (pas de découverte v3 par hôte).",
+      "Le chiffrement SNMPv3 (priv) n'est pas géré — authNoPriv uniquement, pour de la lecture."
     ]
   },
   "checksums": {
@@ -29,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.28"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.29"
 }
