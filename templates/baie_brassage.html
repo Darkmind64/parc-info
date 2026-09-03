@@ -826,7 +826,7 @@ table.mon-table th:nth-child(2), table.mon-table td:nth-child(2) { text-align:le
                 </select>
                 <span id="activite-bandeau" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--accent-green);align-self:center;"></span>
                 <button onclick="MoniteurModal.ouvrir()" class="btn btn-primary btn-sm" title="Moniteur réseau : compteurs bruts des ports, journal d'évènements, capture de trafic — pour comprendre ce que montrent les LEDs">📊 Moniteur</button>
-                <button onclick="BrassageModal.ouvrir()" class="btn btn-primary btn-sm" title="Deviner le brassage depuis le réseau : pour chaque prise murale reliée à une machine, retrouve le port de switch où sa MAC est vue (SNMP) et propose le cordon bandeau ⇄ switch. Aperçu avant application.">🧠 Deviner le brassage</button>
+                <button onclick="BrassageModal.ouvrir()" class="btn btn-primary btn-sm" title="Deviner le brassage : à partir de toutes les MAC vues sur les switchs (SNMP), corrélées à l'inventaire, propose la machine de chaque prise/port, les cordons bandeau ⇄ switch et les liens switch ⇄ éléments. Aperçu avant application.">🧠 Deviner le brassage</button>
                 <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌</a>
                 <button onclick="changerU(-1)" class="btn btn-primary btn-sm" title="Réduire la baie d'1U">− U</button>
                 <button onclick="changerU(1)"  class="btn btn-primary btn-sm" title="Agrandir la baie d'1U">+ U</button>
@@ -1275,12 +1275,13 @@ table.mon-table th:nth-child(2), table.mon-table td:nth-child(2) { text-align:le
             <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">🧠 Deviner le brassage depuis le réseau</h3>
             <button type="button" onclick="BrassageModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
         </div>
-        <div class="mon-tabs" style="margin-bottom:.5rem;">
-            <div class="mon-tab actif" data-sens="machines" onclick="BrassageModal.setSens('machines')">🖥️ → 🔌 Depuis les machines</div>
-            <div class="mon-tab" data-sens="brassage" onclick="BrassageModal.setSens('brassage')">🔌 → 🖥️ Depuis le brassage</div>
+        <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.6rem;">
+            À partir de <b>toutes</b> les adresses MAC apprises sur les switchs de la baie, corrélées à
+            l'inventaire : on propose la machine de chaque prise murale et de chaque port de switch,
+            les cordons bandeau ⇄ switch, et les liens switch ⇄ autres éléments. Décochez ce que vous ne
+            voulez pas, puis appliquez (réversible). Rien n'est écrit avant.
         </div>
-        <div id="brassage-intro" style="font-size:.68rem;color:var(--text-muted);margin-bottom:.6rem;"></div>
-        <div class="mon-pane actif" style="max-height:52vh;"><div id="brassage-corps">Chargement…</div></div>
+        <div class="mon-pane actif" style="max-height:54vh;"><div id="brassage-corps">Chargement…</div></div>
         <div style="display:flex;gap:.6rem;align-items:center;justify-content:flex-end;margin-top:.7rem;">
             <span id="brassage-etat" style="font-size:.72rem;color:var(--text-muted);margin-right:auto;"></span>
             <button class="btn btn-secondary btn-sm" onclick="BrassageModal.fermer()">Annuler</button>
@@ -3683,41 +3684,21 @@ function fmtOctets(o) {
     return o + ' o';
 }
 
-// ── DEVINER LE BRASSAGE (modale) ─────────────────────────────────────────────
-// Deux sens, à partir de la table d'apprentissage MAC des switchs (FDB) :
-//  · "machines"  : prise -> machine déclarée -> port où sa MAC est vue
-//                  -> propose le cordon (application via /api/baie/lien-port).
-//  · "brassage"  : cordons déjà posés -> déduit la machine de chaque prise
-//                  (application via PUT /api/baie/prise-murale/...) ; signale
-//                  les prises où plusieurs appareils sont vus (switch / borne
-//                  Wi-Fi en aval).
+// ── DEVINER LE BRASSAGE — « carte réseau proposée » (modale) ─────────────────
+// GET /api/baie/brassage/proposer : part de TOUTES les MAC apprises sur les
+// switchs de la baie, corrélées à l'inventaire. Rend 4 groupes de propositions
+// cochables (prise↔machine, port↔machine, cordon bandeau⇄switch, lien
+// switch⇄élément) + 2 listes d'info (cascades, hors inventaire). L'application
+// dispatche par type vers la bonne route (lien-port / prise-murale / slot port).
 const BrassageModal = {
-    _props: [],
-    _sens: 'machines',
-
-    _INTRO: {
-        machines: 'Chaque prise murale à laquelle vous avez affecté une machine est rapprochée du port '
-            + 'de switch où la MAC de cette machine est apprise → on propose le cordon <b>bandeau ⇄ switch</b>. '
-            + 'Réversible (déliaison manuelle). Une fois brassé, tout changement est signalé en direct (⚠).',
-        brassage: 'Les cordons <b>bandeau ⇄ switch</b> sont déjà posés → on déduit la <b>machine</b> de chaque '
-            + 'prise murale (la MAC vue sur le port au bout du cordon). Si plusieurs appareils sont vus sur '
-            + 'une prise, il y a un switch ou une borne Wi-Fi en aval : signalé, sans rien affecter.',
-    },
+    _props: [],   // liste plate : chaque entrée porte _type
 
     ouvrir() {
         document.getElementById('brassage-modal').classList.add('open');
-        this.setSens(this._sens);
+        this.charger();
     },
     fermer() { document.getElementById('brassage-modal').classList.remove('open'); },
     fermerSiOverlay(e) { if (e.target.id === 'brassage-modal') this.fermer(); },
-
-    setSens(sens) {
-        this._sens = sens;
-        document.querySelectorAll('#brassage-modal .mon-tab').forEach(t =>
-            t.classList.toggle('actif', t.dataset.sens === sens));
-        document.getElementById('brassage-intro').innerHTML = this._INTRO[sens];
-        this.charger();
-    },
 
     async charger() {
         const corps = document.getElementById('brassage-corps');
@@ -3725,7 +3706,7 @@ const BrassageModal = {
         btn.disabled = true;
         corps.innerHTML = '<span style="color:var(--text-muted);">Relevé SNMP en cours (table d\'apprentissage MAC des switchs)…</span>';
         let d;
-        try { d = await (await fetch('/api/baie/brassage/proposer?sens=' + this._sens)).json(); }
+        try { d = await (await fetch('/api/baie/brassage/proposer')).json(); }
         catch (e) { corps.innerHTML = '<span style="color:var(--accent-red);">Erreur de communication.</span>'; return; }
         if (!d.ok) {
             const m = { snmp_inactif: 'SNMP désactivé — active-le dans le diagnostic réseau.',
@@ -3734,72 +3715,65 @@ const BrassageModal = {
             corps.innerHTML = `<span style="color:var(--accent-orange,#f59e0b);">${escH(m)}</span>`;
             return;
         }
-        this._props = (d.propositions || []).filter(p => p.action !== 'inchange');
-        const inchanges = (d.propositions || []).length - this._props.length;
-        const nr = d.non_resolues || [], casc = d.cascades || [];
+        this._props = [];
         let html = '';
-        if (!this._props.length && !nr.length && !casc.length) {
-            html += this._sens === 'machines'
-                ? '<span style="color:var(--accent-green);">✓ Tout le brassage des prises murales est déjà cohérent avec le réseau.</span>'
-                : '<span style="color:var(--accent-green);">✓ Toutes les prises murales brassées ont déjà la bonne machine.</span>';
-        }
-        if (this._props.length) html += this._sens === 'machines' ? this._tableMachines() : this._tableBrassage();
-        if (casc.length) html += this._tableCascades(casc);
-        if (nr.length) {
-            const mot = { mac_absente: 'pas d\'adresse MAC connue pour la machine',
-                          non_vue: 'MAC absente des tables des switchs (machine éteinte ? switch non géré ?)',
-                          port_non_mappe: 'port de switch non représenté dans la baie (à calibrer)',
-                          pas_un_switch: 'le cordon ne mène pas à un switch interrogeable en SNMP',
-                          rien_vu: 'aucune MAC apprise sur ce port (prise inutilisée ?)',
-                          appareil_inconnu: 'un appareil est vu mais absent de l\'inventaire' };
-            html += '<div style="margin-top:.7rem;font-size:.7rem;color:var(--text-muted);">Non résolu :<ul style="margin:.3rem 0 0 1rem;">'
-                  + nr.map(n => `<li>${escH(n.bandeau_nom)} · prise ${n.prise_numero}${n.machine_nom ? ' (' + escH(n.machine_nom) + ')' : ''}`
-                        + ` — ${escH(mot[n.motif] || n.motif)}${n.vu ? ' : ' + escH(n.vu) : ''}</li>`).join('')
-                  + '</ul></div>';
-        }
-        if (inchanges) html += `<div style="margin-top:.5rem;font-size:.7rem;color:var(--text-muted);">${inchanges} ${this._sens === 'machines' ? 'cordon(s)' : 'prise(s)'} déjà correct(s), non listé(s).</div>`;
+        html += this._section('prise', '🔌 Machine sur une prise murale', d.prises_appareils || [],
+            ['Prise murale', 'Machine vue', 'Port de switch', 'Action'],
+            p => [`${escH(p.bandeau_nom)} · prise ${p.prise_numero}`, escH(p.machine_nom),
+                  `${escH(p.switch_nom)} · port ${p.switch_port_numero}`, this._act(p, 'affecter', p.actuel_nom)]);
+        html += this._section('port', '🖥️ Machine branchée directement sur un switch', d.ports_appareils || [],
+            ['Port de switch', 'Machine vue', 'Action'],
+            p => [`${escH(p.switch_nom)} · port ${p.switch_port_numero}`, escH(p.machine_nom),
+                  this._act(p, 'affecter au port', p.actuel_nom)]);
+        html += this._section('cordon', '🔗 Cordon bandeau ⇄ switch', d.cordons || [],
+            ['Prise murale', 'Machine', 'Port de switch', 'Confiance'],
+            p => [`${escH(p.bandeau_nom)} · prise ${p.prise_numero}`, escH(p.machine_nom),
+                  `${escH(p.switch_nom)} · port ${p.switch_port_numero}`,
+                  p.confiance === 'sure' ? '<span style="color:var(--accent-green);">sûre</span>'
+                    : `<span style="color:var(--accent-orange,#f59e0b);" title="${escH(p.note || 'à vérifier')}">à vérifier</span>`],
+            p => p.confiance === 'sure');
+        html += this._section('lien', '🔗 Lien switch ⇄ autre élément de la baie', d.liens_baie || [],
+            ['Élément A', 'Élément B', 'Détecté par', 'Action'],
+            p => [`${escH(p.a_nom)} · port ${p.a_port}`, `${escH(p.b_nom)} · port ${p.b_port}`,
+                  p.via === 'lldp' ? 'LLDP' : 'tables MAC', this._act(p, 'relier', p.actuel)]);
+
+        html += this._infoCascades(d.cascades || []);
+        html += this._infoHorsInv(d.hors_inventaire || []);
+        if (!html.trim()) html = '<span style="color:var(--accent-green);">✓ Rien à proposer — la baie est cohérente avec ce que voient les switchs.</span>';
         corps.innerHTML = html;
         this._maj();
     },
 
-    _tableMachines() {
-        let h = '<table class="mon-table"><thead><tr><th></th><th>Prise murale</th><th>Machine</th>'
-              + '<th>Port de switch</th><th>Action</th><th>Confiance</th></tr></thead><tbody>';
-        this._props.forEach((p, i) => {
-            const ancien = p.actuel ? `${escH(p.actuel.switch_nom || 'ancien')} port ${p.actuel.switch_port_numero}` : '?';
-            const actTxt = p.action === 'creer' ? '<span style="color:var(--accent-green);">nouveau cordon</span>'
-                : `<span style="color:var(--accent-orange,#f59e0b);">remplace : ${ancien}</span>`;
-            const conf = p.confiance === 'sure' ? '<span style="color:var(--accent-green);">sûre</span>'
-                : `<span style="color:var(--accent-orange,#f59e0b);" title="MAC apprise parmi ${p.vu_avec} autres — possible lien montant">à vérifier</span>`;
-            h += `<tr><td><input type="checkbox" data-i="${i}" ${p.confiance === 'sure' ? 'checked' : ''} onchange="BrassageModal._maj()"></td>`
-               + `<td>${escH(p.bandeau_nom)} · prise ${p.prise_numero}</td><td>${escH(p.machine_nom)}</td>`
-               + `<td>${escH(p.switch_nom)} · port ${p.switch_port_numero}</td>`
-               + `<td style="white-space:normal;">${actTxt}</td><td>${conf}</td></tr>`;
+    _act(p, verbe, actuel) {
+        return p.action === 'creer'
+            ? `<span style="color:var(--accent-green);">${verbe}</span>`
+            : `<span style="color:var(--accent-orange,#f59e0b);">remplace : ${escH(actuel || '?')}</span>`;
+    },
+
+    _section(type, titre, items, entetes, ligne, coche) {
+        if (!items.length) return '';
+        let h = `<div style="margin-top:.7rem;font-size:.74rem;color:var(--text-primary);font-weight:600;">${titre}</div>`
+              + '<table class="mon-table"><thead><tr><th></th>'
+              + entetes.map(e => `<th>${e}</th>`).join('') + '</tr></thead><tbody>';
+        items.forEach(p => {
+            const i = this._props.length;
+            this._props.push({ ...p, _type: type });
+            const ch = coche ? coche(p) : true;
+            h += `<tr><td><input type="checkbox" data-i="${i}" ${ch ? 'checked' : ''} onchange="BrassageModal._maj()"></td>`
+               + ligne(p).map(c => `<td style="white-space:normal;">${c}</td>`).join('') + '</tr>';
         });
         return h + '</tbody></table>';
     },
 
-    _tableBrassage() {
-        let h = '<table class="mon-table"><thead><tr><th></th><th>Prise murale</th><th>Port de switch</th>'
-              + '<th>Machine déduite</th><th>Action</th></tr></thead><tbody>';
-        this._props.forEach((p, i) => {
-            const actTxt = p.action === 'creer' ? '<span style="color:var(--accent-green);">affecter</span>'
-                : `<span style="color:var(--accent-orange,#f59e0b);">remplace : ${escH(p.actuel_nom || '?')}</span>`;
-            h += `<tr><td><input type="checkbox" data-i="${i}" checked onchange="BrassageModal._maj()"></td>`
-               + `<td>${escH(p.bandeau_nom)} · prise ${p.prise_numero}</td>`
-               + `<td>${escH(p.switch_nom)} · port ${p.switch_port_numero}</td>`
-               + `<td>${escH(p.machine_nom)}</td><td style="white-space:normal;">${actTxt}</td></tr>`;
-        });
-        return h + '</tbody></table>';
-    },
-
-    _tableCascades(casc) {
+    _infoCascades(casc) {
+        if (!casc.length) return '';
         const badge = { wifi: '📶 borne Wi-Fi', switch: '🔀 switch non géré', indetermine: '❔ switch ou borne Wi-Fi' };
-        let h = '<div style="margin-top:.6rem;font-size:.72rem;color:var(--text-primary);font-weight:600;">'
-              + 'Plusieurs appareils sur une prise → équipement intermédiaire</div>'
-              + '<table class="mon-table"><thead><tr><th>Prise murale</th><th>Probable</th><th>Appareils vus</th><th>Indices</th></tr></thead><tbody>';
+        let h = '<div style="margin-top:.7rem;font-size:.74rem;color:var(--text-primary);font-weight:600;">'
+              + '📶 Équipement intermédiaire (plusieurs appareils sur un port)</div>'
+              + '<table class="mon-table"><thead><tr><th>Port / prise</th><th>Probable</th><th>Appareils vus</th><th>Indices</th></tr></thead><tbody>';
         casc.forEach(c => {
-            h += `<tr><td>${escH(c.bandeau_nom)} · prise ${c.prise_numero}</td>`
+            const ou = c.prise ? escH(c.prise) : `${escH(c.switch_nom)} · port ${c.switch_port_numero}`;
+            h += `<tr><td style="white-space:normal;">${ou}</td>`
                + `<td style="white-space:normal;">${badge[c.type] || c.type} <span style="color:var(--text-muted);">(${c.n_macs})</span></td>`
                + `<td style="white-space:normal;">${(c.appareils || []).map(escH).join(', ')}</td>`
                + `<td style="white-space:normal;color:var(--text-muted);">${(c.indices || []).map(escH).join(' · ')}</td></tr>`;
@@ -3807,12 +3781,24 @@ const BrassageModal = {
         return h + '</tbody></table>';
     },
 
+    _infoHorsInv(hi) {
+        if (!hi.length) return '';
+        let h = '<div style="margin-top:.7rem;font-size:.74rem;color:var(--text-primary);font-weight:600;">'
+              + '❔ Vus sur un switch mais absents de l\'inventaire</div>'
+              + '<div style="font-size:.68rem;color:var(--text-muted);">À ajouter à l\'inventaire pour qu\'ils soient reconnus.</div>'
+              + '<table class="mon-table"><thead><tr><th>Port de switch</th><th>MAC</th><th>Fabricant</th></tr></thead><tbody>';
+        hi.forEach(x => {
+            h += `<tr><td>${escH(x.switch_nom)} · port ${x.switch_port_numero}</td>`
+               + `<td>${escH(x.mac)}</td><td style="white-space:normal;">${escH(x.vendor || '?')}</td></tr>`;
+        });
+        return h + '</tbody></table>';
+    },
+
     _maj() {
         const n = document.querySelectorAll('#brassage-corps input[type=checkbox]:checked').length;
         const btn = document.getElementById('brassage-appliquer');
-        const unite = this._sens === 'machines' ? 'cordon' : 'affectation';
         btn.disabled = !n;
-        btn.textContent = n ? `Appliquer ${n} ${unite}${n > 1 ? 's' : ''}` : 'Appliquer la sélection';
+        btn.textContent = n ? `Appliquer ${n} proposition${n > 1 ? 's' : ''}` : 'Appliquer la sélection';
     },
 
     async appliquer() {
@@ -3822,29 +3808,28 @@ const BrassageModal = {
         const etat = document.getElementById('brassage-etat');
         btn.disabled = true;
         let ok = 0, ko = 0;
-        for (const b of boxes) {
-            const p = this._props[parseInt(b.dataset.i, 10)];
-            etat.textContent = `Application… ${ok + ko + 1}/${boxes.length}`;
+        // ordre : liens/cordons d'abord (ils détachent), puis affectations
+        const items = boxes.map(b => this._props[parseInt(b.dataset.i, 10)])
+            .sort((a, c) => (a._type === 'prise' || a._type === 'port' ? 1 : 0) - (c._type === 'prise' || c._type === 'port' ? 1 : 0));
+        let fait = 0;
+        for (const p of items) {
+            etat.textContent = `Application… ${++fait}/${items.length}`;
+            const j = (u, m, b) => fetch(u, { method: m, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
             try {
                 let r;
-                if (this._sens === 'machines') {
-                    r = await fetch('/api/baie/lien-port', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ slot1_id: p.bandeau_slot_id, numero1: p.prise_numero,
-                                               slot2_id: p.switch_slot_id, numero2: p.switch_port_numero })
-                    });
-                } else {
-                    r = await fetch(`/api/baie/prise-murale/${p.bandeau_slot_id}/${p.prise_numero}`, {
-                        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ appareil_id: p.machine_id })
-                    });
-                }
-                if (r.ok) ok++; else ko++;
+                if (p._type === 'cordon')
+                    r = await j('/api/baie/lien-port', 'POST', { slot1_id: p.bandeau_slot_id, numero1: p.prise_numero, slot2_id: p.switch_slot_id, numero2: p.switch_port_numero });
+                else if (p._type === 'lien')
+                    r = await j('/api/baie/lien-port', 'POST', { slot1_id: p.a_slot_id, numero1: p.a_port, slot2_id: p.b_slot_id, numero2: p.b_port });
+                else if (p._type === 'prise')
+                    r = await j(`/api/baie/prise-murale/${p.bandeau_slot_id}/${p.prise_numero}`, 'PUT', { appareil_id: p.machine_id });
+                else if (p._type === 'port')
+                    r = await j(`/api/baie/slot/${p.switch_slot_id}/port/${p.switch_port_numero}`, 'PUT', { appareil_id: p.machine_id });
+                if (r && r.ok) ok++; else ko++;
             } catch (e) { ko++; }
         }
         etat.textContent = '';
-        const noun = this._sens === 'machines' ? 'cordon(s) créé(s)' : 'affectation(s)';
-        showFlash(`${ok} ${noun}${ko ? `, ${ko} en échec` : ''}.`, ko ? 'error' : 'success');
+        showFlash(`${ok} proposition(s) appliquée(s)${ko ? `, ${ko} en échec` : ''}.`, ko ? 'error' : 'success');
         this.fermer();
         await chargerBaie(currentBaie);
     },

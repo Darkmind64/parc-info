@@ -1,8 +1,38 @@
-PARCINFO_VERSION=2.19.21
+PARCINFO_VERSION=2.19.22
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090212
+BUILD_NUMBER=2026090213
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.22 - Baie : "Deviner le brassage" -> carte reseau proposee
+# Retour : "j'ai l'impression que ca ne prend en compte que le materiel deja
+# interconnecte. Il faudrait que les adresses MAC presentes sur les ports des
+# switchs soient detectees et mises en correlation avec l'inventaire (noms de
+# l'inventaire pour les machines presentes)."
+# Cas : (a) l'utilisateur reporte l'interconnexion des elements -> deviner
+# assigne les prises murales et le materiel ; (b) l'utilisateur reporte les
+# machines des prises -> deviner definit le cablage bandeau<->switch ET
+# switch<->autres elements.
+#
+# analyser_brassage_baie remplace proposer_brassage_baie + proposer_prises_
+# depuis_brassage (et les 2 onglets de la modale). Part de TOUTES les MAC des
+# FDB de la baie, les correle a l'inventaire, et rend 4 groupes de propositions
+# cochables + 2 listes info :
+#   - prises_appareils : prise murale (cordon pose) -> appareil vu au bout
+#     (PUT /api/baie/prise-murale/...)
+#   - ports_appareils  : port de switch NON brasse -> appareil vu directement
+#     (PUT /api/baie/slot/<id>/port/<n>) ; ignore si l'appareil est deja sur une
+#     prise (releve du cordon)
+#   - cordons          : bandeau <-> switch, deduit d'une machine de prise
+#     (POST /api/baie/lien-port)
+#   - liens_baie       : switch <-> autre element de baie ; port du voisin par
+#     LLDP (diag_topologie) sinon FDB reciproque (mgmt MAC de A vue sur B)
+#     (POST /api/baie/lien-port)
+#   - cascades (info)  : >= 2 MAC sur un port -> switch/borne Wi-Fi en aval
+#   - hors_inventaire (info) : MAC vue seule, absente de l'inventaire (+ OUI)
+# _elements_baie : {appareil_id -> slot/ports}, {mac -> appareil_id d'infra}.
+#
+# Verifie en navigateur sur un HP ProCurve reel. pytest 235 + scripts OK.
 
 # Version 2.19.21 - Baie : "Deviner le brassage" bidirectionnel + cascade switch/Wi-Fi
 # Retour : "J'aimerais aussi detecter le brassage differemment. Si je lie

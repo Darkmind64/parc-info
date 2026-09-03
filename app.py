@@ -7095,20 +7095,17 @@ def api_baie_activite_calibrer_assistant():
 @app.route('/api/baie/brassage/proposer')
 @login_required
 def api_baie_brassage_proposer():
-    """Aperçu de brassage à partir de la table d'apprentissage MAC des switchs.
-    `?sens=machines` (défaut) : prise murale → machine déclarée → port où sa MAC
-    est vue → propose le cordon bandeau⇄switch (application via /api/baie/lien-port).
-    `?sens=brassage` : les cordons sont déjà posés → déduit la machine de chaque
-    prise murale (application via /api/baie/prise-murale/...), et signale les
-    prises où plusieurs appareils sont vus (switch / borne Wi-Fi en aval).
-    Lecture seule ; un relevé SNMP synchrone (FDB) peut avoir lieu — action
-    déclenchée explicitement par l'utilisateur."""
+    """« Carte réseau proposée » : part de TOUTES les MAC apprises sur les switchs
+    de la baie, les corrèle à l'inventaire, et en déduit des propositions groupées
+    (machine sur une prise murale ; machine directe sur un port de switch ; cordon
+    bandeau⇄switch ; lien switch⇄élément de baie) + info (cascades, hors inventaire).
+    Lecture seule ; un relevé SNMP synchrone (FDB) a lieu — action explicite de
+    l'utilisateur. L'application se fait proposition par proposition côté client,
+    via /api/baie/lien-port, /api/baie/prise-murale/... et /api/baie/slot/.../port/..."""
     cid = get_client_id()
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    if request.args.get('sens') == 'brassage':
-        return jsonify(network_diag.proposer_prises_depuis_brassage(cid))
-    return jsonify(network_diag.proposer_brassage_baie(cid))
+    return jsonify(network_diag.analyser_brassage_baie(cid))
 
 
 def _liste_cablage(conn, cid):

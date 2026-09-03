@@ -3690,6 +3690,8 @@ def _classer_cascade(macs, inv_mac):
     if len(macs) <= 4 and not aleatoires and not ap_v:
         s += 1
         indices.append("peu de MAC, aucune aléatoire — plutôt un switch non géré")
+    if len(macs) >= 16:
+        indices.append("beaucoup d'appareils — possible lien montant vers le reste du réseau")
 
     typ = 'wifi' if w > s else 'switch' if s > w else 'indetermine'
     return {'type': typ, 'indices': indices, 'n_macs': len(macs)}
@@ -4381,137 +4383,52 @@ _BRASSAGE_UPLINK_MAX = 8   # au-delà de N MAC apprises sur un port, c'est un up
                            #   la machine est derrière, pas branchée là → confiance faible
 
 
-def proposer_brassage_baie(client_id: int) -> dict:
-    """Propose les cordons de brassage bandeau RJ ⇄ port de switch à partir de la
-    table d'apprentissage MAC : prise murale → machine déclarée → sa MAC est vue
-    sur un port de switch → le port de bandeau de même numéro doit être brassé
-    sur ce port. **Ne modifie rien** (aperçu) — l'application se fait ensuite via
-    /api/baie/lien-port, un lien à la fois.
+def _elements_baie(conn, client_id):
+    """Éléments de rack associés à un appareil. Retourne
+    ({appareil_id: {slot_id, nom, type_equipement, type_appareil, ports:[numero]}},
+     {mac_normalisée: appareil_id}, {slot_id: nom})."""
+    elems, mac_infra, nom_par_slot = {}, {}, {}
+    for slot_id, aid, nom_c, typ_eq, nom_m, typ_app, mac in conn.execute(
+            "SELECT s.id, s.appareil_id, s.nom_custom, s.type_equipement, "
+            "a.nom_machine, a.type_appareil, a.adresse_mac "
+            "FROM baie_slots s JOIN appareils a ON a.id = s.appareil_id "
+            "WHERE s.client_id=?", (client_id,)):
+        nom = nom_c or nom_m or typ_eq or f'#{slot_id}'
+        nom_par_slot[slot_id] = nom
+        elems[aid] = {'slot_id': slot_id, 'nom': nom, 'type_equipement': typ_eq,
+                      'type_appareil': typ_app, 'ports': []}
+        if mac:
+            mac_infra[_norm_mac(mac)] = aid
+    for e in elems.values():
+        e['ports'] = [r[0] for r in conn.execute(
+            "SELECT numero FROM baie_slot_ports WHERE slot_id=? ORDER BY numero", (e['slot_id'],))]
+    # noms de tous les éléments (même sans appareil) pour l'affichage « actuel »
+    for slot_id, nom_c, typ_eq in conn.execute(
+            "SELECT id, nom_custom, type_equipement FROM baie_slots WHERE client_id=?", (client_id,)):
+        nom_par_slot.setdefault(slot_id, nom_c or typ_eq or f'#{slot_id}')
+    return elems, mac_infra, nom_par_slot
 
-    Retourne {ok, motif?, propositions[], non_resolues[]}. Chaque proposition :
-      {bandeau_slot_id, bandeau_nom, prise_numero, machine_id, machine_nom,
-       switch_slot_id, switch_nom, switch_port_numero, ifindex,
-       action: 'creer'|'modifier'|'inchange', confiance: 'sure'|'faible',
-       actuel: {switch_slot_id, switch_port_numero}|None, vu_avec: int}
+
+def analyser_brassage_baie(client_id: int) -> dict:
+    """« Carte réseau proposée » : part de TOUTES les MAC apprises sur les switchs
+    de la baie, les corrèle à l'inventaire (nom d'inventaire pour les machines
+    connues), et en déduit un jeu de propositions. **Ne modifie rien.**
+
+    Groupes (chaque proposition : `action` 'creer'|'modifier' + libellé `actuel*`) :
+      - `prises_appareils` : prise murale dont le cordon est posé → l'appareil
+        réellement vu sur le port de switch au bout (assigne `baie_prises_murales`)
+      - `ports_appareils`  : port de switch NON brassé → l'appareil vu directement
+        dessus (assigne `baie_slot_ports.appareil_id`)
+      - `cordons`          : bandeau ⇄ switch, déduit d'une machine déclarée sur
+        une prise dont la MAC est vue sur un port de switch
+      - `liens_baie`       : switch ⇄ autre élément de la baie (MAC d'infra vue,
+        port du voisin par LLDP ou FDB réciproque)
+    Plus, à titre d'information : `cascades` (switch non géré / borne Wi-Fi en
+    aval d'une prise) et `hors_inventaire` (appareil vu mais absent de l'inventaire).
     """
     from database import get_db
-    if str(_cfg('diag_snmp_actif', '0')) != '1':
-        return {'ok': False, 'motif': 'snmp_inactif', 'propositions': [], 'non_resolues': []}
-    communautes = _communautes_snmp()
-    conn = get_db()
-    try:
-        switchs = _switchs_baie(conn, client_id)
-        if not switchs:
-            return {'ok': False, 'motif': 'aucun_switch', 'propositions': [], 'non_resolues': []}
-
-        # relevé SNMP mutualisé par IP : noms d'interface + FDB
-        infos_par_ip, fdb_par_ip = {}, {}
-        for sw in switchs:
-            ip = sw['ip']
-            if ip not in infos_par_ip:
-                infos_par_ip[ip] = _noms_interfaces(ip, communautes)
-                fdb_par_ip[ip] = _fdb_switch(ip, communautes)
-
-        # par slot switch : {ifindex: numero_baie} (inverse du mapping)
-        sw_ctx = []
-        for sw in switchs:
-            mapping, _sources, _cal, _div = _mapping_baie_ifindex(
-                conn, client_id, sw['slot_id'], sw['appareil_id'], infos_par_ip[sw['ip']])
-            sw_ctx.append({**sw, 'ifx_to_num': {ifx: num for num, ifx in mapping.items()},
-                           'fdb': fdb_par_ip.get(sw['ip']) or {}})
-
-        # MAC de chaque appareil du client
-        mac_par_appareil = {}
-        for aid, mac in conn.execute(
-                "SELECT id, adresse_mac FROM appareils WHERE client_id=? "
-                "AND adresse_mac!='' AND adresse_mac IS NOT NULL", (client_id,)):
-            mac_par_appareil[aid] = _norm_mac(mac)
-
-        propositions, non_resolues = [], []
-        ph = ','.join('?' * len(_TYPES_BANDEAU))
-        for b_slot_id, b_nom_c, b_type in conn.execute(
-                f"SELECT id, nom_custom, type_equipement FROM baie_slots "
-                f"WHERE client_id=? AND type_equipement IN ({ph})", (client_id, *_TYPES_BANDEAU)):
-            b_nom = b_nom_c or b_type
-            for prise_num, aid, m_nom in conn.execute(
-                    "SELECT pm.numero, pm.appareil_id, a.nom_machine FROM baie_prises_murales pm "
-                    "LEFT JOIN appareils a ON a.id = pm.appareil_id "
-                    "WHERE pm.slot_id=? AND pm.appareil_id IS NOT NULL ORDER BY pm.numero", (b_slot_id,)):
-                mac = mac_par_appareil.get(aid)
-                if not mac:
-                    non_resolues.append({'bandeau_nom': b_nom, 'prise_numero': prise_num,
-                                         'machine_nom': m_nom or f'#{aid}', 'motif': 'mac_absente'})
-                    continue
-                # où cette MAC est-elle apprise ? (port le moins « chargé » = accès)
-                cands = []
-                for c in sw_ctx:
-                    for ifx, macs in c['fdb'].items():
-                        if mac in macs:
-                            cands.append((len(macs), c, ifx))
-                if not cands:
-                    non_resolues.append({'bandeau_nom': b_nom, 'prise_numero': prise_num,
-                                         'machine_nom': m_nom or f'#{aid}', 'motif': 'non_vue'})
-                    continue
-                cands.sort(key=lambda x: x[0])
-                # premier candidat (le moins chargé) dont l'ifIndex est un port de
-                # baie représenté — un switch 48 ports en 2 éléments de rack a deux
-                # entrées `sw_ctx` qui se partagent la même FDB mais des plages de
-                # ports différentes.
-                choix = next((t for t in cands if t[1]['ifx_to_num'].get(t[2]) is not None), None)
-                if choix is None:
-                    non_resolues.append({'bandeau_nom': b_nom, 'prise_numero': prise_num,
-                                         'machine_nom': m_nom or f'#{aid}', 'motif': 'port_non_mappe'})
-                    continue
-                vu_avec, c, ifx = choix
-                port_num = c['ifx_to_num'][ifx]
-                actuel = conn.execute(
-                    "SELECT lie_slot_id, lie_port_numero FROM baie_slot_ports WHERE slot_id=? AND numero=?",
-                    (b_slot_id, prise_num)).fetchone()
-                a_sid = actuel[0] if actuel else None
-                a_num = actuel[1] if actuel else None
-                a_nom = ''
-                if a_sid:
-                    r = conn.execute("SELECT COALESCE(NULLIF(nom_custom,''), type_equipement, 'élément') "
-                                     "FROM baie_slots WHERE id=?", (a_sid,)).fetchone()
-                    a_nom = r[0] if r else ''
-                if a_sid == c['slot_id'] and a_num == port_num:
-                    action = 'inchange'
-                elif a_sid:
-                    action = 'modifier'
-                else:
-                    action = 'creer'
-                propositions.append({
-                    'bandeau_slot_id': b_slot_id, 'bandeau_nom': b_nom, 'prise_numero': prise_num,
-                    'machine_id': aid, 'machine_nom': m_nom or f'#{aid}',
-                    'switch_slot_id': c['slot_id'], 'switch_nom': c['nom'],
-                    'switch_port_numero': port_num, 'ifindex': ifx,
-                    'action': action, 'vu_avec': vu_avec - 1,
-                    'confiance': 'faible' if vu_avec > _BRASSAGE_UPLINK_MAX else 'sure',
-                    'actuel': ({'switch_slot_id': a_sid, 'switch_port_numero': a_num,
-                                'switch_nom': a_nom} if a_sid else None)})
-        propositions.sort(key=lambda p: (p['bandeau_nom'], p['prise_numero']))
-        return {'ok': True, 'propositions': propositions, 'non_resolues': non_resolues,
-                'nb_switchs': len({s['ip'] for s in switchs})}
-    except Exception:
-        logger.exception('network_diag: proposer_brassage_baie')
-        return {'ok': False, 'motif': 'erreur_interne', 'propositions': [], 'non_resolues': []}
-    finally:
-        conn.close()
-
-
-def proposer_prises_depuis_brassage(client_id: int) -> dict:
-    """Sens inverse de `proposer_brassage_baie` : les cordons bandeau⇄switch sont
-    déjà posés (`baie_slot_ports.lie_*`), on en **déduit la machine** de chaque
-    prise murale — la MAC apprise sur le port de switch au bout du cordon.
-    Plusieurs MAC sur ce port → équipement intermédiaire (switch non géré / borne
-    Wi-Fi), signalé dans `cascades` (avec un essai de classification) sans rien
-    affecter. **Ne modifie rien** ; l'application passe par
-    `PUT /api/baie/prise-murale/<slot>/<numero>`.
-
-    Retourne {ok, motif?, propositions[], cascades[], non_resolues[]}.
-    """
-    from database import get_db
-    vide = {'propositions': [], 'cascades': [], 'non_resolues': []}
+    vide = {'prises_appareils': [], 'ports_appareils': [], 'cordons': [],
+            'liens_baie': [], 'cascades': [], 'hors_inventaire': []}
     if str(_cfg('diag_snmp_actif', '0')) != '1':
         return {'ok': False, 'motif': 'snmp_inactif', **vide}
     communautes = _communautes_snmp()
@@ -4520,80 +4437,186 @@ def proposer_prises_depuis_brassage(client_id: int) -> dict:
         switchs = _switchs_baie(conn, client_id)
         if not switchs:
             return {'ok': False, 'motif': 'aucun_switch', **vide}
+
         infos_par_ip, fdb_par_ip = {}, {}
         for sw in switchs:
             if sw['ip'] not in infos_par_ip:
                 infos_par_ip[sw['ip']] = _noms_interfaces(sw['ip'], communautes)
                 fdb_par_ip[sw['ip']] = _fdb_switch(sw['ip'], communautes)
-        sw_par_slot = {}
-        for sw in switchs:
-            mapping, _s, _c, _d = _mapping_baie_ifindex(
-                conn, client_id, sw['slot_id'], sw['appareil_id'], infos_par_ip[sw['ip']])
-            sw_par_slot[sw['slot_id']] = {**sw, 'num_to_ifx': mapping,
-                                         'fdb': fdb_par_ip.get(sw['ip']) or {}}
 
-        inv_mac = {}
+        inv_mac, nom_par_aid = {}, {}
         for aid, nom, mac, typ in conn.execute(
-                "SELECT id, nom_machine, adresse_mac, type_appareil FROM appareils "
-                "WHERE client_id=? AND adresse_mac!='' AND adresse_mac IS NOT NULL", (client_id,)):
-            inv_mac[_norm_mac(mac)] = (aid, nom, typ)
+                "SELECT id, nom_machine, adresse_mac, type_appareil FROM appareils WHERE client_id=?",
+                (client_id,)):
+            nom_par_aid[aid] = nom or f'#{aid}'
+            if mac:
+                inv_mac[_norm_mac(mac)] = (aid, nom or f'#{aid}', typ)
+        elems, mac_infra, nom_par_slot = _elements_baie(conn, client_id)
+        aids_baie = set(elems)
 
-        propositions, cascades, non_resolues = [], [], []
+        sw_ctx = []
+        for sw in switchs:
+            mapping, *_r = _mapping_baie_ifindex(conn, client_id, sw['slot_id'],
+                                                sw['appareil_id'], infos_par_ip[sw['ip']])
+            sw_ctx.append({**sw, 'ifx_to_num': {ifx: num for num, ifx in mapping.items()},
+                           'fdb': fdb_par_ip.get(sw['ip']) or {},
+                           'mgmt_mac': next((m for m, a in mac_infra.items()
+                                             if a == sw['appareil_id']), None)})
+        ctx_par_slot = {c['slot_id']: c for c in sw_ctx}
+
+        # état actuel : liens (cordons) et cibles directes de tous les ports du client
+        liens, cibles = {}, {}
+        for slot_id, numero, l_sid, l_num, p_aid in conn.execute(
+                "SELECT slot_id, numero, lie_slot_id, lie_port_numero, appareil_id FROM baie_slot_ports "
+                "WHERE slot_id IN (SELECT id FROM baie_slots WHERE client_id=?)", (client_id,)):
+            if l_sid:
+                liens[(slot_id, numero)] = (l_sid, l_num)
+                liens.setdefault((l_sid, l_num), (slot_id, numero))   # lien à sens unique toléré
+            if p_aid:
+                cibles[(slot_id, numero)] = p_aid
+
         ph = ','.join('?' * len(_TYPES_BANDEAU))
-        for b_slot_id, b_nom_c, b_type in conn.execute(
-                f"SELECT id, nom_custom, type_equipement FROM baie_slots "
-                f"WHERE client_id=? AND type_equipement IN ({ph})", (client_id, *_TYPES_BANDEAU)):
-            b_nom = b_nom_c or b_type
-            for prise_num, lie_sid, lie_pnum, decl_aid, decl_nom in conn.execute(
-                    "SELECT bp.numero, bp.lie_slot_id, bp.lie_port_numero, pm.appareil_id, a.nom_machine "
-                    "FROM baie_slot_ports bp "
-                    "LEFT JOIN baie_prises_murales pm ON pm.slot_id=bp.slot_id AND pm.numero=bp.numero "
-                    "LEFT JOIN appareils a ON a.id=pm.appareil_id "
-                    "WHERE bp.slot_id=? AND bp.lie_slot_id IS NOT NULL AND bp.lie_port_numero IS NOT NULL "
-                    "ORDER BY bp.numero", (b_slot_id,)):
-                sc = sw_par_slot.get(lie_sid)
-                base = {'bandeau_slot_id': b_slot_id, 'bandeau_nom': b_nom, 'prise_numero': prise_num}
-                if not sc:
-                    non_resolues.append({**base, 'motif': 'pas_un_switch'})
+        prises_decl = {}   # (bandeau_slot, numero) -> (appareil_id, nom, mac)
+        for s_id, numero, aid, nom, mac in conn.execute(
+                "SELECT pm.slot_id, pm.numero, pm.appareil_id, a.nom_machine, a.adresse_mac "
+                "FROM baie_prises_murales pm LEFT JOIN appareils a ON a.id=pm.appareil_id "
+                "WHERE pm.slot_id IN (SELECT id FROM baie_slots WHERE client_id=? "
+                f"AND type_equipement IN ({ph}))", (client_id, *_TYPES_BANDEAU)):
+            prises_decl[(s_id, numero)] = (aid, nom or '', _norm_mac(mac or ''))
+        aids_sur_prise = {v[0] for v in prises_decl.values() if v[0]}
+
+        lldp = {}   # (equipement_appareil_id, port_index) -> voisin_port
+        for eq_aid, pidx, vp in conn.execute(
+                "SELECT equipement_appareil_id, port_index, voisin_port FROM diag_topologie "
+                "WHERE client_id=? AND type_lien='lldp' AND equipement_appareil_id IS NOT NULL", (client_id,)):
+            try:
+                lldp[(eq_aid, int(pidx))] = vp or ''
+            except (TypeError, ValueError):
+                pass
+
+        prises_appareils, ports_appareils, cordons = [], [], []
+        liens_baie, cascades, hors_inv = [], [], []
+        vus_liens = set()
+
+        def _cmp_lien(cle, autre_slot, autre_port):
+            cur = liens.get(cle)
+            if cur == (autre_slot, autre_port):
+                return None, None
+            if cur:
+                return 'modifier', f"{nom_par_slot.get(cur[0], '?')} port {cur[1]}"
+            return 'creer', ''
+
+        # ── passe 1 : chaque port mappé de chaque switch ──
+        for c in sw_ctx:
+            for ifx, macs in c['fdb'].items():
+                port_num = c['ifx_to_num'].get(ifx)
+                if port_num is None:
                     continue
-                try:
-                    ifx = sc['num_to_ifx'].get(int(lie_pnum))
-                except (TypeError, ValueError):
-                    ifx = None
-                if ifx is None:
-                    non_resolues.append({**base, 'motif': 'port_non_mappe'})
+                cle = (c['slot_id'], port_num)
+                infra_ici = [(m, mac_infra[m]) for m in sorted(macs)
+                             if m in mac_infra and mac_infra[m] != c['appareil_id']]
+
+                # (D) lien switch ⇄ autre élément de la baie
+                if infra_ici:
+                    autre_aid = infra_ici[0][1]
+                    autre = elems.get(autre_aid)
+                    paire = autre and tuple(sorted((c['slot_id'], autre['slot_id'])))
+                    if autre and paire not in vus_liens:
+                        b_port, via = None, 'fdb'
+                        lv = lldp.get((c['appareil_id'], ifx))
+                        if lv and _port_physique_depuis_nom(lv):
+                            b_port, via = _port_physique_depuis_nom(lv), 'lldp'
+                        if b_port is None and c['mgmt_mac']:
+                            ac = ctx_par_slot.get(autre['slot_id'])
+                            if ac:
+                                for a_ifx, a_macs in ac['fdb'].items():
+                                    if c['mgmt_mac'] in a_macs:
+                                        b_port = ac['ifx_to_num'].get(a_ifx)
+                                        break
+                        if b_port and b_port in autre['ports']:
+                            act, actu = _cmp_lien(cle, autre['slot_id'], b_port)
+                            if act:
+                                liens_baie.append({
+                                    'a_slot_id': c['slot_id'], 'a_nom': c['nom'], 'a_port': port_num,
+                                    'b_slot_id': autre['slot_id'], 'b_nom': autre['nom'], 'b_port': b_port,
+                                    'via': via, 'action': act, 'actuel': actu})
+                            vus_liens.add(paire)
                     continue
-                macs = sc['fdb'].get(ifx, set())
-                if not macs:
-                    non_resolues.append({**base, 'motif': 'rien_vu'})
-                    continue
+
                 if len(macs) >= 2:
                     casc = _classer_cascade(macs, inv_mac)
                     vois = _voisins_port(macs, inv_mac)
-                    cascades.append({**base, 'switch_nom': sc['nom'], 'switch_port_numero': lie_pnum,
+                    b_lien = liens.get(cle)
+                    prise = None
+                    if b_lien and b_lien in prises_decl:
+                        prise = f"{nom_par_slot.get(b_lien[0], '?')} prise {b_lien[1]}"
+                    cascades.append({'switch_nom': c['nom'], 'switch_port_numero': port_num,
                                      'type': casc['type'], 'indices': casc['indices'],
-                                     'n_macs': casc['n_macs'], 'appareils': vois['noms'],
-                                     'declare_nom': decl_nom or ''})
+                                     'n_macs': casc['n_macs'], 'appareils': vois['noms'], 'prise': prise})
                     continue
-                hit = inv_mac.get(next(iter(macs)))
-                if not hit:
-                    non_resolues.append({**base, 'motif': 'appareil_inconnu',
-                                         'vu': _vendor(next(iter(macs))) or next(iter(macs))})
+
+                m = next(iter(macs))
+                if m not in inv_mac:
+                    hors_inv.append({'switch_nom': c['nom'], 'switch_port_numero': port_num,
+                                     'mac': m, 'vendor': _vendor(m) or ''})
                     continue
-                aid, nom, _typ = hit
-                action = 'inchange' if decl_aid == aid else 'modifier' if decl_aid else 'creer'
-                propositions.append({**base, 'machine_id': aid, 'machine_nom': nom or f'#{aid}',
-                                     'switch_nom': sc['nom'], 'switch_port_numero': lie_pnum,
-                                     'action': action, 'actuel_nom': decl_nom or ''})
-        propositions.sort(key=lambda p: (p['bandeau_nom'], p['prise_numero']))
-        cascades.sort(key=lambda p: (p['bandeau_nom'], p['prise_numero']))
-        return {'ok': True, 'propositions': propositions, 'cascades': cascades,
-                'non_resolues': non_resolues, 'nb_switchs': len({s['ip'] for s in switchs})}
+                aid, nom, _typ = inv_mac[m]
+                b_lien = liens.get(cle)
+                if b_lien and b_lien in prises_decl:
+                    decl = prises_decl[b_lien]
+                    if decl[0] != aid:
+                        prises_appareils.append({
+                            'bandeau_slot_id': b_lien[0], 'bandeau_nom': nom_par_slot.get(b_lien[0], '?'),
+                            'prise_numero': b_lien[1], 'machine_id': aid, 'machine_nom': nom,
+                            'switch_nom': c['nom'], 'switch_port_numero': port_num,
+                            'action': 'modifier' if decl[0] else 'creer', 'actuel_nom': decl[1]})
+                elif not b_lien:
+                    cur = cibles.get(cle)
+                    # un appareil déjà déclaré sur une prise murale relève du cordon
+                    # (bandeau⇄switch), pas d'une affectation directe au port
+                    if cur != aid and aid not in aids_baie and aid not in aids_sur_prise:
+                        ports_appareils.append({
+                            'switch_slot_id': c['slot_id'], 'switch_nom': c['nom'],
+                            'switch_port_numero': port_num, 'machine_id': aid, 'machine_nom': nom,
+                            'action': 'modifier' if cur else 'creer',
+                            'actuel_nom': nom_par_aid.get(cur, '') if cur else ''})
+
+        # ── passe 2 : cordons bandeau ⇄ switch depuis les machines de prises ──
+        for (b_sid, b_num), (aid, m_nom, mac) in prises_decl.items():
+            if not aid or not mac or (b_sid, b_num) in liens:
+                continue
+            cands = []
+            for c in sw_ctx:
+                for ifx, macs in c['fdb'].items():
+                    if mac in macs and c['ifx_to_num'].get(ifx) is not None:
+                        cands.append((len(macs), c, c['ifx_to_num'][ifx]))
+            if not cands:
+                continue
+            cands.sort(key=lambda x: x[0])
+            vu_avec, c, port_num = cands[0]
+            occupe = (c['slot_id'], port_num) in liens
+            cordons.append({
+                'bandeau_slot_id': b_sid, 'bandeau_nom': nom_par_slot.get(b_sid, '?'),
+                'prise_numero': b_num, 'machine_nom': m_nom,
+                'switch_slot_id': c['slot_id'], 'switch_nom': c['nom'], 'switch_port_numero': port_num,
+                'action': 'creer',
+                'confiance': 'faible' if (vu_avec > _BRASSAGE_UPLINK_MAX or occupe) else 'sure',
+                'note': ('ce port de switch est déjà brassé ailleurs' if occupe else '')})
+
+        _k = lambda x: (str(x.get('switch_nom', '')), str(x.get('bandeau_nom', '')),
+                        int(x.get('switch_port_numero', x.get('prise_numero', 0)) or 0))
+        for g in (prises_appareils, ports_appareils, cordons, liens_baie, cascades, hors_inv):
+            g.sort(key=_k)
+        return {'ok': True, 'nb_switchs': len({s['ip'] for s in switchs}),
+                'prises_appareils': prises_appareils, 'ports_appareils': ports_appareils,
+                'cordons': cordons, 'liens_baie': liens_baie,
+                'cascades': cascades, 'hors_inventaire': hors_inv}
     except Exception:
-        logger.exception('network_diag: proposer_prises_depuis_brassage')
+        logger.exception('network_diag: analyser_brassage_baie')
         return {'ok': False, 'motif': 'erreur_interne', **vide}
     finally:
         conn.close()
+
 
 
 # ── Capture de trafic à la demande (onglet « Trafic capturé ») ──────────────

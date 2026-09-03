@@ -786,52 +786,6 @@ def test_fdb_switch_et_voisins(monkeypatch):
     assert 'PC-A' in v['noms'] and v['n'] == 2
 
 
-def test_proposer_brassage_baie(conn, deux_clients, make_appareil, monkeypatch):
-    """Rapproche prise murale (machine déclarée) → port de switch où sa MAC est
-    vue (FDB) → propose le cordon bandeau ⇄ switch. Un port qui apprend la MAC
-    parmi beaucoup d'autres (uplink) est proposé mais en confiance « faible »."""
-    cid = deux_clients['cid_a']
-    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.7')
-    pcA = make_appareil(cid, nom_machine='PC-A', adresse_mac='AA:00:00:00:00:0A')
-    pcB = make_appareil(cid, nom_machine='PC-B', adresse_mac='AA:00:00:00:00:0B')
-    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
-    sw_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
-    for n in (3, 7):
-        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (sw_slot, n))
-    conn.execute("INSERT INTO baie_slots (client_id, position, type_equipement) VALUES (?,2,'Bandeau RJ')", (cid,))
-    b_slot = conn.execute("SELECT id FROM baie_slots WHERE type_equipement='Bandeau RJ' AND client_id=?",
-                          (cid,)).fetchone()[0]
-    for n in (1, 2):
-        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (b_slot, n))
-    conn.execute("INSERT INTO baie_prises_murales (slot_id, numero, appareil_id) VALUES (?,1,?)", (b_slot, pcA))
-    conn.execute("INSERT INTO baie_prises_murales (slot_id, numero, appareil_id) VALUES (?,2,?)", (b_slot, pcB))
-    conn.commit()
-
-    monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
-    monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
-    monkeypatch.setattr(network_diag, '_noms_interfaces',
-        lambda ip, c: {33: {'nom': 'Gi0/3', 'alias': '', 'ethernet': True},
-                       77: {'nom': 'Gi0/7', 'alias': '', 'ethernet': True}})
-    monkeypatch.setattr(network_diag, '_fdb_switch',
-        lambda ip, c: {33: {'aa:00:00:00:00:0a'},
-                       77: {'aa:00:00:00:00:0b'} | {f'00:00:00:00:00:{i:02x}' for i in range(20)}})
-
-    d = network_diag.proposer_brassage_baie(cid)
-    assert d['ok'] is True
-    props = {p['prise_numero']: p for p in d['propositions']}
-    assert props[1]['switch_port_numero'] == 3 and props[1]['action'] == 'creer'
-    assert props[1]['confiance'] == 'sure'
-    assert props[2]['switch_port_numero'] == 7 and props[2]['confiance'] == 'faible'
-
-    # une fois le cordon posé (comme le ferait /api/baie/lien-port), l'action passe à 'inchange'
-    conn.execute("UPDATE baie_slot_ports SET lie_slot_id=?, lie_port_numero=3 WHERE slot_id=? AND numero=1",
-                 (sw_slot, b_slot))
-    conn.commit()
-    d2 = network_diag.proposer_brassage_baie(cid)
-    p1 = next(p for p in d2['propositions'] if p['prise_numero'] == 1)
-    assert p1['action'] == 'inchange'
-
-
 def test_classer_cascade():
     _f = network_diag._classer_cascade
     # 2 MAC filaires classiques, aucune aléatoire → switch non géré
@@ -844,41 +798,50 @@ def test_classer_cascade():
     assert r['type'] == 'wifi' and r['n_macs'] == 2
 
 
-def test_proposer_prises_depuis_brassage(conn, deux_clients, make_appareil, monkeypatch):
-    """Cordons bandeau⇄switch déjà posés → déduit la machine de chaque prise ;
-    plusieurs MAC sur le port → cascade (switch / borne Wi-Fi en aval)."""
+def test_analyser_brassage_baie(conn, deux_clients, make_appareil, monkeypatch):
+    """Carte réseau proposée à partir de toutes les MAC vues sur les switchs :
+    machine sur une prise brassée, machine directe sur un port non brassé,
+    cordon déduit d'une machine de prise, cascade, hors inventaire."""
     cid = deux_clients['cid_a']
-    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.8')
-    pcA = make_appareil(cid, nom_machine='PC-A', adresse_mac='AA:00:00:00:00:0A')
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.9')
+    srv = make_appareil(cid, nom_machine='SRV-1', adresse_mac='AA:00:00:00:00:01')   # direct sur port
+    pcP = make_appareil(cid, nom_machine='PC-PRISE', adresse_mac='AA:00:00:00:00:02')  # au bout d'un cordon
+    pcC = make_appareil(cid, nom_machine='PC-CORDON', adresse_mac='AA:00:00:00:00:03')  # machine de prise, cordon à créer
     conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
     sw_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
-    for n in (3, 7):
+    for n in (2, 3, 4, 5, 6):
         conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (sw_slot, n))
     conn.execute("INSERT INTO baie_slots (client_id, position, type_equipement) VALUES (?,2,'Bandeau RJ')", (cid,))
     b_slot = conn.execute("SELECT id FROM baie_slots WHERE type_equipement='Bandeau RJ' AND client_id=?",
                           (cid,)).fetchone()[0]
-    # cordon prise 1 -> switch port 3 ; prise 2 -> switch port 7
-    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero, lie_slot_id, lie_port_numero) VALUES (?,1,?,3)", (b_slot, sw_slot))
-    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero, lie_slot_id, lie_port_numero) VALUES (?,2,?,7)", (b_slot, sw_slot))
-    conn.execute("INSERT INTO baie_prises_murales (slot_id, numero) VALUES (?,1)", (b_slot,))
-    conn.execute("INSERT INTO baie_prises_murales (slot_id, numero) VALUES (?,2)", (b_slot,))
+    for n in (1, 2, 3):
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (b_slot, n))
+        conn.execute("INSERT INTO baie_prises_murales (slot_id, numero) VALUES (?,?)", (b_slot, n))
+    # prise 1 brassée -> switch port 3 (on y verra PC-PRISE) ; prise 2 déclare PC-CORDON (cordon à créer)
+    conn.execute("UPDATE baie_slot_ports SET lie_slot_id=?, lie_port_numero=3 WHERE slot_id=? AND numero=1", (sw_slot, b_slot))
+    conn.execute("UPDATE baie_slot_ports SET lie_slot_id=?, lie_port_numero=1 WHERE slot_id=? AND numero=3", (b_slot, sw_slot))
+    conn.execute("UPDATE baie_prises_murales SET appareil_id=? WHERE slot_id=? AND numero=2", (pcC, b_slot))
     conn.commit()
 
     monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
     monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
     monkeypatch.setattr(network_diag, '_noms_interfaces',
-        lambda ip, c: {33: {'nom': 'Gi0/3', 'alias': '', 'ethernet': True},
-                       77: {'nom': 'Gi0/7', 'alias': '', 'ethernet': True}})
-    monkeypatch.setattr(network_diag, '_fdb_switch',
-        lambda ip, c: {33: {'aa:00:00:00:00:0a'},
-                       77: {'00:11:22:33:44:55', '02:99:99:99:99:99'}})   # 2 MAC → cascade
+        lambda ip, c: {i * 11: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True} for i in (2, 3, 4, 5, 6)})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {
+        22: {'aa:00:00:00:00:01'},                                  # port 2 : SRV-1 direct
+        33: {'aa:00:00:00:00:02'},                                  # port 3 : PC-PRISE (au bout du cordon de la prise 1)
+        44: {'aa:00:00:00:00:03'},                                  # port 4 : PC-CORDON -> cordon à créer vers prise 2
+        55: {'de:ad:be:ef:00:01'},                                  # port 5 : un appareil hors inventaire
+        66: {'00:11:22:33:44:55', '02:99:88:77:66:55'},             # port 6 : cascade (une MAC aléatoire)
+    })
 
-    d = network_diag.proposer_prises_depuis_brassage(cid)
+    d = network_diag.analyser_brassage_baie(cid)
     assert d['ok'] is True
-    assert [p['prise_numero'] for p in d['propositions']] == [1]
-    assert d['propositions'][0]['machine_id'] == pcA and d['propositions'][0]['action'] == 'creer'
-    assert [c['prise_numero'] for c in d['cascades']] == [2]
-    assert d['cascades'][0]['type'] == 'wifi'   # une MAC aléatoire présente
+    assert [(p['prise_numero'], p['machine_nom']) for p in d['prises_appareils']] == [(1, 'PC-PRISE')]
+    assert [(p['switch_port_numero'], p['machine_nom']) for p in d['ports_appareils']] == [(2, 'SRV-1')]
+    assert [(p['prise_numero'], p['switch_port_numero']) for p in d['cordons']] == [(2, 4)]
+    assert [c['switch_port_numero'] for c in d['cascades']] == [6] and d['cascades'][0]['type'] == 'wifi'
+    assert [x['switch_port_numero'] for x in d['hors_inventaire']] == [5]
 
 
 def test_cycle_activite_stale_apres_echecs(conn, deux_clients, make_appareil, monkeypatch):
