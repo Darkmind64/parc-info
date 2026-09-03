@@ -3700,6 +3700,16 @@ const BrassageModal = {
     fermer() { document.getElementById('brassage-modal').classList.remove('open'); },
     fermerSiOverlay(e) { if (e.target.id === 'brassage-modal') this.fermer(); },
 
+    async setFdbMode(ip, mode) {
+        try {
+            await fetch('/api/baie/brassage/fdb-mode', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ip, mode })
+            });
+        } catch (e) {}
+        this.charger();   // relance l'analyse avec le nouveau réglage
+    },
+
     async charger() {
         const corps = document.getElementById('brassage-corps');
         const btn = document.getElementById('brassage-appliquer');
@@ -3716,16 +3726,25 @@ const BrassageModal = {
             return;
         }
         this._props = [];
-        const ill = d.switchs_illisibles || [], tronq = d.switchs_tronques || [];
+        // état de la table MAC de chaque switch : hypothèse retenue, fiabilité, réglage
         let avert = '';
-        if (ill.length)
-            avert += `<div style="margin-bottom:.5rem;font-size:.7rem;color:var(--accent-red,#ef4444);">`
-                  + `⚠ ${ill.map(escH).join(', ')} : table d'apprentissage MAC illisible en SNMP (agent défectueux). `
-                  + `Ce switch est ignoré — les propositions ci-dessous n'en tiennent pas compte.</div>`;
-        if (tronq.length)
-            avert += `<div style="margin-bottom:.5rem;font-size:.7rem;color:var(--accent-orange,#f59e0b);">`
-                  + `⚠ ${tronq.map(escH).join(', ')} : table MAC tronquée par l'agent SNMP — recoupée par préfixe `
-                  + `avec l'inventaire (les appareils absents de l'inventaire ne peuvent pas être identifiés sur ce switch).</div>`;
+        const HYP = { exact: 'lecture standard', tronque4: 'MAC tronquée (2 octets)',
+                      tronque5: 'MAC tronquée (1 octet)', prefixe2: 'préfixe parasite + tronquée',
+                      prefixe1: 'préfixe parasite (1 octet)', ignore: 'ignorée (réglage)' };
+        for (const s of (d.fdb || [])) {
+            const anormal = s.transform !== 'exact' || !s.fiable || s.mode !== 'auto';
+            const coul = !s.fiable ? 'var(--accent-red,#ef4444)'
+                       : s.transform !== 'exact' ? 'var(--accent-orange,#f59e0b)' : 'var(--text-muted)';
+            avert += `<div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.35rem;font-size:.7rem;color:${coul};">`
+                  + `<span>${anormal ? '⚠ ' : ''}${escH(s.nom)} — table MAC : ${escH(HYP[s.transform] || s.transform)}`
+                  + `, ${s.reconnues}/${s.total} appareil(s) reconnu(s)</span>`
+                  + `<select onchange="BrassageModal.setFdbMode('${escH(s.ip)}', this.value)" style="font-size:.68rem;padding:.05rem .2rem;">`
+                  + ['auto', 'standard', 'prefixe', 'ignorer'].map(m =>
+                        `<option value="${m}" ${s.mode === m ? 'selected' : ''}>${
+                          {auto:'auto', standard:'lecture standard', prefixe:'forcer préfixe', ignorer:'ignorer ce switch'}[m]}</option>`).join('')
+                  + `</select></div>`;
+        }
+        if (avert) avert = `<div style="margin-bottom:.5rem;">${avert}</div>`;
         let html = '';
         html += this._section('prise', '🔌 Machine sur une prise murale', d.prises_appareils || [],
             ['Prise murale', 'Machine vue', 'Port de switch', 'Action'],

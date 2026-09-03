@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-02 (v2.19.23). En cas de doute
+> Ce document décrit le comportement au 2026-09-02 (v2.19.24). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -167,19 +167,30 @@ des switchs de la baie et calcule l'état à peindre par port.
     Aussi en direct dans l'infobulle de la prise (ligne « En aval »).
   - **`hors_inventaire`** (info) : MAC seule sur un port, absente de l'inventaire,
     avec son fabricant (OUI) — à ajouter à l'inventaire.
-- **FDB « décalée » d'un agent buggé** (v2.19.23, `_fdb_corriger`). Constaté sur
-  un HP ProCurve J9450A (1810G-24) : l'agent renvoie dans `dot1dTpFdbAddress`
-  la valeur `00:01` + les **4 premiers octets** de la vraie MAC (les 2 derniers
-  perdus) — toutes les MAC apprises se retrouvent avec les 2 mêmes premiers
-  octets, `_vendor()` sortait des fabricants au hasard. Détection : bien plus de
-  MAC qui matchent l'inventaire en **supposant un décalage de 2 octets** qu'en
-  direct (ou ≥ 6 entrées, même préfixe 2 octets, aucun match). Réparation par
-  **préfixe 4 octets** ↔ `appareils.adresse_mac` ; une MAC réparée présente sur
-  plusieurs ports (collision de préfixe) est écartée ; les MAC non rattachables
-  aussi ; une FDB totalement illisible → switch ignoré. Appliqué dans
-  `analyser_brassage_baie` (`switchs_tronques` / `switchs_illisibles` →
-  avertissement dans la modale) **et** dans le cycle d'activité live (journal).
-  Une FDB normale n'est jamais modifiée.
+- **Fiabilité de la table MAC d'un switch** (v2.19.23-24). Constaté sur un HP
+  ProCurve J9450A (1810G-24) : l'agent renvoie dans `dot1dTpFdbAddress` la valeur
+  `00:01` + les **4 premiers octets** de la vraie MAC (les 2 derniers perdus) —
+  `_vendor()` sortait des fabricants au hasard.
+  - **Sources** (`_fdb_switch`) : table bridge (`dot1q`/`dot1d`) **+ table ARP**
+    (`ipNetToMediaPhysAddress`, `_OID_ARP_PHYS`, lue via `_snmp_walk_octets` qui
+    préserve les octets bruts d'un OCTET STRING — `app._snmp_walk` les décode en
+    UTF-8 et détruit une MAC). L'ARP est unie à la FDB → indispensable pour un
+    routeur / switch L3 sans FDB.
+  - **Hypothèses de forme** (`_fdb_corriger`, `_FDB_HYPOTHESES`) : `exact` /
+    `tronque4` / `tronque5` / `prefixe2` (ProCurve) / `prefixe1`. Chacune est
+    scorée par le nombre d'appareils de l'inventaire qu'elle fait reconnaître ;
+    on garde la meilleure si ≥ 3 reconnus **et** nettement mieux que `exact`.
+    Sous une hypothèse déformée, on ne garde que ce qu'on sait rattacher (le
+    reste est perdu) ; une MAC réparée sur plusieurs ports (collision de préfixe)
+    est écartée.
+  - **Réglage manuel par switch** : config `diag_fdb_mode:<ip>` ∈ `auto` /
+    `standard` (jamais transformer) / `prefixe` (forcer l'hypothèse ProCurve) /
+    `ignorer` (FDB vide). Route `POST /api/baie/brassage/fdb-mode` (`can_write`).
+  - **Indicateur** : `analyser_brassage_baie` renvoie `fdb: [{nom, ip, mode,
+    transform, reconnues, total, fiable}]` → la modale affiche pour chaque switch
+    l'hypothèse retenue, « N/M appareils reconnus » et le menu déroulant.
+  - Appliqué dans `analyser_brassage_baie` **et** le cycle d'activité live
+    (journal). Une table MAC normale n'est jamais modifiée.
 - **Capacités SNMP (compteurs 64 bits, PoE) non condamnées sur un seul échec**
   (v2.19.13) : `_activite_hc[ip]` / `_activite_poe[ip]` ne passent à `False`
   qu'après `_ACTIVITE_NEG_CONFIRME` (2) relevés négatifs consécutifs — un paquet

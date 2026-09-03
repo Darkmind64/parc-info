@@ -777,6 +777,7 @@ def test_fdb_switch_et_voisins(monkeypatch):
         network_diag._OID_FDB_DOT1D_PORT: {},
     }
     monkeypatch.setattr(network_diag, '_snmp_walk', lambda oid, ip, c: walks.get(oid, {}))
+    monkeypatch.setattr(network_diag, '_snmp_walk_octets', lambda *a, **k: {})   # table ARP : vide
     fdb = network_diag._fdb_switch('10.0.0.2', ['public'])
     assert fdb[10] == {'aa:bb:cc:00:00:01', 'aa:bb:cc:00:00:02'}
     assert fdb[20] == {'aa:bb:cc:00:00:09'}
@@ -787,35 +788,41 @@ def test_fdb_switch_et_voisins(monkeypatch):
 
 
 def test_fdb_corriger():
-    """Un agent buggé renvoie `00:01` + les 4 premiers octets de chaque MAC :
-    _fdb_corriger le détecte et répare par préfixe 4 octets contre l'inventaire ;
-    une FDB normale est laissée intacte."""
+    """Détection multi-hypothèses de la déformation d'une table MAC :
+    - ProCurve : `00:01` + 4 premiers octets → hypothèse 'prefixe2', réparée
+    - FDB normale : hypothèse 'exact', inchangée
+    - collision de préfixe → écartée ; réglage manuel respecté."""
     _f = network_diag._fdb_corriger
     inv = {'1c:1b:0d:95:99:21': (1, 'PC-A', ''), '00:11:32:43:97:9d': (2, 'NAS', ''),
-           '0c:8f:ff:59:db:3b': (3, 'AP', '')}
-    # FDB décalée : 00:01 + 4 premiers octets
+           '0c:8f:ff:59:db:3b': (3, 'AP', ''), '20:7b:d2:a3:1f:b7': (4, 'MAC', '')}
     tronq = {10: {'00:01:1c:1b:0d:95'}, 11: {'00:01:00:11:32:43', '00:01:0c:8f:ff:59'},
-             12: {'00:01:de:ad:be:ef'}}   # dernière : hors inventaire -> écartée
-    rep, flag = _f(tronq, inv)
-    assert flag is True
-    assert rep == {10: {'1c:1b:0d:95:99:21'},
-                   11: {'00:11:32:43:97:9d', '0c:8f:ff:59:db:3b'}}   # port 12 disparaît
+             12: {'00:01:20:7b:d2:a3'}, 13: {'00:01:de:ad:be:ef'}}   # dernière hors inventaire
+    rep, meta = _f(tronq, inv)
+    assert meta['tronquee'] is True and meta['transform'] == 'prefixe2'
+    assert meta['reconnues'] == 4
+    assert rep == {10: {'1c:1b:0d:95:99:21'}, 12: {'20:7b:d2:a3:1f:b7'},
+                   11: {'00:11:32:43:97:9d', '0c:8f:ff:59:db:3b'}}   # port 13 écarté
 
-    # FDB normale : inchangée
+    # FDB normale : hypothèse exact, inchangée
     ok = {10: {'1c:1b:0d:95:99:21'}, 11: {'00:11:32:43:97:9d'}, 12: {'aa:bb:cc:dd:ee:ff'},
           13: {'11:22:33:44:55:66'}}
-    rep2, flag2 = _f(ok, inv)
-    assert flag2 is False and rep2 == ok
+    rep2, meta2 = _f(ok, inv)
+    assert meta2['transform'] == 'exact' and meta2['tronquee'] is False and rep2 == ok
 
-    # collision de préfixe 4 octets (2 appareils, mêmes 4 premiers octets) → écartée
-    inv2 = {'00:11:32:43:97:9d': (1, 'NAS-1', ''), '00:11:32:43:97:9e': (2, 'NAS-2', ''),
-            '1c:1b:0d:95:99:21': (3, 'PC', ''), '0c:8f:ff:59:db:3b': (4, 'AP', ''),
-            '20:7b:d2:a3:1f:b7': (5, 'MAC', '')}
-    rep3, flag3 = _f({10: {'00:01:00:11:32:43'}, 11: {'00:01:00:11:32:43'},
+    # réglage manuel : 'standard' force la lecture directe même sur une FDB déformée
+    rep3, meta3 = _f(tronq, inv, mode='standard')
+    assert meta3['transform'] == 'exact' and rep3 == tronq
+    # 'ignorer' → FDB vide
+    rep4, meta4 = _f(tronq, inv, mode='ignorer')
+    assert rep4 == {} and meta4['transform'] == 'ignore'
+
+    # collision de préfixe (2 appareils, mêmes 4 premiers octets) → écartée
+    inv2 = {**inv, '00:11:32:43:97:9e': (5, 'NAS-2', '')}
+    rep5, meta5 = _f({10: {'00:01:00:11:32:43'}, 11: {'00:01:00:11:32:43'},
                       12: {'00:01:1c:1b:0d:95'}, 13: {'00:01:0c:8f:ff:59'},
                       14: {'00:01:20:7b:d2:a3'}}, inv2)
-    assert flag3 is True
-    assert rep3 == {12: {'1c:1b:0d:95:99:21'}, 13: {'0c:8f:ff:59:db:3b'},
+    assert meta5['tronquee'] is True
+    assert rep5 == {12: {'1c:1b:0d:95:99:21'}, 13: {'0c:8f:ff:59:db:3b'},
                     14: {'20:7b:d2:a3:1f:b7'}}   # ports 10/11 ambigus, écartés
 
 

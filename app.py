@@ -7108,6 +7108,27 @@ def api_baie_brassage_proposer():
     return jsonify(network_diag.analyser_brassage_baie(cid))
 
 
+@app.route('/api/baie/brassage/fdb-mode', methods=['POST'])
+@login_required
+def api_baie_brassage_fdb_mode():
+    """Fixe le mode de lecture de la table d'apprentissage MAC d'un switch
+    (config `diag_fdb_mode:<ip>`) : auto / standard / prefixe / ignorer — pour
+    forcer le bon comportement quand la détection automatique se trompe."""
+    if not can_write():
+        return jsonify({'error': 'Accès en lecture seule'}), 403
+    f = request.json or {}
+    ip = str(f.get('ip') or '').strip()
+    mode = str(f.get('mode') or '').strip()
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return jsonify({'error': 'IP invalide'}), 400
+    if mode not in ('', 'auto', 'standard', 'prefixe', 'ignorer'):
+        return jsonify({'error': 'Mode invalide'}), 400
+    cfg_set(f'diag_fdb_mode:{ip}', '' if mode in ('', 'auto') else mode)
+    return jsonify({'ok': True})
+
+
 def _liste_cablage(conn, cid):
     """Chaque lien port-à-port du client, une seule fois (pas les deux sens),
     avec le nom des deux éléments — sert à la fois à la page imprimable et à

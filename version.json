@@ -1,22 +1,22 @@
 {
-  "version": "2.19.23",
+  "version": "2.19.24",
   "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.23/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.23/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.23/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.23",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.23/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.23/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.23/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.23/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.23/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.24",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage — « Deviner le brassage » tolère maintenant les switchs dont l'agent SNMP renvoie une table d'apprentissage MAC tronquée (bug constaté sur certains HP ProCurve 1810 : la MAC apprise est remplacée par « 00:01 » + ses 4 premiers octets seulement). ParcInfo détecte ce décalage et recoupe par préfixe de 4 octets avec l'inventaire ; les appareils reconnus retrouvent leur vrai nom, les autres sont écartés (au lieu d'afficher des fabricants au hasard). Un switch dont la table est totalement illisible est signalé et ignoré.",
+    "new_features": "Baie de brassage — « Deviner le brassage » gère la fiabilité de la table MAC de chaque switch : (1) il lit aussi la table ARP du switch/routeur en plus de la table d'apprentissage bridge (utile pour un routeur qui n'a pas de FDB) ; (2) il teste plusieurs hypothèses de déformation (préfixe parasite, MAC tronquée de 1 ou 2 octets) et garde celle qui recoupe le mieux l'inventaire ; (3) la modale affiche pour chaque switch l'hypothèse retenue et « N/M appareils reconnus » ; (4) un menu par switch permet de forcer le comportement : automatique / lecture standard / forcer préfixe / ignorer ce switch.",
     "improvements": [
-      "La carte réseau proposée affiche un avertissement clair quand un switch a une table MAC défectueuse."
+      "Nouvelle route POST /api/baie/brassage/fdb-mode (config diag_fdb_mode:<ip>)."
     ]
   },
   "checksums": {
@@ -27,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.23"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.24"
 }

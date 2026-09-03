@@ -1,8 +1,31 @@
-PARCINFO_VERSION=2.19.23
+PARCINFO_VERSION=2.19.24
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090214
+BUILD_NUMBER=2026090215
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.24 - Baie : fiabilite de la table MAC par switch (multi-source + reglage)
+# Retour : "comment ParcInfo va savoir comment proceder ? Sur un autre switch,
+# ca peut fonctionner differemment. Ca peut etre gere ?"
+#
+# 1. Multi-source : _fdb_switch lit aussi la table ARP (ipNetToMediaPhysAddress,
+#    _OID_ARP_PHYS) via _snmp_walk_octets (GETNEXT qui preserve les octets bruts
+#    des OCTET STRING, contrairement a app._snmp_walk qui decode en UTF-8 et
+#    detruit une MAC). L'ARP est unifie a la FDB bridge -> precieux pour un
+#    routeur / switch L3 qui n'a pas de FDB.
+# 2. _fdb_corriger generalise : plusieurs hypotheses de forme (_FDB_HYPOTHESES :
+#    exact / tronque4 / tronque5 / prefixe2 / prefixe1), scorees contre
+#    l'inventaire ; on garde la meilleure si >= 3 appareils reconnus ET nettement
+#    mieux que l'hypothese "exact". Retourne meta {transform, reconnues, total,
+#    tronquee, fiable}.
+# 3. Reglage manuel par switch : config diag_fdb_mode:<ip> (auto/standard/
+#    prefixe/ignorer), route POST /api/baie/brassage/fdb-mode (can_write),
+#    menu deroulant dans la modale a cote de chaque switch.
+# 4. Indicateur visible : analyser_brassage_baie renvoie fdb:[{nom, ip, mode,
+#    transform, reconnues, total, fiable}] ; la modale affiche
+#    "SW-TEST - table MAC : <hypothese>, N/M appareils reconnus" + le menu.
+#
+# Verifie en navigateur sur le ProCurve reel. pytest 236 + scripts OK.
 
 # Version 2.19.23 - Baie : deviner le brassage tolere les tables MAC tronquees
 # Retour (captures) : "Les adresses MAC ne semblent correspondre a rien de ce

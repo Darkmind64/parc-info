@@ -833,6 +833,66 @@ def _snmp_walk(oid_base, ip, communautes):
         return {}
 
 
+def _snmp_walk_octets(oid_base, ip, communautes, timeout=1.2, max_vars=800, port=161):
+    """GETNEXT sur `oid_base`, mais renvoie la valeur des OCTET STRING **en octets
+    bruts** (`{suffixe: bytes}`) — `app._snmp_walk` la décode en UTF-8, ce qui
+    détruit une MAC. Sert à lire `ipNetToMediaPhysAddress` (table ARP) et, au
+    besoin, `dot1dTpFdbAddress`. Réutilise les briques BER de app."""
+    import socket as _sock
+    try:
+        from app import (_ber_sequence, _ber_oid, _ber_entier, _ber_chaine,
+                          _ber_lire_tlv, _ber_decoder_oid, _snmp_walk_reqid)
+    except Exception:
+        return {}
+    if isinstance(communautes, str):
+        communautes = [communautes]
+    pref = oid_base if oid_base.endswith('.') else oid_base + '.'
+    for comm in communautes:
+        res, courant = {}, oid_base
+        try:
+            with _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM) as s:
+                s.settimeout(timeout)
+                for _ in range(max_vars):
+                    reqid = _snmp_walk_reqid()
+                    vb = _ber_sequence(0x30, _ber_oid(courant) + b'\x05\x00')
+                    pdu = _ber_sequence(0xa1, _ber_entier(reqid) + _ber_entier(0)
+                                        + _ber_entier(0) + _ber_sequence(0x30, vb))
+                    s.sendto(_ber_sequence(0x30, _ber_entier(1) + _ber_chaine(comm) + pdu),
+                             (ip, port))
+                    for _drain in range(4):
+                        data, _ = s.recvfrom(4096)
+                        _, corps, _ = _ber_lire_tlv(data, 0)
+                        q = 0
+                        _, _v, q = _ber_lire_tlv(corps, q)
+                        _, _c, q = _ber_lire_tlv(corps, q)
+                        tag_pdu, pdu_r, _ = _ber_lire_tlv(corps, q)
+                        _, rid_b, _ = _ber_lire_tlv(pdu_r, 0)
+                        if int.from_bytes(rid_b, 'big', signed=True) == reqid:
+                            break
+                    else:
+                        break
+                    if tag_pdu != 0xa2:
+                        break
+                    q = 0
+                    for _ in range(3):
+                        _, _x, q = _ber_lire_tlv(pdu_r, q)
+                    _, vblist, q = _ber_lire_tlv(pdu_r, q)
+                    _, vbc, _ = _ber_lire_tlv(vblist, 0)
+                    bp = 0
+                    _, oid_brut, bp = _ber_lire_tlv(vbc, bp)
+                    tag_val, val_brut, bp = _ber_lire_tlv(vbc, bp)
+                    oid_ret = _ber_decoder_oid(oid_brut)
+                    if not oid_ret.startswith(pref) or tag_val == 0x82:
+                        break
+                    res[oid_ret[len(pref):]] = bytes(val_brut) if tag_val == 0x04 else None
+                    courant = oid_ret
+            if res:
+                return res
+        except Exception:
+            continue
+    return {}
+
+
 def interroger_equipement(ip: str, communautes) -> dict | None:
     """Relevé SNMP d'un switch/routeur (ifTable + ifXTable + dot3StatsTable),
     par GETBULK multi-colonnes (`_snmp_bulk` → `app._snmp_bulk_cols`, repli
@@ -1607,6 +1667,7 @@ def diag_wifi_apercu(client_id: int) -> dict:
 _OID_FDB_DOT1D_PORT   = '1.3.6.1.2.1.17.4.3.1.2'        # dot1dTpFdbPort : MAC -> bridge port
 _OID_FDB_BASEPORT_IF  = '1.3.6.1.2.1.17.1.4.1.2'        # dot1dBasePortIfIndex : bridge port -> ifIndex
 _OID_FDB_DOT1Q_PORT   = '1.3.6.1.2.1.17.7.1.2.2.1.2'    # dot1qTpFdbPort : VLAN.MAC -> bridge port
+_OID_ARP_PHYS         = '1.3.6.1.2.1.4.22.1.2'          # ipNetToMediaPhysAddress : ifIndex.ip -> MAC (table ARP)
 _OID_LLDP_REM_SYSNAME = '1.0.8802.1.1.2.1.4.1.1.9'
 _OID_LLDP_REM_PORTID  = '1.0.8802.1.1.2.1.4.1.1.7'
 
@@ -3630,6 +3691,18 @@ def _fdb_switch(ip, communautes):
         except (TypeError, ValueError):
             ifindex = bp
         par_if.setdefault(ifindex, set()).add(_norm_mac(mac))
+
+    # table ARP (ipNetToMediaPhysAddress) : ifIndex.ip -> MAC. Précieux pour un
+    # routeur / switch L3 (aucune FDB bridge) ; complète la FDB sinon.
+    for suf, brut in _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes).items():
+        if not brut or len(brut) != 6:
+            continue
+        try:
+            ifx = int(suf.split('.')[0])
+        except (ValueError, IndexError):
+            continue
+        par_if.setdefault(ifx, set()).add(':'.join('%02x' % b for b in brut))
+
     if par_if:
         _activite_fdb[ip] = (time.time(), par_if)
         _activite_fdb_echec.pop(ip, None)
@@ -3640,43 +3713,95 @@ def _fdb_switch(ip, communautes):
     return {}
 
 
-def _fdb_corriger(par_if, inv_mac):
-    """Répare une table d'apprentissage MAC « décalée ». Certains agents SNMP bas
-    de gamme (HP ProCurve 1810 avec un firmware buggé, constaté) renvoient dans
-    `dot1dTpFdbAddress` la valeur `00:01` suivie des **4 premiers octets** de la
-    vraie MAC — les 2 derniers sont perdus, donc TOUTES les MAC apprises se
-    ressemblent (mêmes 2 premiers octets), ce qu'un vrai réseau ne fait jamais.
+# Hypothèses de « forme » d'une MAC renvoyée par un agent buggé : (nom, fonction
+# qui extrait le PRÉFIXE à recouper avec le début d'une vraie MAC, longueur).
+# 'exact' = l'agent est correct (recoupement sur la MAC entière).
+_FDB_HYPOTHESES = [
+    ('exact',      lambda o: o,                                   6),
+    ('tronque4',   lambda o: ':'.join(o.split(':')[:4]),          4),   # 2 derniers octets perdus
+    ('tronque5',   lambda o: ':'.join(o.split(':')[:5]),          5),   # 1 dernier octet perdu
+    ('prefixe2',   lambda o: ':'.join(o.split(':')[2:6]),         4),   # 2 octets parasites + tronqué (ProCurve 1810)
+    ('prefixe1',   lambda o: ':'.join(o.split(':')[1:6]),         5),   # 1 octet parasite + tronqué
+]
+_FDB_MODES = ('', 'auto', 'standard', 'prefixe', 'ignorer')
 
-    Détection : on compare le nombre de MAC qui matchent l'inventaire **direct**
-    à celui qui matchent en supposant un **décalage de 2 octets** (`mac[2:6]` =
-    les 4 premiers octets réels). Si le décalage l'emporte nettement → on répare
-    par ce préfixe 4 octets ; les MAC non rattachables sont écartées. Si la FDB
-    est manifestement cassée (≥ 6 entrées, toutes le même préfixe 2 octets) mais
-    qu'on ne peut rien recouper → on la vide (switch illisible).
-    Retourne `(par_if, tronquee: bool)`."""
+
+def _fdb_corriger(par_if, inv_mac, mode=''):
+    """Certains agents SNMP renvoient une table d'apprentissage MAC déformée
+    (préfixe parasite, MAC tronquée…). On essaie plusieurs **hypothèses de forme**
+    (`_FDB_HYPOTHESES`) et on garde celle qui recoupe le mieux l'inventaire
+    (`appareils.adresse_mac`). Une hypothèse non-« exact » n'est retenue que si
+    elle reconnaît au moins 3 appareils ET nettement plus que l'hypothèse
+    « exact ». Les MAC non rattachables sous l'hypothèse retenue sont écartées ;
+    une MAC réparée vue sur plusieurs ports (collision de préfixe) aussi.
+
+    `mode` (réglage par switch) : `''`/`'auto'` = détection ; `'standard'` = ne
+    jamais transformer ; `'prefixe'` = forcer l'hypothèse ProCurve ; `'ignorer'`
+    = renvoyer une FDB vide.
+
+    Retourne `(par_if, meta)` avec meta = {transform, reconnues, total, tronquee,
+    fiable}."""
     toutes = {m for macs in par_if.values() for m in macs if m}
-    if len(toutes) < 4:
-        return par_if, False
-    mono = len({m[:5] for m in toutes}) == 1
-    exact = sum(1 for m in toutes if m in inv_mac)
-    pref4 = {}
-    for m in inv_mac:
-        pref4.setdefault(':'.join(m.split(':')[:4]), m)
-    decale = sum(1 for m in toutes if ':'.join(m.split(':')[2:6]) in pref4)
-    if not ((decale >= 2 and decale > exact) or (mono and len(toutes) >= 6 and exact == 0)):
-        return par_if, False                      # FDB normale (ou trop peu d'indices)
+    meta = {'transform': 'exact', 'reconnues': sum(1 for m in toutes if m in inv_mac),
+            'total': len(toutes), 'tronquee': False, 'fiable': True}
+    if mode == 'ignorer':
+        return {}, {**meta, 'transform': 'ignore', 'reconnues': 0, 'fiable': False}
+    if not toutes:
+        return par_if, meta
+
+    # index inventaire par longueur de préfixe
+    pref_par_lg = {}
+    for lg in {h[2] for h in _FDB_HYPOTHESES}:
+        d = {}
+        for m in inv_mac:
+            d.setdefault(':'.join(m.split(':')[:lg]), m)
+        pref_par_lg[lg] = d
+
+    def _score(fn, lg):
+        idx = pref_par_lg[lg]
+        return len({idx[fn(m)] for m in toutes if fn(m) in idx})
+
+    hyps = _FDB_HYPOTHESES
+    if mode == 'standard':
+        hyps = hyps[:1]
+    elif mode == 'prefixe':
+        hyps = [h for h in _FDB_HYPOTHESES if h[0] == 'prefixe2']
+
+    exact_sc = _score(lambda o: o, 6)
+    best = ('exact', lambda o: o, 6, exact_sc)
+    for nom, fn, lg in hyps:
+        if nom == 'exact':
+            continue
+        sc = _score(fn, lg)
+        if sc >= 3 and sc >= exact_sc + 2 and sc > best[3]:
+            best = (nom, fn, lg, sc)
+    if mode in ('prefixe',) and hyps:
+        nom, fn, lg = hyps[0]
+        best = (nom, fn, lg, _score(fn, lg))
+
+    nom, fn, lg, sc = best
+    meta['transform'], meta['reconnues'] = nom, sc
+
+    if nom == 'exact':
+        # agent correct : on garde tout (les MAC hors inventaire sont légitimes)
+        meta['fiable'] = True
+        return par_if, meta
+
+    # agent déformé : on ne garde QUE ce qu'on sait rattacher (le reste est perdu)
+    meta['tronquee'] = True
+    idx = pref_par_lg[lg]
     neuf = {}
     for ifx, macs in par_if.items():
-        r = {pref4[k] for m in macs if (k := ':'.join(m.split(':')[2:6])) in pref4}
+        r = {idx[k] for m in macs if (k := fn(m)) in idx}
         if r:
             neuf[ifx] = r
-    # une MAC réparée présente sur plusieurs ports = collision de préfixe 4 octets
-    # (2 appareils dont les 4 premiers octets coïncident) : indécidable, on écarte
     compte = collections.Counter(m for macs in neuf.values() for m in macs)
     ambigu = {m for m, n in compte.items() if n > 1}
     if ambigu:
         neuf = {ifx: rest for ifx, macs in neuf.items() if (rest := macs - ambigu)}
-    return neuf, True
+    meta['reconnues'] = len({m for macs in neuf.values() for m in macs})
+    meta['fiable'] = bool(neuf)
+    return neuf, meta
 
 
 def _mac_locale(mac):
@@ -3885,12 +4010,14 @@ def _cycle_activite(clients):
                         # pas encore été martelé par les GETBULK du cycle — un agent
                         # SNMP lent lâche les walks enchaînés (cas HP ProCurve 1810G).
                         # Répare une FDB « décalée » (agent buggé) via l'inventaire.
-                        fdb_par_ip[ip], _fdb_tronq = _fdb_corriger(
-                            _fdb_switch(ip, communautes), inv_mac)
-                        if _fdb_tronq:
+                        fdb_par_ip[ip], _fdb_meta = _fdb_corriger(
+                            _fdb_switch(ip, communautes), inv_mac,
+                            str(_cfg(f'diag_fdb_mode:{ip}', '')))
+                        if _fdb_meta['tronquee']:
                             journal_ops.append((f"{sw['nom']} ({ip}) — table d'apprentissage MAC "
-                                                f"tronquée (SNMP défectueux) : recoupée par préfixe "
-                                                f"avec l'inventaire", 'warn', ip))
+                                                f"déformée (agent SNMP) : {_fdb_meta['reconnues']} "
+                                                f"appareil(s) recoupé(s) avec l'inventaire "
+                                                f"(hypothèse « {_fdb_meta['transform']} »)", 'warn', ip))
                         t0 = time.time()
                         infos = _noms_interfaces(ip, communautes)
                         cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos)
@@ -4474,7 +4601,7 @@ def analyser_brassage_baie(client_id: int) -> dict:
     from database import get_db
     vide = {'prises_appareils': [], 'ports_appareils': [], 'cordons': [],
             'liens_baie': [], 'cascades': [], 'hors_inventaire': [],
-            'switchs_illisibles': [], 'switchs_tronques': []}
+            'switchs_illisibles': [], 'switchs_tronques': [], 'fdb': []}
     if str(_cfg('diag_snmp_actif', '0')) != '1':
         return {'ok': False, 'motif': 'snmp_inactif', **vide}
     communautes = _communautes_snmp()
@@ -4500,21 +4627,36 @@ def analyser_brassage_baie(client_id: int) -> dict:
         elems, mac_infra, nom_par_slot = _elements_baie(conn, client_id)
         aids_baie = set(elems)
 
-        # répare une FDB « décalée » (agent buggé) par préfixe 4 octets ↔ inventaire
-        fdb_tronq_par_ip = {}
+        # essaie plusieurs hypothèses de forme de la FDB (agent buggé) + réglage
+        # manuel par switch (config `diag_fdb_mode:<ip>`)
+        fdb_meta_par_ip = {}
         for ip in list(fdb_par_ip):
-            fdb_par_ip[ip], fdb_tronq_par_ip[ip] = _fdb_corriger(fdb_par_ip[ip], inv_mac)
+            fdb_par_ip[ip], fdb_meta_par_ip[ip] = _fdb_corriger(
+                fdb_par_ip[ip], inv_mac, str(_cfg(f'diag_fdb_mode:{ip}', '')))
 
         sw_ctx = []
         for sw in switchs:
             mapping, *_r = _mapping_baie_ifindex(conn, client_id, sw['slot_id'],
                                                 sw['appareil_id'], infos_par_ip[sw['ip']])
+            m = fdb_meta_par_ip.get(sw['ip'], {})
             sw_ctx.append({**sw, 'ifx_to_num': {ifx: num for num, ifx in mapping.items()},
                            'fdb': fdb_par_ip.get(sw['ip']) or {},
-                           'fdb_tronquee': fdb_tronq_par_ip.get(sw['ip'], False),
-                           'mgmt_mac': next((m for m, a in mac_infra.items()
+                           'fdb_meta': m, 'fdb_tronquee': bool(m.get('tronquee')),
+                           'mgmt_mac': next((mm for mm, a in mac_infra.items()
                                              if a == sw['appareil_id']), None)})
         ctx_par_slot = {c['slot_id']: c for c in sw_ctx}
+        # une IP -> son état FDB (pour l'UI) : nom, mode, hypothèse, reconnues/total
+        fdb_ui, vus_ip = [], set()
+        for c in sw_ctx:
+            if c['ip'] in vus_ip:
+                continue
+            vus_ip.add(c['ip'])
+            mm = c['fdb_meta']
+            fdb_ui.append({'nom': c['nom'], 'ip': c['ip'],
+                           'mode': str(_cfg(f"diag_fdb_mode:{c['ip']}", '')) or 'auto',
+                           'transform': mm.get('transform', 'exact'),
+                           'reconnues': mm.get('reconnues', 0), 'total': mm.get('total', 0),
+                           'fiable': mm.get('fiable', True)})
         switchs_illisibles = sorted({c['nom'] for c in sw_ctx
                                      if c['fdb_tronquee'] and not c['fdb']})
 
@@ -4666,7 +4808,8 @@ def analyser_brassage_baie(client_id: int) -> dict:
                 'prises_appareils': prises_appareils, 'ports_appareils': ports_appareils,
                 'cordons': cordons, 'liens_baie': liens_baie,
                 'cascades': cascades, 'hors_inventaire': hors_inv,
-                'switchs_illisibles': switchs_illisibles, 'switchs_tronques': tronques}
+                'switchs_illisibles': switchs_illisibles, 'switchs_tronques': tronques,
+                'fdb': fdb_ui}
     except Exception:
         logger.exception('network_diag: analyser_brassage_baie')
         return {'ok': False, 'motif': 'erreur_interne', **vide}
