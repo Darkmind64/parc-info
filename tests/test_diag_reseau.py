@@ -938,9 +938,9 @@ def test_analyser_brassage_mac_secondaire(conn, deux_clients, make_appareil, mon
 def test_analyser_brassage_element_baie_sur_port_switch(conn, deux_clients, make_appareil, monkeypatch):
     """Un élément de baie SANS FDB (NAS, serveur…) positionné dans le rack et
     vu sur un port de switch était perdu : la branche « lien switch ⇄ élément »
-    ne trouvait pas le port du voisin et s'arrêtait là. Il doit maintenant
-    être proposé (affectation directe au port si plusieurs ports, lien si un
-    seul port)."""
+    ne trouvait pas le port du voisin et s'arrêtait là. Il doit maintenant être
+    proposé en `liens_baie` : port du voisin à choisir s'il en a plusieurs
+    (b_port_options, confiance faible), sinon son unique port."""
     cid = deux_clients['cid_a']
     sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.9')
     nas = make_appareil(cid, nom_machine='DS415', type_appareil='NAS', adresse_mac='00:11:32:43:97:9d')
@@ -973,9 +973,15 @@ def test_analyser_brassage_element_baie_sur_port_switch(conn, deux_clients, make
 
     d = network_diag.analyser_brassage_baie(cid)
     assert d['ok'] is True
-    assert [(p['switch_port_numero'], p['machine_nom']) for p in d['ports_appareils']] == [(8, 'DS415')]
-    assert [(l['a_port'], l['b_nom'], l['b_port'], l['via']) for l in d['liens_baie']] \
-        == [(9, 'IMPRIMANTE', 1, 'port_unique')]
+    assert d['ports_appareils'] == []
+    liens = {l['b_nom']: l for l in d['liens_baie']}
+    # DS415 a 2 ports -> lien proposé, port du NAS à choisir (défaut = le plus petit)
+    assert liens['DS415']['a_port'] == 8 and liens['DS415']['b_port'] == 1
+    assert liens['DS415']['via'] == 'port_a_choisir'
+    assert liens['DS415']['b_port_options'] == [1, 2] and liens['DS415']['confiance'] == 'faible'
+    # l'imprimante n'a qu'un port -> pas de choix
+    assert liens['IMPRIMANTE']['a_port'] == 9 and liens['IMPRIMANTE']['b_port'] == 1
+    assert liens['IMPRIMANTE']['via'] == 'port_unique' and 'b_port_options' not in liens['IMPRIMANTE']
     assert d['hors_inventaire'] == []
 
 

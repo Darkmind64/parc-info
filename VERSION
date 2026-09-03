@@ -1,9 +1,34 @@
-PARCINFO_VERSION=2.19.30
+PARCINFO_VERSION=2.19.31
 RELEASE_DATE=2026-09-03
 BUILD_NUMBER=2026090301
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.31 - Baie : choix du port du voisin + moniteur sans debordement
+# Suite du retour terrain.
+#
+# 1. "Deviner le brassage" : un element de baie multi-ports (NAS, serveur, 2e
+#    switch...) vu sur un port de switch etait affecte au port de switch
+#    (ports_appareils) mais AUCUN cable n'etait cree faute de savoir quel port
+#    du voisin. analyser_brassage_baie (passe 1) : la branche produit maintenant
+#    toujours un liens_baie :
+#      - port du voisin resolu (LLDP/CDP/FDB reciproque)        -> via='lldp'/'fdb'
+#      - 1 seul port                                            -> via='port_unique'
+#      - plusieurs ports -> b_port_options = [tous ses ports],
+#        b_port = le plus petit, via='port_a_choisir', confiance='faible'
+#    UI (BrassageModal) : la cellule "Element B" affiche un <select> quand
+#    b_port_options ; _section passe l'index a `ligne(p, i)` ; appliquer() lit
+#    le <select data-bport=i> pour numero2 de POST /api/baie/lien-port.
+#
+# 2. Moniteur reseau (modale, onglet Ports) : la table debordait horizontalement
+#    (white-space:nowrap sur toutes les cellules + longues listes d'appareils /
+#    noms d'interface). table.mon-table passe en table-layout:fixed + <colgroup>
+#    (largeurs fixes sauf "Appareil branche") ; classe .mon-wrap (white-space:
+#    normal + word-break) sur les cellules a contenu long ; .mon-pane en
+#    overflow-x:hidden. La colonne "Appareil branche" borne l'affichage a
+#    "N appareils (vu)" au-dela de 2 noms (liste complete en title). Le bouton
+#    "detecter" passe sous le <select> de calibration.
+#
 # Version 2.19.30 - Baie : correctifs "Deviner le brassage" + moniteur reseau
 # Retour terrain apres l'audit :
 #

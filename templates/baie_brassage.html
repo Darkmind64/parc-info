@@ -456,15 +456,20 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .mon-tab { padding:.35rem .8rem; cursor:pointer; border:1px solid transparent; border-bottom:none;
     font-size:.78rem; color:var(--text-muted); border-radius:4px 4px 0 0; }
 .mon-tab.actif { color:var(--accent); border-color:var(--border); background:var(--bg-secondary); }
-.mon-pane { display:none; max-height:62vh; overflow:auto; scrollbar-gutter:stable; padding-right:10px; }
+.mon-pane { display:none; max-height:62vh; overflow-y:auto; overflow-x:hidden; scrollbar-gutter:stable; padding-right:10px; }
 .mon-pane.actif { display:block; }
 .mon-sw-head { font-family:'Share Tech Mono',monospace; font-size:.7rem; color:var(--text-muted);
     padding:.35rem 0 .2rem; border-top:1px solid var(--border); margin-top:.4rem; }
-table.mon-table { width:100%; border-collapse:collapse; font-size:.68rem; }
-table.mon-table th, table.mon-table td { padding:.2rem .35rem; text-align:right; white-space:nowrap;
+table.mon-table { width:100%; border-collapse:collapse; font-size:.68rem; table-layout:fixed; }
+table.mon-table th, table.mon-table td { padding:.2rem .35rem; text-align:right; vertical-align:top;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     border-bottom:1px solid rgba(148,163,184,.12); }
 table.mon-table th:first-child, table.mon-table td:first-child,
 table.mon-table th:nth-child(2), table.mon-table td:nth-child(2) { text-align:left; }
+/* cellules à contenu potentiellement long (appareil branché, nom d'interface) :
+   on autorise le retour à la ligne au lieu de faire déborder la table */
+table.mon-table td.mon-wrap { white-space:normal; word-break:break-word; }
+table.mon-table td.mon-wrap select { max-width:100%; }
 .mon-dot { display:inline-block; width:8px; height:8px; border-radius:50%; vertical-align:middle; }
 .mon-dot-down { background:#334155; } .mon-dot-stale { background:#64748b; }
 .mon-dot-idle { background:#15803d; } .mon-dot-traffic { background:#22c55e; }
@@ -3517,29 +3522,35 @@ const MoniteurModal = {
                     const div = p && p.divergence
                         ? ' <span style="color:var(--accent-orange,#f59e0b);" title="la topologie et le nom d\'interface ne s\'accordent pas sur ce port">⚠</span>' : '';
                     const etat = p ? `<span class="mon-dot mon-dot-${p.etat}"></span> ${p.cpt_pegge ? (p.pps || 0).toFixed(0) + ' pkt/s' : fmtDebit(p.bps)}` : '—';
-                    // « Appareil branché » : l'affectation déclarée, sinon ce que la
-                    // table MAC du switch voit passer sur ce port.
+                    // « Appareil branché » : l'affectation déclarée, sinon ce que
+                    // la table MAC du switch voit passer sur ce port. On borne
+                    // l'affichage (2 noms + « +N ») : au-delà, c'est un switch non
+                    // géré ou un hôte de virtualisation en aval, la liste complète
+                    // n'a pas sa place dans une cellule.
                     let cible = escH(b.cible || '');
                     if (!cible && p && p.voisins && p.voisins.length) {
-                        const plus = (p.voisins_n || p.voisins.length) - p.voisins.length;
-                        cible = `<span style="color:var(--text-muted);" title="vu sur ce port par la table MAC — pas déclaré">`
-                              + p.voisins.map(escH).join(', ') + (plus > 0 ? ' +' + plus : '') + ' <em>(vu)</em></span>';
+                        const tot = p.voisins_n || p.voisins.length;
+                        let txt;
+                        if (tot > 2) txt = `${tot} appareils`;
+                        else txt = p.voisins.map(escH).join(', ');
+                        cible = `<span style="color:var(--text-muted);" title="${escH(p.voisins.join(', '))}${tot > p.voisins.length ? ' +' + (tot - p.voisins.length) : ''} — vu par la table MAC, pas déclaré">`
+                              + txt + ' <em>(vu)</em></span>';
                     }
                     return `<tr>
                         <td>${escH(String(b.numero))}</td>
-                        <td>${cible}</td>
-                        <td style="white-space:nowrap;"><select class="cfg-input cfg-input-sm" style="width:220px;vertical-align:middle;"
+                        <td class="mon-wrap">${cible}</td>
+                        <td class="mon-wrap"><select class="cfg-input cfg-input-sm" style="width:100%;"
                               onchange="MoniteurModal.calibrer(${sw.slot_id}, ${b.numero}, this.value)">${opts(b.if_index)}</select>
-                          <button class="btn btn-sm" style="padding:.1rem .4rem;margin-left:.3rem;" title="Détecter l'interface : débranche puis rebranche le câble de ce port"
-                              onclick="MoniteurModal.assistant(${sw.slot_id}, ${b.numero})">🔌</button></td>
-                        <td style="color:var(--text-muted);">${src}${div}</td>
+                          <button class="btn btn-sm" style="padding:.05rem .35rem;margin-top:.15rem;font-size:.62rem;" title="Détecter l'interface : débranche puis rebranche le câble de ce port"
+                              onclick="MoniteurModal.assistant(${sw.slot_id}, ${b.numero})">🔌 détecter</button></td>
+                        <td class="mon-wrap" style="color:var(--text-muted);">${src}${div}</td>
                         <td>${etat}</td>
                         <td>${p ? sparkline(p.hist, p.cpt_pegge) : ''}</td>
                         ${aPoe ? `<td>${p ? poeCell(p.poe) : ''}</td>` : ''}
                     </tr>`;
                 }).join('');
                 const ifRows = ifs.map(i => `<tr>
-                        <td>${i.ifindex}</td><td>${escH(i.nom)}</td><td>${escH(i.alias || '')}</td>
+                        <td>${i.ifindex}</td><td class="mon-wrap">${escH(i.nom)}</td><td class="mon-wrap">${escH(i.alias || '')}</td>
                         <td><span class="mon-dot mon-dot-${i.etat}"></span> ${i.etat}</td>
                         <td data-if-live="${i.ip}|${i.ifindex}">${i.cpt_pegge ? '—' : fmtDebit(i.bps)}</td>
                         <td>${(i.pps || 0).toFixed(1)}</td>
@@ -3560,11 +3571,15 @@ const MoniteurModal = {
                       <span>Calibration : associe chaque port de la baie à son interface (le n° de port n'est presque jamais égal à l'ifIndex). « auto » = topologie ou nom d'interface.</span>
                       <span style="white-space:nowrap;">Décaler tous les ports RJ de <input type="number" id="mon-dec-${sw.slot_id}" value="0" style="width:3.5rem;" class="cfg-input cfg-input-sm"> <button class="btn btn-sm" style="padding:.1rem .4rem;" onclick="MoniteurModal.decaler(${sw.slot_id})">appliquer</button></span>
                     </div>
-                    <table class="mon-table"><thead><tr>
+                    <table class="mon-table">
+                    <colgroup><col style="width:3.2rem"><col><col style="width:10.5rem"><col style="width:5rem"><col style="width:4.5rem"><col style="width:4.6rem">${aPoe ? '<col style="width:4.5rem">' : ''}</colgroup>
+                    <thead><tr>
                         <th>Port baie</th><th>Appareil branché</th><th>Interface du switch</th><th>source</th><th>débit</th><th>tendance</th>${aPoe ? '<th>PoE</th>' : ''}
                     </tr></thead><tbody>${calRows || `<tr><td colspan="${aPoe ? 7 : 6}" style="color:var(--text-muted);">ce slot n’a pas de ports</td></tr>`}</tbody></table>
                     <details data-sw="${escH(sw.ip)}"${detOuverts.has(sw.ip) ? ' open' : ''} style="margin:.4rem 0;"><summary style="cursor:pointer;font-size:.7rem;color:var(--text-muted);">Toutes les interfaces du switch (${ifs.length})</summary>
-                    <table class="mon-table"><thead><tr><th>ifIndex</th><th>Nom</th><th>Alias</th><th>État</th><th>Débit</th><th>pkt/s</th>${aPoe ? '<th>PoE</th>' : ''}</tr></thead>
+                    <table class="mon-table">
+                    <colgroup><col style="width:3.5rem"><col><col><col style="width:4.5rem"><col style="width:5rem"><col style="width:4rem">${aPoe ? '<col style="width:4.5rem">' : ''}</colgroup>
+                    <thead><tr><th>ifIndex</th><th>Nom</th><th>Alias</th><th>État</th><th>Débit</th><th>pkt/s</th>${aPoe ? '<th>PoE</th>' : ''}</tr></thead>
                     <tbody>${ifRows || `<tr><td colspan="${aPoe ? 7 : 6}" style="color:var(--text-muted);">aucune interface</td></tr>`}</tbody></table></details>`;
             }).join('');
         }
@@ -3809,9 +3824,22 @@ const BrassageModal = {
             p => p.confiance === 'sure');
         html += this._section('lien', '🔗 Lien switch ⇄ autre élément de la baie', d.liens_baie || [],
             ['Élément A', 'Élément B', 'Détecté par', 'Action'],
-            p => [`${escH(p.a_nom)} · port ${p.a_port}`, `${escH(p.b_nom)} · port ${p.b_port}`,
-                  p.via === 'lldp' ? 'LLDP' : p.via === 'port_unique' ? 'port unique du voisin' : 'tables MAC',
-                  this._act(p, 'relier', p.actuel)]);
+            (p, i) => {
+                let elemB;
+                if (p.b_port_options && p.b_port_options.length > 1) {
+                    elemB = `${escH(p.b_nom)} · port <select data-bport="${i}" class="cfg-input cfg-input-sm" style="width:auto;padding:.05rem .3rem;">`
+                          + p.b_port_options.map(n => `<option value="${n}"${n == p.b_port ? ' selected' : ''}>${n}</option>`).join('')
+                          + '</select>';
+                } else {
+                    elemB = `${escH(p.b_nom)} · port ${p.b_port}`;
+                }
+                const via = p.via === 'lldp' ? 'LLDP'
+                    : p.via === 'port_unique' ? 'port unique du voisin'
+                    : p.via === 'port_a_choisir' ? '<span style="color:var(--accent-orange,#f59e0b);" title="le port exact du voisin n\'a pas pu être déterminé — choisissez-le">port à choisir</span>'
+                    : 'tables MAC';
+                return [`${escH(p.a_nom)} · port ${p.a_port}`, elemB, via, this._act(p, 'relier', p.actuel)];
+            },
+            p => p.confiance !== 'faible');   // port du voisin indéterminé -> décoché, l'utilisateur choisit
 
         html += this._infoCascades(d.cascades || []);
         html += this._infoRetypage(d.retypage || []);
@@ -3837,7 +3865,7 @@ const BrassageModal = {
             this._props.push({ ...p, _type: type });
             const ch = coche ? coche(p) : true;
             h += `<tr><td><input type="checkbox" data-i="${i}" ${ch ? 'checked' : ''} onchange="BrassageModal._maj()"></td>`
-               + ligne(p).map(c => `<td style="white-space:normal;">${c}</td>`).join('') + '</tr>';
+               + ligne(p, i).map(c => `<td style="white-space:normal;">${c}</td>`).join('') + '</tr>';
         });
         return h + '</tbody></table>';
     },
@@ -3903,18 +3931,21 @@ const BrassageModal = {
         btn.disabled = true;
         let ok = 0, ko = 0;
         // ordre : liens/cordons d'abord (ils détachent), puis affectations
-        const items = boxes.map(b => this._props[parseInt(b.dataset.i, 10)])
-            .sort((a, c) => (a._type === 'prise' || a._type === 'port' ? 1 : 0) - (c._type === 'prise' || c._type === 'port' ? 1 : 0));
+        const items = boxes.map(b => ({ p: this._props[parseInt(b.dataset.i, 10)], i: parseInt(b.dataset.i, 10) }))
+            .sort((a, c) => (a.p._type === 'prise' || a.p._type === 'port' ? 1 : 0) - (c.p._type === 'prise' || c.p._type === 'port' ? 1 : 0));
         let fait = 0;
-        for (const p of items) {
+        for (const { p, i } of items) {
             etat.textContent = `Application… ${++fait}/${items.length}`;
             const j = (u, m, b) => fetch(u, { method: m, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
             try {
                 let r;
                 if (p._type === 'cordon')
                     r = await j('/api/baie/lien-port', 'POST', { slot1_id: p.bandeau_slot_id, numero1: p.prise_numero, slot2_id: p.switch_slot_id, numero2: p.switch_port_numero });
-                else if (p._type === 'lien')
-                    r = await j('/api/baie/lien-port', 'POST', { slot1_id: p.a_slot_id, numero1: p.a_port, slot2_id: p.b_slot_id, numero2: p.b_port });
+                else if (p._type === 'lien') {
+                    const sel = document.querySelector(`#brassage-corps select[data-bport="${i}"]`);
+                    const n2 = sel ? parseInt(sel.value, 10) : p.b_port;
+                    r = await j('/api/baie/lien-port', 'POST', { slot1_id: p.a_slot_id, numero1: p.a_port, slot2_id: p.b_slot_id, numero2: n2 });
+                }
                 else if (p._type === 'prise')
                     r = await j(`/api/baie/prise-murale/${p.bandeau_slot_id}/${p.prise_numero}`, 'PUT', { appareil_id: p.machine_id });
                 else if (p._type === 'port')

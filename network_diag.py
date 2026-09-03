@@ -5103,9 +5103,15 @@ def analyser_brassage_baie(client_id: int, _progress=None, budget_s: float = 0) 
                     autre = elems.get(autre_aid)
                     ac = ctx_par_slot.get(autre['slot_id']) if autre else None
                     if autre and autre['slot_id'] != c['slot_id']:
+                        # élément de baie ordinaire (pas un switch) avec plusieurs
+                        # appareils sur ce port -> équipement intermédiaire, pas un
+                        # lien direct.
+                        if ac is None and len(macs) >= 2:
+                            _ajouter_cascade(c, port_num, macs, lv)
+                            continue
                         paire = tuple(sorted((c['slot_id'], autre['slot_id'])))
-                        b_port, via = None, 'fdb'
                         if paire not in vus_liens:
+                            b_port, via = None, 'fdb'
                             # 1) port du voisin par LLDP/CDP, selon le sous-type de PortID
                             if lv:
                                 st, pv = lv['subtype'], lv['port']
@@ -5124,36 +5130,32 @@ def analyser_brassage_baie(client_id: int, _progress=None, budget_s: float = 0) 
                                     if c['mgmt_macs'] & a_macs:
                                         b_port = ac['ifx_to_num'].get(a_ifx)
                                         break
-                            # 3) voisin SANS FDB exploitable (NAS, serveur, camera,
-                            #    imprimante... place dans la baie) : son unique port
-                            #    si non ambigu.
-                            if b_port is None and ac is None and len(autre['ports']) == 1:
-                                b_port, via = autre['ports'][0], 'port_unique'
+                            # 3) port du voisin indetermine (pas de LLDP/FDB
+                            #    exploitable). On propose quand meme le lien :
+                            #    - 1 seul port -> ce port
+                            #    - plusieurs ports -> le 1er, mais l'UI laisse
+                            #      choisir (b_port_options) et la proposition est
+                            #      « a confiance faible » (decochee par defaut).
+                            options = None
+                            if not (b_port and b_port in autre['ports']) and autre['ports']:
+                                ports_tries = sorted(autre['ports'])
+                                b_port = ports_tries[0]
+                                if len(ports_tries) == 1:
+                                    via = 'port_unique'
+                                else:
+                                    via, options = 'port_a_choisir', ports_tries
                             if b_port and b_port in autre['ports']:
                                 act, actu = _cmp_lien(cle, autre['slot_id'], b_port)
                                 if act:
-                                    liens_baie.append({
+                                    entree = {
                                         'a_slot_id': c['slot_id'], 'a_nom': c['nom'], 'a_port': port_num,
                                         'b_slot_id': autre['slot_id'], 'b_nom': autre['nom'], 'b_port': b_port,
-                                        'via': via, 'action': act, 'actuel': actu})
+                                        'via': via, 'action': act, 'actuel': actu}
+                                    if options:
+                                        entree['b_port_options'] = options
+                                        entree['confiance'] = 'faible'
+                                    liens_baie.append(entree)
                                 vus_liens.add(paire)
-                                continue
-                        # Lien indeterminable. Voisin = switch -> uplink, on s'arrete.
-                        # Voisin = element de baie ordinaire (NAS/serveur/camera...)
-                        # vu sur ce port de switch : le proposer comme une machine
-                        # directe sur le port (affectation de baie_slot_ports.appareil_id).
-                        if ac is None:
-                            if len(macs) == 1:
-                                cur = cibles.get(cle)
-                                if cur != autre_aid:
-                                    ports_appareils.append({
-                                        'switch_slot_id': c['slot_id'], 'switch_nom': c['nom'],
-                                        'switch_port_numero': port_num, 'machine_id': autre_aid,
-                                        'machine_nom': autre['nom'],
-                                        'action': 'modifier' if cur else 'creer',
-                                        'actuel_nom': nom_par_aid.get(cur, '') if cur else ''})
-                            else:
-                                _ajouter_cascade(c, port_num, macs, lv)
                     continue
 
                 if len(macs) >= 2:

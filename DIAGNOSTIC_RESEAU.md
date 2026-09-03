@@ -192,12 +192,14 @@ des switchs de la baie et calcule l'état à peindre par port.
     MAC vue sur un port de switch (le **moins chargé** ; `> _BRASSAGE_UPLINK_MAX`
     co-MAC ou port déjà brassé ailleurs → confiance « faible ») → propose le
     cordon bandeau ⇄ switch (`POST /api/baie/lien-port`).
-  - **Élément de baie vu sur un port de switch** (v2.19.30) : un appareil
-    positionné dans le rack (NAS, serveur, imprimante, caméra…) qui n'a pas de
-    table MAC propre est reconnu par sa MAC sur un port de switch. S'il a **un
-    seul port** → `liens_baie` (`via='port_unique'`) ; **plusieurs ports** →
-    `ports_appareils` (affectation directe au port de switch, le port exact du
-    NAS restant indéterminé) ; **plusieurs MAC** → `cascades`.
+  - **Élément de baie vu sur un port de switch** (v2.19.30-31) : un appareil
+    positionné dans le rack (NAS, serveur, imprimante, caméra, 2ᵉ switch…)
+    reconnu par sa MAC sur un port de switch → proposition `liens_baie`. Port
+    du voisin : résolu par LLDP/CDP/FDB réciproque si possible, sinon **un seul
+    port** → ce port (`via='port_unique'`), **plusieurs ports** → menu de choix
+    dans la modale (`b_port_options`, défaut = le plus petit, `via='port_a_
+    choisir'`, `confiance='faible'`, décoché par défaut). **Plusieurs MAC** →
+    `cascades`.
   - **`liens_baie`** : un port de switch A apprend la MAC d'infra d'un autre
     élément de baie B → lien A ⇄ B. Port de B : par **LLDP** (`diag_topologie`,
     `voisin_port`) sinon **FDB réciproque** (la mgmt MAC de A vue sur un port de
