@@ -1,8 +1,44 @@
-PARCINFO_VERSION=2.19.24
+PARCINFO_VERSION=2.19.25
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090215
+BUILD_NUMBER=2026090301
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.25 - Audit topologie, lot 1 : sources SNMP unifiees + LLDP/CDP
+# Suite a l'audit "baie de brassage" (24 constats valides). Ce lot couvre :
+#
+# #1  _releve_mac_switch : point d'entree UNIQUE pour la table MAC d'un switch
+#     (bridge dot1q/dot1d + contexte VLAN + ARP + _fdb_corriger + mode). Utilise
+#     par le cycle d'activite, analyser_brassage_baie ET _topologie_equipement
+#     (palier 4), qui n'est donc plus pollue par un agent buggé.
+# #2  _fdb_par_vlan : FDB dot1q relevee VLAN par VLAN avec le contexte de
+#     communaute "public@<vlan>" (Cisco, HP). Dialecte 'dot1q-vlan' memorise.
+#     _OID_DOT1Q_VLAN_NAMES ; _FDB_VLAN_MAX = 32.
+# #3  _voisins_lldp_cdp : lldpRemSysCapEnabled (bits pont/routeur/wlan/tel/docsis/
+#     repeteur), lldpRemChassisId (MAC du voisin -> recoupement inventaire meme
+#     sans FDB), lldpRemPortIdSubtype (3=MAC 5=ifName 7=local). _bits_actifs.
+# #4  CDP (CISCO-CDP-MIB) : cdpCacheDeviceId/DevicePort/Platform/Capabilities/
+#     Address, complete LLDP. _cdp_bits.
+# #5  _snmp_walk_octets refait : GETBULK v2c d'abord (repli GETNEXT), plafond
+#     max_rows, lit ipNetToMediaPhysAddress ET ipNetToPhysicalPhysAddress.
+#     ARP plafonnee a 150 (FDB bridge OK) / 800 (FDB vide = routeur probable).
+# #6  _snmp_walk_octets : verifie error-status + exige un OID strictement
+#     croissant (agent bas de gamme qui boucle).
+# #15 liens_baie : port du voisin choisi selon voisin_port_subtype (MAC ->
+#     FDB du voisin ; local -> ifIndex ; ifname -> _port_physique_depuis_nom).
+#     Voisin identifie aussi par nom LLDP ou MAC de chassis, pas seulement FDB.
+# #16 _macs_infra_switch : dot1dBaseBridgeAddress + ifPhysAddress -> TOUTES les
+#     MAC propres du switch rattachees a l'appareil (liens switch<->switch).
+# #21 _activite_fdb_lock autour de _fdb_switch (loop activite + requete Flask).
+# #22 _mapping_baie_ifindex : plage RJ 1-96 ; ports SFP (1001+) mappes par nom
+#     d'interface fibre (_RE_SFP).
+# #23 app._snmp_walk : meme garde "OID strictement croissant".
+#
+# diag_topologie : colonnes voisin_caps / voisin_mac / voisin_port_subtype /
+# voisin_source. _classer_cascade accepte les capacites LLDP du voisin.
+#
+# Verifie en navigateur sur le ProCurve reel (aucune regression : prefixe2,
+# 9/47, ports 8/17/21). pytest 237 + scripts OK.
 
 # Version 2.19.24 - Baie : fiabilite de la table MAC par switch (multi-source + reglage)
 # Retour : "comment ParcInfo va savoir comment proceder ? Sur un autre switch,

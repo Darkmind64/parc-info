@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-02 (v2.19.24). En cas de doute
+> Ce document décrit le comportement au 2026-09-03 (v2.19.25). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -137,6 +137,23 @@ des switchs de la baie et calcule l'état à peindre par port.
   v2.19.20 : ces infos vont dans l'**infobulle riche existante** (lignes
   « Activité » / « Trafic vu » / « Câblage » ajoutées par `rowsActivitePort`,
   alimentées par `_activiteInfos`), plus de `title` natif en double.
+- **Relevé de table MAC unifié** (v2.19.25, `_releve_mac_switch`) : point d'entrée
+  unique partagé par le **cycle d'activité**, **`analyser_brassage_baie`** et la
+  **découverte de topologie** (palier 4, `_topologie_equipement`). Enchaîne
+  `_fdb_switch` (bridge dot1q/dot1d, **contexte de communauté `public@<vlan>`**
+  via `_fdb_par_vlan` pour les switchs Cisco/HP qui l'exigent, **+ table ARP**
+  `ipNetToMediaPhysAddress` lue en GETBULK plafonné par `_snmp_walk_octets`)
+  puis `_fdb_corriger` (hypothèses de forme + réglage `diag_fdb_mode:<ip>`).
+  `_macs_infra_switch` apprend toutes les MAC propres du switch
+  (`dot1dBaseBridgeAddress` + `ifPhysAddress`).
+- **Voisins LLDP + CDP** (v2.19.25, `_voisins_lldp_cdp`) : `lldpRemSysCapEnabled`
+  (bits pont / routeur / borne Wi-Fi / téléphone / modem câble / répéteur),
+  `lldpRemChassisId` (MAC du voisin → recoupement inventaire même sans FDB),
+  `lldpRemPortIdSubtype` (3=MAC, 5=ifName, 7=local) pour interpréter le port du
+  voisin ; complété par CDP (`cdpCacheDeviceId`/`Platform`/`Capabilities`…).
+  Persisté dans `diag_topologie` (`voisin_caps`, `voisin_mac`,
+  `voisin_port_subtype`, `voisin_source`). `_classer_cascade` s'en sert :
+  cap `wlan` → borne Wi-Fi certaine, `bridge` seul → switch.
 - **Deviner le brassage — « carte réseau proposée »** (v2.19.22,
   `analyser_brassage_baie`, bouton « 🧠 Deviner le brassage » sur `/baie`, route
   `GET /api/baie/brassage/proposer`, **aperçu seul**). Part de **toutes** les MAC

@@ -826,6 +826,21 @@ def test_fdb_corriger():
                     14: {'20:7b:d2:a3:1f:b7'}}   # ports 10/11 ambigus, écartés
 
 
+def test_bits_capacites_lldp_cdp():
+    """Décodage des capacités système : BITS LLDP (bit 0 = MSB octet 0) et
+    bitmap CDP (bit 0 = router, LSB)."""
+    _b = network_diag._bits_actifs
+    L = network_diag._LLDP_CAP_BITS
+    # bridge(2) + wlan(3) : octet 0 = 0b00110000 = 0x30
+    assert _b(b'\x30', L) == {'bridge', 'wlan'}
+    # router(4) : 0b00001000 = 0x08
+    assert _b(b'\x08', L) == {'router'}
+    assert _b(b'', L) == set() and _b(None, L) == set()
+    # CDP : router(bit0) + switch(bit3) -> 0b1001 = 9
+    assert network_diag._cdp_bits((9).to_bytes(4, 'big')) == {'router', 'bridge'}
+    assert network_diag._cdp_bits((0x80).to_bytes(4, 'big')) == {'phone'}
+
+
 def test_classer_cascade():
     _f = network_diag._classer_cascade
     # 2 MAC filaires classiques, aucune aléatoire → switch non géré
@@ -836,6 +851,9 @@ def test_classer_cascade():
     r = _f({'00:11:22:33:44:55', '00:aa:bb:cc:dd:ee'},
            {'00:11:22:33:44:55': (9, 'AP-1', 'Borne WiFi')})
     assert r['type'] == 'wifi' and r['n_macs'] == 2
+    # capacité LLDP du voisin : 'wlan' -> Wi-Fi certain ; 'bridge' -> switch
+    assert _f({'11:11:11:11:11:11', '22:22:22:22:22:22'}, {}, caps='wlan')['type'] == 'wifi'
+    assert _f({'11:11:11:11:11:11', '22:22:22:22:22:22'}, {}, caps='bridge')['type'] == 'switch'
 
 
 def test_analyser_brassage_baie(conn, deux_clients, make_appareil, monkeypatch):
@@ -865,6 +883,7 @@ def test_analyser_brassage_baie(conn, deux_clients, make_appareil, monkeypatch):
 
     monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
     monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
+    monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
     monkeypatch.setattr(network_diag, '_noms_interfaces',
         lambda ip, c: {i * 11: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True} for i in (2, 3, 4, 5, 6)})
     monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {

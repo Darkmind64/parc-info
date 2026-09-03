@@ -833,11 +833,20 @@ def _snmp_walk(oid_base, ip, communautes):
         return {}
 
 
-def _snmp_walk_octets(oid_base, ip, communautes, timeout=1.2, max_vars=800, port=161):
-    """GETNEXT sur `oid_base`, mais renvoie la valeur des OCTET STRING **en octets
-    bruts** (`{suffixe: bytes}`) — `app._snmp_walk` la décode en UTF-8, ce qui
-    détruit une MAC. Sert à lire `ipNetToMediaPhysAddress` (table ARP) et, au
-    besoin, `dot1dTpFdbAddress`. Réutilise les briques BER de app."""
+def _oid_tuple(s):
+    try:
+        return tuple(int(x) for x in s.split('.'))
+    except (ValueError, AttributeError):
+        return ()
+
+
+def _snmp_walk_octets(oid_base, ip, communautes, timeout=1.5, max_rows=2000, port=161):
+    """Parcourt `oid_base` et renvoie la valeur des OCTET STRING **en octets bruts**
+    (`{suffixe: bytes}`) — `app._snmp_walk` la décode en UTF-8, ce qui détruit une
+    MAC. Sert à lire `ipNetToMediaPhysAddress` (table ARP), `dot1dTpFdbAddress`,
+    `ifPhysAddress`… GETBULK v2c d'abord (peu de paquets), repli GETNEXT v1.
+    Gardes : vérifie error-status et exige un OID strictement croissant (agent
+    bas de gamme qui boucle)."""
     import socket as _sock
     try:
         from app import (_ber_sequence, _ber_oid, _ber_entier, _ber_chaine,
@@ -847,49 +856,77 @@ def _snmp_walk_octets(oid_base, ip, communautes, timeout=1.2, max_vars=800, port
     if isinstance(communautes, str):
         communautes = [communautes]
     pref = oid_base if oid_base.endswith('.') else oid_base + '.'
-    for comm in communautes:
-        res, courant = {}, oid_base
-        try:
-            with _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM) as s:
-                s.settimeout(timeout)
-                for _ in range(max_vars):
-                    reqid = _snmp_walk_reqid()
-                    vb = _ber_sequence(0x30, _ber_oid(courant) + b'\x05\x00')
+
+    def _run(comm, bulk):
+        res, courant, prev_t = {}, oid_base, ()
+        with _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            for _ in range(max_rows):
+                reqid = _snmp_walk_reqid()
+                vb = _ber_sequence(0x30, _ber_oid(courant) + b'\x05\x00')
+                if bulk:   # GetBulkRequest v2c : non-repeaters=0, max-repetitions=25
+                    pdu = _ber_sequence(0xa5, _ber_entier(reqid) + _ber_entier(0)
+                                        + _ber_entier(25) + _ber_sequence(0x30, vb))
+                    ver = 1
+                else:      # GetNextRequest v1
                     pdu = _ber_sequence(0xa1, _ber_entier(reqid) + _ber_entier(0)
                                         + _ber_entier(0) + _ber_sequence(0x30, vb))
-                    s.sendto(_ber_sequence(0x30, _ber_entier(1) + _ber_chaine(comm) + pdu),
-                             (ip, port))
-                    for _drain in range(4):
-                        data, _ = s.recvfrom(4096)
-                        _, corps, _ = _ber_lire_tlv(data, 0)
-                        q = 0
-                        _, _v, q = _ber_lire_tlv(corps, q)
-                        _, _c, q = _ber_lire_tlv(corps, q)
-                        tag_pdu, pdu_r, _ = _ber_lire_tlv(corps, q)
-                        _, rid_b, _ = _ber_lire_tlv(pdu_r, 0)
-                        if int.from_bytes(rid_b, 'big', signed=True) == reqid:
-                            break
-                    else:
-                        break
-                    if tag_pdu != 0xa2:
-                        break
+                    ver = 0
+                s.sendto(_ber_sequence(0x30, _ber_entier(ver) + _ber_chaine(comm) + pdu),
+                         (ip, port))
+                for _drain in range(4):
+                    data, _ = s.recvfrom(65535)
+                    _, corps, _ = _ber_lire_tlv(data, 0)
                     q = 0
-                    for _ in range(3):
-                        _, _x, q = _ber_lire_tlv(pdu_r, q)
-                    _, vblist, q = _ber_lire_tlv(pdu_r, q)
-                    _, vbc, _ = _ber_lire_tlv(vblist, 0)
+                    _, _v, q = _ber_lire_tlv(corps, q)
+                    _, _c, q = _ber_lire_tlv(corps, q)
+                    tag_pdu, pdu_r, _ = _ber_lire_tlv(corps, q)
+                    _, rid_b, _ = _ber_lire_tlv(pdu_r, 0)
+                    if int.from_bytes(rid_b, 'big', signed=True) == reqid:
+                        break
+                else:
+                    return res
+                if tag_pdu != 0xa2:
+                    return res
+                q = 0
+                _, _rid, q = _ber_lire_tlv(pdu_r, q)
+                _, err, q = _ber_lire_tlv(pdu_r, q)
+                _, _ei, q = _ber_lire_tlv(pdu_r, q)
+                if err and int.from_bytes(err, 'big', signed=True) != 0:
+                    return res
+                _, vblist, q = _ber_lire_tlv(pdu_r, q)
+                vp, dernier = 0, None
+                while vp < len(vblist):
+                    tvb, vbc, vp = _ber_lire_tlv(vblist, vp)
+                    if tvb != 0x30:
+                        return res
                     bp = 0
                     _, oid_brut, bp = _ber_lire_tlv(vbc, bp)
                     tag_val, val_brut, bp = _ber_lire_tlv(vbc, bp)
                     oid_ret = _ber_decoder_oid(oid_brut)
-                    if not oid_ret.startswith(pref) or tag_val == 0x82:
-                        break
+                    if not oid_ret.startswith(pref) or tag_val in (0x80, 0x81, 0x82):
+                        return res
+                    t = _oid_tuple(oid_ret)
+                    if prev_t and t <= prev_t:        # OID non croissant : agent qui boucle
+                        return res
+                    prev_t = t
                     res[oid_ret[len(pref):]] = bytes(val_brut) if tag_val == 0x04 else None
-                    courant = oid_ret
-            if res:
-                return res
-        except Exception:
-            continue
+                    dernier = oid_ret
+                    if len(res) >= max_rows:
+                        return res
+                if dernier is None:
+                    return res
+                courant = dernier
+        return res
+
+    for comm in communautes:
+        for bulk in (True, False):
+            try:
+                r = _run(comm, bulk)
+                if r:
+                    return r
+            except Exception:
+                continue
     return {}
 
 
@@ -1667,9 +1704,129 @@ def diag_wifi_apercu(client_id: int) -> dict:
 _OID_FDB_DOT1D_PORT   = '1.3.6.1.2.1.17.4.3.1.2'        # dot1dTpFdbPort : MAC -> bridge port
 _OID_FDB_BASEPORT_IF  = '1.3.6.1.2.1.17.1.4.1.2'        # dot1dBasePortIfIndex : bridge port -> ifIndex
 _OID_FDB_DOT1Q_PORT   = '1.3.6.1.2.1.17.7.1.2.2.1.2'    # dot1qTpFdbPort : VLAN.MAC -> bridge port
+_OID_DOT1Q_VLAN_NAMES = '1.3.6.1.2.1.17.7.1.4.3.1.1'    # dot1qVlanStaticName : suffixe = VLAN id
 _OID_ARP_PHYS         = '1.3.6.1.2.1.4.22.1.2'          # ipNetToMediaPhysAddress : ifIndex.ip -> MAC (table ARP)
-_OID_LLDP_REM_SYSNAME = '1.0.8802.1.1.2.1.4.1.1.9'
+_OID_ARP_PHYS_2       = '1.3.6.1.2.1.4.35.1.4'          # ipNetToPhysicalPhysAddress (IP-MIB moderne)
+_OID_BRIDGE_BASE_MAC  = '1.3.6.1.2.1.17.1.1'            # dot1dBaseBridgeAddress
+_OID_IF_PHYS_ADDR     = '1.3.6.1.2.1.2.2.1.6'           # ifPhysAddress
+_FDB_VLAN_MAX         = 32                              # garde-fou : nb de VLAN sondés par contexte de communauté
+_OID_LLDP_REM_CHASSIS_ST = '1.0.8802.1.1.2.1.4.1.1.4'   # lldpRemChassisIdSubtype
+_OID_LLDP_REM_CHASSIS    = '1.0.8802.1.1.2.1.4.1.1.5'   # lldpRemChassisId (OCTET STRING, souvent MAC)
+_OID_LLDP_REM_PORTID_ST  = '1.0.8802.1.1.2.1.4.1.1.6'   # lldpRemPortIdSubtype (3=MAC, 5=ifName, 7=local)
 _OID_LLDP_REM_PORTID  = '1.0.8802.1.1.2.1.4.1.1.7'
+_OID_LLDP_REM_SYSNAME = '1.0.8802.1.1.2.1.4.1.1.9'
+_OID_LLDP_REM_SYSDESC = '1.0.8802.1.1.2.1.4.1.1.10'
+_OID_LLDP_REM_CAP_EN  = '1.0.8802.1.1.2.1.4.1.1.12'     # lldpRemSysCapEnabled (BITS)
+_OID_LLDP_LOC_PORTID  = '1.0.8802.1.1.2.1.3.7.1.3'      # lldpLocPortId : localPortNum -> nom d'interface locale
+# CDP (CISCO-CDP-MIB, cdpCacheEntry) : index = cdpCacheIfIndex.cdpCacheDeviceIndex
+_OID_CDP_ADDR     = '1.3.6.1.4.1.9.9.23.1.2.1.1.4'
+_OID_CDP_DEVICE   = '1.3.6.1.4.1.9.9.23.1.2.1.1.6'
+_OID_CDP_PORT     = '1.3.6.1.4.1.9.9.23.1.2.1.1.7'
+_OID_CDP_PLATFORM = '1.3.6.1.4.1.9.9.23.1.2.1.1.8'
+_OID_CDP_CAP      = '1.3.6.1.4.1.9.9.23.1.2.1.1.9'
+
+_LLDP_CAP_BITS = ('other', 'repeater', 'bridge', 'wlan', 'router', 'phone', 'docsis', 'station')
+_CDP_CAP_BITS  = ('router', 'bridge', 'bridge', 'bridge', 'host', 'igmp', 'repeater', 'phone')
+
+
+def _bits_actifs(brut, noms):
+    """OCTET STRING de type BITS -> set de libelles. Bit 0 = poids fort du 1er octet."""
+    out = set()
+    if not brut:
+        return out
+    for i, nom in enumerate(noms):
+        octet, dec = i // 8, 7 - (i % 8)
+        if octet < len(brut) and (brut[octet] >> dec) & 1:
+            out.add(nom)
+    return out
+
+
+def _cdp_bits(brut):
+    """cdpCacheCapabilities : entier 4 octets, bit 0 = router (LSB)."""
+    out = set()
+    try:
+        v = int.from_bytes(brut, 'big') if isinstance(brut, (bytes, bytearray)) else int(brut)
+    except (TypeError, ValueError):
+        return out
+    m = {0: 'router', 1: 'bridge', 2: 'bridge', 3: 'bridge', 4: 'host', 6: 'repeater', 7: 'phone'}
+    for b, nom in m.items():
+        if v & (1 << b):
+            out.add(nom)
+    return out
+
+
+def _voisins_lldp_cdp(ip, communautes, infos):
+    """Voisins directs d'un switch/routeur par LLDP puis CDP. Retourne
+    `{ifIndex_local: {nom, port, port_subtype, caps:set, mac, platform, source}}`.
+    caps ⊂ {bridge, router, wlan, phone, docsis, repeater, host, station}."""
+    vois = {}
+
+    # ── LLDP ──
+    txt = lambda b: (b.decode('utf-8', 'replace').strip() if isinstance(b, (bytes, bytearray)) else str(b or '')).strip()
+    loc = {}   # localPortNum -> nom d'interface locale (pour retrouver l'ifIndex)
+    for suf, v in _snmp_walk_octets(_OID_LLDP_LOC_PORTID, ip, communautes, max_rows=400).items():
+        try:
+            loc[int(suf.split('.')[-1])] = txt(v)
+        except (ValueError, IndexError):
+            pass
+    nom_vers_ifx = {}
+    for ifx, m in infos.items():
+        if m.get('nom'):
+            nom_vers_ifx[str(m['nom'])] = ifx
+
+    sysn = _snmp_walk(_OID_LLDP_REM_SYSNAME, ip, communautes)
+    if sysn:
+        pid_st = _snmp_walk(_OID_LLDP_REM_PORTID_ST, ip, communautes)
+        pid = _snmp_walk_octets(_OID_LLDP_REM_PORTID, ip, communautes, max_rows=400)
+        pdesc = _snmp_walk(_OID_LLDP_REM_SYSDESC, ip, communautes)
+        cap = _snmp_walk_octets(_OID_LLDP_REM_CAP_EN, ip, communautes, max_rows=400)
+        chid = _snmp_walk_octets(_OID_LLDP_REM_CHASSIS, ip, communautes, max_rows=400)
+        for suf, nom_v in sysn.items():
+            parts = suf.split('.')
+            if len(parts) < 3:
+                continue
+            try:
+                locnum = int(parts[1])
+            except ValueError:
+                continue
+            ifx = nom_vers_ifx.get(loc.get(locnum, ''), locnum)
+            st = 0
+            try:
+                st = int(pid_st.get(suf, 0))
+            except (TypeError, ValueError):
+                pass
+            pv = pid.get(suf)
+            if st == 3 and pv and len(pv) == 6:            # PortId = MAC
+                port_s, port_sub = _mac_octets(pv), 'mac'
+            else:
+                port_s, port_sub = txt(pv), ('ifname' if st == 5 else 'local' if st == 7 else 'autre')
+            cv = chid.get(suf)
+            vois[ifx] = {'nom': txt(nom_v), 'port': port_s, 'port_subtype': port_sub,
+                         'caps': _bits_actifs(cap.get(suf), _LLDP_CAP_BITS),
+                         'mac': _mac_octets(cv) if cv and len(cv) == 6 else '',
+                         'platform': txt(pdesc.get(suf, '')), 'source': 'lldp'}
+
+    # ── CDP (complete, n'ecrase pas LLDP) ──
+    dev = _snmp_walk(_OID_CDP_DEVICE, ip, communautes)
+    if dev:
+        port = _snmp_walk(_OID_CDP_PORT, ip, communautes)
+        plat = _snmp_walk(_OID_CDP_PLATFORM, ip, communautes)
+        cap = _snmp_walk_octets(_OID_CDP_CAP, ip, communautes, max_rows=400)
+        addr = _snmp_walk_octets(_OID_CDP_ADDR, ip, communautes, max_rows=400)
+        for suf, nom_v in dev.items():
+            try:
+                ifx = int(suf.split('.')[0])
+            except (ValueError, IndexError):
+                continue
+            if ifx in vois:
+                continue
+            a = addr.get(suf)
+            vois[ifx] = {'nom': txt(nom_v), 'port': txt(port.get(suf, '')), 'port_subtype': 'ifname',
+                         'caps': _cdp_bits(cap.get(suf)),
+                         'mac': '', 'platform': txt(plat.get(suf, '')),
+                         'ip': ('.'.join(str(b) for b in a) if a and len(a) == 4 else ''),
+                         'source': 'cdp'}
+    return vois
 
 
 def _mac_depuis_suffixe(suffixe: str, decimal_count: int = 6) -> str:
@@ -1723,8 +1880,9 @@ def decouvrir_topologie(client_id: int) -> list:
             conn.executemany(
                 "INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
                 "port_index, port_nom, mac_vue, appareil_vu_id, appareil_vu_nom, vendor, "
-                "type_lien, voisin_nom, voisin_port, horodatage) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", lignes)
+                "type_lien, voisin_nom, voisin_port, horodatage, "
+                "voisin_caps, voisin_mac, voisin_port_subtype, voisin_source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", lignes)
             conn.commit()
             conn.close()
         except Exception:
@@ -1733,49 +1891,22 @@ def decouvrir_topologie(client_id: int) -> list:
 
 
 def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now):
-    """Un switch : FDB -> port -> {mac, appareil} + voisins LLDP + recoupement baie."""
+    """Un switch : FDB -> port -> {mac, appareil} + voisins LLDP/CDP + recoupement baie."""
     equipement = interroger_equipement(ip, communautes)
-    noms_ports = {}
+    noms_ports, infos = {}, {}
     if equipement:
-        noms_ports = {p['index']: p['nom'] for p in equipement['ports']}
+        for p in equipement['ports']:
+            noms_ports[p['index']] = p['nom']
+            infos[p['index']] = {'nom': p['nom'], 'alias': p.get('alias', ''), 'ethernet': True}
 
-    baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes)   # {bridge_port: ifIndex}
-    fdb = _snmp_walk(_OID_FDB_DOT1Q_PORT, ip, communautes)
-    decal = 6
-    if not fdb:
-        fdb = _snmp_walk(_OID_FDB_DOT1D_PORT, ip, communautes)
-    else:
-        decal = 6  # dot1q : suffixe = vlan.macs(6) → on prend quand même les 6 derniers
+    # Table MAC : même relevé unifié que le cycle d'activité et « Deviner le
+    # brassage » (bridge dot1q/dot1d + contexte VLAN + ARP + correction de forme
+    # pour un agent buggé + réglage `diag_fdb_mode:<ip>`).
+    par_if, _meta = _releve_mac_switch(ip, communautes, inventaire)
+    par_port = {ifx: sorted(macs) for ifx, macs in par_if.items()}
 
-    # port bridge -> [macs]
-    par_port = {}
-    for suffixe, bridge_port in fdb.items():
-        mac = _mac_depuis_suffixe(suffixe, decal)
-        try:
-            bp = int(bridge_port)
-        except (TypeError, ValueError):
-            continue
-        if not mac or bp <= 0:
-            continue
-        ifindex = baseport_if.get(str(bp), bp)
-        try:
-            ifindex = int(ifindex)
-        except (TypeError, ValueError):
-            ifindex = bp
-        par_port.setdefault(ifindex, []).append(mac)
-
-    # voisins LLDP
-    voisins = {}
-    lldp_noms = _snmp_walk(_OID_LLDP_REM_SYSNAME, ip, communautes)
-    lldp_ports = _snmp_walk(_OID_LLDP_REM_PORTID, ip, communautes)
-    for suffixe, nom_voisin in lldp_noms.items():
-        # suffixe LLDP = timeMark.locPortNum.remIndex → locPortNum au milieu
-        parts = suffixe.split('.')
-        loc = parts[1] if len(parts) >= 2 else parts[0]
-        try:
-            voisins[int(loc)] = {'nom': str(nom_voisin), 'port': str(lldp_ports.get(suffixe, ''))}
-        except ValueError:
-            pass
+    # voisins LLDP + CDP (capacités système, MAC du châssis, sous-type de PortID)
+    voisins = _voisins_lldp_cdp(ip, communautes, infos)
 
     # câblage baie de ce switch : {numero_port: (appareil_id, nom)}
     baie = {}
@@ -1793,20 +1924,31 @@ def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now)
     except Exception:
         pass
 
+    # ports qui n'ont PAS de MAC apprise mais un voisin LLDP/CDP (lien infra pur)
+    tous_ifx = sorted(set(par_port) | set(voisins))
     lignes, findings = [], []
-    for ifindex, macs in sorted(par_port.items()):
-        macs = sorted(set(macs))
+    for ifindex in tous_ifx:
+        macs = sorted(set(par_port.get(ifindex, [])))
         port_nom = noms_ports.get(ifindex, f'if{ifindex}')
         vue_appareil_id, vue_nom = None, ''
         if len(macs) == 1 and macs[0] in inventaire:
             vue_appareil_id, vue_nom = inventaire[macs[0]]
         v = voisins.get(ifindex, {})
-        for mac in macs:
-            inv = inventaire.get(mac)
+        v_caps = ','.join(sorted(v.get('caps', ())))
+        v_mac = v.get('mac', '')
+        # la MAC du châssis LLDP recoupe l'inventaire même sans FDB
+        if not vue_appareil_id and v_mac and v_mac in inventaire:
+            vue_appareil_id, vue_nom = inventaire[v_mac]
+        rows_macs = macs or ([''] if v else [])
+        for mac in rows_macs:
+            inv = inventaire.get(mac) if mac else None
             lignes.append((client_id, ip, equip_id, ifindex, port_nom, mac,
-                           inv[0] if inv else None, inv[1] if inv else '',
-                           _vendor(mac), 'lldp' if v else 'mac',
-                           v.get('nom', ''), v.get('port', ''), now))
+                           inv[0] if inv else (vue_appareil_id if not mac else None),
+                           inv[1] if inv else (vue_nom if not mac else ''),
+                           _vendor(mac) if mac else '',
+                           v.get('source') or ('mac' if mac else ''),
+                           v.get('nom', ''), v.get('port', ''), now,
+                           v_caps, v_mac, v.get('port_subtype', ''), v.get('source', '')))
         # recoupement baie : le switch voit un appareil connu, seul, différent
         # de celui déclaré dans la baie pour ce numéro de port
         baie_port = baie.get(ifindex)
@@ -2973,8 +3115,9 @@ _activite_sysinfo    = {}   # ip -> {'ts', 'sysname', 'sysdescr'} (cache ~10 min
 _activite_sut        = {}   # (client_id, ip) -> (sysUpTime_ticks, epoch) : dt exact via l'horloge de l'agent
 _activite_fdb        = {}   # ip -> (epoch, {ifindex: set(mac normalisée)}) : FDB bridge-MIB, cache _ACTIVITE_FDB_TTL
 _activite_fdb_baseport = {} # ip -> (epoch, {bridge_port: ifIndex}) : dot1dBasePortIfIndex, quasi statique
-_activite_fdb_dialecte = {} # ip -> 'dot1q' | 'dot1d' : quel jeu FDB répond (switch lent = 1 walk au lieu de 2)
+_activite_fdb_dialecte = {} # ip -> 'dot1q' | 'dot1d' | 'dot1q-vlan' : quel jeu FDB répond
 _activite_fdb_echec  = {}   # ip -> epoch du dernier walk FDB infructueux (backoff)
+_activite_infra_mac  = {}   # ip -> (epoch, set(mac)) : MAC propres du switch (base bridge + ifPhysAddress)
 _activite_echecs     = {}   # client_id -> nb d'échecs consécutifs de _cycle_activite
 _ACTIVITE_HIST_MAX   = 60   # échantillons conservés par port pour la sparkline
 _ACTIVITE_SYSINFO_TTL = 600.0
@@ -3107,13 +3250,15 @@ def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, infos):
             except (TypeError, ValueError):
                 continue
 
-    par_nom = {}   # port physique déduit du nom -> ifindex (interfaces ethernet)
+    _RE_SFP = re.compile(r'(sfp|xfp|qsfp|fiber|fibre|tengig|fortygig|hundredgig|\bte\b|\bxe-|\bfo\b)', re.I)
+    par_nom, par_nom_sfp = {}, {}   # port physique déduit du nom -> ifindex
     for ifx, meta in sorted(infos.items()):
         if not meta.get('ethernet', True):
             continue
-        pp = _port_physique_depuis_nom(meta.get('nom')) or _port_physique_depuis_nom(meta.get('alias'))
+        nom = str(meta.get('nom') or '')
+        pp = _port_physique_depuis_nom(nom) or _port_physique_depuis_nom(meta.get('alias'))
         if pp is not None:
-            par_nom.setdefault(pp, ifx)
+            (par_nom_sfp if _RE_SFP.search(nom) else par_nom).setdefault(pp, ifx)
 
     repli_naif = str(_cfg('diag_baie_activite_repli_naif', '0')) == '1'
     mapping, sources, calibre, divergences = {}, {}, False, []
@@ -3123,10 +3268,16 @@ def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, infos):
         except (TypeError, ValueError):
             continue
         if_topo = topo.get(p_aid) if p_aid else None
-        # nom d'interface : seulement pour la plage RJ (1-48). Un port SFP de baie
-        # (1001+) partage son numéro logique avec le port RJ du même rang → il
-        # serait mappé à tort sur le RJ. SFP/WAN se calibrent par topologie/manuel.
-        if_nom = par_nom.get(numero) if numero <= 48 else None
+        # nom d'interface : plage RJ (jusqu'à 96, couvre les stacks 48+48 et les
+        # châssis 96 ports). Un port SFP de baie (1001+) est mappé sur une
+        # interface dont le NOM porte un marqueur fibre/SFP, jamais sur un RJ.
+        _log = _numero_logique(numero)
+        if numero <= 96:
+            if_nom = par_nom.get(numero)
+        elif 1000 < numero <= 9000:
+            if_nom = par_nom_sfp.get(_log)
+        else:
+            if_nom = None
         if if_manuel:
             try:
                 mapping[numero] = int(if_manuel)
@@ -3637,80 +3788,172 @@ def _modele_court(sysdescr):
     return sysdescr.split('\n')[0].split(',')[0].strip()[:48]
 
 
+_activite_fdb_lock = threading.Lock()   # _fdb_switch : loop d'activité + requête Flask
+
+
+def _mac_octets(brut):
+    return ':'.join('%02x' % b for b in brut) if brut and len(brut) == 6 else ''
+
+
+def _bridge_fdb_brute(ip, communautes, baseport_if):
+    """{ifIndex: set(mac)} depuis la bridge-MIB. Essaie dot1q, dot1d, puis — si
+    les deux sont muets — le contexte de communauté par VLAN (`public@<vlan>`,
+    cas Cisco et quelques HP). Mémorise le dialecte qui répond."""
+    def _agrege(fdb):
+        out = {}
+        for suffixe, bridge_port in fdb.items():
+            mac = _mac_depuis_suffixe(suffixe, 6)
+            try:
+                bp = int(bridge_port)
+            except (TypeError, ValueError):
+                continue
+            if not mac or bp <= 0:
+                continue
+            ifx = baseport_if.get(str(bp), bp)
+            try:
+                ifx = int(ifx)
+            except (TypeError, ValueError):
+                ifx = bp
+            out.setdefault(ifx, set()).add(_norm_mac(mac))
+        return out
+
+    dialecte = _activite_fdb_dialecte.get(ip)
+    if dialecte == 'dot1d':
+        f = _snmp_walk(_OID_FDB_DOT1D_PORT, ip, communautes)
+        if f:
+            return _agrege(f)
+    elif dialecte == 'dot1q':
+        f = _snmp_walk(_OID_FDB_DOT1Q_PORT, ip, communautes)
+        if f:
+            return _agrege(f)
+    elif dialecte == 'dot1q-vlan':
+        return _fdb_par_vlan(ip, communautes, baseport_if)
+    else:
+        for nom, oid in (('dot1q', _OID_FDB_DOT1Q_PORT), ('dot1d', _OID_FDB_DOT1D_PORT)):
+            f = _snmp_walk(oid, ip, communautes)
+            if f:
+                _activite_fdb_dialecte[ip] = nom
+                return _agrege(f)
+        vlan = _fdb_par_vlan(ip, communautes, baseport_if)
+        if vlan:
+            _activite_fdb_dialecte[ip] = 'dot1q-vlan'
+            return vlan
+    return {}
+
+
+def _fdb_par_vlan(ip, communautes, baseport_if):
+    """FDB dot1q relevée VLAN par VLAN avec le contexte de communauté
+    `communaute@<vlan>` (indispensable sur beaucoup de switches Cisco / HP)."""
+    vlans = _snmp_walk(_OID_DOT1Q_VLAN_NAMES, ip, communautes)
+    vids = []
+    for suf in vlans:
+        try:
+            vids.append(int(suf.split('.')[-1]))
+        except (ValueError, IndexError):
+            pass
+    out = {}
+    for vid in sorted(set(vids))[:_FDB_VLAN_MAX]:
+        ctx = [f'{c}@{vid}' for c in communautes]
+        f = _snmp_walk(_OID_FDB_DOT1Q_PORT, ip, ctx)
+        for suffixe, bridge_port in f.items():
+            mac = _mac_depuis_suffixe(suffixe, 6)
+            try:
+                bp = int(bridge_port)
+            except (TypeError, ValueError):
+                continue
+            if not mac or bp <= 0:
+                continue
+            ifx = baseport_if.get(str(bp), bp)
+            try:
+                ifx = int(ifx)
+            except (TypeError, ValueError):
+                ifx = bp
+            out.setdefault(ifx, set()).add(_norm_mac(mac))
+    return out
+
+
 def _fdb_switch(ip, communautes):
-    """Table d'apprentissage MAC du switch (bridge-MIB), `{ifIndex: set(mac)}`.
-    Relevé « live » à chaque cycle (cache `_ACTIVITE_FDB_TTL` s) — sert au
-    contrôle de câblage des prises murales et à lister, dans l'infobulle d'un
-    port, les appareils dont le trafic y transite. Sur échec de walk, on
-    conserve la dernière valeur connue si elle n'est pas trop vieille."""
-    hit = _activite_fdb.get(ip)
-    if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_TTL:
-        return hit[1]
-    # backoff : un switch qui ne répond pas à la bridge-MIB ferait sinon un walk
-    # lent (~7 s) à chaque cycle. Après un échec sans repli, on patiente.
-    ech = _activite_fdb_echec.get(ip)
-    if ech and (time.time() - ech) < _ACTIVITE_FDB_BACKOFF and not hit:
+    """Table d'apprentissage MAC du switch, `{ifIndex: set(mac)}` : bridge-MIB
+    (dot1q/dot1d, contexte VLAN au besoin) **+ table ARP** (`ipNetToMediaPhysAddress`,
+    précieuse pour un routeur / switch L3 sans FDB). Cache `_ACTIVITE_FDB_TTL` s ;
+    sur échec de walk, conserve la dernière valeur connue si elle n'est pas trop
+    vieille."""
+    with _activite_fdb_lock:
+        hit = _activite_fdb.get(ip)
+        if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_TTL:
+            return hit[1]
+        ech = _activite_fdb_echec.get(ip)
+        if ech and (time.time() - ech) < _ACTIVITE_FDB_BACKOFF and not hit:
+            return {}
+
+        bp_hit = _activite_fdb_baseport.get(ip)
+        if bp_hit and (time.time() - bp_hit[0]) < _ACTIVITE_SYSINFO_TTL:
+            baseport_if = bp_hit[1]
+        else:
+            baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes)
+            if baseport_if:
+                _activite_fdb_baseport[ip] = (time.time(), baseport_if)
+            elif bp_hit:
+                baseport_if = bp_hit[1]
+
+        par_if = _bridge_fdb_brute(ip, communautes, baseport_if)
+
+        # table ARP — plafonnée : petit complément si la FDB bridge a répondu,
+        # relevé plus large si elle est vide (probable routeur / switch L3).
+        arp_cap = 150 if par_if else 800
+        arp = _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes, max_rows=arp_cap)
+        if not arp:
+            arp = _snmp_walk_octets(_OID_ARP_PHYS_2, ip, communautes, max_rows=arp_cap)
+        for suf, brut in arp.items():
+            mac = _mac_octets(brut)
+            if not mac:
+                continue
+            try:
+                ifx = int(suf.split('.')[0])
+            except (ValueError, IndexError):
+                continue
+            par_if.setdefault(ifx, set()).add(mac)
+
+        if par_if:
+            _activite_fdb[ip] = (time.time(), par_if)
+            _activite_fdb_echec.pop(ip, None)
+            return par_if
+        _activite_fdb_echec[ip] = time.time()
+        if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_PERIME:
+            return hit[1]
         return {}
 
-    # bridge_port -> ifIndex : quasi statique → cache long (un switch lent finit
-    # par lâcher des paquets SNMP quand on enchaîne les walks : on en économise).
-    bp_hit = _activite_fdb_baseport.get(ip)
-    if bp_hit and (time.time() - bp_hit[0]) < _ACTIVITE_SYSINFO_TTL:
-        baseport_if = bp_hit[1]
-    else:
-        baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes)
-        if baseport_if:
-            _activite_fdb_baseport[ip] = (time.time(), baseport_if)
-        elif bp_hit:
-            baseport_if = bp_hit[1]
 
-    # FDB : on interroge d'abord le dialecte qui a répondu la dernière fois
-    # (dot1q OU dot1d), pas les deux — le walk mort coûte plusieurs secondes.
-    dialecte = _activite_fdb_dialecte.get(ip)
-    ordre = ([('dot1d', _OID_FDB_DOT1D_PORT)] if dialecte == 'dot1d'
-             else [('dot1q', _OID_FDB_DOT1Q_PORT)] if dialecte == 'dot1q'
-             else [('dot1q', _OID_FDB_DOT1Q_PORT), ('dot1d', _OID_FDB_DOT1D_PORT)])
-    fdb = {}
-    for nom, oid in ordre:
-        fdb = _snmp_walk(oid, ip, communautes)
-        if fdb:
-            _activite_fdb_dialecte[ip] = nom
-            break
-    par_if = {}
-    for suffixe, bridge_port in fdb.items():
-        mac = _mac_depuis_suffixe(suffixe, 6)
-        try:
-            bp = int(bridge_port)
-        except (TypeError, ValueError):
-            continue
-        if not mac or bp <= 0:
-            continue
-        ifindex = baseport_if.get(str(bp), bp)
-        try:
-            ifindex = int(ifindex)
-        except (TypeError, ValueError):
-            ifindex = bp
-        par_if.setdefault(ifindex, set()).add(_norm_mac(mac))
+def _macs_infra_switch(ip, communautes):
+    """Toutes les MAC « propres » d'un switch : adresse de base bridge
+    (`dot1dBaseBridgeAddress`) + `ifPhysAddress` de chaque interface. Un switch
+    en a plusieurs (base, une par port, une par VLAN) ; les rattacher toutes à
+    l'appareil fiabilise la détection des liens switch ⇄ switch. Cache court."""
+    ent = _activite_infra_mac.get(ip)
+    if ent and time.time() - ent[0] < _ACTIVITE_SYSINFO_TTL:
+        return ent[1]
+    macs = set()
+    base = _snmp_walk_octets(_OID_BRIDGE_BASE_MAC, ip, communautes, max_rows=4)
+    for brut in base.values():
+        m = _mac_octets(brut)
+        if m:
+            macs.add(m)
+    for brut in _snmp_walk_octets(_OID_IF_PHYS_ADDR, ip, communautes, max_rows=400).values():
+        m = _mac_octets(brut)
+        if m and m != '00:00:00:00:00:00':
+            macs.add(m)
+    if macs:
+        _activite_infra_mac[ip] = (time.time(), macs)
+    return macs
 
-    # table ARP (ipNetToMediaPhysAddress) : ifIndex.ip -> MAC. Précieux pour un
-    # routeur / switch L3 (aucune FDB bridge) ; complète la FDB sinon.
-    for suf, brut in _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes).items():
-        if not brut or len(brut) != 6:
-            continue
-        try:
-            ifx = int(suf.split('.')[0])
-        except (ValueError, IndexError):
-            continue
-        par_if.setdefault(ifx, set()).add(':'.join('%02x' % b for b in brut))
 
-    if par_if:
-        _activite_fdb[ip] = (time.time(), par_if)
-        _activite_fdb_echec.pop(ip, None)
-        return par_if
-    _activite_fdb_echec[ip] = time.time()
-    if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_PERIME:
-        return hit[1]
-    return {}
+def _releve_mac_switch(ip, communautes, inv_mac):
+    """Point d'entrée unique : `_fdb_switch` (bridge + ARP) puis `_fdb_corriger`
+    (hypothèses de forme, réglage `diag_fdb_mode:<ip>`). Retourne `(fdb, meta)`.
+    Utilisé par le cycle d'activité, `analyser_brassage_baie` ET la découverte
+    de topologie (palier 4)."""
+    return _fdb_corriger(_fdb_switch(ip, communautes), inv_mac,
+                         str(_cfg(f'diag_fdb_mode:{ip}', '')))
 
 
 # Hypothèses de « forme » d'une MAC renvoyée par un agent buggé : (nom, fonction
@@ -3822,16 +4065,25 @@ _OUI_MOBILE = ('apple', 'samsung', 'huawei', 'xiaomi', 'google', 'oneplus',
 _TYPES_AP_INV = ('Borne WiFi', 'Switch/AP', 'Switch', 'Point d\'accès')
 
 
-def _classer_cascade(macs, inv_mac):
+def _classer_cascade(macs, inv_mac, caps=''):
     """Plusieurs MAC sur un même port de switch relié à UNE prise murale → il y
     a un équipement intermédiaire (switch non géré ou borne Wi-Fi). Essaie de
-    trancher. `inv_mac` = {mac: (aid, nom, type_appareil)}.
+    trancher. `inv_mac` = {mac: (aid, nom, type_appareil)} ; `caps` = capacités
+    LLDP/CDP du voisin sur ce port ('bridge,wlan,...') si connues.
     Retourne {type: 'switch'|'wifi'|'indetermine', indices: [...], n_macs}."""
     macs = sorted(macs)
     aleatoires = [m for m in macs if _mac_locale(m)]
     vendors = [(_vendor(m) or '').lower() for m in macs]
     types_inv = [inv_mac[m][2] for m in macs if m in inv_mac and len(inv_mac[m]) > 2 and inv_mac[m][2]]
+    caps = set((caps or '').split(','))
     indices, w, s = [], 0, 0
+
+    if 'wlan' in caps:
+        w += 4
+        indices.append("le voisin LLDP/CDP se déclare « borne Wi-Fi »")
+    elif 'bridge' in caps and 'router' not in caps:
+        s += 4
+        indices.append("le voisin LLDP/CDP se déclare « pont »")
 
     if any(t in _TYPES_AP_INV[:2] or 'wifi' in (t or '').lower() or 'accès' in (t or '').lower()
            for t in types_inv):
@@ -4006,13 +4258,10 @@ def _cycle_activite(clients):
 
                     # ── relevé SNMP : UNE fois par IP, partagé entre ses slots ──
                     if ip not in poll_par_ip:
-                        # FDB en premier : quand il est dû (TTL long), le switch n'a
-                        # pas encore été martelé par les GETBULK du cycle — un agent
-                        # SNMP lent lâche les walks enchaînés (cas HP ProCurve 1810G).
-                        # Répare une FDB « décalée » (agent buggé) via l'inventaire.
-                        fdb_par_ip[ip], _fdb_meta = _fdb_corriger(
-                            _fdb_switch(ip, communautes), inv_mac,
-                            str(_cfg(f'diag_fdb_mode:{ip}', '')))
+                        # FDB en premier : quand elle est due (TTL long), le switch
+                        # n'a pas encore été martelé par les GETBULK du cycle — un
+                        # agent lent lâche les walks enchaînés (cas ProCurve 1810G).
+                        fdb_par_ip[ip], _fdb_meta = _releve_mac_switch(ip, communautes, inv_mac)
                         if _fdb_meta['tronquee']:
                             journal_ops.append((f"{sw['nom']} ({ip}) — table d'apprentissage MAC "
                                                 f"déformée (agent SNMP) : {_fdb_meta['reconnues']} "
@@ -4338,6 +4587,9 @@ def _activite_loop():
                 for k in [k for k, v in list(_activite_sysinfo.items())
                           if now - v['ts'] > max(_ACTIVITE_PURGE, _ACTIVITE_SYSINFO_TTL * 2)]:
                     _activite_sysinfo.pop(k, None)
+                for k in [k for k, v in list(_activite_infra_mac.items())
+                          if now - v[0] > max(_ACTIVITE_PURGE, _ACTIVITE_SYSINFO_TTL * 2)]:
+                    _activite_infra_mac.pop(k, None)
                 for k in [k for k, v in list(_activite_fdb.items())
                           if now - v[0] > max(_ACTIVITE_PURGE, _ACTIVITE_FDB_PERIME + 60)]:
                     _activite_fdb.pop(k, None)
@@ -4611,12 +4863,6 @@ def analyser_brassage_baie(client_id: int) -> dict:
         if not switchs:
             return {'ok': False, 'motif': 'aucun_switch', **vide}
 
-        infos_par_ip, fdb_par_ip = {}, {}
-        for sw in switchs:
-            if sw['ip'] not in infos_par_ip:
-                infos_par_ip[sw['ip']] = _noms_interfaces(sw['ip'], communautes)
-                fdb_par_ip[sw['ip']] = _fdb_switch(sw['ip'], communautes)
-
         inv_mac, nom_par_aid = {}, {}
         for aid, nom, mac, typ in conn.execute(
                 "SELECT id, nom_machine, adresse_mac, type_appareil FROM appareils WHERE client_id=?",
@@ -4627,23 +4873,34 @@ def analyser_brassage_baie(client_id: int) -> dict:
         elems, mac_infra, nom_par_slot = _elements_baie(conn, client_id)
         aids_baie = set(elems)
 
-        # essaie plusieurs hypothèses de forme de la FDB (agent buggé) + réglage
-        # manuel par switch (config `diag_fdb_mode:<ip>`)
-        fdb_meta_par_ip = {}
-        for ip in list(fdb_par_ip):
-            fdb_par_ip[ip], fdb_meta_par_ip[ip] = _fdb_corriger(
-                fdb_par_ip[ip], inv_mac, str(_cfg(f'diag_fdb_mode:{ip}', '')))
+        # relevé mutualisé par IP : noms d'interface + table MAC (bridge + ARP +
+        # correction de forme + réglage manuel `diag_fdb_mode:<ip>`)
+        infos_par_ip, fdb_par_ip, fdb_meta_par_ip = {}, {}, {}
+        for sw in switchs:
+            if sw['ip'] not in infos_par_ip:
+                infos_par_ip[sw['ip']] = _noms_interfaces(sw['ip'], communautes)
+                fdb_par_ip[sw['ip']], fdb_meta_par_ip[sw['ip']] = _releve_mac_switch(
+                    sw['ip'], communautes, inv_mac)
+
+        # MAC « propres » de chaque switch, relevées en SNMP (base bridge +
+        # ifPhysAddress) → toutes rattachées à l'appareil comme MAC d'infra.
+        infra_snmp_par_ip = {}
+        for sw in switchs:
+            if sw['ip'] not in infra_snmp_par_ip:
+                infra_snmp_par_ip[sw['ip']] = _macs_infra_switch(sw['ip'], communautes)
+                for mm in infra_snmp_par_ip[sw['ip']]:
+                    mac_infra.setdefault(mm, sw['appareil_id'])
 
         sw_ctx = []
         for sw in switchs:
             mapping, *_r = _mapping_baie_ifindex(conn, client_id, sw['slot_id'],
                                                 sw['appareil_id'], infos_par_ip[sw['ip']])
             m = fdb_meta_par_ip.get(sw['ip'], {})
+            mgmt = {mm for mm, a in mac_infra.items() if a == sw['appareil_id']}
             sw_ctx.append({**sw, 'ifx_to_num': {ifx: num for num, ifx in mapping.items()},
                            'fdb': fdb_par_ip.get(sw['ip']) or {},
                            'fdb_meta': m, 'fdb_tronquee': bool(m.get('tronquee')),
-                           'mgmt_mac': next((mm for mm, a in mac_infra.items()
-                                             if a == sw['appareil_id']), None)})
+                           'mgmt_macs': mgmt})
         ctx_par_slot = {c['slot_id']: c for c in sw_ctx}
         # une IP -> son état FDB (pour l'UI) : nom, mode, hypothèse, reconnues/total
         fdb_ui, vus_ip = [], set()
@@ -4681,12 +4938,17 @@ def analyser_brassage_baie(client_id: int) -> dict:
             prises_decl[(s_id, numero)] = (aid, nom or '', _norm_mac(mac or ''))
         aids_sur_prise = {v[0] for v in prises_decl.values() if v[0]}
 
-        lldp = {}   # (equipement_appareil_id, port_index) -> voisin_port
-        for eq_aid, pidx, vp in conn.execute(
-                "SELECT equipement_appareil_id, port_index, voisin_port FROM diag_topologie "
-                "WHERE client_id=? AND type_lien='lldp' AND equipement_appareil_id IS NOT NULL", (client_id,)):
+        # voisins LLDP/CDP relevés au dernier passage du palier 4 :
+        # (appareil_switch, port_index) -> {port, subtype, mac, caps, nom}
+        lldp = {}
+        for eq_aid, pidx, vp, vst, vmac, vcaps, vnom in conn.execute(
+                "SELECT equipement_appareil_id, port_index, voisin_port, "
+                "COALESCE(voisin_port_subtype,''), COALESCE(voisin_mac,''), "
+                "COALESCE(voisin_caps,''), voisin_nom FROM diag_topologie "
+                "WHERE client_id=? AND voisin_nom!='' AND equipement_appareil_id IS NOT NULL", (client_id,)):
             try:
-                lldp[(eq_aid, int(pidx))] = vp or ''
+                lldp[(eq_aid, int(pidx))] = {'port': vp or '', 'subtype': vst,
+                                             'mac': vmac, 'caps': vcaps, 'nom': vnom}
             except (TypeError, ValueError):
                 pass
 
@@ -4712,23 +4974,41 @@ def analyser_brassage_baie(client_id: int) -> dict:
                 infra_ici = [(m, mac_infra[m]) for m in sorted(macs)
                              if m in mac_infra and mac_infra[m] != c['appareil_id']]
 
-                # (D) lien switch ⇄ autre élément de la baie
-                if infra_ici:
-                    autre_aid = infra_ici[0][1]
+                # (D) lien switch ⇄ autre élément de la baie. Voisin = un élément
+                #     dont une MAC d'infra est apprise sur ce port, OU un voisin
+                #     LLDP/CDP dont le nom/MAC recoupe un élément de la baie.
+                lv = lldp.get((c['appareil_id'], ifx))
+                autre_aid = infra_ici[0][1] if infra_ici else None
+                if autre_aid is None and lv:
+                    if lv['mac'] and lv['mac'] in mac_infra:
+                        autre_aid = mac_infra[lv['mac']]
+                    elif lv['nom']:
+                        autre_aid = next((a for a, e in elems.items()
+                                          if e['nom'].lower() == lv['nom'].lower()), None)
+                if autre_aid is not None:
                     autre = elems.get(autre_aid)
                     paire = autre and tuple(sorted((c['slot_id'], autre['slot_id'])))
-                    if autre and paire not in vus_liens:
+                    if autre and autre['slot_id'] != c['slot_id'] and paire not in vus_liens:
                         b_port, via = None, 'fdb'
-                        lv = lldp.get((c['appareil_id'], ifx))
-                        if lv and _port_physique_depuis_nom(lv):
-                            b_port, via = _port_physique_depuis_nom(lv), 'lldp'
-                        if b_port is None and c['mgmt_mac']:
-                            ac = ctx_par_slot.get(autre['slot_id'])
-                            if ac:
-                                for a_ifx, a_macs in ac['fdb'].items():
-                                    if c['mgmt_mac'] in a_macs:
-                                        b_port = ac['ifx_to_num'].get(a_ifx)
+                        ac = ctx_par_slot.get(autre['slot_id'])
+                        # 1) port du voisin par LLDP/CDP, selon le sous-type de PortID
+                        if lv:
+                            st, pv = lv['subtype'], lv['port']
+                            if st == 'mac' and ac:
+                                for a_ifx, a_macs in (ac['fdb'] or {}).items():
+                                    if pv in a_macs:
+                                        b_port, via = ac['ifx_to_num'].get(a_ifx), 'lldp'
                                         break
+                            elif st == 'local' and ac and pv.isdigit():
+                                b_port, via = ac['ifx_to_num'].get(int(pv)), 'lldp'
+                            elif _port_physique_depuis_nom(pv):
+                                b_port, via = _port_physique_depuis_nom(pv), 'lldp'
+                        # 2) sinon : la mgmt MAC de C vue sur un port du voisin (FDB réciproque)
+                        if b_port is None and c['mgmt_macs'] and ac:
+                            for a_ifx, a_macs in (ac['fdb'] or {}).items():
+                                if c['mgmt_macs'] & a_macs:
+                                    b_port = ac['ifx_to_num'].get(a_ifx)
+                                    break
                         if b_port and b_port in autre['ports']:
                             act, actu = _cmp_lien(cle, autre['slot_id'], b_port)
                             if act:
@@ -4740,7 +5020,7 @@ def analyser_brassage_baie(client_id: int) -> dict:
                     continue
 
                 if len(macs) >= 2:
-                    casc = _classer_cascade(macs, inv_mac)
+                    casc = _classer_cascade(macs, inv_mac, lv.get('caps') if lv else '')
                     vois = _voisins_port(macs, inv_mac)
                     b_lien = liens.get(cle)
                     prise = None

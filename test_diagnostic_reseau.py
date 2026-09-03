@@ -277,6 +277,8 @@ _MAC_DEC = '.'.join(str(int('aa0000000011'[i:i + 2], 16)) for i in range(0, 12, 
 N._snmp_walk = lambda oid, ip, comm: (
     {f'1.{_MAC_DEC}': '5'} if oid == N._OID_FDB_DOT1Q_PORT else
     {'5': '5'} if oid == N._OID_FDB_BASEPORT_IF else {})
+N._snmp_walk_octets = lambda *a, **k: {}     # table ARP / MAC infra : vide (pas de vrai reseau)
+N._activite_fdb.clear(); N._activite_fdb_baseport.clear(); N._activite_fdb_dialecte.clear()
 _ft = N.decouvrir_topologie(902)
 verifier([f['categorie'] for f in _ft] == ['cablage_incoherent'],
          "switch voit PC-VU sur port 5, la baie déclare PC-DECLARE -> cablage_incoherent",

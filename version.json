@@ -1,22 +1,25 @@
 {
-  "version": "2.19.24",
+  "version": "2.19.25",
   "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.24",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.24/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.25",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage — « Deviner le brassage » gère la fiabilité de la table MAC de chaque switch : (1) il lit aussi la table ARP du switch/routeur en plus de la table d'apprentissage bridge (utile pour un routeur qui n'a pas de FDB) ; (2) il teste plusieurs hypothèses de déformation (préfixe parasite, MAC tronquée de 1 ou 2 octets) et garde celle qui recoupe le mieux l'inventaire ; (3) la modale affiche pour chaque switch l'hypothèse retenue et « N/M appareils reconnus » ; (4) un menu par switch permet de forcer le comportement : automatique / lecture standard / forcer préfixe / ignorer ce switch.",
+    "new_features": "Topologie réseau — audit de fiabilité, lot 1/n. La découverte de topologie (palier 4) partage désormais le même relevé de table MAC unifié que « Deviner le brassage » (bridge + ARP + correction de forme d'un agent buggé) : elle n'est plus polluée par les MAC tronquées d'un ProCurve. La table MAC par VLAN (contexte de communauté public@<vlan>) est lue pour les switchs Cisco/HP qui l'exigent. Les capacités système LLDP et CDP du voisin (pont, routeur, borne Wi-Fi, téléphone, box FAI, répéteur) et son adresse MAC de châssis sont relevées et servent à typer les voisins et à fiabiliser les liens switch ⇄ switch.",
     "improvements": [
-      "Nouvelle route POST /api/baie/brassage/fdb-mode (config diag_fdb_mode:<ip>)."
+      "Table ARP lue en GETBULK v2c plafonné (plus rapide sur un routeur à grosse table).",
+      "Les MAC « propres » d'un switch (adresse de base + ifPhysAddress) sont apprises en SNMP : détection des liens switch ⇄ switch plus fiable.",
+      "Mapping port ⇄ interface : plage RJ étendue à 96 (stacks 48+48, châssis) ; ports SFP mappés par nom d'interface fibre.",
+      "Walk SNMP : garde « OID strictement croissant » contre un agent qui boucle ; error-status vérifié ; verrou sur le relevé de table MAC (thread activité + requête)."
     ]
   },
   "checksums": {
@@ -27,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.24"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.25"
 }

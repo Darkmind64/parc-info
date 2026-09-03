@@ -2185,6 +2185,13 @@ def init_db():
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
     c.execute('''CREATE INDEX IF NOT EXISTS idx_diag_topo
         ON diag_topologie(client_id, equipement_ip, port_index)''')
+    # Palier 4 (v2.19.25) : capacites LLDP/CDP du voisin (bridge, router, wlan,
+    # phone, docsis...), sa MAC (lldpRemChassisId), le sous-type de son PortID.
+    for col_add in ('voisin_caps', 'voisin_mac', 'voisin_port_subtype', 'voisin_source'):
+        try:
+            c.execute(f"ALTER TABLE diag_topologie ADD COLUMN {col_add} TEXT DEFAULT ''")
+        except Exception:
+            pass
     # Palier 5 — métriques temporelles (tendances / baseline).
     c.execute('''CREATE TABLE IF NOT EXISTS diag_metriques (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -8842,6 +8849,16 @@ def _snmp_walk(ip_str, oid_base, communautes=('public',), timeout=1.2,
                     oid_ret = _ber_decoder_oid(oid_brut)
                     if not oid_ret.startswith(prefixe) or tag_val == 0x82:
                         break  # sorti du sous-arbre / endOfMibView
+                    # OID doit STRICTEMENT croître : un agent bas de gamme qui
+                    # renvoie deux fois le même OID (ou recule) ferait tourner le
+                    # walk jusqu'à max_vars avec des doublons.
+                    try:
+                        _tr = tuple(int(x) for x in oid_ret.split('.'))
+                        _tc = tuple(int(x) for x in oid_courant.split('.'))
+                        if _tc and _tr <= _tc:
+                            break
+                    except ValueError:
+                        pass
                     resultats[oid_ret[len(prefixe):]] = _ber_decoder_valeur(tag_val, val_brut)
                     oid_courant = oid_ret
             if resultats:
