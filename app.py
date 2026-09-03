@@ -7095,14 +7095,19 @@ def api_baie_activite_calibrer_assistant():
 @app.route('/api/baie/brassage/proposer')
 @login_required
 def api_baie_brassage_proposer():
-    """Propose les cordons de brassage bandeau RJ ⇄ port de switch à partir de
-    la table d'apprentissage MAC des switchs (prise murale → machine déclarée →
-    port où sa MAC est vue). Lecture seule : renvoie un aperçu, l'application
-    passe ensuite par /api/baie/lien-port. Un relevé SNMP synchrone (FDB) peut
-    avoir lieu ici — action déclenchée explicitement par l'utilisateur."""
+    """Aperçu de brassage à partir de la table d'apprentissage MAC des switchs.
+    `?sens=machines` (défaut) : prise murale → machine déclarée → port où sa MAC
+    est vue → propose le cordon bandeau⇄switch (application via /api/baie/lien-port).
+    `?sens=brassage` : les cordons sont déjà posés → déduit la machine de chaque
+    prise murale (application via /api/baie/prise-murale/...), et signale les
+    prises où plusieurs appareils sont vus (switch / borne Wi-Fi en aval).
+    Lecture seule ; un relevé SNMP synchrone (FDB) peut avoir lieu — action
+    déclenchée explicitement par l'utilisateur."""
     cid = get_client_id()
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
+    if request.args.get('sens') == 'brassage':
+        return jsonify(network_diag.proposer_prises_depuis_brassage(cid))
     return jsonify(network_diag.proposer_brassage_baie(cid))
 
 

@@ -1,23 +1,22 @@
 {
-  "version": "2.19.20",
+  "version": "2.19.21",
   "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.20",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.21/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.21/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.21/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.21",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.21/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.21/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.21/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.21/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.21/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage — bouton « 🧠 Deviner le brassage » : pour chaque prise murale reliée à une machine, ParcInfo retrouve (table d'apprentissage MAC du switch) le port de switch où cette machine est vue et propose le cordon bandeau ⇄ switch correspondant. Aperçu avant application, réversible. Une fois le brassage posé, tout changement de câblage est signalé en direct (⚠).",
+    "new_features": "Baie de brassage — « Deviner le brassage » fonctionne maintenant dans les DEUX sens : « Depuis les machines » (prise → machine déclarée → port de switch, on propose le cordon) et « Depuis le brassage » (les cordons sont posés → on déduit la machine de chaque prise murale, à partir de la MAC vue au bout du cordon). Si plusieurs appareils sont vus sur une même prise, ParcInfo signale un switch non géré ou une borne Wi-Fi en aval, avec un essai de classification (MAC aléatoires = Wi-Fi, appareil inventorié = certain).",
     "improvements": [
-      "Les infos « trafic vu / câblage » ne créent plus une seconde infobulle : elles sont fusionnées dans l'infobulle riche des ports de switch/routeur et des prises murales (lignes « Activité » et « Trafic vu »).",
-      "Rapprochement de brassage : port de switch le moins « chargé » privilégié ; un port qui apprend la MAC parmi beaucoup d'autres (lien montant) est proposé en confiance « à vérifier »."
+      "Le signalement « équipement intermédiaire » apparaît aussi en direct dans l'infobulle de la prise murale (ligne « En aval »)."
     ]
   },
   "checksums": {
@@ -28,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.20"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.21"
 }

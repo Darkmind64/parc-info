@@ -832,6 +832,55 @@ def test_proposer_brassage_baie(conn, deux_clients, make_appareil, monkeypatch):
     assert p1['action'] == 'inchange'
 
 
+def test_classer_cascade():
+    _f = network_diag._classer_cascade
+    # 2 MAC filaires classiques, aucune aléatoire → switch non géré
+    assert _f({'00:11:22:33:44:55', '00:aa:bb:cc:dd:ee'}, {})['type'] == 'switch'
+    # une MAC localement administrée (aléatoire) → client Wi-Fi
+    assert _f({'02:11:22:33:44:55', '00:aa:bb:cc:dd:ee'}, {})['type'] == 'wifi'
+    # un appareil inventorié « Borne WiFi » vu sur le port → Wi-Fi certain
+    r = _f({'00:11:22:33:44:55', '00:aa:bb:cc:dd:ee'},
+           {'00:11:22:33:44:55': (9, 'AP-1', 'Borne WiFi')})
+    assert r['type'] == 'wifi' and r['n_macs'] == 2
+
+
+def test_proposer_prises_depuis_brassage(conn, deux_clients, make_appareil, monkeypatch):
+    """Cordons bandeau⇄switch déjà posés → déduit la machine de chaque prise ;
+    plusieurs MAC sur le port → cascade (switch / borne Wi-Fi en aval)."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.8')
+    pcA = make_appareil(cid, nom_machine='PC-A', adresse_mac='AA:00:00:00:00:0A')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    sw_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    for n in (3, 7):
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (sw_slot, n))
+    conn.execute("INSERT INTO baie_slots (client_id, position, type_equipement) VALUES (?,2,'Bandeau RJ')", (cid,))
+    b_slot = conn.execute("SELECT id FROM baie_slots WHERE type_equipement='Bandeau RJ' AND client_id=?",
+                          (cid,)).fetchone()[0]
+    # cordon prise 1 -> switch port 3 ; prise 2 -> switch port 7
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero, lie_slot_id, lie_port_numero) VALUES (?,1,?,3)", (b_slot, sw_slot))
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero, lie_slot_id, lie_port_numero) VALUES (?,2,?,7)", (b_slot, sw_slot))
+    conn.execute("INSERT INTO baie_prises_murales (slot_id, numero) VALUES (?,1)", (b_slot,))
+    conn.execute("INSERT INTO baie_prises_murales (slot_id, numero) VALUES (?,2)", (b_slot,))
+    conn.commit()
+
+    monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
+    monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
+    monkeypatch.setattr(network_diag, '_noms_interfaces',
+        lambda ip, c: {33: {'nom': 'Gi0/3', 'alias': '', 'ethernet': True},
+                       77: {'nom': 'Gi0/7', 'alias': '', 'ethernet': True}})
+    monkeypatch.setattr(network_diag, '_fdb_switch',
+        lambda ip, c: {33: {'aa:00:00:00:00:0a'},
+                       77: {'00:11:22:33:44:55', '02:99:99:99:99:99'}})   # 2 MAC → cascade
+
+    d = network_diag.proposer_prises_depuis_brassage(cid)
+    assert d['ok'] is True
+    assert [p['prise_numero'] for p in d['propositions']] == [1]
+    assert d['propositions'][0]['machine_id'] == pcA and d['propositions'][0]['action'] == 'creer'
+    assert [c['prise_numero'] for c in d['cascades']] == [2]
+    assert d['cascades'][0]['type'] == 'wifi'   # une MAC aléatoire présente
+
+
 def test_cycle_activite_stale_apres_echecs(conn, deux_clients, make_appareil, monkeypatch):
     """Un relevé manqué garde le dernier état connu (jamais 'down' juste parce
     que le SNMP a raté) ; après 3 échecs consécutifs, le port passe 'stale'."""

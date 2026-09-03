@@ -1,8 +1,32 @@
-PARCINFO_VERSION=2.19.20
+PARCINFO_VERSION=2.19.21
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090211
+BUILD_NUMBER=2026090212
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.21 - Baie : "Deviner le brassage" bidirectionnel + cascade switch/Wi-Fi
+# Retour : "J'aimerais aussi detecter le brassage differemment. Si je lie
+# d'abord les ports du switch aux ports du bandeau RJ, je veux deduire
+# automatiquement les machines connectees aux prises murales. Egalement, si
+# plusieurs appareils sont detectes sur une meme prise murale, en deduire qu'il
+# doit y avoir un switch entre la prise et les appareils ou un point d'acces
+# wifi (voir s'il est possible de differencier les deux)."
+#
+# 1. proposer_prises_depuis_brassage + GET /api/baie/brassage/proposer?sens=brassage
+#    Sens inverse : pour chaque prise murale dont le cordon lie_* est deja pose,
+#    on lit la MAC apprise sur le port de switch au bout et on DEDUIT la machine.
+#    Application via PUT /api/baie/prise-murale/<slot>/<numero> {appareil_id}.
+#    La modale "Deviner le brassage" a maintenant deux onglets (Depuis les
+#    machines / Depuis le brassage).
+# 2. Cascade : >= 2 MAC sur le port d'un cordon -> equipement intermediaire.
+#    _classer_cascade tranche switch vs borne Wi-Fi : appareil inventorie de type
+#    "Borne WiFi"/"Switch" vu = certain ; MAC localement administrees (aleatoires)
+#    = Wi-Fi ; fabricant AP / fabricants "mobile" = Wi-Fi ; peu de MAC, aucune
+#    aleatoire = switch. Sinon "indetermine". Affiche dans la modale ET en direct
+#    dans l'infobulle de la prise (ligne "En aval").
+# 3. inv_mac du cycle d'activite porte maintenant le type d'appareil (3-uple).
+#
+# Verifie en navigateur sur un HP ProCurve reel. pytest 236 + scripts OK.
 
 # Version 2.19.20 - Baie : bouton "Deviner le brassage" + infobulle unifiee
 # Retour : "Tu as cree une deuxieme infobulle au lieu d'ajouter les infos a
