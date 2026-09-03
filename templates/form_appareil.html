@@ -708,6 +708,13 @@
         <a href="/identifiant/nouveau" class="btn btn-primary btn-sm" style="margin-top:.6rem;">+ Ajouter un identifiant</a>
     </div>
 
+    <!-- PERIPHERIQUES ASSOCIES -->
+    <div class="form-section">
+        <div class="form-section-title">&#9632; Périphériques associés</div>
+        <div id="periph-list"><div style="color:var(--text-muted);font-size:.82rem;">Chargement...</div></div>
+        <a href="/peripherique/nouveau?appareil_id={{ appareil.id }}" class="btn btn-primary btn-sm" style="margin-top:.6rem;">+ Associer un périphérique</a>
+    </div>
+
     <!-- PORTS DE BAIE LIES -->
     {% if ports_baie %}
     <div class="form-section">
