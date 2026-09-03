@@ -786,6 +786,39 @@ def test_fdb_switch_et_voisins(monkeypatch):
     assert 'PC-A' in v['noms'] and v['n'] == 2
 
 
+def test_fdb_corriger():
+    """Un agent buggé renvoie `00:01` + les 4 premiers octets de chaque MAC :
+    _fdb_corriger le détecte et répare par préfixe 4 octets contre l'inventaire ;
+    une FDB normale est laissée intacte."""
+    _f = network_diag._fdb_corriger
+    inv = {'1c:1b:0d:95:99:21': (1, 'PC-A', ''), '00:11:32:43:97:9d': (2, 'NAS', ''),
+           '0c:8f:ff:59:db:3b': (3, 'AP', '')}
+    # FDB décalée : 00:01 + 4 premiers octets
+    tronq = {10: {'00:01:1c:1b:0d:95'}, 11: {'00:01:00:11:32:43', '00:01:0c:8f:ff:59'},
+             12: {'00:01:de:ad:be:ef'}}   # dernière : hors inventaire -> écartée
+    rep, flag = _f(tronq, inv)
+    assert flag is True
+    assert rep == {10: {'1c:1b:0d:95:99:21'},
+                   11: {'00:11:32:43:97:9d', '0c:8f:ff:59:db:3b'}}   # port 12 disparaît
+
+    # FDB normale : inchangée
+    ok = {10: {'1c:1b:0d:95:99:21'}, 11: {'00:11:32:43:97:9d'}, 12: {'aa:bb:cc:dd:ee:ff'},
+          13: {'11:22:33:44:55:66'}}
+    rep2, flag2 = _f(ok, inv)
+    assert flag2 is False and rep2 == ok
+
+    # collision de préfixe 4 octets (2 appareils, mêmes 4 premiers octets) → écartée
+    inv2 = {'00:11:32:43:97:9d': (1, 'NAS-1', ''), '00:11:32:43:97:9e': (2, 'NAS-2', ''),
+            '1c:1b:0d:95:99:21': (3, 'PC', ''), '0c:8f:ff:59:db:3b': (4, 'AP', ''),
+            '20:7b:d2:a3:1f:b7': (5, 'MAC', '')}
+    rep3, flag3 = _f({10: {'00:01:00:11:32:43'}, 11: {'00:01:00:11:32:43'},
+                      12: {'00:01:1c:1b:0d:95'}, 13: {'00:01:0c:8f:ff:59'},
+                      14: {'00:01:20:7b:d2:a3'}}, inv2)
+    assert flag3 is True
+    assert rep3 == {12: {'1c:1b:0d:95:99:21'}, 13: {'0c:8f:ff:59:db:3b'},
+                    14: {'20:7b:d2:a3:1f:b7'}}   # ports 10/11 ambigus, écartés
+
+
 def test_classer_cascade():
     _f = network_diag._classer_cascade
     # 2 MAC filaires classiques, aucune aléatoire → switch non géré

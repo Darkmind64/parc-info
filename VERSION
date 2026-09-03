@@ -1,8 +1,32 @@
-PARCINFO_VERSION=2.19.22
+PARCINFO_VERSION=2.19.23
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090213
+BUILD_NUMBER=2026090214
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.23 - Baie : deviner le brassage tolere les tables MAC tronquees
+# Retour (captures) : "Les adresses MAC ne semblent correspondre a rien de ce
+# qui se trouve sur mon reseau. Du coup, la fonction deviner le brassage me
+# donne n'importe-quoi."
+#
+# Diagnostic : le HP ProCurve J9450A (1810G-24) de l'utilisateur renvoie dans
+# dot1dTpFdbAddress la valeur `00 01` + les 4 PREMIERS octets de la vraie MAC
+# (les 2 derniers perdus). Verifie au niveau des octets bruts : la valeur
+# OCTET STRING ET l'index OID portent la meme troncature. Toutes les MAC
+# apprises se retrouvent donc avec les 2 memes premiers octets (00:01),
+# _vendor() renvoyait "EQUIP'TRANS", "TECO a.s."... au hasard.
+#
+# _fdb_corriger : detecte le decalage (bcp de MAC qui matchent l'inventaire en
+# supposant un decalage de 2 octets, ~aucune en direct ; ou >= 6 entrees toutes
+# le meme prefixe 2 octets sans aucun match). Repare par correspondance du
+# prefixe 4 octets avec appareils.adresse_mac ; les MAC non rattachables sont
+# ecartees. Une FDB totalement illisible -> switch ignore + averti.
+# Applique dans analyser_brassage_baie (champs switchs_illisibles /
+# switchs_tronques -> bandeau d'avertissement dans la modale) ET dans le cycle
+# d'activite live (journal). Une FDB normale n'est jamais touchee.
+#
+# Verifie en navigateur sur le ProCurve reel + inventaire seede avec de vraies
+# MAC du reseau. pytest 237 + scripts OK.
 
 # Version 2.19.22 - Baie : "Deviner le brassage" -> carte reseau proposee
 # Retour : "j'ai l'impression que ca ne prend en compte que le materiel deja

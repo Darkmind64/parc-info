@@ -3640,6 +3640,45 @@ def _fdb_switch(ip, communautes):
     return {}
 
 
+def _fdb_corriger(par_if, inv_mac):
+    """Répare une table d'apprentissage MAC « décalée ». Certains agents SNMP bas
+    de gamme (HP ProCurve 1810 avec un firmware buggé, constaté) renvoient dans
+    `dot1dTpFdbAddress` la valeur `00:01` suivie des **4 premiers octets** de la
+    vraie MAC — les 2 derniers sont perdus, donc TOUTES les MAC apprises se
+    ressemblent (mêmes 2 premiers octets), ce qu'un vrai réseau ne fait jamais.
+
+    Détection : on compare le nombre de MAC qui matchent l'inventaire **direct**
+    à celui qui matchent en supposant un **décalage de 2 octets** (`mac[2:6]` =
+    les 4 premiers octets réels). Si le décalage l'emporte nettement → on répare
+    par ce préfixe 4 octets ; les MAC non rattachables sont écartées. Si la FDB
+    est manifestement cassée (≥ 6 entrées, toutes le même préfixe 2 octets) mais
+    qu'on ne peut rien recouper → on la vide (switch illisible).
+    Retourne `(par_if, tronquee: bool)`."""
+    toutes = {m for macs in par_if.values() for m in macs if m}
+    if len(toutes) < 4:
+        return par_if, False
+    mono = len({m[:5] for m in toutes}) == 1
+    exact = sum(1 for m in toutes if m in inv_mac)
+    pref4 = {}
+    for m in inv_mac:
+        pref4.setdefault(':'.join(m.split(':')[:4]), m)
+    decale = sum(1 for m in toutes if ':'.join(m.split(':')[2:6]) in pref4)
+    if not ((decale >= 2 and decale > exact) or (mono and len(toutes) >= 6 and exact == 0)):
+        return par_if, False                      # FDB normale (ou trop peu d'indices)
+    neuf = {}
+    for ifx, macs in par_if.items():
+        r = {pref4[k] for m in macs if (k := ':'.join(m.split(':')[2:6])) in pref4}
+        if r:
+            neuf[ifx] = r
+    # une MAC réparée présente sur plusieurs ports = collision de préfixe 4 octets
+    # (2 appareils dont les 4 premiers octets coïncident) : indécidable, on écarte
+    compte = collections.Counter(m for macs in neuf.values() for m in macs)
+    ambigu = {m for m, n in compte.items() if n > 1}
+    if ambigu:
+        neuf = {ifx: rest for ifx, macs in neuf.items() if (rest := macs - ambigu)}
+    return neuf, True
+
+
 def _mac_locale(mac):
     """True si le bit « localement administré » du 1er octet est posé — signe
     d'une MAC aléatoire (téléphone/portable en Wi-Fi moderne), jamais d'une
@@ -3845,7 +3884,13 @@ def _cycle_activite(clients):
                         # FDB en premier : quand il est dû (TTL long), le switch n'a
                         # pas encore été martelé par les GETBULK du cycle — un agent
                         # SNMP lent lâche les walks enchaînés (cas HP ProCurve 1810G).
-                        fdb_par_ip[ip] = _fdb_switch(ip, communautes)
+                        # Répare une FDB « décalée » (agent buggé) via l'inventaire.
+                        fdb_par_ip[ip], _fdb_tronq = _fdb_corriger(
+                            _fdb_switch(ip, communautes), inv_mac)
+                        if _fdb_tronq:
+                            journal_ops.append((f"{sw['nom']} ({ip}) — table d'apprentissage MAC "
+                                                f"tronquée (SNMP défectueux) : recoupée par préfixe "
+                                                f"avec l'inventaire", 'warn', ip))
                         t0 = time.time()
                         infos = _noms_interfaces(ip, communautes)
                         cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos)
@@ -4428,7 +4473,8 @@ def analyser_brassage_baie(client_id: int) -> dict:
     """
     from database import get_db
     vide = {'prises_appareils': [], 'ports_appareils': [], 'cordons': [],
-            'liens_baie': [], 'cascades': [], 'hors_inventaire': []}
+            'liens_baie': [], 'cascades': [], 'hors_inventaire': [],
+            'switchs_illisibles': [], 'switchs_tronques': []}
     if str(_cfg('diag_snmp_actif', '0')) != '1':
         return {'ok': False, 'motif': 'snmp_inactif', **vide}
     communautes = _communautes_snmp()
@@ -4454,15 +4500,23 @@ def analyser_brassage_baie(client_id: int) -> dict:
         elems, mac_infra, nom_par_slot = _elements_baie(conn, client_id)
         aids_baie = set(elems)
 
+        # répare une FDB « décalée » (agent buggé) par préfixe 4 octets ↔ inventaire
+        fdb_tronq_par_ip = {}
+        for ip in list(fdb_par_ip):
+            fdb_par_ip[ip], fdb_tronq_par_ip[ip] = _fdb_corriger(fdb_par_ip[ip], inv_mac)
+
         sw_ctx = []
         for sw in switchs:
             mapping, *_r = _mapping_baie_ifindex(conn, client_id, sw['slot_id'],
                                                 sw['appareil_id'], infos_par_ip[sw['ip']])
             sw_ctx.append({**sw, 'ifx_to_num': {ifx: num for num, ifx in mapping.items()},
                            'fdb': fdb_par_ip.get(sw['ip']) or {},
+                           'fdb_tronquee': fdb_tronq_par_ip.get(sw['ip'], False),
                            'mgmt_mac': next((m for m, a in mac_infra.items()
                                              if a == sw['appareil_id']), None)})
         ctx_par_slot = {c['slot_id']: c for c in sw_ctx}
+        switchs_illisibles = sorted({c['nom'] for c in sw_ctx
+                                     if c['fdb_tronquee'] and not c['fdb']})
 
         # état actuel : liens (cordons) et cibles directes de tous les ports du client
         liens, cibles = {}, {}
@@ -4607,10 +4661,12 @@ def analyser_brassage_baie(client_id: int) -> dict:
                         int(x.get('switch_port_numero', x.get('prise_numero', 0)) or 0))
         for g in (prises_appareils, ports_appareils, cordons, liens_baie, cascades, hors_inv):
             g.sort(key=_k)
+        tronques = sorted({c['nom'] for c in sw_ctx if c['fdb_tronquee'] and c['fdb']})
         return {'ok': True, 'nb_switchs': len({s['ip'] for s in switchs}),
                 'prises_appareils': prises_appareils, 'ports_appareils': ports_appareils,
                 'cordons': cordons, 'liens_baie': liens_baie,
-                'cascades': cascades, 'hors_inventaire': hors_inv}
+                'cascades': cascades, 'hors_inventaire': hors_inv,
+                'switchs_illisibles': switchs_illisibles, 'switchs_tronques': tronques}
     except Exception:
         logger.exception('network_diag: analyser_brassage_baie')
         return {'ok': False, 'motif': 'erreur_interne', **vide}
