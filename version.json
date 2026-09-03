@@ -1,25 +1,24 @@
 {
-  "version": "2.19.26",
+  "version": "2.19.27",
   "release_date": "2026-09-03T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.26",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.27/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.27/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.27/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.27",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.27/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.27/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.27/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.27/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.27/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Scan réseau — audit de fiabilité, lot 2/n : reconnaissance des types d'appareils. Le scan interroge désormais WS-Discovery (ONVIF) et lit sysObjectID / sysServices en SNMP. Une caméra IP, un enregistreur NVR/DVR, une box de FAI, un téléphone IP / interphone, une alarme, un contrôle d'accès / portail et un pont Wi-Fi sont maintenant reconnus comme tels au lieu de retomber sur « PC » ou « Switch/AP ». Le Private Enterprise Number du sysObjectID identifie le fabricant (et suffit à trancher pour Axis / Hikvision / Dahua, APC / Eaton / Liebert / Riello). Les ports RTSP 554, WS-Discovery 3702, SIP 5060, caméra 8000 / 37777 sont scannés par défaut.",
+    "new_features": "Baie de brassage — audit de fiabilité, lot 3/n : un appareil peut porter plusieurs adresses MAC (serveur bi-carte, routeur WAN+LAN, borne 2 radios, NVR avec ports caméra intégrés, carte d'administration iDRAC/iLO). Nouvelle table appareil_macs, alimentée automatiquement par le collecteur système (cartes réseau physiques), par le scan réseau (MAC vue à une IP déjà connue) et à la main dans la fiche appareil (champ « Adresses MAC supplémentaires »). Toutes les fonctions de corrélation — brassage proposé, découverte de topologie, contrôle de câblage, capture passive — reconnaissent désormais l'appareil sur n'importe laquelle de ses cartes.",
     "improvements": [
-      "« Deviner le brassage » signale les types d'inventaire à revoir quand les capacités LLDP du voisin les contredisent (voisin qui se déclare borne Wi-Fi, routeur, téléphone…).",
-      "sysServices SNMP (bitmap de couches) : un agent qui ne dessert que la couche liaison est classé Switch, la couche réseau Routeur.",
-      "Liste canonique des types d'appareils étendue : Box internet (FAI), Camera IP, Enregistreur video (NVR/DVR), Alarme / centrale, Controle d'acces / portail, Telephone IP, Pont Wi-Fi.",
-      "Relevé SNMP du scan groupé en un seul GET typé (sysDescr + sysName + sysObjectID + sysServices)."
+      "Fiche appareil : champ « Adresses MAC supplémentaires » (une par ligne, libellé optionnel).",
+      "Les interfaces virtuelles (Hyper-V, WSL, Docker, VPN) remontées par le collecteur sont exclues des MAC secondaires.",
+      "La table appareil_macs est synchronisée entre instances (Turso)."
     ]
   },
   "checksums": {
@@ -30,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.26"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.27"
 }

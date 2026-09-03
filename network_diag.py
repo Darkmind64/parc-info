@@ -185,6 +185,23 @@ def _norm_mac(mac: str) -> str:
     return (mac or '').replace('-', ':').lower().strip()
 
 
+def _macs_secondaires(conn, client_id):
+    """{mac_normalisée: appareil_id} depuis la table appareil_macs (2e carte,
+    WAN/LAN, radios, carte d'admin…). Best-effort — {} si la table n'existe pas
+    encore (base d'avant la migration v2.19.27)."""
+    out = {}
+    try:
+        for aid, mac in conn.execute(
+                "SELECT appareil_id, adresse_mac FROM appareil_macs WHERE client_id=?",
+                (client_id,)):
+            m = _norm_mac(mac)
+            if m:
+                out.setdefault(m, aid)
+    except Exception:
+        pass
+    return out
+
+
 def _passerelle_defaut() -> str:
     """Adresse IP de la passerelle par défaut du poste (best-effort)."""
     try:
@@ -1856,10 +1873,15 @@ def decouvrir_topologie(client_id: int) -> list:
             f"AND type_appareil IN ({placeholders}) AND adresse_ip!='' AND adresse_ip IS NOT NULL",
             (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
         inventaire = {}
+        _nom_aid = {}
         for aid, nom, mac in conn.execute(
-                "SELECT id, nom_machine, adresse_mac FROM appareils "
-                "WHERE client_id=? AND adresse_mac!='' AND adresse_mac IS NOT NULL", (client_id,)):
-            inventaire[_norm_mac(mac)] = (aid, nom)
+                "SELECT id, nom_machine, adresse_mac FROM appareils WHERE client_id=?", (client_id,)):
+            _nom_aid[aid] = nom
+            if mac:
+                inventaire[_norm_mac(mac)] = (aid, nom)
+        for _m, _aid in _macs_secondaires(conn, client_id).items():
+            if _m not in inventaire and _aid in _nom_aid:
+                inventaire[_m] = (_aid, _nom_aid[_aid])
         conn.close()
     except Exception:
         return []
@@ -4249,10 +4271,16 @@ def _cycle_activite(clients):
                 fdb_par_ip = {}       # ip -> {ifindex: set(mac)} : FDB live (câblage + voisins)
                 inv_mac = {}          # mac normalisée -> (appareil_id, nom_machine, type_appareil)
                 if switchs:
+                    _meta_aid = {}
                     for _aid, _nom, _mac, _typ in conn.execute(
                             "SELECT id, nom_machine, adresse_mac, type_appareil FROM appareils "
-                            "WHERE client_id=? AND adresse_mac!='' AND adresse_mac IS NOT NULL", (cid,)):
-                        inv_mac[_norm_mac(_mac)] = (_aid, _nom, _typ)
+                            "WHERE client_id=?", (cid,)):
+                        _meta_aid[_aid] = (_nom, _typ)
+                        if _mac:
+                            inv_mac[_norm_mac(_mac)] = (_aid, _nom, _typ)
+                    for _m, _aid in _macs_secondaires(conn, cid).items():
+                        if _m not in inv_mac and _aid in _meta_aid:
+                            inv_mac[_m] = (_aid, _meta_aid[_aid][0], _meta_aid[_aid][1])
 
                 for sw in switchs:
                     ip, slot_id = sw['ip'], sw['slot_id']
@@ -4824,6 +4852,11 @@ def _elements_baie(conn, client_id):
                       'type_appareil': typ_app, 'ports': []}
         if mac:
             mac_infra[_norm_mac(mac)] = aid
+    # MAC secondaires d'un élément de baie (WAN/LAN d'un routeur, radios d'une
+    # borne, carte d'admin d'un switch) — comptent aussi comme MAC d'infra.
+    for _m, _aid in _macs_secondaires(conn, client_id).items():
+        if _aid in elems:
+            mac_infra.setdefault(_m, _aid)
     for e in elems.values():
         e['ports'] = [r[0] for r in conn.execute(
             "SELECT numero FROM baie_slot_ports WHERE slot_id=? ORDER BY numero", (e['slot_id'],))]
@@ -4872,6 +4905,11 @@ def analyser_brassage_baie(client_id: int) -> dict:
             typ_par_aid[aid] = (typ or '').strip()
             if mac:
                 inv_mac[_norm_mac(mac)] = (aid, nom or f'#{aid}', typ)
+        # MAC secondaires (appareil_macs) : l'appareil est reconnu sur chacune
+        # de ses cartes, pas seulement adresse_mac.
+        for _m, _aid in _macs_secondaires(conn, client_id).items():
+            if _m not in inv_mac and _aid in nom_par_aid:
+                inv_mac[_m] = (_aid, nom_par_aid[_aid], typ_par_aid.get(_aid, ''))
         elems, mac_infra, nom_par_slot = _elements_baie(conn, client_id)
         aids_baie = set(elems)
 
@@ -5213,10 +5251,16 @@ def capturer_trafic(duree: int, client_id=None) -> dict:
         try:
             from database import get_local_db
             c = get_local_db()
+            _nom_aid = {}
             for aid, nom, mac in c.execute(
-                    "SELECT id, nom_machine, adresse_mac FROM appareils "
-                    "WHERE client_id=? AND COALESCE(adresse_mac,'')<>''", (client_id,)):
-                inv[_norm_mac(mac)] = (aid, nom)
+                    "SELECT id, nom_machine, adresse_mac FROM appareils WHERE client_id=?",
+                    (client_id,)):
+                _nom_aid[aid] = nom
+                if mac:
+                    inv[_norm_mac(mac)] = (aid, nom)
+            for _m, _aid in _macs_secondaires(c, client_id).items():
+                if _m not in inv and _aid in _nom_aid:
+                    inv[_m] = (_aid, _nom_aid[_aid])
             c.close()
         except Exception:
             pass

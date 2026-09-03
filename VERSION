@@ -1,9 +1,36 @@
-PARCINFO_VERSION=2.19.26
+PARCINFO_VERSION=2.19.27
 RELEASE_DATE=2026-09-03
 BUILD_NUMBER=2026090301
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.27 - Audit baie de brassage, lot 3 : plusieurs MAC par appareil
+# Constat #17 de l'audit "baie de brassage" (limite structurelle n1 pour
+# cartographier une infra fidelement).
+#
+# Nouvelle table appareil_macs (appareil_id, client_id, adresse_mac, libelle,
+# source, date_maj ; UNIQUE(appareil_id, adresse_mac)). appareils.adresse_mac
+# reste la MAC principale (compat, matching rapide) ; la table porte les autres
+# cartes : serveur bi-NIC, routeur WAN+LAN, borne 2 radios, NVR avec ports
+# camera integres, carte d'admin iDRAC/iLO.
+#
+# Alimentation :
+# - collecteur systeme : cartes reseau PHYSIQUES de system_report
+#   .network_adapter_details (Virtual == False) ; interfaces Hyper-V / WSL /
+#   Docker / VPN exclues. _sync_collector_macs, source='collecteur'.
+# - scan reseau : une MAC vue a une IP deja rattachee a un appareil, differente
+#   de sa MAC principale -> ajoutee en secondaire (source='scan').
+# - manuel : champ "Adresses MAC supplementaires" de la fiche appareil (une par
+#   ligne, libelle optionnel). _parse_macs_form / _maj_macs_appareil.
+#
+# Corrélation : network_diag._macs_secondaires(conn, client_id) fusionne dans
+# l'inventaire MAC utilise par analyser_brassage_baie, _elements_baie
+# (mac_infra), le cycle d'activite, _topologie_equipement (palier 4) et
+# capturer_trafic (palier 2). L'appareil est reconnu sur n'importe laquelle de
+# ses cartes.
+#
+# Sync : appareil_macs ajoutee a _TRACKED_JOURNAL (replication Turso).
+#
 # Version 2.19.26 - Audit baie de brassage, lot 2 : reconnaissance des types au scan
 # Suite a l'audit "baie de brassage" (24 constats valides). Constats couverts :
 # #8/#11 Libelles de type incoherents / types manquants : la liste canonique

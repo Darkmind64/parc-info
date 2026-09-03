@@ -904,6 +904,34 @@ def test_analyser_brassage_baie(conn, deux_clients, make_appareil, monkeypatch):
     assert d['retypage'] == []
 
 
+def test_analyser_brassage_mac_secondaire(conn, deux_clients, make_appareil, monkeypatch):
+    """Un appareil est reconnu sur un port de switch via une MAC déclarée dans
+    appareil_macs (2e carte), pas seulement via appareils.adresse_mac."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.9')
+    srv = make_appareil(cid, nom_machine='SRV-BI-NIC', adresse_mac='AA:00:00:00:00:01')
+    conn.execute("INSERT INTO appareil_macs (appareil_id, client_id, adresse_mac, source, date_maj) "
+                 "VALUES (?,?,?, 'collecteur', '')", (srv, cid, 'bb:00:00:00:00:02'))
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    sw_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    for n in (2, 3):
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (sw_slot, n))
+    conn.commit()
+
+    monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
+    monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
+    monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
+    monkeypatch.setattr(network_diag, '_noms_interfaces',
+        lambda ip, c: {i * 11: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True} for i in (2, 3)})
+    # la 2e carte (bb:...) est vue sur le port 3, pas la MAC principale
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {33: {'bb:00:00:00:00:02'}})
+
+    d = network_diag.analyser_brassage_baie(cid)
+    assert d['ok'] is True
+    assert [(p['switch_port_numero'], p['machine_nom']) for p in d['ports_appareils']] == [(3, 'SRV-BI-NIC')]
+    assert d['hors_inventaire'] == []
+
+
 def test_analyser_brassage_retypage_lldp(conn, deux_clients, make_appareil, monkeypatch):
     """Le voisin LLDP se déclare 'wlan' mais l'appareil correspondant est
     typé 'Switch' en inventaire -> proposition de retypage (indicative)."""

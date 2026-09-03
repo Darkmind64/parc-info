@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-03 (v2.19.26). En cas de doute
+> Ce document décrit le comportement au 2026-09-03 (v2.19.27). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -146,6 +146,16 @@ des switchs de la baie et calcule l'état à peindre par port.
   puis `_fdb_corriger` (hypothèses de forme + réglage `diag_fdb_mode:<ip>`).
   `_macs_infra_switch` apprend toutes les MAC propres du switch
   (`dot1dBaseBridgeAddress` + `ifPhysAddress`).
+- **Plusieurs MAC par appareil** (v2.19.27, table `appareil_macs`,
+  `network_diag._macs_secondaires`) : `appareils.adresse_mac` reste la MAC
+  principale ; les autres cartes (serveur bi-NIC, routeur WAN+LAN, borne
+  2 radios, NVR, carte d'administration iDRAC/iLO) sont enregistrées à part et
+  fusionnées dans l'inventaire MAC de **toutes** les corrélations
+  (`analyser_brassage_baie`, `_elements_baie` → `mac_infra`, cycle d'activité,
+  `_topologie_equipement`, `capturer_trafic`). Alimentée par le collecteur
+  système (cartes `physical` seulement — Hyper-V/WSL/Docker/VPN exclus), par le
+  scan (MAC vue à une IP déjà rattachée, ≠ principale) et à la main dans la
+  fiche appareil (« Adresses MAC supplémentaires »).
 - **Voisins LLDP + CDP** (v2.19.25, `_voisins_lldp_cdp`) : `lldpRemSysCapEnabled`
   (bits pont / routeur / borne Wi-Fi / téléphone / modem câble / répéteur),
   `lldpRemChassisId` (MAC du voisin → recoupement inventaire même sans FDB),

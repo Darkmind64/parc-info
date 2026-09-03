@@ -206,6 +206,15 @@
                 <input id="id-nom_dns" type="text" name="nom_dns" value="{{ appareil.nom_dns if appareil else '' }}" placeholder="Ex: pc-dupont.local">
             </div>
         </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="id-macs_supplementaires">Adresses MAC supplémentaires</label>
+                <textarea id="id-macs_supplementaires" name="macs_supplementaires" rows="3" class="mono"
+                          placeholder="Une par ligne, libellé optionnel après un espace :&#10;AA:BB:CC:00:11:22 WAN&#10;AA:BB:CC:00:11:33 iDRAC">{% for m in macs_sec %}{{ m.adresse_mac }}{% if m.libelle %} {{ m.libelle }}{% endif %}
+{% endfor %}</textarea>
+                <small style="color:var(--text-muted);font-size:.72rem;">2e carte réseau, ports WAN/LAN d'un routeur, radios d'une borne, carte d'administration (iDRAC/iLO)… L'appareil est alors reconnu sur n'importe laquelle de ses MAC pour le brassage et la topologie. Les MAC détectées par le collecteur ou le scan sont ajoutées automatiquement.</small>
+            </div>
+        </div>
         {% if appareil and appareil.ports_ouverts %}
         <div class="form-row">
             <div class="form-group">

@@ -895,6 +895,30 @@ def init_db():
         anydesk_id TEXT DEFAULT '', anydesk_password TEXT DEFAULT '',
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
 
+    # TABLE APPAREIL_MACS — adresses MAC supplémentaires d'un appareil.
+    # `appareils.adresse_mac` reste la MAC principale (compat, matching rapide) ;
+    # cette table porte les autres cartes : serveur bi-NIC, routeur WAN+LAN,
+    # borne 2 radios, NVR avec ports caméra intégrés, carte d'administration
+    # (iDRAC/iLO)… Toutes les fonctions de corrélation (brassage, topologie,
+    # câblage) reconnaissent l'appareil sur n'importe laquelle de ses MAC.
+    # Alimentée par le collecteur système, le scan réseau et la saisie manuelle.
+    c.execute('''CREATE TABLE IF NOT EXISTS appareil_macs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        appareil_id INTEGER NOT NULL,
+        client_id INTEGER NOT NULL,
+        adresse_mac TEXT NOT NULL DEFAULT '',
+        libelle TEXT DEFAULT '',
+        source TEXT DEFAULT 'manuel',
+        date_maj TEXT DEFAULT '',
+        UNIQUE(appareil_id, adresse_mac),
+        FOREIGN KEY(appareil_id) REFERENCES appareils(id) ON DELETE CASCADE,
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_appareil_macs_client '
+                  'ON appareil_macs(client_id, adresse_mac)')
+    except Exception:
+        pass
+
     # TABLE IDENTIFIANTS GLOBAUX
     c.execute('''CREATE TABLE IF NOT EXISTS identifiants (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1945,7 +1969,8 @@ def init_db():
     # inclus — leur absence empêchait la sync entre instances de ces données critiques).
     # Valeur = nom de la colonne clé primaire ('id' pour la quasi-totalité, 'cle' pour config).
     _TRACKED_JOURNAL = {
-        'appareils': 'id', 'peripheriques': 'id', 'identifiants': 'id', 'contrats': 'id',
+        'appareils': 'id', 'appareil_macs': 'id',
+        'peripheriques': 'id', 'identifiants': 'id', 'contrats': 'id',
         'utilisateurs': 'id', 'services': 'id', 'clients': 'id', 'baie_slots': 'id',
         'outils': 'id', 'kb_articles': 'id', 'kb_categories': 'id',
         'documents_appareils': 'id', 'documents_contrats': 'id',
@@ -4140,6 +4165,93 @@ def _get_logiciels_metier_list(conn, cid):
     return [l.strip() for l in re.split(r'[,\n]', raw) if l.strip()]
 
 
+# ── MAC secondaires d'un appareil (table appareil_macs) ─────────────────────
+_RE_MAC_PI = re.compile(r'^([0-9a-f]{2}:){5}[0-9a-f]{2}$')
+
+
+def _norm_mac_pi(mac):
+    """Normalise une MAC en minuscules à deux-points ('a1:b2:...'). '' si invalide."""
+    m = re.sub(r'[\s\-.]', ':', (mac or '').strip().lower())
+    m = re.sub(r'[^0-9a-f:]', '', m)
+    # forme compacte 'a1b2c3d4e5f6' -> insère les deux-points
+    if _RE_MAC_PI.match(m):
+        return m
+    compact = m.replace(':', '')
+    if len(compact) == 12 and re.match(r'^[0-9a-f]{12}$', compact):
+        return ':'.join(compact[i:i + 2] for i in range(0, 12, 2))
+    return ''
+
+
+def _lister_macs_appareil(conn, appareil_id):
+    """[{adresse_mac, libelle, source}] triées, MAC secondaires uniquement."""
+    try:
+        return [{'adresse_mac': r[0], 'libelle': r[1] or '', 'source': r[2] or ''}
+                for r in conn.execute(
+                    "SELECT adresse_mac, libelle, source FROM appareil_macs "
+                    "WHERE appareil_id=? ORDER BY adresse_mac", (appareil_id,))]
+    except Exception:
+        return []
+
+
+def _maj_macs_appareil(conn, appareil_id, client_id, entrees, source='manuel',
+                       remplacer_source=True):
+    """Enregistre des MAC secondaires. `entrees` : liste de (mac, libelle) ou de
+    chaînes. La MAC principale (appareils.adresse_mac) est ignorée si présente.
+    `remplacer_source` : supprime d'abord les entrées de CETTE source absentes de
+    la nouvelle liste (utile pour le collecteur/scan qui reflètent l'état réel) ;
+    en mode manuel, remplace toutes les entrées manuelles."""
+    now = _utcnow().isoformat()
+    principale = _norm_mac_pi((conn.execute(
+        "SELECT adresse_mac FROM appareils WHERE id=?", (appareil_id,)).fetchone() or [''])[0])
+    vus = set()
+    propres = []
+    for e in entrees or []:
+        mac, lib = (e if isinstance(e, (list, tuple)) else (e, ''))
+        m = _norm_mac_pi(mac)
+        if not m or m == principale or m in vus:
+            continue
+        vus.add(m)
+        propres.append((m, (lib or '').strip()[:60]))
+    if remplacer_source:
+        if vus:
+            conn.execute("DELETE FROM appareil_macs WHERE appareil_id=? AND source=? "
+                         f"AND adresse_mac NOT IN ({','.join('?' * len(vus))})",
+                         (appareil_id, source, *vus))
+        else:
+            conn.execute("DELETE FROM appareil_macs WHERE appareil_id=? AND source=?",
+                         (appareil_id, source))
+    for m, lib in propres:
+        row = conn.execute("SELECT id, libelle, source FROM appareil_macs "
+                           "WHERE appareil_id=? AND adresse_mac=?", (appareil_id, m)).fetchone()
+        if row:
+            _id, _lib_ex, _src_ex = row
+            # un libellé déjà saisi n'est pas effacé par une source automatique
+            # sans libellé ; une entrée manuelle garde la main sur sa source.
+            lib_final = lib or _lib_ex
+            src_final = source if (source == 'manuel' or _src_ex != 'manuel') else _src_ex
+            conn.execute("UPDATE appareil_macs SET libelle=?, source=?, date_maj=? WHERE id=?",
+                         (lib_final, src_final, now, _id))
+        else:
+            conn.execute("INSERT INTO appareil_macs (appareil_id, client_id, adresse_mac, "
+                         "libelle, source, date_maj) VALUES (?,?,?,?,?,?)",
+                         (appareil_id, client_id, m, lib, source, now))
+
+
+def _parse_macs_form(texte):
+    """Textarea « une MAC par ligne, libellé optionnel après un espace/tab »
+    → [(mac, libelle)]. Lignes invalides ignorées."""
+    out = []
+    for ligne in (texte or '').splitlines():
+        ligne = ligne.strip()
+        if not ligne:
+            continue
+        parts = re.split(r'[\s,;]+', ligne, maxsplit=1)
+        mac = _norm_mac_pi(parts[0])
+        if mac:
+            out.append((mac, parts[1].strip() if len(parts) > 1 else ''))
+    return out
+
+
 @app.route('/appareil/nouveau', methods=['GET','POST'])
 @login_required
 def nouvel_appareil():
@@ -4184,6 +4296,9 @@ def nouvel_appareil():
             vals + (svc_id, usr_id))
         new_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
         _save_licences(conn, new_id, cid, request.form)
+        _maj_macs_appareil(conn, new_id, cid,
+                           _parse_macs_form(request.form.get('macs_supplementaires', '')),
+                           source='manuel')
         log_history(conn, cid, 'appareil', new_id, request.form.get('nom_machine','') or 'Nouvel appareil', 'Création')
         _sync_appareil_to_periph(conn, new_id, cid)
         _propager_utilisateur_aux_peripheriques(
@@ -4191,7 +4306,7 @@ def nouvel_appareil():
         conn.commit(); conn.close()
         flash('Appareil ajouté avec succès', 'success')
         return redirect(url_for('liste_appareils'))
-    return render_template('form_appareil.html', appareil=None, action='Ajouter',
+    return render_template('form_appareil.html', appareil=None, action='Ajouter', macs_sec=[],
                            types_appareils=get_liste_cached('types_appareils'),
                            marques_av=get_liste('marques_antivirus'),
                            noms_av=get_liste('noms_antivirus'),
@@ -4260,6 +4375,9 @@ def editer_appareil(id):
         _details_a = _diff_json({k: str(_old.get(k,'') or '') for k in _cols_a},
                                  {k: str(request.form.get(k,'') or '') for k in _cols_a})
         _save_licences(conn, id, cid, request.form)
+        _maj_macs_appareil(conn, id, cid,
+                           _parse_macs_form(request.form.get('macs_supplementaires', '')),
+                           source='manuel')
         log_history(conn, cid, 'appareil', id, nom, 'Modification', _details_a)
         _sync_appareil_to_periph(conn, id, cid)
         _propager_utilisateur_aux_peripheriques(
@@ -4305,6 +4423,7 @@ def editer_appareil(id):
            FROM baie_prises_murales pm JOIN baie_slots bs ON pm.slot_id=bs.id
            WHERE pm.appareil_id=? AND bs.client_id=?
            ORDER BY baie_nom, position, numero''', (id, cid, id, cid)).fetchall()]
+    macs_sec = _lister_macs_appareil(conn, id)
     conn.close()
     try:
         sw_sel = json.loads(a.get('logiciels') or '[]')
@@ -4316,7 +4435,7 @@ def editer_appareil(id):
 
     return render_template('form_appareil.html', appareil=a, documents=docs, action='Modifier',
                            cles_bitlocker=cles_bitlocker,
-                           ports_baie=ports_baie,
+                           ports_baie=ports_baie, macs_sec=macs_sec,
                            utilisateurs_noms=utilisateurs_noms,
                            utilisateurs_variantes=utilisateurs_variantes,
                            services_noms=services_noms,
@@ -9836,6 +9955,17 @@ def importer_scan():
                 (now, ports_str, mac, marque, modele, numero_serie, cpu, ram, stockage,
                  now, cid, ip))
             mis_a_jour += 1
+            # MAC vue au scan différente de la principale déjà enregistrée
+            # (appareil retrouvé par IP) -> carte réseau supplémentaire.
+            _m_scan = _norm_mac_pi(mac)
+            _m_prim = _norm_mac_pi((conn.execute(
+                "SELECT adresse_mac FROM appareils WHERE id=?", (app_id,)).fetchone() or [''])[0])
+            if _m_scan and _m_prim and _m_scan != _m_prim:
+                try:
+                    _maj_macs_appareil(conn, app_id, cid, [(_m_scan, 'vue au scan')],
+                                       source='scan', remplacer_source=False)
+                except Exception:
+                    logger.exception('Ajout MAC scan (appareil %s)', app_id)
             log_history(conn, cid, 'appareil', app_id, nom, 'Auto-remplissage (scan réseau)',
                         {'source': 'scan-reseau', 'ip': ip})
         else:
@@ -9860,6 +9990,37 @@ def importer_scan():
                                          'marque': marque, 'modele': modele})
     conn.commit(); conn.close()
     return jsonify({"importes": importes, "total": len(items), "suggestions_baie": suggestions_baie})
+
+
+def _sync_collector_macs(conn, cid, appareil_id, data):
+    """Enregistre en MAC secondaires les cartes réseau PHYSIQUES remontées par
+    le collecteur (`system_report.network_adapter_details`). Les interfaces
+    virtuelles (Hyper-V, WSL, Docker, VPN) sont exclues : elles fausseraient la
+    corrélation de brassage. Idempotent (source='collecteur')."""
+    sr = data.get('system_report') or {}
+    details = sr.get('network_adapter_details')
+    if not isinstance(details, list):
+        return 0
+    entrees = []
+    for a in details:
+        if not isinstance(a, dict):
+            continue
+        # `physical` vaut True seulement quand le collecteur a pu confirmer
+        # `Virtual == False` ; on n'ajoute que celles-là.
+        if a.get('physical') is not True:
+            continue
+        mac = _norm_mac_pi(a.get('mac_address') or '')
+        if not mac:
+            continue
+        entrees.append((mac, (a.get('name') or a.get('description') or '')[:60]))
+    if not entrees:
+        return 0
+    try:
+        _maj_macs_appareil(conn, appareil_id, cid, entrees, source='collecteur')
+    except Exception:
+        logger.exception('Sync MAC collecteur (appareil %s)', appareil_id)
+        return 0
+    return len(entrees)
 
 
 def _sync_collector_peripherals(conn, cid, appareil_id, monitors, printers, usb_devices=None):
@@ -10918,6 +11079,13 @@ def api_device_info():
             conn, cid, app_id, data.get('monitors') or [], data.get('printers') or [],
             usb_devices)
         conn.commit()
+
+        # Cartes réseau physiques supplémentaires → MAC secondaires
+        try:
+            if _sync_collector_macs(conn, cid, app_id, data):
+                conn.commit()
+        except Exception:
+            logger.exception('Sync MAC collecteur (appareil %s)', app_id)
 
         conn.close()
 
