@@ -1,9 +1,35 @@
-PARCINFO_VERSION=2.19.25
-RELEASE_DATE=2026-09-02
+PARCINFO_VERSION=2.19.26
+RELEASE_DATE=2026-09-03
 BUILD_NUMBER=2026090301
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.26 - Audit baie de brassage, lot 2 : reconnaissance des types au scan
+# Suite a l'audit "baie de brassage" (24 constats valides). Constats couverts :
+# #8/#11 Libelles de type incoherents / types manquants : la liste canonique
+#        (config_helpers.LISTE_DEFAULTS['types_appareils']) gagne Box internet
+#        (FAI), Camera IP, Enregistreur video (NVR/DVR), Alarme / centrale,
+#        Controle d'acces / portail, Telephone IP, Pont Wi-Fi.
+# #9  _deviner_type exploite enfin les signaux SNMP forts : sysObjectID -> PEN
+#     (_pen_de_oid + _PEN_FABRICANT/_PEN_TYPE) et sysServices (bitmap de couches :
+#     2=pont -> Switch, 4=reseau -> Routeur). Nouvelle signature : sys_services,
+#     sys_object_id, lldp_caps, onvif_types, est_passerelle.
+# #10 Cameras / NVR / DVR : WS-Discovery (_ws_discovery_reseau, UDP 3702, SOAP
+#     Probe) lance une fois par scan (thread _decouvrir_onvif) ; les scopes ONVIF
+#     (type/name/hardware) typent l'appareil. Repli sur les ports RTSP 554 +
+#     8000 (Hikvision) / 37777 (Dahua) / 34567 (XiongMai).
+# #12 Box internet FAI : marques grand public (Livebox/Freebox/BBox/Fritz!Box...)
+#     ou InternetGatewayDevice UPnP + passerelle par defaut (network_diag.
+#     _passerelle_defaut) -> Box internet (FAI).
+# #13 Telephones IP / interphones / transmetteurs : SIP 5060/5061 (sauf si des
+#     ports serveur sont ouverts = IPBX) + mots-cles fabricants.
+# #14 Pont Wi-Fi : mots-cles NanoStation/PowerBeam/LiteBeam/AirFiber... ->
+#     'Pont Wi-Fi', distinct de 'Borne Wi-Fi'.
+# #24 analyser_brassage_baie renvoie `retypage` : les appareils dont le type
+#     d'inventaire contredit les capacites LLDP du voisin (indicatif, aucune
+#     modification). Rendu dans la modale "Deviner le brassage".
+# Ports scannes par defaut : + 554, 3702, 5060, 8000, 37777.
+#
 # Version 2.19.25 - Audit topologie, lot 1 : sources SNMP unifiees + LLDP/CDP
 # Suite a l'audit "baie de brassage" (24 constats valides). Ce lot couvre :
 #

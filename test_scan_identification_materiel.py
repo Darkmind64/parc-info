@@ -149,5 +149,78 @@ verifier(A._deviner_type('qnap-nas01', [], vendor='') == 'NAS', "hostname QNAP -
 verifier(A._deviner_type('poste', [], upnp_device_type='urn:schemas-upnp-org:device:MediaServer:1') == 'NAS',
           "deviceType UPnP MediaServer -> NAS (plus 'Serveur')")
 
+print('\n=== 9. Signaux SNMP/ONVIF/ports : caméras, NVR, box FAI, téléphones, ponts Wi-Fi ===')
+# ONVIF (WS-Discovery) : profil déclaré par l'appareil
+verifier(A._deviner_type('cam-hall', [80, 554], onvif_types={'video_encoder', 'network video transmitter'}) == 'Camera IP',
+          "scope ONVIF 'network video transmitter' -> Camera IP")
+verifier(A._deviner_type('rec-01', [80], onvif_types={'network video storage', 'recorder'}) == 'Enregistreur video (NVR/DVR)',
+          "scope ONVIF 'storage/recorder' -> Enregistreur video (NVR/DVR)")
+# sysObjectID -> PEN mono-produit
+verifier(A._deviner_type('x', [], sys_object_id='1.3.6.1.4.1.39165.1.2.3') == 'Camera IP',
+          "sysObjectID PEN 39165 (Hikvision) -> Camera IP")
+verifier(A._deviner_type('x', [], sys_object_id='1.3.6.1.4.1.318.1.1.1') == 'Onduleur / UPS',
+          "sysObjectID PEN 318 (APC) -> Onduleur / UPS")
+verifier(A._pen_de_oid('1.3.6.1.4.1.9.1.516') == 9, "_pen_de_oid extrait bien le PEN (9 = Cisco)")
+verifier(A._pen_de_oid('1.3.6.1.2.1.1.1.0') == 0, "_pen_de_oid renvoie 0 hors sous-arbre enterprises")
+# Ports vidéosurveillance
+verifier(A._deviner_type('inconnu', [554, 37777]) == 'Enregistreur video (NVR/DVR)',
+          "RTSP 554 + port Dahua 37777 -> NVR/DVR")
+verifier(A._deviner_type('inconnu', [554]) == 'Camera IP', "RTSP 554 seul -> Camera IP")
+# Téléphonie SIP
+verifier(A._deviner_type('inconnu', [80, 5060]) == 'Telephone IP',
+          "SIP 5060 sans port serveur -> Telephone IP")
+verifier(A._deviner_type('yealink-t46', [80]) == 'Telephone IP', "hostname 'yealink' -> Telephone IP")
+verifier(A._deviner_type('pbx', [5060, 5432, 22]) != 'Telephone IP',
+          "SIP 5060 + port serveur (PostgreSQL) -> PAS un téléphone (IPBX)")
+# Box FAI
+verifier(A._deviner_type('Livebox-1234', []) == 'Box internet (FAI)', "hostname 'Livebox' -> Box internet (FAI)")
+verifier(A._deviner_type('routeur', [], upnp_device_type='urn:schemas-upnp-org:device:InternetGatewayDevice:1',
+                          est_passerelle=True) == 'Box internet (FAI)',
+          "IGD UPnP + passerelle par défaut -> Box internet (FAI)")
+# sysServices
+verifier(A._deviner_type('sw', [], sys_services=2) == 'Switch', "sysServices=2 (liaison seule) -> Switch")
+verifier(A._deviner_type('rt', [], sys_services=4) == 'Routeur/Pare-feu', "sysServices=4 (réseau) -> Routeur/Pare-feu")
+verifier(A._deviner_type('srv', [445], sys_services=72) not in ('Switch', 'Routeur/Pare-feu'),
+          "sysServices=72 (hôte applicatif) -> ne bascule pas en équipement réseau")
+# Pont Wi-Fi
+verifier(A._deviner_type('NanoStation-M5', [], vendor='Ubiquiti Inc') == 'Pont Wi-Fi',
+          "hostname 'NanoStation' -> Pont Wi-Fi (pas Borne Wi-Fi)")
+# Toutes ces valeurs restent dans la liste canonique
+for args in [dict(onvif_types={'network video transmitter'}), dict(sys_object_id='1.3.6.1.4.1.318.1'),
+             dict(ports=[554, 37777]), dict(ports=[5060]), dict(sys_services=4)]:
+    hn = args.pop('hostname', 'x'); pr = args.pop('ports', [])
+    tt = A._deviner_type(hn, pr, **args)
+    verifier(tt in TYPES_CANONIQUES, f"_deviner_type({args}) -> '{tt}' dans la liste canonique", tt)
+
+print('\n=== 10. _ws_discovery_reseau : parsing des scopes ONVIF ===')
+_soc_orig = A.socket.socket
+class _FauxSocket:
+    def __init__(self, *a, **k): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def setsockopt(self, *a): pass
+    def settimeout(self, *a): pass
+    def sendto(self, *a): pass
+    _lu = [False]
+    def recvfrom(self, n):
+        if _FauxSocket._lu[0]:
+            raise A.socket.timeout()
+        _FauxSocket._lu[0] = True
+        rep = (b'<probeMatch><d:XAddrs>http://192.0.2.50/onvif/device_service</d:XAddrs>'
+               b'<d:Scopes>onvif://www.onvif.org/type/video_encoder '
+               b'onvif://www.onvif.org/name/Cam%20Entree '
+               b'onvif://www.onvif.org/hardware/DS-2CD2042</d:Scopes></probeMatch>')
+        return rep, ('192.0.2.50', 3702)
+A.socket.socket = lambda *a, **k: _FauxSocket()
+try:
+    trouve = A._ws_discovery_reseau(timeout=0.2)
+finally:
+    A.socket.socket = _soc_orig
+    _FauxSocket._lu[0] = False
+verifier('192.0.2.50' in trouve, "l'IP du XAddrs est extraite", str(list(trouve)))
+ent = trouve.get('192.0.2.50', {})
+verifier('video_encoder' in ent.get('types', set()), "le type ONVIF est parsé", str(ent.get('types')))
+verifier(ent.get('name') == 'Cam Entree', "le nom ONVIF est parsé (%20 -> espace)", str(ent.get('name')))
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

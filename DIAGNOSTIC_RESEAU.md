@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-03 (v2.19.25). En cas de doute
+> Ce document décrit le comportement au 2026-09-03 (v2.19.26). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -184,6 +184,12 @@ des switchs de la baie et calcule l'état à peindre par port.
     Aussi en direct dans l'infobulle de la prise (ligne « En aval »).
   - **`hors_inventaire`** (info) : MAC seule sur un port, absente de l'inventaire,
     avec son fabricant (OUI) — à ajouter à l'inventaire.
+  - **`retypage`** (info, v2.19.26) : un voisin LLDP (`diag_topologie.voisin_caps`)
+    se déclare `wlan` / `router` / `bridge` / `phone`, mais l'appareil
+    correspondant en inventaire porte un `type_appareil` incompatible → on
+    propose le type probable (`Borne Wi-Fi`, `Routeur/Pare-feu`, `Switch`,
+    `Telephone IP`). Purement indicatif — aucune modification, lien vers la
+    fiche appareil dans la modale.
 - **Fiabilité de la table MAC d'un switch** (v2.19.23-24). Constaté sur un HP
   ProCurve J9450A (1810G-24) : l'agent renvoie dans `dot1dTpFdbAddress` la valeur
   `00:01` + les **4 premiers octets** de la vraie MAC (les 2 derniers perdus) —

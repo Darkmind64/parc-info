@@ -901,6 +901,39 @@ def test_analyser_brassage_baie(conn, deux_clients, make_appareil, monkeypatch):
     assert [(p['prise_numero'], p['switch_port_numero']) for p in d['cordons']] == [(2, 4)]
     assert [c['switch_port_numero'] for c in d['cascades']] == [6] and d['cascades'][0]['type'] == 'wifi'
     assert [x['switch_port_numero'] for x in d['hors_inventaire']] == [5]
+    assert d['retypage'] == []
+
+
+def test_analyser_brassage_retypage_lldp(conn, deux_clients, make_appareil, monkeypatch):
+    """Le voisin LLDP se déclare 'wlan' mais l'appareil correspondant est
+    typé 'Switch' en inventaire -> proposition de retypage (indicative)."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.9')
+    ap = make_appareil(cid, nom_machine='AP-1', type_appareil='Switch',
+                       adresse_mac='AA:00:00:00:00:AA')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    sw_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    for n in (2, 3):
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (sw_slot, n))
+    conn.execute("INSERT INTO diag_topologie (client_id, equipement_appareil_id, port_index, "
+                 "voisin_nom, voisin_mac, voisin_caps, voisin_port, voisin_port_subtype) "
+                 "VALUES (?,?,?,?,?,?,?,?)",
+                 (cid, sw, 22, 'AP-1', 'aa:00:00:00:00:aa', 'bridge,wlan', '1', 'local'))
+    conn.commit()
+
+    monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
+    monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
+    monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
+    monkeypatch.setattr(network_diag, '_noms_interfaces',
+        lambda ip, c: {i * 11: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True} for i in (2, 3)})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {22: {'aa:00:00:00:00:aa'}})
+
+    d = network_diag.analyser_brassage_baie(cid)
+    assert d['ok'] is True
+    assert len(d['retypage']) == 1
+    r = d['retypage'][0]
+    assert r['machine_nom'] == 'AP-1' and r['type_actuel'] == 'Switch'
+    assert r['type_propose'] == 'Borne Wi-Fi'
 
 
 def test_cycle_activite_stale_apres_echecs(conn, deux_clients, make_appareil, monkeypatch):

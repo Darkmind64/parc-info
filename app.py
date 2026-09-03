@@ -437,7 +437,7 @@ def _generate_dynamic_css(auth_user_id=None):
         css += f".port-{k}{{color:{col};border-color:{col}55}}.port-{k}:hover{{background:{col}18;box-shadow:0 0 8px {col}44}}"
 
     # Couleurs des ports par NUMÉRO (configurations personnalisées)
-    scan_ports_str = g('scan_ports', '21,22,23,25,53,80,110,135,139,143,443,445,631,3389,5900,8080,8443,9100')
+    scan_ports_str = g('scan_ports', '21,22,23,25,53,80,110,135,139,143,443,445,554,631,3389,3702,5060,5900,8000,8080,8443,9100,37777')
     for port_str in scan_ports_str.split(','):
         try:
             pnum = int(port_str.strip())
@@ -515,12 +515,17 @@ _PORT_MAP = {
     143:  ('other',  '✉',  'IMAP — Messagerie',                    'info'),
     443:  ('https',  '🔒', 'HTTPS — Serveur web sécurisé',         'https'),
     445:  ('smb',    '🗂', 'SMB — Partage de fichiers Windows',    'smb'),
+    554:  ('other',  '🎥', 'RTSP — Flux vidéo (caméra / NVR)',      'info'),
     631:  ('print',  '🖨', 'IPP — Service impression',          'print'),
     3389: ('rdp',    '🖥', 'RDP — Bureau à distance Windows',      'rdp'),
+    3702: ('other',  '🎥', 'WS-Discovery — Découverte ONVIF',       'info'),
+    5060: ('other',  '📞', 'SIP — Téléphonie IP / interphone',      'info'),
     5900: ('rdp',    '🖥', 'VNC — Bureau à distance VNC',          'vnc'),
+    8000: ('other',  '🎥', 'Port caméra / NVR (Hikvision SDK)',     'info'),
     8080: ('http',   '🌐', 'HTTP alternatif (port 8080)',           'http8080'),
     8443: ('https',  '🔒', 'HTTPS alternatif (port 8443)',          'https8443'),
     9100: ('print',  '🖨', 'JetDirect — Impression directe',       'print'),
+    37777:('other',  '🎥', 'Port caméra / NVR (Dahua)',             'info'),
 }
 
 @app.template_filter('periph_icon')
@@ -8049,7 +8054,7 @@ def _mac_from_arp(ip_str):
 def _scan_ports(ip_str):
     """Scan TCP des ports configurés."""
     raw = cfg_get('scan_ports',
-                  '21,22,23,25,53,80,110,135,139,143,389,443,445,631,1433,3306,3389,5900,8080,8443,9100')
+                  '21,22,23,25,53,80,110,135,139,143,389,443,445,554,631,1433,3306,3389,3702,5060,5900,8000,8080,8443,9100,37777')
     try:
         PORTS = [int(p.strip()) for p in raw.split(',') if p.strip().isdigit()]
     except Exception:
@@ -8152,7 +8157,9 @@ def _grab_bannieres(ip_str, ports_ouverts):
 
 
 def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="",
-                   upnp_device_type="", mdns_service="", snmp_actif=False):
+                   upnp_device_type="", mdns_service="", snmp_actif=False,
+                   sys_services=0, sys_object_id="", lldp_caps="",
+                   onvif_types=None, est_passerelle=False):
     """Détermine le type d'équipement depuis le hostname, les ports ouverts, l'OS et le fabricant.
 
     Plusieurs méthodes de détection (UPnP, mDNS, SNMP, fabricant MAC,
@@ -8183,13 +8190,27 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="",
     `extra_signal` regroupe tout texte identifiant supplémentaire (bannières
     de service, sysDescr SNMP, nom UPnP/mDNS) : traité comme le hostname/
     fabricant pour la recherche de mots-clés.
+
+    Signaux structurés supplémentaires (priorité 1, avec UPnP/mDNS) :
+      - `onvif_types` : profils déclarés par une caméra/NVR au Probe
+        WS-Discovery (ONVIF) ;
+      - `sys_object_id` : sysObjectID SNMP → Private Enterprise Number, qui
+        identifie le fabricant (et suffit à trancher pour un fabricant
+        mono-produit : caméra Axis/Hikvision/Dahua, onduleur APC/Eaton…).
+    Signaux structurés moyens (priorité 4-5, avec les ports) :
+      - `sys_services` : bitmap de couches SNMP (2=pont, 4=routeur, 64=appli) ;
+      - `lldp_caps` : capacités système LLDP du voisin (docsis, wlan…) ;
+      - `est_passerelle` : cette IP est la passerelle par défaut du poste.
     """
     # Signaux structurés d'abord : un deviceType UPnP ou un type de service
     # mDNS ne laisse en général aucun doute, contrairement à une simple
     # sous-chaîne de hostname.
     dt = (upnp_device_type or '').lower()
     if 'internetgatewaydevice' in dt:
-        return 'Routeur/Pare-feu'
+        # Une passerelle Internet qui EST la passerelle par défaut du poste
+        # est presque toujours la box du FAI ; ailleurs (routeur secondaire,
+        # NAT interne) on reste sur la catégorie générique.
+        return 'Box internet (FAI)' if est_passerelle else 'Routeur/Pare-feu'
     if 'printer' in dt:
         return 'Imprimante'
     if 'mediaserver' in dt or 'nas' in dt:
@@ -8202,8 +8223,27 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="",
     if svc in ('hap', 'shelly', 'esphomelib', 'matter', 'matterc'):
         return 'Objet connecté'
 
+    # ONVIF (WS-Discovery) : une caméra / un NVR qui répond au Probe multicast
+    # déclare son profil dans ses « scopes ». Signal aussi net qu'un deviceType
+    # UPnP — placé au même niveau de priorité.
+    ot = set(str(t).lower() for t in (onvif_types or ()))
+    if ot:
+        if any(k in t for t in ot
+               for k in ('nvr', 'recorder', 'recording', 'storage', 'receiver')):
+            return 'Enregistreur video (NVR/DVR)'
+        return 'Camera IP'
+
+    # sysObjectID → Private Enterprise Number. Certains fabricants ne font
+    # qu'un seul type de produit : le PEN suffit alors à trancher (caméras
+    # Axis/Hikvision/Dahua, onduleurs APC/Eaton/Liebert/Riello).
+    _pen = _pen_de_oid(sys_object_id)
+    if _pen and _pen in _PEN_TYPE:
+        return _PEN_TYPE[_pen]
+    _pen_vendor = _PEN_FABRICANT.get(_pen, '') if _pen else ''
+
     v = (vendor or '').lower()
-    h = (hostname + " " + vendor + " " + extra_signal).lower()
+    h = (hostname + " " + vendor + " " + extra_signal + " " + _pen_vendor).lower()
+    lc = (lldp_caps or '').lower()
     # Imprimante
     if any(x in h for x in ['printer','print','canon','epson','brother','ricoh',
                               'xerox','kyocera','konica','lexmark','hp printer','jetdirect']):
@@ -8235,6 +8275,73 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="",
                               'smart-plug', 'smart plug', 'smartplug',
                               'prise-connectee', 'prise connectee']):
         return 'Objet connecté'
+
+    # ── Vidéosurveillance : caméras IP et enregistreurs (NVR/DVR) ────────────
+    # Fabricants et mots-clés explicites d'abord, puis signature de ports
+    # (RTSP 554 quasi universel ; 8000 = SDK Hikvision, 37777 = Dahua,
+    # 34567 = XiongMai/marques blanches). Un boîtier qui cumule RTSP + un de
+    # ces ports propriétaires est un enregistreur ; RTSP seul penche caméra.
+    if any(x in h for x in ['hikvision', 'dahua', 'axis comm', 'ezviz', 'reolink',
+                              'uniview', 'vivotek', 'foscam', 'amcrest', 'xiongmai',
+                              'hanwha', 'wisenet', 'mobotix', 'geovision', 'dvr',
+                              'nvr', 'ip camera', 'ip-camera', 'ipcam', 'ip cam',
+                              'caméra', 'camera ip', 'network video recorder']):
+        if any(x in h for x in [' nvr', 'nvr-', 'recorder', 'enregistreur',
+                                  ' dvr', 'dvr-', 'network video recorder']):
+            return 'Enregistreur video (NVR/DVR)'
+        return 'Camera IP'
+    if 554 in ports and any(p in ports for p in (8000, 37777, 34567)):
+        return 'Enregistreur video (NVR/DVR)'
+    if 554 in ports or 37777 in ports or 34567 in ports:
+        return 'Camera IP'
+
+    # ── Téléphonie IP / interphones / transmetteurs ─────────────────────────
+    # SIP (5060/5061) : forte présomption de téléphone/interphone SI la
+    # machine n'expose pas de port de service serveur (sinon c'est un IPBX).
+    if any(x in h for x in ['yealink', 'snom', 'fanvil', 'gigaset', 'aastra',
+                              'mitel', 'polycom', 'grandstream', 'sip phone',
+                              'sip-phone', 'voip phone', 'ip phone', 'ip-phone',
+                              'téléphone ip', 'telephone ip', 'interphone',
+                              'intercom', 'doorbird', 'akuvox', '2n telekom',
+                              '2n helios', 'baudisch']):
+        return 'Telephone IP'
+    if (5060 in ports or 5061 in ports) and not any(p in ports for p in _PORTS_SERVEUR):
+        return 'Telephone IP'
+
+    # ── Alarme / centrale de sécurité (IP ou transmetteur) ──────────────────
+    if any(x in h for x in ['ajax systems', 'ajax hub', 'paradox security', 'risco',
+                              'texecom', 'videofied', 'daitem', 'hager alarm',
+                              'centrale alarme', "centrale d'alarme", 'alarm panel',
+                              'alarm-panel', 'transmetteur', 'ip communicator',
+                              'dsc powerseries', 'sur-gard', 'lifasafe']):
+        return 'Alarme / centrale'
+
+    # ── Contrôle d'accès / portails / barrières ─────────────────────────────
+    if any(x in h for x in ['contrôle d’accès', "contrôle d'accès", 'controle d acces',
+                              'access control', 'door controller', 'portail',
+                              'barrière', 'barriere automatique', 'came spa',
+                              'faac ', 'nice spa', 'bft ', 'wiegand', 'intratone',
+                              'comelit', 'urmet', 'aiphone', 'controleur de porte']):
+        return "Controle d'acces / portail"
+
+    # ── Box internet d'un FAI ──────────────────────────────────────────────
+    # Marques de box grand public, ou passerelle par défaut du segment qui
+    # s'annonce en InternetGatewayDevice / porte la capacité DOCSIS (LLDP).
+    if any(x in h for x in ['livebox', 'freebox', 'bbox', 'sfr box', 'sfrbox',
+                              'box internet', 'fritz!box', 'fritzbox', 'technicolor',
+                              'sagemcom', 'vodafone station', 'connect box',
+                              'swisscom internet-box', 'proximus', 'orange box']):
+        return 'Box internet (FAI)'
+    if est_passerelle and ('docsis' in lc
+                           or 'internetgatewaydevice' in (upnp_device_type or '').lower()):
+        return 'Box internet (FAI)'
+
+    # ── Pont Wi-Fi (liaison point-à-point) vs borne d'accès ─────────────────
+    if any(x in h for x in ['nanostation', 'nanobeam', 'powerbeam', 'litebeam',
+                              'airgrid', 'rocket m', 'bullet m', 'airfiber',
+                              'loco m', 'wireless bridge', 'pont wifi', 'pont wi-fi',
+                              'ptp link', ' cpe ', 'ubnt-cpe']):
+        return 'Pont Wi-Fi'
 
     # Mac : le TTL seul ne distingue pas macOS de Linux (les deux à 64 par
     # défaut) — signalé en usage réel, un MacBook ressortait comme "machine
@@ -8314,6 +8421,19 @@ def _deviner_type(hostname, ports, os_guess="", vendor="", extra_signal="",
     # une exception si rare qu'elle ne mérite pas de règle spéciale).
     if 3389 in ports:
         return 'PC (Windows)'
+    # sysServices (RFC 1213) : bitmap des couches OSI que l'agent dessert.
+    # bit 2 (0x02) = liaison/pont, bit 3 (0x04) = réseau/routage, bit 7
+    # (0x40) = applications. Un switch pur = 2, un routeur = 4 ou 6, un
+    # serveur/hôte = 72 (0x48). Signal SNMP structuré, plus précis que le
+    # simple « un agent a répondu » ci-dessous.
+    if sys_services:
+        _app_l = bool(sys_services & 0x40)
+        _net_l = bool(sys_services & 0x04)
+        _lnk_l = bool(sys_services & 0x02)
+        if _net_l and not _app_l:
+            return 'Routeur/Pare-feu'
+        if _lnk_l and not _net_l and not _app_l:
+            return 'Switch'
     # Un agent SNMP qui répond (community "public") est déjà un signal fort
     # à lui seul : un PC/Mac de bureau n'expose pratiquement jamais SNMP,
     # contrairement aux ports SMB/22 ci-dessous qui restent ambigus. Vérifié
@@ -8458,6 +8578,60 @@ def _ssdp_decouvrir_tout(timeout=3):
                     if ligne.upper().startswith('LOCATION:'):
                         trouves[ip_source] = ligne.split(':', 1)[1].strip()
                         break
+    except Exception:
+        pass
+    return trouves
+
+
+def _ws_discovery_reseau(timeout=3):
+    """WS-Discovery (UDP multicast 3702) : les caméras / NVR / encodeurs ONVIF
+    répondent à un Probe avec leurs « scopes » (onvif://.../type/... , /name/... ,
+    /hardware/...). Retourne {ip: {onvif:True, types:set, name, hardware}}.
+    Best-effort, {} si rien ne répond."""
+    import uuid as _uuid
+    probe = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<e:Envelope xmlns:e="http://www.w3.org/2003/05/soap-envelope"'
+        ' xmlns:w="http://schemas.xmlsoap.org/ws/2004/08/addressing"'
+        ' xmlns:d="http://schemas.xmlsoap.org/ws/2005/04/discovery">'
+        '<e:Header><w:MessageID>uuid:%s</w:MessageID>'
+        '<w:To>urn:schemas-xmlsoap-org:ws:2005:04:discovery</w:To>'
+        '<w:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/Probe</w:Action>'
+        '</e:Header><e:Body><d:Probe/></e:Body></e:Envelope>'
+        % _uuid.uuid4()
+    ).encode('utf-8')
+    _re_xaddr = re.compile(r'https?://([0-9]{1,3}(?:\.[0-9]{1,3}){3})')
+    _re_scope = re.compile(r'onvif://www\.onvif\.org/([a-z_]+)/([^\s<"]+)', re.I)
+    trouves = {}
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.settimeout(timeout)
+            s.sendto(probe, ('239.255.255.250', 3702))
+            fin = time.time() + timeout
+            while time.time() < fin:
+                try:
+                    data, (ip_source, _p) = s.recvfrom(65535)
+                except socket.timeout:
+                    break
+                except Exception:
+                    continue
+                txt = data.decode('utf-8', errors='ignore')
+                mx = _re_xaddr.search(txt)
+                ip = mx.group(1) if mx else ip_source
+                ent = trouves.setdefault(ip, {'onvif': True, 'types': set(), 'name': '', 'hardware': ''})
+                for cat, val in _re_scope.findall(txt):
+                    cat = cat.lower()
+                    val = val.replace('%20', ' ').strip()
+                    if cat == 'type':
+                        # les types ONVIF sont en CamelCase sans espace
+                        # (NetworkVideoTransmitter…) — on garde tel quel,
+                        # juste en minuscules.
+                        ent['types'].add(val.lower())
+                    elif cat == 'name' and not ent['name']:
+                        ent['name'] = val.replace('_', ' ')
+                    elif cat == 'hardware' and not ent['hardware']:
+                        ent['hardware'] = val.replace('_', ' ')
     except Exception:
         pass
     return trouves
@@ -8614,8 +8788,43 @@ def _decouverte_mdns_reseau(timeout=3):
 # construite à la main pour la vérification DNS) : aucune dépendance
 # supplémentaire pour une fonctionnalité de scan optionnelle. Communauté
 # "public" en lecture seule uniquement, jamais d'écriture SNMP.
-_OID_SYS_DESCR = '1.3.6.1.2.1.1.1.0'
-_OID_SYS_NAME  = '1.3.6.1.2.1.1.5.0'
+_OID_SYS_DESCR    = '1.3.6.1.2.1.1.1.0'
+_OID_SYS_NAME     = '1.3.6.1.2.1.1.5.0'
+_OID_SYS_OBJECTID = '1.3.6.1.2.1.1.2.0'   # sysObjectID -> 1.3.6.1.4.1.<PEN>...
+_OID_SYS_SERVICES = '1.3.6.1.2.1.1.7.0'   # bitmap de couches : 2=pont, 4=routeur, 64/72=hote
+
+# Private Enterprise Number -> fabricant (pour typer un equipement SNMP dont le
+# hostname/sysDescr ne dit rien). Liste indicative, pas exhaustive.
+_PEN_FABRICANT = {
+    9: 'cisco', 11: 'hp', 674: 'dell', 2011: 'huawei', 25506: 'h3c',
+    6027: 'force10', 1916: 'extreme', 1991: 'foundry', 3417: 'brocade',
+    1588: 'brocade', 2636: 'juniper', 12356: 'fortinet', 25461: 'paloalto',
+    8741: 'sonicwall', 3097: 'watchguard', 41112: 'ubiquiti', 4526: 'netgear',
+    890: 'zyxel', 171: 'dlink', 14988: 'mikrotik', 14179: 'aruba', 47196: 'aruba',
+    6486: 'alcatel', 259: 'accton', 5591: 'nortel', 43356: 'teltonika',
+    2495: 'exablaze', 30065: 'arista', 12325: 'draytek', 2352: 'sagemcom',
+    3902: 'zte', 637: 'lantronix', 4413: 'broadcom', 39178: 'ruckus',
+    28320: 'grandstream', 1466: 'polycom', 236: 'samsung', 6889: 'avaya',
+    193: 'ericsson', 8072: 'netsnmp', 8886: 'axis', 39165: 'hikvision',
+    1004: 'dahua', 7483: 'apc', 318: 'apc', 3808: 'liebert', 20677: 'eaton',
+    534: 'eaton', 705: 'apc', 4555: 'riello',
+}
+_PEN_TYPE = {   # PEN -> type direct (fabricant mono-produit)
+    8886: 'Camera IP', 39165: 'Camera IP', 1004: 'Camera IP',
+    318: 'Onduleur / UPS', 705: 'Onduleur / UPS', 534: 'Onduleur / UPS',
+    3808: 'Onduleur / UPS', 20677: 'Onduleur / UPS', 4555: 'Onduleur / UPS',
+}
+
+
+def _pen_de_oid(oid):
+    """sysObjectID '1.3.6.1.4.1.<PEN>...' -> int(PEN), ou 0 si non reconnaissable."""
+    if not oid or not str(oid).startswith('1.3.6.1.4.1.'):
+        return 0
+    reste = str(oid)[len('1.3.6.1.4.1.'):].split('.')
+    try:
+        return int(reste[0])
+    except (ValueError, IndexError):
+        return 0
 
 
 def _ber_longueur(n):
@@ -8987,7 +9196,7 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
             for b in oid_bases}
 
 
-def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
+def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onvif_par_ip=None):
     """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant.
 
     Optionnellement enrichit avec WMI si enrich_wmi=True et que c'est une machine Windows
@@ -9024,7 +9233,9 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
         f_netbios  = ex.submit(_netbios_name, ip_str)
         f_os       = ex.submit(_ttl_os_guess, ip_str)
         f_ports    = ex.submit(_scan_ports,   ip_str)
-        f_snmp     = ex.submit(_snmp_get,     ip_str, [_OID_SYS_DESCR, _OID_SYS_NAME])
+        f_snmp     = ex.submit(_snmp_get_typed, ip_str,
+                               [_OID_SYS_DESCR, _OID_SYS_NAME, _OID_SYS_OBJECTID, _OID_SYS_SERVICES],
+                               timeout=1.5)
         try: hostname  = f_hostname.result(timeout=5)
         except Exception: hostname = ""
         try: netbios   = f_netbios.result(timeout=5)
@@ -9033,7 +9244,7 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
         except Exception: os_guess = ""
         try: ports     = f_ports.result(timeout=15)
         except Exception: ports = []
-        try: snmp_info = f_snmp.result(timeout=2)
+        try: snmp_info = f_snmp.result(timeout=8)
         except Exception: snmp_info = {}
     # Toujours pas de MAC malgré les relevés précoces ? Les sondes
     # ci-dessus (hostname/NetBIOS/ports) ont généré du trafic supplémentaire
@@ -9059,19 +9270,35 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None):
     # sysName (SNMP) est en général le nom configuré à la main sur un
     # équipement managé — aussi fiable qu'un hostname DNS/NetBIOS, en repli
     # juste après eux (avant IGD UPnP/mDNS, moins spécifiques à CET appareil).
-    snmp_sysname = (snmp_info or {}).get(_OID_SYS_NAME, '')
-    snmp_sysdescr = (snmp_info or {}).get(_OID_SYS_DESCR, '')
+    snmp_sysname = str((snmp_info or {}).get(_OID_SYS_NAME, '') or '')
+    snmp_sysdescr = str((snmp_info or {}).get(_OID_SYS_DESCR, '') or '')
+    snmp_oid = str((snmp_info or {}).get(_OID_SYS_OBJECTID, '') or '')
+    try:
+        snmp_services = int((snmp_info or {}).get(_OID_SYS_SERVICES) or 0)
+    except (TypeError, ValueError):
+        snmp_services = 0
+    onvif_info = (onvif_par_ip or {}).get(ip_str) or {}
+    try:
+        from network_diag import _passerelle_defaut
+        est_passerelle = (ip_str == _passerelle_defaut())
+    except Exception:
+        est_passerelle = False
     display_name = (netbios or hostname or snmp_sysname
-                    or upnp_info.get('friendly_name') or mdns_info.get('nom') or ip_str)
+                    or upnp_info.get('friendly_name') or mdns_info.get('nom')
+                    or onvif_info.get('name') or ip_str)
     signal_supplementaire = ' '.join(bannieres.values())
     host_type = _deviner_type(
         display_name, ports, os_guess, vendor,
         extra_signal=' '.join([signal_supplementaire, snmp_sysdescr,
                                upnp_info.get('friendly_name', ''),
-                               upnp_info.get('manufacturer', ''), mdns_info.get('nom', '')]),
+                               upnp_info.get('manufacturer', ''), mdns_info.get('nom', ''),
+                               onvif_info.get('name', ''), onvif_info.get('hardware', '')]),
         upnp_device_type=upnp_info.get('device_type', ''),
         mdns_service=mdns_info.get('service', ''),
         snmp_actif=bool(snmp_sysdescr or snmp_sysname),
+        sys_services=snmp_services, sys_object_id=snmp_oid,
+        onvif_types=onvif_info.get('types') or set(),
+        est_passerelle=est_passerelle,
     )
 
     result = {
@@ -9153,8 +9380,8 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
         # découvertes ; les lancer après aurait laissé une course où les
         # premiers hôtes scannés n'auraient jamais leur enrichissement.
         with scan_lock:
-            scan_status["message"] = "Découverte UPnP/mDNS..."
-        decouvertes_upnp, decouvertes_mdns = {}, {}
+            scan_status["message"] = "Découverte UPnP/mDNS/ONVIF..."
+        decouvertes_upnp, decouvertes_mdns, decouvertes_onvif = {}, {}, {}
 
         def _decouvrir_upnp():
             nonlocal decouvertes_upnp
@@ -9170,8 +9397,16 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
             except Exception:
                 pass
 
+        def _decouvrir_onvif():
+            nonlocal decouvertes_onvif
+            try:
+                decouvertes_onvif = _ws_discovery_reseau()
+            except Exception:
+                pass
+
         fils_decouverte = [threading.Thread(target=_decouvrir_upnp, daemon=True),
-                           threading.Thread(target=_decouvrir_mdns, daemon=True)]
+                           threading.Thread(target=_decouvrir_mdns, daemon=True),
+                           threading.Thread(target=_decouvrir_onvif, daemon=True)]
         for f in fils_decouverte:
             f.start()
         for f in fils_decouverte:
@@ -9190,7 +9425,8 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
                     scan_status["results"] = list(found)
         with concurrent.futures.ThreadPoolExecutor(max_workers=nb_threads) as executor:
             futures = {executor.submit(_scan_host, ip, enrich_wmi=enrich_wmi,
-                                       upnp_par_ip=decouvertes_upnp, mdns_par_ip=decouvertes_mdns): ip
+                                       upnp_par_ip=decouvertes_upnp, mdns_par_ip=decouvertes_mdns,
+                                       onvif_par_ip=decouvertes_onvif): ip
                       for ip in hosts}
             for f in concurrent.futures.as_completed(futures):
                 on_done(f, futures[f])

@@ -821,7 +821,8 @@ _OID_DOT3_DUPLEX    = '1.3.6.1.2.1.10.7.2.1.19'
 # (fast/100BaseFX), 7 (iso88023Csmacd) — HP ProCurve annonce 117 par ex.
 _IFTYPE_ETHERNET = frozenset({6, 7, 62, 69, 117})
 
-_TYPES_EQUIP_SNMP = ('Switch', 'Switch/AP', 'Routeur/Pare-feu', 'NAS', 'Onduleur / UPS')
+_TYPES_EQUIP_SNMP = ('Switch', 'Switch/AP', 'Routeur/Pare-feu', 'NAS', 'Onduleur / UPS',
+                     'Borne Wi-Fi', 'Box internet (FAI)', 'Pont Wi-Fi')
 _TYPE_UPS = 'Onduleur / UPS'
 
 
@@ -4062,7 +4063,7 @@ _OUI_AP     = ('ubiquiti', 'aruba', 'ruckus', 'meraki', 'aerohive', 'mist',
                'extreme networks', 'cambium', 'engenius', 'mikrotik', 'zyxel')
 _OUI_MOBILE = ('apple', 'samsung', 'huawei', 'xiaomi', 'google', 'oneplus',
                'oppo', 'vivo', 'motorola mobility', 'sony mobile', 'nothing')
-_TYPES_AP_INV = ('Borne WiFi', 'Switch/AP', 'Switch', 'Point d\'accès')
+_TYPES_AP_INV = ('Borne Wi-Fi', 'Switch/AP', 'Pont Wi-Fi', "Point d'accès")
 
 
 def _classer_cascade(macs, inv_mac, caps=''):
@@ -4085,11 +4086,11 @@ def _classer_cascade(macs, inv_mac, caps=''):
         s += 4
         indices.append("le voisin LLDP/CDP se déclare « pont »")
 
-    if any(t in _TYPES_AP_INV[:2] or 'wifi' in (t or '').lower() or 'accès' in (t or '').lower()
-           for t in types_inv):
+    _wifi_kw = lambda t: any(k in (t or '').lower() for k in ('wi-fi', 'wifi', 'accès', 'wlan'))
+    if any(t in _TYPES_AP_INV or _wifi_kw(t) for t in types_inv):
         w += 3
         indices.append("un appareil inventorié de type borne Wi-Fi est vu sur ce port")
-    if any(t == 'Switch' for t in types_inv):
+    if any(t in ('Switch', 'Switch/AP') for t in types_inv):
         s += 3
         indices.append("un appareil inventorié de type switch est vu sur ce port")
     if aleatoires:
@@ -4852,7 +4853,7 @@ def analyser_brassage_baie(client_id: int) -> dict:
     """
     from database import get_db
     vide = {'prises_appareils': [], 'ports_appareils': [], 'cordons': [],
-            'liens_baie': [], 'cascades': [], 'hors_inventaire': [],
+            'liens_baie': [], 'cascades': [], 'hors_inventaire': [], 'retypage': [],
             'switchs_illisibles': [], 'switchs_tronques': [], 'fdb': []}
     if str(_cfg('diag_snmp_actif', '0')) != '1':
         return {'ok': False, 'motif': 'snmp_inactif', **vide}
@@ -4863,11 +4864,12 @@ def analyser_brassage_baie(client_id: int) -> dict:
         if not switchs:
             return {'ok': False, 'motif': 'aucun_switch', **vide}
 
-        inv_mac, nom_par_aid = {}, {}
+        inv_mac, nom_par_aid, typ_par_aid = {}, {}, {}
         for aid, nom, mac, typ in conn.execute(
                 "SELECT id, nom_machine, adresse_mac, type_appareil FROM appareils WHERE client_id=?",
                 (client_id,)):
             nom_par_aid[aid] = nom or f'#{aid}'
+            typ_par_aid[aid] = (typ or '').strip()
             if mac:
                 inv_mac[_norm_mac(mac)] = (aid, nom or f'#{aid}', typ)
         elems, mac_infra, nom_par_slot = _elements_baie(conn, client_id)
@@ -5079,15 +5081,55 @@ def analyser_brassage_baie(client_id: int) -> dict:
                 'confiance': 'faible' if (vu_avec > _BRASSAGE_UPLINK_MAX or occupe) else 'sure',
                 'note': ('ce port de switch est déjà brassé ailleurs' if occupe else '')})
 
+        # ── retypage : capacités LLDP du voisin ≠ type d'inventaire ──
+        # Le voisin LLDP se déclare pont / routeur / borne Wi-Fi / téléphone.
+        # Si l'appareil correspondant en inventaire porte un type franchement
+        # incompatible, on le signale (à titre indicatif, aucune modification).
+        _CAP_TYPE = (
+            (('wlan',), (), ('Borne Wi-Fi', 'Switch/AP', 'Pont Wi-Fi', "Point d'accès",
+                             'Borne WiFi'), 'Borne Wi-Fi'),
+            (('router',), ('bridge', 'wlan'), ('Routeur/Pare-feu', 'Box internet (FAI)'),
+             'Routeur/Pare-feu'),
+            (('bridge',), ('router', 'wlan'), ('Switch', 'Switch/AP'), 'Switch'),
+            (('phone',), (), ('Telephone IP', 'Téléphone IP'), 'Telephone IP'),
+        )
+        retypage, vus_retypage = [], set()
+        for (eq_aid, ifx), lv in lldp.items():
+            caps = (lv.get('caps') or '').lower()
+            if not caps:
+                continue
+            aid = None
+            mm = _norm_mac(lv.get('mac') or '')
+            if mm and mm in inv_mac:
+                aid = inv_mac[mm][0]
+            elif mm and mm in mac_infra:
+                aid = mac_infra[mm]
+            if aid is None and lv.get('nom'):
+                aid = next((a for a, e in elems.items()
+                            if e['nom'].lower() == lv['nom'].lower()), None)
+            if aid is None or aid in vus_retypage:
+                continue
+            actuel = typ_par_aid.get(aid, '')
+            for need, interdits, oks, propose in _CAP_TYPE:
+                if all(n in caps for n in need) and not any(i in caps for i in interdits) \
+                        and actuel not in oks:
+                    retypage.append({
+                        'machine_id': aid, 'machine_nom': nom_par_aid.get(aid, f'#{aid}'),
+                        'type_actuel': actuel or '(non renseigné)', 'type_propose': propose,
+                        'motif': 'LLDP : ' + ', '.join(sorted(set(caps.split(','))))})
+                    vus_retypage.add(aid)
+                    break
+
         _k = lambda x: (str(x.get('switch_nom', '')), str(x.get('bandeau_nom', '')),
                         int(x.get('switch_port_numero', x.get('prise_numero', 0)) or 0))
         for g in (prises_appareils, ports_appareils, cordons, liens_baie, cascades, hors_inv):
             g.sort(key=_k)
+        retypage.sort(key=lambda x: str(x.get('machine_nom', '')))
         tronques = sorted({c['nom'] for c in sw_ctx if c['fdb_tronquee'] and c['fdb']})
         return {'ok': True, 'nb_switchs': len({s['ip'] for s in switchs}),
                 'prises_appareils': prises_appareils, 'ports_appareils': ports_appareils,
                 'cordons': cordons, 'liens_baie': liens_baie,
-                'cascades': cascades, 'hors_inventaire': hors_inv,
+                'cascades': cascades, 'hors_inventaire': hors_inv, 'retypage': retypage,
                 'switchs_illisibles': switchs_illisibles, 'switchs_tronques': tronques,
                 'fdb': fdb_ui}
     except Exception:

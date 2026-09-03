@@ -1,25 +1,25 @@
 {
-  "version": "2.19.25",
-  "release_date": "2026-09-02T00:00:00.000000",
+  "version": "2.19.26",
+  "release_date": "2026-09-03T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.25",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.25/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.26",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.26/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Topologie réseau — audit de fiabilité, lot 1/n. La découverte de topologie (palier 4) partage désormais le même relevé de table MAC unifié que « Deviner le brassage » (bridge + ARP + correction de forme d'un agent buggé) : elle n'est plus polluée par les MAC tronquées d'un ProCurve. La table MAC par VLAN (contexte de communauté public@<vlan>) est lue pour les switchs Cisco/HP qui l'exigent. Les capacités système LLDP et CDP du voisin (pont, routeur, borne Wi-Fi, téléphone, box FAI, répéteur) et son adresse MAC de châssis sont relevées et servent à typer les voisins et à fiabiliser les liens switch ⇄ switch.",
+    "new_features": "Scan réseau — audit de fiabilité, lot 2/n : reconnaissance des types d'appareils. Le scan interroge désormais WS-Discovery (ONVIF) et lit sysObjectID / sysServices en SNMP. Une caméra IP, un enregistreur NVR/DVR, une box de FAI, un téléphone IP / interphone, une alarme, un contrôle d'accès / portail et un pont Wi-Fi sont maintenant reconnus comme tels au lieu de retomber sur « PC » ou « Switch/AP ». Le Private Enterprise Number du sysObjectID identifie le fabricant (et suffit à trancher pour Axis / Hikvision / Dahua, APC / Eaton / Liebert / Riello). Les ports RTSP 554, WS-Discovery 3702, SIP 5060, caméra 8000 / 37777 sont scannés par défaut.",
     "improvements": [
-      "Table ARP lue en GETBULK v2c plafonné (plus rapide sur un routeur à grosse table).",
-      "Les MAC « propres » d'un switch (adresse de base + ifPhysAddress) sont apprises en SNMP : détection des liens switch ⇄ switch plus fiable.",
-      "Mapping port ⇄ interface : plage RJ étendue à 96 (stacks 48+48, châssis) ; ports SFP mappés par nom d'interface fibre.",
-      "Walk SNMP : garde « OID strictement croissant » contre un agent qui boucle ; error-status vérifié ; verrou sur le relevé de table MAC (thread activité + requête)."
+      "« Deviner le brassage » signale les types d'inventaire à revoir quand les capacités LLDP du voisin les contredisent (voisin qui se déclare borne Wi-Fi, routeur, téléphone…).",
+      "sysServices SNMP (bitmap de couches) : un agent qui ne dessert que la couche liaison est classé Switch, la couche réseau Routeur.",
+      "Liste canonique des types d'appareils étendue : Box internet (FAI), Camera IP, Enregistreur video (NVR/DVR), Alarme / centrale, Controle d'acces / portail, Telephone IP, Pont Wi-Fi.",
+      "Relevé SNMP du scan groupé en un seul GET typé (sysDescr + sysName + sysObjectID + sysServices)."
     ]
   },
   "checksums": {
@@ -30,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.25"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.26"
 }

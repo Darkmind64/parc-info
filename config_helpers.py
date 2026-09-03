@@ -55,8 +55,10 @@ LISTE_DEFAULTS = {
     'types_appareils': [
         'PC', 'PC (Windows)', 'PC/Serveur (Linux)', 'Laptop', 'MacBook',
         'Serveur', 'Imprimante', 'Switch', 'Switch/AP', 'Routeur/Pare-feu',
-        'NAS', 'Onduleur / UPS', 'Telephone IP', 'Tablette', 'Camera IP',
-        'Borne Wi-Fi', 'Objet connecté', 'Autre'
+        'Box internet (FAI)', 'NAS', 'Onduleur / UPS', 'Telephone IP',
+        'Tablette', 'Camera IP', 'Enregistreur video (NVR/DVR)',
+        'Alarme / centrale', "Controle d'acces / portail",
+        'Borne Wi-Fi', 'Pont Wi-Fi', 'Objet connecté', 'Autre'
     ],
     'categories_peripheriques': [
         'Ecran', 'Clavier', 'Souris', 'Webcam', 'Casque / Micro', 'Haut-parleurs',
@@ -155,7 +157,7 @@ CFG_DEFAULTS = {
     'ping_workers': '30',
     'ping_timeout': '1.0',
     'scan_workers': '50',
-    'scan_ports': '21,22,23,25,53,80,110,135,139,143,443,445,631,3389,5900,8080,8443,9100',
+    'scan_ports': '21,22,23,25,53,80,110,135,139,143,443,445,554,631,3389,3702,5060,5900,8000,8080,8443,9100,37777',
     # ── Diagnostic réseau (module network_diag) ───────────────────────────────
     'diag_surveillance_active': '0',   # thread de surveillance continue
     'diag_capture_active': '0',        # palier 2 : capture passive scapy (OFF par défaut)

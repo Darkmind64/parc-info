@@ -3767,6 +3767,7 @@ const BrassageModal = {
                   p.via === 'lldp' ? 'LLDP' : 'tables MAC', this._act(p, 'relier', p.actuel)]);
 
         html += this._infoCascades(d.cascades || []);
+        html += this._infoRetypage(d.retypage || []);
         html += this._infoHorsInv(d.hors_inventaire || []);
         if (!html.trim()) html = '<span style="color:var(--accent-green);">✓ Rien à proposer — la baie est cohérente avec ce que voient les switchs.</span>';
         corps.innerHTML = avert + html;
@@ -3806,6 +3807,21 @@ const BrassageModal = {
                + `<td style="white-space:normal;">${badge[c.type] || c.type} <span style="color:var(--text-muted);">(${c.n_macs})</span></td>`
                + `<td style="white-space:normal;">${(c.appareils || []).map(escH).join(', ')}</td>`
                + `<td style="white-space:normal;color:var(--text-muted);">${(c.indices || []).map(escH).join(' · ')}</td></tr>`;
+        });
+        return h + '</tbody></table>';
+    },
+
+    _infoRetypage(rt) {
+        if (!rt.length) return '';
+        let h = '<div style="margin-top:.7rem;font-size:.74rem;color:var(--text-primary);font-weight:600;">'
+              + '🏷️ Type d\'inventaire à revoir (capacités LLDP)</div>'
+              + '<div style="font-size:.68rem;color:var(--text-muted);">Le voisin LLDP se déclare autrement que le type saisi. À corriger dans la fiche appareil.</div>'
+              + '<table class="mon-table"><thead><tr><th>Appareil</th><th>Type actuel</th><th>Type probable</th><th>Indices</th></tr></thead><tbody>';
+        rt.forEach(x => {
+            h += `<tr><td style="white-space:normal;"><a href="/appareil/${x.machine_id}/editer" target="_blank">${escH(x.machine_nom)}</a></td>`
+               + `<td style="white-space:normal;">${escH(x.type_actuel)}</td>`
+               + `<td style="white-space:normal;color:var(--accent-orange,#f59e0b);">${escH(x.type_propose)}</td>`
+               + `<td style="white-space:normal;color:var(--text-muted);">${escH(x.motif || '')}</td></tr>`;
         });
         return h + '</tbody></table>';
     },
