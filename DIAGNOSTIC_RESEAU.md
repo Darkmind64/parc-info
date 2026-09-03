@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-03 (v2.19.27). En cas de doute
+> Ce document décrit le comportement au 2026-09-03 (v2.19.28). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -171,6 +171,16 @@ des switchs de la baie et calcule l'état à peindre par port.
   l'inventaire (`appareils.adresse_mac` → nom d'inventaire), et rend 4 groupes de
   propositions cochables + 2 listes d'information. `_elements_baie` fournit
   `{appareil_id → slot/ports}` et `{mac → appareil_id d'infra}`.
+  - **Relevé en tâche de fond** (v2.19.28) : le balayage SNMP tourne dans un
+    thread (`lancer_analyse_brassage` / `statut_analyse_brassage`, thread
+    `DiagBrassage`), jamais dans le fil de la requête HTTP. La route
+    `GET /api/baie/brassage/proposer` démarre le job et renvoie
+    `{en_cours, progress, message}` ; la modale poll la même route jusqu'au
+    résultat (`?forcer=1` = balayage neuf, après un changement de réglage FDB).
+    Un résultat de moins de `_BRASSAGE_CACHE_S` (90 s) est resservi tel quel.
+    Budget de sécurité 150 s → résultat partiel + `switchs_non_releves`
+    (bannière). Motif `switchs_muets` = des switchs sont configurés mais aucun
+    ne répond en SNMP.
   - **`prises_appareils`** : port de switch **brassé** (`lie_*`) vers un bandeau,
     1 MAC inventoriée dessus → assigne la machine à la **prise murale**
     (`PUT /api/baie/prise-murale/<slot>/<num>` `{appareil_id}`).
@@ -193,7 +203,18 @@ des switchs de la baie et calcule l'état à peindre par port.
     Wi-Fi ; peu de MAC, aucune aléatoire = switch non géré ; sinon `indetermine`.
     Aussi en direct dans l'infobulle de la prise (ligne « En aval »).
   - **`hors_inventaire`** (info) : MAC seule sur un port, absente de l'inventaire,
-    avec son fabricant (OUI) — à ajouter à l'inventaire.
+    avec son fabricant (OUI) — à ajouter à l'inventaire. v2.19.28 : enrichi
+    des **talkers de la dernière capture passive** (palier 2) absents de
+    l'inventaire, d'aucune FDB relevée et non localement administrés
+    (`via='capture'`, affiché « capture passive ») — utile là où aucun switch
+    ne répond en SNMP, sur un VLAN sans SNMP ou derrière un switch non géré.
+  - **Confiance faible** (v2.19.28, #19) : sur un switch à table MAC déformée,
+    une MAC réparée qui matche 2 appareils de l'inventaire (mêmes 4 premiers
+    octets) était jetée. `_fdb_corriger` la remonte maintenant dans
+    `meta['ambigus']` ; si **un seul** de ses ports candidats est cartographié,
+    `analyser_brassage_baie` en fait une proposition `prises_appareils` /
+    `ports_appareils` marquée `confiance='faible'` (décochée par défaut, badge
+    « ⚠ à vérifier »).
   - **`retypage`** (info, v2.19.26) : un voisin LLDP (`diag_topologie.voisin_caps`)
     se déclare `wlan` / `router` / `bridge` / `phone`, mais l'appareil
     correspondant en inventaire porte un `type_appareil` incompatible → on

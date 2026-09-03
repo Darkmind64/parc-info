@@ -824,6 +824,9 @@ def test_fdb_corriger():
     assert meta5['tronquee'] is True
     assert rep5 == {12: {'1c:1b:0d:95:99:21'}, 13: {'0c:8f:ff:59:db:3b'},
                     14: {'20:7b:d2:a3:1f:b7'}}   # ports 10/11 ambigus, écartés
+    # #19 : les MAC ambiguës ne sont plus jetées en silence, meta['ambigus']
+    # liste les ports candidats.
+    assert meta5['ambigus'] == {'00:11:32:43:97:9d': [10, 11]}
 
 
 def test_bits_capacites_lldp_cdp():
@@ -962,6 +965,106 @@ def test_analyser_brassage_retypage_lldp(conn, deux_clients, make_appareil, monk
     r = d['retypage'][0]
     assert r['machine_nom'] == 'AP-1' and r['type_actuel'] == 'Switch'
     assert r['type_propose'] == 'Borne Wi-Fi'
+
+
+def test_route_brassage_proposer_poll(client, deux_clients, monkeypatch):
+    """La route /api/baie/brassage/proposer répond tout de suite (en_cours),
+    puis rend le résultat quand la tâche de fond a fini."""
+    import time
+    monkeypatch.setattr(network_diag, 'analyser_brassage_baie',
+                        lambda cid, _progress=None, budget_s=0: {'ok': True, 'prises_appareils': []})
+    with network_diag._brassage_lock:
+        network_diag._brassage_status.update(
+            {'running': False, 'progress': 0, 'resultat': None, 'client_id': None, 'ts': 0.0})
+    login_session(client, deux_clients['proprio'], deux_clients['cid_a'])
+    r = client.get('/api/baie/brassage/proposer')
+    assert r.status_code == 200 and r.get_json().get('en_cours') is True
+    for _ in range(60):
+        body = client.get('/api/baie/brassage/proposer').get_json()
+        if not body.get('en_cours'):
+            break
+        time.sleep(0.05)
+    assert body.get('ok') is True
+
+
+def test_analyse_brassage_tache_de_fond(monkeypatch):
+    """lancer/statut_analyse_brassage : relevé en thread, résultat rendu une
+    fois prêt et seulement au bon client, pas de 2e relevé concurrent."""
+    import time
+    calls = []
+
+    def _fake(cid, _progress=None, budget_s=0):
+        if _progress:
+            _progress(50, 'moitié')
+        calls.append(cid)
+        return {'ok': True, 'x': cid}
+
+    monkeypatch.setattr(network_diag, 'analyser_brassage_baie', _fake)
+    with network_diag._brassage_lock:
+        network_diag._brassage_status.update(
+            {'running': False, 'progress': 0, 'resultat': None, 'client_id': None, 'ts': 0.0})
+
+    assert network_diag.lancer_analyse_brassage(42) is True
+    st = None
+    for _ in range(60):
+        st = network_diag.statut_analyse_brassage(42)
+        if st['resultat'] is not None:
+            break
+        time.sleep(0.05)
+    assert st['resultat'] == {'ok': True, 'x': 42}
+    assert network_diag.statut_analyse_brassage(99)['resultat'] is None   # pas de fuite
+    assert calls == [42]
+
+
+def test_analyser_brassage_budget(conn, deux_clients, make_appareil, monkeypatch):
+    """budget_s dépassé -> relevé partiel + switchs_non_releves."""
+    import time
+    cid = deux_clients['cid_a']
+    for i, ip in enumerate(('10.0.0.1', '10.0.0.2'), start=1):
+        sw = make_appareil(cid, nom_machine=f'SW{i}', type_appareil='Switch', adresse_ip=ip)
+        conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,?,?)", (cid, i, sw))
+    conn.commit()
+    monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
+    monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
+    monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
+
+    def _lent(ip, c):
+        time.sleep(0.15)
+        return {}
+
+    monkeypatch.setattr(network_diag, '_noms_interfaces', _lent)
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {})
+
+    d = network_diag.analyser_brassage_baie(cid, budget_s=0.05)
+    assert d['ok'] is True
+    assert len(d['switchs_non_releves']) == 1   # 1 relevé, 1 sauté
+
+
+def test_analyser_brassage_capture(conn, deux_clients, make_appareil, monkeypatch):
+    """Une MAC active vue par la dernière capture passive, absente de
+    l'inventaire et d'aucune FDB -> hors_inventaire (via='capture')."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.9')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    sw_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,2)", (sw_slot,))
+    conn.commit()
+    monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
+    monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
+    monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
+    monkeypatch.setattr(network_diag, '_noms_interfaces',
+                        lambda ip, c: {22: {'nom': 'Gi0/2', 'alias': '', 'ethernet': True}})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {})
+    monkeypatch.setattr(network_diag, 'statut_capture_baie', lambda: {
+        'client_id': cid, 'resultat': {'disponible': True, 'talkers': [
+            {'mac': 'd4:d4:d4:d4:d4:d4', 'vendor': 'Acme', 'appareil_id': None},
+            {'mac': '02:aa:bb:cc:dd:ee', 'vendor': '', 'appareil_id': None},  # locale -> ignorée
+        ]}})
+
+    d = network_diag.analyser_brassage_baie(cid)
+    assert d['ok'] is True
+    hi = [x for x in d['hors_inventaire'] if x.get('via') == 'capture']
+    assert [x['mac'] for x in hi] == ['d4:d4:d4:d4:d4:d4']
 
 
 def test_cycle_activite_stale_apres_echecs(conn, deux_clients, make_appareil, monkeypatch):

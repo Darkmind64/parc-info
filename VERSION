@@ -1,9 +1,38 @@
-PARCINFO_VERSION=2.19.27
+PARCINFO_VERSION=2.19.28
 RELEASE_DATE=2026-09-03
 BUILD_NUMBER=2026090301
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.28 - Audit baie de brassage, lot 4 : tache de fond, confiance, capture
+# Constats #18, #19, #20 de l'audit "baie de brassage".
+#
+# #20 - "Deviner le brassage" en tache de fond
+#   analyser_brassage_baie(client_id, _progress=None, budget_s=0). Le relage
+#   SNMP (FDB de tous les switchs) tourne dans un thread demon (DiagBrassage),
+#   statut interrogeable : lancer_analyse_brassage / statut_analyse_brassage,
+#   _brassage_status + _brassage_lock. La route GET /api/baie/brassage/proposer
+#   demarre le job si besoin et renvoie {en_cours, progress, message} ; le
+#   client poll la meme route jusqu'au resultat. ?forcer=1 relance un balayage
+#   neuf (apres un changement de reglage FDB). Un resultat de < 90 s
+#   (_BRASSAGE_CACHE_S) est resservi tel quel. Budget de securite 150 s ->
+#   resultat partiel + switchs_non_releves (banniere dans la modale). Nouveau
+#   motif switchs_muets (switchs configures mais aucun ne repond en SNMP).
+#
+# #19 - Collision de prefixe 4 octets : proposition "confiance faible"
+#   _fdb_corriger expose meta['ambigus'] = {mac: [ports candidats]} au lieu de
+#   jeter en silence. analyser_brassage_baie (passe 1bis) : si UN SEUL port
+#   candidat est cartographie, la MAC devient une proposition prises_appareils
+#   ou ports_appareils avec confiance='faible' (decochee par defaut dans la
+#   modale, badge "a verifier").
+#
+# #18 - Capture passive branchee sur le brassage
+#   analyser_brassage_baie lit statut_capture_baie() : les talkers de la
+#   derniere capture (palier 2) absents de l'inventaire, d'aucune FDB relevee
+#   et non localement administres -> hors_inventaire avec via='capture'
+#   (rendu "capture passive" dans la modale). Utile la ou aucun switch ne
+#   repond en SNMP / VLAN sans SNMP / switch non gere.
+#
 # Version 2.19.27 - Audit baie de brassage, lot 3 : plusieurs MAC par appareil
 # Constat #17 de l'audit "baie de brassage" (limite structurelle n1 pour
 # cartographier une infra fidelement).

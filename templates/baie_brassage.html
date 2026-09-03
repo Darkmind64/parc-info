@@ -3707,20 +3707,35 @@ const BrassageModal = {
                 body: JSON.stringify({ ip, mode })
             });
         } catch (e) {}
-        this.charger();   // relance l'analyse avec le nouveau réglage
+        this.charger(true);   // relance un relevé neuf avec le nouveau réglage
     },
 
-    async charger() {
+    async charger(forcer) {
         const corps = document.getElementById('brassage-corps');
         const btn = document.getElementById('brassage-appliquer');
         btn.disabled = true;
-        corps.innerHTML = '<span style="color:var(--text-muted);">Relevé SNMP en cours (table d\'apprentissage MAC des switchs)…</span>';
-        let d;
-        try { d = await (await fetch('/api/baie/brassage/proposer')).json(); }
-        catch (e) { corps.innerHTML = '<span style="color:var(--accent-red);">Erreur de communication.</span>'; return; }
+        // Relevé en tâche de fond : on poll la même route jusqu'au résultat.
+        let d, premier = true;
+        for (let i = 0; i < 160; i++) {
+            const url = '/api/baie/brassage/proposer' + (premier && forcer ? '?forcer=1' : '');
+            premier = false;
+            try { d = await (await fetch(url)).json(); }
+            catch (e) { corps.innerHTML = '<span style="color:var(--accent-red);">Erreur de communication.</span>'; return; }
+            if (!d.en_cours) break;
+            const p = d.progress || 0;
+            corps.innerHTML = `<span style="color:var(--text-muted);">Relevé SNMP en cours (table d'apprentissage MAC des switchs)…`
+                + (p ? ` <strong>${p}%</strong>` : '')
+                + (d.message ? `<br><span style="font-size:.72rem;">${escH(d.message)}</span>` : '') + `</span>`;
+            await new Promise(r => setTimeout(r, 1500));
+        }
+        if (d && d.en_cours) {
+            corps.innerHTML = '<span style="color:var(--accent-orange,#f59e0b);">Relevé trop long — réessaie dans un moment.</span>';
+            return;
+        }
         if (!d.ok) {
             const m = { snmp_inactif: 'SNMP désactivé — active-le dans le diagnostic réseau.',
                         aucun_switch: 'Aucun switch de la baie associé à un appareil avec adresse IP.',
+                        switchs_muets: 'Aucun switch de la baie n\'a répondu en SNMP.',
                         erreur_interne: 'Erreur interne pendant le relevé.' }[d.motif] || 'Rapprochement impossible.';
             corps.innerHTML = `<span style="color:var(--accent-orange,#f59e0b);">${escH(m)}</span>`;
             return;
@@ -3744,16 +3759,24 @@ const BrassageModal = {
                           {auto:'auto', standard:'lecture standard', prefixe:'forcer préfixe', ignorer:'ignorer ce switch'}[m]}</option>`).join('')
                   + `</select></div>`;
         }
+        if ((d.switchs_non_releves || []).length) {
+            avert += `<div style="font-size:.7rem;color:var(--accent-orange,#f59e0b);margin-bottom:.35rem;">`
+                  + `⚠ Relevé partiel (budget dépassé) — non interrogé(s) : ${(d.switchs_non_releves).map(escH).join(', ')}.</div>`;
+        }
         if (avert) avert = `<div style="margin-bottom:.5rem;">${avert}</div>`;
         let html = '';
+        const faible = p => p.confiance === 'faible'
+            ? ' <span style="color:var(--accent-orange,#f59e0b);" title="MAC ambiguë (collision de préfixe sur une table MAC déformée) — un seul port cohérent, à vérifier">⚠ à vérifier</span>' : '';
         html += this._section('prise', '🔌 Machine sur une prise murale', d.prises_appareils || [],
             ['Prise murale', 'Machine vue', 'Port de switch', 'Action'],
             p => [`${escH(p.bandeau_nom)} · prise ${p.prise_numero}`, escH(p.machine_nom),
-                  `${escH(p.switch_nom)} · port ${p.switch_port_numero}`, this._act(p, 'affecter', p.actuel_nom)]);
+                  `${escH(p.switch_nom)} · port ${p.switch_port_numero}`, this._act(p, 'affecter', p.actuel_nom) + faible(p)],
+            p => p.confiance !== 'faible');
         html += this._section('port', '🖥️ Machine branchée directement sur un switch', d.ports_appareils || [],
             ['Port de switch', 'Machine vue', 'Action'],
             p => [`${escH(p.switch_nom)} · port ${p.switch_port_numero}`, escH(p.machine_nom),
-                  this._act(p, 'affecter au port', p.actuel_nom)]);
+                  this._act(p, 'affecter au port', p.actuel_nom) + faible(p)],
+            p => p.confiance !== 'faible');
         html += this._section('cordon', '🔗 Cordon bandeau ⇄ switch', d.cordons || [],
             ['Prise murale', 'Machine', 'Port de switch', 'Confiance'],
             p => [`${escH(p.bandeau_nom)} · prise ${p.prise_numero}`, escH(p.machine_nom),
@@ -3829,11 +3852,13 @@ const BrassageModal = {
     _infoHorsInv(hi) {
         if (!hi.length) return '';
         let h = '<div style="margin-top:.7rem;font-size:.74rem;color:var(--text-primary);font-weight:600;">'
-              + '❔ Vus sur un switch mais absents de l\'inventaire</div>'
-              + '<div style="font-size:.68rem;color:var(--text-muted);">À ajouter à l\'inventaire pour qu\'ils soient reconnus.</div>'
-              + '<table class="mon-table"><thead><tr><th>Port de switch</th><th>MAC</th><th>Fabricant</th></tr></thead><tbody>';
+              + '❔ Vus sur le réseau mais absents de l\'inventaire</div>'
+              + '<div style="font-size:.68rem;color:var(--text-muted);">À ajouter à l\'inventaire pour qu\'ils soient reconnus. « capture passive » = vu sur le segment mais sur aucun port de switch relevé (switch non géré / VLAN sans SNMP).</div>'
+              + '<table class="mon-table"><thead><tr><th>Vu</th><th>MAC</th><th>Fabricant</th></tr></thead><tbody>';
         hi.forEach(x => {
-            h += `<tr><td>${escH(x.switch_nom)} · port ${x.switch_port_numero}</td>`
+            const ou = x.via === 'capture' ? '📡 capture passive'
+                     : `${escH(x.switch_nom)} · port ${escH('' + x.switch_port_numero)}`;
+            h += `<tr><td style="white-space:normal;">${ou}</td>`
                + `<td>${escH(x.mac)}</td><td style="white-space:normal;">${escH(x.vendor || '?')}</td></tr>`;
         });
         return h + '</tbody></table>';

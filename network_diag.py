@@ -3159,6 +3159,14 @@ _capture_baie_lock   = threading.Lock()
 _capture_baie_status = {'running': False, 'progress': 0, 'message': '',
                         'resultat': None, 'client_id': None, 'fin': None}
 
+# « Deviner le brassage » : le relevé SNMP (FDB de tous les switchs de la baie)
+# peut prendre 1-2 min sur un rack chargé — jamais dans le fil d'une requête
+# HTTP. Thread de fond + statut interrogeable, comme la capture ci-dessus.
+_brassage_lock     = threading.Lock()
+_brassage_status   = {'running': False, 'progress': 0, 'message': '',
+                      'resultat': None, 'client_id': None, 'ts': 0.0}
+_BRASSAGE_CACHE_S  = 90     # un résultat de moins de 90 s est resservi tel quel
+
 
 def _journal(message, niveau='info', cible=''):
     """Ajoute une ligne au journal du moniteur. Dédoublonne un message identique
@@ -4009,7 +4017,7 @@ def _fdb_corriger(par_if, inv_mac, mode=''):
     fiable}."""
     toutes = {m for macs in par_if.values() for m in macs if m}
     meta = {'transform': 'exact', 'reconnues': sum(1 for m in toutes if m in inv_mac),
-            'total': len(toutes), 'tronquee': False, 'fiable': True}
+            'total': len(toutes), 'tronquee': False, 'fiable': True, 'ambigus': {}}
     if mode == 'ignorer':
         return {}, {**meta, 'transform': 'ignore', 'reconnues': 0, 'fiable': False}
     if not toutes:
@@ -4064,6 +4072,11 @@ def _fdb_corriger(par_if, inv_mac, mode=''):
     compte = collections.Counter(m for macs in neuf.values() for m in macs)
     ambigu = {m for m, n in compte.items() if n > 1}
     if ambigu:
+        # #19 : ne pas jeter en silence — on note les ports candidats de chaque
+        # MAC en collision de préfixe. analyser_brassage_baie peut en faire une
+        # proposition « à confiance faible » quand un seul port est cohérent.
+        meta['ambigus'] = {m: sorted(ifx for ifx, macs in neuf.items() if m in macs)
+                           for m in ambigu}
         neuf = {ifx: rest for ifx, macs in neuf.items() if (rest := macs - ambigu)}
     meta['reconnues'] = len({m for macs in neuf.values() for m in macs})
     meta['fiable'] = bool(neuf)
@@ -4867,10 +4880,14 @@ def _elements_baie(conn, client_id):
     return elems, mac_infra, nom_par_slot
 
 
-def analyser_brassage_baie(client_id: int) -> dict:
+def analyser_brassage_baie(client_id: int, _progress=None, budget_s: float = 0) -> dict:
     """« Carte réseau proposée » : part de TOUTES les MAC apprises sur les switchs
     de la baie, les corrèle à l'inventaire (nom d'inventaire pour les machines
     connues), et en déduit un jeu de propositions. **Ne modifie rien.**
+
+    `_progress(pct, message)` : rappel optionnel pour le suivi en tâche de fond.
+    `budget_s` : si > 0, arrête le relevé SNMP au-delà de ce délai et renvoie un
+    résultat partiel + `switchs_non_releves`.
 
     Groupes (chaque proposition : `action` 'creer'|'modifier' + libellé `actuel*`) :
       - `prises_appareils` : prise murale dont le cordon est posé → l'appareil
@@ -4887,7 +4904,15 @@ def analyser_brassage_baie(client_id: int) -> dict:
     from database import get_db
     vide = {'prises_appareils': [], 'ports_appareils': [], 'cordons': [],
             'liens_baie': [], 'cascades': [], 'hors_inventaire': [], 'retypage': [],
-            'switchs_illisibles': [], 'switchs_tronques': [], 'fdb': []}
+            'switchs_illisibles': [], 'switchs_tronques': [], 'switchs_non_releves': [],
+            'fdb': []}
+
+    def _prog(pct, msg=''):
+        if _progress:
+            try:
+                _progress(int(pct), msg)
+            except Exception:
+                pass
     if str(_cfg('diag_snmp_actif', '0')) != '1':
         return {'ok': False, 'motif': 'snmp_inactif', **vide}
     communautes = _communautes_snmp()
@@ -4915,21 +4940,41 @@ def analyser_brassage_baie(client_id: int) -> dict:
 
         # relevé mutualisé par IP : noms d'interface + table MAC (bridge + ARP +
         # correction de forme + réglage manuel `diag_fdb_mode:<ip>`)
-        infos_par_ip, fdb_par_ip, fdb_meta_par_ip = {}, {}, {}
+        ips_a_relever, _vus_ip = [], set()
         for sw in switchs:
-            if sw['ip'] not in infos_par_ip:
-                infos_par_ip[sw['ip']] = _noms_interfaces(sw['ip'], communautes)
-                fdb_par_ip[sw['ip']], fdb_meta_par_ip[sw['ip']] = _releve_mac_switch(
-                    sw['ip'], communautes, inv_mac)
+            if sw['ip'] not in _vus_ip:
+                _vus_ip.add(sw['ip'])
+                ips_a_relever.append(sw['ip'])
+        nom_par_ip = {}
+        for sw in switchs:
+            nom_par_ip.setdefault(sw['ip'], sw['nom'])
 
-        # MAC « propres » de chaque switch, relevées en SNMP (base bridge +
-        # ifPhysAddress) → toutes rattachées à l'appareil comme MAC d'infra.
+        infos_par_ip, fdb_par_ip, fdb_meta_par_ip = {}, {}, {}
         infra_snmp_par_ip = {}
-        for sw in switchs:
-            if sw['ip'] not in infra_snmp_par_ip:
-                infra_snmp_par_ip[sw['ip']] = _macs_infra_switch(sw['ip'], communautes)
-                for mm in infra_snmp_par_ip[sw['ip']]:
-                    mac_infra.setdefault(mm, sw['appareil_id'])
+        ips_non_releves = []
+        t_debut = time.time()
+        for i, ip in enumerate(ips_a_relever):
+            # budget : au-delà du délai, on rend ce qu'on a (mais toujours au
+            # moins un switch relevé pour ne pas renvoyer une carte vide).
+            if budget_s and i > 0 and (time.time() - t_debut) > budget_s:
+                ips_non_releves = ips_a_relever[i:]
+                break
+            _prog(5 + i * 80 // max(1, len(ips_a_relever)),
+                  f"Relevé SNMP {i + 1}/{len(ips_a_relever)} — {nom_par_ip.get(ip, ip)}")
+            infos_par_ip[ip] = _noms_interfaces(ip, communautes)
+            fdb_par_ip[ip], fdb_meta_par_ip[ip] = _releve_mac_switch(ip, communautes, inv_mac)
+            # MAC « propres » du switch (base bridge + ifPhysAddress) -> MAC d'infra
+            infra_snmp_par_ip[ip] = _macs_infra_switch(ip, communautes)
+            _aid_sw = next((s['appareil_id'] for s in switchs if s['ip'] == ip), None)
+            for mm in infra_snmp_par_ip[ip]:
+                if _aid_sw:
+                    mac_infra.setdefault(mm, _aid_sw)
+        switchs_non_releves = sorted({nom_par_ip.get(ip, ip) for ip in ips_non_releves})
+        # ne garder que les switchs effectivement relevés pour la suite
+        switchs = [s for s in switchs if s['ip'] in infos_par_ip]
+        _prog(88, 'Corrélation…')
+        if not switchs:
+            return {'ok': False, 'motif': 'switchs_muets', **vide}
 
         sw_ctx = []
         for sw in switchs:
@@ -5097,6 +5142,48 @@ def analyser_brassage_baie(client_id: int) -> dict:
                             'action': 'modifier' if cur else 'creer',
                             'actuel_nom': nom_par_aid.get(cur, '') if cur else ''})
 
+        # ── passe 1bis : MAC en collision de préfixe (#19) ──
+        # Une MAC réparée par _fdb_corriger sous une hypothèse déformée qui
+        # matche 2 appareils de l'inventaire (mêmes 4 premiers octets) est
+        # écartée de la FDB. Si UN SEUL de ses ports candidats correspond à un
+        # port physique cartographié, on en fait une proposition « à confiance
+        # faible » (décochée par défaut) plutôt que de la perdre.
+        deja_propose = {(p['switch_slot_id'], p['switch_port_numero'])
+                        for p in ports_appareils} | {
+                        (p['bandeau_slot_id'], p['prise_numero']) for p in prises_appareils}
+        for c in sw_ctx:
+            for mac_amb, ifxs in (c['fdb_meta'].get('ambigus') or {}).items():
+                if mac_amb not in inv_mac:
+                    continue
+                ports_cand = sorted({c['ifx_to_num'][x] for x in ifxs
+                                     if c['ifx_to_num'].get(x) is not None})
+                if len(ports_cand) != 1:
+                    continue
+                port_num = ports_cand[0]
+                cle = (c['slot_id'], port_num)
+                aid, nom, _typ = inv_mac[mac_amb]
+                b_lien = liens.get(cle)
+                if b_lien and b_lien in prises_decl:
+                    if b_lien in deja_propose:
+                        continue
+                    decl = prises_decl[b_lien]
+                    if decl[0] != aid:
+                        prises_appareils.append({
+                            'bandeau_slot_id': b_lien[0], 'bandeau_nom': nom_par_slot.get(b_lien[0], '?'),
+                            'prise_numero': b_lien[1], 'machine_id': aid, 'machine_nom': nom,
+                            'switch_nom': c['nom'], 'switch_port_numero': port_num,
+                            'action': 'modifier' if decl[0] else 'creer', 'actuel_nom': decl[1],
+                            'confiance': 'faible'})
+                elif not b_lien and cle not in deja_propose:
+                    cur = cibles.get(cle)
+                    if cur != aid and aid not in aids_baie and aid not in aids_sur_prise:
+                        ports_appareils.append({
+                            'switch_slot_id': c['slot_id'], 'switch_nom': c['nom'],
+                            'switch_port_numero': port_num, 'machine_id': aid, 'machine_nom': nom,
+                            'action': 'modifier' if cur else 'creer',
+                            'actuel_nom': nom_par_aid.get(cur, '') if cur else '',
+                            'confiance': 'faible'})
+
         # ── passe 2 : cordons bandeau ⇄ switch depuis les machines de prises ──
         for (b_sid, b_num), (aid, m_nom, mac) in prises_decl.items():
             if not aid or not mac or (b_sid, b_num) in liens:
@@ -5118,6 +5205,28 @@ def analyser_brassage_baie(client_id: int) -> dict:
                 'action': 'creer',
                 'confiance': 'faible' if (vu_avec > _BRASSAGE_UPLINK_MAX or occupe) else 'sure',
                 'note': ('ce port de switch est déjà brassé ailleurs' if occupe else '')})
+
+        # ── #18 : dernière capture passive (palier 2) comme source d'appoint ──
+        # Des MAC actives sur le segment — y compris derrière un switch non géré
+        # ou sur un VLAN sans SNMP — que le relevé FDB n'a pas vues.
+        try:
+            cap = statut_capture_baie()
+            rc = cap.get('resultat') or {}
+            if cap.get('client_id') == client_id and rc.get('disponible'):
+                macs_fdb = {m for c in sw_ctx for s in c['fdb'].values() for m in s}
+                deja_hi = {x['mac'] for x in hors_inv}
+                for t in (rc.get('talkers') or []):
+                    m = _norm_mac(t.get('mac') or '')
+                    if (not m or m in inv_mac or m in mac_infra or m in macs_fdb
+                            or m in deja_hi or _mac_locale(m)):
+                        continue
+                    hors_inv.append({'switch_nom': '(capture passive)',
+                                     'switch_port_numero': 0, 'mac': m,
+                                     'vendor': t.get('vendor') or _vendor(m) or '',
+                                     'via': 'capture'})
+                    deja_hi.add(m)
+        except Exception:
+            logger.debug('network_diag: apport capture au brassage', exc_info=True)
 
         # ── retypage : capacités LLDP du voisin ≠ type d'inventaire ──
         # Le voisin LLDP se déclare pont / routeur / borne Wi-Fi / téléphone.
@@ -5164,18 +5273,66 @@ def analyser_brassage_baie(client_id: int) -> dict:
             g.sort(key=_k)
         retypage.sort(key=lambda x: str(x.get('machine_nom', '')))
         tronques = sorted({c['nom'] for c in sw_ctx if c['fdb_tronquee'] and c['fdb']})
+        _prog(100, 'Terminé')
         return {'ok': True, 'nb_switchs': len({s['ip'] for s in switchs}),
                 'prises_appareils': prises_appareils, 'ports_appareils': ports_appareils,
                 'cordons': cordons, 'liens_baie': liens_baie,
                 'cascades': cascades, 'hors_inventaire': hors_inv, 'retypage': retypage,
                 'switchs_illisibles': switchs_illisibles, 'switchs_tronques': tronques,
-                'fdb': fdb_ui}
+                'switchs_non_releves': switchs_non_releves, 'fdb': fdb_ui}
     except Exception:
         logger.exception('network_diag: analyser_brassage_baie')
         return {'ok': False, 'motif': 'erreur_interne', **vide}
     finally:
         conn.close()
 
+
+def statut_analyse_brassage(client_id: int) -> dict:
+    """État du relevé « Deviner le brassage » lancé en tâche de fond.
+    Renvoie le résultat seulement s'il est frais (< _BRASSAGE_CACHE_S) et pour
+    CE client."""
+    with _brassage_lock:
+        st = dict(_brassage_status)
+    if st.get('client_id') != client_id:
+        return {'en_cours': False, 'progress': 0, 'resultat': None}
+    frais = (st['resultat'] is not None
+             and (time.time() - st['ts']) < _BRASSAGE_CACHE_S)
+    return {'en_cours': st['running'], 'progress': st['progress'],
+            'message': st['message'],
+            'resultat': st['resultat'] if (frais and not st['running']) else None}
+
+
+def lancer_analyse_brassage(client_id: int) -> bool:
+    """Démarre le relevé en thread détaché. False si un relevé tourne déjà
+    (pour n'importe quel client — un seul à la fois, le relevé est lourd)."""
+    with _brassage_lock:
+        if _brassage_status['running']:
+            return False
+        _brassage_status.update({'running': True, 'progress': 0,
+                                 'message': 'Démarrage…', 'client_id': client_id,
+                                 'resultat': None})
+    threading.Thread(target=_run_analyse_brassage, args=(client_id,),
+                     daemon=True, name='DiagBrassage').start()
+    return True
+
+
+def _run_analyse_brassage(client_id: int):
+    def _maj(pct, msg):
+        with _brassage_lock:
+            _brassage_status['progress'] = max(_brassage_status['progress'], pct)
+            if msg:
+                _brassage_status['message'] = msg
+    try:
+        # budget de sécurité : un rack pathologique (switch qui répond au
+        # compte-gouttes) ne doit pas laisser le job « running » indéfiniment
+        # et bloquer les relevés suivants.
+        res = analyser_brassage_baie(client_id, _progress=_maj, budget_s=150)
+    except Exception:
+        logger.exception('network_diag: _run_analyse_brassage')
+        res = {'ok': False, 'motif': 'erreur_interne'}
+    with _brassage_lock:
+        _brassage_status.update({'running': False, 'progress': 100,
+                                 'resultat': res, 'ts': time.time()})
 
 
 # ── Capture de trafic à la demande (onglet « Trafic capturé ») ──────────────

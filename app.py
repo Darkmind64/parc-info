@@ -7236,7 +7236,20 @@ def api_baie_brassage_proposer():
     cid = get_client_id()
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    return jsonify(network_diag.analyser_brassage_baie(cid))
+    # Le relevé SNMP (FDB de tous les switchs) est lourd : jamais dans le fil de
+    # la requête. Tâche de fond + statut interrogeable (le client poll cette même
+    # route). `?forcer=1` relance un relevé neuf (après un changement de réglage).
+    if request.args.get('forcer') == '1':
+        network_diag.lancer_analyse_brassage(cid)
+        return jsonify({'en_cours': True, 'progress': 0})
+    st = network_diag.statut_analyse_brassage(cid)
+    if st.get('resultat') is not None:
+        return jsonify(st['resultat'])
+    if not st.get('en_cours'):
+        network_diag.lancer_analyse_brassage(cid)
+        st = network_diag.statut_analyse_brassage(cid)
+    return jsonify({'en_cours': True, 'progress': st.get('progress', 0),
+                    'message': st.get('message', '')})
 
 
 @app.route('/api/baie/brassage/fdb-mode', methods=['POST'])
