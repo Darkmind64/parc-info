@@ -935,6 +935,50 @@ def test_analyser_brassage_mac_secondaire(conn, deux_clients, make_appareil, mon
     assert d['hors_inventaire'] == []
 
 
+def test_analyser_brassage_element_baie_sur_port_switch(conn, deux_clients, make_appareil, monkeypatch):
+    """Un élément de baie SANS FDB (NAS, serveur…) positionné dans le rack et
+    vu sur un port de switch était perdu : la branche « lien switch ⇄ élément »
+    ne trouvait pas le port du voisin et s'arrêtait là. Il doit maintenant
+    être proposé (affectation directe au port si plusieurs ports, lien si un
+    seul port)."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.9')
+    nas = make_appareil(cid, nom_machine='DS415', type_appareil='NAS', adresse_mac='00:11:32:43:97:9d')
+    imp = make_appareil(cid, nom_machine='IMPRIMANTE', type_appareil='Imprimante',
+                        adresse_mac='00:21:b7:39:4e:07')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    sw_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    for n in (2, 3, 8, 9):
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (sw_slot, n))
+    # le NAS est un élément de baie avec 2 ports -> affectation directe au port
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,2,?)", (cid, nas))
+    nas_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (nas,)).fetchone()[0]
+    for n in (1, 2):
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (nas_slot, n))
+    # l'imprimante est un élément de baie avec 1 seul port -> lien
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,3,?)", (cid, imp))
+    imp_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (imp,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1)", (imp_slot,))
+    conn.commit()
+
+    monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
+    monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
+    monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
+    monkeypatch.setattr(network_diag, '_noms_interfaces',
+        lambda ip, c: {i * 11: {'nom': str(i), 'alias': '', 'ethernet': True} for i in (2, 3, 8, 9)})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {
+        88: {'00:11:32:43:97:9d'},   # port 8 : DS415 (élément de baie, 2 ports)
+        99: {'00:21:b7:39:4e:07'},   # port 9 : imprimante (élément de baie, 1 port)
+    })
+
+    d = network_diag.analyser_brassage_baie(cid)
+    assert d['ok'] is True
+    assert [(p['switch_port_numero'], p['machine_nom']) for p in d['ports_appareils']] == [(8, 'DS415')]
+    assert [(l['a_port'], l['b_nom'], l['b_port'], l['via']) for l in d['liens_baie']] \
+        == [(9, 'IMPRIMANTE', 1, 'port_unique')]
+    assert d['hors_inventaire'] == []
+
+
 def test_analyser_brassage_retypage_lldp(conn, deux_clients, make_appareil, monkeypatch):
     """Le voisin LLDP se déclare 'wlan' mais l'appareil correspondant est
     typé 'Switch' en inventaire -> proposition de retypage (indicative)."""

@@ -5068,6 +5068,16 @@ def analyser_brassage_baie(client_id: int, _progress=None, budget_s: float = 0) 
                 return 'modifier', f"{nom_par_slot.get(cur[0], '?')} port {cur[1]}"
             return 'creer', ''
 
+        def _ajouter_cascade(c, port_num, macs, lv):
+            casc = _classer_cascade(macs, inv_mac, lv.get('caps') if lv else '')
+            vois = _voisins_port(macs, inv_mac)
+            b_l = liens.get((c['slot_id'], port_num))
+            prise = (f"{nom_par_slot.get(b_l[0], '?')} prise {b_l[1]}"
+                     if b_l and b_l in prises_decl else None)
+            cascades.append({'switch_nom': c['nom'], 'switch_port_numero': port_num,
+                             'type': casc['type'], 'indices': casc['indices'],
+                             'n_macs': casc['n_macs'], 'appareils': vois['noms'], 'prise': prise})
+
         # ── passe 1 : chaque port mappé de chaque switch ──
         for c in sw_ctx:
             for ifx, macs in c['fdb'].items():
@@ -5091,48 +5101,63 @@ def analyser_brassage_baie(client_id: int, _progress=None, budget_s: float = 0) 
                                           if e['nom'].lower() == lv['nom'].lower()), None)
                 if autre_aid is not None:
                     autre = elems.get(autre_aid)
-                    paire = autre and tuple(sorted((c['slot_id'], autre['slot_id'])))
-                    if autre and autre['slot_id'] != c['slot_id'] and paire not in vus_liens:
+                    ac = ctx_par_slot.get(autre['slot_id']) if autre else None
+                    if autre and autre['slot_id'] != c['slot_id']:
+                        paire = tuple(sorted((c['slot_id'], autre['slot_id'])))
                         b_port, via = None, 'fdb'
-                        ac = ctx_par_slot.get(autre['slot_id'])
-                        # 1) port du voisin par LLDP/CDP, selon le sous-type de PortID
-                        if lv:
-                            st, pv = lv['subtype'], lv['port']
-                            if st == 'mac' and ac:
+                        if paire not in vus_liens:
+                            # 1) port du voisin par LLDP/CDP, selon le sous-type de PortID
+                            if lv:
+                                st, pv = lv['subtype'], lv['port']
+                                if st == 'mac' and ac:
+                                    for a_ifx, a_macs in (ac['fdb'] or {}).items():
+                                        if pv in a_macs:
+                                            b_port, via = ac['ifx_to_num'].get(a_ifx), 'lldp'
+                                            break
+                                elif st == 'local' and ac and pv.isdigit():
+                                    b_port, via = ac['ifx_to_num'].get(int(pv)), 'lldp'
+                                elif _port_physique_depuis_nom(pv):
+                                    b_port, via = _port_physique_depuis_nom(pv), 'lldp'
+                            # 2) sinon : la mgmt MAC de C vue sur un port du voisin (FDB réciproque)
+                            if b_port is None and c['mgmt_macs'] and ac:
                                 for a_ifx, a_macs in (ac['fdb'] or {}).items():
-                                    if pv in a_macs:
-                                        b_port, via = ac['ifx_to_num'].get(a_ifx), 'lldp'
+                                    if c['mgmt_macs'] & a_macs:
+                                        b_port = ac['ifx_to_num'].get(a_ifx)
                                         break
-                            elif st == 'local' and ac and pv.isdigit():
-                                b_port, via = ac['ifx_to_num'].get(int(pv)), 'lldp'
-                            elif _port_physique_depuis_nom(pv):
-                                b_port, via = _port_physique_depuis_nom(pv), 'lldp'
-                        # 2) sinon : la mgmt MAC de C vue sur un port du voisin (FDB réciproque)
-                        if b_port is None and c['mgmt_macs'] and ac:
-                            for a_ifx, a_macs in (ac['fdb'] or {}).items():
-                                if c['mgmt_macs'] & a_macs:
-                                    b_port = ac['ifx_to_num'].get(a_ifx)
-                                    break
-                        if b_port and b_port in autre['ports']:
-                            act, actu = _cmp_lien(cle, autre['slot_id'], b_port)
-                            if act:
-                                liens_baie.append({
-                                    'a_slot_id': c['slot_id'], 'a_nom': c['nom'], 'a_port': port_num,
-                                    'b_slot_id': autre['slot_id'], 'b_nom': autre['nom'], 'b_port': b_port,
-                                    'via': via, 'action': act, 'actuel': actu})
-                            vus_liens.add(paire)
+                            # 3) voisin SANS FDB exploitable (NAS, serveur, camera,
+                            #    imprimante... place dans la baie) : son unique port
+                            #    si non ambigu.
+                            if b_port is None and ac is None and len(autre['ports']) == 1:
+                                b_port, via = autre['ports'][0], 'port_unique'
+                            if b_port and b_port in autre['ports']:
+                                act, actu = _cmp_lien(cle, autre['slot_id'], b_port)
+                                if act:
+                                    liens_baie.append({
+                                        'a_slot_id': c['slot_id'], 'a_nom': c['nom'], 'a_port': port_num,
+                                        'b_slot_id': autre['slot_id'], 'b_nom': autre['nom'], 'b_port': b_port,
+                                        'via': via, 'action': act, 'actuel': actu})
+                                vus_liens.add(paire)
+                                continue
+                        # Lien indeterminable. Voisin = switch -> uplink, on s'arrete.
+                        # Voisin = element de baie ordinaire (NAS/serveur/camera...)
+                        # vu sur ce port de switch : le proposer comme une machine
+                        # directe sur le port (affectation de baie_slot_ports.appareil_id).
+                        if ac is None:
+                            if len(macs) == 1:
+                                cur = cibles.get(cle)
+                                if cur != autre_aid:
+                                    ports_appareils.append({
+                                        'switch_slot_id': c['slot_id'], 'switch_nom': c['nom'],
+                                        'switch_port_numero': port_num, 'machine_id': autre_aid,
+                                        'machine_nom': autre['nom'],
+                                        'action': 'modifier' if cur else 'creer',
+                                        'actuel_nom': nom_par_aid.get(cur, '') if cur else ''})
+                            else:
+                                _ajouter_cascade(c, port_num, macs, lv)
                     continue
 
                 if len(macs) >= 2:
-                    casc = _classer_cascade(macs, inv_mac, lv.get('caps') if lv else '')
-                    vois = _voisins_port(macs, inv_mac)
-                    b_lien = liens.get(cle)
-                    prise = None
-                    if b_lien and b_lien in prises_decl:
-                        prise = f"{nom_par_slot.get(b_lien[0], '?')} prise {b_lien[1]}"
-                    cascades.append({'switch_nom': c['nom'], 'switch_port_numero': port_num,
-                                     'type': casc['type'], 'indices': casc['indices'],
-                                     'n_macs': casc['n_macs'], 'appareils': vois['noms'], 'prise': prise})
+                    _ajouter_cascade(c, port_num, macs, lv)
                     continue
 
                 m = next(iter(macs))

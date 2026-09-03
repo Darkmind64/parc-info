@@ -3486,6 +3486,14 @@ const MoniteurModal = {
                         ⚠ Détection du port ${ca.numero} expirée — aucune interface n'a changé d'état. Réessaie ou calibre manuellement.</div>`;
             }
 
+            // conserver l'état ouvert/fermé du <details> « Toutes les interfaces »
+            // avant de reconstruire le panneau (sinon il se refermerait à chaque
+            // rafraîchissement 2 s).
+            const detOuverts = new Set(
+                [...cont.querySelectorAll('details[data-sw][open]')].map(x => x.dataset.sw));
+            const SRC_LABEL = { manuel: 'manuel (calibré)', topologie: 'topologie L2',
+                nom_port: "nom d'interface", repli: "repli n°=ifIndex", 'non_mappé': '—', '': '—' };
+
             cont.innerHTML = caBanner + (d.switchs || []).map(sw => {
                 const ifs = (parIpIf[sw.ip] || []).slice().sort((a, b) => a.ifindex - b.ifindex);
                 const mapByNum = parIpMap[sw.ip] || {};
@@ -3504,16 +3512,25 @@ const MoniteurModal = {
                 };
                 const calRows = bp.map(b => {
                     const p = mapByNum[b.numero];
-                    const src = p ? p.source_mapping : (b.if_index ? 'manuel' : '—');
+                    const srcRaw = p ? p.source_mapping : (b.if_index ? 'manuel' : 'non_mappé');
+                    const src = SRC_LABEL[srcRaw] || srcRaw;
                     const div = p && p.divergence
                         ? ' <span style="color:var(--accent-orange,#f59e0b);" title="la topologie et le nom d\'interface ne s\'accordent pas sur ce port">⚠</span>' : '';
                     const etat = p ? `<span class="mon-dot mon-dot-${p.etat}"></span> ${p.cpt_pegge ? (p.pps || 0).toFixed(0) + ' pkt/s' : fmtDebit(p.bps)}` : '—';
+                    // « Appareil branché » : l'affectation déclarée, sinon ce que la
+                    // table MAC du switch voit passer sur ce port.
+                    let cible = escH(b.cible || '');
+                    if (!cible && p && p.voisins && p.voisins.length) {
+                        const plus = (p.voisins_n || p.voisins.length) - p.voisins.length;
+                        cible = `<span style="color:var(--text-muted);" title="vu sur ce port par la table MAC — pas déclaré">`
+                              + p.voisins.map(escH).join(', ') + (plus > 0 ? ' +' + plus : '') + ' <em>(vu)</em></span>';
+                    }
                     return `<tr>
                         <td>${escH(String(b.numero))}</td>
-                        <td>${escH(b.cible || '')}</td>
-                        <td style="white-space:nowrap;"><select class="cfg-input cfg-input-sm" style="max-width:300px;"
+                        <td>${cible}</td>
+                        <td style="white-space:nowrap;"><select class="cfg-input cfg-input-sm" style="width:220px;vertical-align:middle;"
                               onchange="MoniteurModal.calibrer(${sw.slot_id}, ${b.numero}, this.value)">${opts(b.if_index)}</select>
-                          <button class="btn btn-sm" style="padding:.1rem .4rem;" title="Détecter l'interface : débranche puis rebranche le câble de ce port"
+                          <button class="btn btn-sm" style="padding:.1rem .4rem;margin-left:.3rem;" title="Détecter l'interface : débranche puis rebranche le câble de ce port"
                               onclick="MoniteurModal.assistant(${sw.slot_id}, ${b.numero})">🔌</button></td>
                         <td style="color:var(--text-muted);">${src}${div}</td>
                         <td>${etat}</td>
@@ -3546,7 +3563,7 @@ const MoniteurModal = {
                     <table class="mon-table"><thead><tr>
                         <th>Port baie</th><th>Appareil branché</th><th>Interface du switch</th><th>source</th><th>débit</th><th>tendance</th>${aPoe ? '<th>PoE</th>' : ''}
                     </tr></thead><tbody>${calRows || `<tr><td colspan="${aPoe ? 7 : 6}" style="color:var(--text-muted);">ce slot n’a pas de ports</td></tr>`}</tbody></table>
-                    <details style="margin:.4rem 0;"><summary style="cursor:pointer;font-size:.7rem;color:var(--text-muted);">Toutes les interfaces du switch (${ifs.length})</summary>
+                    <details data-sw="${escH(sw.ip)}"${detOuverts.has(sw.ip) ? ' open' : ''} style="margin:.4rem 0;"><summary style="cursor:pointer;font-size:.7rem;color:var(--text-muted);">Toutes les interfaces du switch (${ifs.length})</summary>
                     <table class="mon-table"><thead><tr><th>ifIndex</th><th>Nom</th><th>Alias</th><th>État</th><th>Débit</th><th>pkt/s</th>${aPoe ? '<th>PoE</th>' : ''}</tr></thead>
                     <tbody>${ifRows || `<tr><td colspan="${aPoe ? 7 : 6}" style="color:var(--text-muted);">aucune interface</td></tr>`}</tbody></table></details>`;
             }).join('');
@@ -3793,7 +3810,8 @@ const BrassageModal = {
         html += this._section('lien', '🔗 Lien switch ⇄ autre élément de la baie', d.liens_baie || [],
             ['Élément A', 'Élément B', 'Détecté par', 'Action'],
             p => [`${escH(p.a_nom)} · port ${p.a_port}`, `${escH(p.b_nom)} · port ${p.b_port}`,
-                  p.via === 'lldp' ? 'LLDP' : 'tables MAC', this._act(p, 'relier', p.actuel)]);
+                  p.via === 'lldp' ? 'LLDP' : p.via === 'port_unique' ? 'port unique du voisin' : 'tables MAC',
+                  this._act(p, 'relier', p.actuel)]);
 
         html += this._infoCascades(d.cascades || []);
         html += this._infoRetypage(d.retypage || []);

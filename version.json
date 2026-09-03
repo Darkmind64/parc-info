@@ -1,24 +1,23 @@
 {
-  "version": "2.19.29",
+  "version": "2.19.30",
   "release_date": "2026-09-03T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.29",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.29/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.30/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.30/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.30/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.30",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.30/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.30/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.30/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.30/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.30/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Réseau — audit de fiabilité, lot 5/n : SNMPv3. Le diagnostic et la baie de brassage acceptent désormais un utilisateur SNMPv3 authNoPriv (MD5 / SHA-1 / SHA-256, Réglages → Réseau & Scan), essayé en premier avec repli automatique sur les communautés v1/v2c — pour les pare-feux, box de FAI récentes et caméras managées qui n'acceptent que v3. Surtout, un échec SNMP ne se confond plus avec l'absence de matériel : une découverte d'engine SNMPv3 (sans authentification) sert de sonde universelle « y a-t-il un agent ici ? », et « SNMP présent mais refusé » (mauvaise communauté, ACL, v3 exigé) est affiché comme tel dans « Deviner le brassage » et le bouton « Tester SNMP ».",
+    "new_features": "Baie de brassage — correctifs sur « Deviner le brassage » et le moniteur réseau. Un appareil positionné dans le rack sans table MAC propre (NAS, serveur, imprimante, caméra…) et vu sur un port de switch est désormais proposé : affectation directe au port s'il a plusieurs ports, lien s'il n'en a qu'un. Le moniteur réseau affiche l'appareil réellement vu sur le port (table MAC) quand aucune affectation n'est déclarée, la colonne « source » est en clair (nom d'interface / topologie L2 / manuel), et le panneau « Toutes les interfaces du switch » ne se referme plus à chaque rafraîchissement.",
     "improvements": [
-      "Encodage BER fait main, crypto = bibliothèque standard (hashlib + hmac) : aucune dépendance nouvelle.",
-      "Le scan réseau reste en communauté publique (pas de découverte v3 par hôte).",
-      "Le chiffrement SNMPv3 (priv) n'est pas géré — authNoPriv uniquement, pour de la lecture."
+      "Moniteur : le bouton « détecter l'interface » ne chevauche plus la colonne source.",
+      "« Deviner le brassage » : lien « port unique du voisin » quand l'élément de baie n'a qu'un seul port."
     ]
   },
   "checksums": {
@@ -29,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.29"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.30"
 }

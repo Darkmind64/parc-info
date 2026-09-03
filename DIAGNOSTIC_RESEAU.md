@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-03 (v2.19.29). En cas de doute
+> Ce document décrit le comportement au 2026-09-03 (v2.19.30). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -192,6 +192,12 @@ des switchs de la baie et calcule l'état à peindre par port.
     MAC vue sur un port de switch (le **moins chargé** ; `> _BRASSAGE_UPLINK_MAX`
     co-MAC ou port déjà brassé ailleurs → confiance « faible ») → propose le
     cordon bandeau ⇄ switch (`POST /api/baie/lien-port`).
+  - **Élément de baie vu sur un port de switch** (v2.19.30) : un appareil
+    positionné dans le rack (NAS, serveur, imprimante, caméra…) qui n'a pas de
+    table MAC propre est reconnu par sa MAC sur un port de switch. S'il a **un
+    seul port** → `liens_baie` (`via='port_unique'`) ; **plusieurs ports** →
+    `ports_appareils` (affectation directe au port de switch, le port exact du
+    NAS restant indéterminé) ; **plusieurs MAC** → `cascades`.
   - **`liens_baie`** : un port de switch A apprend la MAC d'infra d'un autre
     élément de baie B → lien A ⇄ B. Port de B : par **LLDP** (`diag_topologie`,
     `voisin_port`) sinon **FDB réciproque** (la mgmt MAC de A vue sur un port de
@@ -323,8 +329,13 @@ battement du collecteur d'activité) :
   flappe pendant le geste ne gagne plus ; à défaut, à l'expiration de la
   fenêtre, la seule interface qui a bougé. L'écriture (`calibrer_port_baie`)
   est faite par le thread `_activite_loop`, jamais par le GET moniteur.
-  Section repliable « toutes les interfaces » avec leur état/débit/pps. Rend
-  transparent ce qui alimente les LEDs.
+  Section repliable « toutes les interfaces » avec leur état/débit/pps
+  (v2.19.30 : garde son état ouvert d'un rafraîchissement à l'autre). Rend
+  transparent ce qui alimente les LEDs. v2.19.30 : la colonne **« Appareil
+  branché »** affiche, à défaut d'affectation déclarée, l'appareil vu sur le
+  port par la table MAC (`p.voisins`, suffixé « (vu) ») ; la colonne
+  **« source »** est en clair (`nom d'interface` / `topologie L2` /
+  `manuel (calibré)` / `repli`).
 - **Journal** : flux d'évènements horodatés et dédoublonnés (`_activite_journal`,
   `collections.deque(maxlen=250)`, alimenté par `_journal()`) — switch injoignable
   ou rétabli, port devenu actif/calme, port passé « obsolète », lien coupé,

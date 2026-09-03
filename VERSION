@@ -1,9 +1,38 @@
-PARCINFO_VERSION=2.19.29
+PARCINFO_VERSION=2.19.30
 RELEASE_DATE=2026-09-03
 BUILD_NUMBER=2026090301
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.30 - Baie : correctifs "Deviner le brassage" + moniteur reseau
+# Retour terrain apres l'audit :
+#
+# 1. "Deviner le brassage" ne proposait pas un element de baie (NAS, serveur,
+#    imprimante, camera...) POSITIONNE dans le rack et vu sur un port de switch.
+#    Sa MAC etant dans mac_infra (_elements_baie), il tombait dans la branche
+#    "lien switch <-> autre element de la baie", qui cherche le port du voisin
+#    par LLDP/CDP ou FDB reciproque -> impossible pour un appareil sans FDB ->
+#    la branche s'arretait sur `continue` sans rien proposer.
+#    Fix (analyser_brassage_baie, passe 1) : quand le voisin n'est pas un switch
+#    (ac is None) et qu'aucun port n'a pu etre resolu :
+#      - 1 seul port -> lien switch-port <-> element-port (via='port_unique')
+#      - plusieurs ports -> affectation directe au port de switch
+#        (ports_appareils, baie_slot_ports.appareil_id)
+#      - plusieurs MAC + un element de baie -> cascade (au lieu de rien)
+#    _ajouter_cascade factorise l'ajout d'une cascade.
+#
+# 2. Moniteur reseau (modale, onglet Ports) :
+#    - colonne "Appareil branche" : si aucune affectation declaree, on affiche
+#      ce que la table MAC du switch voit sur le port (p.voisins -> "DS415 (vu)").
+#    - colonne "source" : libelles en clair (SRC_LABEL) au lieu des jetons
+#      internes (nom_port -> "nom d'interface", topologie -> "topologie L2",
+#      manuel -> "manuel (calibre)").
+#    - <details> "Toutes les interfaces du switch" : l'etat ouvert est conserve
+#      d'un rafraichissement 2 s a l'autre (data-sw + Set detOuverts) ; il ne se
+#      referme plus tout seul.
+#    - le bouton "detecter l'interface" ne chevauche plus la colonne source
+#      (select a largeur fixe 220px + marge).
+#
 # Version 2.19.29 - Audit reseau, lot 5 : SNMPv3 + "SNMP present mais refuse"
 # Constat #7 de l'audit "baie de brassage".
 #
