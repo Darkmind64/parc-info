@@ -1,8 +1,36 @@
-PARCINFO_VERSION=2.19.19
+PARCINFO_VERSION=2.19.20
 RELEASE_DATE=2026-09-02
-BUILD_NUMBER=2026090210
+BUILD_NUMBER=2026090211
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.20 - Baie : bouton "Deviner le brassage" + infobulle unifiee
+# Retour : "Tu as cree une deuxieme infobulle au lieu d'ajouter les infos a
+# celle existante. Je souhaite que dans les infobulles des ports de switchs,
+# routeurs soient affichees les machines dont le trafic passe par le port. Le
+# but est d'identifier quelle machine est reliee a quel port. J'assigne les
+# machines aux prises murales, on detecte quelle machine est sur quel port du
+# switch, on relie les ports des switchs aux ports du bandeau RJ - operation
+# qui pourrait etre automatique. Cela permet de detecter tout changement."
+#
+# 1. Infobulle : le title natif (2e infobulle) est supprime. Les lignes
+#    "Activite" (etat + debit) et "Trafic vu" (appareils dont une MAC est
+#    apprise sur le port) + l'etat de cablage sont maintenant dans l'infobulle
+#    RICHE existante (afficherTooltipPort / afficherTooltipPriseMurale via
+#    rowsActivitePort, alimente par _activiteInfos rempli par chargerActivite).
+# 2. proposer_brassage_baie + route GET /api/baie/brassage/proposer : pour
+#    chaque prise murale reliee a une machine, cherche dans la FDB de tous les
+#    switchs de la baie le port ou la MAC de cette machine est vue (port le
+#    moins charge = acces ; un port qui l'apprend parmi >8 autres = uplink,
+#    confiance "faible"), mappe l'ifIndex -> numero de port de baie, compare au
+#    lien existant -> action creer / modifier / inchange. Aperçu, rien n'est
+#    ecrit.
+# 3. Modale "Deviner le brassage" (BrassageModal) : liste cochable des
+#    propositions + non-resolues ; application via /api/baie/lien-port (la
+#    route de liaison manuelle, un cordon a la fois). Une fois pose, le
+#    controle de cablage live (v2.19.19) signale tout changement.
+#
+# Verifie en navigateur sur un HP ProCurve reel. pytest 234 + scripts OK.
 
 # Version 2.19.19 - Baie : controle de cablage sur la FDB live + voisins par port
 # Retour terrain : "le controle du cablage ne fonctionne pas. J'ai volontairement

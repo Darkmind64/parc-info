@@ -1,23 +1,23 @@
 {
-  "version": "2.19.19",
+  "version": "2.19.20",
   "release_date": "2026-09-02T00:00:00.000000",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.19/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.19/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.19/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.19",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.19/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.19/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.19/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.19/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.19/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.20",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.20/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage — le contrôle de câblage des prises murales se fait maintenant sur la table d'apprentissage MAC « live » du switch (bridge-MIB), relevée à chaque cycle : plus besoin d'attendre une découverte de topologie, l'incohérence est signalée dès qu'une prise est mal brassée. Les infobulles des ports (switch ET prises murales) listent désormais les appareils dont le trafic transite réellement par le port.",
+    "new_features": "Baie de brassage — bouton « 🧠 Deviner le brassage » : pour chaque prise murale reliée à une machine, ParcInfo retrouve (table d'apprentissage MAC du switch) le port de switch où cette machine est vue et propose le cordon bandeau ⇄ switch correspondant. Aperçu avant application, réversible. Une fois le brassage posé, tout changement de câblage est signalé en direct (⚠).",
     "improvements": [
-      "Contrôle de câblage : comparaison directe MAC déclarée ↔ MAC apprise sur le port (repli sur la topologie L2 si le switch ne répond pas à la bridge-MIB).",
-      "Walk FDB résilient face à un agent SNMP lent : mémorisation du dialecte qui répond (dot1q/dot1d), relevé en début de cycle avant les GETBULK, cache long, service de la dernière valeur connue en cas d'échec."
+      "Les infos « trafic vu / câblage » ne créent plus une seconde infobulle : elles sont fusionnées dans l'infobulle riche des ports de switch/routeur et des prises murales (lignes « Activité » et « Trafic vu »).",
+      "Rapprochement de brassage : port de switch le moins « chargé » privilégié ; un port qui apprend la MAC parmi beaucoup d'autres (lien montant) est proposé en confiance « à vérifier »."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.19"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.20"
 }

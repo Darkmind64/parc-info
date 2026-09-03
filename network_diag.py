@@ -4310,6 +4310,128 @@ def calibrer_decalage_baie(client_id: int, slot_id: int, offset) -> int:
         conn.close()
 
 
+_BRASSAGE_UPLINK_MAX = 8   # au-delà de N MAC apprises sur un port, c'est un uplink :
+                           #   la machine est derrière, pas branchée là → confiance faible
+
+
+def proposer_brassage_baie(client_id: int) -> dict:
+    """Propose les cordons de brassage bandeau RJ ⇄ port de switch à partir de la
+    table d'apprentissage MAC : prise murale → machine déclarée → sa MAC est vue
+    sur un port de switch → le port de bandeau de même numéro doit être brassé
+    sur ce port. **Ne modifie rien** (aperçu) — l'application se fait ensuite via
+    /api/baie/lien-port, un lien à la fois.
+
+    Retourne {ok, motif?, propositions[], non_resolues[]}. Chaque proposition :
+      {bandeau_slot_id, bandeau_nom, prise_numero, machine_id, machine_nom,
+       switch_slot_id, switch_nom, switch_port_numero, ifindex,
+       action: 'creer'|'modifier'|'inchange', confiance: 'sure'|'faible',
+       actuel: {switch_slot_id, switch_port_numero}|None, vu_avec: int}
+    """
+    from database import get_db
+    if str(_cfg('diag_snmp_actif', '0')) != '1':
+        return {'ok': False, 'motif': 'snmp_inactif', 'propositions': [], 'non_resolues': []}
+    communautes = _communautes_snmp()
+    conn = get_db()
+    try:
+        switchs = _switchs_baie(conn, client_id)
+        if not switchs:
+            return {'ok': False, 'motif': 'aucun_switch', 'propositions': [], 'non_resolues': []}
+
+        # relevé SNMP mutualisé par IP : noms d'interface + FDB
+        infos_par_ip, fdb_par_ip = {}, {}
+        for sw in switchs:
+            ip = sw['ip']
+            if ip not in infos_par_ip:
+                infos_par_ip[ip] = _noms_interfaces(ip, communautes)
+                fdb_par_ip[ip] = _fdb_switch(ip, communautes)
+
+        # par slot switch : {ifindex: numero_baie} (inverse du mapping)
+        sw_ctx = []
+        for sw in switchs:
+            mapping, _sources, _cal, _div = _mapping_baie_ifindex(
+                conn, client_id, sw['slot_id'], sw['appareil_id'], infos_par_ip[sw['ip']])
+            sw_ctx.append({**sw, 'ifx_to_num': {ifx: num for num, ifx in mapping.items()},
+                           'fdb': fdb_par_ip.get(sw['ip']) or {}})
+
+        # MAC de chaque appareil du client
+        mac_par_appareil = {}
+        for aid, mac in conn.execute(
+                "SELECT id, adresse_mac FROM appareils WHERE client_id=? "
+                "AND adresse_mac!='' AND adresse_mac IS NOT NULL", (client_id,)):
+            mac_par_appareil[aid] = _norm_mac(mac)
+
+        propositions, non_resolues = [], []
+        ph = ','.join('?' * len(_TYPES_BANDEAU))
+        for b_slot_id, b_nom_c, b_type in conn.execute(
+                f"SELECT id, nom_custom, type_equipement FROM baie_slots "
+                f"WHERE client_id=? AND type_equipement IN ({ph})", (client_id, *_TYPES_BANDEAU)):
+            b_nom = b_nom_c or b_type
+            for prise_num, aid, m_nom in conn.execute(
+                    "SELECT pm.numero, pm.appareil_id, a.nom_machine FROM baie_prises_murales pm "
+                    "LEFT JOIN appareils a ON a.id = pm.appareil_id "
+                    "WHERE pm.slot_id=? AND pm.appareil_id IS NOT NULL ORDER BY pm.numero", (b_slot_id,)):
+                mac = mac_par_appareil.get(aid)
+                if not mac:
+                    non_resolues.append({'bandeau_nom': b_nom, 'prise_numero': prise_num,
+                                         'machine_nom': m_nom or f'#{aid}', 'motif': 'mac_absente'})
+                    continue
+                # où cette MAC est-elle apprise ? (port le moins « chargé » = accès)
+                cands = []
+                for c in sw_ctx:
+                    for ifx, macs in c['fdb'].items():
+                        if mac in macs:
+                            cands.append((len(macs), c, ifx))
+                if not cands:
+                    non_resolues.append({'bandeau_nom': b_nom, 'prise_numero': prise_num,
+                                         'machine_nom': m_nom or f'#{aid}', 'motif': 'non_vue'})
+                    continue
+                cands.sort(key=lambda x: x[0])
+                # premier candidat (le moins chargé) dont l'ifIndex est un port de
+                # baie représenté — un switch 48 ports en 2 éléments de rack a deux
+                # entrées `sw_ctx` qui se partagent la même FDB mais des plages de
+                # ports différentes.
+                choix = next((t for t in cands if t[1]['ifx_to_num'].get(t[2]) is not None), None)
+                if choix is None:
+                    non_resolues.append({'bandeau_nom': b_nom, 'prise_numero': prise_num,
+                                         'machine_nom': m_nom or f'#{aid}', 'motif': 'port_non_mappe'})
+                    continue
+                vu_avec, c, ifx = choix
+                port_num = c['ifx_to_num'][ifx]
+                actuel = conn.execute(
+                    "SELECT lie_slot_id, lie_port_numero FROM baie_slot_ports WHERE slot_id=? AND numero=?",
+                    (b_slot_id, prise_num)).fetchone()
+                a_sid = actuel[0] if actuel else None
+                a_num = actuel[1] if actuel else None
+                a_nom = ''
+                if a_sid:
+                    r = conn.execute("SELECT COALESCE(NULLIF(nom_custom,''), type_equipement, 'élément') "
+                                     "FROM baie_slots WHERE id=?", (a_sid,)).fetchone()
+                    a_nom = r[0] if r else ''
+                if a_sid == c['slot_id'] and a_num == port_num:
+                    action = 'inchange'
+                elif a_sid:
+                    action = 'modifier'
+                else:
+                    action = 'creer'
+                propositions.append({
+                    'bandeau_slot_id': b_slot_id, 'bandeau_nom': b_nom, 'prise_numero': prise_num,
+                    'machine_id': aid, 'machine_nom': m_nom or f'#{aid}',
+                    'switch_slot_id': c['slot_id'], 'switch_nom': c['nom'],
+                    'switch_port_numero': port_num, 'ifindex': ifx,
+                    'action': action, 'vu_avec': vu_avec - 1,
+                    'confiance': 'faible' if vu_avec > _BRASSAGE_UPLINK_MAX else 'sure',
+                    'actuel': ({'switch_slot_id': a_sid, 'switch_port_numero': a_num,
+                                'switch_nom': a_nom} if a_sid else None)})
+        propositions.sort(key=lambda p: (p['bandeau_nom'], p['prise_numero']))
+        return {'ok': True, 'propositions': propositions, 'non_resolues': non_resolues,
+                'nb_switchs': len({s['ip'] for s in switchs})}
+    except Exception:
+        logger.exception('network_diag: proposer_brassage_baie')
+        return {'ok': False, 'motif': 'erreur_interne', 'propositions': [], 'non_resolues': []}
+    finally:
+        conn.close()
+
+
 # ── Capture de trafic à la demande (onglet « Trafic capturé ») ──────────────
 
 def capturer_trafic(duree: int, client_id=None) -> dict:

@@ -826,6 +826,7 @@ table.mon-table th:nth-child(2), table.mon-table td:nth-child(2) { text-align:le
                 </select>
                 <span id="activite-bandeau" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--accent-green);align-self:center;"></span>
                 <button onclick="MoniteurModal.ouvrir()" class="btn btn-primary btn-sm" title="Moniteur réseau : compteurs bruts des ports, journal d'évènements, capture de trafic — pour comprendre ce que montrent les LEDs">📊 Moniteur</button>
+                <button onclick="BrassageModal.ouvrir()" class="btn btn-primary btn-sm" title="Deviner le brassage depuis le réseau : pour chaque prise murale reliée à une machine, retrouve le port de switch où sa MAC est vue (SNMP) et propose le cordon bandeau ⇄ switch. Aperçu avant application.">🧠 Deviner le brassage</button>
                 <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌</a>
                 <button onclick="changerU(-1)" class="btn btn-primary btn-sm" title="Réduire la baie d'1U">− U</button>
                 <button onclick="changerU(1)"  class="btn btn-primary btn-sm" title="Agrandir la baie d'1U">+ U</button>
@@ -1259,6 +1260,33 @@ table.mon-table th:nth-child(2), table.mon-table td:nth-child(2) { text-align:le
             </div>
             <div id="mon-cap-prog" class="mon-bar" style="display:none;margin-bottom:.6rem;"><i style="width:0%;"></i></div>
             <div id="mon-capture"></div>
+        </div>
+    </div>
+</div>
+
+<!-- DEVINER LE BRASSAGE — modale ouverte par le bouton « 🧠 Deviner le brassage ».
+     Pour chaque prise murale reliée à une machine, retrouve (table d'apprentissage
+     MAC du switch, SNMP) le port de switch où cette machine est vue, et propose le
+     cordon bandeau ⇄ switch correspondant. Aperçu : rien n'est écrit tant que
+     l'utilisateur n'a pas confirmé (application via /api/baie/lien-port). -->
+<div id="brassage-modal" class="modal-overlay" onclick="BrassageModal.fermerSiOverlay(event)">
+    <div class="mon-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;">
+            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">🧠 Deviner le brassage depuis le réseau</h3>
+            <button type="button" onclick="BrassageModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
+        </div>
+        <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.6rem;">
+            Chaque prise murale du bandeau RJ à laquelle vous avez affecté une machine est rapprochée du
+            port de switch où la MAC de cette machine est apprise. On propose alors le cordon
+            <b>bandeau&nbsp;⇄&nbsp;switch</b>. Décochez ce que vous ne voulez pas, puis appliquez —
+            l'opération est réversible (déliaison manuelle d'un port). Une fois brassé, tout changement de
+            câblage est signalé en direct sur la prise (⚠).
+        </div>
+        <div class="mon-pane actif" style="max-height:56vh;"><div id="brassage-corps">Chargement…</div></div>
+        <div style="display:flex;gap:.6rem;align-items:center;justify-content:flex-end;margin-top:.7rem;">
+            <span id="brassage-etat" style="font-size:.72rem;color:var(--text-muted);margin-right:auto;"></span>
+            <button class="btn btn-secondary btn-sm" onclick="BrassageModal.fermer()">Annuler</button>
+            <button id="brassage-appliquer" class="btn btn-primary btn-sm" onclick="BrassageModal.appliquer()" disabled>Appliquer la sélection</button>
         </div>
     </div>
 </div>
@@ -2247,7 +2275,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         });
         el.addEventListener('mouseenter', e => {
             e.stopPropagation();
-            afficherTooltipPriseMurale(e, pm, port.numero, nom);
+            afficherTooltipPriseMurale(e, pm, port.numero, nom, s.id);
         });
         el.addEventListener('mousemove', e => { e.stopPropagation(); const t = document.getElementById('rack-tooltip'); if (t.classList.contains('show')) positionnerTooltip(e); });
         el.addEventListener('mouseleave', e => { e.stopPropagation(); masquerTooltip(); });
@@ -2949,6 +2977,36 @@ async function creerLienPort(slot1Id, numero1, slot2Id, numero2) {
     showFlash('Lien créé.', 'success');
 }
 
+// Lignes « Activité » + « Trafic vu » à ajouter dans une infobulle riche
+// (port de switch/routeur ou prise murale), à partir du dernier relevé SNMP
+// de la vue d'activité (_activiteInfos). Vide si l'activité n'est pas active
+// ou si le port n'a rien remonté.
+function rowsActivitePort(slotId, numero) {
+    const a = _activiteInfos[slotId + '-' + numero];
+    if (!a) return '';
+    let h = '';
+    const etats = { traffic: 'trafic', sature: 'saturé', err: 'erreurs', idle: 'calme',
+                    stale: 'données obsolètes', down: 'lien coupé' };
+    const deb = a.cpt_pegge ? `${Math.round(a.pps || 0)} pkt/s` : fmtDebit(a.debit_bps);
+    h += `<div class="tip-row"><span class="tip-key">Activité</span><span class="tip-val">`
+       + `${etats[a.etat] || a.etat} · ${deb}`
+       + (a.err_delta ? ` · <span style="color:var(--accent-red,#ff3355);">${a.err_delta} err</span>` : '')
+       + `</span></div>`;
+    if (a.voisins && a.voisins.length) {
+        const plus = a.voisins_restants ? ` <span style="color:var(--text-muted);">+${a.voisins_restants}</span>` : '';
+        h += `<div class="tip-row"><span class="tip-key">Trafic vu</span>`
+           + `<span class="tip-val">${a.voisins.map(escH).join(', ')}${plus}</span></div>`;
+    }
+    if (a.cable === 'incoherent') {
+        h += `<div class="tip-row"><span class="tip-key">Câblage</span>`
+           + `<span class="tip-val" style="color:var(--accent-red,#ff3355);">⚠ incohérent — le switch voit un autre appareil</span></div>`;
+    } else if (a.cable === 'ok') {
+        h += `<div class="tip-row"><span class="tip-key">Câblage</span>`
+           + `<span class="tip-val" style="color:var(--accent-green,#22c55e);">✓ confirmé (la machine déclarée est bien sur ce port)</span></div>`;
+    }
+    return h;
+}
+
 function afficherTooltipPort(e, p, nomSlot, estBandeau, typeEquipement) {
     const t = document.getElementById('rack-tooltip');
     // Pour un lien port-à-port, nom_cible ("Port 1 — Routeur B") est déjà
@@ -2994,6 +3052,7 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau, typeEquipement) {
     if (p.cable_couleur || p.cable_longueur) {
         html += `<div class="tip-row"><span class="tip-key">Câble</span><span class="tip-val">${[p.cable_couleur, p.cable_longueur].filter(Boolean).map(escH).join(' · ')}</span></div>`;
     }
+    html += rowsActivitePort(p.slot_id, p.numero);
     t.innerHTML = html;
     t.classList.add('show');
     positionnerTooltip(e);
@@ -3004,7 +3063,7 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau, typeEquipement) {
 // Plus simple que afficherTooltipPort : jamais de lien port-à-port ici
 // (voir cleCiblePriseMurale), la correspondance avec le port RJ de même
 // numéro est fixe et automatique, pas quelque chose à câbler soi-même.
-function afficherTooltipPriseMurale(e, pm, numero, nomSlot) {
+function afficherTooltipPriseMurale(e, pm, numero, nomSlot, slotId) {
     const t = document.getElementById('rack-tooltip');
     let html = `<div class="tip-title">🚪 Prise murale ${numero}${pm.nom_cible ? ' — ' + escH(pm.nom_cible) : ''}</div>`;
     html += `<div class="tip-row"><span class="tip-key">Bandeau</span><span class="tip-val">${escH(nomSlot)}</span></div>`;
@@ -3024,6 +3083,7 @@ function afficherTooltipPriseMurale(e, pm, numero, nomSlot) {
     if (pm.cable_couleur || pm.cable_longueur) {
         html += `<div class="tip-row"><span class="tip-key">Câble</span><span class="tip-val">${[pm.cable_couleur, pm.cable_longueur].filter(Boolean).map(escH).join(' · ')}</span></div>`;
     }
+    html += rowsActivitePort(slotId, numero);
     html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);font-size:.68rem;">↓ Port RJ ${numero} : interconnexion</span></div>`;
     html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);font-size:.68rem;">✎ Double-clic pour éditer</span></div>`;
     t.innerHTML = html;
@@ -3209,6 +3269,7 @@ function initPingAuto() {
 // Préférence locale au navigateur (baie_activite_ms) — mode de vue, pas un
 // réglage serveur. Nécessite le SNMP activé côté diagnostic réseau.
 let _activiteTimer = null;
+let _activiteInfos = {};   // "slotId-numero" -> dernier relevé du port (lu par les infobulles riches)
 
 function fmtDebit(bps) {
     if (!bps) return '0 b/s';
@@ -3271,8 +3332,10 @@ async function chargerActivite() {
     const leg = document.getElementById('legende-activite');
     if (leg) leg.style.display = (d.actif === true) ? '' : 'none';
     _viderActivite();
+    _activiteInfos = {};
     if (d.actif === true) {
         for (const p of (d.ports || [])) {
+            _activiteInfos[p.slot_id + '-' + p.numero] = p;   // lu par les infobulles riches
             const sel = p.prise_murale
                 ? `.prise-murale[data-slot="${p.slot_id}"][data-numero="${p.numero}"]`
                 : `.port[data-slot="${p.slot_id}"][data-numero="${p.numero}"]`;
@@ -3282,23 +3345,6 @@ async function chargerActivite() {
             el.classList.add(p.prise_murale ? 'pm-act' : 'port-act', pre + '-' + p.etat);
             if (p.blink_ms) el.style.setProperty('--act-ms', p.blink_ms + 'ms');
             if (p.cable === 'incoherent') el.classList.add('pm-cable-ko');
-            const deb = p.cpt_pegge ? `${(p.pps || 0).toFixed(0)} pkt/s` : fmtDebit(p.debit_bps);
-            let cbl = '';
-            if (p.cable === 'incoherent') {
-                const v = p.voisins || [];
-                const vu = v.length ? ' : ' + v.slice(0, 3).join(', ') + (v.length > 3 ? '…' : '') : '';
-                cbl = ` · ⚠ câblage incohérent (le switch voit un autre appareil${vu})`;
-            } else if (p.cable === 'ok') {
-                cbl = ' · câblage confirmé';
-            }
-            let traf = '';
-            if (p.voisins && p.voisins.length && p.cable !== 'incoherent') {
-                traf = ` — trafic : ${p.voisins.join(', ')}`
-                     + (p.voisins_restants ? ` +${p.voisins_restants}` : '');
-            }
-            el.title = `${numeroAffiche(p.numero)}${p.cible ? ' · ' + p.cible : ''}`
-                       + `${p.nom ? ' · ' + p.nom : ''}${p.alias ? ' (' + p.alias + ')' : ''}`
-                       + ` — ${p.etat} · ${deb}` + (p.err_delta ? ` · ${p.err_delta} err` : '') + cbl + traf;
         }
     }
     majBandeauActivite(d);
@@ -3314,6 +3360,7 @@ function demarrerActivite(ms) {
         if (leg) leg.style.display = 'none';
         document.body.classList.remove('baie-activite-on');
         _viderActivite();
+        _activiteInfos = {};
         majBandeauActivite(null);
     }
 }
@@ -3631,6 +3678,106 @@ function fmtOctets(o) {
     if (o >= 1e3) return (o / 1e3).toFixed(0) + ' ko';
     return o + ' o';
 }
+
+// ── DEVINER LE BRASSAGE (modale) ─────────────────────────────────────────────
+// GET /api/baie/brassage/proposer -> liste de {prise -> port de switch} déduite
+// de la FDB. L'utilisateur coche, puis on applique chaque lien via
+// /api/baie/lien-port (la route de liaison manuelle, bidirectionnelle, qui
+// détache proprement toute liaison antérieure des deux côtés).
+const BrassageModal = {
+    _props: [],
+
+    ouvrir() {
+        document.getElementById('brassage-modal').classList.add('open');
+        this.charger();
+    },
+    fermer() { document.getElementById('brassage-modal').classList.remove('open'); },
+    fermerSiOverlay(e) { if (e.target.id === 'brassage-modal') this.fermer(); },
+
+    async charger() {
+        const corps = document.getElementById('brassage-corps');
+        const btn = document.getElementById('brassage-appliquer');
+        btn.disabled = true;
+        corps.innerHTML = '<span style="color:var(--text-muted);">Relevé SNMP en cours (table d\'apprentissage MAC des switchs)…</span>';
+        let d;
+        try { d = await (await fetch('/api/baie/brassage/proposer')).json(); }
+        catch (e) { corps.innerHTML = '<span style="color:var(--accent-red);">Erreur de communication.</span>'; return; }
+        if (!d.ok) {
+            const m = { snmp_inactif: 'SNMP désactivé — active-le dans le diagnostic réseau.',
+                        aucun_switch: 'Aucun switch de la baie associé à un appareil avec adresse IP.',
+                        erreur_interne: 'Erreur interne pendant le relevé.' }[d.motif] || 'Rapprochement impossible.';
+            corps.innerHTML = `<span style="color:var(--accent-orange,#f59e0b);">${escH(m)}</span>`;
+            return;
+        }
+        this._props = (d.propositions || []).filter(p => p.action !== 'inchange');
+        const inchanges = (d.propositions || []).length - this._props.length;
+        let html = '';
+        if (!this._props.length && !(d.non_resolues || []).length) {
+            html += '<span style="color:var(--accent-green);">✓ Tout le brassage des prises murales est déjà cohérent avec le réseau.</span>';
+        }
+        if (this._props.length) {
+            html += '<table class="mon-table"><thead><tr><th></th><th>Prise murale</th><th>Machine</th>'
+                  + '<th>Port de switch</th><th>Action</th><th>Confiance</th></tr></thead><tbody>';
+            this._props.forEach((p, i) => {
+                const chScheck = p.confiance === 'sure' ? 'checked' : '';
+                const ancien = p.actuel ? `${escH(p.actuel.switch_nom || 'ancien')} port ${p.actuel.switch_port_numero}` : '?';
+                const actTxt = p.action === 'creer' ? '<span style="color:var(--accent-green);">nouveau cordon</span>'
+                    : `<span style="color:var(--accent-orange,#f59e0b);">remplace : ${ancien}</span>`;
+                const conf = p.confiance === 'sure' ? '<span style="color:var(--accent-green);">sûre</span>'
+                    : `<span style="color:var(--accent-orange,#f59e0b);" title="La MAC est apprise sur ce port parmi ${p.vu_avec} autres — possible lien montant : à vérifier">à vérifier</span>`;
+                html += `<tr><td><input type="checkbox" data-i="${i}" ${chScheck} onchange="BrassageModal._maj()"></td>`
+                      + `<td>${escH(p.bandeau_nom)} · prise ${p.prise_numero}</td>`
+                      + `<td>${escH(p.machine_nom)}</td>`
+                      + `<td>${escH(p.switch_nom)} · port ${p.switch_port_numero}</td>`
+                      + `<td style="white-space:normal;">${actTxt}</td><td>${conf}</td></tr>`;
+            });
+            html += '</tbody></table>';
+        }
+        if ((d.non_resolues || []).length) {
+            const mot = { mac_absente: 'pas d\'adresse MAC connue pour la machine',
+                          non_vue: 'MAC absente de toutes les tables des switchs (machine éteinte ? switch non géré ?)',
+                          port_non_mappe: 'port de switch non représenté dans la baie (à calibrer)' };
+            html += '<div style="margin-top:.7rem;font-size:.7rem;color:var(--text-muted);">Non résolu :<ul style="margin:.3rem 0 0 1rem;">'
+                  + d.non_resolues.map(n => `<li>${escH(n.bandeau_nom)} · prise ${n.prise_numero} (${escH(n.machine_nom)}) — ${escH(mot[n.motif] || n.motif)}</li>`).join('')
+                  + '</ul></div>';
+        }
+        if (inchanges) html += `<div style="margin-top:.5rem;font-size:.7rem;color:var(--text-muted);">${inchanges} cordon(s) déjà correct(s), non listé(s).</div>`;
+        corps.innerHTML = html;
+        this._maj();
+    },
+
+    _maj() {
+        const n = document.querySelectorAll('#brassage-corps input[type=checkbox]:checked').length;
+        const btn = document.getElementById('brassage-appliquer');
+        btn.disabled = !n;
+        btn.textContent = n ? `Appliquer ${n} cordon${n > 1 ? 's' : ''}` : 'Appliquer la sélection';
+    },
+
+    async appliquer() {
+        const boxes = [...document.querySelectorAll('#brassage-corps input[type=checkbox]:checked')];
+        if (!boxes.length) return;
+        const btn = document.getElementById('brassage-appliquer');
+        const etat = document.getElementById('brassage-etat');
+        btn.disabled = true;
+        let ok = 0, ko = 0;
+        for (const b of boxes) {
+            const p = this._props[parseInt(b.dataset.i, 10)];
+            etat.textContent = `Application… ${ok + ko + 1}/${boxes.length}`;
+            try {
+                const r = await fetch('/api/baie/lien-port', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ slot1_id: p.bandeau_slot_id, numero1: p.prise_numero,
+                                           slot2_id: p.switch_slot_id, numero2: p.switch_port_numero })
+                });
+                if (r.ok) ok++; else ko++;
+            } catch (e) { ko++; }
+        }
+        etat.textContent = '';
+        showFlash(`Brassage : ${ok} cordon(s) créé(s)${ko ? `, ${ko} en échec` : ''}.`, ko ? 'error' : 'success');
+        this.fermer();
+        await chargerBaie(currentBaie);
+    },
+};
 
 // ── RECHERCHE ─────────────────────────────────────────────────────────────────
 function rechercherEquip(q) {

@@ -7092,6 +7092,20 @@ def api_baie_activite_calibrer_assistant():
     return jsonify(network_diag.assistant_calibration(cid, slot_id, numero, action))
 
 
+@app.route('/api/baie/brassage/proposer')
+@login_required
+def api_baie_brassage_proposer():
+    """Propose les cordons de brassage bandeau RJ ⇄ port de switch à partir de
+    la table d'apprentissage MAC des switchs (prise murale → machine déclarée →
+    port où sa MAC est vue). Lecture seule : renvoie un aperçu, l'application
+    passe ensuite par /api/baie/lien-port. Un relevé SNMP synchrone (FDB) peut
+    avoir lieu ici — action déclenchée explicitement par l'utilisateur."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify(network_diag.proposer_brassage_baie(cid))
+
+
 def _liste_cablage(conn, cid):
     """Chaque lien port-à-port du client, une seule fois (pas les deux sens),
     avec le nom des deux éléments — sert à la fois à la page imprimable et à

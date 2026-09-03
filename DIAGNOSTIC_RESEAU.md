@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-02 (v2.19.19). En cas de doute
+> Ce document décrit le comportement au 2026-09-02 (v2.19.20). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -134,6 +134,20 @@ des switchs de la baie et calcule l'état à peindre par port.
   alimente, dans l'infobulle de chaque port (switch **et** prise murale) et dans
   le détail du moniteur, la liste des appareils dont une MAC transite réellement
   par le port (« trafic : PC-A, PC-B +3 » — nom d'inventaire, sinon fabricant OUI).
+  v2.19.20 : ces infos vont dans l'**infobulle riche existante** (lignes
+  « Activité » / « Trafic vu » / « Câblage » ajoutées par `rowsActivitePort`,
+  alimentées par `_activiteInfos`), plus de `title` natif en double.
+- **Deviner le brassage** (v2.19.20, `proposer_brassage_baie`, bouton
+  « 🧠 Deviner le brassage » sur `/baie`) : pour chaque prise murale reliée à une
+  machine, on cherche dans la FDB de tous les switchs de la baie le port où la MAC
+  de cette machine est apprise (port le **moins chargé** = accès ; MAC vue parmi
+  `> _BRASSAGE_UPLINK_MAX` autres = lien montant → confiance « faible »), on mappe
+  l'ifIndex → numéro de port de baie (inverse de `_mapping_baie_ifindex`), et on
+  compare au cordon `baie_slot_ports.lie_*` existant → `creer` / `modifier` /
+  `inchange`. **Aperçu seul** (route `GET /api/baie/brassage/proposer`, lecture
+  seule) ; l'application se fait cordon par cordon via `POST /api/baie/lien-port`
+  (la route de liaison manuelle bidirectionnelle). Une fois le cordon posé, le
+  contrôle de câblage « live » signale tout changement ultérieur.
 - **Capacités SNMP (compteurs 64 bits, PoE) non condamnées sur un seul échec**
   (v2.19.13) : `_activite_hc[ip]` / `_activite_poe[ip]` ne passent à `False`
   qu'après `_ACTIVITE_NEG_CONFIRME` (2) relevés négatifs consécutifs — un paquet
@@ -402,7 +416,7 @@ GET, GET typé et GETNEXT (walk) sont faits main (encodage BER dans `app.py`,
 | Topologie (palier 4) | `decouvrir_topologie`, `_topologie_equipement`, `etat_topologie`, `appliquer_topologie_baie` |
 | Baseline (palier 5) | `enregistrer_metriques_liaison`, `evaluer_baseline`, `serie_metrique` |
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
-| Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite` (relevé SNMP mutualisé par IP → switch multi-slots), `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports` (+ `sysUpTime` pour un Δt exact), `_poll_poe` (POWER-ETHERNET-MIB), `_lire_sysinfo` (modèle/uptime), `_mapping_baie_ifindex` (nom_port RJ seulement, `divergences`) + `_port_physique_depuis_nom`, `_etat_led` (plafond débit/pps, bouclage 32 bits, `reboot`), `activite_baie`, `calibrer_port_baie` / `calibrer_decalage_baie`, `_prises_murales_activite` (v2.19.18 : LED des prises murales d'un bandeau RJ via le port de switch au bout du cordon `lie_slot_id`/`lie_port_numero`), `_fdb_switch` + `_voisins_port` (v2.19.19 : FDB bridge-MIB « live » → contrôle de câblage MAC déclarée ↔ MAC apprise, repli `diag_topologie` ; + appareils vus par port dans les infobulles) ; état : `_activite_sut` (Δt), `_activite_hist` (sparkline), `_activite_sysinfo`, `_activite_fdb`/`_activite_fdb_baseport`/`_activite_fdb_dialecte`/`_activite_fdb_echec`, `_activite_echecs`, `_activite_thread_lock` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer{,/decalage}` ; `baie_brassage.html` (`#sel-activite`, `.prise-murale.pm-act-*`, badge ⚠ `.pm-cable-ko`) ; widget `network-activity` ; colonne `baie_slot_ports.if_index` |
+| Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite` (relevé SNMP mutualisé par IP → switch multi-slots), `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports` (+ `sysUpTime` pour un Δt exact), `_poll_poe` (POWER-ETHERNET-MIB), `_lire_sysinfo` (modèle/uptime), `_mapping_baie_ifindex` (nom_port RJ seulement, `divergences`) + `_port_physique_depuis_nom`, `_etat_led` (plafond débit/pps, bouclage 32 bits, `reboot`), `activite_baie`, `calibrer_port_baie` / `calibrer_decalage_baie`, `_prises_murales_activite` (v2.19.18 : LED des prises murales d'un bandeau RJ via le port de switch au bout du cordon `lie_slot_id`/`lie_port_numero`), `_fdb_switch` + `_voisins_port` (v2.19.19 : FDB bridge-MIB « live » → contrôle de câblage MAC déclarée ↔ MAC apprise, repli `diag_topologie` ; + appareils vus par port dans les infobulles), `proposer_brassage_baie` (v2.19.20 : bouton « 🧠 Deviner le brassage » → cordons bandeau⇄switch déduits de la FDB, route `GET /api/baie/brassage/proposer` lecture seule, application via `POST /api/baie/lien-port`) ; état : `_activite_sut` (Δt), `_activite_hist` (sparkline), `_activite_sysinfo`, `_activite_fdb`/`_activite_fdb_baseport`/`_activite_fdb_dialecte`/`_activite_fdb_echec`, `_activite_echecs`, `_activite_thread_lock` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer{,/decalage}` ; `baie_brassage.html` (`#sel-activite`, `.prise-murale.pm-act-*`, badge ⚠ `.pm-cable-ko`) ; widget `network-activity` ; colonne `baie_slot_ports.if_index` |
 | Moniteur réseau de la baie (modale) | `network_diag.py` : `moniteur_baie` (GET, lecture seule), `_journal`/`_activite_journal` (conditions permanentes émises une seule fois), `_activite_detail`, `assistant_calibration`/`_maj_assistant_calibration` (calibrer par débranchement — décision quand le réseau se calme, écriture par `_activite_loop`), `capturer_trafic`, `lancer_capture_baie`/`statut_capture_baie` ; `_activite_calib` + `_noms_interfaces` (flag `maj_en_cours`) sous `_activite_lock` ; routes `GET /api/baie/activite/moniteur` + `POST /api/baie/activite/capture` + `POST /api/baie/activite/calibrer/assistant` ; `baie_brassage.html` (`#moniteur-modal`, `MoniteurModal` : en-tête modèle/uptime, colonne « tendance » (`sparkline`), « décaler de N », marqueur divergence, gel du re-render pendant qu'un `<select>` est manipulé, poll suspendu sur `document.hidden`) |
 | Orchestration | `_run_snapshot` (snapshot), `_moniteur_loop` / `_moniteur_cycle` (continu), `_enregistrer_evenements`, `_purger_anciens` |
 | Walk SNMP + BER | `app.py` : `_snmp_get`, `_snmp_get_typed`, `_snmp_walk` (GETNEXT), `_snmp_bulk_cols` (GETBULK v2c multi-colonnes, auto-descriptif), `_ber_decoder_oid`, `_ber_decoder_valeur` — tous vérifient le request-id de la réponse |

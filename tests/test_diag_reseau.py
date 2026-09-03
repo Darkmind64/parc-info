@@ -786,6 +786,52 @@ def test_fdb_switch_et_voisins(monkeypatch):
     assert 'PC-A' in v['noms'] and v['n'] == 2
 
 
+def test_proposer_brassage_baie(conn, deux_clients, make_appareil, monkeypatch):
+    """Rapproche prise murale (machine déclarée) → port de switch où sa MAC est
+    vue (FDB) → propose le cordon bandeau ⇄ switch. Un port qui apprend la MAC
+    parmi beaucoup d'autres (uplink) est proposé mais en confiance « faible »."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.7')
+    pcA = make_appareil(cid, nom_machine='PC-A', adresse_mac='AA:00:00:00:00:0A')
+    pcB = make_appareil(cid, nom_machine='PC-B', adresse_mac='AA:00:00:00:00:0B')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    sw_slot = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    for n in (3, 7):
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (sw_slot, n))
+    conn.execute("INSERT INTO baie_slots (client_id, position, type_equipement) VALUES (?,2,'Bandeau RJ')", (cid,))
+    b_slot = conn.execute("SELECT id FROM baie_slots WHERE type_equipement='Bandeau RJ' AND client_id=?",
+                          (cid,)).fetchone()[0]
+    for n in (1, 2):
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,?)", (b_slot, n))
+    conn.execute("INSERT INTO baie_prises_murales (slot_id, numero, appareil_id) VALUES (?,1,?)", (b_slot, pcA))
+    conn.execute("INSERT INTO baie_prises_murales (slot_id, numero, appareil_id) VALUES (?,2,?)", (b_slot, pcB))
+    conn.commit()
+
+    monkeypatch.setattr(network_diag, '_cfg', lambda k, d=None: '1' if k == 'diag_snmp_actif' else d)
+    monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
+    monkeypatch.setattr(network_diag, '_noms_interfaces',
+        lambda ip, c: {33: {'nom': 'Gi0/3', 'alias': '', 'ethernet': True},
+                       77: {'nom': 'Gi0/7', 'alias': '', 'ethernet': True}})
+    monkeypatch.setattr(network_diag, '_fdb_switch',
+        lambda ip, c: {33: {'aa:00:00:00:00:0a'},
+                       77: {'aa:00:00:00:00:0b'} | {f'00:00:00:00:00:{i:02x}' for i in range(20)}})
+
+    d = network_diag.proposer_brassage_baie(cid)
+    assert d['ok'] is True
+    props = {p['prise_numero']: p for p in d['propositions']}
+    assert props[1]['switch_port_numero'] == 3 and props[1]['action'] == 'creer'
+    assert props[1]['confiance'] == 'sure'
+    assert props[2]['switch_port_numero'] == 7 and props[2]['confiance'] == 'faible'
+
+    # une fois le cordon posé (comme le ferait /api/baie/lien-port), l'action passe à 'inchange'
+    conn.execute("UPDATE baie_slot_ports SET lie_slot_id=?, lie_port_numero=3 WHERE slot_id=? AND numero=1",
+                 (sw_slot, b_slot))
+    conn.commit()
+    d2 = network_diag.proposer_brassage_baie(cid)
+    p1 = next(p for p in d2['propositions'] if p['prise_numero'] == 1)
+    assert p1['action'] == 'inchange'
+
+
 def test_cycle_activite_stale_apres_echecs(conn, deux_clients, make_appareil, monkeypatch):
     """Un relevé manqué garde le dernier état connu (jamais 'down' juste parce
     que le SNMP a raté) ; après 3 échecs consécutifs, le port passe 'stale'."""
