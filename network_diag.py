@@ -2197,7 +2197,9 @@ def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> 
                 lents = [d[1] for f, d in futurs.items() if not f.done()]
                 logger.info('network_diag: cartographie — budget atteint, '
                             'équipement(s) toujours en cours : %s', ', '.join(lents))
-                muets += [ip for ip in lents if ip not in muets]
+                deja = {m['ip'] for m in muets}
+                muets += [{'ip': ip, 'detail': "budget de cartographie atteint pendant le relevé"}
+                          for ip in lents if ip not in deja]
         finally:
             # wait=False : on ne bloque pas sur un relevé qui traîne encore dans
             # un `recvfrom`. Son résultat sera simplement ignoré.
@@ -2206,9 +2208,9 @@ def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> 
             except TypeError:          # Python 3.8 : pas de cancel_futures
                 pool.shutdown(wait=False)
 
-        for ip, ((lignes, findings_eq, voisins_ip, nets, muet), aid, prof) in resultats.items():
+        for ip, ((lignes, findings_eq, voisins_ip, nets, muet, motif), aid, prof) in resultats.items():
             if muet:
-                muets.append(ip)
+                muets.append({'ip': ip, 'detail': motif or 'sans réponse SNMP'})
                 continue
             findings += findings_eq
             lignes_par_ip[ip] = lignes
@@ -2305,7 +2307,10 @@ def _journaliser_mouvements(conn, client_id, lignes_par_ip, now):
 def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now,
                           deadline=0.0):
     """Un switch : FDB -> port -> {mac, appareil} + voisins LLDP/CDP + STP +
-    recoupement baie. Retourne `(lignes, findings, voisins_ip, reseaux, muet)`.
+    recoupement baie. Retourne `(lignes, findings, voisins_ip, reseaux, muet,
+    detail)` — `detail` explique le POURQUOI quand `muet` est vrai (SNMP refusé
+    / absent / agent lisible mais sans interface ni table MAC), pour que
+    l'interface n'ait pas besoin d'un second bouton pour savoir quoi corriger.
 
     Corrections d'audit appliquées ici :
 
@@ -2339,7 +2344,7 @@ def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now,
         if not exploitable:
             logger.info('network_diag: cartographie — %s sans SNMP exploitable (%s)',
                         ip, _detail)
-            return [], [], [], [], True
+            return [], [], [], [], True, _detail
     except Exception:
         logger.debug('network_diag: _snmp_presence %s indisponible', ip, exc_info=True)
 
@@ -2354,7 +2359,7 @@ def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now,
     # L'agent répond mais n'expose ni interfaces ni table MAC : rien à
     # cartographier, et les relevés suivants seraient tout aussi vides.
     if not infos and not par_if:
-        return [], [], [], [], True
+        return [], [], [], [], True, 'SNMP lisible mais aucune interface ni table MAC exposée'
 
     noms_ports = {ifx: m.get('nom') or f'if{ifx}' for ifx, m in infos.items()}
     par_port = {ifx: sorted(macs) for ifx, macs in par_if.items()}
@@ -2486,7 +2491,7 @@ def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now,
     if findings:
         for f in findings:
             f['appareil_id'] = equip_id
-    return lignes, findings, voisins_ip, reseaux, False
+    return lignes, findings, voisins_ip, reseaux, False, ''
 
 
 def _communautes_snmp():

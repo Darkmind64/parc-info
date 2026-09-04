@@ -722,12 +722,13 @@ verifier(_r20[4] is True and _appels == [],
          "agent muet -> sortie immédiate, aucun relevé secondaire tenté",
          str(_appels))
 
-# (b) La cartographie complète remonte l'équipement muet au lieu de le taire.
+# (b) La cartographie complète remonte l'équipement muet au lieu de le taire,
+#     avec le POURQUOI (déjà calculé par _snmp_presence, plus jeté).
 A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (True, False, 'refusé')
 N._noms_interfaces, N._releve_mac_switch = _noms_orig, _releve_orig
 _res20 = N.decouvrir_topologie(902, budget_s=30)
-verifier(_res20.get('muets') == ['10.2.0.1'],
-         "un agent qui refuse le SNMP est remonté dans `muets`, pas ignoré en silence",
+verifier(_res20.get('muets') == [{'ip': '10.2.0.1', 'detail': 'refusé'}],
+         "un agent qui refuse le SNMP est remonté dans `muets` avec le motif, pas ignoré en silence",
          str(_res20.get('muets')))
 
 # (c) Equipement LENT : le budget doit etre respecte. `as_completed` etait
@@ -735,7 +736,7 @@ verifier(_res20.get('muets') == ['10.2.0.1'],
 #     un seul lot il ne l'etait donc jamais, et un seul switch lent figeait tout.
 A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (True, True, 'v1/v2c')
 _topo_orig = N._topologie_equipement
-N._topologie_equipement = lambda *a, **k: (_t20.sleep(20), ([], [], [], [], False))[1]
+N._topologie_equipement = lambda *a, **k: (_t20.sleep(20), ([], [], [], [], False, ''))[1]
 _t_debut = _t20.time()
 _res20b = N.decouvrir_topologie(902, budget_s=3)
 _duree = _t20.time() - _t_debut
@@ -746,7 +747,7 @@ verifier(_duree < 10,
 
 # (d) La progression est emise a CHAQUE equipement, pas une fois par lot.
 _vus = []
-N._topologie_equipement = lambda *a, **k: ([], [], [], [], False)
+N._topologie_equipement = lambda *a, **k: ([], [], [], [], False, '')
 N.decouvrir_topologie(902, _progress=lambda pct, msg: _vus.append(msg), budget_s=30)
 N._topologie_equipement = _topo_orig
 verifier(any('Relevé' in m for m in _vus) and _vus[-1] == 'Terminé',

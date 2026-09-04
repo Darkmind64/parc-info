@@ -1,17 +1,17 @@
 {
-  "version": "2.19.35",
+  "version": "2.19.36",
   "release_date": "2026-09-04",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.35/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.35/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.35/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.35",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.35/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.35/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.35/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.35/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.35/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.36/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.36/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.36/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.36",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.36/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.36/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.36/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.36/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.36/SHA256SUMS.txt"
   },
   "notes": {
     "new_features": "Baie de brassage — suite des correctifs. « Deviner le brassage » : quand un élément vu sur un port de switch a plusieurs ports (NAS, serveur, second switch…), on peut désormais choisir sur quel port du voisin le câble se branche, via un menu dans la proposition (au lieu d'une simple affectation sans lien). Moniteur réseau (onglet Ports) : la table ne déborde plus horizontalement quand les noms d'appareils ou d'interfaces sont longs ou nombreux — largeurs de colonnes fixées, retour à la ligne autorisé, liste des appareils vus bornée à « N appareils (vu) » au-delà de deux (détail complet en infobulle).",
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.35"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.36"
 }

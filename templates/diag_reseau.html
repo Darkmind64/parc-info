@@ -770,10 +770,15 @@ function suivreCartographie(){
         if (!dec) return;
         let html = '';
         if ((r2.muets || []).length){
+            // Chaque équipement porte désormais le POURQUOI (déjà calculé par
+            // _snmp_presence, simplement jeté avant cette version) : plus
+            // besoin de rouvrir « Tester SNMP » à côté pour savoir s'il s'agit
+            // d'un refus de communauté ou d'un silence complet.
             html += '<div class="diag-line" style="margin-top:.7rem;font-size:.78rem;color:#e0952a;">'
-                + '<strong>' + r2.muets.length + " équipement(s) sans SNMP exploitable :</strong> "
-                + r2.muets.map(x => '<span class="mono">' + esc(x) + '</span>').join(', ')
-                + '<div style="color:var(--text-muted);margin-top:.3rem;">Vérifiez qu’ils sont allumés et que la communauté (ou l’utilisateur SNMPv3) des réglages leur donne accès en lecture. Le bouton « Tester SNMP » dit lequel des deux manque.</div></div>';
+                + '<strong>' + r2.muets.length + " équipement(s) sans SNMP exploitable :</strong><br>"
+                + r2.muets.map(x => '<span class="mono">' + esc(x.ip || x) + '</span>'
+                    + (x.detail ? ' — ' + esc(x.detail) : '')).join('<br>')
+                + '<div style="color:var(--text-muted);margin-top:.3rem;">« aucune réponse SNMP » = l’agent ne répond à rien, à vérifier : allumé ? bon port/VLAN ? pare-feu ? « présent mais refusé »/« ni communauté ni v3 valides » = un agent répond mais la communauté (ou l’utilisateur SNMPv3) des réglages ne convient pas.</div></div>';
         }
         if ((r2.decouverts || []).length){
             html += '<div class="diag-line" style="margin-top:.7rem;font-size:.78rem;">'

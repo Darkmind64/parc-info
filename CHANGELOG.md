@@ -1,5 +1,15 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.36] - 2026-09-04 🔍
+
+### 🔍 Le motif exact d'un équipement muet s'affiche directement dans la cartographie
+
+Retour terrain sur 2.19.35 : la cartographie va désormais au bout (le blocage est corrigé), mais quand un équipement configuré pour le SNMP est marqué « sans SNMP exploitable », il fallait rouvrir « Tester SNMP » à côté pour savoir *pourquoi* — refus de communauté, utilisateur SNMPv3 invalide, ou silence total. Cette raison était déjà calculée par `_snmp_presence` à l'intérieur de `_topologie_equipement`, puis simplement jetée.
+
+`_topologie_equipement` retourne maintenant le motif exact en plus du booléen « muet » ; `decouvrir_topologie` le porte dans `muets` sous la forme `{ip, detail}` au lieu d'une simple liste d'IP (un équipement qui n'a pas eu le temps d'être relevé avant la fin du budget porte le motif « budget de cartographie atteint pendant le relevé »). La bannière sous la carte affiche désormais ce motif à côté de chaque IP, avec une légende expliquant la différence entre « aucune réponse » (agent silencieux — à vérifier : allumé, bon port/VLAN, pare-feu) et « présent mais refusé » (un agent répond, mais la communauté ou l'utilisateur SNMPv3 configuré ne convient pas).
+
+Correctif de documentation au passage : un paragraphe de `DIAGNOSTIC_RESEAU.md` avait été corrompu par un appel `python -c "..."` exécuté via PowerShell — le backtick y est le caractère d'échappement, donc chaque `` `<lettre> `` d'un code span markdown avait été mangé, avec un caractère BEL invisible produit dans le mot « as_completed ». Corrigé, et vérifié qu'aucun autre fichier du dépôt ne porte la même corruption.
+
 ## [2.19.35] - 2026-09-04 🩹
 
 ### 🩹 Cartographie qui se figeait + schéma des cascades dans l'infobulle de la baie

@@ -95,16 +95,19 @@ Rétention `diag_reseau_max_jours`.
 
 ### Quand un équipement ne répond pas
 
-_topologie_equipement commence par une sonde _snmp_presence (un GET
-sysDescr, ~1 s). Si l'agent n'est pas lisible, elle rend la main aussitôt et
-l'IP part dans muets. Sans elle, les ~20 parcours SNMP qui suivent expiraient
-un par un — près d'une minute par équipement, pendant laquelle la cartographie
-paraissait figée. Une échéance (deadline) est ensuite propagée : LLDP/CDP,
-STP, ENTITY-MIB et sous-réseaux sont sautés quand le budget se tend, dans cet
-ordre de priorité décroissante.
+`_topologie_equipement` commence par une sonde `_snmp_presence` (un `GET
+sysDescr`, ~1 s). Si l'agent n'est pas lisible, elle rend la main aussitôt et
+l'IP part dans `muets` — avec le motif exact (`_snmp_presence` le calcule déjà :
+« aucune réponse SNMP » si l'agent est silencieux, « agent présent mais
+communauté/utilisateur v3 refusés » s'il répond à la découverte v3 sans
+accepter la lecture), affiché tel quel sous la carte. Sans cette sonde, les
+~20 parcours SNMP qui suivent expiraient un par un — près d'une minute par
+équipement, pendant laquelle la cartographie paraissait figée. Une échéance
+(`deadline`) est ensuite propagée : LLDP/CDP, STP, ENTITY-MIB et sous-réseaux
+sont sautés quand le budget se tend, dans cet ordre de priorité décroissante.
 
-Côté orchestration, s_completed reçoit le délai restant et l'exécuteur est
-fermé avec wait=False : un relevé qui traîne n'immobilise plus le job, son
+Côté orchestration, `as_completed` reçoit le délai restant et l'exécuteur est
+fermé avec `wait=False` : un relevé qui traîne n'immobilise plus le job, son
 résultat est simplement ignoré. La progression est rapportée à **chaque**
 équipement terminé, pas une fois par lot.
 

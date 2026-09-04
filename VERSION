@@ -1,9 +1,31 @@
-PARCINFO_VERSION=2.19.35
+PARCINFO_VERSION=2.19.36
 RELEASE_DATE=2026-09-04
-BUILD_NUMBER=2026090404
+BUILD_NUMBER=2026090405
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.36 - Le motif d'un equipement muet est affiche directement
+# Retour terrain sur 2.19.35 : la cartographie va desormais au bout (le bug
+# de blocage est corrige), mais quand un equipement configure pour le SNMP
+# est marque "sans SNMP exploitable", l'utilisateur devait rouvrir "Tester
+# SNMP" a cote pour savoir POURQUOI (refus de communaute/v3 vs silence total).
+# Cette raison etait deja calculee par _snmp_presence puis jetee.
+#
+# _topologie_equipement retourne maintenant un 6e element (le motif exact :
+# "aucune reponse SNMP", "agent SNMP present, ni communaute ni utilisateur v3
+# valides", "SNMPv3 : refus <code>", ou "SNMP lisible mais aucune interface ni
+# table MAC exposee"). decouvrir_topologie le porte dans `muets` sous la forme
+# {ip, detail} (au lieu d'une simple liste d'IP) ; un equipement qui n'a pas eu
+# le temps d'etre relevé avant la fin du budget porte le motif "budget de
+# cartographie atteint pendant le releve". Affiche directement sous la carte,
+# a cote de chaque IP.
+#
+# Correctif de documentation au passage : le paragraphe "Quand un equipement
+# ne repond pas" de DIAGNOSTIC_RESEAU.md avait ete corrompu par un appel
+# `python -c "..."` execute via PowerShell — le backtick y est le caractere
+# d'echappement, donc chaque `<lettre>` de code span a ete mange (`a` a
+# meme produit un caractere BEL invisible dans "as_completed"). Corrige.
+#
 # Version 2.19.35 - Cartographie debloquee + schema de cascade dans la baie
 #
 # 1. CARTOGRAPHIE QUI SE FIGEAIT (retour terrain)
