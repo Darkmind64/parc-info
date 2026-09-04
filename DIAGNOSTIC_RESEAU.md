@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-04 (v2.19.32). En cas de doute
+> Ce document décrit le comportement au 2026-09-04 (v2.19.35). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -92,6 +92,21 @@ l'ancien relevé au nouveau **avant** l'écrasement et écrit les transitions da
 `diag_topologie_mouvements` : `apparu`, `disparu`, `deplace` (avec port avant /
 après). Uniquement sur les ports d'accès — un uplink bougerait sans arrêt.
 Rétention `diag_reseau_max_jours`.
+
+### Quand un équipement ne répond pas
+
+_topologie_equipement commence par une sonde _snmp_presence (un GET
+sysDescr, ~1 s). Si l'agent n'est pas lisible, elle rend la main aussitôt et
+l'IP part dans muets. Sans elle, les ~20 parcours SNMP qui suivent expiraient
+un par un — près d'une minute par équipement, pendant laquelle la cartographie
+paraissait figée. Une échéance (deadline) est ensuite propagée : LLDP/CDP,
+STP, ENTITY-MIB et sous-réseaux sont sautés quand le budget se tend, dans cet
+ordre de priorité décroissante.
+
+Côté orchestration, s_completed reçoit le délai restant et l'exécuteur est
+fermé avec wait=False : un relevé qui traîne n'immobilise plus le job, son
+résultat est simplement ignoré. La progression est rapportée à **chaque**
+équipement terminé, pas une fois par lot.
 
 ### Ce que ce palier ne pourra pas faire
 

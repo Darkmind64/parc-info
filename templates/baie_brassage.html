@@ -524,6 +524,10 @@ table.mon-table td.mon-wrap select { max-width:100%; }
     box-shadow:0 4px 20px rgba(0,0,0,.7); display:none; line-height:1.5;
 }
 .rack-tooltip.show { display:block; }
+/* Le schéma de cascade (port -> équipement intermédiaire -> machines) ne tient
+   pas dans les 260 px par défaut : la classe est posée par les fonctions
+   d'infobulle quand le schéma est présent. */
+.rack-tooltip.tip-large { max-width:340px; }
 .tip-title { color:var(--accent); font-weight:700; margin-bottom:.3rem; }
 .tip-row { display:flex; gap:.5rem; }
 .tip-key  { color:#4a6a8a; min-width:60px; }
@@ -733,6 +737,17 @@ table.mon-table td.mon-wrap select { max-width:100%; }
     border-left: none; margin-left: 0; padding-left: 0;
     border-top: 1px dashed rgba(255,255,255,.15); margin-top: .3rem; padding-top: .3rem;
 }
+
+/* ── Schéma de cascade dans l'infobulle (plusieurs machines sur un port) ── */
+.casc-wrap { display:block; }
+.casc-wrap .tip-key { display:block; margin-bottom:.15rem; }
+.casc-titre { display:block; color:var(--accent-orange,#f59e0b); margin-bottom:.15rem; }
+.casc-wrap svg { display:block; max-width:100%; height:auto; overflow:visible; }
+.casc-lien { fill:none; stroke:var(--accent,#00c9ff); stroke-width:1.2; opacity:.55; }
+.casc-sym { font-size:13px; text-anchor:middle; dominant-baseline:middle; }
+.casc-txt { font-size:10.5px; fill:var(--text-primary,#e8eefc); dominant-baseline:middle; }
+.casc-txt.casc-port { font-size:9px; fill:var(--text-muted,#93a0b4); text-anchor:middle; }
+.casc-txt.casc-inconnu { fill:var(--text-muted,#93a0b4); font-style:italic; }
 </style>
 {% endblock %}
 
@@ -2731,6 +2746,8 @@ function afficherTooltip(e, s) {
     html += `<div class="tip-row"><span class="tip-key">Position</span><span class="tip-val">U${s.position} · C${s.col_index||0} · ${s.hauteur_u||1}U${s.largeur_u ? ' · '+s.largeur_u+'/10' : ''}</span></div>`;
     if (s.description)    html += `<div class="tip-row"><span class="tip-key">Note</span><span class="tip-val">${escH(s.description)}</span></div>`;
     t.innerHTML = html;
+    // Le schema de cascade a besoin de plus que les 260 px par defaut.
+    t.classList.toggle('tip-large', html.indexOf('casc-wrap') >= 0);
     t.classList.add('show');
     positionnerTooltip(e);
 }
@@ -2981,6 +2998,86 @@ async function creerLienPort(slot1Id, numero1, slot2Id, numero2) {
     showFlash('Lien créé.', 'success');
 }
 
+// ── Symbole par type d'appareil, pour le schéma de cascade ──────────────────
+// La liste canonique des types est config_helpers.LISTE_DEFAULTS['types_appareils'].
+// On y ajoute une correspondance par mot-clé pour les types libres et pour les
+// appareils inconnus de l'inventaire (on n'a alors que le fabricant OUI).
+const SYM_TYPE = [
+    [/borne|point d.acc|\bap\b|wifi|wi-fi/i, '📶'],
+    [/switch/i,                              '🔀'],
+    [/routeur|pare-?feu|firewall|box/i,      '🌐'],
+    [/serveur|nas/i,                         '🗄️'],
+    [/imprimante|scanner|mfp/i,              '🖨️'],
+    [/cam[ée]ra|nvr|dvr|enregistreur/i,      '📷'],
+    [/t[ée]l[ée]phone|voip|sip/i,            '☎️'],
+    [/onduleur|ups/i,                        '🔋'],
+    [/portable|laptop/i,                     '💻'],
+    [/tablette|mobile|smartphone/i,          '📱'],
+    [/tv|[ée]cran|affich/i,                  '🖥️'],
+    [/pc|poste|desktop|ordinateur/i,         '🖥️'],
+];
+function symboleType(type, connu) {
+    for (const [re, sym] of SYM_TYPE) if (re.test(type || '')) return sym;
+    return connu ? '🖥️' : '❓';   // inventorié sans type connu / vu mais pas inventorié
+}
+
+// Schéma d'une cascade : le port, l'équipement intermédiaire déduit (switch non
+// géré ou borne Wi-Fi), et les machines qui parlent à travers lui. Rendu en SVG
+// inline — la page n'autorise aucune dépendance externe.
+function schemaCascade(a, numero) {
+    const det = (a.voisins_detail && a.voisins_detail.length)
+        ? a.voisins_detail
+        : (a.voisins || []).map(n => ({ nom: n, type: '', connu: true }));
+    if (det.length < 2) return '';
+    const c = a.cascade || {};
+    const inter = { wifi:        { sym: '📶', lbl: 'Borne Wi-Fi probable' },
+                    switch:      { sym: '🔀', lbl: 'Switch non géré probable' },
+                    indetermine: { sym: '🔀', lbl: 'Switch ou borne Wi-Fi' } }[c.type]
+                || { sym: '🔀', lbl: 'Équipement intermédiaire' };
+
+    // Géométrie : 🔌 (le port) ── 🔀 (l'équipement déduit) ─┬─ 🖥️ machine
+    // L'équipement intermédiaire n'est PAS étiqueté dans le dessin : la ligne
+    // de titre juste au-dessus le nomme déjà, et l'étiquette chevauchait le port.
+    const LH = 19, X_PORT = 17, X_INTER = 62, X_SYM = 104, X_NOM = 120, W = 300;
+    const yInter = 26, Y0 = 54;
+    const total = c.n_macs || a.voisins_n || det.length;
+    const restants = Math.max(0, total - det.length);
+    const lignes = det.length + (restants ? 1 : 0);
+    const H = Y0 + Math.max(0, lignes - 1) * LH + 12;
+
+    // width en % : le dessin se met à l'échelle si l'infobulle est plus étroite
+    // que les 300 px du viewBox (elle est plafonnée par `.rack-tooltip`).
+    let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img"`
+          + ` aria-label="Schéma des appareils en aval du port ${numero}">`;
+    // le port, et sa liaison vers l'équipement intermédiaire
+    s += `<text class="casc-txt casc-port" x="${X_PORT}" y="8">Port ${escH(numero)}</text>`;
+    s += `<text class="casc-sym" x="${X_PORT}" y="${yInter}">🔌</text>`;
+    s += `<path class="casc-lien" d="M${X_PORT + 11} ${yInter} H${X_INTER - 11}" />`;
+    s += `<text class="casc-sym" x="${X_INTER}" y="${yInter}">${inter.sym}</text>`;
+
+    // tronc vertical + peigne vers chaque machine
+    const yDernier = Y0 + Math.max(0, lignes - 1) * LH;
+    s += `<path class="casc-lien" d="M${X_INTER} ${yInter + 11} V${yDernier}" />`;
+    det.forEach((m, i) => {
+        const y = Y0 + i * LH;
+        s += `<path class="casc-lien" d="M${X_INTER} ${y} H${X_SYM - 10}" />`;
+        s += `<text class="casc-sym" x="${X_SYM}" y="${y}">${symboleType(m.type, m.connu)}</text>`;
+        const nom = (m.nom || '').length > 23 ? (m.nom || '').slice(0, 22) + '…' : (m.nom || '');
+        s += `<text class="casc-txt${m.connu ? '' : ' casc-inconnu'}" x="${X_NOM}" y="${y}">`
+           + `${escH(nom)}</text>`;
+    });
+    if (restants) {
+        const y = Y0 + det.length * LH;
+        s += `<path class="casc-lien" d="M${X_INTER} ${y} H${X_SYM - 10}" />`;
+        s += `<text class="casc-txt casc-inconnu" x="${X_NOM}" y="${y}">+${restants} autre(s)</text>`;
+    }
+    s += '</svg>';
+
+    return `<div class="tip-row casc-wrap"><span class="tip-key">En aval</span>`
+         + `<span class="tip-val"><span class="casc-titre">${total} appareils · ${escH(inter.lbl)}</span>`
+         + s + `</span></div>`;
+}
+
 // Lignes « Activité » + « Trafic vu » à ajouter dans une infobulle riche
 // (port de switch/routeur ou prise murale), à partir du dernier relevé SNMP
 // de la vue d'activité (_activiteInfos). Vide si l'activité n'est pas active
@@ -2996,7 +3093,11 @@ function rowsActivitePort(slotId, numero) {
        + `${etats[a.etat] || a.etat} · ${deb}`
        + (a.err_delta ? ` · <span style="color:var(--accent-red,#ff3355);">${a.err_delta} err</span>` : '')
        + `</span></div>`;
-    if (a.voisins && a.voisins.length) {
+    // « Trafic vu » ne sert que quand il n'y a PAS de schéma : sinon les mêmes
+    // noms seraient listés deux fois dans la même infobulle.
+    const _aSchema = !!(a.voisins_detail || a.voisins || []).length
+                     && ((a.voisins_detail || a.voisins || []).length >= 2);
+    if (a.voisins && a.voisins.length && !_aSchema) {
         const plus = a.voisins_restants ? ` <span style="color:var(--text-muted);">+${a.voisins_restants}</span>` : '';
         h += `<div class="tip-row"><span class="tip-key">Trafic vu</span>`
            + `<span class="tip-val">${a.voisins.map(escH).join(', ')}${plus}</span></div>`;
@@ -3008,7 +3109,13 @@ function rowsActivitePort(slotId, numero) {
         h += `<div class="tip-row"><span class="tip-key">Câblage</span>`
            + `<span class="tip-val" style="color:var(--accent-green,#22c55e);">✓ confirmé (la machine déclarée est bien sur ce port)</span></div>`;
     }
-    if (a.cascade) {
+    // Plusieurs machines derrière un seul port : on dessine la cascade
+    // (port -> équipement intermédiaire -> machines) plutôt que d'annoncer un
+    // simple décompte. Repli sur la ligne texte si le détail manque.
+    const _sch = schemaCascade(a, numero);
+    if (_sch) {
+        h += _sch;
+    } else if (a.cascade) {
         const lbl = { wifi: '📶 borne Wi-Fi probable', switch: '🔀 switch non géré probable',
                       indetermine: '❔ switch ou borne Wi-Fi' }[a.cascade.type] || a.cascade.type;
         h += `<div class="tip-row"><span class="tip-key">En aval</span>`
@@ -3064,6 +3171,8 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau, typeEquipement) {
     }
     html += rowsActivitePort(p.slot_id, p.numero);
     t.innerHTML = html;
+    // Le schema de cascade a besoin de plus que les 260 px par defaut.
+    t.classList.toggle('tip-large', html.indexOf('casc-wrap') >= 0);
     t.classList.add('show');
     positionnerTooltip(e);
 }
@@ -3097,6 +3206,8 @@ function afficherTooltipPriseMurale(e, pm, numero, nomSlot, slotId) {
     html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);font-size:.68rem;">↓ Port RJ ${numero} : interconnexion</span></div>`;
     html += `<div class="tip-row"><span class="tip-val" style="color:var(--text-muted);font-size:.68rem;">✎ Double-clic pour éditer</span></div>`;
     t.innerHTML = html;
+    // Le schema de cascade a besoin de plus que les 260 px par defaut.
+    t.classList.toggle('tip-large', html.indexOf('casc-wrap') >= 0);
     t.classList.add('show');
     positionnerTooltip(e);
 }

@@ -769,6 +769,12 @@ function suivreCartographie(){
         const dec = document.getElementById('topo-decouverts');
         if (!dec) return;
         let html = '';
+        if ((r2.muets || []).length){
+            html += '<div class="diag-line" style="margin-top:.7rem;font-size:.78rem;color:#e0952a;">'
+                + '<strong>' + r2.muets.length + " équipement(s) sans SNMP exploitable :</strong> "
+                + r2.muets.map(x => '<span class="mono">' + esc(x) + '</span>').join(', ')
+                + '<div style="color:var(--text-muted);margin-top:.3rem;">Vérifiez qu’ils sont allumés et que la communauté (ou l’utilisateur SNMPv3) des réglages leur donne accès en lecture. Le bouton « Tester SNMP » dit lequel des deux manque.</div></div>';
+        }
         if ((r2.decouverts || []).length){
             html += '<div class="diag-line" style="margin-top:.7rem;font-size:.78rem;">'
                 + '<strong>' + r2.decouverts.length + " équipement(s) réseau vus en LLDP mais absents de l'inventaire :</strong><br>"

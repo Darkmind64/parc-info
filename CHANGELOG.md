@@ -1,5 +1,17 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.35] - 2026-09-04 🩹
+
+### 🩹 Cartographie qui se figeait + schéma des cascades dans l'infobulle de la baie
+
+**La cartographie ne rendait jamais la main.** Le bouton « Cartographier maintenant » restait sur « Relevé de 1/2 équipements » indéfiniment. Trois causes cumulées, toutes introduites en 2.19.32.
+
+D'abord, la progression n'était émise **qu'une fois par lot**, avant le pool de relevés : avec deux switchs et six ouvriers il n'y a qu'un seul lot, donc un seul message, du début à la fin. Elle est maintenant rapportée à chaque équipement terminé. Ensuite, `as_completed` était appelé **sans délai** et le budget n'était vérifié qu'entre deux lots — donc jamais quand il n'y en a qu'un : un seul équipement lent immobilisait tout le job. Le délai restant lui est transmis, et l'exécuteur est fermé avec `wait=False` pour ne pas bloquer sur un `recvfrom` en cours. Enfin, `_topologie_equipement` enchaîne une vingtaine de parcours SNMP (LLDP ×7, CDP ×5, `lldpRemManAddr`, STP ×4, ENTITY-MIB ×5, IP-MIB ×3, FDB, PVID, ARP) : sur un équipement muet, chacun expirait sur son propre délai, soit près d'une minute par équipement. Une sonde `_snmp_presence` (un `GET sysDescr`, ~1 s) passe désormais **en premier** et rend la main aussitôt si l'agent n'est pas lisible ; une échéance est propagée pour sauter les relevés secondaires quand le budget se tend.
+
+Les équipements muets ne sont plus passés sous silence : ils remontent dans `muets`, le message final les compte, et l'interface indique quoi vérifier (alimentation, communauté ou utilisateur SNMPv3). Quatre tests de non-régression couvrent désormais l'agent muet, l'agent qui refuse le SNMP, l'agent lent face au budget, et la progression.
+
+**Schéma des cascades dans l'infobulle de la baie.** Un port sur lequel plusieurs machines sont détectées se contentait d'un décompte (« 10 appareils · switch non géré probable »). Il affiche maintenant un petit schéma : le port, l'équipement intermédiaire déduit — switch ou borne Wi-Fi selon `_classer_cascade` — et les machines qui parlent à travers lui, chacune avec le symbole de son type (poste, portable, imprimante, caméra, téléphone, NAS, onduleur…), les appareils vus mais absents de l'inventaire étant marqués distinctement. `_voisins_port` renvoie pour cela un `detail` (`{nom, type, id, mac, connu}`) : la liste de noms ne portait pas le type. `_cycle_activite` classe aussi la cascade pour les ports de **switch**, ce qui n'était fait que pour les prises murales. La ligne « Trafic vu » s'efface quand le schéma est présent, sinon les mêmes noms apparaîtraient deux fois, et l'infobulle passe à 340 px (`.tip-large`) parce que le dessin ne tient pas dans les 260 px par défaut. Dessin en SVG inline, sans aucune dépendance.
+
 ## [2.19.34] - 2026-09-04 📐
 
 ### 📐 Balayage du défilement horizontal : 28 pages mesurées, 4 causes corrigées

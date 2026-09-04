@@ -277,6 +277,10 @@ N.interroger_equipement = lambda ip, comm: {'sysname': 'sw', 'ts': _t.time(), 'p
 # consomme le cache des noms d'interface alimenté par la phase SNMP.
 N._noms_interfaces = lambda ip, comm: {
     5: {'nom': 'Gi0/5', 'alias': '', 'ethernet': True, 'speed_mbps': 1000}}
+# Sonde d'existence : _topologie_equipement commence par un GET sysDescr pour ne
+# pas enchaîner vingt parcours SNMP sur un équipement muet. On la fait répondre
+# « agent lisible » ici, et on vérifie plus bas qu'un agent muet coupe court.
+A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (True, True, 'v1/v2c (public)')
 _MAC_DEC = '.'.join(str(int('aa0000000011'[i:i + 2], 16)) for i in range(0, 12, 2))
 N._snmp_walk = lambda oid, ip, comm, **k: (
     {f'1.{_MAC_DEC}': '5'} if oid == N._OID_FDB_DOT1Q_PORT else
@@ -701,6 +705,52 @@ verifier(_rb.get('1.3.6.1.2.1.31.1.1.1.1') == {'1': 'Gi1/0/1', '2': 'Gi1/0/2', '
          and _rb.get('1.3.6.1.2.1.2.2.1.8') == {'1': 1, '2': 2, '3': 1},
          "GETBULK 2 colonnes, réponse en ordre colonne-majeur -> attribution par préfixe (pas par position)",
          str(_rb))
+
+print('\n=== 20. Cartographie : ni blocage sur un agent muet, ni sur un agent lent ===')
+import time as _t20
+
+# (a) Equipement MUET : la sonde d'existence doit couper court AVANT les ~20
+#     parcours SNMP secondaires. Sans elle, chacun expirait sur son delai et la
+#     cartographie restait figee sur « Relevé de 1/2 » plusieurs minutes.
+_appels = []
+A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (False, False, 'aucune réponse SNMP')
+_noms_orig, _releve_orig = N._noms_interfaces, N._releve_mac_switch
+N._noms_interfaces = lambda ip, comm: (_appels.append('noms'), {})[1]
+N._releve_mac_switch = lambda ip, comm, inv: (_appels.append('fdb'), ({}, {}))[1]
+_r20 = N._topologie_equipement(902, 500, '10.2.0.99', ['public'], {}, 'x')
+verifier(_r20[4] is True and _appels == [],
+         "agent muet -> sortie immédiate, aucun relevé secondaire tenté",
+         str(_appels))
+
+# (b) La cartographie complète remonte l'équipement muet au lieu de le taire.
+A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (True, False, 'refusé')
+N._noms_interfaces, N._releve_mac_switch = _noms_orig, _releve_orig
+_res20 = N.decouvrir_topologie(902, budget_s=30)
+verifier(_res20.get('muets') == ['10.2.0.1'],
+         "un agent qui refuse le SNMP est remonté dans `muets`, pas ignoré en silence",
+         str(_res20.get('muets')))
+
+# (c) Equipement LENT : le budget doit etre respecte. `as_completed` etait
+#     appele SANS delai et le budget n'etait verifie qu'entre deux lots — avec
+#     un seul lot il ne l'etait donc jamais, et un seul switch lent figeait tout.
+A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (True, True, 'v1/v2c')
+_topo_orig = N._topologie_equipement
+N._topologie_equipement = lambda *a, **k: (_t20.sleep(20), ([], [], [], [], False))[1]
+_t_debut = _t20.time()
+_res20b = N.decouvrir_topologie(902, budget_s=3)
+_duree = _t20.time() - _t_debut
+N._topologie_equipement = _topo_orig
+verifier(_duree < 10,
+         "un relevé qui traîne n'immobilise plus le job : rendu sous le budget",
+         "%.1f s pour un budget de 3 s" % _duree)
+
+# (d) La progression est emise a CHAQUE equipement, pas une fois par lot.
+_vus = []
+N._topologie_equipement = lambda *a, **k: ([], [], [], [], False)
+N.decouvrir_topologie(902, _progress=lambda pct, msg: _vus.append(msg), budget_s=30)
+N._topologie_equipement = _topo_orig
+verifier(any('Relevé' in m for m in _vus) and _vus[-1] == 'Terminé',
+         "la progression est rapportée puis close par « Terminé »", str(_vus[-3:]))
 
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

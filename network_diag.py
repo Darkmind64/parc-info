@@ -2110,7 +2110,8 @@ def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> 
       cache `_noms_interfaces`, alimenté par la phase SNMP qui précède, au lieu
       de refaire un `interroger_equipement` intégral par switch."""
     if str(_cfg('diag_topologie_active', '0')) != '1' or str(_cfg('diag_snmp_actif', '0')) != '1':
-        return {'findings': [], 'equipements': 0, 'decouverts': [], 'reseaux': []}
+        return {'findings': [], 'equipements': 0, 'decouverts': [], 'reseaux': [],
+                'muets': []}
     communautes = _communautes_snmp()
 
     def _prog(pct, msg=''):
@@ -2144,35 +2145,71 @@ def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> 
                 inventaire[_m] = (_aid, _nom_aid[_aid])
         conn.close()
     except Exception:
-        return {'findings': [], 'equipements': 0, 'decouverts': [], 'reseaux': []}
+        return {'findings': [], 'equipements': 0, 'decouverts': [], 'reseaux': [],
+                'muets': []}
 
-    findings, decouverts, reseaux = [], [], set()
+    findings, decouverts, reseaux, muets = [], [], set(), []
     now = _now_z()
     t0 = time.time()
     # file d'attente : (appareil_id | None, ip, profondeur)
     a_faire = [(aid, ip, 0) for aid, ip in equipements if ip]
     vues = {ip for _a, ip, _p in a_faire}
     lignes_par_ip = {}
+    nb_faits = [0]
+
+    def _avance(ip_courante=''):
+        """Progression réelle, appelée à CHAQUE équipement terminé. Elle n'était
+        émise qu'une fois par lot : avec deux switchs et six ouvriers, il n'y a
+        qu'un seul lot, donc un seul message — l'interface restait figée sur
+        « Relevé de 1/2 » du début à la fin."""
+        nb_faits[0] += 1
+        _prog(5 + min(85, nb_faits[0] * 85 // max(1, len(vues))),
+              "Relevé %d/%d — %s" % (nb_faits[0], len(vues), ip_courante))
 
     while a_faire and len(vues) <= _TOPO_EQUIP_MAX:
-        if budget_s and (time.time() - t0) > budget_s:
+        restant = (budget_s - (time.time() - t0)) if budget_s else None
+        if restant is not None and restant <= 1:
             break
         lot, a_faire = a_faire[:_TOPO_WORKERS], a_faire[_TOPO_WORKERS:]
-        _prog(5 + min(80, len(lignes_par_ip) * 80 // max(1, len(vues))),
-              f"Relevé de {len(lignes_par_ip) + 1}/{len(vues)} équipement(s)")
+        _prog(5 + min(85, nb_faits[0] * 85 // max(1, len(vues))),
+              "Relevé %d/%d — %s" % (nb_faits[0] + 1, len(vues), lot[0][1]))
+        # échéance transmise à chaque relevé : les parcours SNMP secondaires
+        # s'arrêtent d'eux-mêmes au lieu d'expirer un par un.
+        deadline = (t0 + budget_s) if budget_s else 0.0
         resultats = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(lot)) as pool:
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(lot))
+        try:
             futurs = {pool.submit(_topologie_equipement, client_id, aid, ip,
-                                  communautes, inventaire, now): (aid, ip, prof)
+                                  communautes, inventaire, now, deadline): (aid, ip, prof)
                       for aid, ip, prof in lot}
-            for fut in concurrent.futures.as_completed(futurs):
-                aid, ip, prof = futurs[fut]
-                try:
-                    resultats[ip] = (fut.result(), aid, prof)
-                except Exception:
-                    logger.debug('network_diag: topologie %s en échec', ip, exc_info=True)
+            try:
+                # `as_completed` SANS délai attendait indéfiniment : le budget
+                # n'était vérifié qu'entre deux lots, donc jamais quand il n'y
+                # en a qu'un. Un seul équipement lent figeait tout le job.
+                for fut in concurrent.futures.as_completed(futurs, timeout=restant):
+                    aid, ip, prof = futurs[fut]
+                    try:
+                        resultats[ip] = (fut.result(), aid, prof)
+                    except Exception:
+                        logger.debug('network_diag: topologie %s en échec', ip, exc_info=True)
+                    _avance(ip)
+            except concurrent.futures.TimeoutError:
+                lents = [d[1] for f, d in futurs.items() if not f.done()]
+                logger.info('network_diag: cartographie — budget atteint, '
+                            'équipement(s) toujours en cours : %s', ', '.join(lents))
+                muets += [ip for ip in lents if ip not in muets]
+        finally:
+            # wait=False : on ne bloque pas sur un relevé qui traîne encore dans
+            # un `recvfrom`. Son résultat sera simplement ignoré.
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except TypeError:          # Python 3.8 : pas de cancel_futures
+                pool.shutdown(wait=False)
 
-        for ip, ((lignes, findings_eq, voisins_ip, nets), aid, prof) in resultats.items():
+        for ip, ((lignes, findings_eq, voisins_ip, nets, muet), aid, prof) in resultats.items():
+            if muet:
+                muets.append(ip)
+                continue
             findings += findings_eq
             lignes_par_ip[ip] = lignes
             reseaux |= set(nets)
@@ -2209,7 +2246,8 @@ def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> 
             logger.exception('network_diag: écriture topologie impossible')
     _prog(100, 'Terminé')
     return {'findings': findings, 'equipements': len(lignes_par_ip),
-            'decouverts': decouverts, 'reseaux': sorted(reseaux)}
+            'decouverts': decouverts, 'reseaux': sorted(reseaux),
+            'muets': muets}
 
 
 def _journaliser_mouvements(conn, client_id, lignes_par_ip, now):
@@ -2264,9 +2302,10 @@ def _journaliser_mouvements(conn, client_id, lignes_par_ip, now):
             "port_avant, port_apres) VALUES (?,?,?,?,?,?,?,?,?,?)", mvts)
 
 
-def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now):
+def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now,
+                          deadline=0.0):
     """Un switch : FDB -> port -> {mac, appareil} + voisins LLDP/CDP + STP +
-    recoupement baie. Retourne `(lignes, findings, voisins_ip, reseaux)`.
+    recoupement baie. Retourne `(lignes, findings, voisins_ip, reseaux, muet)`.
 
     Corrections d'audit appliquées ici :
 
@@ -2279,40 +2318,81 @@ def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now)
     - **#03** : le recoupement avec la baie passe par `_mapping_baie_ifindex`
       (numéro de façade -> ifIndex) au lieu de comparer un ifIndex à un numéro
       de port, deux numérotations sans rapport.
+
+    `deadline` (epoch) : au-delà, les relevés SECONDAIRES (LLDP/CDP, STP,
+    ENTITY-MIB, sous-réseaux) sont sautés. Sans cela, un équipement qui ne
+    répond pas coûtait une vingtaine de parcours SNMP expirant chacun sur son
+    délai — plusieurs minutes pendant lesquelles la cartographie semblait figée.
     """
+    def _reste():
+        return (deadline - time.time()) if deadline else 1e9
+
+    # ── Sonde d'existence, EN PREMIER ────────────────────────────────────────
+    # Un `GET sysDescr` (~1 s) répond à « y a-t-il un agent lisible ici ? ».
+    # Sans elle, un équipement éteint ou dont la communauté est fausse coûtait
+    # la vingtaine de parcours SNMP qui suivent, expirant chacun sur son propre
+    # délai : près d'une minute par équipement, pendant laquelle la
+    # cartographie paraissait figée.
+    try:
+        from app import _snmp_presence
+        present, exploitable, _detail = _snmp_presence(ip, communautes)
+        if not exploitable:
+            logger.info('network_diag: cartographie — %s sans SNMP exploitable (%s)',
+                        ip, _detail)
+            return [], [], [], [], True
+    except Exception:
+        logger.debug('network_diag: _snmp_presence %s indisponible', ip, exc_info=True)
+
     # #07 — cache partagé avec la vue d'activité, TTL 90 s, rafraîchi en fond.
     infos = _noms_interfaces(ip, communautes) or {}
-    noms_ports = {ifx: m.get('nom') or f'if{ifx}' for ifx, m in infos.items()}
 
     # Table MAC : même relevé unifié que le cycle d'activité et « Deviner le
     # brassage » (bridge dot1q/dot1d + contexte VLAN + ARP + correction de forme
     # pour un agent buggé + réglage `diag_fdb_mode:<ip>`).
     par_if, meta = _releve_mac_switch(ip, communautes, inventaire)
+
+    # L'agent répond mais n'expose ni interfaces ni table MAC : rien à
+    # cartographier, et les relevés suivants seraient tout aussi vides.
+    if not infos and not par_if:
+        return [], [], [], [], True
+
+    noms_ports = {ifx: m.get('nom') or f'if{ifx}' for ifx, m in infos.items()}
     par_port = {ifx: sorted(macs) for ifx, macs in par_if.items()}
     vlans, pvid = meta.get('vlans') or {}, meta.get('pvid') or {}
 
     # voisins LLDP + CDP (capacités système, MAC du châssis, sous-type de PortID,
     # et désormais l'IP de gestion — graine de la découverte récursive, #10)
-    voisins = _voisins_lldp_cdp(ip, communautes, infos)
+    voisins = {}
+    if _reste() > 12:
+        try:
+            voisins = _voisins_lldp_cdp(ip, communautes, infos)
+        except Exception:
+            logger.debug('network_diag: LLDP/CDP %s en échec', ip, exc_info=True)
 
     # STP : le SENS des liens même sans LLDP (#12)
     bp_hit = _activite_fdb_baseport.get(ip)
     baseport_if = bp_hit[1] if bp_hit else {}
-    try:
-        stp_ports, _stp_glob = _stp_switch(ip, communautes, baseport_if)
-    except Exception:
-        stp_ports = {}
+    stp_ports = {}
+    if _reste() > 8:
+        try:
+            stp_ports, _stp_glob = _stp_switch(ip, communautes, baseport_if)
+        except Exception:
+            stp_ports = {}
 
     # modèle / série exacts pour l'affichage et l'inventaire (#14)
-    try:
-        entite = _entite_physique(ip, communautes)
-    except Exception:
-        entite = {}
+    entite = {}
+    if _reste() > 6:
+        try:
+            entite = _entite_physique(ip, communautes)
+        except Exception:
+            entite = {}
     # sous-réseaux portés / routés (#13)
-    try:
-        reseaux = _sous_reseaux_equipement(ip, communautes)
-    except Exception:
-        reseaux = []
+    reseaux = []
+    if _reste() > 4:
+        try:
+            reseaux = _sous_reseaux_equipement(ip, communautes)
+        except Exception:
+            reseaux = []
 
     # #03 — câblage baie de ce switch : {ifIndex: (appareil_id, nom)}, obtenu en
     # INVERSANT le mapping numéro de façade -> ifIndex. Les ports dont le mapping
@@ -2406,7 +2486,7 @@ def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now)
     if findings:
         for f in findings:
             f['appareil_id'] = equip_id
-    return lignes, findings, voisins_ip, reseaux
+    return lignes, findings, voisins_ip, reseaux, False
 
 
 def _communautes_snmp():
@@ -2460,10 +2540,15 @@ def _run_cartographie(client_id: int):
         res = decouvrir_topologie(client_id, _progress=_prog, budget_s=_TOPO_BUDGET_S)
         nb_evts = _enregistrer_evenements(client_id, res['findings'], 'topologie')
         resultat = {'equipements': res['equipements'], 'decouverts': res['decouverts'],
-                    'reseaux': res['reseaux'], 'nouveaux_evenements': nb_evts}
+                    'reseaux': res['reseaux'], 'muets': res.get('muets') or [],
+                    'nouveaux_evenements': nb_evts}
         message = '%d équipement(s) cartographié(s)' % res['equipements']
         if res['decouverts']:
             message += ", %d découvert(s) hors inventaire" % len(res['decouverts'])
+        if resultat['muets']:
+            # Sans ce retour, un agent injoignable donnait « 0 équipement
+            # cartographié » sans dire pourquoi.
+            message += ", %d sans réponse SNMP" % len(resultat['muets'])
     except Exception as e:
         logger.exception('network_diag: cartographie en échec')
         message = f'Erreur : {e}'
@@ -4879,21 +4964,31 @@ def _voisins_port(macs, inv_mac):
     """Décrit les appareils dont une MAC est apprise sur un port : nom
     d'inventaire si connu, sinon fabricant (OUI), sinon la MAC brute.
     Retourne `{'noms': [...max _ACTIVITE_VOISINS_MAX...], 'n': total,
-    'ids': set(appareil_id connus)}`."""
-    noms, ids, restants = [], set(), 0
+    'ids': set(appareil_id connus), 'detail': [...]}`.
+
+    `detail` porte, pour chacun des appareils listés, `{nom, type, id, mac,
+    connu}` : le schéma de cascade de l'infobulle a besoin du **type** pour
+    choisir le symbole de chaque machine, ce que la liste de noms ne donnait
+    pas."""
+    noms, ids, detail, vus = [], set(), [], set()
     for mac in sorted(macs):
         hit = inv_mac.get(mac)
         if hit:
             ids.add(hit[0])
             libelle = hit[1] or _vendor(mac) or mac
+            typ = (hit[2] or '') if len(hit) > 2 else ''
+            aid = hit[0]
         else:
             libelle = _vendor(mac) or mac
+            typ, aid = '', None
+        if libelle in vus:
+            continue
+        vus.add(libelle)
         if len(noms) < _ACTIVITE_VOISINS_MAX:
-            if libelle not in noms:
-                noms.append(libelle)
-        else:
-            restants += 1
-    return {'noms': noms, 'n': len(macs), 'ids': ids,
+            noms.append(libelle)
+            detail.append({'nom': libelle, 'type': typ, 'id': aid,
+                           'mac': mac, 'connu': bool(hit)})
+    return {'noms': noms, 'n': len(macs), 'ids': ids, 'detail': detail,
             'restants': max(0, len(macs) - len(noms))}
 
 
@@ -4983,6 +5078,7 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
                 'nom': meta.get('nom', ''), 'cible': decl_nom, 'cable': cable,
                 'voisins': (voisins or {}).get('noms', []),
                 'voisins_restants': (voisins or {}).get('restants', 0),
+                'voisins_detail': (voisins or {}).get('detail', []),
                 'cascade': cascade})
     return ports_ui, journal_ops
 
@@ -5191,6 +5287,13 @@ def _cycle_activite(clients):
                         # appareils dont une MAC est apprise sur ce port (FDB live)
                         _macs_port = (fdb_par_ip.get(ip) or {}).get(ifindex, set())
                         _vois = _voisins_port(_macs_port, inv_mac) if _macs_port else None
+                        # Plusieurs MAC sur un port d'accès = un équipement
+                        # intermédiaire non géré. On le classe ici aussi (ce
+                        # n'était fait que pour les prises murales) pour que
+                        # l'infobulle du port de switch puisse en dessiner le
+                        # schéma.
+                        _casc = (_classer_cascade(_macs_port, inv_mac)
+                                 if _macs_port and len(_macs_port) >= 2 else None)
 
                         ports_ui.append({'slot_id': slot_id, 'numero': numero,
                                          'etat': led['etat'], 'blink_ms': led['blink_ms'],
@@ -5201,6 +5304,8 @@ def _cycle_activite(clients):
                                          'cible': cibles.get(numero, ''),
                                          'voisins': (_vois or {}).get('noms', []),
                                          'voisins_restants': (_vois or {}).get('restants', 0),
+                                         'voisins_detail': (_vois or {}).get('detail', []),
+                                         'cascade': _casc,
                                          'cpt_pegge': (p or {}).get('cpt_pegge', False)})
                         if led['etat'] not in ('down', 'stale'):
                             nb_up += 1

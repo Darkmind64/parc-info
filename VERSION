@@ -1,9 +1,48 @@
-PARCINFO_VERSION=2.19.34
+PARCINFO_VERSION=2.19.35
 RELEASE_DATE=2026-09-04
-BUILD_NUMBER=2026090403
+BUILD_NUMBER=2026090404
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.35 - Cartographie debloquee + schema de cascade dans la baie
+#
+# 1. CARTOGRAPHIE QUI SE FIGEAIT (retour terrain)
+#    Le bouton "Cartographier maintenant" restait sur "Releve de 1/2
+#    equipements" sans jamais aboutir. Trois causes cumulees, toutes
+#    introduites en 2.19.32 :
+#
+#    a) La progression n'etait emise QU'UNE FOIS PAR LOT, avant le pool. Avec
+#       deux switchs et six ouvriers il n'y a qu'un seul lot : un seul message,
+#       du debut a la fin. `_avance()` la rapporte maintenant a chaque
+#       equipement termine.
+#    b) `as_completed` etait appele SANS delai et le budget n'etait verifie
+#       qu'entre deux lots - donc jamais quand il n'y en a qu'un. Un seul
+#       equipement lent immobilisait tout le job. Delai transmis, plus
+#       `shutdown(wait=False)` pour ne pas bloquer sur un `recvfrom` en cours.
+#    c) `_topologie_equipement` enchaine une vingtaine de parcours SNMP
+#       (LLDP x7, CDP x5, ManAddr, STP x4, ENTITY x5, IP-MIB x3, FDB, PVID,
+#       ARP). Sur un equipement muet, chacun expirait sur son propre delai :
+#       pres d'une minute par equipement. Une sonde `_snmp_presence` (~1 s)
+#       passe maintenant en PREMIER et rend la main aussitot ; une echeance
+#       est propagee pour sauter les releves secondaires quand le budget se
+#       tend.
+#
+#    Les equipements muets ne sont plus tus : ils remontent dans `muets`, le
+#    message final les compte, et l'interface explique quoi verifier.
+#    Quatre tests de non-regression (section 20 de test_diagnostic_reseau.py).
+#
+# 2. SCHEMA DE CASCADE DANS L'INFOBULLE DE LA BAIE
+#    Un port sur lequel plusieurs machines sont vues affichait un simple
+#    decompte ("10 appareils - switch non gere probable"). Il montre desormais
+#    un schema SVG : le port, l'equipement intermediaire deduit (switch ou
+#    borne Wi-Fi selon `_classer_cascade`), et les machines rattachees, chacune
+#    avec le symbole de son type. `_voisins_port` rend un `detail`
+#    ({nom, type, id, mac, connu}) car la liste de noms ne portait pas le type ;
+#    `_cycle_activite` classe aussi la cascade pour les ports de SWITCH (ce
+#    n'etait fait que pour les prises murales). La ligne "Trafic vu" s'efface
+#    quand le schema est la (memes noms deux fois sinon), et l'infobulle passe
+#    a 340 px (`.tip-large`) car le dessin ne tient pas dans 260.
+#
 # Version 2.19.34 - Balayage du debordement horizontal (28 pages)
 # Suite de 2.19.33 : les 28 pages de l'application ont ete mesurees a 375 px,
 # puis les coupables corriges et l'ensemble re-verifie a 320 px.
