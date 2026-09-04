@@ -1,9 +1,46 @@
-PARCINFO_VERSION=2.19.33
+PARCINFO_VERSION=2.19.34
 RELEASE_DATE=2026-09-04
-BUILD_NUMBER=2026090402
+BUILD_NUMBER=2026090403
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.34 - Balayage du debordement horizontal (28 pages)
+# Suite de 2.19.33 : les 28 pages de l'application ont ete mesurees a 375 px,
+# puis les coupables corriges et l'ensemble re-verifie a 320 px.
+#
+# TROIS PAGES DEBORDAIENT
+#  - Tableau de bord : `.page-header` porte un `display:flex` en style INLINE
+#    dans neuf gabarits, sans `flex-wrap` - la rangee de boutons (314 px)
+#    depassait son en-tete (311 px). Regle partagee dans base.html : passage a
+#    la ligne sous 700 px. La rangee porte aussi `flex-shrink: 0` en inline,
+#    donc elle ne retrecissait jamais et ses enfants n'avaient jamais "besoin"
+#    de passer a la ligne : `!important` necessaire pour contrer l'inline.
+#  - Etiquettes QR : `.position-box` combine `min-height: 160px` et
+#    `aspect-ratio: 1.875/1`, ce qui imposait une LARGEUR de 300 px dans une
+#    colonne de grille de 69 px. La planche AVERY J8159 garde ses 3 colonnes,
+#    l'aspect-ratio derive maintenant la hauteur de la largeur. Les grilles a
+#    2 colonnes du formulaire passent a 1 colonne sous 480 px.
+#  - Historique des maintenances : `.chart-container` est un element de grille,
+#    donc `min-width: auto` : sa largeur minimale etait celle de son contenu
+#    (canvas 300 px + 2 rem de marge x2 = 366 px) dans un conteneur de 311 px,
+#    malgre la media query `grid-template-columns: 1fr` deja presente.
+#    `min-width: 0` suffit.
+#
+# ET UN DEBORDEMENT DE PORTABLE, TROUVE AU PASSAGE
+#  La nav horizontale (`nav_mode` = "horizontal" PAR DEFAUT) reclame ~1725 px
+#  pour ses onze entrees : en dessous, elle debordait et faisait defiler toute
+#  la page - donc sur 1280, 1366, 1440 et 1536, les largeurs de portable les
+#  plus courantes. Entre 901 et 1750 px : marges et interlettrage resserres
+#  (suffit vers 1520 px et au-dela), badge client masque (deja affiche dans la
+#  barre du dessus), et passage a la ligne pour le reste. Le repli a la ligne
+#  est prefere a `overflow-x: auto`, qui rognerait les menus deroulants
+#  (`.nav-dropdown` est en position absolue), et au masquage, qui rendrait des
+#  entrees inatteignables. `body.nav-left` (nav verticale) est exclu : un
+#  `flex-wrap` sur une colonne de 100vh creerait une SECONDE COLONNE.
+#
+# Verifie a 320, 375, 480, 620, 760, 900, 1000, 1280, 1366, 1440, 1600, 1920 px.
+# Au-dela de 1750 px, l'affichage est strictement inchange.
+#
 # Version 2.19.33 - Barre superieure compacte sur ecran etroit
 # La topbar client exigeait ~780 px : selecteur de client a min-width 200px,
 # libelle "Client :", etat du watchdog, bloc de synchro et quatre liens en

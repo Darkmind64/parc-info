@@ -116,6 +116,12 @@
 }
 
 .chart-container {
+    /* Un élément de grille a `min-width: auto` : sa largeur minimale est celle
+       de son CONTENU. Avec un canvas Chart.js de 300 px et 2 rem de marge
+       intérieure de chaque côté, la piste de grille était forcée à 366 px dans
+       un conteneur de 311 px — la page défilait latéralement sur mobile,
+       malgré la media query `grid-template-columns: 1fr` déjà présente. */
+    min-width: 0;
     position: relative;
     background: linear-gradient(135deg, var(--bg-secondary), var(--bg-primary));
     padding: 2rem;
@@ -168,6 +174,7 @@
 
 /* Full-width chart container */
 .chart-container-full {
+    min-width: 0;   /* meme raison que .chart-container ci-dessus */
     position: relative;
     background: linear-gradient(135deg, var(--bg-secondary), var(--bg-primary));
     padding: 2rem;

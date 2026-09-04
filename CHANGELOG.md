@@ -1,5 +1,21 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.34] - 2026-09-04 📐
+
+### 📐 Balayage du défilement horizontal : 28 pages mesurées, 4 causes corrigées
+
+Suite de 2.19.33. Les 28 pages de l'application ont été mesurées à 375 px, puis les coupables corrigés et l'ensemble re-vérifié à 320 px. Trois pages débordaient, chacune pour une raison différente, et un quatrième défaut est apparu au passage sur les largeurs de portable.
+
+**Tableau de bord.** Neuf gabarits posent un `display: flex` en style *inline* sur `.page-header` (titre à gauche, boutons à droite) sans jamais déclarer `flex-wrap` : la rangée de boutons, large de 314 px, dépassait son en-tête de 311 px. Une règle partagée dans `base.html` autorise le passage à la ligne sous 700 px, ce qui couvre les neuf gabarits d'un coup. La rangée porte aussi `flex-shrink: 0` en inline : elle ne rétrécissait donc jamais, ses enfants n'avaient jamais « besoin » de passer à la ligne et le `flex-wrap` restait sans effet — d'où le `!important`, seul moyen de contrer une déclaration inline.
+
+**Étiquettes QR.** `.position-box` combine `min-height: 160px` et `aspect-ratio: 1.875/1`, ce qui imposait au bloc une *largeur* de 300 px dans une colonne de grille de 69 px. La planche AVERY J8159 garde ses trois colonnes ; c'est l'aspect-ratio qui dérive désormais la hauteur de la largeur. Les grilles à deux colonnes du formulaire (choix de l'appareil, cases à cocher, paires de champs) passent à une colonne sous 480 px.
+
+**Historique des maintenances.** `.chart-container` est un élément de grille, donc `min-width: auto` : sa largeur minimale était celle de son contenu (un canvas Chart.js de 300 px plus 2 rem de marge de chaque côté, soit 366 px) dans un conteneur de 311 px — et cela malgré la media query `grid-template-columns: 1fr` déjà présente, qui ne pouvait rien contre un minimum de contenu. `min-width: 0` suffit.
+
+**Et un défaut de portable, trouvé au passage.** La navigation horizontale, qui est le mode *par défaut*, réclame environ 1725 px pour ses onze entrées : en dessous, elle débordait et faisait défiler toute la page — donc sur 1280, 1366, 1440 et 1536 px, les largeurs de portable les plus courantes. Entre 901 et 1750 px, les marges et l'interlettrage sont resserrés (ce qui suffit à partir de ~1520 px), le badge du client actif est masqué puisqu'il est déjà affiché dans la barre juste au-dessus, et ce qui ne rentre toujours pas passe à la ligne. Le repli à la ligne a été préféré à `overflow-x: auto`, qui rognerait les menus déroulants (`.nav-dropdown` est en position absolue), et au masquage d'entrées, qui les rendrait inatteignables. La navigation verticale (`body.nav-left`) est explicitement exclue : un `flex-wrap` sur une colonne de 100 vh créerait une seconde colonne au lieu de défiler.
+
+Vérifié à 320, 375, 480, 620, 760, 900, 1000, 1280, 1366, 1440, 1600 et 1920 px. Au-delà de 1750 px, l'affichage est strictement inchangé.
+
 ## [2.19.33] - 2026-09-04 📱
 
 ### 📱 Barre supérieure compacte sur écran étroit

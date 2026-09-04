@@ -189,6 +189,7 @@
   .position-box {
     aspect-ratio: 1.875 / 1;
     min-height: 160px;
+    min-width: 0;
     border: 2px solid var(--border);
     background: white;
     border-radius: 3px;
@@ -231,6 +232,29 @@
     background: rgba(0, 0, 0, 0);
     cursor: pointer;
     z-index: 1;
+  }
+
+  /* Écran étroit : la hauteur plancher de 160 px, combinée à l'aspect-ratio
+     1,875:1, imposait au bloc une LARGEUR de 300 px — bien au-delà de sa
+     colonne de grille (69 px sur un mobile). La planche débordait et faisait
+     défiler toute la page. On laisse alors l'aspect-ratio dériver la hauteur
+     de la largeur : la planche garde ses 3 colonnes, donc sa lisibilité de
+     planche AVERY J8159. */
+  @media (max-width: 700px) {
+    .position-box { min-height: 0; }
+    .position-grid { gap: 5px; }
+    /* même piège pour l'aperçu d'étiquette, figé à 300 x 160 px */
+    .label-preview { width: 100%; max-width: 300px; height: auto; aspect-ratio: 1.875 / 1; }
+  }
+
+  /* Les grilles à deux colonnes du formulaire (choix de l'appareil, cases à
+     cocher, paires de champs) ont des éléments dont le contenu minimal dépasse
+     leur piste : à 320 px, la page débordait de quelques pixels. Une seule
+     colonne, et `min-width: 0` pour que rien ne force sa piste. */
+  @media (max-width: 480px) {
+    .asset-selection, .checkbox-grid, .form-row { grid-template-columns: 1fr; }
+    .asset-dropdown, .checkbox-item, .form-group, .radio-group { min-width: 0; }
+    .checkbox-item label { overflow-wrap: anywhere; }
   }
 
   .position-box:hover {

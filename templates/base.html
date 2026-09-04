@@ -782,6 +782,62 @@
             .client-bar-link { padding: .2rem .4rem; }
             #topbar-sync-label { display: none; }
         }
+        /* ══════════════════════════════════════════════════════════════
+           NAVIGATION HORIZONTALE SUR UN ÉCRAN DE PORTABLE
+
+           La barre de navigation horizontale (`nav_mode` vaut « horizontal »
+           par DÉFAUT) réclame ~1725 px pour ses onze entrées, la marque, le
+           numéro de version, la recherche et le badge client. En dessous, elle
+           débordait et faisait défiler TOUTE la page latéralement — donc sur
+           tous les portables courants : 1280, 1366, 1440, 1536.
+
+           On resserre d'abord (marges, interlettrage), ce qui suffit vers
+           1500 px et au-delà ; ce qui ne rentre toujours pas passe à la ligne.
+           Le repli à la ligne est préféré à `overflow-x: auto` : un conteneur
+           qui défile rognerait les menus déroulants (`.nav-dropdown` est en
+           position absolue), et préféré au masquage : aucune entrée ne doit
+           devenir inatteignable.
+
+           Exclut `body.nav-left` (nav verticale) : là, `flex-wrap` sur une
+           colonne de 100vh créerait une SECONDE COLONNE au lieu de défiler.
+           Démarre à 901 px : en dessous, la nav est déjà un tiroir.
+           ══════════════════════════════════════════════════════════════ */
+        @media (min-width: 901px) and (max-width: 1750px) {
+            body:not(.nav-left) nav { padding: 0 .6rem; flex-wrap: wrap; height: auto; min-height: 50px; }
+            body:not(.nav-left) nav a { padding: 0 .5rem; letter-spacing: .3px; }
+            body:not(.nav-left) .nav-group-btn { padding: 0 .5rem; letter-spacing: .3px; }
+            body:not(.nav-left) .nav-version-group { margin-right: .4rem; }
+            /* Le badge du client actif (100 px) est déjà affiché juste au-dessus,
+               dans le menu déroulant de la barre client : le masquer ici évite
+               qu'il parte seul sur une deuxième ligne entre 1520 et 1620 px. */
+            body:not(.nav-left) .nav-client-badge { display: none; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════
+           EN-TÊTE DE PAGE SUR ÉCRAN ÉTROIT
+
+           Neuf gabarits posent un `display:flex` en style INLINE sur
+           `.page-header` (titre à gauche, boutons d'action à droite) sans
+           jamais déclarer `flex-wrap`. Sur un mobile, la rangée de boutons
+           dépassait et faisait défiler toute la page latéralement — constaté
+           sur le tableau de bord (rangée de 314 px dans un en-tête de 311 px).
+
+           L'attribut `style` ne déclare que `display`, `align-items`,
+           `justify-content` et `gap` : une règle `flex-wrap` en feuille de
+           style s'applique donc sans avoir à toucher aux neuf gabarits.
+           ══════════════════════════════════════════════════════════════ */
+        @media (max-width: 700px) {
+            .page-header { flex-wrap: wrap; gap: .7rem; }
+            .page-header > div { min-width: 0; flex-wrap: wrap; }
+            .page-header h1 { font-size: 1.45rem; overflow-wrap: anywhere; }
+            /* Plusieurs gabarits posent aussi `flex-shrink: 0` en inline sur la
+               rangée de boutons : elle garde alors sa largeur maximale, ses
+               enfants n'ont donc jamais « besoin » de passer à la ligne et le
+               `flex-wrap` ci-dessus reste sans effet. Le `!important` est le
+               seul moyen de contrer une déclaration inline. */
+            .page-header > div { flex-shrink: 1 !important; }
+        }
+
         @media (max-width: 400px) {
             /* Sur les plus petits écrans (320 px), le nom du client tombait à
                ~40 px : « M… », impossible de savoir quel client est actif, ce
