@@ -154,6 +154,9 @@
             transition: all 0.15s;
         }
         .client-bar-link:hover { color: var(--accent); border-color: var(--accent); }
+        /* Libellé long / icône de repli : un seul des deux est visible, selon la
+           largeur (voir la media query « TOPBAR CLIENT COMPACTE »). */
+        .cb-ico { display: none; }
 
         /* ── NAV ── */
         nav {
@@ -735,6 +738,61 @@
         }
 
         /* ══════════════════════════════════════════════════════════════
+           TOPBAR CLIENT COMPACTE (écran étroit)
+
+           La barre exigeait ~780 px : sélecteur de client à `min-width:200px`,
+           libellé « Client : », état du watchdog, bloc de synchro et quatre
+           liens en toutes lettres. Comme elle est sticky et pleine largeur,
+           elle imposait un défilement horizontal à TOUTE la page sur un
+           mobile de 375 px.
+
+           Principe : on ne retire aucune action, on rétrécit. Le sélecteur
+           devient élastique, les libellés deviennent des icônes, et seuls
+           les affichages purement informatifs (état du watchdog, mot
+           « Synchro DB ») disparaissent.
+
+           À placer APRÈS `.wd-topbar` et `.client-bar-actions` : mêmes
+           spécificités, c'est l'ordre dans la feuille qui tranche. Et il faut
+           neutraliser leurs `margin-left:auto` — une marge automatique absorbe
+           l'espace libre AVANT que `flex-grow` ne le distribue, ce qui laissait
+           le menu déroulant à 25 px de large, illisible.
+           ══════════════════════════════════════════════════════════════ */
+        @media (max-width: 900px) {
+            .client-bar { padding: 0 .75rem; gap: .5rem; }
+            .client-bar-label { display: none; }        /* le menu déroulant se suffit */
+            .wd-topbar { display: none; }               /* état du watchdog : informatif */
+            /* `max-width` : sans plafond, le sélecteur absorbait tout l'espace
+               libre et atteignait 440 px sur une tablette. Il grandit jusqu'à
+               un nom de client confortable, puis s'arrête. */
+            .client-select-wrap { flex: 1 1 auto; min-width: 0; max-width: 22rem; gap: .4rem; }
+            #client-dropdown {
+                flex: 1 1 auto; min-width: 0; width: auto;
+                padding: .3rem .4rem; text-overflow: ellipsis;
+            }
+            .client-bar-actions { margin-left: auto; flex-shrink: 0; gap: .4rem; }
+            #topbar-sync-wrap > span { display: none; } /* le mot « Synchro DB » */
+        }
+        @media (max-width: 620px) {
+            .client-bar { padding: 0 .5rem; gap: .4rem; }
+            /* Libellés remplacés par leur icône. Toutes les actions restent
+               accessibles : « Nouveau client » et « Gérer les clients » ne sont
+               atteignables que d'ici, la navigation ne les propose pas. */
+            .cb-txt { display: none; }
+            .cb-ico { display: inline; }
+            .client-bar-link { padding: .2rem .4rem; }
+            #topbar-sync-label { display: none; }
+        }
+        @media (max-width: 400px) {
+            /* Sur les plus petits écrans (320 px), le nom du client tombait à
+               ~40 px : « M… », impossible de savoir quel client est actif, ce
+               qui est précisément l'information dont cette barre a la charge.
+               On lui garantit un plancher lisible en cédant la pastille de
+               niveau d'accès — purement indicative, et rappelée sur /clients. */
+            .topbar-acces-badge { display: none; }
+            #client-dropdown { flex: 1 1 6rem; min-width: 5rem; }
+        }
+
+        /* ══════════════════════════════════════════════════════════════
            NAV MOBILE (< 900px) — repli en tiroir hors-écran, réutilisant
            le style déjà écrit pour body.nav-left (colonne verticale,
            groupes cliquables) plutôt qu'une nouvelle nav. S'applique que
@@ -914,15 +972,19 @@
             <a href="/journal-synchronisation" title="Journal de synchronisation"
                style="color:var(--text-muted);text-decoration:none;font-size:.85rem;">📡</a>
         </div>
-        <a href="/client/nouveau" class="client-bar-link">+ Nouveau</a>
-        <a href="/clients" class="client-bar-link">Gérer →</a>
+        <a href="/client/nouveau" class="client-bar-link" title="Nouveau client">
+            <span class="cb-ico" aria-hidden="true">＋</span><span class="cb-txt">+ Nouveau</span>
+        </a>
+        <a href="/clients" class="client-bar-link" title="Gérer les clients">
+            <span class="cb-ico" aria-hidden="true">☰</span><span class="cb-txt">Gérer →</span>
+        </a>
         {% if session.get('auth_user_id') %}
-        <a href="/profil" style="display:flex;align-items:center;gap:.4rem;text-decoration:none;
+        <a href="/profil" title="Mon profil" style="display:flex;align-items:center;gap:.4rem;text-decoration:none;
             border:1px solid var(--border);border-radius:3px;padding:.2rem .6rem;
             font-size:.72rem;color:var(--text-muted);transition:all .15s;"
            onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--text-secondary)'"
            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text-muted)'">
-            👤 {{ session.get('auth_user_nom', 'Profil') }}
+            👤 <span class="cb-txt">{{ session.get('auth_user_nom', 'Profil') }}</span>
         </a>
         <a href="/logout" style="border:1px solid rgba(255,51,85,.3);border-radius:3px;padding:.2rem .5rem;
             font-size:.7rem;color:var(--accent-red);text-decoration:none;" title="Déconnexion">⏏</a>

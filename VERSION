@@ -1,9 +1,35 @@
-PARCINFO_VERSION=2.19.32
+PARCINFO_VERSION=2.19.33
 RELEASE_DATE=2026-09-04
-BUILD_NUMBER=2026090401
+BUILD_NUMBER=2026090402
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.33 - Barre superieure compacte sur ecran etroit
+# La topbar client exigeait ~780 px : selecteur de client a min-width 200px,
+# libelle "Client :", etat du watchdog, bloc de synchro et quatre liens en
+# toutes lettres. Comme elle est sticky et pleine largeur, elle imposait un
+# defilement horizontal a TOUTE la page sur un mobile de 375 px.
+#
+# Aucune action n'est retiree, la barre retrecit :
+#  - <= 900 px : "Client :" et l'etat du watchdog masques (informatifs), le
+#    selecteur devient elastique (plafonne a 22rem pour ne pas s'etirer a
+#    440 px sur tablette), le mot "Synchro DB" disparait.
+#  - <= 620 px : les libelles des liens deviennent des icones (spans .cb-txt /
+#    .cb-ico), le nom de l'utilisateur est masque a cote de son icone.
+#  - <= 400 px : la pastille de niveau d'acces cede la place pour garantir un
+#    nom de client lisible (plancher 5rem) - c'est l'information dont cette
+#    barre a la charge.
+#
+# Deux pieges rencontres : le bloc doit etre place APRES .wd-topbar et
+# .client-bar-actions (memes specificites, l'ordre tranche), et il faut
+# neutraliser leurs margin-left:auto - une marge automatique absorbe l'espace
+# libre AVANT que flex-grow ne le distribue, ce qui laissait le menu deroulant
+# a 25 px de large.
+#
+# Verifie a 320 / 375 / 480 / 620 / 760 / 900 / 1280 px : la barre ne deborde
+# plus a aucune largeur, les 7 actions restent accessibles partout, et
+# l'affichage au-dela de 900 px est inchange.
+#
 # Version 2.19.32 - Audit topologie reseau : 21 correctifs et ajouts
 # Audit complet de la decouverte de topologie (palier 4), des primitives SNMP
 # qui l'alimentent et de son interface. 21 constats, tous traites.

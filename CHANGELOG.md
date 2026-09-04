@@ -1,5 +1,17 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.33] - 2026-09-04 📱
+
+### 📱 Barre supérieure compacte sur écran étroit
+
+La barre client exigeait environ 780 px de large : un sélecteur de client à `min-width: 200px`, le libellé « Client : », l'état du watchdog, le bloc de synchronisation et quatre liens écrits en toutes lettres. Comme elle est `sticky` et pleine largeur, elle imposait un **défilement horizontal à toute la page** sur un mobile de 375 px, quelle que soit la page consultée.
+
+Aucune action n'a été retirée, la barre rétrécit. Sous 900 px, le libellé « Client : » et l'état du watchdog (purement informatifs) sont masqués et le sélecteur devient élastique, plafonné à 22 rem pour ne pas s'étirer jusqu'à 440 px sur une tablette. Sous 620 px, les libellés des liens deviennent leurs icônes (« + Nouveau » → ＋, « Gérer → » → ☰) et le nom de l'utilisateur disparaît à côté de son icône : « Nouveau client » et « Gérer les clients » ne sont atteignables que depuis cette barre, la navigation ne les propose pas, il n'était donc pas envisageable de les supprimer. Sous 400 px enfin, la pastille de niveau d'accès cède la place pour garantir un nom de client lisible (plancher de 5 rem), puisque c'est l'information dont cette barre a la charge.
+
+Deux pièges au passage : le bloc doit être placé **après** `.wd-topbar` et `.client-bar-actions` dans la feuille de style (mêmes spécificités, c'est l'ordre qui tranche), et il faut neutraliser leurs `margin-left: auto` — une marge automatique absorbe l'espace libre *avant* que `flex-grow` ne le distribue, ce qui laissait le menu déroulant à 25 px de large, illisible.
+
+Vérifié à 320, 375, 480, 620, 760, 900 et 1280 px : la barre ne déborde plus à aucune largeur, les sept actions restent accessibles partout, et l'affichage au-delà de 900 px est strictement inchangé.
+
 ## [2.19.32] - 2026-09-04 🗺
 
 ### 🗺 Audit de la découverte de topologie réseau : 21 constats, tous traités
