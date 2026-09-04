@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-03 (v2.19.30). En cas de doute
+> Ce document décrit le comportement au 2026-09-04 (v2.19.32). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -17,7 +17,7 @@ du **client actif** ; les évènements sont rattachés à ce client.
 | 1 | **Diagnostic actif** | Tables ARP de l'OS, ping en rafale (perte/latence/gigue), DHCPDISCOVER, requêtes NBNS/DNS | Aucun | Le DHCP pirate est best-effort (port 68 souvent occupé) |
 | 2 | **Capture passive** | Trames vues sur l'interface (ARP, DHCP, STP, RA IPv6, en-têtes TCP) | `scapy` + privilèges + Npcap (Windows) ; en conteneur `network_mode: host` + `cap_add: [NET_RAW, NET_ADMIN]` | Ne voit que le trafic qui atteint la sonde (pas au-delà du switch) |
 | 3 | **Interrogation SNMP** | Compteurs par port des switchs/routeurs/NAS (erreurs, duplex, débit, état) | SNMP v1/v2c **ou v3 authNoPriv** en lecture seule ; `diag_snmp_actif` | Deux relevés successifs nécessaires pour un delta |
-| 4 | **Topologie L2** | Tables MAC (bridge-MIB FDB) + LLDP → quel appareil sur quel port | Palier 3 actif + `diag_topologie_active` | FDB volatile ; VLAN non pris en compte finement |
+| 4 | **Topologie L2** | Tables MAC (bridge-MIB FDB) + LLDP/CDP + STP → quel appareil sur quel port, quel switch derrière quel switch. Découverte **récursive** par `lldpRemManAddr` | Palier 3 actif + `diag_topologie_active` | FDB volatile (une machine éteinte disparaît en ~300 s) ; un switch non manageable ne dit rien |
 | 5 | **Tendances & baseline** | Historique des métriques (liaison, ports) → dégradation *relative* | `diag_baseline_active` (défaut on) ; ~8 points d'historique | Ne remplace pas les seuils absolus, les complète |
 | 6 | **Rapport & remédiation** | — (synthèse) | reportlab pour le PDF (repli HTML sinon) | — |
 | 7a | **Wi-Fi (poste)** | État Wi-Fi du poste ParcInfo + AP visibles (`netsh wlan` / `iw` / `system_profiler`) | `diag_wifi_active` (défaut on) ; un adaptateur Wi-Fi | Vision depuis un seul point ; scan macOS best-effort |
@@ -26,6 +26,83 @@ du **client actif** ; les évènements sont rattachés à ce client.
 **Deux modes** : *snapshot* à la demande (bouton « Lancer un diagnostic », mode
 rapide possible) et *surveillance continue* (`diag_surveillance_active`, thread
 démon `_moniteur_loop` calqué sur le watchdog ping, période `diag_intervalle_s`).
+
+---
+
+## Palier 4 — topologie L2, en détail (revu v2.19.32)
+
+Onglet **Topologie** de `/diag-reseau`. Trois façons de le relever : le bouton
+**« Cartographier maintenant »** (job dédié en tâche de fond,
+`lancer_cartographie` / `statut_cartographie`, routes
+`POST /api/diag-reseau/topologie/cartographier` et `GET …/statut`), la phase
+`topologie` d'un snapshot complet, ou le cycle de surveillance continue.
+Le bouton dédié existe parce que la phase de snapshot arrive en avant-dernière
+position, derrière un garde `_budget_ok` : une liaison lente suffisait à la
+sauter snapshot après snapshot.
+
+### Ce qui est relevé, par équipement
+
+| Source | Fonction | Ce qu'elle apporte |
+|--------|----------|--------------------|
+| Table MAC | `_releve_mac_switch` | quelle MAC sur quel ifIndex, **et dans quel VLAN** (l'index `dot1qTpFdbPort` porte le fdbId ; repli `dot1qPvid` par port) |
+| LLDP / CDP | `_voisins_lldp_cdp` | nom, port, capacités, MAC de châssis et **IP de gestion** (`lldpRemManAddr`) du voisin |
+| STP | `_stp_switch` | port vers la racine, pont amont de chaque port, état (`passant`, `bloquant`…) |
+| ENTITY-MIB | `_entite_physique` | modèle exact, numéro de série, composition d'un stack |
+| IP-MIB | `_sous_reseaux_equipement` | sous-réseaux portés / routés, proposés comme plages de scan |
+| Noms d'interface | `_noms_interfaces` | **cache partagé** avec la vue d'activité (TTL 90 s) — la topologie ne refait plus un `interroger_equipement` complet |
+
+### Découverte récursive
+
+`decouvrir_topologie` part des appareils inventoriés de type réseau avec une IP,
+puis suit les `lldpRemManAddr` des voisins jusqu'à `_TOPO_PROFONDEUR_MAX` (3)
+sauts, plafonné à `_TOPO_EQUIP_MAX` (40) équipements et à un budget en secondes.
+Les équipements atteints qui ne sont **pas** dans l'inventaire sont renvoyés dans
+`decouverts` et affichés sous la carte : ils ne sont **jamais créés d'office**.
+Les relevés sont menés `_TOPO_WORKERS` (6) de front — les switchs sont
+indépendants et l'attente est du temps réseau.
+
+### Port d'accès contre uplink
+
+Chaque ligne de `diag_topologie` porte `nb_macs_port` et `est_uplink`. Un port
+est un **uplink** dès qu'il apprend plus d'une MAC, qu'il a un voisin
+pont / routeur / borne, ou qu'il est le port racine STP. Cette distinction est la
+condition de sûreté de tout ce qui écrit dans la baie : un uplink apprend toutes
+les MAC d'en aval, et sans elle le premier appareil arbitraire vu derrière un
+uplink se retrouvait affecté au port d'uplink.
+
+### Reporter dans la baie
+
+`proposer_topologie_baie` (lecture seule, `GET /api/diag-reseau/topologie/proposer`)
+rend `{propositions, ignores}` ; l'interface en fait une modale à cases à cocher,
+et `appliquer_topologie_baie(client_id, selection)` n'écrit que la sélection.
+Deux garde-fous :
+
+- le numéro de port de la baie vient de **`_mapping_baie_ifindex`** (manuel >
+  topologie > nom d'interface), jamais de l'ifIndex SNMP. Le numéro de façade
+  n'est dans aucune MIB : le déduire est la seule voie, et un ifIndex n'est
+  presque jamais un numéro de façade — un switch qui numérote en 10101 faisait
+  créer un port 10101 dans le rack ;
+- un port de façade **absent du châssis n'est plus créé**, il part dans
+  `ignores` avec son motif.
+
+### Historique des mouvements
+
+`diag_topologie` est écrasée à chaque passage. `_journaliser_mouvements` compare
+l'ancien relevé au nouveau **avant** l'écrasement et écrit les transitions dans
+`diag_topologie_mouvements` : `apparu`, `disparu`, `deplace` (avec port avant /
+après). Uniquement sur les ports d'accès — un uplink bougerait sans arrêt.
+Rétention `diag_reseau_max_jours`.
+
+### Ce que ce palier ne pourra pas faire
+
+- Un **switch non manageable** ne dit rien : ni MIB, ni LLDP. On ne peut que
+  l'inférer (plusieurs MAC sur un port, `_classer_cascade`).
+- La **FDB est volatile** : une machine éteinte disparaît en ~300 s. La carte
+  reflète ce qui a parlé récemment, jamais l'inventaire complet — d'où
+  l'affichage systématique de sa fraîcheur.
+- Le **numéro sérigraphié sur la façade n'existe dans aucune MIB standard**. Le
+  mapping restera une déduction (nom d'interface) ou une calibration humaine.
+- Pas de SNMP en écriture : ParcInfo constate et propose, il ne corrige pas.
 
 ---
 
@@ -465,10 +542,23 @@ dot3StatsDuplexStatus .19   (1 unknown | 2 halfDuplex | 3 fullDuplex)
 # BRIDGE-MIB / Q-BRIDGE-MIB
 dot1dTpFdbPort        1.3.6.1.2.1.17.4.3.1.2
 dot1dBasePortIfIndex  1.3.6.1.2.1.17.1.4.1.2
-dot1qTpFdbPort        1.3.6.1.2.1.17.7.1.2.2.1.2
+dot1qTpFdbPort        1.3.6.1.2.1.17.7.1.2.2.1.2   (index = <fdbId>.<6 octets de MAC> : le VLAN est gratuit)
+dot1qPvid             1.3.6.1.2.1.17.7.1.4.5.1.1   (VLAN d'accès par dot1dBasePort)
+# STP (BRIDGE-MIB) — donne le SENS des liens, même sans LLDP
+dot1dStpRootPort             1.3.6.1.2.1.17.2.7.0
+dot1dStpDesignatedRoot       1.3.6.1.2.1.17.2.5.0
+dot1dStpPortState            1.3.6.1.2.1.17.2.15.1.3
+dot1dStpPortDesignatedBridge 1.3.6.1.2.1.17.2.15.1.8
+# ENTITY-MIB — modèle / n° de série / composition d'un stack (base 1.3.6.1.2.1.47.1.1.1.1)
+entPhysicalDescr .2   entPhysicalClass .5   entPhysicalName .7
+entPhysicalSerialNum .11   entPhysicalModelName .13
+# IP-MIB — sous-réseaux portés / routés (proposés comme plages de scan)
+ipAdEntIfIndex 1.3.6.1.2.1.4.20.1.2   ipAdEntNetMask 1.3.6.1.2.1.4.20.1.3
+ipCidrRouteDest 1.3.6.1.2.1.4.24.4.1.1
 # LLDP-MIB
 lldpRemSysName  1.0.8802.1.1.2.1.4.1.1.9
 lldpRemPortId   1.0.8802.1.1.2.1.4.1.1.7
+lldpRemManAddrIfId 1.0.8802.1.1.2.1.4.2.1.2   (l'INDEX porte l'IP de gestion du voisin)
 # UPS-MIB (RFC 1628, 1.3.6.1.2.1.33.1.x) — onduleurs
 upsIdentModel .1.1.2   upsBatteryStatus .1.2.1   upsSecondsOnBattery .1.2.2
 upsEstimatedMinutesRemaining .1.2.3   upsEstimatedChargeRemaining .1.2.4
@@ -527,7 +617,8 @@ d'un refus ou d'un appareil qui ne fait pas de SNMP.
 | `diag_reseau_evenements` | évènements dédoublonnés par `signature` (`nb_occurrences`, `resolu`, `appareil_id`) | `diag_reseau_max_jours` (résolus uniquement) |
 | `diag_reseau_runs` | un enregistrement par snapshot (durée, `resume_json` avec les temps de phase) | `diag_reseau_max_jours` |
 | `diag_snmp_releves` | compteurs par port horodatés (delta) | `diag_reseau_max_jours` |
-| `diag_topologie` | instantané FDB/LLDP par équipement | remplacée à chaque poll |
+| `diag_topologie` | instantané FDB/LLDP/STP par équipement (+ `nb_macs_port`, `est_uplink`, `vlan`, `stp_etat`, `stp_amont`, `voisin_ip`, `voisin_modele`) | remplacée à chaque poll |
+| `diag_topologie_mouvements` | transitions d'un relevé à l'autre : appareil apparu / disparu / déplacé de port | `diag_reseau_max_jours` |
 | `diag_metriques` | série temporelle (liaison, débit/erreurs port) pour la baseline | `diag_reseau_max_jours` |
 
 ---
@@ -553,7 +644,7 @@ d'un refus ou d'un appareil qui ne fait pas de SNMP.
 |--------|--------|
 | Détections palier 1/2 | `network_diag.py` : `detecter_*`, `mesurer_qualite_liaison`, `capture_passive` |
 | SNMP (palier 3) | `interroger_equipement`, `_analyser_snmp`, `interroger_equipements_client`, `etat_snmp` |
-| Topologie (palier 4) | `decouvrir_topologie`, `_topologie_equipement`, `etat_topologie`, `appliquer_topologie_baie` |
+| Topologie (palier 4) | `decouvrir_topologie` (récursive, parallèle, sous budget), `_topologie_equipement`, `_journaliser_mouvements`, `_stp_switch`, `_entite_physique`, `_sous_reseaux_equipement`, `etat_topologie`, `proposer_topologie_baie` / `appliquer_topologie_baie`, `lancer_cartographie` / `statut_cartographie` |
 | Baseline (palier 5) | `enregistrer_metriques_liaison`, `evaluer_baseline`, `serie_metrique` |
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
 | Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite` (relevé SNMP mutualisé par IP → switch multi-slots), `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports` (+ `sysUpTime` pour un Δt exact), `_poll_poe` (POWER-ETHERNET-MIB), `_lire_sysinfo` (modèle/uptime), `_mapping_baie_ifindex` (nom_port RJ seulement, `divergences`) + `_port_physique_depuis_nom`, `_etat_led` (plafond débit/pps, bouclage 32 bits, `reboot`), `activite_baie`, `calibrer_port_baie` / `calibrer_decalage_baie`, `_prises_murales_activite` (v2.19.18 : LED des prises murales d'un bandeau RJ via le port de switch au bout du cordon `lie_slot_id`/`lie_port_numero`), `_fdb_switch` + `_voisins_port` (v2.19.19 : FDB bridge-MIB « live » → contrôle de câblage MAC déclarée ↔ MAC apprise, repli `diag_topologie` ; + appareils vus par port dans les infobulles), `analyser_brassage_baie` / `_elements_baie` / `_classer_cascade` / `_fdb_corriger` (v2.19.22-23 : bouton « 🧠 Deviner le brassage » → carte réseau proposée, route `GET /api/baie/brassage/proposer` lecture seule ; 4 groupes de propositions + cascades + hors inventaire ; répare une FDB tronquée par un agent SNMP buggé) ; état : `_activite_sut` (Δt), `_activite_hist` (sparkline), `_activite_sysinfo`, `_activite_fdb`/`_activite_fdb_baseport`/`_activite_fdb_dialecte`/`_activite_fdb_echec`, `_activite_echecs`, `_activite_thread_lock` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer{,/decalage}` ; `baie_brassage.html` (`#sel-activite`, `.prise-murale.pm-act-*`, badge ⚠ `.pm-cable-ko`) ; widget `network-activity` ; colonne `baie_slot_ports.if_index` |

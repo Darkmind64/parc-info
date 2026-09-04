@@ -273,23 +273,47 @@ N.interroger_equipement = lambda ip, comm: {'sysname': 'sw', 'ts': _t.time(), 'p
     {'index': 5, 'nom': 'Gi0/5', 'alias': '', 'oper': 1, 'admin': 1, 'speed_mbps': 1000,
      'in_oct': 0, 'out_oct': 0, 'in_err': 0, 'out_err': 0, 'in_disc': 0, 'out_disc': 0,
      'align_err': 0, 'fcs_err': 0, 'late_coll': 0, 'exc_coll': 0, 'duplex': 3}]}
+# Audit #07 : la topologie ne refait plus un interroger_equipement complet, elle
+# consomme le cache des noms d'interface alimenté par la phase SNMP.
+N._noms_interfaces = lambda ip, comm: {
+    5: {'nom': 'Gi0/5', 'alias': '', 'ethernet': True, 'speed_mbps': 1000}}
 _MAC_DEC = '.'.join(str(int('aa0000000011'[i:i + 2], 16)) for i in range(0, 12, 2))
-N._snmp_walk = lambda oid, ip, comm: (
+N._snmp_walk = lambda oid, ip, comm, **k: (
     {f'1.{_MAC_DEC}': '5'} if oid == N._OID_FDB_DOT1Q_PORT else
-    {'5': '5'} if oid == N._OID_FDB_BASEPORT_IF else {})
+    {'5': '5'} if oid == N._OID_FDB_BASEPORT_IF else
+    {'5': '10'} if oid == N._OID_DOT1Q_PVID else {})
 N._snmp_walk_octets = lambda *a, **k: {}     # table ARP / MAC infra : vide (pas de vrai reseau)
 N._activite_fdb.clear(); N._activite_fdb_baseport.clear(); N._activite_fdb_dialecte.clear()
-_ft = N.decouvrir_topologie(902)
+N._activite_pvid.clear()
+_res = N.decouvrir_topologie(902)
+_ft = _res['findings']
 verifier([f['categorie'] for f in _ft] == ['cablage_incoherent'],
          "switch voit PC-VU sur port 5, la baie déclare PC-DECLARE -> cablage_incoherent",
          str([f['categorie'] for f in _ft]))
+verifier(_ft and _ft[0]['details'].get('port_baie') == 5,
+         "audit #03 : le constat nomme le port de FAÇADE, pas l'ifIndex brut",
+         str(_ft[0]['details'] if _ft else None))
 _et = N.etat_topologie(902)
 verifier(_et['equipements'] and _et['equipements'][0]['ports'][0]['hotes'][0]['appareil_nom'] == 'PC-VU',
          "etat_topologie associe la MAC au bon appareil")
+verifier(_et['equipements'][0].get('age_s') is not None,
+         "audit #19 : etat_topologie expose la fraîcheur de la carte",
+         str(_et['equipements'][0].get('age_s')))
+verifier(_et['equipements'][0]['ports'][0]['est_uplink'] is False
+         and _et['equipements'][0]['ports'][0]['nb_macs'] == 1,
+         "audit #02 : un port à une seule MAC est un port d'accès, pas un uplink")
 _c = A.get_db()
 _c.execute("INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
-           "port_index, appareil_vu_id, horodatage) VALUES (902,'10.2.0.1',500,6,501,'x')")
+           "port_index, port_nom, appareil_vu_id, appareil_vu_nom, horodatage, "
+           "nb_macs_port, est_uplink) VALUES (902,'10.2.0.1',500,6,'Gi0/6',501,'PC-VU','x',1,0)")
 _c.commit(); _c.close()
+_ap = N.proposer_topologie_baie(902)
+verifier([(p['port_numero'], p['machine_id']) for p in _ap['propositions']] == [(6, 501)],
+         "audit #16 : l'aperçu propose le port 6 (vide) et rien d'autre",
+         str(_ap['propositions']))
+verifier(any('occupé' in i['motif'] for i in _ap['ignores']),
+         "aperçu : le port 5 déjà occupé est listé comme ignoré, pas écrasé",
+         str(_ap['ignores']))
 verifier(N.appliquer_topologie_baie(902)['maj'] == 1, "appliquer-baie remplit le port 6 (vide)")
 _c = A.get_db()
 _p5 = _c.execute("SELECT appareil_id FROM baie_slot_ports WHERE slot_id=9 AND numero=5").fetchone()[0]
@@ -443,7 +467,7 @@ def _fake_ups_get(ip, oids, comm='public', timeout=1.5, port=161):
     return {o: m[o] for o in oids if o in m}
 _orig_get_typed = A._snmp_get_typed
 A._snmp_get_typed = _fake_ups_get
-N._snmp_walk = lambda oid, ip, comm: ({'1': '95'} if oid == N._OID_UPS_OUT_LOAD else {})
+N._snmp_walk = lambda oid, ip, comm, **k: ({'1': '95'} if oid == N._OID_UPS_OUT_LOAD else {})
 _ups = N.interroger_ups('10.6.0.1', ['public'])
 verifier(_ups and _ups['source_txt'] == 'batterie' and _ups['charge_pct'] == 95,
          "interroger_ups : source batterie, charge 95 %", str(_ups and _ups.get('source_txt')))
@@ -577,7 +601,7 @@ _c.commit(); _c.close()
 # relevé par GETBULK multi-colonnes (mock) + liste complète des interfaces
 N._activite_noms.pop('10.8.0.1', None)
 N._noms_interfaces = lambda ip, comm: dict(_infos)
-N._fdb_switch = lambda ip, comm: {}
+N._fdb_switch = lambda ip, comm: ({}, {})
 N._poll_switch_ports = lambda ip, comm, infos=None: (
     {44: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0),
      49: dict(oper=2, speed_mbps=0, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0)},

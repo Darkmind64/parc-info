@@ -29,6 +29,7 @@ sont importés paresseusement.
 from __future__ import annotations
 
 import collections
+import concurrent.futures
 import hashlib
 import ipaddress
 import json
@@ -843,10 +844,19 @@ _TYPES_EQUIP_SNMP = ('Switch', 'Switch/AP', 'Routeur/Pare-feu', 'NAS', 'Onduleur
 _TYPE_UPS = 'Onduleur / UPS'
 
 
-def _snmp_walk(oid_base, ip, communautes):
+def _snmp_walk(oid_base, ip, communautes, max_vars=None, stats=None):
+    """Parcours SNMP (GETBULK v2c, repli GETNEXT, SNMPv3 en premier si
+    configuré). `max_vars` : plafond de lignes ; `stats` : dict renseigné en
+    sortie (`tronque`, `mode`) — sans lui une table trop grande était amputée
+    en silence (constat d'audit #05)."""
     try:
         from app import _snmp_walk as _w
-        return _w(ip, oid_base, communautes) or {}
+        kw = {}
+        if max_vars is not None:
+            kw['max_vars'] = max_vars
+        if stats is not None:
+            kw['stats'] = stats
+        return _w(ip, oid_base, communautes, **kw) or {}
     except Exception:
         return {}
 
@@ -858,22 +868,41 @@ def _oid_tuple(s):
         return ()
 
 
-def _snmp_walk_octets(oid_base, ip, communautes, timeout=1.5, max_rows=2000, port=161):
+def _snmp_walk_octets(oid_base, ip, communautes, timeout=1.5, max_rows=2000,
+                      port=161, stats=None):
     """Parcourt `oid_base` et renvoie la valeur des OCTET STRING **en octets bruts**
     (`{suffixe: bytes}`) — `app._snmp_walk` la décode en UTF-8, ce qui détruit une
     MAC. Sert à lire `ipNetToMediaPhysAddress` (table ARP), `dot1dTpFdbAddress`,
-    `ifPhysAddress`… GETBULK v2c d'abord (peu de paquets), repli GETNEXT v1.
+    `ifPhysAddress`… **SNMPv3 authNoPriv d'abord** si configuré (constat d'audit
+    #04 : sans lui, un switch v3-only perdait le port/la MAC/les capacités de ses
+    voisins LLDP, sa table ARP et ses MAC d'infra), puis GETBULK v2c (peu de
+    paquets), repli GETNEXT v1.
     Gardes : vérifie error-status et exige un OID strictement croissant (agent
-    bas de gamme qui boucle)."""
+    bas de gamme qui boucle). `stats` : dict renseigné en sortie (`tronque`, `mode`)."""
     import socket as _sock
     try:
         from app import (_ber_sequence, _ber_oid, _ber_entier, _ber_chaine,
-                          _ber_lire_tlv, _ber_decoder_oid, _snmp_walk_reqid)
+                          _ber_lire_tlv, _ber_decoder_oid, _snmp_walk_reqid,
+                          _snmp_v3_params, _v3_walk)
     except Exception:
         return {}
     if isinstance(communautes, str):
         communautes = [communautes]
     pref = oid_base if oid_base.endswith('.') else oid_base + '.'
+
+    def _note(**kw):
+        if stats is not None:
+            stats.update(kw)
+
+    try:
+        _v3 = _snmp_v3_params()
+    except Exception:
+        _v3 = None
+    if _v3:
+        _r = _v3_walk(ip, oid_base, _v3, timeout, max_rows, port, brut=True)
+        if _r:
+            _note(mode='v3', tronque=len(_r) >= max_rows)
+            return _r
 
     def _run(comm, bulk):
         res, courant, prev_t = {}, oid_base, ()
@@ -942,6 +971,7 @@ def _snmp_walk_octets(oid_base, ip, communautes, timeout=1.5, max_rows=2000, por
             try:
                 r = _run(comm, bulk)
                 if r:
+                    _note(mode='bulk' if bulk else 'next', tronque=len(r) >= max_rows)
                     return r
             except Exception:
                 continue
@@ -1723,11 +1753,36 @@ _OID_FDB_DOT1D_PORT   = '1.3.6.1.2.1.17.4.3.1.2'        # dot1dTpFdbPort : MAC -
 _OID_FDB_BASEPORT_IF  = '1.3.6.1.2.1.17.1.4.1.2'        # dot1dBasePortIfIndex : bridge port -> ifIndex
 _OID_FDB_DOT1Q_PORT   = '1.3.6.1.2.1.17.7.1.2.2.1.2'    # dot1qTpFdbPort : VLAN.MAC -> bridge port
 _OID_DOT1Q_VLAN_NAMES = '1.3.6.1.2.1.17.7.1.4.3.1.1'    # dot1qVlanStaticName : suffixe = VLAN id
+_OID_DOT1Q_PVID       = '1.3.6.1.2.1.17.7.1.4.5.1.1'    # dot1qPvid : dot1dBasePort -> VLAN d'accès
 _OID_ARP_PHYS         = '1.3.6.1.2.1.4.22.1.2'          # ipNetToMediaPhysAddress : ifIndex.ip -> MAC (table ARP)
 _OID_ARP_PHYS_2       = '1.3.6.1.2.1.4.35.1.4'          # ipNetToPhysicalPhysAddress (IP-MIB moderne)
 _OID_BRIDGE_BASE_MAC  = '1.3.6.1.2.1.17.1.1'            # dot1dBaseBridgeAddress
 _OID_IF_PHYS_ADDR     = '1.3.6.1.2.1.2.2.1.6'           # ifPhysAddress
-_FDB_VLAN_MAX         = 32                              # garde-fou : nb de VLAN sondés par contexte de communauté
+_FDB_VLAN_MAX         = 64                              # garde-fou : nb de VLAN sondés par contexte de communauté
+_FDB_VLAN_BUDGET_S    = 45.0                            # budget total du relevé VLAN par VLAN (les VLAN sont
+                                                        # sondés du plus chargé au moins chargé, cf. #09)
+_FDB_MAX_ENTREES      = 5000                            # plafond de lecture d'une table MAC. Au-delà de 800
+                                                        # (ancien défaut de app._snmp_walk) une FDB de switch
+                                                        # de coeur était amputée EN SILENCE — constat #05.
+# ── STP (BRIDGE-MIB) : hiérarchie de l'arbre, donc le SENS des liens même sans
+#    LLDP (constat d'audit #12). Lecture seule, table très courte.
+_OID_STP_ROOT_PORT    = '1.3.6.1.2.1.17.2.7.0'          # dot1dStpRootPort (dot1dBasePort vers la racine)
+_OID_STP_DESIGN_BR    = '1.3.6.1.2.1.17.2.15.1.8'       # dot1dStpPortDesignatedBridge (prio+MAC du pont amont)
+_OID_STP_PORT_STATE   = '1.3.6.1.2.1.17.2.15.1.3'       # dot1dStpPortState (5 = forwarding, 2 = blocking)
+_OID_STP_DESIGN_ROOT  = '1.3.6.1.2.1.17.2.5.0'          # dot1dStpDesignatedRoot (prio+MAC de la racine)
+_STP_ETAT_TXT = {1: 'désactivé', 2: 'bloquant', 3: 'écoute', 4: 'apprentissage',
+                 5: 'passant', 6: 'cassé'}
+# ── ENTITY-MIB : modèle / numéro de série / composition d'un stack (constat #14)
+_OID_ENT_CLASS        = '1.3.6.1.2.1.47.1.1.1.1.5'      # entPhysicalClass (3 = chassis, 9 = module)
+_OID_ENT_DESCR        = '1.3.6.1.2.1.47.1.1.1.1.2'      # entPhysicalDescr
+_OID_ENT_NAME         = '1.3.6.1.2.1.47.1.1.1.1.7'      # entPhysicalName
+_OID_ENT_SERIAL       = '1.3.6.1.2.1.47.1.1.1.1.11'     # entPhysicalSerialNum
+_OID_ENT_MODEL        = '1.3.6.1.2.1.47.1.1.1.1.13'     # entPhysicalModelName
+_ENT_CLASSE_CHASSIS   = 3
+# ── IP-MIB : sous-réseaux effectivement routés / portés (constat #13)
+_OID_IP_ADENT_IFX     = '1.3.6.1.2.1.4.20.1.2'          # ipAdEntIfIndex : ip -> ifIndex
+_OID_IP_ADENT_MASK    = '1.3.6.1.2.1.4.20.1.3'          # ipAdEntNetMask : ip -> masque
+_OID_IP_CIDR_ROUTE    = '1.3.6.1.2.1.4.24.4.1.1'        # ipCidrRouteDest (index : dest.masque.tos.nexthop)
 _OID_LLDP_REM_CHASSIS_ST = '1.0.8802.1.1.2.1.4.1.1.4'   # lldpRemChassisIdSubtype
 _OID_LLDP_REM_CHASSIS    = '1.0.8802.1.1.2.1.4.1.1.5'   # lldpRemChassisId (OCTET STRING, souvent MAC)
 _OID_LLDP_REM_PORTID_ST  = '1.0.8802.1.1.2.1.4.1.1.6'   # lldpRemPortIdSubtype (3=MAC, 5=ifName, 7=local)
@@ -1736,6 +1791,10 @@ _OID_LLDP_REM_SYSNAME = '1.0.8802.1.1.2.1.4.1.1.9'
 _OID_LLDP_REM_SYSDESC = '1.0.8802.1.1.2.1.4.1.1.10'
 _OID_LLDP_REM_CAP_EN  = '1.0.8802.1.1.2.1.4.1.1.12'     # lldpRemSysCapEnabled (BITS)
 _OID_LLDP_LOC_PORTID  = '1.0.8802.1.1.2.1.3.7.1.3'      # lldpLocPortId : localPortNum -> nom d'interface locale
+# lldpRemManAddrIfId : l'INDEX porte l'adresse de gestion du voisin
+# (timeMark.portNum.remIndex.subtype.len.a.b.c.d) — graine de la découverte
+# récursive (constat d'audit #10).
+_OID_LLDP_REM_MAN_ADDR = '1.0.8802.1.1.2.1.4.2.1.2'
 # CDP (CISCO-CDP-MIB, cdpCacheEntry) : index = cdpCacheIfIndex.cdpCacheDeviceIndex
 _OID_CDP_ADDR     = '1.3.6.1.4.1.9.9.23.1.2.1.1.4'
 _OID_CDP_DEVICE   = '1.3.6.1.4.1.9.9.23.1.2.1.1.6'
@@ -1824,6 +1883,33 @@ def _voisins_lldp_cdp(ip, communautes, infos):
                          'mac': _mac_octets(cv) if cv and len(cv) == 6 else '',
                          'platform': txt(pdesc.get(suf, '')), 'source': 'lldp'}
 
+        # ── IP de gestion des voisins (lldpRemManAddrTable) ──
+        # L'index PORTE l'adresse : timeMark.portNum.remIndex.subtype.len.a.b.c.d
+        # (subtype 1 = IPv4). C'est la graine de la découverte récursive : un
+        # switch jamais inventorié est joignable dès qu'un voisin le voit
+        # (constat d'audit #10).
+        for suf in _snmp_walk(_OID_LLDP_REM_MAN_ADDR, ip, communautes, max_vars=400):
+            parts = suf.split('.')
+            if len(parts) < 9:
+                continue
+            try:
+                locnum, sub, lg = int(parts[1]), int(parts[3]), int(parts[4])
+            except ValueError:
+                continue
+            if sub != 1 or lg != 4 or len(parts) < 5 + 4:
+                continue
+            try:
+                addr = '.'.join(str(int(x)) for x in parts[5:9])
+            except ValueError:
+                continue
+            if addr.startswith('0.') or addr == '127.0.0.1':
+                continue
+            ifx = nom_vers_ifx.get(loc.get(locnum, ''), locnum)
+            # rattacher au voisin du même port local, quel que soit son remIndex
+            cible = vois.get(ifx)
+            if cible is not None and not cible.get('ip'):
+                cible['ip'] = addr
+
     # ── CDP (complete, n'ecrase pas LLDP) ──
     dev = _snmp_walk(_OID_CDP_DEVICE, ip, communautes)
     if dev:
@@ -1847,6 +1933,143 @@ def _voisins_lldp_cdp(ip, communautes, infos):
     return vois
 
 
+def _stp_switch(ip, communautes, baseport_if):
+    """Arbre spanning tree du switch : `{ifIndex: {'etat', 'amont', 'pont_amont'}}`
+    plus `{'racine': mac, 'port_racine': ifIndex}`.
+
+    Sans LLDP, ParcInfo savait qu'un port apprenait beaucoup de MAC (« sans
+    doute un uplink ») mais pas dans quel SENS. `dot1dStpRootPort` donne le port
+    qui mène à la racine, `dot1dStpPortDesignatedBridge` le pont d'en face de
+    chaque port : de quoi hiérarchiser les équipements de façon déterministe
+    (constat d'audit #12). Tables très courtes, coût négligeable.
+    Retourne `({}, {})` si l'équipement ne fait pas de STP."""
+    def _ifx(bp):
+        try:
+            return int(baseport_if.get(str(bp), bp))
+        except (TypeError, ValueError):
+            return bp
+
+    etats = _snmp_walk(_OID_STP_PORT_STATE, ip, communautes, max_vars=600)
+    design = _snmp_walk_octets(_OID_STP_DESIGN_BR, ip, communautes, max_rows=600)
+    if not etats and not design:
+        return {}, {}
+
+    racine = ''
+    for brut in _snmp_walk_octets(_OID_STP_DESIGN_ROOT, ip, communautes, max_rows=4).values():
+        # dot1dStpDesignatedRoot = 2 octets de priorité + 6 octets de MAC
+        if brut and len(brut) == 8:
+            racine = _mac_octets(brut[2:])
+            break
+    port_racine = None
+    for val in _snmp_walk(_OID_STP_ROOT_PORT, ip, communautes, max_vars=4).values():
+        try:
+            bp = int(val)
+        except (TypeError, ValueError):
+            continue
+        if bp > 0:
+            port_racine = _ifx(bp)
+        break
+
+    ports = {}
+    for suf, val in etats.items():
+        try:
+            bp, etat = int(str(suf).split('.')[0]), int(val)
+        except (TypeError, ValueError, IndexError):
+            continue
+        ports.setdefault(_ifx(bp), {})['etat'] = _STP_ETAT_TXT.get(etat, '')
+    for suf, brut in design.items():
+        try:
+            bp = int(str(suf).split('.')[0])
+        except (ValueError, IndexError):
+            continue
+        if brut and len(brut) == 8:
+            ports.setdefault(_ifx(bp), {})['pont_amont'] = _mac_octets(brut[2:])
+    for ifx, d in ports.items():
+        d['amont'] = (port_racine is not None and ifx == port_racine)
+        d.setdefault('etat', '')
+        d.setdefault('pont_amont', '')
+    return ports, {'racine': racine, 'port_racine': port_racine}
+
+
+def _entite_physique(ip, communautes):
+    """ENTITY-MIB : `{'modele', 'serie', 'descr', 'membres': [...]}` du châssis.
+    Le modèle venait jusqu'ici d'une troncature de `sysDescr` ; l'ENTITY-MIB
+    donne le modèle exact, le numéro de série et la composition d'un stack
+    (constat d'audit #14). `{}` si l'agent ne l'expose pas.
+    Caché aussi longtemps que les autres informations quasi statiques."""
+    ent = _activite_entite.get(ip)
+    if ent and time.time() - ent[0] < _ACTIVITE_SYSINFO_TTL:
+        return ent[1]
+    classes = _snmp_walk(_OID_ENT_CLASS, ip, communautes, max_vars=400)
+    if not classes:
+        _activite_entite[ip] = (time.time(), {})
+        return {}
+    modeles = _snmp_walk(_OID_ENT_MODEL, ip, communautes, max_vars=400)
+    series = _snmp_walk(_OID_ENT_SERIAL, ip, communautes, max_vars=400)
+    descrs = _snmp_walk(_OID_ENT_DESCR, ip, communautes, max_vars=400)
+    noms = _snmp_walk(_OID_ENT_NAME, ip, communautes, max_vars=400)
+
+    def _t(d, k):
+        return str(d.get(k) or '').strip()
+
+    membres = []
+    for idx, cls in classes.items():
+        try:
+            if int(cls) != _ENT_CLASSE_CHASSIS:
+                continue
+        except (TypeError, ValueError):
+            continue
+        membres.append({'index': idx, 'modele': _t(modeles, idx), 'serie': _t(series, idx),
+                        'descr': _t(descrs, idx), 'nom': _t(noms, idx)})
+    # le châssis « principal » : le premier qui porte un modèle ou une série
+    principal = next((m for m in membres if m['modele'] or m['serie']), None)
+    res = {}
+    if principal:
+        res = {'modele': principal['modele'], 'serie': principal['serie'],
+               'descr': principal['descr'],
+               'membres': membres if len(membres) > 1 else []}
+    _activite_entite[ip] = (time.time(), res)
+    return res
+
+
+def _sous_reseaux_equipement(ip, communautes):
+    """Sous-réseaux effectivement portés ou routés par l'équipement, en notation
+    CIDR triée : `['192.168.1.0/24', '10.20.0.0/16']`.
+
+    La plage à scanner est aujourd'hui saisie à la main dans
+    `parc_general.plage_ip_locale` : sur un site multi-VLAN, les autres réseaux
+    sont des angles morts. Le routeur, lui, les connaît (constat d'audit #13).
+    Purement informatif : rien n'est scanné sans validation de l'utilisateur."""
+    import ipaddress as _ipa
+    reseaux = set()
+
+    masques = _snmp_walk(_OID_IP_ADENT_MASK, ip, communautes, max_vars=200)
+    for adr, masque in masques.items():
+        try:
+            net = _ipa.ip_network(f'{adr}/{masque}', strict=False)
+        except (ValueError, TypeError):
+            continue
+        if net.is_loopback or net.prefixlen >= 31:
+            continue
+        reseaux.add(str(net))
+
+    # ipCidrRouteDest : index = dest.masque.tos.nexthop -> les routes connectées
+    for suf in _snmp_walk(_OID_IP_CIDR_ROUTE, ip, communautes, max_vars=400):
+        parts = suf.split('.')
+        if len(parts) < 8:
+            continue
+        try:
+            net = _ipa.ip_network('.'.join(parts[0:4]) + '/' + '.'.join(parts[4:8]),
+                                  strict=False)
+        except (ValueError, TypeError):
+            continue
+        if net.is_loopback or net.prefixlen < 16 or net.prefixlen >= 31:
+            continue      # 0.0.0.0/0 et les routes très larges ne sont pas scannables
+        reseaux.add(str(net))
+
+    return sorted(reseaux, key=lambda r: (_ipa.ip_network(r).prefixlen, r))
+
+
 def _mac_depuis_suffixe(suffixe: str, decimal_count: int = 6) -> str:
     """Les 6 derniers sous-identifiants d'un OID FDB = la MAC en décimal."""
     parts = suffixe.split('.')
@@ -1858,12 +2081,45 @@ def _mac_depuis_suffixe(suffixe: str, decimal_count: int = 6) -> str:
         return ''
 
 
-def decouvrir_topologie(client_id: int) -> list:
-    """Découvre la topologie L2 des switchs SNMP du client. Retourne les
-    findings de câblage incohérent ; peuple la table diag_topologie."""
+_TOPO_COLS = ('client_id', 'equipement_ip', 'equipement_appareil_id', 'port_index',
+              'port_nom', 'mac_vue', 'appareil_vu_id', 'appareil_vu_nom', 'vendor',
+              'type_lien', 'voisin_nom', 'voisin_port', 'horodatage',
+              'voisin_caps', 'voisin_mac', 'voisin_port_subtype', 'voisin_source',
+              'nb_macs_port', 'est_uplink', 'vlan', 'stp_etat', 'stp_amont',
+              'voisin_ip', 'voisin_modele')
+_TOPO_PROFONDEUR_MAX = 3    # sauts LLDP au-delà des équipements inventoriés (#10)
+_TOPO_EQUIP_MAX = 40        # garde-fou absolu sur le nombre d'équipements interrogés
+_TOPO_WORKERS = 6           # relevés SNMP menés de front (#08)
+
+
+def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> dict:
+    """Découvre la topologie L2 des switchs SNMP du client et peuple
+    `diag_topologie`. Retourne
+    `{'findings': [...], 'equipements': n, 'decouverts': [...], 'reseaux': [...]}`.
+
+    Trois différences avec la version d'origine :
+
+    - **Découverte récursive** (#10) : on part des équipements réseau
+      inventoriés, puis on suit les adresses de gestion annoncées en LLDP
+      (`lldpRemManAddr`) jusqu'à `_TOPO_PROFONDEUR_MAX` sauts. Un switch jamais
+      saisi dans l'inventaire est donc cartographié, et remonté dans
+      `decouverts` pour être proposé à l'ajout (jamais créé d'office).
+    - **Relevés menés de front** (#08) : les équipements sont indépendants et
+      l'attente est du temps réseau ; on ne les met plus bout à bout.
+    - **Pas de second relevé complet** (#07) : les noms d'interface viennent du
+      cache `_noms_interfaces`, alimenté par la phase SNMP qui précède, au lieu
+      de refaire un `interroger_equipement` intégral par switch."""
     if str(_cfg('diag_topologie_active', '0')) != '1' or str(_cfg('diag_snmp_actif', '0')) != '1':
-        return []
+        return {'findings': [], 'equipements': 0, 'decouverts': [], 'reseaux': []}
     communautes = _communautes_snmp()
+
+    def _prog(pct, msg=''):
+        if _progress:
+            try:
+                _progress(int(pct), msg)
+            except Exception:
+                pass
+
     try:
         from database import get_db
         conn = get_db()
@@ -1874,119 +2130,283 @@ def decouvrir_topologie(client_id: int) -> list:
             (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
         inventaire = {}
         _nom_aid = {}
-        for aid, nom, mac in conn.execute(
-                "SELECT id, nom_machine, adresse_mac FROM appareils WHERE client_id=?", (client_id,)):
+        ip_connues = {}
+        for aid, nom, mac, aip in conn.execute(
+                "SELECT id, nom_machine, adresse_mac, adresse_ip FROM appareils WHERE client_id=?",
+                (client_id,)):
             _nom_aid[aid] = nom
             if mac:
                 inventaire[_norm_mac(mac)] = (aid, nom)
+            if aip:
+                ip_connues[str(aip).strip()] = aid
         for _m, _aid in _macs_secondaires(conn, client_id).items():
             if _m not in inventaire and _aid in _nom_aid:
                 inventaire[_m] = (_aid, _nom_aid[_aid])
         conn.close()
     except Exception:
-        return []
+        return {'findings': [], 'equipements': 0, 'decouverts': [], 'reseaux': []}
 
-    findings = []
+    findings, decouverts, reseaux = [], [], set()
     now = _now_z()
-    for equip_id, ip in equipements:
-        try:
-            lignes, findings_eq = _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now)
-        except Exception:
-            logger.debug('network_diag: topologie %s en échec', ip, exc_info=True)
-            continue
-        findings += findings_eq
+    t0 = time.time()
+    # file d'attente : (appareil_id | None, ip, profondeur)
+    a_faire = [(aid, ip, 0) for aid, ip in equipements if ip]
+    vues = {ip for _a, ip, _p in a_faire}
+    lignes_par_ip = {}
+
+    while a_faire and len(vues) <= _TOPO_EQUIP_MAX:
+        if budget_s and (time.time() - t0) > budget_s:
+            break
+        lot, a_faire = a_faire[:_TOPO_WORKERS], a_faire[_TOPO_WORKERS:]
+        _prog(5 + min(80, len(lignes_par_ip) * 80 // max(1, len(vues))),
+              f"Relevé de {len(lignes_par_ip) + 1}/{len(vues)} équipement(s)")
+        resultats = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(lot)) as pool:
+            futurs = {pool.submit(_topologie_equipement, client_id, aid, ip,
+                                  communautes, inventaire, now): (aid, ip, prof)
+                      for aid, ip, prof in lot}
+            for fut in concurrent.futures.as_completed(futurs):
+                aid, ip, prof = futurs[fut]
+                try:
+                    resultats[ip] = (fut.result(), aid, prof)
+                except Exception:
+                    logger.debug('network_diag: topologie %s en échec', ip, exc_info=True)
+
+        for ip, ((lignes, findings_eq, voisins_ip, nets), aid, prof) in resultats.items():
+            findings += findings_eq
+            lignes_par_ip[ip] = lignes
+            reseaux |= set(nets)
+            if prof >= _TOPO_PROFONDEUR_MAX:
+                continue
+            for v_ip, v_nom, v_modele in voisins_ip:
+                if not v_ip or v_ip in vues or len(vues) >= _TOPO_EQUIP_MAX:
+                    continue
+                vues.add(v_ip)
+                v_aid = ip_connues.get(v_ip)
+                a_faire.append((v_aid, v_ip, prof + 1))
+                if v_aid is None:
+                    decouverts.append({'ip': v_ip, 'nom': v_nom, 'modele': v_modele,
+                                       'vu_par': ip})
+
+    # écriture : une seule transaction, mouvements journalisés AVANT l'écrasement
+    if lignes_par_ip:
         try:
             from database import get_db
             conn = get_db()
-            conn.execute("DELETE FROM diag_topologie WHERE client_id=? AND equipement_ip=?",
-                         (client_id, ip))
-            conn.executemany(
-                "INSERT INTO diag_topologie (client_id, equipement_ip, equipement_appareil_id, "
-                "port_index, port_nom, mac_vue, appareil_vu_id, appareil_vu_nom, vendor, "
-                "type_lien, voisin_nom, voisin_port, horodatage, "
-                "voisin_caps, voisin_mac, voisin_port_subtype, voisin_source) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", lignes)
-            conn.commit()
-            conn.close()
+            try:
+                _journaliser_mouvements(conn, client_id, lignes_par_ip, now)
+                for ip, lignes in lignes_par_ip.items():
+                    conn.execute("DELETE FROM diag_topologie WHERE client_id=? AND equipement_ip=?",
+                                 (client_id, ip))
+                    if lignes:
+                        conn.executemany(
+                            "INSERT INTO diag_topologie (%s) VALUES (%s)"
+                            % (','.join(_TOPO_COLS), ','.join('?' * len(_TOPO_COLS))), lignes)
+                conn.commit()
+            finally:
+                conn.close()
         except Exception:
             logger.exception('network_diag: écriture topologie impossible')
-    return findings
+    _prog(100, 'Terminé')
+    return {'findings': findings, 'equipements': len(lignes_par_ip),
+            'decouverts': decouverts, 'reseaux': sorted(reseaux)}
+
+
+def _journaliser_mouvements(conn, client_id, lignes_par_ip, now):
+    """Compare le nouveau relevé à celui déjà en base et enregistre les
+    TRANSITIONS dans `diag_topologie_mouvements` : appareil apparu, disparu, ou
+    déplacé d'un port à un autre.
+
+    `diag_topologie` est écrasée à chaque passage : sans ce journal, « depuis
+    quand cette machine est-elle sur ce port ? » n'avait aucune réponse
+    (constat d'audit #15). On ne garde que les ports d'ACCÈS (un uplink apprend
+    tout et bougerait sans arrêt)."""
+    i_ip, i_ifx, i_nom_p = 1, 3, 4
+    i_mac, i_aid, i_anom = 5, 6, 7
+    i_uplink = _TOPO_COLS.index('est_uplink')
+    try:
+        avant = {}
+        for eip, pidx, pnom, mac, aid, anom, upl in conn.execute(
+                "SELECT equipement_ip, port_index, port_nom, mac_vue, appareil_vu_id, "
+                "appareil_vu_nom, COALESCE(est_uplink,0) FROM diag_topologie WHERE client_id=?",
+                (client_id,)):
+            if upl or not mac:
+                continue
+            avant[(eip, mac)] = (pidx, pnom, aid, anom)
+        apres = {}
+        for ip, lignes in lignes_par_ip.items():
+            for l in lignes:
+                if l[i_uplink] or not l[i_mac]:
+                    continue
+                apres[(l[i_ip], l[i_mac])] = (l[i_ifx], l[i_nom_p], l[i_aid], l[i_anom])
+    except Exception:
+        return
+
+    mvts = []
+    ips_relevees = set(lignes_par_ip)
+    for cle, (pidx, pnom, aid, anom) in apres.items():
+        vieux = avant.get(cle)
+        if vieux is None:
+            mvts.append((client_id, now, 'apparu', aid, anom or '', cle[1], cle[0], '',
+                         '', pnom or str(pidx)))
+        elif vieux[0] != pidx:
+            mvts.append((client_id, now, 'deplace', aid, anom or vieux[3] or '', cle[1],
+                         cle[0], '', vieux[1] or str(vieux[0]), pnom or str(pidx)))
+    for cle, (pidx, pnom, aid, anom) in avant.items():
+        # « disparu » n'a de sens que sur un équipement effectivement re-relevé
+        if cle[0] in ips_relevees and cle not in apres:
+            mvts.append((client_id, now, 'disparu', aid, anom or '', cle[1], cle[0], '',
+                         pnom or str(pidx), ''))
+    if mvts:
+        conn.executemany(
+            "INSERT INTO diag_topologie_mouvements (client_id, horodatage, genre, "
+            "appareil_id, appareil_nom, mac, equipement_ip, equipement_nom, "
+            "port_avant, port_apres) VALUES (?,?,?,?,?,?,?,?,?,?)", mvts)
 
 
 def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now):
-    """Un switch : FDB -> port -> {mac, appareil} + voisins LLDP/CDP + recoupement baie."""
-    equipement = interroger_equipement(ip, communautes)
-    noms_ports, infos = {}, {}
-    if equipement:
-        for p in equipement['ports']:
-            noms_ports[p['index']] = p['nom']
-            infos[p['index']] = {'nom': p['nom'], 'alias': p.get('alias', ''), 'ethernet': True}
+    """Un switch : FDB -> port -> {mac, appareil} + voisins LLDP/CDP + STP +
+    recoupement baie. Retourne `(lignes, findings, voisins_ip, reseaux)`.
+
+    Corrections d'audit appliquées ici :
+
+    - **#07** : les noms d'interface viennent du cache `_noms_interfaces`
+      (alimenté par la phase SNMP qui précède), plus d'`interroger_equipement`
+      intégral refait pour n'en garder que les noms.
+    - **#02** : chaque ligne porte `nb_macs_port` et `est_uplink`. Un port qui
+      apprend plusieurs MAC, ou qui a un voisin pont/routeur, ou qui est le port
+      racine STP, n'est plus une source d'affectation automatique.
+    - **#03** : le recoupement avec la baie passe par `_mapping_baie_ifindex`
+      (numéro de façade -> ifIndex) au lieu de comparer un ifIndex à un numéro
+      de port, deux numérotations sans rapport.
+    """
+    # #07 — cache partagé avec la vue d'activité, TTL 90 s, rafraîchi en fond.
+    infos = _noms_interfaces(ip, communautes) or {}
+    noms_ports = {ifx: m.get('nom') or f'if{ifx}' for ifx, m in infos.items()}
 
     # Table MAC : même relevé unifié que le cycle d'activité et « Deviner le
     # brassage » (bridge dot1q/dot1d + contexte VLAN + ARP + correction de forme
     # pour un agent buggé + réglage `diag_fdb_mode:<ip>`).
-    par_if, _meta = _releve_mac_switch(ip, communautes, inventaire)
+    par_if, meta = _releve_mac_switch(ip, communautes, inventaire)
     par_port = {ifx: sorted(macs) for ifx, macs in par_if.items()}
+    vlans, pvid = meta.get('vlans') or {}, meta.get('pvid') or {}
 
-    # voisins LLDP + CDP (capacités système, MAC du châssis, sous-type de PortID)
+    # voisins LLDP + CDP (capacités système, MAC du châssis, sous-type de PortID,
+    # et désormais l'IP de gestion — graine de la découverte récursive, #10)
     voisins = _voisins_lldp_cdp(ip, communautes, infos)
 
-    # câblage baie de ce switch : {numero_port: (appareil_id, nom)}
+    # STP : le SENS des liens même sans LLDP (#12)
+    bp_hit = _activite_fdb_baseport.get(ip)
+    baseport_if = bp_hit[1] if bp_hit else {}
+    try:
+        stp_ports, _stp_glob = _stp_switch(ip, communautes, baseport_if)
+    except Exception:
+        stp_ports = {}
+
+    # modèle / série exacts pour l'affichage et l'inventaire (#14)
+    try:
+        entite = _entite_physique(ip, communautes)
+    except Exception:
+        entite = {}
+    # sous-réseaux portés / routés (#13)
+    try:
+        reseaux = _sous_reseaux_equipement(ip, communautes)
+    except Exception:
+        reseaux = []
+
+    # #03 — câblage baie de ce switch : {ifIndex: (appareil_id, nom)}, obtenu en
+    # INVERSANT le mapping numéro de façade -> ifIndex. Les ports dont le mapping
+    # n'a pas de source fiable (repli naïf) sont écartés : mieux vaut ne rien
+    # dire que lever un « câblage incohérent » sur une correspondance devinée.
     baie = {}
     try:
         from database import get_db
         conn = get_db()
-        for numero, aid, anom in conn.execute(
-                "SELECT p.numero, p.appareil_id, a.nom_machine "
-                "FROM baie_slot_ports p JOIN baie_slots s ON s.id=p.slot_id "
-                "LEFT JOIN appareils a ON a.id=p.appareil_id "
-                "WHERE s.client_id=? AND s.appareil_id=? AND p.appareil_id IS NOT NULL",
-                (client_id, equip_id)):
-            baie[int(numero)] = (aid, anom)
-        conn.close()
+        try:
+            slot = conn.execute(
+                "SELECT id FROM baie_slots WHERE client_id=? AND appareil_id=? LIMIT 1",
+                (client_id, equip_id)).fetchone() if equip_id else None
+            if slot:
+                mapping, sources, _cal, _div = _mapping_baie_ifindex(
+                    conn, client_id, slot[0], equip_id, infos)
+                declares = {}
+                for numero, aid, anom in conn.execute(
+                        "SELECT p.numero, p.appareil_id, a.nom_machine FROM baie_slot_ports p "
+                        "LEFT JOIN appareils a ON a.id=p.appareil_id "
+                        "WHERE p.slot_id=? AND p.appareil_id IS NOT NULL", (slot[0],)):
+                    declares[int(numero)] = (aid, anom)
+                for numero, ifx in mapping.items():
+                    if sources.get(numero) == 'repli':
+                        continue
+                    if numero in declares:
+                        baie[ifx] = declares[numero] + (numero,)
+        finally:
+            conn.close()
     except Exception:
-        pass
+        logger.debug('network_diag: recoupement baie %s indisponible', ip, exc_info=True)
 
     # ports qui n'ont PAS de MAC apprise mais un voisin LLDP/CDP (lien infra pur)
-    tous_ifx = sorted(set(par_port) | set(voisins))
-    lignes, findings = [], []
+    tous_ifx = sorted(set(par_port) | set(voisins) | set(stp_ports))
+    lignes, findings, voisins_ip = [], [], []
+    caps_infra = {'bridge', 'router', 'wlan', 'repeater', 'docsis'}
     for ifindex in tous_ifx:
         macs = sorted(set(par_port.get(ifindex, [])))
         port_nom = noms_ports.get(ifindex, f'if{ifindex}')
-        vue_appareil_id, vue_nom = None, ''
-        if len(macs) == 1 and macs[0] in inventaire:
-            vue_appareil_id, vue_nom = inventaire[macs[0]]
         v = voisins.get(ifindex, {})
-        v_caps = ','.join(sorted(v.get('caps', ())))
+        v_caps_set = set(v.get('caps', ()))
+        v_caps = ','.join(sorted(v_caps_set))
         v_mac = v.get('mac', '')
+        v_ip = v.get('ip', '')
+        st = stp_ports.get(ifindex, {})
+        stp_amont = 1 if st.get('amont') else 0
+
+        # #02 — un port d'ACCÈS porte une seule MAC, n'a pas de voisin d'infra et
+        # n'est pas le port racine STP. Tout le reste est un uplink : on le note,
+        # on ne s'en sert plus pour affecter quoi que ce soit automatiquement.
+        nb_macs = len(macs)
+        est_uplink = 1 if (nb_macs > 1
+                           or (v_caps_set & caps_infra)
+                           or stp_amont) else 0
+        vue_appareil_id, vue_nom = None, ''
+        if not est_uplink and nb_macs == 1 and macs[0] in inventaire:
+            vue_appareil_id, vue_nom = inventaire[macs[0]]
         # la MAC du châssis LLDP recoupe l'inventaire même sans FDB
-        if not vue_appareil_id and v_mac and v_mac in inventaire:
+        if not vue_appareil_id and not macs and v_mac and v_mac in inventaire:
             vue_appareil_id, vue_nom = inventaire[v_mac]
-        rows_macs = macs or ([''] if v else [])
+
+        if v_ip:
+            voisins_ip.append((v_ip, v.get('nom', ''), v.get('platform', '')))
+
+        rows_macs = macs or ([''] if (v or st) else [])
         for mac in rows_macs:
             inv = inventaire.get(mac) if mac else None
+            vlan = vlans.get((ifindex, mac)) or pvid.get(ifindex) or 0
             lignes.append((client_id, ip, equip_id, ifindex, port_nom, mac,
                            inv[0] if inv else (vue_appareil_id if not mac else None),
                            inv[1] if inv else (vue_nom if not mac else ''),
                            _vendor(mac) if mac else '',
-                           v.get('source') or ('mac' if mac else ''),
+                           v.get('source') or ('mac' if mac else 'stp'),
                            v.get('nom', ''), v.get('port', ''), now,
-                           v_caps, v_mac, v.get('port_subtype', ''), v.get('source', '')))
-        # recoupement baie : le switch voit un appareil connu, seul, différent
-        # de celui déclaré dans la baie pour ce numéro de port
+                           v_caps, v_mac, v.get('port_subtype', ''), v.get('source', ''),
+                           nb_macs, est_uplink, vlan, st.get('etat', ''), stp_amont,
+                           v_ip, v.get('platform', '') or entite.get('modele', '')))
+
+        # recoupement baie : le switch voit un appareil connu, SEUL, sur un port
+        # d'accès, différent de celui déclaré dans la baie pour ce port
         baie_port = baie.get(ifindex)
         if vue_appareil_id and baie_port and baie_port[0] and baie_port[0] != vue_appareil_id:
             findings.append(_finding(
                 'cablage_incoherent',
-                f"Port {port_nom} de {ip} : le switch voit « {vue_nom} », "
-                f"la baie déclare « {baie_port[1]} »",
+                f"Port {baie_port[2]} de {ip} ({port_nom}) : le switch voit "
+                f"« {vue_nom} », la baie déclare « {baie_port[1]} »",
                 {'equipement': ip, 'port_index': ifindex, 'port': port_nom,
+                 'port_baie': baie_port[2],
                  'vu_par_snmp': vue_nom, 'declare_baie': baie_port[1]},
                 ip, ifindex))
     if findings:
         for f in findings:
             f['appareil_id'] = equip_id
-    return lignes, findings
+    return lignes, findings, voisins_ip, reseaux
 
 
 def _communautes_snmp():
@@ -1995,7 +2415,71 @@ def _communautes_snmp():
     return c or ['public']
 
 
+_TOPO_MOUVEMENTS_MAX = 60
+
+# ── Cartographie à la demande (#18) ─────────────────────────────────────────
+# La topologie n'était relevée que dans _run_snapshot, en avant-dernière
+# position et derrière un garde de budget : une liaison lente suffisait à la
+# sauter snapshot après snapshot. Ici, un job dédié, calqué sur
+# lancer_analyse_brassage.
+_topo_status = {'running': False, 'client_id': None, 'progress': 0, 'message': '',
+                'ts': 0.0, 'resultat': None}
+_topo_lock = threading.Lock()
+_TOPO_BUDGET_S = 180.0
+
+
+def statut_cartographie(client_id: int) -> dict:
+    with _topo_lock:
+        st = dict(_topo_status)
+    if st['running'] and st['client_id'] == client_id:
+        return {'en_cours': True, 'progress': st['progress'], 'message': st['message']}
+    return {'en_cours': False, 'progress': 100,
+            'message': st['message'] if st['client_id'] == client_id else '',
+            'resultat': st['resultat'] if st['client_id'] == client_id else None}
+
+
+def lancer_cartographie(client_id: int) -> bool:
+    """Démarre le relevé de topologie en tâche de fond. False si déjà en cours."""
+    with _topo_lock:
+        if _topo_status['running']:
+            return False
+        _topo_status.update({'running': True, 'client_id': client_id, 'progress': 0,
+                             'message': 'Démarrage…', 'ts': time.time(), 'resultat': None})
+    threading.Thread(target=_run_cartographie, args=(client_id,), daemon=True,
+                     name='DiagTopologie').start()
+    return True
+
+
+def _run_cartographie(client_id: int):
+    def _prog(pct, msg):
+        with _topo_lock:
+            _topo_status['progress'] = pct
+            _topo_status['message'] = msg
+    resultat, message = None, 'Terminé'
+    try:
+        res = decouvrir_topologie(client_id, _progress=_prog, budget_s=_TOPO_BUDGET_S)
+        nb_evts = _enregistrer_evenements(client_id, res['findings'], 'topologie')
+        resultat = {'equipements': res['equipements'], 'decouverts': res['decouverts'],
+                    'reseaux': res['reseaux'], 'nouveaux_evenements': nb_evts}
+        message = '%d équipement(s) cartographié(s)' % res['equipements']
+        if res['decouverts']:
+            message += ", %d découvert(s) hors inventaire" % len(res['decouverts'])
+    except Exception as e:
+        logger.exception('network_diag: cartographie en échec')
+        message = f'Erreur : {e}'
+    finally:
+        with _topo_lock:
+            _topo_status.update({'running': False, 'progress': 100, 'message': message,
+                                 'resultat': resultat})
+
+
 def etat_topologie(client_id: int) -> dict:
+    """État de la carte L2 pour l'interface. Ajouts d'audit : `horodatage` et
+    `age_s` par équipement (#19 — une carte de trois semaines avait exactement
+    la même apparence qu'une carte de deux minutes, alors que la FDB oublie une
+    machine éteinte en cinq minutes), `est_uplink` / `nb_macs` / `aval` par port
+    (#20), `vlan` et `stp` (#11/#12), les liens inter-équipements pour la carte
+    graphique (#17) et les derniers `mouvements` (#15)."""
     from database import get_db
     conn = get_db()
     try:
@@ -2011,27 +2495,92 @@ def etat_topologie(client_id: int) -> dict:
                 "AND resolu=0 AND categorie='cablage_incoherent'", (client_id,))
             for d in [_json_charge(dj)] if d
         }
+        mvt_cols = ('horodatage', 'genre', 'appareil_id', 'appareil_nom', 'mac',
+                    'equipement_ip', 'port_avant', 'port_apres')
+        mouvements = [dict(zip(mvt_cols, r)) for r in conn.execute(
+            "SELECT %s FROM diag_topologie_mouvements WHERE client_id=? "
+            "ORDER BY horodatage DESC, id DESC LIMIT ?" % ','.join(mvt_cols),
+            (client_id, _TOPO_MOUVEMENTS_MAX))]
     finally:
         conn.close()
+
+    def _v(d, cle, defaut=None):
+        return d.get(cle, defaut)
+
     equipements = {}
     for r in rows:
         d = dict(zip(cols, r))
         cle = d['equipement_ip']
         eq = equipements.setdefault(cle, {
             'ip': cle, 'nom': d.get('equipement_nom') or '',
-            'appareil_id': d['equipement_appareil_id'], 'ports': {}, 'voisins': []})
+            'appareil_id': d['equipement_appareil_id'], 'ports': {}, 'voisins': [],
+            'horodatage': ''})
+        if d.get('horodatage') and (not eq['horodatage'] or d['horodatage'] < eq['horodatage']):
+            eq['horodatage'] = d['horodatage']      # le plus ANCIEN : l'âge réel de la carte
         p = eq['ports'].setdefault(d['port_index'], {
             'port_index': d['port_index'], 'port_nom': d['port_nom'], 'hotes': [],
-            'incoherent': f"{cle}:{d['port_index']}" in incoherents})
-        p['hotes'].append({'mac': d['mac_vue'], 'appareil_id': d['appareil_vu_id'],
-                           'appareil_nom': d['appareil_vu_nom'], 'vendor': d['vendor']})
+            'incoherent': f"{cle}:{d['port_index']}" in incoherents,
+            'est_uplink': bool(_v(d, 'est_uplink', 0)),
+            'nb_macs': int(_v(d, 'nb_macs_port', 0) or 0),
+            'vlan': int(_v(d, 'vlan', 0) or 0),
+            'stp': _v(d, 'stp_etat', '') or '',
+            'stp_amont': bool(_v(d, 'stp_amont', 0)),
+            'voisin': _v(d, 'voisin_nom', '') or '',
+            'voisin_ip': _v(d, 'voisin_ip', '') or '',
+            'voisin_port': _v(d, 'voisin_port', '') or '',
+            'voisin_caps': _v(d, 'voisin_caps', '') or ''})
+        if d['mac_vue'] or d['appareil_vu_id']:
+            p['hotes'].append({'mac': d['mac_vue'], 'appareil_id': d['appareil_vu_id'],
+                               'appareil_nom': d['appareil_vu_nom'], 'vendor': d['vendor']})
         if d['voisin_nom'] and not any(v['nom'] == d['voisin_nom'] for v in eq['voisins']):
             eq['voisins'].append({'nom': d['voisin_nom'], 'port': d['voisin_port'],
-                                  'port_local': d['port_nom']})
+                                  'port_local': d['port_nom'],
+                                  'ip': _v(d, 'voisin_ip', '') or '',
+                                  'caps': _v(d, 'voisin_caps', '') or ''})
+
+    maintenant = datetime.now(timezone.utc)
     for eq in equipements.values():
         eq['ports'] = sorted(eq['ports'].values(), key=lambda x: x['port_index'])
+        eq['nb_uplinks'] = sum(1 for p in eq['ports'] if p['est_uplink'])
+        eq['nb_acces'] = len(eq['ports']) - eq['nb_uplinks']
+        eq['age_s'] = None
+        if eq['horodatage']:
+            try:
+                t = datetime.fromisoformat(eq['horodatage'].replace('Z', '+00:00'))
+                eq['age_s'] = max(0, int((maintenant - t).total_seconds()))
+            except (ValueError, TypeError):
+                pass
+
+    # #17 — liens entre équipements cartographiés, pour la carte graphique.
+    par_nom = {}
+    for eq in equipements.values():
+        if eq['nom']:
+            par_nom[eq['nom'].lower()] = eq['ip']
+    # Un lien est vu des DEUX côtés. On garde une seule arête par paire, mais on
+    # garde la direction qui porte `stp_amont` : c'est elle qui dit qui est en
+    # aval de qui, et donc qui donne sa hiérarchie à la carte (#12/#17). Garder
+    # la première vue à l'aveugle aplatissait l'arbre.
+    par_paire = {}
+    for eq in equipements.values():
+        for p in eq['ports']:
+            cible = None
+            if p['voisin_ip'] and p['voisin_ip'] in equipements:
+                cible = p['voisin_ip']
+            elif p['voisin'] and p['voisin'].lower() in par_nom:
+                cible = par_nom[p['voisin'].lower()]
+            if not cible or cible == eq['ip']:
+                continue
+            cand = {'de': eq['ip'], 'vers': cible, 'port_local': p['port_nom'],
+                    'port_distant': p['voisin_port'], 'amont': bool(p['stp_amont']),
+                    'caps': p['voisin_caps']}
+            paire = tuple(sorted((eq['ip'], cible)))
+            garde = par_paire.get(paire)
+            if garde is None or (cand['amont'] and not garde['amont']):
+                par_paire[paire] = cand
+    liens = list(par_paire.values())
     return {'actif': str(_cfg('diag_topologie_active', '0')) == '1',
-            'equipements': list(equipements.values())}
+            'equipements': list(equipements.values()),
+            'liens': liens, 'mouvements': mouvements}
 
 
 def _json_charge(s):
@@ -2041,44 +2590,135 @@ def _json_charge(s):
         return {}
 
 
-def appliquer_topologie_baie(client_id: int) -> dict:
-    """Pré-remplit les ports de baie VIDES avec l'appareil vu par SNMP. Ne
-    touche jamais un port déjà affecté. Retourne {maj: n}."""
+def proposer_topologie_baie(client_id: int) -> dict:
+    """Aperçu de ce que « Renseigner les ports vides de la baie » écrirait, sans
+    rien modifier : `{'propositions': [...], 'ignores': [...]}`.
+
+    Trois corrections d'audit par rapport à la version qui écrivait directement :
+
+    - **#01** : le numéro de port de la baie est obtenu par
+      `_mapping_baie_ifindex` (manuel > topologie > nom d'interface), jamais en
+      prenant l'ifIndex SNMP pour un numéro de façade. Un port de façade qui
+      n'existe pas dans le châssis n'est plus CRÉÉ : sur un switch qui numérote
+      ses ifIndex en 10101, la version précédente inventait un port 10101.
+    - **#02** : seuls les ports d'ACCÈS (une seule MAC, pas d'uplink) sont
+      proposés. Auparavant, le premier appareil vu derrière un uplink était
+      affecté au port d'uplink.
+    - **#16** : rien n'est écrit ici ; l'application passe par
+      `appliquer_topologie_baie` sur la sélection explicite de l'utilisateur.
+    """
     from database import get_db
+    conn = get_db()
+    props, ignores = [], []
+    try:
+        equipements = {}
+        for eq_aid, eq_ip in conn.execute(
+                "SELECT DISTINCT equipement_appareil_id, equipement_ip FROM diag_topologie "
+                "WHERE client_id=? AND equipement_appareil_id IS NOT NULL", (client_id,)):
+            equipements.setdefault(eq_aid, eq_ip)
+        for eq_aid, eq_ip in equipements.items():
+            slot = conn.execute(
+                "SELECT id, COALESCE(nom_custom,''), COALESCE(type_equipement,'') "
+                "FROM baie_slots WHERE client_id=? AND appareil_id=? LIMIT 1",
+                (client_id, eq_aid)).fetchone()
+            if not slot:
+                continue
+            _r = conn.execute("SELECT nom_machine FROM appareils WHERE id=?", (eq_aid,)).fetchone()
+            sw_nom = slot[1] or (_r[0] if _r else '') or slot[2] or eq_ip
+            infos = {}
+            for ifx, nom in conn.execute(
+                    "SELECT DISTINCT port_index, port_nom FROM diag_topologie "
+                    "WHERE client_id=? AND equipement_appareil_id=?", (client_id, eq_aid)):
+                try:
+                    infos[int(ifx)] = {'nom': nom or f'if{ifx}', 'alias': '', 'ethernet': True}
+                except (TypeError, ValueError):
+                    continue
+            mapping, sources, _cal, _div = _mapping_baie_ifindex(
+                conn, client_id, slot[0], eq_aid, infos)
+            ifx_to_num = {ifx: num for num, ifx in mapping.items()
+                          if sources.get(num) != 'repli'}
+            for ifx, pnom, vu_aid, vu_nom in conn.execute(
+                    "SELECT port_index, port_nom, appareil_vu_id, appareil_vu_nom "
+                    "FROM diag_topologie WHERE client_id=? AND equipement_appareil_id=? "
+                    "AND appareil_vu_id IS NOT NULL AND COALESCE(est_uplink,0)=0 "
+                    "AND COALESCE(nb_macs_port,1)<=1", (client_id, eq_aid)):
+                try:
+                    ifx = int(ifx)
+                except (TypeError, ValueError):
+                    continue
+                numero = ifx_to_num.get(ifx)
+                if numero is None:
+                    ignores.append({'switch_nom': sw_nom, 'port_nom': pnom or f'if{ifx}',
+                                    'machine_nom': vu_nom or '',
+                                    'motif': 'port de façade inconnu (calibrez ce port)'})
+                    continue
+                port = conn.execute(
+                    "SELECT id, appareil_id, peripherique_id, usage_libre FROM baie_slot_ports "
+                    "WHERE slot_id=? AND numero=?", (slot[0], numero)).fetchone()
+                if not port:
+                    ignores.append({'switch_nom': sw_nom, 'port_nom': pnom or f'if{ifx}',
+                                    'machine_nom': vu_nom or '',
+                                    'motif': f"le port {numero} n'existe pas dans ce châssis"})
+                    continue
+                if port[1] == vu_aid:
+                    continue                      # déjà correct : rien à proposer
+                if port[1] or port[2] or (port[3] or '').strip():
+                    ignores.append({'switch_nom': sw_nom, 'port_nom': pnom or f'if{ifx}',
+                                    'machine_nom': vu_nom or '',
+                                    'motif': 'port déjà occupé (non écrasé)'})
+                    continue
+                props.append({'slot_id': slot[0], 'switch_nom': sw_nom,
+                              'port_numero': numero, 'port_nom': pnom or f'if{ifx}',
+                              'source': sources.get(numero, ''),
+                              'machine_id': vu_aid, 'machine_nom': vu_nom or f'#{vu_aid}'})
+    except Exception:
+        logger.exception('network_diag: aperçu topologie -> baie impossible')
+    finally:
+        conn.close()
+    props.sort(key=lambda p: (str(p['switch_nom']), p['port_numero']))
+    return {'propositions': props, 'ignores': ignores}
+
+
+def appliquer_topologie_baie(client_id: int, selection=None) -> dict:
+    """Applique les propositions de `proposer_topologie_baie`. `selection` =
+    liste de `{slot_id, port_numero}` (celles cochées par l'utilisateur) ;
+    `None` = toutes les propositions.
+
+    Ne touche jamais un port déjà affecté, et n'en crée jamais un qui n'existe
+    pas dans le châssis. Retourne `{maj, ignores}`."""
+    from database import get_db
+    apercu = proposer_topologie_baie(client_id)
+    a_ecrire = apercu['propositions']
+    if selection is not None:
+        voulu = set()
+        for s in selection or ():
+            if isinstance(s, dict):
+                try:
+                    voulu.add((int(s.get('slot_id', 0)), int(s.get('port_numero', -1))))
+                except (TypeError, ValueError):
+                    continue
+        a_ecrire = [p for p in a_ecrire if (p['slot_id'], p['port_numero']) in voulu]
+
     conn = get_db()
     maj = 0
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT t.equipement_appareil_id, t.port_index, t.appareil_vu_id "
-            "FROM diag_topologie t "
-            "WHERE t.client_id=? AND t.appareil_vu_id IS NOT NULL", (client_id,)).fetchall()
-        for equip_aid, port_index, vu_aid in rows:
-            if not equip_aid:
-                continue
-            slot = conn.execute(
-                "SELECT id FROM baie_slots WHERE client_id=? AND appareil_id=? LIMIT 1",
-                (client_id, equip_aid)).fetchone()
-            if not slot:
-                continue
+        now = _now_z()
+        for p in a_ecrire:
             port = conn.execute(
                 "SELECT id, appareil_id, peripherique_id, usage_libre FROM baie_slot_ports "
-                "WHERE slot_id=? AND numero=?", (slot[0], port_index)).fetchone()
-            now = _now_z()
-            if port and not (port[1] or port[2] or (port[3] or '').strip()):
-                conn.execute("UPDATE baie_slot_ports SET appareil_id=?, date_maj=? WHERE id=?",
-                             (vu_aid, now, port[0]))
-                maj += 1
-            elif not port:
-                conn.execute(
-                    "INSERT OR IGNORE INTO baie_slot_ports (slot_id, numero, appareil_id, date_maj) "
-                    "VALUES (?,?,?,?)", (slot[0], port_index, vu_aid, now))
-                maj += 1
+                "WHERE slot_id=? AND numero=?", (p['slot_id'], p['port_numero'])).fetchone()
+            # re-vérifié juste avant l'écriture : l'aperçu peut dater
+            if not port or port[1] or port[2] or (port[3] or '').strip():
+                continue
+            conn.execute("UPDATE baie_slot_ports SET appareil_id=?, date_maj=? WHERE id=?",
+                         (p['machine_id'], now, port[0]))
+            maj += 1
         conn.commit()
     except Exception:
         logger.exception('network_diag: application topologie -> baie impossible')
     finally:
         conn.close()
-    return {'maj': maj}
+    return {'maj': maj, 'ignores': apercu['ignores']}
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -2778,7 +3418,13 @@ def _run_snapshot(client_id: int, plage: str, avec_capture, rapide=None):
             _fin_phase('snmp', tp)
             if str(_cfg('diag_topologie_active', '0')) == '1' and _budget_ok('Cartographie de topologie'):
                 tp = _phase('topologie', 84, 'Cartographie de topologie L2')
-                findings += decouvrir_topologie(client_id)
+                _topo = decouvrir_topologie(client_id, budget_s=max(20, budget - (time.time() - t0)))
+                findings += _topo['findings']
+                if _topo['decouverts']:
+                    avertissements.append(
+                        "%d équipement(s) réseau vus en LLDP mais absents de l'inventaire : %s"
+                        % (len(_topo['decouverts']),
+                           ', '.join(d['ip'] for d in _topo['decouverts'][:5])))
                 _fin_phase('topologie', tp)
 
         tp = _phase('baseline', 88, 'Analyse des tendances (baseline)')
@@ -2840,6 +3486,9 @@ def _purger_anciens(conn, client_id: int):
         conn.execute("DELETE FROM diag_snmp_releves WHERE client_id=? AND horodatage < ?",
                      (client_id, limite))
         conn.execute("DELETE FROM diag_metriques WHERE client_id=? AND horodatage < ?",
+                     (client_id, limite))
+        # Journal des mouvements de topologie (#15) : même rétention.
+        conn.execute("DELETE FROM diag_topologie_mouvements WHERE client_id=? AND horodatage < ?",
                      (client_id, limite))
     except Exception:
         logger.debug('network_diag: purge par âge en échec', exc_info=True)
@@ -3027,7 +3676,7 @@ def _moniteur_cycle():
             if avec_snmp:
                 findings += interroger_equipements_client(cid)
                 if avec_topo:
-                    findings += decouvrir_topologie(cid)
+                    findings += decouvrir_topologie(cid, budget_s=_TOPO_BUDGET_S)['findings']
             findings += evaluer_baseline(cid)
             src = 'actif'
             if avec_capture and not capture_faite and etat_capture()['disponible']:
@@ -3136,7 +3785,9 @@ _activite_etat_mappe = {}   # (client_id, slot_id) -> {clé: dernier etat} (tran
 _activite_hist       = {}   # (client_id, ip, ifindex) -> deque[(ts, bps, pps)] (sparkline moniteur)
 _activite_sysinfo    = {}   # ip -> {'ts', 'sysname', 'sysdescr'} (cache ~10 min)
 _activite_sut        = {}   # (client_id, ip) -> (sysUpTime_ticks, epoch) : dt exact via l'horloge de l'agent
-_activite_fdb        = {}   # ip -> (epoch, {ifindex: set(mac normalisée)}) : FDB bridge-MIB, cache _ACTIVITE_FDB_TTL
+_activite_fdb        = {}   # ip -> (epoch, {ifindex: set(mac normalisée)}, info) : FDB bridge-MIB + VLAN, cache _ACTIVITE_FDB_TTL
+_activite_pvid       = {}   # ip -> (epoch, [vid ordonnés par charge], {dot1dBasePort: vid}) : dot1qPvid
+_activite_entite     = {}   # ip -> (epoch, {modele, serie, descr, membres}) : ENTITY-MIB
 _activite_fdb_baseport = {} # ip -> (epoch, {bridge_port: ifIndex}) : dot1dBasePortIfIndex, quasi statique
 _activite_fdb_dialecte = {} # ip -> 'dot1q' | 'dot1d' | 'dot1q-vlan' : quel jeu FDB répond
 _activite_fdb_echec  = {}   # ip -> epoch du dernier walk FDB infructueux (backoff)
@@ -3272,9 +3923,12 @@ def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, infos):
 
     topo = {}   # appareil_vu_id -> ifindex
     if appareil_id_switch:
+        # #02 : un uplink apprend TOUTES les MAC d'en aval. S'en servir pour
+        # mapper un port de façade associait la machine au port d'uplink.
         for vu_aid, pidx in conn.execute(
                 "SELECT appareil_vu_id, port_index FROM diag_topologie "
-                "WHERE client_id=? AND equipement_appareil_id=? AND appareil_vu_id IS NOT NULL",
+                "WHERE client_id=? AND equipement_appareil_id=? AND appareil_vu_id IS NOT NULL "
+                "AND COALESCE(est_uplink,0)=0 AND COALESCE(nb_macs_port,1)<=1",
                 (client_id, appareil_id_switch)):
             try:
                 topo.setdefault(int(vu_aid), int(pidx))
@@ -3826,12 +4480,47 @@ def _mac_octets(brut):
     return ':'.join('%02x' % b for b in brut) if brut and len(brut) == 6 else ''
 
 
-def _bridge_fdb_brute(ip, communautes, baseport_if):
-    """{ifIndex: set(mac)} depuis la bridge-MIB. Essaie dot1q, dot1d, puis — si
-    les deux sont muets — le contexte de communauté par VLAN (`public@<vlan>`,
-    cas Cisco et quelques HP). Mémorise le dialecte qui répond."""
-    def _agrege(fdb):
-        out = {}
+def _vlans_actifs(ip, communautes):
+    """VLAN réellement portés par des ports du switch, du plus chargé au moins
+    chargé : `[(vid, nb_ports)]`. Lu dans `dot1qPvid` (dot1qPortVlanTable), une
+    seule table, très courte. Sert (a) à ne sonder par contexte de communauté
+    que les VLAN qui existent vraiment — au lieu des 32 premiers déclarés,
+    VLAN vides compris (constat d'audit #09) — et (b) à renseigner le VLAN
+    d'accès d'un port (constat #11). `[]` si l'agent ne l'expose pas.
+    Résultat caché avec les MAC d'infra (quasi statique)."""
+    ent = _activite_pvid.get(ip)
+    if ent and time.time() - ent[0] < _ACTIVITE_SYSINFO_TTL:
+        return ent[1], ent[2]
+    pvid = _snmp_walk(_OID_DOT1Q_PVID, ip, communautes, max_vars=600)
+    par_bp = {}
+    compte = collections.Counter()
+    for suf, val in pvid.items():
+        try:
+            bp, vid = int(str(suf).split('.')[0]), int(val)
+        except (TypeError, ValueError, IndexError):
+            continue
+        if vid <= 0:
+            continue
+        par_bp[bp] = vid
+        compte[vid] += 1
+    ordre = [v for v, _n in compte.most_common()]
+    if par_bp:
+        _activite_pvid[ip] = (time.time(), ordre, par_bp)
+    return ordre, par_bp
+
+
+def _bridge_fdb_brute(ip, communautes, baseport_if, stats=None):
+    """`({ifIndex: set(mac)}, {(ifIndex, mac): vlan})` depuis la bridge-MIB.
+    Essaie dot1q, dot1d, puis — si les deux sont muets — le contexte de
+    communauté par VLAN (`public@<vlan>`, cas Cisco et quelques HP). Mémorise le
+    dialecte qui répond.
+
+    Le VLAN d'apprentissage vient gratuitement de l'index dot1q
+    (`dot1qTpFdbPort` est indexé `<fdbId>.<6 octets de MAC>`) — constat #11.
+    `stats` : dict renseigné en sortie (`tronque`)."""
+    def _agrege(fdb, avec_vlan, vid_force=None, out=None, vlans=None):
+        out = {} if out is None else out
+        vlans = {} if vlans is None else vlans
         for suffixe, bridge_port in fdb.items():
             mac = _mac_depuis_suffixe(suffixe, 6)
             try:
@@ -3845,96 +4534,123 @@ def _bridge_fdb_brute(ip, communautes, baseport_if):
                 ifx = int(ifx)
             except (TypeError, ValueError):
                 ifx = bp
-            out.setdefault(ifx, set()).add(_norm_mac(mac))
-        return out
+            m = _norm_mac(mac)
+            out.setdefault(ifx, set()).add(m)
+            vid = vid_force
+            if vid is None and avec_vlan:
+                # index dot1q = <fdbId>.<mac sur 6 sous-identifiants>
+                parts = str(suffixe).split('.')
+                if len(parts) >= 7:
+                    try:
+                        vid = int(parts[-7])
+                    except ValueError:
+                        vid = None
+            if vid:
+                vlans[(ifx, m)] = vid
+        return out, vlans
+
+    def _walk_fdb(oid, comm):
+        st = {}
+        f = _snmp_walk(oid, ip, comm, max_vars=_FDB_MAX_ENTREES, stats=st)
+        if st.get('tronque') and stats is not None:
+            stats['tronque'] = True
+        return f
 
     dialecte = _activite_fdb_dialecte.get(ip)
-    if dialecte == 'dot1d':
-        f = _snmp_walk(_OID_FDB_DOT1D_PORT, ip, communautes)
+    if dialecte in ('dot1d', 'dot1q'):
+        oid = _OID_FDB_DOT1D_PORT if dialecte == 'dot1d' else _OID_FDB_DOT1Q_PORT
+        f = _walk_fdb(oid, communautes)
         if f:
-            return _agrege(f)
-    elif dialecte == 'dot1q':
-        f = _snmp_walk(_OID_FDB_DOT1Q_PORT, ip, communautes)
-        if f:
-            return _agrege(f)
+            return _agrege(f, dialecte == 'dot1q')
     elif dialecte == 'dot1q-vlan':
-        return _fdb_par_vlan(ip, communautes, baseport_if)
+        return _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb)
     else:
         for nom, oid in (('dot1q', _OID_FDB_DOT1Q_PORT), ('dot1d', _OID_FDB_DOT1D_PORT)):
-            f = _snmp_walk(oid, ip, communautes)
+            f = _walk_fdb(oid, communautes)
             if f:
                 _activite_fdb_dialecte[ip] = nom
-                return _agrege(f)
-        vlan = _fdb_par_vlan(ip, communautes, baseport_if)
-        if vlan:
+                return _agrege(f, nom == 'dot1q')
+        par_if, vlans = _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb)
+        if par_if:
             _activite_fdb_dialecte[ip] = 'dot1q-vlan'
-            return vlan
-    return {}
+        return par_if, vlans
+    return {}, {}
 
 
-def _fdb_par_vlan(ip, communautes, baseport_if):
+def _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb):
     """FDB dot1q relevée VLAN par VLAN avec le contexte de communauté
-    `communaute@<vlan>` (indispensable sur beaucoup de switches Cisco / HP)."""
-    vlans = _snmp_walk(_OID_DOT1Q_VLAN_NAMES, ip, communautes)
-    vids = []
-    for suf in vlans:
-        try:
-            vids.append(int(suf.split('.')[-1]))
-        except (ValueError, IndexError):
-            pass
-    out = {}
-    for vid in sorted(set(vids))[:_FDB_VLAN_MAX]:
-        ctx = [f'{c}@{vid}' for c in communautes]
-        f = _snmp_walk(_OID_FDB_DOT1Q_PORT, ip, ctx)
-        for suffixe, bridge_port in f.items():
-            mac = _mac_depuis_suffixe(suffixe, 6)
+    `communaute@<vlan>` (indispensable sur beaucoup de switches Cisco / HP).
+
+    Les VLAN sondés viennent en priorité de `dot1qPvid` (ceux réellement portés
+    par un port), du plus chargé au moins chargé, et non de la liste statique
+    des VLAN déclarés dont beaucoup sont vides — constat d'audit #09. Repli sur
+    `dot1qVlanStaticName` si l'agent n'expose pas `dot1qPvid`."""
+    vids, _par_bp = _vlans_actifs(ip, communautes)
+    if not vids:
+        compte = []
+        for suf in _snmp_walk(_OID_DOT1Q_VLAN_NAMES, ip, communautes, max_vars=600):
             try:
-                bp = int(bridge_port)
-            except (TypeError, ValueError):
-                continue
-            if not mac or bp <= 0:
-                continue
-            ifx = baseport_if.get(str(bp), bp)
-            try:
-                ifx = int(ifx)
-            except (TypeError, ValueError):
-                ifx = bp
-            out.setdefault(ifx, set()).add(_norm_mac(mac))
-    return out
+                compte.append(int(suf.split('.')[-1]))
+            except (ValueError, IndexError):
+                pass
+        vids = sorted(set(compte))
+    out, vlans = {}, {}
+    t0 = time.time()
+    for vid in vids[:_FDB_VLAN_MAX]:
+        if time.time() - t0 > _FDB_VLAN_BUDGET_S:
+            break                      # budget : les VLAN restants sont les moins chargés
+        f = _walk_fdb(_OID_FDB_DOT1Q_PORT, [f'{c}@{vid}' for c in communautes])
+        _agrege(f, False, vid_force=vid, out=out, vlans=vlans)
+    return out, vlans
 
 
 def _fdb_switch(ip, communautes):
-    """Table d'apprentissage MAC du switch, `{ifIndex: set(mac)}` : bridge-MIB
-    (dot1q/dot1d, contexte VLAN au besoin) **+ table ARP** (`ipNetToMediaPhysAddress`,
-    précieuse pour un routeur / switch L3 sans FDB). Cache `_ACTIVITE_FDB_TTL` s ;
-    sur échec de walk, conserve la dernière valeur connue si elle n'est pas trop
-    vieille."""
+    """Table d'apprentissage MAC du switch : `({ifIndex: set(mac)}, info)` avec
+    `info = {'vlans': {(ifIndex, mac): vid}, 'tronque': bool}`. Sources :
+    bridge-MIB (dot1q/dot1d, contexte VLAN au besoin) **+ table ARP**
+    (`ipNetToMediaPhysAddress`, précieuse pour un routeur / switch L3 sans FDB).
+    Cache `_ACTIVITE_FDB_TTL` s ; sur échec de walk, conserve la dernière valeur
+    connue si elle n'est pas trop vieille."""
     with _activite_fdb_lock:
         hit = _activite_fdb.get(ip)
         if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_TTL:
-            return hit[1]
+            return hit[1], hit[2]
         ech = _activite_fdb_echec.get(ip)
         if ech and (time.time() - ech) < _ACTIVITE_FDB_BACKOFF and not hit:
-            return {}
+            return {}, {}
 
         bp_hit = _activite_fdb_baseport.get(ip)
         if bp_hit and (time.time() - bp_hit[0]) < _ACTIVITE_SYSINFO_TTL:
             baseport_if = bp_hit[1]
         else:
-            baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes)
+            baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes, max_vars=600)
             if baseport_if:
                 _activite_fdb_baseport[ip] = (time.time(), baseport_if)
             elif bp_hit:
                 baseport_if = bp_hit[1]
 
-        par_if = _bridge_fdb_brute(ip, communautes, baseport_if)
+        stats = {}
+        par_if, vlans = _bridge_fdb_brute(ip, communautes, baseport_if, stats)
+
+        # VLAN d'accès des ports (dot1qPvid) : complète le VLAN d'apprentissage
+        # pour les MAC dont l'index dot1q ne le portait pas (dot1d, ARP).
+        _ordre, pvid_par_bp = _vlans_actifs(ip, communautes)
+        pvid_par_ifx = {}
+        for bp, vid in pvid_par_bp.items():
+            try:
+                pvid_par_ifx[int(baseport_if.get(str(bp), bp))] = vid
+            except (TypeError, ValueError):
+                continue
 
         # table ARP — plafonnée : petit complément si la FDB bridge a répondu,
         # relevé plus large si elle est vide (probable routeur / switch L3).
         arp_cap = 150 if par_if else 800
-        arp = _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes, max_rows=arp_cap)
+        st_arp = {}
+        arp = _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes, max_rows=arp_cap, stats=st_arp)
         if not arp:
-            arp = _snmp_walk_octets(_OID_ARP_PHYS_2, ip, communautes, max_rows=arp_cap)
+            arp = _snmp_walk_octets(_OID_ARP_PHYS_2, ip, communautes, max_rows=arp_cap, stats=st_arp)
+        if st_arp.get('tronque'):
+            stats['tronque'] = True
         for suf, brut in arp.items():
             mac = _mac_octets(brut)
             if not mac:
@@ -3945,14 +4661,15 @@ def _fdb_switch(ip, communautes):
                 continue
             par_if.setdefault(ifx, set()).add(mac)
 
+        info = {'vlans': vlans, 'pvid': pvid_par_ifx, 'tronque': bool(stats.get('tronque'))}
         if par_if:
-            _activite_fdb[ip] = (time.time(), par_if)
+            _activite_fdb[ip] = (time.time(), par_if, info)
             _activite_fdb_echec.pop(ip, None)
-            return par_if
+            return par_if, info
         _activite_fdb_echec[ip] = time.time()
         if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_PERIME:
-            return hit[1]
-        return {}
+            return hit[1], hit[2]
+        return {}, info
 
 
 def _macs_infra_switch(ip, communautes):
@@ -3979,12 +4696,21 @@ def _macs_infra_switch(ip, communautes):
 
 
 def _releve_mac_switch(ip, communautes, inv_mac):
-    """Point d'entrée unique : `_fdb_switch` (bridge + ARP) puis `_fdb_corriger`
-    (hypothèses de forme, réglage `diag_fdb_mode:<ip>`). Retourne `(fdb, meta)`.
+    """Point d'entrée unique : `_fdb_switch` (bridge + ARP + VLAN) puis
+    `_fdb_corriger` (hypothèses de forme, réglage `diag_fdb_mode:<ip>`).
+    Retourne `(fdb, meta)` ; `meta` porte en plus `vlans` ({(ifIndex, mac): vid}),
+    `pvid` ({ifIndex: vid d'accès}) et `tronque_taille` (la table dépassait le
+    plafond de lecture — résultat incomplet, constat d'audit #05).
     Utilisé par le cycle d'activité, `analyser_brassage_baie` ET la découverte
     de topologie (palier 4)."""
-    return _fdb_corriger(_fdb_switch(ip, communautes), inv_mac,
-                         str(_cfg(f'diag_fdb_mode:{ip}', '')))
+    par_if, info = _fdb_switch(ip, communautes)
+    fdb, meta = _fdb_corriger(par_if, inv_mac, str(_cfg(f'diag_fdb_mode:{ip}', '')))
+    meta['vlans'] = info.get('vlans') or {}
+    meta['pvid'] = info.get('pvid') or {}
+    meta['tronque_taille'] = bool(info.get('tronque'))
+    if meta['tronque_taille']:
+        meta['fiable'] = False
+    return fdb, meta
 
 
 # Hypothèses de « forme » d'une MAC renvoyée par un agent buggé : (nom, fonction

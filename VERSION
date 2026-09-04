@@ -1,9 +1,65 @@
-PARCINFO_VERSION=2.19.31
-RELEASE_DATE=2026-09-03
-BUILD_NUMBER=2026090301
+PARCINFO_VERSION=2.19.32
+RELEASE_DATE=2026-09-04
+BUILD_NUMBER=2026090401
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.32 - Audit topologie reseau : 21 correctifs et ajouts
+# Audit complet de la decouverte de topologie (palier 4), des primitives SNMP
+# qui l'alimentent et de son interface. 21 constats, tous traites.
+#
+# EXACTITUDE
+#  #01 "Reporter dans la baie" prenait l'ifIndex SNMP pour un numero de port de
+#      facade et creait des ports fantomes (ifIndex 10101 -> port 10101 dans le
+#      rack). Passe desormais par _mapping_baie_ifindex ; n'invente plus de port.
+#  #02 Aucune garde sur les ports UPLINK : le premier appareil vu derriere un
+#      uplink etait affecte au port d'uplink. Colonnes nb_macs_port / est_uplink
+#      dans diag_topologie ; seuls les ports d'acces alimentent une affectation.
+#  #03 Le constat "cablage incoherent" comparait un ifIndex a un numero de
+#      facade. Mapping inverse + sources fiables uniquement.
+#  #04 SNMPv3 absent de _snmp_walk_octets : sur un switch v3-only, le port, la
+#      MAC et les capacites des voisins LLDP, la table ARP et les MAC d'infra
+#      etaient perdus. Chemin v3 ajoute (+ _snmp_bulk_cols).
+#  #05 FDB tronquee en silence a 800 entrees. Plafond porte a 5000, troncature
+#      remontee dans meta (stats {tronque, mode}).
+#
+# VITESSE
+#  #06 app._snmp_walk passe en GETBULK v2c (max-repetitions 25), repli GETNEXT :
+#      ~25x moins de paquets sur une FDB ou une table LLDP. _v3_walk aussi.
+#  #07 Le snapshot faisait DEUX interroger_equipement complets par switch
+#      (phase snmp puis phase topologie). La topologie consomme le cache
+#      _noms_interfaces.
+#  #08 Les switchs etaient interroges les uns apres les autres -> pool de 6.
+#  #09 Le releve VLAN par VLAN sondait les 32 premiers VLAN declares, vides
+#      compris. Il suit maintenant dot1qPvid (VLAN reellement portes), du plus
+#      charge au moins charge, sous budget.
+#
+# EXHAUSTIVITE
+#  #10 lldpRemManAddr : decouverte RECURSIVE (profondeur 3). Un switch absent de
+#      l'inventaire est cartographie et propose a l'ajout, jamais cree d'office.
+#  #11 VLAN par port (dot1qPvid + index dot1q) persiste dans diag_topologie.
+#  #12 STP (dot1dStpRootPort / PortDesignatedBridge / PortState) : le SENS des
+#      liens, donc la hierarchie de la carte, meme sans LLDP.
+#  #13 Sous-reseaux du routeur (ipAddrTable / ipCidrRouteTable) proposes comme
+#      plages de scan. Rien n'est balaye sans validation.
+#  #14 ENTITY-MIB : modele, numero de serie, composition d'un stack.
+#  #15 Table diag_topologie_mouvements : appareil apparu / disparu / deplace
+#      d'un port a un autre (diag_topologie est ecrasee a chaque passage).
+#
+# INTERFACE
+#  #16 "Reporter dans la baie" ecrivait en base sur un simple confirm().
+#      Modale d'apercu ligne par ligne, cases a cocher, cas ignores explicites
+#      (route GET /api/diag-reseau/topologie/proposer, lecture seule).
+#  #17 Carte L2 en SVG inline (aucune dependance) : noeuds, liens, hierarchie
+#      STP, appareils feuilles comptes par switch.
+#  #18 Cartographie a la demande en tache de fond (lancer_cartographie /
+#      statut_cartographie, routes dediees) : elle n'etait relevee qu'en
+#      avant-derniere phase d'un diagnostic complet, et sautee sur budget.
+#  #19 Fraicheur de la carte affichee ("relevee il y a 3 j"), grisee au-dela
+#      de 24 h. La donnee etait en base, jamais remontee.
+#  #20 Ports uplink replies en une ligne "N appareils en aval", depliable.
+#  #21 La topologie a son propre onglet.
+#
 # Version 2.19.31 - Baie : choix du port du voisin + moniteur sans debordement
 # Suite du retour terrain.
 #

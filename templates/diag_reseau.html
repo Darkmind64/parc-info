@@ -73,6 +73,32 @@
     padding:.55rem .9rem; font-size:.82rem; font-weight:600; cursor:pointer; }
 .diag-tab:hover { color:var(--text-primary); }
 .diag-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+/* ── Carte de topologie (audit #17) ── */
+.topo-fraicheur { font-size:.72rem; font-weight:400; color:var(--text-muted); margin-left:.6rem; }
+.topo-fraicheur.perime { color:#e0952a; }
+#topo-carte svg { max-width:100%; height:auto; display:block; }
+.topo-noeud rect { fill:var(--card-bg, rgba(30,58,95,.35)); stroke:var(--accent); stroke-width:1.5; }
+.topo-noeud.hors-inv rect { stroke:#e0952a; stroke-dasharray:4 3; }
+.topo-noeud text { fill:var(--text-primary); font-size:12px; font-weight:600; }
+.topo-noeud text.sub { fill:var(--text-muted); font-size:10px; font-weight:400; }
+.topo-lien { stroke:var(--accent); stroke-width:2; opacity:.65; }
+.topo-lien.amont { stroke-width:3; opacity:.9; }
+.topo-lien-txt { fill:var(--text-muted); font-size:9px; }
+.topo-feuilles { fill:var(--text-muted); font-size:10px; }
+.topo-legende { font-size:.72rem; color:var(--text-muted); margin-top:.5rem; }
+/* ── Uplinks repliables (audit #20) ── */
+tr.topo-uplink { background:rgba(224,149,42,.07); }
+tr.topo-uplink td { cursor:pointer; }
+.topo-badge { font-size:.66rem; padding:1px 6px; border-radius:99px; border:1px solid var(--border);
+    color:var(--text-muted); margin-left:.35rem; white-space:nowrap; }
+.topo-badge.up { border-color:#e0952a; color:#e0952a; }
+.topo-badge.vlan { border-color:var(--accent); color:var(--accent); }
+.topo-aval { display:none; }
+tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
+.topo-mvt-genre { font-size:.66rem; padding:1px 6px; border-radius:99px; border:1px solid var(--border); }
+.topo-mvt-genre.apparu { border-color:#2ea36b; color:#2ea36b; }
+.topo-mvt-genre.disparu { border-color:#c0574f; color:#c0574f; }
+.topo-mvt-genre.deplace { border-color:#e0952a; color:#e0952a; }
 .diag-pane { display:none; }
 .diag-pane.active { display:block; }
 .cfg-etat { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:.5rem .9rem; }
@@ -95,6 +121,7 @@
 <div class="diag-tabs" id="diag-tabs">
     <button class="diag-tab" data-pane="pane-apercu">Vue d'ensemble</button>
     <button class="diag-tab" data-pane="pane-ports">Équipements</button>
+    <button class="diag-tab" data-pane="pane-topologie">Topologie</button>
     <button class="diag-tab" data-pane="pane-tendances">Tendances</button>
     <button class="diag-tab" data-pane="pane-evenements">Évènements</button>
 </div>
@@ -206,14 +233,32 @@
     <div id="snmp-body" class="diag-line">Chargement…</div>
 </div>
 
-<!-- ── Topologie découverte ── -->
-<div class="diag-card" id="topo-wrap" style="margin-bottom:1.2rem;">
-    <h2>🗺 Topologie découverte
-        {% if peut_ecrire %}<button class="link-btn" style="margin-left:.6rem;" onclick="appliquerBaie()">Reporter dans la baie</button>{% endif %}
+</div><!-- /pane-ports -->
+
+<!-- ── Topologie : onglet dédié (audit #21) ── -->
+<div class="diag-pane" id="pane-topologie">
+<div class="diag-card" id="topo-carte-wrap" style="margin-bottom:1.2rem;">
+    <h2>🗺 Carte du réseau (niveau 2)
+        {% if peut_ecrire %}
+        <button class="link-btn" style="margin-left:.6rem;" id="btn-cartographier" onclick="cartographier()">Cartographier maintenant</button>
+        <button class="link-btn" style="margin-left:.4rem;" onclick="apercuBaie()">Reporter dans la baie…</button>
+        {% endif %}
+        <span id="topo-fraicheur" class="topo-fraicheur"></span>
     </h2>
+    <div id="topo-carte" class="diag-line">Chargement…</div>
+    <div id="topo-decouverts"></div>
+</div>
+
+<div class="diag-card" id="topo-wrap" style="margin-bottom:1.2rem;">
+    <h2>🔎 Détail par équipement</h2>
     <div id="topo-body" class="diag-line">Chargement…</div>
 </div>
-</div><!-- /pane-ports -->
+
+<div class="diag-card" id="topo-mvt-wrap" style="margin-bottom:1.2rem;">
+    <h2>🔀 Mouvements récents</h2>
+    <div id="topo-mvt" class="diag-line">Chargement…</div>
+</div>
+</div><!-- /pane-topologie -->
 
 <div class="diag-pane" id="pane-tendances">
 <!-- ── Tendances ── -->
@@ -512,40 +557,303 @@ function chargerSNMP(){
     }).catch(() => {});
 }
 
+// ── Fraîcheur de la carte (audit #19) ──────────────────────────────────────
+// Une carte de trois semaines avait la même apparence qu'une carte de deux
+// minutes, alors que la FDB oublie une machine éteinte en cinq minutes.
+function ageTexte(s){
+    if (s === null || s === undefined) return '';
+    if (s < 90) return 'à l’instant';
+    if (s < 5400) return 'il y a ' + Math.round(s/60) + ' min';
+    if (s < 172800) return 'il y a ' + Math.round(s/3600) + ' h';
+    return 'il y a ' + Math.round(s/86400) + ' j';
+}
+
+// ── Carte L2 en SVG inline (audit #17) ─────────────────────────────────────
+// Aucune dépendance externe (la CSP de la page l'interdit). Les équipements
+// SNMP sont des noeuds, les liens LLDP/CDP/STP des arêtes ; les machines
+// feuilles sont COMPTÉES sous leur switch, pas dessinées une par une.
+function carteTopologie(d){
+    const eqs = d.equipements || [], liens = d.liens || [];
+    if (!eqs.length) return '';
+    // profondeur : on remonte les liens « vers la racine STP »
+    const amontDe = {};
+    liens.forEach(l => { if (l.amont) amontDe[l.de] = l.vers; });
+    const niveau = {};
+    eqs.forEach(e => {
+        let n = 0, cur = e.ip, garde = 0;
+        while (amontDe[cur] && garde++ < 8){ cur = amontDe[cur]; n++; }
+        niveau[e.ip] = n;
+    });
+    const parNiveau = {};
+    eqs.forEach(e => { (parNiveau[niveau[e.ip]] = parNiveau[niveau[e.ip]] || []).push(e); });
+    const niveaux = Object.keys(parNiveau).map(Number).sort((a,b)=>a-b);
+    const LARG = 190, HAUT = 58, GX = 60, GY = 78;
+    const maxCol = Math.max.apply(null, niveaux.map(n => parNiveau[n].length));
+    const W = Math.max(360, maxCol * (LARG + GX) + GX);
+    const H = niveaux.length * (HAUT + GY) + GY;
+    const pos = {};
+    niveaux.forEach((n, iy) => {
+        const ligne = parNiveau[n];
+        const total = ligne.length * (LARG + GX) - GX;
+        ligne.forEach((e, ix) => {
+            pos[e.ip] = { x: (W - total)/2 + ix * (LARG + GX), y: GY/2 + iy * (HAUT + GY) };
+        });
+    });
+    let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Carte du réseau de niveau 2">';
+    liens.forEach(l => {
+        // On dessine TOUJOURS du parent (plus haut) vers l'enfant : `de` est
+        // l'équipement en aval quand le lien porte `amont`.
+        let hautIp = l.de, basIp = l.vers, portHaut = l.port_distant, portBas = l.port_local;
+        if (l.amont || niveau[l.vers] < niveau[l.de]){
+            hautIp = l.vers; basIp = l.de; portHaut = l.port_distant; portBas = l.port_local;
+        } else {
+            hautIp = l.de; basIp = l.vers; portHaut = l.port_local; portBas = l.port_distant;
+        }
+        const a = pos[hautIp], b = pos[basIp];
+        if (!a || !b) return;
+        const x1 = a.x + LARG/2, x2 = b.x + LARG/2;
+        let d, mx, my;
+        if (niveau[hautIp] === niveau[basIp]){          // même rang : trait latéral
+            const y = a.y + HAUT/2;
+            d = 'M' + x1 + ' ' + y + ' L' + x2 + ' ' + y;
+            mx = (x1 + x2) / 2; my = y - 6;
+        } else {
+            const y1 = a.y + HAUT, y2 = b.y;
+            const cy = (y1 + y2) / 2;
+            d = 'M' + x1 + ' ' + y1 + ' C ' + x1 + ' ' + cy + ', ' + x2 + ' ' + cy + ', ' + x2 + ' ' + y2;
+            // étiquette placée près de l'ENFANT, pas au milieu : au milieu,
+            // toutes les branches d'un même parent se superposent.
+            mx = x1 + (x2 - x1) * 0.8; my = y2 - 8;
+        }
+        svg += '<path class="topo-lien' + (l.amont ? ' amont' : '') + '" fill="none" d="' + d + '">'
+            + '<title>' + esc(portHaut||'') + ' ↔ ' + esc(portBas||'') + '</title></path>';
+        svg += '<text class="topo-lien-txt" x="' + mx + '" y="' + my + '" text-anchor="middle">'
+            + esc(portHaut||'') + ' ↔ ' + esc(portBas||'') + '</text>';
+    });
+    eqs.forEach(e => {
+        const p = pos[e.ip]; if (!p) return;
+        const feuilles = (e.ports||[]).reduce((n,pt) => n + (pt.est_uplink ? 0 : (pt.hotes||[]).length), 0);
+        svg += '<g class="topo-noeud"><rect x="' + p.x + '" y="' + p.y + '" width="' + LARG + '" height="' + HAUT + '" rx="8"/>'
+            + '<text x="' + (p.x+12) + '" y="' + (p.y+21) + '">' + esc((e.nom || e.ip).slice(0,26)) + '</text>'
+            + '<text class="sub" x="' + (p.x+12) + '" y="' + (p.y+36) + '">' + esc(e.ip) + ' · ' + (e.nb_uplinks||0) + ' uplink(s)</text>'
+            + '<text class="topo-feuilles" x="' + (p.x+12) + '" y="' + (p.y+50) + '">' + feuilles + ' en accès · ' + esc(ageTexte(e.age_s)) + '</text>'
+            + '</g>';
+    });
+    svg += '</svg>';
+    const isoles = eqs.filter(e => !liens.some(l => l.de === e.ip || l.vers === e.ip)).length;
+    return svg + '<div class="topo-legende">Trait épais = lien vers la racine STP. '
+        + liens.length + ' lien(s) inter-équipements'
+        + (isoles ? ' · ' + isoles + ' équipement(s) sans lien identifié (ni LLDP/CDP, ni STP)' : '')
+        + '.</div>';
+}
+
+// Un uplink apprend toutes les MAC d'en aval : le déplier d'office noyait le
+// tableau (audit #20). Il est replié, dépliable au clic.
+function lignePort(p){
+    const hotes = p.hotes || [];
+    // le VLAN a sa propre colonne : pas de pastille redondante ici
+    const badges = (p.est_uplink ? '<span class="topo-badge up">uplink' + (p.stp_amont ? ' · vers la racine' : '') + '</span>' : '')
+        + (p.incoherent ? ' <span class="grav-badge grav-avertissement">incohérent baie</span>' : '');
+    const nomHote = h => h.appareil_id
+        ? '<a href="/appareil/' + h.appareil_id + '/fiche-systeme">' + esc(h.appareil_nom) + '</a>'
+        : '<span class="mono">' + esc(h.mac) + '</span>';
+    if (p.est_uplink){
+        const cible = p.voisin ? esc(p.voisin) + (p.voisin_port ? ' (' + esc(p.voisin_port) + ')' : '') : '';
+        return '<tr class="topo-uplink" title="Cliquer pour voir les appareils en aval">'
+            + '<td>' + esc(p.port_nom) + '</td><td>' + (p.vlan || '') + '</td>'
+            + '<td>' + (cible ? '→ ' + cible + ' · ' : '') + hotes.length + ' appareil(s) en aval ' + badges
+            + ' <span style="color:var(--text-muted);font-size:.7rem;">(cliquer pour déplier)</span></td>'
+            + '<td style="font-size:.72rem;color:var(--text-muted);">' + esc(p.stp || '') + '</td></tr>'
+            + '<tr class="topo-aval"><td></td><td></td><td colspan="2" style="font-size:.75rem;">'
+            + (hotes.map(nomHote).join(' · ') || '<span style="color:var(--text-muted);">aucune MAC apprise</span>')
+            + '</td></tr>';
+    }
+    return '<tr style="' + (p.incoherent ? 'background:rgba(255,140,0,.08);' : '') + '">'
+        + '<td>' + esc(p.port_nom) + '</td><td>' + (p.vlan || '') + '</td>'
+        + '<td>' + hotes.map(nomHote).join('<br>') + badges + '</td>'
+        + '<td style="font-size:.72rem;color:var(--text-muted);">'
+        + hotes.map(h => esc(h.vendor||'')).filter(Boolean).join(', ') + '</td></tr>';
+}
+
 function chargerTopologie(){
     fetch('/api/diag-reseau/topologie').then(r=>r.json()).then(d => {
         const wrap = document.getElementById('topo-body');
+        const carte = document.getElementById('topo-carte');
+        const frais = document.getElementById('topo-fraicheur');
+        const mvt = document.getElementById('topo-mvt');
+        if (!wrap || !carte) return;
         if (!d.actif){
-            wrap.innerHTML = '<span style="color:var(--text-muted);">Cartographie de topologie désactivée — nécessite le SNMP + le réglage dédié.</span>';
+            const msg = '<span style="color:var(--text-muted);">Cartographie de topologie désactivée — nécessite le SNMP + le réglage dédié.</span>';
+            wrap.innerHTML = msg; carte.innerHTML = msg;
+            if (mvt) mvt.innerHTML = ''; if (frais) frais.textContent = '';
             return;
         }
         if (!d.equipements || !d.equipements.length){
-            wrap.innerHTML = '<span style="color:var(--text-muted);">Aucune donnée. Lancez un diagnostic avec la topologie activée.</span>';
+            const msg = '<span style="color:var(--text-muted);">Aucune donnée. Lancez la cartographie ci-dessus, ou un diagnostic avec la topologie activée.</span>';
+            wrap.innerHTML = msg; carte.innerHTML = msg;
+            if (mvt) mvt.innerHTML = ''; if (frais) frais.textContent = '';
             return;
         }
-        wrap.innerHTML = d.equipements.map(eq => `
-            <div style="margin:.6rem 0 1rem;">
-                <div style="font-weight:700;font-size:.85rem;margin-bottom:.3rem;">${esc(eq.nom || eq.ip)} <span style="color:var(--text-muted);font-weight:400;">${esc(eq.ip)}</span></div>
-                ${eq.voisins && eq.voisins.length ? `<div class="diag-line" style="font-size:.75rem;">Voisins LLDP : ${eq.voisins.map(v => esc(v.nom) + (v.port ? ' ('+esc(v.port)+')' : '')).join(', ')}</div>` : ''}
-                <div style="overflow-x:auto;"><table class="diag-table"><thead><tr><th>Port</th><th>Appareils vus</th><th>Fabricant</th></tr></thead><tbody>
-                ${eq.ports.map(p => `<tr style="${p.incoherent ? 'background:rgba(255,140,0,.08);' : ''}">
-                    <td>${esc(p.port_nom)}</td>
-                    <td>${p.hotes.map(h => h.appareil_id ? `<a href="/appareil/${h.appareil_id}/fiche-systeme">${esc(h.appareil_nom)}</a>` : `<span class="mono">${esc(h.mac)}</span>`).join('<br>')}
-                        ${p.incoherent ? ' <span class="grav-badge grav-avertissement">incohérent baie</span>' : ''}</td>
-                    <td style="font-size:.72rem;color:var(--text-muted);">${p.hotes.map(h => esc(h.vendor||'')).filter(Boolean).join(', ')}</td>
-                </tr>`).join('')}
-                </tbody></table></div>
-            </div>`).join('');
+        // fraîcheur globale = le relevé le plus ANCIEN
+        const ages = d.equipements.map(e => e.age_s).filter(a => a !== null && a !== undefined);
+        const vieux = ages.length ? Math.max.apply(null, ages) : null;
+        if (frais){
+            frais.textContent = vieux === null ? '' : 'relevée ' + ageTexte(vieux);
+            frais.classList.toggle('perime', vieux !== null && vieux > 86400);
+        }
+        carte.innerHTML = carteTopologie(d);
+
+        wrap.innerHTML = d.equipements.map(eq =>
+            '<div style="margin:.6rem 0 1rem;">'
+            + '<div style="font-weight:700;font-size:.85rem;margin-bottom:.3rem;">' + esc(eq.nom || eq.ip)
+            + ' <span style="color:var(--text-muted);font-weight:400;">' + esc(eq.ip) + '</span>'
+            + '<span class="topo-fraicheur">' + eq.nb_acces + " port(s) d'accès · " + eq.nb_uplinks
+            + ' uplink(s) · ' + esc(ageTexte(eq.age_s)) + '</span></div>'
+            + (eq.voisins && eq.voisins.length
+                ? '<div class="diag-line" style="font-size:.75rem;">Voisins LLDP/CDP : '
+                  + eq.voisins.map(v => esc(v.nom) + (v.port ? ' (' + esc(v.port) + ')' : '')
+                                        + (v.ip ? ' — ' + esc(v.ip) : '')).join(', ') + '</div>'
+                : '')
+            + '<div style="overflow-x:auto;"><table class="diag-table"><thead><tr><th>Port</th><th>VLAN</th>'
+            + '<th>Appareils vus</th><th>Fabricant / STP</th></tr></thead><tbody>'
+            + eq.ports.map(lignePort).join('')
+            + '</tbody></table></div></div>').join('');
+        wrap.querySelectorAll('tr.topo-uplink').forEach(tr => {
+            tr.addEventListener('click', () => tr.classList.toggle('ouvert'));
+        });
+
+        // ── Mouvements récents (audit #15) ──
+        const mv = d.mouvements || [];
+        if (mvt){
+            mvt.innerHTML = !mv.length
+                ? '<span style="color:var(--text-muted);">Aucun mouvement enregistré. Les déplacements d’un appareil d’un port à un autre apparaîtront ici après deux cartographies.</span>'
+                : '<div style="overflow-x:auto;"><table class="diag-table"><thead><tr><th>Quand</th><th>Quoi</th>'
+                  + '<th>Appareil</th><th>Équipement</th><th>Port</th></tr></thead><tbody>'
+                  + mv.map(m => '<tr>'
+                      + '<td style="font-size:.72rem;color:var(--text-muted);">' + esc((m.horodatage||'').replace('T',' ').replace('Z','')) + '</td>'
+                      + '<td><span class="topo-mvt-genre ' + esc(m.genre) + '">' + esc(m.genre) + '</span></td>'
+                      + '<td>' + (m.appareil_id
+                            ? '<a href="/appareil/' + m.appareil_id + '/fiche-systeme">' + esc(m.appareil_nom||'') + '</a>'
+                            : '<span class="mono">' + esc(m.mac||'') + '</span>') + '</td>'
+                      + '<td style="font-size:.75rem;">' + esc(m.equipement_ip||'') + '</td>'
+                      + '<td style="font-size:.75rem;">' + esc(m.port_avant||'')
+                      + (m.port_avant && m.port_apres ? ' → ' : '') + esc(m.port_apres||'') + '</td>'
+                      + '</tr>').join('') + '</tbody></table></div>';
+        }
     }).catch(() => {});
 }
 
-function appliquerBaie(){
-    if (!confirm('Renseigner les ports vides de la baie de brassage à partir de la topologie SNMP ?')) return;
-    fetch('/api/diag-reseau/topologie/appliquer-baie', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+// ── Cartographie à la demande (audit #18) ──────────────────────────────────
+// Avant : la topologie n'était relevée qu'en avant-dernière phase d'un
+// diagnostic complet, et sautée dès que le budget de 120 s était dépassé.
+let topoPoll = null;
+function cartographier(){
+    const b = document.getElementById('btn-cartographier');
+    if (b) { b.disabled = true; b.textContent = 'Cartographie…'; }
+    fetch('/api/diag-reseau/topologie/cartographier', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
         .then(r => r.json()).then(d => {
-            if (d.ok) showToast(`${d.maj} port(s) renseigné(s) dans la baie`, 'success');
-            else showToast(d.error || 'Erreur', 'error');
-        }).catch(() => showToast('Erreur réseau', 'error'));
+            if (d.error){ showToast(d.error, 'error'); finCartographie(); return; }
+            if (topoPoll) clearInterval(topoPoll);
+            topoPoll = setInterval(suivreCartographie, 1500);
+        }).catch(() => { showToast('Erreur réseau', 'error'); finCartographie(); });
+}
+function suivreCartographie(){
+    fetch('/api/diag-reseau/topologie/statut').then(r=>r.json()).then(d => {
+        const b = document.getElementById('btn-cartographier');
+        if (d.en_cours){ if (b) b.textContent = (d.message || 'Cartographie…'); return; }
+        clearInterval(topoPoll); topoPoll = null;
+        finCartographie();
+        showToast(d.message || 'Cartographie terminée', 'success');
+        chargerTopologie();
+        const r2 = d.resultat || {};
+        const dec = document.getElementById('topo-decouverts');
+        if (!dec) return;
+        let html = '';
+        if ((r2.decouverts || []).length){
+            html += '<div class="diag-line" style="margin-top:.7rem;font-size:.78rem;">'
+                + '<strong>' + r2.decouverts.length + " équipement(s) réseau vus en LLDP mais absents de l'inventaire :</strong><br>"
+                + r2.decouverts.map(x => '<span class="mono">' + esc(x.ip) + '</span>'
+                    + (x.nom ? ' — ' + esc(x.nom) : '')
+                    + (x.modele ? ' <span style="color:var(--text-muted);">' + esc(x.modele) + '</span>' : '')).join('<br>')
+                + '<div style="color:var(--text-muted);margin-top:.3rem;">Ajoutez-les à l’inventaire pour qu’ils soient interrogés à chaque passage.</div></div>';
+        }
+        if ((r2.reseaux || []).length){
+            html += '<div class="diag-line" style="margin-top:.5rem;font-size:.78rem;">'
+                + '<strong>Sous-réseaux vus sur les équipements :</strong> '
+                + r2.reseaux.map(x => '<span class="mono">' + esc(x) + '</span>').join(', ')
+                + '<div style="color:var(--text-muted);margin-top:.3rem;">Vous pouvez les ajouter comme plages dans Scan réseau. Rien n’est balayé sans votre accord.</div></div>';
+        }
+        dec.innerHTML = html;
+    }).catch(() => { clearInterval(topoPoll); topoPoll = null; finCartographie(); });
+}
+function finCartographie(){
+    const b = document.getElementById('btn-cartographier');
+    if (b) { b.disabled = false; b.textContent = 'Cartographier maintenant'; }
+}
+
+// ── Reporter dans la baie : aperçu AVANT écriture (audit #16) ──────────────
+// Avant : un confirm() puis une écriture directe en base, sans que
+// l'utilisateur voie ce qui allait être fait, ni comment l'annuler.
+function apercuBaie(){
+    fetch('/api/diag-reseau/topologie/proposer').then(r=>r.json()).then(d => {
+        const props = d.propositions || [], ign = d.ignores || [];
+        if (!props.length && !ign.length){ showToast('Rien à reporter', 'info'); return; }
+        afficherModaleBaie(props, ign);
+    }).catch(() => showToast('Erreur réseau', 'error'));
+}
+
+const SRC_BAIE = {manuel: 'calibré à la main', topologie: 'topologie L2', nom_port: "nom d'interface"};
+
+function afficherModaleBaie(props, ign){
+    let m = document.getElementById('baie-modal');
+    if (!m){
+        m = document.createElement('div'); m.id = 'baie-modal';
+        m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+        document.body.appendChild(m);
+    }
+    m.innerHTML = '<div style="background:var(--bg-card,#12233c);color:var(--text-primary);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:760px;width:100%;max-height:80vh;overflow:auto;">'
+        + '<h3 style="margin:0 0 .4rem;">Reporter la topologie dans la baie</h3>'
+        + '<p style="font-size:.8rem;color:var(--text-muted);margin:0 0 .8rem;">Seuls les ports d’accès (une seule adresse MAC apprise, jamais un uplink) et les emplacements de baie vides sont proposés. Décochez ce que vous ne voulez pas.</p>'
+        + (props.length
+            ? '<table class="diag-table"><thead><tr><th></th><th>Équipement</th><th>Port</th><th>Appareil</th><th>Origine du n° de port</th></tr></thead><tbody>'
+              + props.map((p,i) => '<tr><td><input type="checkbox" data-baiep="' + i + '" checked></td>'
+                  + '<td>' + esc(p.switch_nom) + '</td>'
+                  + '<td>' + p.port_numero + ' <span style="color:var(--text-muted);font-size:.72rem;">' + esc(p.port_nom) + '</span></td>'
+                  + '<td>' + esc(p.machine_nom) + '</td>'
+                  + '<td style="font-size:.72rem;color:var(--text-muted);">' + esc(SRC_BAIE[p.source] || p.source || '') + '</td></tr>').join('')
+              + '</tbody></table>'
+            : '<p style="font-size:.85rem;">Aucune proposition applicable.</p>')
+        + (ign.length
+            ? '<details style="margin-top:.8rem;"><summary style="cursor:pointer;font-size:.8rem;">' + ign.length + ' cas non proposé(s)</summary>'
+              + '<ul style="font-size:.76rem;color:var(--text-muted);margin:.4rem 0 0;padding-left:1.1rem;">'
+              + ign.map(x => '<li>' + esc(x.switch_nom) + ' ' + esc(x.port_nom)
+                  + (x.machine_nom ? ' — ' + esc(x.machine_nom) : '') + ' : ' + esc(x.motif) + '</li>').join('')
+              + '</ul></details>'
+            : '')
+        + '<div style="text-align:right;margin-top:1rem;display:flex;gap:.5rem;justify-content:flex-end;">'
+        + '<button class="link-btn" onclick="document.getElementById(\'baie-modal\').remove()">Annuler</button>'
+        + (props.length ? '<button class="link-btn" style="border-color:var(--accent);color:var(--accent);" onclick="validerBaie()">Appliquer la sélection</button>' : '')
+        + '</div></div>';
+    m._props = props;
+}
+
+function validerBaie(){
+    const m = document.getElementById('baie-modal');
+    const props = (m && m._props) || [];
+    const selection = props.filter((_p, i) => {
+        const cb = m.querySelector('[data-baiep="' + i + '"]');
+        return cb && cb.checked;
+    }).map(p => ({slot_id: p.slot_id, port_numero: p.port_numero}));
+    if (!selection.length){ showToast('Rien de sélectionné', 'info'); return; }
+    fetch('/api/diag-reseau/topologie/appliquer-baie', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({selection: selection})
+    }).then(r => r.json()).then(d => {
+        if (d.ok) showToast(d.maj + ' port(s) renseigné(s) dans la baie', 'success');
+        else showToast(d.error || 'Erreur', 'error');
+        m.remove();
+        chargerTopologie();
+    }).catch(() => showToast('Erreur réseau', 'error'));
 }
 
 function sparkline(points, mediane, w, h){

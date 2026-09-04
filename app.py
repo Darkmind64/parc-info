@@ -2222,6 +2222,40 @@ def init_db():
             c.execute(f"ALTER TABLE diag_topologie ADD COLUMN {col_add} TEXT DEFAULT ''")
         except Exception:
             pass
+    # Palier 4 (audit topologie) : de quoi distinguer un port d'ACCÈS d'un
+    # UPLINK, sans quoi le premier appareil vu derrière un uplink était affecté
+    # au port d'uplink (#02) ; VLAN d'apprentissage (#11) ; rôle STP, qui donne
+    # le SENS des liens même sans LLDP (#12) ; IP de gestion du voisin, graine
+    # de la découverte récursive (#10).
+    for col_add, col_type in (('nb_macs_port', "INTEGER DEFAULT 0"),
+                              ('est_uplink', "INTEGER DEFAULT 0"),
+                              ('vlan', "INTEGER DEFAULT 0"),
+                              ('stp_etat', "TEXT DEFAULT ''"),
+                              ('stp_amont', "INTEGER DEFAULT 0"),
+                              ('voisin_ip', "TEXT DEFAULT ''"),
+                              ('voisin_modele', "TEXT DEFAULT ''")):
+        try:
+            c.execute(f"ALTER TABLE diag_topologie ADD COLUMN {col_add} {col_type}")
+        except Exception:
+            pass
+    # Historique des mouvements (#15) : la table diag_topologie est ÉCRASÉE à
+    # chaque passage, donc un appareil qui change de port ne laissait aucune
+    # trace. Ici on ne garde que les transitions, avec la rétention habituelle.
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_topologie_mouvements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        horodatage TEXT DEFAULT '',
+        genre TEXT DEFAULT '',
+        appareil_id INTEGER,
+        appareil_nom TEXT DEFAULT '',
+        mac TEXT DEFAULT '',
+        equipement_ip TEXT DEFAULT '',
+        equipement_nom TEXT DEFAULT '',
+        port_avant TEXT DEFAULT '',
+        port_apres TEXT DEFAULT '',
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    c.execute('''CREATE INDEX IF NOT EXISTS idx_diag_topo_mvt
+        ON diag_topologie_mouvements(client_id, horodatage)''')
     # Palier 5 — métriques temporelles (tendances / baseline).
     c.execute('''CREATE TABLE IF NOT EXISTS diag_metriques (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -9147,91 +9181,146 @@ def _ber_decoder_valeur(tag, brut):
     return brut.decode('utf-8', errors='replace').strip()
 
 
+_SNMP_BULK_REPETITIONS = 25   # max-repetitions d'un GETBULK : ~25 lignes par aller-retour
+
+
 def _snmp_walk(ip_str, oid_base, communautes=('public',), timeout=1.2,
-               max_vars=800, port=161):
-    """Parcourt le sous-arbre `oid_base` par GETNEXT. Retourne
-    {suffixe_oid: valeur} (suffixe = ce qui suit oid_base, ex. l'ifIndex).
-    Essaie chaque communauté dans l'ordre ; s'arrête à endOfMibView, à la
-    sortie du sous-arbre, sur erreur, ou à max_vars. {} si rien ne répond.
-    Un utilisateur SNMPv3 configuré est tenté en premier (authNoPriv)."""
+               max_vars=800, port=161, stats=None):
+    """Parcourt le sous-arbre `oid_base`. Retourne {suffixe_oid: valeur}
+    (suffixe = ce qui suit oid_base, ex. l'ifIndex).
+
+    **GETBULK v2c d'abord** (`_SNMP_BULK_REPETITIONS` lignes par aller-retour),
+    repli GETNEXT si l'agent ne répond pas au GETBULK ou renvoie une erreur —
+    le GETNEXT strict coûtait un aller-retour UDP par ligne, soit ~25 fois plus
+    de paquets sur une table MAC ou une table LLDP (constat d'audit #06).
+    Essaie chaque communauté dans l'ordre ; s'arrête à endOfMibView, à la sortie
+    du sous-arbre, sur erreur, ou à max_vars. {} si rien ne répond.
+    Un utilisateur SNMPv3 configuré est tenté en premier (authNoPriv).
+
+    `stats` : dict optionnel renseigné en sortie — `{'tronque': True}` si le
+    parcours s'est arrêté sur `max_vars` (donc résultat INCOMPLET) et
+    `{'mode': 'bulk'|'next'|'v3'}`. Sans lui, une table trop grande était
+    amputée en silence (constat d'audit #05)."""
     if isinstance(communautes, str):
         communautes = [communautes]
     prefixe = oid_base if oid_base.endswith('.') else oid_base + '.'
+
+    def _note(**kw):
+        if stats is not None:
+            stats.update(kw)
+
     _v3 = _snmp_v3_params()
     if _v3:
         _r = _v3_walk(ip_str, oid_base, _v3, timeout, max_vars, port)
         if _r:
+            _note(mode='v3', tronque=len(_r) >= max_vars)
             return _r
-    for communaute in communautes:
+
+    def _run(communaute, bulk):
+        """Un parcours complet. Retourne (resultats, tronque, propre) où
+        `propre` = le parcours s'est terminé normalement (fin de sous-arbre,
+        endOfMibView ou max_vars) et non sur un silence / une erreur d'agent."""
         resultats = {}
         oid_courant = oid_base
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.settimeout(timeout)
-                for _ in range(max_vars):
-                    reqid_env = _snmp_walk_reqid()
-                    vb = _ber_sequence(0x30, _ber_oid(oid_courant) + b'\x05\x00')
+        prev_t = ()
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(timeout)
+            while len(resultats) < max_vars:
+                reqid_env = _snmp_walk_reqid()
+                vb = _ber_sequence(0x30, _ber_oid(oid_courant) + b'\x05\x00')
+                if bulk:
+                    # GetBulkRequest-PDU : non-repeaters=0, max-repetitions=N
+                    reps = max(1, min(_SNMP_BULK_REPETITIONS, max_vars - len(resultats)))
+                    pdu_corps = (_ber_entier(reqid_env) + _ber_entier(0)
+                                 + _ber_entier(reps) + _ber_sequence(0x30, vb))
+                    pdu = _ber_sequence(0xa5, pdu_corps)
+                else:
                     pdu_corps = (_ber_entier(reqid_env) + _ber_entier(0)
                                  + _ber_entier(0) + _ber_sequence(0x30, vb))
                     pdu = _ber_sequence(0xa1, pdu_corps)  # GetNextRequest-PDU
-                    # version 1 (v2c) : GETBULK serait mieux mais GETNEXT marche partout
-                    message = _ber_sequence(
-                        0x30, _ber_entier(1) + _ber_chaine(communaute) + pdu)
-                    s.sendto(message, (ip_str, port))
+                # version 1 = SNMPv2c (requis par GETBULK, accepté en GETNEXT)
+                message = _ber_sequence(
+                    0x30, _ber_entier(1) + _ber_chaine(communaute) + pdu)
+                s.sendto(message, (ip_str, port))
 
-                    # Lire jusqu'à la réponse qui porte NOTRE request-id : un
-                    # switch bas de gamme, lent, renvoie parfois une réponse
-                    # tardive à la requête précédente — l'associer à celle-ci
-                    # décalerait tout le walk (ports fantômes, valeurs répétées).
-                    for _drain in range(4):
-                        data, _ = s.recvfrom(4096)
-                        _, corps, _ = _ber_lire_tlv(data, 0)
-                        pos = 0
-                        _, _v, pos = _ber_lire_tlv(corps, pos)
-                        _, _c, pos = _ber_lire_tlv(corps, pos)
-                        tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
-                        _p0 = 0
-                        _, _rid_b, _p0 = _ber_lire_tlv(pdu_corps_r, _p0)
-                        if int.from_bytes(_rid_b, 'big', signed=True) == reqid_env:
-                            break
-                    else:
+                # Lire jusqu'à la réponse qui porte NOTRE request-id : un
+                # switch bas de gamme, lent, renvoie parfois une réponse
+                # tardive à la requête précédente — l'associer à celle-ci
+                # décalerait tout le walk (ports fantômes, valeurs répétées).
+                for _drain in range(4):
+                    data, _ = s.recvfrom(65535)
+                    _, corps, _ = _ber_lire_tlv(data, 0)
+                    pos = 0
+                    _, _v, pos = _ber_lire_tlv(corps, pos)
+                    _, _c, pos = _ber_lire_tlv(corps, pos)
+                    tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
+                    _p0 = 0
+                    _, _rid_b, _p0 = _ber_lire_tlv(pdu_corps_r, _p0)
+                    if int.from_bytes(_rid_b, 'big', signed=True) == reqid_env:
                         break
-                    if tag_pdu != 0xa2:
-                        break
-                    p = 0
-                    _, _reqid, p = _ber_lire_tlv(pdu_corps_r, p)
-                    _, err, p = _ber_lire_tlv(pdu_corps_r, p)
-                    _, _ei, p = _ber_lire_tlv(pdu_corps_r, p)
-                    if err and int.from_bytes(err, 'big', signed=True) != 0:
-                        break
-                    _, vblist, p = _ber_lire_tlv(pdu_corps_r, p)
+                else:
+                    return resultats, False, False       # aucune réponse
+                if tag_pdu != 0xa2:
+                    return resultats, False, False
+                p = 0
+                _, _reqid, p = _ber_lire_tlv(pdu_corps_r, p)
+                _, err, p = _ber_lire_tlv(pdu_corps_r, p)
+                _, _ei, p = _ber_lire_tlv(pdu_corps_r, p)
+                if err and int.from_bytes(err, 'big', signed=True) != 0:
+                    # GETBULK non supporté (tooBig / genErr) : l'appelant repliera
+                    return resultats, False, False
+                _, vblist, p = _ber_lire_tlv(pdu_corps_r, p)
 
-                    vp = 0
+                vp, dernier = 0, None
+                while vp < len(vblist):
                     _tag_vb, vb_corps, vp = _ber_lire_tlv(vblist, vp)
                     if _tag_vb != 0x30:
-                        break
+                        return resultats, False, False
                     bp = 0
                     _to, oid_brut, bp = _ber_lire_tlv(vb_corps, bp)
                     tag_val, val_brut, bp = _ber_lire_tlv(vb_corps, bp)
                     oid_ret = _ber_decoder_oid(oid_brut)
-                    if not oid_ret.startswith(prefixe) or tag_val == 0x82:
-                        break  # sorti du sous-arbre / endOfMibView
+                    if not oid_ret.startswith(prefixe) or tag_val in _SNMP_SENTINELLES:
+                        return resultats, False, True    # fin de sous-arbre : normal
                     # OID doit STRICTEMENT croître : un agent bas de gamme qui
                     # renvoie deux fois le même OID (ou recule) ferait tourner le
                     # walk jusqu'à max_vars avec des doublons.
                     try:
                         _tr = tuple(int(x) for x in oid_ret.split('.'))
-                        _tc = tuple(int(x) for x in oid_courant.split('.'))
-                        if _tc and _tr <= _tc:
-                            break
                     except ValueError:
-                        pass
+                        _tr = ()
+                    if prev_t and _tr and _tr <= prev_t:
+                        return resultats, False, False   # agent qui boucle
+                    if _tr:
+                        prev_t = _tr
                     resultats[oid_ret[len(prefixe):]] = _ber_decoder_valeur(tag_val, val_brut)
-                    oid_courant = oid_ret
-            if resultats:
+                    dernier = oid_ret
+                    if len(resultats) >= max_vars:
+                        return resultats, True, True
+                if dernier is None:
+                    return resultats, False, False
+                oid_courant = dernier
+        return resultats, True, True
+
+    for communaute in communautes:
+        meilleur, meilleur_st = {}, ()
+        for bulk in (True, False):
+            try:
+                resultats, tronque, propre = _run(communaute, bulk)
+            except Exception:
+                continue
+            if resultats and propre:
+                _note(mode='bulk' if bulk else 'next', tronque=tronque)
                 return resultats
-        except Exception:
-            continue
+            # Parcours interrompu (silence, erreur, agent qui boucle) : on garde
+            # le meilleur essai mais on tente l'autre méthode avant d'abandonner
+            # — un agent qui accepte le GETBULK sur les 25 premières lignes puis
+            # renvoie tooBig rendrait sinon une table amputée en silence.
+            if len(resultats) > len(meilleur):
+                meilleur, meilleur_st = resultats, ('bulk' if bulk else 'next', tronque)
+        if meilleur:
+            _note(mode=meilleur_st[0], tronque=True)
+            return meilleur
     return {}
 
 
@@ -9501,37 +9590,75 @@ def _snmp_v3_exchange(ip, pdu, port=161, timeout=1.5, params=None):
     return None, st
 
 
-def _v3_walk(ip, oid_base, params, timeout=1.5, max_vars=800, port=161):
-    """GETNEXT en boucle sur `oid_base`, en SNMPv3 authNoPriv.
-    Retourne {suffixe_oid: valeur} (mêmes garanties que `_snmp_walk` : OID
-    strictement croissant, sortie du sous-arbre, endOfMibView). {} si échec."""
+def _v3_walk(ip, oid_base, params, timeout=1.5, max_vars=800, port=161,
+             brut=False):
+    """Parcours de `oid_base` en SNMPv3 authNoPriv. **GETBULK d'abord**
+    (`_SNMP_BULK_REPETITIONS` lignes par aller-retour), repli GETNEXT si l'agent
+    refuse — mêmes garanties que `_snmp_walk` : OID strictement croissant,
+    sortie du sous-arbre, endOfMibView. {} si échec.
+
+    `brut=True` : renvoie les OCTET STRING en **octets bruts** (`bytes`) au lieu
+    de les décoder en UTF-8, et `None` pour les autres types — contrat de
+    `network_diag._snmp_walk_octets`, indispensable pour une MAC (constat #04)."""
     prefixe = oid_base if oid_base.endswith('.') else oid_base + '.'
-    resultats = {}
-    oid_courant = oid_base
-    for _ in range(max_vars):
-        pdu = _ber_sequence(0xa1, _ber_entier(_snmp_walk_reqid()) + _ber_entier(0)
-                            + _ber_entier(0)
-                            + _ber_sequence(0x30, _ber_sequence(
-                                0x30, _ber_oid(oid_courant) + b'\x05\x00')))
-        body, st = _snmp_v3_exchange(ip, pdu, port, timeout, params)
-        if st != 'ok' or body is None:
-            break
-        vbs = _v3_pdu_varbinds(body)
-        if not vbs:
-            break
-        oid_ret, tag_val, val_brut = vbs[0]
-        if not oid_ret.startswith(prefixe) or tag_val == 0x82:
-            break
+
+    def _val(tag_val, val_brut):
+        if brut:
+            return bytes(val_brut) if tag_val == 0x04 else None
+        return _ber_decoder_valeur(tag_val, val_brut)
+
+    def _run(bulk):
+        resultats = {}
+        oid_courant = oid_base
+        prev_t = ()
+        while len(resultats) < max_vars:
+            vb = _ber_sequence(0x30, _ber_sequence(
+                0x30, _ber_oid(oid_courant) + b'\x05\x00'))
+            if bulk:
+                reps = max(1, min(_SNMP_BULK_REPETITIONS, max_vars - len(resultats)))
+                pdu = _ber_sequence(0xa5, _ber_entier(_snmp_walk_reqid())
+                                    + _ber_entier(0) + _ber_entier(reps) + vb)
+            else:
+                pdu = _ber_sequence(0xa1, _ber_entier(_snmp_walk_reqid())
+                                    + _ber_entier(0) + _ber_entier(0) + vb)
+            body, st = _snmp_v3_exchange(ip, pdu, port, timeout, params)
+            if st != 'ok' or body is None:
+                return resultats, False
+            vbs = _v3_pdu_varbinds(body)
+            if not vbs:
+                return resultats, False
+            dernier = None
+            for oid_ret, tag_val, val_brut in vbs:
+                if not oid_ret.startswith(prefixe) or tag_val in _SNMP_SENTINELLES:
+                    return resultats, True          # fin de sous-arbre : normal
+                try:
+                    _tr = tuple(int(x) for x in oid_ret.split('.'))
+                except ValueError:
+                    _tr = ()
+                if prev_t and _tr and _tr <= prev_t:
+                    return resultats, False         # agent qui boucle
+                if _tr:
+                    prev_t = _tr
+                resultats[oid_ret[len(prefixe):]] = _val(tag_val, val_brut)
+                dernier = oid_ret
+                if len(resultats) >= max_vars:
+                    return resultats, True
+            if dernier is None:
+                return resultats, False
+            oid_courant = dernier
+        return resultats, True
+
+    meilleur = {}
+    for bulk in (True, False):
         try:
-            _tr = tuple(int(x) for x in oid_ret.split('.'))
-            _tc = tuple(int(x) for x in oid_courant.split('.'))
-            if _tc and _tr <= _tc:
-                break
-        except ValueError:
-            pass
-        resultats[oid_ret[len(prefixe):]] = _ber_decoder_valeur(tag_val, val_brut)
-        oid_courant = oid_ret
-    return resultats
+            resultats, propre = _run(bulk)
+        except Exception:
+            continue
+        if resultats and propre:
+            return resultats
+        if len(resultats) > len(meilleur):
+            meilleur = resultats
+    return meilleur
 
 
 def _snmp_presence(ip, communautes=('public',), port=161, timeout=1.2):
@@ -9577,6 +9704,16 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
         communautes = [communautes]
     oid_bases = list(oid_bases)
     prefs = [b if b.endswith('.') else b + '.' for b in oid_bases]
+    # SNMPv3 (authNoPriv) tenté en premier, colonne par colonne : `_v3_walk` fait
+    # lui-même du GETBULK, donc le coût reste raisonnable. Sans ça, un switch
+    # v3-only ne répondait ici que par le repli GETNEXT de fin de fonction
+    # (constat d'audit #04).
+    _v3 = _snmp_v3_params()
+    if _v3:
+        res_v3 = {b: _v3_walk(ip_str, b, _v3, timeout, max_rows, port)
+                  for b in oid_bases}
+        if any(res_v3.values()):
+            return res_v3
     for communaute in communautes:
         res = {b: {} for b in oid_bases}
         courant = {b: b for b in oid_bases}     # base -> dernier OID interrogé
@@ -10126,18 +10263,60 @@ def api_diag_topologie():
     return jsonify(network_diag.etat_topologie(cid))
 
 
+@app.route('/api/diag-reseau/topologie/proposer')
+@login_required
+def api_diag_topologie_proposer():
+    """Aperçu de « Renseigner les ports vides de la baie » — LECTURE SEULE.
+    Avant l'audit, le bouton écrivait en base sur un simple confirm() sans que
+    l'utilisateur voie ce qui allait être fait (constat #16)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify(network_diag.proposer_topologie_baie(cid))
+
+
 @app.route('/api/diag-reseau/topologie/appliquer-baie', methods=['POST'])
 @login_required
 def api_diag_topologie_appliquer_baie():
     cid = get_client_id()
     if not can_write(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    res = network_diag.appliquer_topologie_baie(cid)
+    data = request.get_json(silent=True) or {}
+    selection = data.get('selection')
+    if selection is not None and not isinstance(selection, list):
+        return jsonify({'error': 'selection invalide'}), 400
+    res = network_diag.appliquer_topologie_baie(cid, selection)
     conn = get_db()
     log_history(conn, cid, 'diag_reseau', 0, 'Topologie → baie',
                 'DIAG_TOPO_BAIE', f"{res.get('maj', 0)} port(s) renseigné(s)")
     conn.commit(); conn.close()
     return jsonify({'ok': True, **res})
+
+
+@app.route('/api/diag-reseau/topologie/cartographier', methods=['POST'])
+@login_required
+def api_diag_topologie_cartographier():
+    """Lance la cartographie L2 SEULE, en tâche de fond (constat #18 : elle
+    n'était relevée qu'en avant-dernière phase d'un diagnostic complet, et
+    sautée dès que le budget était dépassé). `can_write` comme le snapshot :
+    un balayage SNMP consomme le réseau, ce n'est pas une consultation."""
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    if str(cfg_get('diag_topologie_active', '0')) != '1' or str(cfg_get('diag_snmp_actif', '0')) != '1':
+        return jsonify({'error': 'Activez le SNMP et la topologie L2 dans les réglages'}), 400
+    if not network_diag.lancer_cartographie(cid):
+        return jsonify({'error': 'Cartographie déjà en cours'}), 409
+    return jsonify({'ok': True})
+
+
+@app.route('/api/diag-reseau/topologie/statut')
+@login_required
+def api_diag_topologie_statut():
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify(network_diag.statut_cartographie(cid))
 
 
 @app.route('/api/diag-reseau/wifi')
