@@ -1,5 +1,16 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.39] - 2026-09-05 📱
+
+### 📱 Interface mobile enrichie + correctifs intégrés
+
+Release qui rassemble, en plus du scan réseau SNMP/capture de 2.19.38, le travail terminé et testé de plusieurs sessions parallèles :
+
+- **Interface mobile (PWA) enrichie** — le dashboard `/m` affiche désormais disponibilité, garanties, périphériques, valeur du parc et activité récente ; la fiche appareil mobile expose marque/modèle/localisation, dernier ping, licences logicielles (masquées), clés de récupération BitLocker (déchiffrées à la demande, auditées comme côté bureau) et les documents joints, réellement téléchargeables ; les contrats affichent montant/numéro, interventions liées et documents ; les utilisateurs, leurs notes. Aucune nouvelle action d'écriture : uniquement des lectures supplémentaires, avec les mêmes règles ACL et de masquage que le reste de l'application.
+- **Correctif** : le CSS personnalisé (thème, couleurs) s'affichait en texte brut en haut de la page mobile au lieu de s'appliquer — il n'était pas enveloppé dans une balise `<style>`, contrairement au template bureau.
+- **Correctif** : une connexion avec mot de passe à changer obligatoirement, lancée depuis `/m`, renvoyait vers l'interface bureau au lieu de revenir sur mobile une fois le mot de passe changé.
+- **Correctif** : la section « Périphériques associés » de la fiche appareil avait disparu (conteneur JS manquant depuis un changement de template), provoquant une erreur à chaque ouverture du formulaire d'édition.
+
 ## [2.19.38] - 2026-09-05 🔀
 
 ### 🔀 Scan réseau : croiser SNMP et capture passive pour détecter un maximum d'appareils

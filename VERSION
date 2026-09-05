@@ -1,9 +1,38 @@
-PARCINFO_VERSION=2.19.38
+PARCINFO_VERSION=2.19.39
 RELEASE_DATE=2026-09-05
-BUILD_NUMBER=2026090502
+BUILD_NUMBER=2026090503
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.39 - Integration : interface mobile enrichie + correctifs en attente
+# Release qui rassemble le travail termine et teste de plusieurs sessions
+# paralleles (worktrees) en plus du scan reseau SNMP/capture de 2.19.39 :
+#
+# - feat: enrichir l'interface mobile (documents, licences, BitLocker,
+#   interventions). Complete la consultation mobile (/m) avec des donnees
+#   deja disponibles cote bureau mais absentes jusque-la : dashboard
+#   (disponibilite/garanties/peripheriques/valeur du parc, activite
+#   recente), appareils (marque/modele/localisation en liste, dernier ping,
+#   licences logicielles masquees, cles de recuperation BitLocker
+#   dechiffrees a la demande et auditees comme cote bureau, documents joints
+#   reellement telechargeables), contrats (montant/numero en liste,
+#   interventions liees, documents telechargeables), utilisateurs (notes).
+#   Aucune nouvelle action d'ecriture - uniquement des lectures
+#   supplementaires, memes regles ACL et de masquage que le reste de l'app.
+# - fix: CSS dynamique affiche en texte brut sur l'interface mobile. Le
+#   template mobile injectait {{ dynamic_css }} nu dans <head> au lieu de
+#   l'envelopper dans <style id="cfg-vars"> comme le template bureau -> le
+#   navigateur poussait ce texte orphelin dans le corps de la page.
+# - fix: connexion depuis /m ne renvoyait jamais vers la version mobile. Un
+#   compte avec mot de passe a changer obligatoirement (dont l'admin par
+#   defaut) atterrissait sur la page bureau de changement de mot de passe
+#   quelle que soit la destination demandee - la destination d'origine est
+#   maintenant conservee a travers le changement force.
+# - fix: fiche appareil - section "Peripheriques associes" manquante
+#   (loadPeriph casse). loadPeriph() ciblait #periph-list, conteneur absent
+#   du template -> TypeError a chaque ouverture de /appareil/<id>/editer.
+#   Section ajoutee, alignee sur "Contrats lies" / "Identifiants lies".
+#
 # Version 2.19.38 - Scan reseau : croiser SNMP + capture passive pour detecter
 # un maximum d'appareils, y compris hors du segment local
 # Demande : "Fais en sorte qu'un maximum d'appareils soient detectes avec un
