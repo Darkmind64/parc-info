@@ -316,6 +316,7 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
 const PEUT_ECRIRE = {{ 'true' if peut_ecrire else 'false' }};
 let currentPage = 1;
 let diagInterval = null;
+let diagLastCount = -1;   // nb de constats au dernier rendu de la liste (audit #14)
 
 const MOTIFS_CAPTURE = {
     ok: "disponible",
@@ -425,6 +426,7 @@ function lancerDiag(){
     }).then(r => r.json().then(d => ({ok:r.ok, d}))).then(({ok,d}) => {
         if (!ok){ showToast(d.error || 'Erreur', 'error'); btn.disabled = false; return; }
         document.getElementById('snapshot-wrap').style.display = 'block';
+        diagLastCount = -1;
         diagInterval = setInterval(pollDiag, 900);
     }).catch(() => { showToast('Erreur réseau', 'error'); btn.disabled = false; });
 }
@@ -433,7 +435,13 @@ function pollDiag(){
     fetch('/api/diag-reseau/snapshot/status').then(r=>r.json()).then(d => {
         document.getElementById('diag-prog').style.width = (d.progress||0) + '%';
         document.getElementById('diag-msg').textContent = d.message || '';
-        if (d.findings) renderFindings(d.findings, d.avertissements || []);
+        // Même principe que le scan réseau (audit réseau 2026-09-05, #14) :
+        // ne reconstruire la liste de constats que si elle a réellement
+        // changé, pas à chaque tick de sondage (900 ms).
+        if (d.findings && (d.findings.length !== diagLastCount || !d.running)) {
+            diagLastCount = d.findings.length;
+            renderFindings(d.findings, d.avertissements || []);
+        }
         if (d.phases && Object.keys(d.phases).length){
             const pt = document.getElementById('phase-times');
             if (pt) pt.textContent = 'Temps par phase : ' +

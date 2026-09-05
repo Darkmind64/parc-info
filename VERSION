@@ -1,8 +1,53 @@
-PARCINFO_VERSION=2.19.41
+PARCINFO_VERSION=2.19.42
 RELEASE_DATE=2026-09-05
-BUILD_NUMBER=2026090505
+BUILD_NUMBER=2026090506
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.42 - Audit reseau, lot 2 : coherence et performance du frontend
+# Suite du lot 1 (network_diag.py / app.py). 4 correctifs sur scan_reseau.html,
+# diag_reseau.html, baie_brassage.html :
+#
+# #13 Le tri par "Statut" du tableau de resultats du scan reseau ne triait
+#     rien : le comparateur lisait a[sortCol] avec sortCol='statut', mais
+#     aucun objet de resultat ne porte ce champ (le badge Nouveau/Inventaire
+#     est calcule a l'AFFICHAGE, jamais ecrit sur la ligne, via
+#     INVENTAIRE_IPS.has(h.ip)) -> comparaison toujours '' vs '', tri sans
+#     effet, alors que la fleche de tri s'affichait comme si ca avait
+#     fonctionne. Le comparateur calcule desormais ce meme statut pour le cas
+#     sortCol==='statut', pour trier reellement quelque chose.
+# #14 Le tableau de resultats du scan (pollStatus, 800 ms) ET la liste de
+#     constats du diagnostic (pollDiag, 900 ms) reconstruisaient l'INTEGRALITE
+#     du DOM (tri + filtre + concatenation de chaines + remplacement complet)
+#     a CHAQUE tick de sondage, meme quand rien n'avait change depuis le tick
+#     precedent - jusqu'a plus d'une fois par seconde sur un scan complet
+#     (254 lignes sur un /24), avec reinitialisation des cases de selection a
+#     chaque reconstruction. Le sondage reste rapide (necessaire pour la barre
+#     de progression), mais le tableau/la liste ne se reconstruit desormais
+#     QUE si le nombre de resultats a reellement change (scanLastCount /
+#     diagLastCount), ou a la toute fin du scan/diagnostic.
+# #15 Le menu deroulant "mode FDB" de l'avertissement de fiabilite de la
+#     table MAC (fonctionnalite "Deviner le brassage") n'avait ni classe ni
+#     largeur definie, contrairement a un select QUASI IDENTIQUE 4 lignes
+#     plus loin (data-bport, class="cfg-input cfg-input-sm" style="width:
+#     auto") - signe d'un oubli plutot que d'un choix. Meme classe/largeur
+#     appliquee.
+# #16 Un nom de fabricant/modele detecte via WMI/UPnP (chaine "friendly
+#     name" libre) peut faire 40-60+ caracteres ; la cellule correspondante
+#     du scan reseau n'avait pas de troncature (white-space:nowrap seul) et
+#     elargissait toute la colonne pour une seule ligne longue. Troncature
+#     (text-overflow:ellipsis + max-width:220px) ajoutee, valeur complete
+#     (marque + modele ou fabricant OUI) desormais dans l'infobulle. Meme
+#     principe pour la cellule MAC du tableau "hors inventaire" de la baie de
+#     brassage, seule colonne truncable de ce tableau sans infobulle
+#     jusqu'ici.
+#
+# Verifie en navigateur : tri par Statut (3 hotes marques artificiellement
+# "en inventaire" -> regroupes correctement en ordre croissant ET decroissant),
+# cellule fabricant (troncature + infobulle avec valeur complete verifiees),
+# scan et diagnostic lances sans erreur JS console. Suite de tests complete
+# reverifiee (36 scripts, purement backend donc non affectee par ce lot
+# frontend) : aucune regression.
 
 # Version 2.19.41 - Audit reseau, lot 1 : 12 correctifs de fiabilite/performance
 # Suite a la demande explicite de l'utilisateur : parcourir l'ensemble des

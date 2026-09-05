@@ -1,26 +1,24 @@
 {
-  "version": "2.19.41",
+  "version": "2.19.42",
   "release_date": "2026-09-05",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.41/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.41/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.41/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.41",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.41/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.41/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.41/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.41/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.41/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.42/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.42/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.42/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.42",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.42/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.42/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.42/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.42/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.42/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Audit réseau, lot 1 : 12 correctifs de fiabilité et performance sur network_diag.py et les primitives SNMP/scan de app.py. Les deux plus visibles : un rebouclage normal de compteur SNMP 32 bits n'est plus pris pour un redémarrage de switch (fausses alertes de saturation/erreurs éliminées), et le badge « vu via SNMP/capture » du scan réseau n'est plus attribué à tort à un appareil déjà résolu normalement en local.",
+    "new_features": "Audit réseau, lot 2 : 4 correctifs frontend (scan réseau, diagnostic réseau, baie de brassage). Le tri par « Statut » du tableau de scan trie désormais réellement les résultats. Les tableaux du scan et du diagnostic réseau ne sont plus reconstruits en entier à chaque sondage (jusqu'à plus d'une fois par seconde) mais seulement quand le contenu a réellement changé.",
     "improvements": [
-      "Le comptage « N switches / N muets » de la baie compte désormais sur la même base (déduplication par IP).",
-      "Le test de capture de la baie n'accuse plus systématiquement des privilèges insuffisants pour n'importe quelle erreur.",
-      "SNMPv3 vérifie désormais que la réponse reçue correspond bien à la requête envoyée (même garantie que le SNMP v1/v2c).",
-      "Une résolution DNS inverse lente ne peut plus retenir un scan au-delà du budget affiché.",
-      "Un verrou par switch (au lieu d'un verrou global) pour le relevé de la table MAC, afin qu'un switch lent ne bloque plus l'activité de toute la baie."
+      "Un menu déroulant de la baie de brassage (mode de lecture de la table MAC) ne s'étire plus sur toute la largeur de sa ligne.",
+      "Un nom de fabricant/modèle long (WMI/UPnP) est tronqué proprement avec la valeur complète en infobulle, au lieu d'élargir toute la colonne.",
+      "L'adresse MAC des appareils « hors inventaire » de la baie a maintenant une infobulle, comme les autres colonnes tronquables."
     ]
   },
   "checksums": {
@@ -31,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.41"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.42"
 }

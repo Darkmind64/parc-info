@@ -1,5 +1,16 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.42] - 2026-09-05 🖱️
+
+### 🖱️ Audit réseau, lot 2 : cohérence et performance du frontend
+
+Suite du lot 1 (network_diag.py / app.py), 4 correctifs sur les pages Scan réseau, Diagnostic réseau et Baie de brassage :
+
+- Le tri par « Statut » du tableau de résultats du scan réseau ne triait rien (aucun champ `statut` n'existe sur un résultat, le badge Nouveau/Inventaire est calculé à l'affichage) tout en affichant quand même la flèche de tri comme si ça avait fonctionné. Le tri calcule désormais ce même badge pour trier réellement.
+- Les tableaux de résultats du scan réseau (sondage toutes les 800 ms) et de la liste de constats du diagnostic réseau (900 ms) étaient entièrement reconstruits — tri, filtre, remplacement complet du DOM — à chaque tick, même quand rien n'avait changé, jusqu'à plus d'une fois par seconde sur un scan complet. Ils ne se reconstruisent désormais que quand le nombre de résultats a réellement évolué, ou à la toute fin.
+- Un menu déroulant de la baie de brassage (mode de lecture de la table MAC, dans l'avertissement de fiabilité de « Deviner le brassage ») n'avait ni classe ni largeur définie, contrairement à un menu quasi identique juste à côté — il pouvait s'étirer et chevaucher son étiquette.
+- Un nom de fabricant/modèle détecté via WMI/UPnP peut faire 40 à 60 caractères ; la cellule correspondante du scan réseau n'était pas tronquée et élargissait toute la colonne. Troncature ajoutée avec la valeur complète en infobulle ; l'adresse MAC du tableau « hors inventaire » de la baie reçoit elle aussi une infobulle, comme les autres colonnes tronquables du même tableau.
+
 ## [2.19.41] - 2026-09-05 🔍
 
 ### 🔍 Audit réseau, lot 1 : 12 correctifs de fiabilité et performance
