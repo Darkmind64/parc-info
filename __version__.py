@@ -9,8 +9,8 @@ Usage:
 """
 
 # Semantic versioning (MAJOR.MINOR.PATCH)
-__version__ = "2.19.39"
-__version_tuple__ = (2, 19, 39)
+__version__ = "2.19.40"
+__version_tuple__ = (2, 19, 40)
 
 # Build metadata
 GITHUB_REPO = "Darkmind64/parc-info"

@@ -1,5 +1,17 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.40] - 2026-09-05 🩹
+
+### 🩹 Case à cocher « Interrogation SNMP » invisible dans le diagnostic réseau
+
+Signalé par l'utilisateur. La règle CSS globale de `base.html` qui stylise tous les champs de formulaire (`input, select, textarea { width:100%; padding:.55rem .8rem; ... }`) ne mettait pas les cases à cocher / boutons radio à part — toute case sans classe de style dédiée héritait donc d'une largeur à 100 % et d'un padding pensé pour du texte, s'étirant en une barre plate d'environ 230 px de large sur 13 px de haut au lieu d'un carré normal.
+
+Dans la plupart des cas (une case dans une cellule de tableau étroite, par exemple la sélection des lignes du scan réseau) le dégât restait discret. Mais la case « Interrogation SNMP » du panneau de configuration du diagnostic réseau (`templates/diag_reseau.html`) n'a pas cette chance : son texte d'accompagnement (communautés SNMP configurées, utilisateur SNMPv3 le cas échéant) peut être long, et une carte élargie par ce texte combinée à une case étirée sur toute la largeur produit, dans les cas extrêmes, un effondrement complet de la mise en page de la grille — la case finit hors du cadre visible.
+
+Deux correctifs complémentaires :
+- `templates/base.html` : les sélecteurs `input[type="checkbox"]`/`input[type="radio"]` sont désormais exclus de la règle globale, et reçoivent à la place une couleur d'accent cohérente avec le thème.
+- `templates/diag_reseau.html` : la carte de configuration protège aussi le cas d'un texte réellement très long (`min-width:0` + retour à la ligne du texte plutôt que débordement, case à cocher qui ne rétrécit jamais) — le même principe déjà appliqué ailleurs dans l'app face à ce type de contenu variable (voir les correctifs de défilement horizontal de la v2.19.33/34).
+
 ## [2.19.39] - 2026-09-05 📱
 
 ### 📱 Interface mobile enrichie + correctifs intégrés

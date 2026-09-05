@@ -103,7 +103,14 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
 .diag-pane.active { display:block; }
 .cfg-etat { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:.5rem .9rem; }
 .cfg-etat-row { display:flex; align-items:center; justify-content:space-between; gap:.5rem; font-size:.8rem;
-    border:1px solid var(--border); border-radius:4px; padding:.4rem .6rem; background:var(--bg-secondary); }
+    border:1px solid var(--border); border-radius:4px; padding:.4rem .6rem; background:var(--bg-secondary);
+    min-width:0; }
+/* Un libellé long (communautés SNMP multiples, utilisateur v3...) ne doit
+   jamais pousser la case à cocher hors du cadre visible : le texte passe à
+   la ligne (min-width:0 lève la contrainte de largeur mini d'un enfant
+   flex/grid) plutôt que de déborder, et la case garde toujours sa taille. */
+.cfg-etat-row > span:first-child { min-width:0; overflow-wrap:anywhere; }
+.cfg-etat-row input[type="checkbox"] { flex-shrink:0; }
 .cfg-etat-row .sub { font-size:.68rem; color:var(--text-muted); }
 .phase-times { font-family:'Share Tech Mono',monospace; font-size:.68rem; color:var(--text-muted); margin-top:.4rem; }
 </style>

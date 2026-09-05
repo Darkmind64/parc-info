@@ -1,10 +1,51 @@
-PARCINFO_VERSION=2.19.39
+PARCINFO_VERSION=2.19.40
 RELEASE_DATE=2026-09-05
-BUILD_NUMBER=2026090503
+BUILD_NUMBER=2026090504
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.19.39 - Integration : interface mobile enrichie + correctifs en attente
+# Version 2.19.40 - Case a cocher "Interrogation SNMP" invisible (diagnostic reseau)
+# Signale par l'utilisateur. La regle CSS globale de base.html qui stylise
+# tous les champs de formulaire (input, select, textarea { width:100%;
+# padding:.55rem .8rem; ... }) ne mettait pas les cases a cocher / boutons
+# radio a part -> toute case SANS classe de style dediee heritait d'une
+# largeur a 100% et d'un padding pense pour du texte, s'etirant en une barre
+# plate (~230 x 13 px releve en pratique) au lieu d'un carre normal (13x13).
+#
+# Discret dans la plupart des cas (case dans une cellule de tableau etroite,
+# ex. selection des lignes du scan reseau, ou grep confirme d'autres cases
+# sans classe : admin_user_form.html "Compte actif", diag_reseau.html
+# "chk-rapide"). Mais la case "Interrogation SNMP" du panneau de config du
+# diagnostic reseau n'a pas cette chance : son texte d'accompagnement
+# (communautes SNMP + utilisateur SNMPv3) peut etre long, et une carte
+# elargie par ce texte + une case etiree sur toute la largeur produit, dans
+# les cas extremes (communaute tres longue sans separateur), un effondrement
+# complet de la mise en page de la grille CSS (`.cfg-etat`,
+# repeat(auto-fill,minmax(230px,1fr))) - reproduit en environnement de dev en
+# configurant une communaute artificiellement longue, la case finissait
+# litteralement hors du cadre visible.
+#
+# Deux correctifs complementaires :
+# - base.html : input[type="checkbox"]/[type="radio"] exclus de la regle
+#   globale (`input:not([type="checkbox"]):not([type="radio"]), select,
+#   textarea { ... }`), + accent-color coherent avec le theme.
+# - diag_reseau.html : `.cfg-etat-row` gagne min-width:0 (leve la contrainte
+#   de largeur mini heritee du contenu sur un enfant grid/flex) et le
+#   libelle `overflow-wrap:anywhere` (le texte passe a la ligne plutot que
+#   de deborder ou de pousser la case), la case elle-meme `flex-shrink:0`
+#   (ne retrecit jamais). Meme principe deja applique ailleurs dans l'app
+#   face a un contenu de largeur variable (v2.19.33/34, defilement
+#   horizontal).
+#
+# Verifie en navigateur : cas normal (case 13x13 visible), cas degrade avec
+# utilisateur SNMPv3 + communautes multiples (texte sur 5 lignes, case
+# visible), cas extreme avec un mot de 90 caracteres sans separateur (texte
+# wrappe proprement dans la carte, case toujours visible en 13x13) ; verifie
+# aussi que les cases de selection du scan reseau (#chk-all/.chk-host, deja
+# dans une cellule etroite) restent a leur taille normale apres le
+# changement global.
+#
+
 # Release qui rassemble le travail termine et teste de plusieurs sessions
 # paralleles (worktrees) en plus du scan reseau SNMP/capture de 2.19.39 :
 #
