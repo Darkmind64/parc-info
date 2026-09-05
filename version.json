@@ -1,24 +1,24 @@
 {
-  "version": "2.19.43",
+  "version": "2.19.44",
   "release_date": "2026-09-05",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.43/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.43/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.43/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.43",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.43/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.43/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.43/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.43/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.43/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.44",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Audit réseau, lot 3 : couverture de tests complétée pour 5 zones jusque-là non testées (capture passive, topologie STP, découverte récursive, diagnostic Wi-Fi Linux/macOS, SNMPv3 multi-protocoles). Deux bugs réels ont été découverts et corrigés en écrivant ces tests : un détecteur DHCP actif (`detecter_dhcp_pirate`) n'envoyait en réalité jamais aucun paquet, à cause d'une collision de nom entre deux fonctions homonymes ; et le paquet DHCPDISCOVER construit était 4 octets trop court par rapport au format standard.",
+    "new_features": "Audit réseau, lot 4 : granularité — sept techniques de détection alternatives ajoutées pour identifier des appareils jusque-là invisibles ou mal identifiés. Réveil à distance (Wake-on-LAN) à la demande depuis la fiche système ; inventaire logiciel gratuit via HOST-RESOURCES-MIB pour un NAS/serveur SNMP sans collecteur ; empreinte OS passive façon p0f sur le scan réseau ; récepteur de traps SNMP (UDP 162, opt-in) ; table de voisinage IPv6 (NDP) avec ping multicast de courtoisie ; alias d'interface (ifAlias) affiché dans la vue Topologie.",
     "improvements": [
-      "La capture réseau passive (ARP spoofing, tempête broadcast, DHCP pirate, Router Advertisement pirate, instabilité STP, retransmissions TCP) est désormais vérifiée par une suite de tests dédiée.",
-      "Le calcul du sens des liens réseau par STP, et la découverte récursive de topologie (avec son plafond de profondeur), sont désormais testés.",
-      "Le diagnostic Wi-Fi sous Linux et macOS est désormais testé (seul Windows l'était jusqu'ici)."
+      "Le scan réseau croise désormais aussi l'empreinte TCP/IP passive (TTL, options du SYN initial) pour estimer la famille d'OS d'un appareil muet sur toute sonde active.",
+      "Un NAS ou un serveur Linux avec un agent SNMP standard, mais sans le collecteur ParcInfo, peut désormais fournir un inventaire logiciel gratuit (bouton dédié sur la fiche système).",
+      "Les traps SNMP poussés par les équipements (linkDown, coldStart, alarmes...) peuvent désormais être journalisés en temps réel dans les évènements du diagnostic réseau."
     ]
   },
   "checksums": {
@@ -29,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.43"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.44"
 }

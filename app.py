@@ -2233,7 +2233,14 @@ def init_db():
                               ('stp_etat', "TEXT DEFAULT ''"),
                               ('stp_amont', "INTEGER DEFAULT 0"),
                               ('voisin_ip', "TEXT DEFAULT ''"),
-                              ('voisin_modele', "TEXT DEFAULT ''")):
+                              ('voisin_modele', "TEXT DEFAULT ''"),
+                              # Audit réseau 2026-09-05, #22 : ifAlias (le nom
+                              # qu'un administrateur tape sur un port de
+                              # switch, ex. « PC-Comptabilité ») est déjà
+                              # relevé à chaque cycle par _noms_interfaces
+                              # pour le mapping des ports, puis jeté — jamais
+                              # exposé ni utilisé comme signal.
+                              ('port_alias', "TEXT DEFAULT ''")):
         try:
             c.execute(f"ALTER TABLE diag_topologie ADD COLUMN {col_add} {col_type}")
         except Exception:
@@ -5789,7 +5796,61 @@ def apercu_document(id):
         conn.close()
 
 
-# ─── API APPAREIL : IGNORER ALERTE GARANTIE ──────────────────────────────────
+# ─── API APPAREIL : RÉVEIL (WAKE-ON-LAN) ─────────────────────────────────────
+
+@app.route('/api/appareil/<int:id>/reveiller', methods=['POST'])
+@login_required
+def api_reveiller_appareil(id):
+    """Wake-on-LAN à la demande (audit réseau 2026-09-05, #26) : distingue un
+    appareil réellement éteint d'un appareil simplement endormi. Toujours une
+    action MANUELLE explicite — jamais de comportement de fond ni automatique
+    (réveiller un poste à l'improviste n'est pas anodin pour son
+    utilisateur)."""
+    client_id = get_client_id()
+    if not can_write(client_id):
+        return jsonify({'error': 'Accès en lecture seule'}), 403
+    conn = get_db()
+    row = conn.execute('SELECT adresse_mac FROM appareils WHERE id=? AND client_id=?',
+                       (id, client_id)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'Appareil introuvable'}), 404
+    mac = (row[0] or '').strip()
+    if not mac:
+        return jsonify({'error': "Cet appareil n'a pas d'adresse MAC enregistrée"}), 400
+    ok, motif = network_diag.reveiller_appareil(mac)
+    if not ok:
+        return jsonify({'error': motif or 'Envoi impossible'}), 500
+    log_history('REVEIL_APPAREIL', get_auth_user()['login'], client_id, {'id': id, 'mac': mac})
+    return jsonify({'ok': True})
+
+
+@app.route('/api/appareil/<int:id>/host-resources')
+@login_required
+def api_appareil_host_resources(id):
+    """Inventaire logiciel/processus/stockage via HOST-RESOURCES-MIB SNMP,
+    sans dépendre du collecteur ParcInfo (audit réseau 2026-09-05, #24) —
+    utile pour un NAS, un serveur Linux ou tout hôte avec un agent SNMP mais
+    sans le collecteur installé. Lecture seule (aucune écriture)."""
+    client_id = get_client_id()
+    if not get_client_access(client_id):
+        return jsonify({'error': 'Forbidden'}), 403
+    conn = get_db()
+    row = conn.execute('SELECT adresse_ip FROM appareils WHERE id=? AND client_id=?',
+                       (id, client_id)).fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'Appareil introuvable'}), 404
+    ip = (row[0] or '').strip()
+    if not ip:
+        return jsonify({'error': "Cet appareil n'a pas d'adresse IP enregistrée"}), 400
+    communautes = [c.strip() for c in re.split(r'[,;\s]+',
+                   (cfg_get('diag_snmp_communautes', 'public') or 'public')) if c.strip()] or ['public']
+    res = network_diag.inventaire_host_resources(ip, communautes)
+    if not res:
+        return jsonify({'ok': False, 'motif': "Aucun agent HOST-RESOURCES-MIB détecté sur cet hôte"})
+    return jsonify({'ok': True, **res})
+
 
 @app.route('/api/appareil/<int:id>/garantie-ignorer', methods=['POST'])
 @login_required
@@ -9184,6 +9245,78 @@ def _ber_decoder_valeur(tag, brut):
     return brut.decode('utf-8', errors='replace').strip()
 
 
+_TAG_TRAP_V1  = 0xa4   # Trap-PDU (SNMPv1)
+_TAG_TRAP_V2C = 0xa7   # SNMPv2-Trap-PDU (v2c/v3, structure d'un GetResponse-PDU)
+_SNMP_TRAP_GENERIQUES = {0: 'coldStart', 1: 'warmStart', 2: 'linkDown', 3: 'linkUp',
+                         4: 'authenticationFailure', 5: 'egpNeighborLoss', 6: 'enterpriseSpecific'}
+
+
+def _snmp_trap_parse(data: bytes) -> dict | None:
+    """Décode un message SNMP TRAP entrant (v1 Trap-PDU ou v2c/v3
+    SNMPv2-Trap-PDU) reçu tel quel sur le socket UDP 162. `None` si ce n'est
+    pas un trap reconnaissable (paquet tronqué, PDU d'un autre type, version
+    exotique) — jamais d'exception propagée vers l'appelant.
+
+    SNMPv3 authentifié/chiffré n'est PAS vérifié ici (portée volontairement
+    limitée à v1/v2c et à un v3 noAuthNoPriv en clair) : la structure
+    varbind-list reste lisible même sans validation USM, mais un trap v3
+    avec confidentialité activée ne peut pas être décodé — motif renvoyé
+    explicitement (`'chiffre': True`) plutôt qu'un résultat silencieusement
+    incomplet."""
+    try:
+        _, corps, _ = _ber_lire_tlv(data, 0)
+        pos = 0
+        _, ver_brut, pos = _ber_lire_tlv(corps, pos)
+        version = int.from_bytes(ver_brut, 'big', signed=True) if ver_brut else 0
+        if version == 3:
+            return {'version': 3, 'chiffre': True, 'categorie_pdu': None}
+        _, communaute_brut, pos = _ber_lire_tlv(corps, pos)
+        communaute = communaute_brut.decode('utf-8', errors='replace')
+        tag_pdu, pdu_corps, _ = _ber_lire_tlv(corps, pos)
+        res = {'version': version, 'communaute': communaute}
+        p = 0
+        if tag_pdu == _TAG_TRAP_V1:
+            _, ent_brut, p = _ber_lire_tlv(pdu_corps, p)
+            _, agent_brut, p = _ber_lire_tlv(pdu_corps, p)
+            _, gen_brut, p = _ber_lire_tlv(pdu_corps, p)
+            _, spec_brut, p = _ber_lire_tlv(pdu_corps, p)
+            _, _ts, p = _ber_lire_tlv(pdu_corps, p)
+            _, vblist, p = _ber_lire_tlv(pdu_corps, p)
+            gen = int.from_bytes(gen_brut, 'big', signed=True) if gen_brut else 0
+            res.update({
+                'type': 'v1', 'entreprise': _ber_decoder_oid(ent_brut),
+                'agent_adresse': '.'.join(str(b) for b in agent_brut) if len(agent_brut) == 4 else '',
+                'generic_trap': gen, 'generic_trap_libelle': _SNMP_TRAP_GENERIQUES.get(gen, str(gen)),
+                'specific_trap': int.from_bytes(spec_brut, 'big', signed=True) if spec_brut else 0,
+            })
+        elif tag_pdu == _TAG_TRAP_V2C:
+            _, _reqid, p = _ber_lire_tlv(pdu_corps, p)
+            _, _err, p = _ber_lire_tlv(pdu_corps, p)
+            _, _ei, p = _ber_lire_tlv(pdu_corps, p)
+            _, vblist, p = _ber_lire_tlv(pdu_corps, p)
+            res['type'] = 'v2c'
+        else:
+            return None
+        varbinds = []
+        vp = 0
+        while vp < len(vblist):
+            tag_vb, vb_corps, vp = _ber_lire_tlv(vblist, vp)
+            if tag_vb != 0x30:
+                break
+            bp = 0
+            _, oid_brut, bp = _ber_lire_tlv(vb_corps, bp)
+            tag_val, val_brut, bp = _ber_lire_tlv(vb_corps, bp)
+            varbinds.append((_ber_decoder_oid(oid_brut), _ber_decoder_valeur(tag_val, val_brut)))
+        res['varbinds'] = varbinds
+        if res.get('type') == 'v2c':
+            # Convention SNMPv2 : le 2e varbind est snmpTrapOID.0 — l'OID qui
+            # identifie le trap (équivalent du couple generic/specific en v1).
+            res['trap_oid'] = varbinds[1][1] if len(varbinds) > 1 else ''
+        return res
+    except Exception:
+        return None
+
+
 _SNMP_BULK_REPETITIONS = 25   # max-repetitions d'un GETBULK : ~25 lignes par aller-retour
 
 
@@ -9852,7 +9985,7 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
 
 
 def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onvif_par_ip=None,
-               snmp_arp_par_ip=None, capture_arp_par_ip=None):
+               snmp_arp_par_ip=None, capture_arp_par_ip=None, dhcp_par_mac=None, os_par_ip=None):
     """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant.
 
     Optionnellement enrichit avec WMI si enrich_wmi=True et que c'est une machine Windows
@@ -10053,6 +10186,18 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
         # MAC vue en écoutant le trafic ARP local — l'hôte ne répond à AUCUNE
         # sonde active mais existe bel et bien sur CE segment.
         result['mac_source'] = 'capture'
+    if mac and dhcp_par_mac and mac in dhcp_par_mac:
+        # Empreinte DHCP passive (audit réseau 2026-09-05, #23) : la famille
+        # d'appareil déduite de l'option 55 (liste de paramètres demandés),
+        # indicative — un signal de plus, jamais une identification à elle
+        # seule (même statut que le fabricant OUI ou le TTL).
+        result['dhcp_fingerprint'] = dhcp_par_mac[mac]
+    if os_par_ip and ip_str in os_par_ip:
+        # Empreinte TCP/IP passive façon p0f (audit réseau 2026-09-05, #25) :
+        # famille d'OS estimée depuis le SYN initial (TTL, fenêtre, options),
+        # sans dépendre du collecteur ni d'une sonde active — indicative, au
+        # même titre que le fabricant OUI ou l'empreinte DHCP.
+        result['os_fingerprint'] = os_par_ip[ip_str]
 
     # Marque/modèle « les plus précis disponibles » : UPnP et mDNS
     # identifient déjà l'appareil lui-même (contrairement à vendor, qui ne
@@ -10120,6 +10265,8 @@ def _run_scan(plages, nb_threads, enrich_wmi=False, client_id=None):
             scan_status["message"] = "Découverte UPnP/mDNS/ONVIF/SNMP..."
         decouvertes_upnp, decouvertes_mdns, decouvertes_onvif = {}, {}, {}
         decouvertes_snmp_arp, decouvertes_capture_arp = {}, {}
+        decouvertes_dhcp = {}
+        decouvertes_os = {}
 
         # Chaque sonde journalise son échec (audit réseau 2026-09-05, #12) : ces
         # 3 sondes avalaient auparavant toute exception en silence, contrairement
@@ -10165,6 +10312,30 @@ def _run_scan(plages, nb_threads, enrich_wmi=False, client_id=None):
             except Exception:
                 logger.debug('scan: capture_arp_sightings indisponible', exc_info=True)
 
+        def _decouvrir_dhcp():
+            # Empreinte DHCP passive (audit réseau 2026-09-05, #23) : identifie
+            # la FAMILLE d'un appareil (Windows/Apple/embarqué) à partir de son
+            # option 55 (liste de paramètres demandés), indépendamment du TTL
+            # ou du préfixe MAC déjà utilisés — fenêtre plus étroite qu'un
+            # simple trafic ARP (un DHCPDISCOVER n'est émis qu'au démarrage ou
+            # au renouvellement de bail), durée plus longue pour compenser.
+            nonlocal decouvertes_dhcp
+            try:
+                decouvertes_dhcp = network_diag.capture_dhcp_fingerprints(duree=9)
+            except Exception:
+                logger.debug('scan: capture_dhcp_fingerprints indisponible', exc_info=True)
+
+        def _decouvrir_os():
+            # Empreinte OS passive façon p0f (audit réseau 2026-09-05, #25) :
+            # famille d'OS estimée depuis le SYN initial (TTL, options TCP),
+            # un signal de plus pour un appareil qui ne répond à aucune sonde
+            # WMI/collecteur — jamais une identification précise à elle seule.
+            nonlocal decouvertes_os
+            try:
+                decouvertes_os = network_diag.capture_os_fingerprints(duree=9)
+            except Exception:
+                logger.debug('scan: capture_os_fingerprints indisponible', exc_info=True)
+
         # Timeout individuel par thread : la capture ARP dure volontairement
         # ~8 s (dernier recours pour les appareils muets), les autres ~6 s —
         # comme ils tournent tous EN PARALLÈLE (déjà démarrés ci-dessous),
@@ -10173,7 +10344,9 @@ def _run_scan(plages, nb_threads, enrich_wmi=False, client_id=None):
                            (threading.Thread(target=_decouvrir_mdns, daemon=True), 6),
                            (threading.Thread(target=_decouvrir_onvif, daemon=True), 6),
                            (threading.Thread(target=_decouvrir_snmp_arp, daemon=True), 10),
-                           (threading.Thread(target=_decouvrir_capture_arp, daemon=True), 9)]
+                           (threading.Thread(target=_decouvrir_capture_arp, daemon=True), 9),
+                           (threading.Thread(target=_decouvrir_dhcp, daemon=True), 9),
+                           (threading.Thread(target=_decouvrir_os, daemon=True), 9)]
         for f, _t in fils_decouverte:
             f.start()
         for f, t in fils_decouverte:
@@ -10195,7 +10368,9 @@ def _run_scan(plages, nb_threads, enrich_wmi=False, client_id=None):
                                        upnp_par_ip=decouvertes_upnp, mdns_par_ip=decouvertes_mdns,
                                        onvif_par_ip=decouvertes_onvif,
                                        snmp_arp_par_ip=decouvertes_snmp_arp,
-                                       capture_arp_par_ip=decouvertes_capture_arp): ip
+                                       capture_arp_par_ip=decouvertes_capture_arp,
+                                       dhcp_par_mac=decouvertes_dhcp,
+                                       os_par_ip=decouvertes_os): ip
                       for ip in hosts}
             for f in concurrent.futures.as_completed(futures):
                 on_done(f, futures[f])
@@ -10309,11 +10484,12 @@ def page_diag_reseau():
         'diag_snapshot_rapide', 'diag_intervalle_s', 'diag_snmp_communautes',
         'diag_snmp_v3_user', 'diag_snmp_v3_auth_proto',
         'diag_alerte_destinataire', 'diag_rapport_cron',
-        'diag_wifi_active', 'diag_ups_active')}
+        'diag_wifi_active', 'diag_ups_active', 'diag_snmp_trap_active')}
     return render_template('diag_reseau.html',
                            parc=parc, client=client, dernier_run=dernier_run,
                            etat_capture=network_diag.etat_capture(),
                            etat_moniteur=network_diag.etat_moniteur(),
+                           etat_traps=network_diag.etat_recepteur_traps(),
                            diag_cfg=diag_cfg,
                            peut_ecrire=can_write(cid),
                            clients=get_clients(), client_actif_id=cid)
@@ -10505,6 +10681,18 @@ def api_diag_ups():
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
     return jsonify(network_diag.etat_ups(cid))
+
+
+@app.route('/api/diag-reseau/ipv6-voisins')
+@login_required
+def api_diag_ipv6_voisins():
+    """Table de voisinage IPv6 (NDP) de ce poste, ping multicast en préalable
+    (audit réseau 2026-09-05, #28). Côté poste, comme le diagnostic Wi-Fi —
+    aucune notion de client à filtrer, juste un accès au diagnostic requis."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return jsonify(network_diag.voisinage_ipv6())
 
 
 @app.route('/api/diag-reseau/metriques')

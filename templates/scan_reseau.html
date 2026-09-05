@@ -552,7 +552,13 @@ function renderTable(results) {
             ? `<span class="badge-os badge-os-${osBadgeClass}">${h.os_guess}</span>`
             : '—';
         const bannieresTxt = [h.bannieres ? Object.entries(h.bannieres).map(([p,b]) => `${p}: ${b}`).join('\n') : '',
-                              (h.snmp && h.snmp.sysDescr) ? `SNMP: ${h.snmp.sysDescr}` : '']
+                              (h.snmp && h.snmp.sysDescr) ? `SNMP: ${h.snmp.sysDescr}` : '',
+                              // Empreinte DHCP passive (audit #23) : famille déduite de l'option 55,
+                              // indicative — pas une identification à elle seule.
+                              (h.dhcp_fingerprint && h.dhcp_fingerprint.famille) ? `DHCP: ${h.dhcp_fingerprint.famille}` : '',
+                              // Empreinte TCP/IP passive façon p0f (audit #25) : famille déduite du
+                              // SYN initial (TTL, options) — indicative, jamais une version précise.
+                              (h.os_fingerprint && h.os_fingerprint.os_probable) ? `TCP/IP: ${h.os_fingerprint.os_probable}` : '']
                               .filter(Boolean).join('\n');
         const ports = (h.ports||[]).slice(0,7).map(p => `<span class="port-chip">${p}</span>`).join('')
                     + (h.ports&&h.ports.length>7 ? `<span class="port-chip">+${h.ports.length-7}</span>` : '');

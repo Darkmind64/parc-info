@@ -246,5 +246,132 @@ finally:
 verifier(f == [], "scapy absent -> [] immédiatement, sans tenter de sniffer")
 
 
+print('\n=== 12. capture_dhcp_fingerprints() : empreinte DHCP passive (audit #23) ===')
+_cfg_orig = N._cfg
+_etat_capture_orig = N.etat_capture
+
+
+def _capturer_dhcp(paquets, actif=True):
+    FauxAsyncSniffer._paquets = paquets
+    N._charger_scapy = lambda: FAUX_SCAPY
+    N.time.sleep = lambda s: None
+    N._cfg = lambda cle, defaut=None: '1' if (cle == 'diag_capture_active' and actif) else defaut
+    # RUNNING_IN_DOCKER=1 (mis par ce script) fait toujours répondre
+    # etat_capture() 'docker_bridge' quel que soit le faux scapy injecté —
+    # sans ce mock, la fonction testée renverrait toujours {} pour une
+    # raison sans rapport avec ce qu'on teste ici.
+    N.etat_capture = lambda: {'disponible': True, 'motif': 'ok'}
+    try:
+        return N.capture_dhcp_fingerprints(5)
+    finally:
+        N._charger_scapy = _charger_scapy_orig
+        N.time.sleep = _sleep_orig
+        N._cfg = _cfg_orig
+        N.etat_capture = _etat_capture_orig
+
+
+_paquet_win = FauxPaquet(
+    Ether(src='aa:bb:cc:00:00:01', dst='ff:ff:ff:ff:ff:ff'),
+    DHCP(options=[('message-type', 1), ('param_req_list', [1, 3, 6, 15, 31, 33, 43, 44, 46, 47, 119, 121, 249, 252])]))
+_paquet_apple = FauxPaquet(
+    Ether(src='aa:bb:cc:00:00:02', dst='ff:ff:ff:ff:ff:ff'),
+    DHCP(options=[('message-type', 1), ('param_req_list', [1, 3, 6, 15, 119, 95, 252, 44, 46])]))
+_paquet_iot = FauxPaquet(
+    Ether(src='aa:bb:cc:00:00:03', dst='ff:ff:ff:ff:ff:ff'),
+    DHCP(options=[('message-type', 1), ('param_req_list', [1, 3, 6, 15])]))
+
+_r12 = _capturer_dhcp([_paquet_win, _paquet_apple, _paquet_iot])
+verifier(set(_r12) == {'aa:bb:cc:00:00:01', 'aa:bb:cc:00:00:02', 'aa:bb:cc:00:00:03'},
+         "les 3 empreintes sont capturées, une par MAC source", str(sorted(_r12)))
+verifier(_r12['aa:bb:cc:00:00:01']['options'] == tuple(sorted({1, 3, 6, 15, 31, 33, 43, 44, 46, 47, 119, 121, 249, 252})),
+         "la liste de paramètres demandés (option 55) est capturée telle quelle, triée",
+         str(_r12['aa:bb:cc:00:00:01']['options']))
+verifier('Windows' in _r12['aa:bb:cc:00:00:01']['famille'],
+         "option 249 (route statique MS) -> famille Windows", str(_r12['aa:bb:cc:00:00:01']))
+verifier('Apple' in _r12['aa:bb:cc:00:00:02']['famille'],
+         "options 119+95 -> famille Apple", str(_r12['aa:bb:cc:00:00:02']))
+verifier('embarqué' in _r12['aa:bb:cc:00:00:03']['famille'],
+         "liste courte (4 options de base) -> objet embarqué", str(_r12['aa:bb:cc:00:00:03']))
+
+print('\n=== 12bis. capture_dhcp_fingerprints() : désactivée par réglage / scapy absent ===')
+verifier(_capturer_dhcp([_paquet_win], actif=False) == {},
+         "diag_capture_active=0 -> {} immédiatement, sans tenter de sniffer")
+N._cfg = lambda cle, defaut=None: '1' if cle == 'diag_capture_active' else defaut
+N.etat_capture = lambda: {'disponible': True, 'motif': 'ok'}
+N._charger_scapy = lambda: None
+try:
+    _r12c = N.capture_dhcp_fingerprints(5)
+finally:
+    N._charger_scapy = _charger_scapy_orig
+    N._cfg = _cfg_orig
+    N.etat_capture = _etat_capture_orig
+verifier(_r12c == {}, "scapy absent -> {} sans exception")
+
+print('\n=== 12ter. Un paquet DHCP sans option 55 (ACK, RENEW sans param_req_list) est ignoré ===')
+_paquet_sans_option = FauxPaquet(
+    Ether(src='aa:bb:cc:00:00:09', dst='ff:ff:ff:ff:ff:ff'),
+    DHCP(options=[('message-type', 5)]))
+_r12d = _capturer_dhcp([_paquet_sans_option])
+verifier(_r12d == {}, "aucune option param_req_list -> pas d'entrée pour cette MAC", str(_r12d))
+
+print('\n=== 13. _p0f_ttl_initial() / _p0f_famille() : fonctions pures (audit #25) ===')
+verifier(N._p0f_ttl_initial(60) == 64, "TTL observé 60 (4 sauts) -> TTL initial 64", str(N._p0f_ttl_initial(60)))
+verifier(N._p0f_ttl_initial(125) == 128, "TTL observé 125 (3 sauts) -> TTL initial 128")
+verifier(N._p0f_ttl_initial(250) == 255, "TTL observé 250 -> TTL initial 255")
+verifier(N._p0f_ttl_initial('bidon') is None, "TTL illisible -> None, pas d'exception")
+verifier('Windows' in N._p0f_famille(128, False, False), "TTL initial 128 -> Windows")
+verifier('réseau' in N._p0f_famille(255, False, False), "TTL initial 255 -> équipement réseau")
+verifier('Linux' in N._p0f_famille(64, True, True), "TTL 64 + WScale + Timestamp -> Linux ou assimilé")
+verifier('macOS' in N._p0f_famille(64, False, False), "TTL 64 sans WScale/Timestamp -> macOS/BSD")
+verifier(N._p0f_famille(None, False, False) == 'Indéterminé', "TTL initial inconnu -> Indéterminé")
+
+print('\n=== 14. capture_os_fingerprints() : empreinte TCP/IP passive façon p0f (audit #25) ===')
+
+
+def _capturer_os(paquets, actif=True):
+    FauxAsyncSniffer._paquets = paquets
+    N._charger_scapy = lambda: FAUX_SCAPY
+    N.time.sleep = lambda s: None
+    N._cfg = lambda cle, defaut=None: '1' if (cle == 'diag_capture_active' and actif) else defaut
+    N.etat_capture = lambda: {'disponible': True, 'motif': 'ok'}
+    try:
+        return N.capture_os_fingerprints(5)
+    finally:
+        N._charger_scapy = _charger_scapy_orig
+        N.time.sleep = _sleep_orig
+        N._cfg = _cfg_orig
+        N.etat_capture = _etat_capture_orig
+
+
+_syn_win = FauxPaquet(IP(src='10.5.0.11', ttl=127),
+                      TCP(flags=0x02, window=8192, options=[('MSS', 1460)]))
+_syn_lin = FauxPaquet(IP(src='10.5.0.12', ttl=63),
+                      TCP(flags=0x02, window=29200,
+                          options=[('MSS', 1460), ('SAckOK', b''), ('Timestamp', (1, 0)),
+                                   ('NOP', None), ('WScale', 7)]))
+_synack_ignore = FauxPaquet(IP(src='10.5.0.99', ttl=64), TCP(flags=0x12, window=65535, options=[]))
+
+_r14 = _capturer_os([_syn_win, _syn_lin, _synack_ignore])
+verifier(set(_r14) == {'10.5.0.11', '10.5.0.12'},
+         "seuls les SYN initiaux (pas les SYN-ACK) produisent une entrée", str(sorted(_r14)))
+verifier(_r14['10.5.0.11']['ttl_initial_estime'] == 128 and 'Windows' in _r14['10.5.0.11']['os_probable'],
+         "TTL observé 127 + fenêtre 8192 -> Windows probable", str(_r14['10.5.0.11']))
+verifier(_r14['10.5.0.12']['ttl_initial_estime'] == 64 and 'Linux' in _r14['10.5.0.12']['os_probable'],
+         "TTL observé 63 + WScale/Timestamp -> Linux probable", str(_r14['10.5.0.12']))
+
+print('\n=== 14bis. capture_os_fingerprints() : désactivée par réglage / scapy absent ===')
+verifier(_capturer_os([_syn_win], actif=False) == {},
+         "diag_capture_active=0 -> {} immédiatement, sans tenter de sniffer")
+N._cfg = lambda cle, defaut=None: '1' if cle == 'diag_capture_active' else defaut
+N.etat_capture = lambda: {'disponible': True, 'motif': 'ok'}
+N._charger_scapy = lambda: None
+try:
+    _r14c = N.capture_os_fingerprints(5)
+finally:
+    N._charger_scapy = _charger_scapy_orig
+    N._cfg = _cfg_orig
+    N.etat_capture = _etat_capture_orig
+verifier(_r14c == {}, "scapy absent -> {} sans exception")
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

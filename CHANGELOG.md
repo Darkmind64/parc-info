@@ -1,5 +1,18 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.44] - 2026-09-05 🛰️
+
+### 🛰️ Audit réseau, lot 4 : granularité — techniques alternatives de détection
+
+Suite des lots 1 à 3. Là où les lots précédents corrigeaient des bugs et complétaient la couverture de tests, celui-ci ajoute des sources de détection nouvelles pour gagner en granularité sur des appareils jusqu'ici invisibles ou mal identifiés — sept propositions de l'audit, toutes validées :
+
+- **Réveil à distance (Wake-on-LAN).** Bouton « ⚡ Réveiller » sur la fiche système d'un appareil qui a une adresse MAC enregistrée : envoie le paquet magique standard en diffusion locale. Ne fonctionne que si le Wake-on-LAN est activé côté appareil et qu'il est sur le même segment L2 que ce serveur — toujours une action manuelle explicite, jamais un comportement de fond.
+- **Inventaire logiciel gratuit via HOST-RESOURCES-MIB.** Bouton « 🔍 Inventaire SNMP » sur la fiche système : interroge `hrSWInstalledName`/`hrSWRunName`/`hrStorage*` sur l'agent SNMP standard d'un NAS, d'un serveur Linux ou de tout hôte avec un agent SNMP mais sans le collecteur ParcInfo installé — logiciels installés, processus en cours, occupation disque, sans rien déployer sur la cible.
+- **Empreinte OS passive façon p0f.** Le scan réseau écoute désormais aussi les paquets TCP SYN initiaux (TTL, options de fenêtre) pour estimer la famille d'OS d'un appareil qui ne répond à aucune sonde active — un signal de plus, au même titre que le fabricant OUI ou l'empreinte DHCP, jamais une identification à lui seul.
+- **Récepteur de traps SNMP (UDP 162), opt-in.** Un nouveau bouton dans la configuration du diagnostic réseau active un récepteur qui journalise les traps SNMP v1/v2c poussés par les équipements (linkDown, coldStart, alarmes constructeur...) dans les évènements du diagnostic — complément « en temps réel » au relevé SNMP actif, qui n'interroge qu'à intervalle régulier. Nécessite des droits élevés pour se lier au port 162 ; un trap n'est journalisé que s'il provient d'une IP déjà connue de l'inventaire d'un client, jamais d'évènement hors périmètre ACL.
+- **Table de voisinage IPv6 (NDP).** Nouvel encart dans l'aperçu du diagnostic réseau : lit le cache de voisinage IPv6 du système (le pendant IPv6 de l'ARP) après un ping multicast de courtoisie vers `ff02::1`, pour les appareils qui ne répondent qu'en IPv6 sur ce segment.
+- **Alias d'interface (`ifAlias`) dans la vue Topologie.** Le libellé configuré sur chaque port d'un switch (souvent le nom du poste ou de la prise murale branchée) s'affiche désormais à côté du nom technique du port.
+
 ## [2.19.43] - 2026-09-05 🧪
 
 ### 🧪 Audit réseau, lot 3 : couverture de tests + 2 bugs réels découverts

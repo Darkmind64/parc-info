@@ -1,8 +1,28 @@
-PARCINFO_VERSION=2.19.43
+PARCINFO_VERSION=2.19.44
 RELEASE_DATE=2026-09-05
-BUILD_NUMBER=2026090507
+BUILD_NUMBER=2026090508
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.44 - Audit reseau, lot 4 : granularite - techniques alternatives
+# Suite des lots 1 a 3. Sept propositions de l'audit validees par l'utilisateur,
+# toutes visant a detecter/identifier des appareils jusque-la invisibles ou mal
+# identifies :
+# - Reveil a distance (Wake-on-LAN) a la demande depuis la fiche systeme.
+# - Inventaire logiciel gratuit via HOST-RESOURCES-MIB (hrSWInstalledName/
+#   hrSWRunName/hrStorage*) pour un NAS/serveur avec agent SNMP mais sans le
+#   collecteur ParcInfo.
+# - Empreinte OS passive facon p0f (TTL + options TCP du SYN initial) sur le
+#   scan reseau, pour un appareil muet sur toute sonde active.
+# - Recepteur de traps SNMP v1/v2c (UDP 162), opt-in, journalise dans les
+#   evenements du diagnostic reseau - complement temps reel au relevé actif.
+# - Table de voisinage IPv6 (NDP) + ping multicast de courtoisie (ff02::1)
+#   dans l'apercu du diagnostic reseau.
+# - Alias d'interface (ifAlias) affiche dans la vue Topologie.
+# Suite de tests complete revérifiée (37 scripts + tests dédiés pour chaque
+# nouvelle fonction, dont un encodage/decodage BER de trap SNMP synthétique) +
+# pytest (235 passants, 10 echecs preexistants sans rapport, en cours de
+# correction separement), aucune regression.
 
 # Version 2.19.43 - Audit reseau, lot 3 : couverture de tests + 2 bugs reels
 # Suite des lots 1 et 2. Constats #17 a #21 de l'audit (couverture de tests) :

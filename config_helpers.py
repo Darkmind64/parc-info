@@ -182,6 +182,13 @@ CFG_DEFAULTS = {
     'diag_snmp_v3_auth_pass': '',      # mot de passe d'authentification
     'diag_snmp_seuil_erreurs': '50',   # Δ erreurs/discards/CRC par fenêtre avant alerte
     'diag_snmp_seuil_saturation_pct': '90',  # seuil de saturation de lien (%)
+    # Récepteur de traps SNMP, UDP 162 (audit réseau 2026-09-05, #27) : requiert
+    # généralement des privilèges élevés pour se lier au port 162 (< 1024) —
+    # OFF par défaut, à activer explicitement une fois l'app lancée avec les
+    # droits nécessaires. Un trap n'est journalisé que s'il provient d'une IP
+    # déjà présente dans l'inventaire d'un client (jamais d'évènement orphelin
+    # hors ACL multi-client).
+    'diag_snmp_trap_active': '0',
     # ── Palier 4 : cartographie de topologie L2 (nécessite diag_snmp_actif) ───
     'diag_topologie_active': '0',      # découverte topologie (FDB/LLDP) + recoupement baie
     # ── Palier 5 : tendances & baseline ──────────────────────────────────────
