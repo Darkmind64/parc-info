@@ -1,9 +1,48 @@
-PARCINFO_VERSION=2.19.36
-RELEASE_DATE=2026-09-04
-BUILD_NUMBER=2026090405
+PARCINFO_VERSION=2.19.37
+RELEASE_DATE=2026-09-05
+BUILD_NUMBER=2026090501
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.37 - Detection automatique des sous-reseaux d'un site
+# Signale par un utilisateur : des appareils sur un second /24 routes (meme
+# routeur, deux LAN/VLAN) n'apparaissaient nulle part - scan, baie, diag -
+# faute que quiconque pense a taper cette plage a la main.
+#
+# network_diag.sous_reseaux_detectes(client_id) : pour chaque routeur/switch
+# SNMP de l'inventaire, sonde d'existence _snmp_presence PUIS lecture de sa
+# table IP/routes (_sous_reseaux_equipement, deja utilisee par la
+# cartographie depuis 2.19.32) ; agrege les sous-reseaux vus par plusieurs
+# equipements en une seule entree ; exclut ceux deja dans
+# parc_general.plage_ip_locale. Nouvelle route GET /api/scan/sous-reseaux
+# (lecture seule).
+#
+# Page Scan reseau : encart "Sous-reseaux detectes via SNMP" sous les plages
+# deja saisies, un bouton "+ Ajouter" par plage proposee qui l'ajoute a la
+# liste existante (reutilise ajouterPlage(), deja capable de scanner
+# plusieurs plages a la fois - ca marchait deja, il manquait juste la
+# suggestion). Rien n'est ajoute ni scanne sans un clic.
+#
+# parc_general.plage_ip_locale devient multi-valeur (separateur virgule,
+# meme convention que diag_snmp_communautes) :
+#  - _appareil_sur_reseau_courant (app.py) : site confirme sur AU MOINS une
+#    des plages declarees -> confiance etendue aux AUTRES plages du meme
+#    site, meme routees (pas directement rattachees a l'interface de ce
+#    poste). Sans ca, un appareil ajoute a l'inventaire depuis le second
+#    sous-reseau restait invisible pour la surveillance ping meme apres
+#    avoir complete plage_ip_locale, puisque CETTE plage precise ne
+#    chevauche jamais l'interface locale du poste ParcInfo.
+#  - _parse_cidrs / network_diag._parse_plages : meme helper cote app.py et
+#    network_diag.py (pas de dependance croisee pour un si petit bout de
+#    code).
+#
+# Limite assumee, pas un defaut a corriger : un appareil scanne sur un
+# sous-reseau ROUTE (pas directement rattache) n'aura pas de MAC resolue
+# (ARP ne traverse pas un routeur) - pas de fabricant OUI, pas de
+# correlation topologie/FDB. Pour apparaitre correctement place dans la
+# baie de brassage, c'est son PROPRE switch qui doit etre ajoute et
+# interroge en SNMP, pas seulement son sous-reseau detecte.
+#
 # Version 2.19.36 - Le motif d'un equipement muet est affiche directement
 # Retour terrain sur 2.19.35 : la cartographie va desormais au bout (le bug
 # de blocage est corrige), mais quand un equipement configure pour le SNMP

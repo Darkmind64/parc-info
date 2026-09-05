@@ -1,5 +1,17 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.37] - 2026-09-05 🌐
+
+### 🌐 Détection automatique des sous-réseaux supplémentaires d'un site
+
+Signalé par un utilisateur : des appareils sur un second `/24` routé (le même routeur desservant deux réseaux locaux, par exemple `192.168.1.0/24` et `192.168.0.0/24`) n'apparaissaient nulle part — ni le scan réseau, ni la baie de brassage, ni le diagnostic réseau — faute que quiconque pense à taper cette seconde plage à la main.
+
+Le routeur, lui, connaît ses propres sous-réseaux. `network_diag.sous_reseaux_detectes(client_id)` interroge chaque routeur/switch SNMP de l'inventaire (sonde d'existence `_snmp_presence` d'abord, pour ne pas traîner sur un équipement pas encore configuré pour le SNMP), lit sa table IP/routes — la même lecture que la cartographie utilise depuis 2.19.32 — et agrège les sous-réseaux vus, en excluant ceux déjà déclarés. La page **Scan réseau** affiche désormais un encart « Sous-réseaux détectés via SNMP » sous les plages déjà saisies, avec un bouton « + Ajouter » par plage proposée. Rien n'est ajouté ni scanné sans un clic : le mécanisme de scan multi-plages existait déjà, il manquait simplement la suggestion.
+
+`parc_general.plage_ip_locale` accepte désormais plusieurs plages séparées par une virgule. Amélioration associée dans `_appareil_sur_reseau_courant` (surveillance ping en tâche de fond) : une fois le site confirmé sur *au moins une* des plages déclarées, les *autres* plages du même site sont aussi considérées joignables, même quand elles ne chevauchent pas directement l'interface réseau du poste ParcInfo — sans ce correctif, un appareil importé depuis le second sous-réseau serait resté invisible pour le watchdog même après avoir complété `plage_ip_locale`, puisque routé plutôt que directement rattaché.
+
+Limite assumée, et non un défaut à corriger : un appareil découvert sur un sous-réseau **routé** n'aura pas d'adresse MAC résolue (l'ARP ne traverse pas un routeur), donc pas de fabricant détecté ni de corrélation avec la topologie/FDB des switchs. Pour apparaître correctement placé dans la baie de brassage, c'est le switch qui dessert *physiquement* cet appareil qui doit être ajouté à l'inventaire et interrogé en SNMP — détecter le sous-réseau ne suffit pas à ça.
+
 ## [2.19.36] - 2026-09-04 🔍
 
 ### 🔍 Le motif exact d'un équipement muet s'affiche directement dans la cartographie

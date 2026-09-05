@@ -94,6 +94,21 @@ verifier(A._appareil_sur_reseau_courant('10.0.0.5', '10.0.0.0/24', set()) is Tru
 verifier(A._appareil_sur_reseau_courant('pas-une-ip', '', un_reseau) is False,
          "IP invalide -> False, pas d'exception")
 
+# Signalé en usage réel : un site avec deux sous-réseaux routés (ex. un
+# OpenWrt servant 192.168.1.0/24 ET 192.168.0.0/24). Une fois le second
+# ajouté à plage_ip_locale (valeur multiple, séparée par virgule), un
+# appareil qui y vit doit être considéré joignable même si ce sous-réseau
+# précis ne chevauche pas l'interface locale de CE poste — le site est déjà
+# confirmé via le PREMIER sous-réseau, et route normalement vers l'autre.
+verifier(A._appareil_sur_reseau_courant('192.168.0.50', '192.168.1.0/24,192.168.0.0/24', un_reseau) is True,
+         "plage_ip_locale multi-valeur : site confirmé sur 192.168.1.0/24 -> "
+         "l'appareil du SECOND sous-réseau (routé, pas on-link) est aussi considéré joignable")
+verifier(A._appareil_sur_reseau_courant('10.0.0.5', '192.168.1.0/24,10.0.0.0/24', set()) is True,
+         "réseaux locaux inconnus -> repli historique, même avec une plage multi-valeur")
+verifier(A._parse_cidrs(' 192.168.1.0/24 ; 10.0.0.0/24,pas-une-ip ')
+         == [ipaddress.ip_network('192.168.1.0/24'), ipaddress.ip_network('10.0.0.0/24')],
+         "_parse_cidrs : virgule/point-virgule/espace, jeton invalide ignoré")
+
 print('\n=== 3. _watchdog_cycle() : bout en bout ===')
 A.init_db()
 conn = A.get_db()

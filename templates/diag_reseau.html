@@ -792,7 +792,7 @@ function suivreCartographie(){
             html += '<div class="diag-line" style="margin-top:.5rem;font-size:.78rem;">'
                 + '<strong>Sous-réseaux vus sur les équipements :</strong> '
                 + r2.reseaux.map(x => '<span class="mono">' + esc(x) + '</span>').join(', ')
-                + '<div style="color:var(--text-muted);margin-top:.3rem;">Vous pouvez les ajouter comme plages dans Scan réseau. Rien n’est balayé sans votre accord.</div></div>';
+                + '<div style="color:var(--text-muted);margin-top:.3rem;">La page <a href="/scan">Scan réseau</a> les propose désormais automatiquement (un clic par plage) ; rien n’est balayé sans votre accord.</div></div>';
         }
         dec.innerHTML = html;
     }).catch(() => { clearInterval(topoPoll); topoPoll = null; finCartographie(); });

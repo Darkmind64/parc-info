@@ -35,6 +35,25 @@
     width:100%; transition:all .15s; margin-bottom:.7rem;
 }
 .plage-add:hover { border-color:var(--accent); color:var(--accent); }
+/* Sous-réseaux détectés via SNMP (routeur/switch du client) — proposés en
+   plus de la/des plage(s) déjà saisie(s), jamais ajoutés sans un clic. */
+.sous-reseaux-box {
+    background:rgba(0,201,255,.05); border:1px solid rgba(0,201,255,.2);
+    border-radius:4px; padding:.5rem .6rem; margin-bottom:.7rem; font-size:.74rem;
+}
+.sous-reseaux-box .titre { color:var(--accent); font-weight:700; margin-bottom:.35rem; }
+.sous-reseaux-row {
+    display:flex; align-items:center; justify-content:space-between; gap:.5rem;
+    padding:.2rem 0;
+}
+.sous-reseaux-row .cidr { font-family:'Share Tech Mono',monospace; color:var(--text-primary); }
+.sous-reseaux-row .src { color:var(--text-muted); font-size:.68rem; }
+.sous-reseaux-row button {
+    background:none; border:1px solid var(--accent); color:var(--accent);
+    border-radius:3px; padding:.15rem .5rem; cursor:pointer; font-size:.68rem; white-space:nowrap;
+}
+.sous-reseaux-row button:hover { background:rgba(0,201,255,.12); }
+.sous-reseaux-row.ajoute button { border-color:var(--text-muted); color:var(--text-muted); cursor:default; }
 .scan-progress-bar { height:5px; background:var(--bg-secondary); border-radius:3px; overflow:hidden; margin:.6rem 0; }
 .scan-progress-fill { height:100%; background:linear-gradient(90deg,var(--accent),var(--accent-green)); border-radius:3px; transition:width .3s; }
 .scan-status-msg { font-family:'Share Tech Mono',monospace; font-size:.7rem; color:var(--text-muted); }
@@ -136,6 +155,10 @@
         <div style="font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:.35rem;">Plages IP</div>
         <div id="plages-wrap"></div>
         <button class="plage-add" onclick="ajouterPlage()">+ Ajouter une plage</button>
+        <!-- Sous-réseaux détectés via SNMP sur les routeurs/switchs du client
+             (voir sous_reseaux_detectes côté serveur) — masqué s'il n'y en a
+             aucun. Jamais ajouté d'office : un clic par plage proposée. -->
+        <div id="sous-reseaux-wrap"></div>
         <div style="display:flex;gap:.6rem;margin-bottom:.7rem;">
             <div class="form-group" style="margin:0;flex:1;">
                 <label style="font-size:.7rem;">Threads</label>
@@ -305,6 +328,42 @@ function getPlages() {
 }
 
 ajouterPlage('{{ parc_plage or "192.168.1.0/24" }}');
+
+// ── SOUS-RÉSEAUX DÉTECTÉS VIA SNMP ──────────────────────────────────────────
+// Signalé en usage réel : des appareils sur un second /24 routé (derrière le
+// même routeur/box) n'apparaissaient nulle part — scan, baie, diagnostic —
+// faute que quiconque pense à taper cette plage à la main. Le routeur, lui,
+// la connaît (sa propre table IP/routes en SNMP) ; on la propose ici, un
+// clic par plage, jamais ajoutée d'office.
+async function chargerSousReseaux() {
+    const wrap = document.getElementById('sous-reseaux-wrap');
+    if (!wrap) return;
+    let d;
+    try {
+        d = await fetch('/api/scan/sous-reseaux').then(r => r.json());
+    } catch (e) { return; }
+    if (!d.ok || !(d.detectes || []).length) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = '<div class="sous-reseaux-box">'
+        + '<div class="titre">🔎 Sous-réseaux détectés via SNMP</div>'
+        + d.detectes.map((s, i) => {
+            const sources = (s.sources || []).map(x => `${escH(x.nom)} (${escH(x.ip)})`).join(', ');
+            return `<div class="sous-reseaux-row" id="sr-row-${i}">
+                <span><span class="cidr">${escH(s.cidr)}</span>`
+                + (sources ? ` <span class="src">— vu sur ${sources}</span>` : '') + '</span>'
+                + `<button type="button" onclick="ajouterSousReseau(${i}, '${escH(s.cidr)}')">+ Ajouter</button>
+            </div>`;
+        }).join('')
+        + '</div>';
+}
+function ajouterSousReseau(i, cidr) {
+    ajouterPlage(cidr);
+    const row = document.getElementById('sr-row-' + i);
+    if (!row) return;
+    row.classList.add('ajoute');
+    row.querySelector('button').textContent = '✓ Ajoutée';
+    row.querySelector('button').onclick = null;
+}
+chargerSousReseaux();
 
 // ── BASE OUI (fabricants) ───────────────────────────────────────────────────
 async function mettreAJourOui() {

@@ -2070,6 +2070,116 @@ def _sous_reseaux_equipement(ip, communautes):
     return sorted(reseaux, key=lambda r: (_ipa.ip_network(r).prefixlen, r))
 
 
+def _parse_plages(chaine):
+    """`'192.168.1.0/24, 192.168.0.0/24'` -> `[ip_network, ...]`, jetons
+    invalides ignorés. Même convention de séparateurs que le reste du module
+    (`_communautes_snmp`)."""
+    out = []
+    for tok in re.split(r'[,;\s]+', str(chaine or '').strip()):
+        if not tok:
+            continue
+        try:
+            out.append(ipaddress.ip_network(tok, strict=False))
+        except ValueError:
+            continue
+    return out
+
+
+_SOUS_RESEAUX_MAX_EQUIP = 8     # garde-fou : équipements interrogés par appel
+_SOUS_RESEAUX_BUDGET_S = 8.0    # appel synchrone (page Scan réseau) : reste court
+
+
+def sous_reseaux_detectes(client_id: int) -> dict:
+    """Sous-réseaux vus sur les équipements réseau SNMP du client, EN PLUS de
+    ceux déjà déclarés dans `parc_general.plage_ip_locale`. Pensée pour un
+    appel synchrone (chargement de la page Scan réseau) : chaque équipement
+    est d'abord sondé via `_snmp_presence` (échec en ~1 s) avant d'interroger
+    sa table IP/routes — un routeur pas encore configuré pour le SNMP (cas
+    fréquent : OpenWrt sans `snmpd` installé) ne fait pas traîner l'appel.
+
+    Retourne `{'ok': bool, 'motif': str, 'configurees': [cidr...],
+    'detectes': [{'cidr', 'sources': [{'nom', 'ip'}]}]}`. `motif` ('snmp_inactif'
+    / 'aucun_equipement' / 'aucune_reponse_snmp') explique un résultat vide sans
+    lever d'erreur — cette fonction ne doit jamais faire échouer le chargement
+    de la page qui l'appelle."""
+    vide = {'ok': False, 'motif': '', 'configurees': [], 'detectes': []}
+    if str(_cfg('diag_snmp_actif', '0')) != '1':
+        return {**vide, 'motif': 'snmp_inactif'}
+    try:
+        from database import get_db
+        conn = get_db()
+        placeholders = ','.join('?' * len(_TYPES_EQUIP_SNMP))
+        equipements = conn.execute(
+            f"SELECT id, nom_machine, adresse_ip FROM appareils WHERE client_id=? "
+            f"AND type_appareil IN ({placeholders}) AND COALESCE(adresse_ip,'')!=''",
+            (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
+        row = conn.execute(
+            "SELECT plage_ip_locale FROM parc_general WHERE client_id=?", (client_id,)).fetchone()
+        conn.close()
+    except Exception:
+        logger.debug('network_diag: sous_reseaux_detectes lecture base en échec', exc_info=True)
+        return vide
+
+    if not equipements:
+        return {**vide, 'motif': 'aucun_equipement'}
+
+    configurees = _parse_plages(row[0] if row else '')
+    communautes = _communautes_snmp()
+    equipements = equipements[:_SOUS_RESEAUX_MAX_EQUIP]
+
+    def _pour_un(nom, ip):
+        try:
+            from app import _snmp_presence
+            _present, exploitable, _d = _snmp_presence(ip, communautes)
+            if not exploitable:
+                return nom, ip, [], False
+        except Exception:
+            logger.debug('network_diag: _snmp_presence %s indisponible', ip, exc_info=True)
+        try:
+            return nom, ip, _sous_reseaux_equipement(ip, communautes), True
+        except Exception:
+            logger.debug('network_diag: sous-réseaux %s en échec', ip, exc_info=True)
+            return nom, ip, [], False
+
+    trouves = {}   # cidr -> {'cidr', 'sources': [{'nom','ip'}, ...]}
+    interroges = 0
+    t0 = time.time()
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(equipements)))
+    try:
+        futurs = {pool.submit(_pour_un, nom, ip): (nom, ip) for _aid, nom, ip in equipements}
+        try:
+            for fut in concurrent.futures.as_completed(
+                    futurs, timeout=max(0.1, _SOUS_RESEAUX_BUDGET_S - (time.time() - t0))):
+                nom, ip, reseaux, ok = fut.result()
+                if ok:
+                    interroges += 1
+                for r in reseaux:
+                    trouves.setdefault(r, {'cidr': r, 'sources': []})['sources'].append(
+                        {'nom': nom, 'ip': ip})
+        except concurrent.futures.TimeoutError:
+            pass
+    finally:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:          # Python 3.8 : pas de cancel_futures
+            pool.shutdown(wait=False)
+
+    if interroges == 0:
+        return {**vide, 'motif': 'aucune_reponse_snmp'}
+
+    def _deja_connu(cidr_str):
+        try:
+            net = ipaddress.ip_network(cidr_str, strict=False)
+        except ValueError:
+            return True
+        return any(net.subnet_of(c) or net == c for c in configurees)
+
+    detectes = sorted((v for k, v in trouves.items() if not _deja_connu(k)),
+                      key=lambda d: (ipaddress.ip_network(d['cidr']).prefixlen, d['cidr']))
+    return {'ok': True, 'motif': '', 'configurees': [str(c) for c in configurees],
+            'detectes': detectes}
+
+
 def _mac_depuis_suffixe(suffixe: str, decimal_count: int = 6) -> str:
     """Les 6 derniers sous-identifiants d'un OID FDB = la MAC en décimal."""
     parts = suffixe.split('.')

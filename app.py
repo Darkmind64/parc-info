@@ -10090,6 +10090,20 @@ def api_scan_client_suggere():
         'suggestion': matches[0] if len(matches) == 1 else None,
     })
 
+@app.route('/api/scan/sous-reseaux')
+@login_required
+def api_scan_sous_reseaux():
+    """Sous-réseaux supplémentaires détectés via SNMP sur les routeurs/switchs
+    du client actif — signalé en usage réel : des appareils sur un second
+    /24 routé (derrière la même box) n'apparaissaient nulle part (scan,
+    baie, diagnostic) faute que quiconque pense à taper cette plage à la
+    main. Lecture seule (aucun scan déclenché ici) ; requiert seulement un
+    accès en lecture, comme le reste de la page avant de lancer un scan."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'ok': False, 'motif': 'acces_refuse', 'configurees': [], 'detectes': []}), 403
+    return jsonify(network_diag.sous_reseaux_detectes(cid))
+
 @app.route('/api/scan/lancer', methods=['POST'])
 @login_required
 def lancer_scan():
@@ -14627,15 +14641,44 @@ def _reseaux_locaux_actuels():
     return reseaux
 
 
+def _parse_cidrs(chaine):
+    """`'192.168.1.0/24, 192.168.0.0/24'` -> `[ip_network, ip_network]`, silencieux
+    sur les jetons invalides. Même convention de séparateurs (virgule ;
+    point-virgule ; espace) que `diag_snmp_communautes` et consorts —
+    `parc_general.plage_ip_locale` accepte depuis peu plusieurs plages, pour un
+    site à plusieurs sous-réseaux routés (constat utilisateur : des appareils
+    sur un second /24, derrière le même routeur, n'apparaissaient nulle part)."""
+    out = []
+    for tok in re.split(r'[,;\s]+', str(chaine or '').strip()):
+        if not tok:
+            continue
+        try:
+            out.append(ipaddress.ip_network(tok, strict=False))
+        except ValueError:
+            continue
+    return out
+
+
 def _appareil_sur_reseau_courant(ip_appareil, plage_client, reseaux_locaux):
     """Vrai si CE poste est plausiblement sur le même réseau que l'appareil visé.
 
-    Compare les réseaux locaux actuels à la plage IP configurée du client
-    (parc_general.plage_ip_locale, la source la plus fiable quand elle est
-    renseignée) ET au repli /24 déduit de l'IP de l'appareil lui-même (utile
-    quand ce champ est resté sur sa valeur par défaut, ou vide). `overlaps()`
-    reste vrai même si l'un des réseaux comparés est un sous-ensemble de
-    l'autre (ex : client configuré en /22, poste sur un /24 dedans).
+    Compare les réseaux locaux actuels à la (ou aux) plage(s) IP configurée(s)
+    du client (parc_general.plage_ip_locale, la source la plus fiable quand
+    elle est renseignée) ET au repli /24 déduit de l'IP de l'appareil lui-même
+    (utile quand ce champ est resté sur sa valeur par défaut, ou vide).
+    `overlaps()` reste vrai même si l'un des réseaux comparés est un
+    sous-ensemble de l'autre (ex : client configuré en /22, poste sur un /24
+    dedans).
+
+    Site confirmé sur AU MOINS une des plages déclarées du client -> on fait
+    confiance à TOUTES ses autres plages déclarées, même celles qui ne
+    chevauchent pas directement l'interface de ce poste : un site à plusieurs
+    sous-réseaux route normalement entre eux (l'appareil visé est alors
+    joignable via ce routage, même s'il n'est pas sur le même segment L2).
+    Sans ce court-circuit, un appareil legitimement sur un second /24 routé
+    restait injoignable pour le watchdog même après l'avoir ajouté à
+    plage_ip_locale, puisque cette plage précise ne recoupe jamais
+    l'interface locale du poste.
 
     `reseaux_locaux` vide (résolution DNS locale indisponible) : on ne peut
     rien affirmer sur notre propre position — mieux vaut pinger comme avant
@@ -14643,12 +14686,10 @@ def _appareil_sur_reseau_courant(ip_appareil, plage_client, reseaux_locaux):
     """
     if not reseaux_locaux:
         return True
-    cibles = []
-    if plage_client:
-        try:
-            cibles.append(ipaddress.ip_network(plage_client, strict=False))
-        except Exception:
-            pass
+    plages_client = _parse_cidrs(plage_client)
+    if plages_client and any(rl.overlaps(pc) for rl in reseaux_locaux for pc in plages_client):
+        return True
+    cibles = list(plages_client)
     try:
         cibles.append(ipaddress.ip_network(f'{ip_appareil}/24', strict=False))
     except Exception:

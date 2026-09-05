@@ -753,5 +753,69 @@ N._topologie_equipement = _topo_orig
 verifier(any('Relevé' in m for m in _vus) and _vus[-1] == 'Terminé',
          "la progression est rapportée puis close par « Terminé »", str(_vus[-3:]))
 
+print('\n=== 21. sous_reseaux_detectes() : sous-réseaux supplémentaires via SNMP ===')
+# Signalé en usage réel : des appareils sur un second /24 routé (derrière le
+# même routeur) n'apparaissaient nulle part (scan, baie, diag) faute que
+# quiconque pense à taper cette plage à la main. Le routeur, lui, la connaît.
+verifier(N._parse_plages(' 192.168.1.0/24 ,192.168.0.0/24 ; pas-une-ip ')
+         == [N.ipaddress.ip_network('192.168.1.0/24'), N.ipaddress.ip_network('192.168.0.0/24')],
+         "_parse_plages : virgule/point-virgule/espace, jetons invalides ignorés")
+
+from config_helpers import cfg_invalidate as _inv21
+
+conn = A.get_db()
+conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (905, 'SousReseaux')")
+conn.execute("INSERT INTO parc_general (client_id, nom_site, plage_ip_locale) VALUES (905, 'Site', '192.168.1.0/24')")
+conn.execute("INSERT OR REPLACE INTO config (cle, valeur) VALUES ('diag_snmp_actif', '0')")
+conn.commit(); conn.close()
+_inv21()
+verifier(N.sous_reseaux_detectes(905) == {'ok': False, 'motif': 'snmp_inactif', 'configurees': [], 'detectes': []},
+         "SNMP désactivé -> motif explicite, aucune requête tentée")
+
+conn = A.get_db()
+conn.execute("INSERT OR REPLACE INTO config (cle, valeur) VALUES ('diag_snmp_actif', '1')")
+conn.commit(); conn.close()
+_inv21()
+verifier(N.sous_reseaux_detectes(905)['motif'] == 'aucun_equipement',
+         "aucun équipement réseau inventorié -> motif explicite")
+
+conn = A.get_db()
+conn.execute("INSERT INTO appareils (id, client_id, nom_machine, type_appareil, adresse_ip) "
+             "VALUES (951, 905, 'Routeur-Site', 'Routeur/Pare-feu', '192.168.1.254')")
+conn.commit(); conn.close()
+
+# (a) l'équipement ne répond pas en SNMP -> sonde d'existence coupe court,
+#     _sous_reseaux_equipement n'est JAMAIS appelée (pas de parcours inutile).
+_appels_sre = []
+N._sous_reseaux_equipement = lambda ip, comm: (_appels_sre.append(ip), ['192.168.0.0/24'])[1]
+A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (False, False, 'aucune réponse SNMP')
+_r21 = N.sous_reseaux_detectes(905)
+verifier(_r21['motif'] == 'aucune_reponse_snmp' and _appels_sre == [],
+         "routeur muet -> motif explicite, table IP jamais interrogée", str((_r21, _appels_sre)))
+
+# (b) l'équipement répond : le sous-réseau déjà déclaré est exclu, un
+#     sous-réseau NOUVEAU est proposé avec sa source.
+A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (True, True, 'v1/v2c (public)')
+N._sous_reseaux_equipement = lambda ip, comm: ['192.168.1.0/24', '192.168.0.0/24']
+_r21b = N.sous_reseaux_detectes(905)
+verifier(_r21b['ok'] and _r21b['configurees'] == ['192.168.1.0/24'],
+         "la plage déjà déclarée est bien lue depuis parc_general", str(_r21b))
+verifier([d['cidr'] for d in _r21b['detectes']] == ['192.168.0.0/24'],
+         "seul le sous-réseau NON déjà déclaré est proposé (192.168.1.0/24 exclu)",
+         str(_r21b['detectes']))
+verifier(_r21b['detectes'][0]['sources'] == [{'nom': 'Routeur-Site', 'ip': '192.168.1.254'}],
+         "la source (équipement qui l'a vu) est rapportée", str(_r21b['detectes']))
+
+# (c) deux équipements voient le MÊME sous-réseau nouveau -> une seule entrée,
+#     deux sources (pas de doublon).
+conn = A.get_db()
+conn.execute("INSERT INTO appareils (id, client_id, nom_machine, type_appareil, adresse_ip) "
+             "VALUES (952, 905, 'SW-Coeur', 'Switch', '192.168.1.253')")
+conn.commit(); conn.close()
+_r21c = N.sous_reseaux_detectes(905)
+verifier(len(_r21c['detectes']) == 1 and len(_r21c['detectes'][0]['sources']) == 2,
+         "même sous-réseau vu par 2 équipements -> une entrée, deux sources",
+         str(_r21c['detectes']))
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

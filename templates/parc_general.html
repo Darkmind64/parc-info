@@ -76,8 +76,11 @@
                 <input id="id-ip_publique" type="text" name="ip_publique" value="{{ parc.ip_publique or '' }}" placeholder="Ex: 82.64.x.x">
             </div>
             <div class="form-group">
-                <label for="id-plage_ip_locale">Plage IP locale</label>
-                <input id="id-plage_ip_locale" type="text" name="plage_ip_locale" value="{{ parc.plage_ip_locale or '192.168.1.0/24' }}" placeholder="192.168.1.0/24">
+                <label for="id-plage_ip_locale">Plage(s) IP locale(s)</label>
+                <input id="id-plage_ip_locale" type="text" name="plage_ip_locale" value="{{ parc.plage_ip_locale or '192.168.1.0/24' }}" placeholder="192.168.1.0/24, 192.168.0.0/24" title="Plusieurs sous-réseaux routés au même site ? Séparez-les par une virgule.">
+                <p class="form-hint">
+                    Site avec plusieurs sous-réseaux (ex. routeur qui dessert 192.168.1.0/24 ET 192.168.0.0/24) : séparez-les par une virgule. La page Scan réseau peut aussi les proposer automatiquement, s'ils sont vus via SNMP sur un routeur/switch de l'inventaire.
+                </p>
             </div>
         </div>
         <div class="form-row cols-2">

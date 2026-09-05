@@ -4,7 +4,7 @@ Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
 **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
 du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-04 (v2.19.35). En cas de doute
+> Ce document décrit le comportement au 2026-09-05 (v2.19.37). En cas de doute
 > sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
 > `network_diag.py`.
 
@@ -121,6 +121,47 @@ résultat est simplement ignoré. La progression est rapportée à **chaque**
 - Le **numéro sérigraphié sur la façade n'existe dans aucune MIB standard**. Le
   mapping restera une déduction (nom d'interface) ou une calibration humaine.
 - Pas de SNMP en écriture : ParcInfo constate et propose, il ne corrige pas.
+
+### Sous-réseaux supplémentaires d'un site (page Scan réseau)
+
+Un site à plusieurs sous-réseaux routés (le même routeur dessert par exemple
+`192.168.1.0/24` **et** `192.168.0.0/24`) laissait jusqu'ici les appareils du
+second réseau invisibles partout — scan, baie, diagnostic — faute que
+quelqu'un pense à taper cette plage à la main. Le routeur, lui, connaît ses
+propres sous-réseaux.
+
+`network_diag.sous_reseaux_detectes(client_id)` interroge chaque routeur/switch
+SNMP de l'inventaire : sonde `_snmp_presence` d'abord (échec en ~1 s sur un
+équipement pas encore configuré pour le SNMP), puis lecture de sa table
+IP/routes via `_sous_reseaux_equipement` — le même relevé que la cartographie
+utilise depuis 2.19.32. Résultat agrégé par CIDR, avec la liste des
+équipements qui l'ont vu, en excluant ce qui est déjà déclaré dans
+`parc_general.plage_ip_locale`. Route `GET /api/scan/sous-reseaux`, lecture
+seule (aucun scan n'est déclenché).
+
+La page **Scan réseau** affiche un encart « Sous-réseaux détectés via SNMP »
+sous les plages déjà saisies, avec un bouton « + Ajouter » par plage proposée
+— il réutilise `ajouterPlage()`, déjà capable de lancer un scan sur plusieurs
+plages à la fois (`POST /api/scan/lancer` accepte `plage_ip` en liste). Rien
+n'est scanné sans un clic explicite.
+
+`parc_general.plage_ip_locale` accepte désormais **plusieurs plages séparées
+par une virgule** (même convention que `diag_snmp_communautes`). Dans
+`_appareil_sur_reseau_courant` (surveillance ping en tâche de fond), le site
+est considéré confirmé dès qu'**une seule** des plages déclarées chevauche le
+réseau local du poste ParcInfo — les *autres* plages du même site sont alors
+elles aussi jugées joignables, même si elles ne chevauchent pas directement
+son interface (elles sont routées via le même équipement). Sans ce
+correctif, un appareil importé depuis le second sous-réseau restait invisible
+pour le watchdog même après avoir complété `plage_ip_locale`.
+
+**Limite assumée, pas un défaut à corriger** : un appareil scanné sur un
+sous-réseau **routé** (pas directement rattaché à l'interface du poste
+ParcInfo) n'aura pas de MAC résolue — l'ARP ne traverse pas un routeur. Ni
+fabricant OUI, ni corrélation avec une topologie/FDB de switch. Pour
+apparaître correctement placé dans la baie de brassage, c'est le switch qui
+dessert *physiquement* cet appareil qui doit être ajouté à l'inventaire et
+interrogé en SNMP — détecter le sous-réseau ne suffit pas à ça.
 
 ---
 
@@ -663,6 +704,7 @@ d'un refus ou d'un appareil qui ne fait pas de SNMP.
 | Détections palier 1/2 | `network_diag.py` : `detecter_*`, `mesurer_qualite_liaison`, `capture_passive` |
 | SNMP (palier 3) | `interroger_equipement`, `_analyser_snmp`, `interroger_equipements_client`, `etat_snmp` |
 | Topologie (palier 4) | `decouvrir_topologie` (récursive, parallèle, sous budget), `_topologie_equipement`, `_journaliser_mouvements`, `_stp_switch`, `_entite_physique`, `_sous_reseaux_equipement`, `etat_topologie`, `proposer_topologie_baie` / `appliquer_topologie_baie`, `lancer_cartographie` / `statut_cartographie` |
+| Sous-réseaux supplémentaires (page Scan réseau) | `network_diag.sous_reseaux_detectes` (sonde `_snmp_presence` + `_sous_reseaux_equipement` par équipement, agrégé), route `GET /api/scan/sous-reseaux`, `templates/scan_reseau.html` (`chargerSousReseaux`/`ajouterSousReseau`) ; `app._parse_cidrs` / `network_diag._parse_plages` (plage_ip_locale multi-valeur) ; `app._appareil_sur_reseau_courant` (confiance étendue à tout le site une fois une plage confirmée) |
 | Baseline (palier 5) | `enregistrer_metriques_liaison`, `evaluer_baseline`, `serie_metrique` |
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
 | Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite` (relevé SNMP mutualisé par IP → switch multi-slots), `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports` (+ `sysUpTime` pour un Δt exact), `_poll_poe` (POWER-ETHERNET-MIB), `_lire_sysinfo` (modèle/uptime), `_mapping_baie_ifindex` (nom_port RJ seulement, `divergences`) + `_port_physique_depuis_nom`, `_etat_led` (plafond débit/pps, bouclage 32 bits, `reboot`), `activite_baie`, `calibrer_port_baie` / `calibrer_decalage_baie`, `_prises_murales_activite` (v2.19.18 : LED des prises murales d'un bandeau RJ via le port de switch au bout du cordon `lie_slot_id`/`lie_port_numero`), `_fdb_switch` + `_voisins_port` (v2.19.19 : FDB bridge-MIB « live » → contrôle de câblage MAC déclarée ↔ MAC apprise, repli `diag_topologie` ; + appareils vus par port dans les infobulles), `analyser_brassage_baie` / `_elements_baie` / `_classer_cascade` / `_fdb_corriger` (v2.19.22-23 : bouton « 🧠 Deviner le brassage » → carte réseau proposée, route `GET /api/baie/brassage/proposer` lecture seule ; 4 groupes de propositions + cascades + hors inventaire ; répare une FDB tronquée par un agent SNMP buggé) ; état : `_activite_sut` (Δt), `_activite_hist` (sparkline), `_activite_sysinfo`, `_activite_fdb`/`_activite_fdb_baseport`/`_activite_fdb_dialecte`/`_activite_fdb_echec`, `_activite_echecs`, `_activite_thread_lock` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer{,/decalage}` ; `baie_brassage.html` (`#sel-activite`, `.prise-murale.pm-act-*`, badge ⚠ `.pm-cable-ko`) ; widget `network-activity` ; colonne `baie_slot_ports.if_index` |
