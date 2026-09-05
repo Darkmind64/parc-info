@@ -1,8 +1,113 @@
-PARCINFO_VERSION=2.19.40
+PARCINFO_VERSION=2.19.41
 RELEASE_DATE=2026-09-05
-BUILD_NUMBER=2026090504
+BUILD_NUMBER=2026090505
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.41 - Audit reseau, lot 1 : 12 correctifs de fiabilite/performance
+# Suite a la demande explicite de l'utilisateur : parcourir l'ensemble des
+# fonctionnalites reseau, verifier la coherence et l'absence de bugs, de
+# ralentissements, de blocages, et proposer des ameliorations. 4 relectures
+# independantes (network_diag.py, primitives SNMP/scan de app.py, frontend,
+# couverture de tests) -> 28 constats presentes en artefact de decision,
+# TOUS valides par l'utilisateur. Ce lot traite les 12 premiers (bugs et
+# performance de network_diag.py + app.py) :
+#
+# #01 _analyser_snmp confondait un rebouclage normal de compteur 32 bits
+#     (frequent sur un lien Gigabit charge : ifInOctets boucle en ~34 s) avec
+#     un redemarrage de switch -> utilisait la valeur BRUTE du compteur comme
+#     delta depuis le releve precedent (jusqu'a 5 min), produisant des debits
+#     en terabits fantomes et de fausses alertes port_sature/port_erreurs/
+#     duplex_mismatch. Nouvelle fonction partagee _delta_compteur_32()
+#     (meme logique que celle deja ecrite et testee pour les LEDs de la baie,
+#     _etat_led/_d, desormais factorisee) : distingue le bouclage (delta
+#     negatif proche du PLAFOND du compteur) du redemarrage (proche de ZERO).
+#     interroger_equipement() expose maintenant un flag hc (compteurs 64 bits
+#     ou non) pour appliquer le bon plafond (2**32 ou illimite) selon le
+#     compteur (in_oct/out_oct en HC si l'agent les expose, les autres
+#     compteurs du groupe restent toujours en Counter32).
+# #02 nb_switchs (deduplique par IP) et nb_muets (compte par emplacement de
+#     rack) ne comptaient pas sur la meme base -> un switch injoignable sur 2
+#     emplacements affichait "3 switches, 2 muets" pour 2 switches physiques.
+#     nb_muets deduplique desormais par IP ; la comparaison nb_muets==nb
+#     switchs (motif 'sans_reponse') corrigee au passage (meme bug, meme
+#     endroit).
+# #03 capturer_trafic() renvoyait systematiquement le motif precis mais
+#     potentiellement FAUX 'privileges_insuffisants' pour N'IMPORTE QUELLE
+#     exception (erreur scapy interne, interface debranchee...), contrairement
+#     aux fonctions soeurs (capture_passive, capture_arp_sightings) qui
+#     journalisent la vraie cause. Nouveau motif neutre 'erreur_capture' pour
+#     toute exception AUTRE qu'un vrai PermissionError ; libelle ajoute dans
+#     baie_brassage.html.
+# #04 _lire_sysinfo ne mettait pas en cache un resultat vide (sysName/
+#     sysDescr absents) -> switch qui ne les expose pas re-sonde a CHAQUE
+#     cycle d'activite (jusqu'a toutes les 3 s en rechauffe), contrairement a
+#     _entite_physique qui cache deja son echec. Meme traitement applique.
+# #05 La barre de progression de la cartographie ("Releve N/M") pouvait
+#     RECULER : son denominateur (equipements vus) grandit en cours de route
+#     quand la decouverte recursive LLDP trouve de nouveaux switches, plus
+#     vite que le numerateur n'avance. Plafond (pct_max) qui ne redescend
+#     jamais.
+# #06 _noms_interfaces, sur un switch JAMAIS interroge (cache totalement
+#     froid), ne posait aucun verrou -> la boucle d'activite, une
+#     cartographie et le moniteur pouvaient chacun lancer le meme parcours
+#     GETBULK simultanement s'ils atteignaient ce switch au meme moment.
+#     Verrou par IP (Event) : un seul thread fait le releve, les autres
+#     attendent son resultat.
+# #07 _fdb_switch (relevé de la table MAC, jusqu'a 45 s sur un gros switch
+#     via le parcours VLAN par VLAN) etait protegee par un verrou GLOBAL
+#     unique -> un relevé lent sur UN switch bloquait les LEDs d'activite de
+#     TOUS les autres switches de la baie, ou un job "Deviner le brassage" en
+#     parallele, sans rapport avec lui. Verrou PAR SWITCH (_fdb_lock(ip),
+#     dict de verrous cree a la demande) : les switches s'interrogent
+#     desormais reellement en parallele.
+# #08 Le badge "vu via SNMP/capture" (badges 🌐/📡 du scan reseau, ajoutes en
+#     2.19.38) etait attribue par simple EGALITE DE VALEUR entre la mac
+#     trouvee et celle presente dans snmp_arp_par_ip/capture_arp_par_ip -> un
+#     appareil resolu NORMALEMENT en ARP local etait etiquete a tort "vu via
+#     SNMP, sous-reseau route" des que cette meme mac apparaissait AUSSI dans
+#     la table ARP d'un routeur de l'inventaire (le cas courant pour
+#     n'importe quelle passerelle, potentiellement la majorite des appareils
+#     locaux). _scan_host() trace desormais la provenance au moment exact ou
+#     la mac est TROUVEE (_resoudre_mac()/_mac_snmp_ou_capture() renvoient
+#     (mac, source)), plus jamais rededuite apres coup. Test de regression
+#     dedie (section 9 de test_scan_completude_oui_arp.py) : mac identique
+#     par coincidence entre ARP local et table SNMP -> mac_source reste vide.
+# #09 Le protocole SNMPv3 (decouverte d'engine ET echange authentifie)
+#     acceptait le PREMIER datagramme UDP recu sans verifier qu'il
+#     correspond a la requete envoyee (request-id/PDU) -> contrairement aux
+#     echanges v1/v2c du meme fichier qui comparent deja explicitement le
+#     request-id pour ignorer une reponse tardive a une requete precedente.
+#     Meme garantie ajoutee : _v3_parse() expose desormais le request-id de
+#     la PDU (`reqid`), _v3_discover() et _snmp_v3_exchange() purgent les
+#     reponses qui ne correspondent pas (boucle de 4 essais, comme le v1/v2c).
+#     2 tests dedies dans test_snmp_v3.py (agents qui envoient DELIBEREMENT
+#     une reponse perimee avant la vraie, avec une valeur differente pour
+#     detecter sans ambiguite si l'ancien comportage l'aurait acceptee).
+# #10 _hostname() (resolution DNS inverse, gethostbyaddr) n'a pas de delai
+#     propre ; le garde-fou future.result(timeout=5) ne borne que l'ATTENTE
+#     du resultat cote appelant, pas la duree de vie du thread. Le bloc
+#     `with ThreadPoolExecutor(...)` attendait ensuite que CE thread se
+#     termine reellement (shutdown(wait=True) implicite a la sortie du
+#     `with`) -> un seul hote au DNS inverse muet pouvait immobiliser un
+#     thread de scan bien au-dela des budgets affiches. Executor cree sans
+#     `with`, shutdown(wait=False) explicite : un thread bloque ne retient
+#     plus l'appelant.
+# #11 _netbios_name() ne fermait sa socket qu'en cas de succes ; sur timeout
+#     (le cas le PLUS FREQUENT, la plupart des hotes n'ont pas NetBIOS),
+#     l'exception etait absorbee sans fermer la socket (liberee seulement par
+#     le ramasse-miettes). Socket geree par un `with`, fermee dans tous les
+#     cas.
+# #12 Les 3 sondes de decouverte UPnP/mDNS/ONVIF de _run_scan avalaient toute
+#     exception SANS AUCUNE trace de log, contrairement aux 2 sondes
+#     voisines plus recentes (SNMP/capture, ajoutees en 2.19.38) qui
+#     journalisent deja l'erreur reelle. logger.debug(exc_info=True) ajoute
+#     aux 3 sondes, meme niveau que leurs voisines.
+#
+# Suite de tests complete reverifiee apres ce lot (36 scripts + 235 tests
+# pytest) : aucune regression, seuls les 10 echecs pytest deja identifies
+# comme preexistants (test_diag_reseau.py, sans rapport avec cet audit, pris
+# en charge dans une tache separee) subsistent a l'identique.
 
 # Version 2.19.40 - Case a cocher "Interrogation SNMP" invisible (diagnostic reseau)
 # Signale par l'utilisateur. La regle CSS globale de base.html qui stylise

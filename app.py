@@ -8119,11 +8119,14 @@ def _netbios_name(ip_str):
             b'\x00\x21' +          # QTYPE: NBSTAT (0x21)
             b'\x00\x01'            # QCLASS: IN
         )
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(1.0)
-        s.sendto(query, (ip_str, 137))
-        data, _ = s.recvfrom(1024)
-        s.close()
+        # `with` : ferme la socket même sur timeout (le cas le plus fréquent
+        # ici, la plupart des hôtes n'ont pas NetBIOS) — auparavant seul le
+        # chemin de succès la fermait, laissant le ramasse-miettes s'en
+        # charger sur timeout (audit réseau 2026-09-05, #11).
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(1.0)
+            s.sendto(query, (ip_str, 137))
+            data, _ = s.recvfrom(1024)
         # Parser la réponse : offset 56 = nombre de noms
         if len(data) > 57:
             nb_names = data[56]
@@ -9437,9 +9440,14 @@ def _v3_parse(data):
         pdu_tag, pdu_body, _ = _ber_lire_tlv(msgdata, r)
         d = {'engine_id': eid, 'boots': int.from_bytes(boots_b, 'big'),
              'time': int.from_bytes(time_b, 'big'), 'user': uname,
-             'pdu_tag': pdu_tag, 'pdu_body': pdu_body, 'report_oid': '', 'varbinds': {}}
+             'pdu_tag': pdu_tag, 'pdu_body': pdu_body, 'report_oid': '', 'varbinds': {},
+             'reqid': None}
         s = 0
         _, _rid, s = _ber_lire_tlv(pdu_body, s)
+        try:
+            d['reqid'] = int.from_bytes(_rid, 'big', signed=True)
+        except Exception:
+            pass
         _, _es, s = _ber_lire_tlv(pdu_body, s)
         _, _ei, s = _ber_lire_tlv(pdu_body, s)
         _, vbl, s = _ber_lire_tlv(pdu_body, s)
@@ -9505,8 +9513,18 @@ def _v3_discover(ip, port=161, timeout=1.5):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.settimeout(timeout)
             s.sendto(msg, (ip, port))
-            data, _ = s.recvfrom(65535)
-        d = _v3_parse(data)
+            d = None
+            # Ignorer une réponse tardive à une découverte PRÉCÉDENTE (même
+            # garantie que les échanges v1/v2c de ce fichier) : sans ce
+            # contrôle, le premier datagramme UDP arrivant sur ce port
+            # éphémère est accepté sans vérifier qu'il correspond bien à
+            # CETTE requête (audit réseau 2026-09-05, #09).
+            for _drain in range(4):
+                data, _ = s.recvfrom(65535)
+                cand = _v3_parse(data)
+                if cand and cand.get('reqid') == rid:
+                    d = cand
+                    break
         if not d or not d['engine_id']:
             with _v3_engine_lock:
                 _v3_engine_negatif[ip] = now
@@ -9553,20 +9571,41 @@ def _snmp_v3_exchange(ip, pdu, port=161, timeout=1.5, params=None):
     kul = _v3_kul(hfn, ku, engine)
     ubytes = user.encode('utf-8')
 
+    def _pdu_reqid(pdu_encoded):
+        """Request-id déjà embarqué dans `pdu` (indépendant du msgID de
+        l'enveloppe SNMPv3) — sert à vérifier que la réponse reçue correspond
+        bien à CETTE PDU, pas à un datagramme tardif d'un échange précédent."""
+        try:
+            _, corps, _ = _ber_lire_tlv(pdu_encoded, 0)
+            _, rid_b, _ = _ber_lire_tlv(corps, 0)
+            return int.from_bytes(rid_b, 'big', signed=True)
+        except Exception:
+            return None
+
     def _try(boots_, time_):
         mid = _snmp_walk_reqid()
+        pdu_reqid = _pdu_reqid(pdu)
         base = _v3_message(mid, engine, boots_, time_, ubytes, pdu, taglen)
         signed = _v3_signer(base, hfn, taglen, kul)
         if signed is None:
             return None, 'erreur'
+        d = None
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.settimeout(timeout)
                 s.sendto(signed, (ip, port))
-                data, _ = s.recvfrom(65535)
+                # Ignorer une réponse tardive à un échange précédent (même
+                # garantie que les échanges v1/v2c de ce fichier) — sans ce
+                # contrôle, le premier datagramme UDP reçu était accepté sans
+                # vérifier qu'il correspond à CETTE requête (audit #09).
+                for _drain in range(4):
+                    data, _ = s.recvfrom(65535)
+                    cand = _v3_parse(data)
+                    if cand and (pdu_reqid is None or cand.get('reqid') == pdu_reqid):
+                        d = cand
+                        break
         except Exception:
             return None, 'silence'
-        d = _v3_parse(data)
         if not d:
             return None, 'erreur'
         if d['pdu_tag'] == 0xa8:   # Report -> échec, la raison est dans l'OID
@@ -9834,12 +9873,32 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
     que ce soit d'actif.
     """
     def _mac_snmp_ou_capture():
+        """Renvoie (mac, source) — jamais juste la mac seule : la provenance
+        doit être tracée au moment même où la valeur est trouvée, pas
+        redéduite après coup par égalité (audit réseau 2026-09-05, #08 : un
+        appareil résolu normalement en ARP local était réétiqueté « vu via
+        SNMP » dès que cette même MAC apparaissait AUSSI dans la table ARP
+        d'un routeur de l'inventaire — le cas courant pour une passerelle)."""
         if snmp_arp_par_ip and ip_str in snmp_arp_par_ip:
-            return snmp_arp_par_ip[ip_str].get('mac', '')
+            m = snmp_arp_par_ip[ip_str].get('mac', '')
+            if m:
+                return m, 'snmp'
         if capture_arp_par_ip and ip_str in capture_arp_par_ip:
-            return capture_arp_par_ip[ip_str]
-        return ''
+            m = capture_arp_par_ip[ip_str]
+            if m:
+                return m, 'capture'
+        return '', ''
 
+    def _resoudre_mac():
+        """ARP local d'abord, TOUJOURS ; SNMP/capture seulement s'il échoue.
+        La provenance renvoyée ('' = ARP local) ne concerne que la valeur
+        que CET appel vient de trouver — jamais un mac déjà connu ailleurs."""
+        local = _mac_from_arp(ip_str)
+        if local:
+            return local, ''
+        return _mac_snmp_ou_capture()
+
+    mac_source = ''
     ping_ok = _ping(ip_str)
     # Même si le ping échoue (pare-feu, très nombreux objets connectés qui
     # bloquent ICMP par défaut), l'OS a dû résoudre l'adresse MAC via ARP
@@ -9851,10 +9910,10 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
     # manuelle par IP/MAC"). Un hôte ni pingable, ni résolu en ARP local, ni
     # vu par SNMP/capture est considéré absent, comme avant.
     time.sleep(0.4)
-    mac = _mac_from_arp(ip_str) or _mac_snmp_ou_capture()
+    mac, mac_source = _resoudre_mac()
     if not ping_ok and not mac:
         time.sleep(0.4)
-        mac = _mac_from_arp(ip_str) or _mac_snmp_ou_capture()
+        mac, mac_source = _resoudre_mac()
         if not mac:
             return None
     # Après ping, laisser l'OS finir de peupler la table ARP si le premier
@@ -9862,9 +9921,17 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
     # cache) — 0.5s est suffisant même sur les réseaux chargés.
     elif not mac:
         time.sleep(0.5)
-        mac = _mac_from_arp(ip_str) or _mac_snmp_ou_capture()
-    # Lancer hostname + NetBIOS + OS + ports en parallèle
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        mac, mac_source = _resoudre_mac()
+    # Lancer hostname + NetBIOS + OS + ports en parallèle. Volontairement PAS
+    # de `with` ici : ThreadPoolExecutor.__exit__ fait un shutdown(wait=True),
+    # qui attend que CHAQUE thread soumis se termine réellement avant de
+    # continuer — un seul hôte au DNS inverse muet (gethostbyaddr n'a pas de
+    # délai propre) aurait alors immobilisé ce thread de scan bien au-delà des
+    # `timeout=` ci-dessous, qui ne bornent que l'ATTENTE du résultat, pas la
+    # durée de vie du thread (audit réseau 2026-09-05, #10). shutdown(wait=False)
+    # laisse un thread bloqué se terminer de son côté sans retenir l'appelant.
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+    try:
         f_hostname = ex.submit(_hostname,     ip_str)
         f_netbios  = ex.submit(_netbios_name, ip_str)
         f_os       = ex.submit(_ttl_os_guess, ip_str)
@@ -9885,6 +9952,8 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
         except Exception: ports = []
         try: snmp_info = f_snmp.result(timeout=8)
         except Exception: snmp_info = {}
+    finally:
+        ex.shutdown(wait=False)
     # Toujours pas de MAC malgré les relevés précoces ? Les sondes
     # ci-dessus (hostname/NetBIOS/ports) ont généré du trafic supplémentaire
     # qui a pu déclencher la résolution ARP entre-temps — un dernier essai,
@@ -9898,14 +9967,11 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
     # (table ARP d'un routeur) puis capture passive — c'est exactement le cas
     # d'un appareil sur un sous-réseau routé qui répond au ping/aux ports mais
     # dont ce poste ne pourra JAMAIS résoudre la MAC par lui-même (l'ARP ne
-    # traverse pas un routeur).
-    mac_source = ''
+    # traverse pas un routeur). La provenance est déjà tracée par les appels
+    # précédents à _resoudre_mac() ; mac_source ne reste vide ici que si ARP
+    # local a réussi plus tôt ou si ce dernier essai est lui-même local.
     if not mac:
-        mac = _mac_snmp_ou_capture()
-    if mac and snmp_arp_par_ip and ip_str in snmp_arp_par_ip and mac == snmp_arp_par_ip[ip_str].get('mac'):
-        mac_source = 'snmp'
-    elif mac and capture_arp_par_ip and ip_str in capture_arp_par_ip and mac == capture_arp_par_ip[ip_str]:
-        mac_source = 'capture'
+        mac, mac_source = _mac_snmp_ou_capture()
     vendor    = _oui_vendor(mac)
     # Le TTL seul ne distingue pas macOS de Linux (les deux répondent à 64
     # par défaut) — signalé en usage réel : un MacBook ressortait comme
@@ -10055,26 +10121,31 @@ def _run_scan(plages, nb_threads, enrich_wmi=False, client_id=None):
         decouvertes_upnp, decouvertes_mdns, decouvertes_onvif = {}, {}, {}
         decouvertes_snmp_arp, decouvertes_capture_arp = {}, {}
 
+        # Chaque sonde journalise son échec (audit réseau 2026-09-05, #12) : ces
+        # 3 sondes avalaient auparavant toute exception en silence, contrairement
+        # aux 2 sondes voisines (SNMP/capture) — un échec systématique dans un
+        # environnement donné (ex. multicast non relayé en Docker bridge) ne
+        # laissait alors aucune trace.
         def _decouvrir_upnp():
             nonlocal decouvertes_upnp
             try:
                 decouvertes_upnp = _decouverte_upnp_reseau()
             except Exception:
-                pass
+                logger.debug('scan: découverte UPnP indisponible', exc_info=True)
 
         def _decouvrir_mdns():
             nonlocal decouvertes_mdns
             try:
                 decouvertes_mdns = _decouverte_mdns_reseau()
             except Exception:
-                pass
+                logger.debug('scan: découverte mDNS indisponible', exc_info=True)
 
         def _decouvrir_onvif():
             nonlocal decouvertes_onvif
             try:
                 decouvertes_onvif = _ws_discovery_reseau()
             except Exception:
-                pass
+                logger.debug('scan: découverte ONVIF/WS-Discovery indisponible', exc_info=True)
 
         def _decouvrir_snmp_arp():
             nonlocal decouvertes_snmp_arp

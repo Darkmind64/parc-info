@@ -3713,7 +3713,8 @@ const MoniteurModal = {
             btn.disabled = true;
             const motifs = { scapy_absent: 'scapy non installé', docker_bridge: 'conteneur en mode bridge (network_mode: host requis)',
                              privileges_insuffisants: 'privilèges insuffisants (lancer en administrateur / root, Npcap sous Windows)',
-                             aucune_interface: 'aucune interface réseau' };
+                             aucune_interface: 'aucune interface réseau',
+                             erreur_capture: 'la capture a été interrompue par une erreur (voir les journaux du serveur)' };
             etat.textContent = 'Capture indisponible : ' + (motifs[cap.motif] || cap.motif);
         } else if (cap.en_cours) {
             btn.disabled = true;

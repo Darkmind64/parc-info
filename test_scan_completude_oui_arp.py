@@ -276,5 +276,36 @@ verifier(resultat_prio is not None and resultat_prio.get('mac') == 'dd:ee:ff:44:
           "l'ARP local reste prioritaire : jamais écrasé par SNMP/capture quand il répond déjà",
           str(resultat_prio.get('mac')))
 
+# Audit réseau 2026-09-05, #08 : un hôte résolu normalement en ARP local ne
+# doit JAMAIS recevoir le badge 🌐/📡 même si cette MÊME mac apparaît AUSSI
+# dans snmp_arp_par_ip — le cas courant d'une passerelle, que le routeur de
+# l'inventaire connaît forcément lui aussi dans sa propre table ARP. L'ancien
+# code déduisait la provenance après coup par simple égalité de valeur et se
+# trompait précisément dans ce cas ; elle doit être tracée au moment où la
+# mac est trouvée, pas redéduite ensuite.
+A._ping           = lambda ip: True
+A._hostname       = lambda ip: 'passerelle'
+A._netbios_name   = lambda ip: ''
+A._ttl_os_guess   = lambda ip: 'Linux/Unix'
+A._scan_ports     = lambda ip: [80]
+A._mac_from_arp   = lambda ip: 'aa:bb:cc:00:01:02'   # même mac que la table ARP du routeur ci-dessous
+A._snmp_get_typed = lambda ip, oids, **kw: {}
+A.time.sleep      = lambda s: None
+try:
+    resultat_meme_mac = A._scan_host(
+        '192.0.2.83',
+        snmp_arp_par_ip={'192.0.2.83': {'mac': 'aa:bb:cc:00:01:02',
+                                        'sources': [{'nom': 'Routeur-Site', 'ip': '192.0.2.254'}]}})
+finally:
+    A._ping, A._hostname, A._netbios_name = _ping_orig, _hostname_orig, _netbios_orig
+    A._ttl_os_guess, A._scan_ports = _ttl_orig, _ports_orig
+    A._mac_from_arp = _arp_orig
+    A.time.sleep = _sleep_orig
+verifier(resultat_meme_mac is not None and resultat_meme_mac.get('mac') == 'aa:bb:cc:00:01:02'
+          and not resultat_meme_mac.get('mac_source'),
+          "une mac identique par coïncidence entre l'ARP local et la table SNMP d'un routeur "
+          "n'étiquette PAS l'hôte comme « vu via SNMP » : la provenance suit la RÉSOLUTION, pas la valeur",
+          str((resultat_meme_mac.get('mac'), resultat_meme_mac.get('mac_source'))))
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

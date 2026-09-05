@@ -118,10 +118,10 @@ KU = A._v3_ku(HFN, PASSWORD)
 KUL = A._v3_kul(HFN, KU, FAKE_ENGINE)
 
 
-def _pdu_reponse(reqid, oids, tag=0xa2):
+def _pdu_reponse(reqid, oids, tag=0xa2, valeurs=None):
     vbs = b''
-    canned = {A._OID_SYS_DESCR: (0x04, b'FauxSwitch v3'),
-              A._OID_SYS_NAME:  (0x04, b'SW-V3-TEST')}
+    canned = valeurs or {A._OID_SYS_DESCR: (0x04, b'FauxSwitch v3'),
+                        A._OID_SYS_NAME:  (0x04, b'SW-V3-TEST')}
     for o in oids:
         t, v = canned.get(o, (0x04, b''))
         vbs += A._ber_sequence(0x30, A._ber_oid(o) + bytes([t]) + A._ber_longueur(len(v)) + v)
@@ -173,6 +173,80 @@ def _demarrer_agent(**kw):
     s.settimeout(0.3)
     stop = threading.Event()
     t = threading.Thread(target=_agent, args=(s, stop), kwargs=kw, daemon=True)
+    t.start()
+    return s.getsockname()[1], stop, s
+
+
+# ── audit réseau 2026-09-05, #09 : ni _v3_discover ni _snmp_v3_exchange ne
+# vérifiaient que la réponse reçue correspondait au request-id envoyé — le
+# premier datagramme UDP arrivant sur le port éphémère était accepté tel
+# quel. Ces deux agents envoient délibérément une réponse PÉRIMÉE (mauvais
+# request-id, comme un paquet tardif d'un échange précédent) AVANT la vraie
+# réponse, pour vérifier que le client sait l'ignorer.
+def _agent_reponse_perimee(sock, stop):
+    while not stop.is_set():
+        try:
+            data, addr = sock.recvfrom(65535)
+        except (socket.timeout, OSError):
+            continue
+        try:
+            d = A._v3_parse(data)
+            eid = d['engine_id']
+            _pdu_tag, reqid, oids = _scoped_oids(data)
+            if not eid:
+                rep = A._v3_message(1, FAKE_ENGINE, 3, 555, b'',
+                                    _report(reqid, '1.3.6.1.6.3.15.1.1.4.0'), taglen=0)
+                sock.sendto(rep, addr)
+                continue
+            a0, a1 = _authparams_span(data)
+            recu = data[a0:a1]
+            zero = data[:a0] + b'\x00' * (a1 - a0) + data[a1:]
+            attendu = hmac.new(KUL, zero, HFN).digest()[:TAGLEN]
+            if recu == attendu:
+                # 1) réponse au MAUVAIS request-id (paquet tardif simulé), avec
+                #    une valeur DIFFÉRENTE de la vraie — si le client l'acceptait
+                #    à tort, le test le verrait immédiatement dans la valeur lue.
+                pdu_perime = _pdu_reponse(reqid + 999, oids,
+                                          valeurs={A._OID_SYS_DESCR: (0x04, b'REPONSE-PERIMEE-IGNOREZ-MOI')})
+                base_perime = A._v3_message(reqid, FAKE_ENGINE, 3, 556, USER.encode(), pdu_perime, taglen=TAGLEN)
+                sock.sendto(A._v3_signer(base_perime, HFN, TAGLEN, KUL), addr)
+                # 2) la vraie réponse, avec le bon request-id
+                pdu = _pdu_reponse(reqid, oids)
+                base = A._v3_message(reqid, FAKE_ENGINE, 3, 556, USER.encode(), pdu, taglen=TAGLEN)
+                sock.sendto(A._v3_signer(base, HFN, TAGLEN, KUL), addr)
+            else:
+                pdu = _report(reqid, '1.3.6.1.6.3.15.1.1.5.0')
+                sock.sendto(A._v3_message(reqid, FAKE_ENGINE, 3, 556, b'', pdu, taglen=0), addr)
+        except Exception as e:
+            print('   [agent-perime] exception', e)
+
+
+def _agent_discover_perime(sock, stop):
+    while not stop.is_set():
+        try:
+            data, addr = sock.recvfrom(65535)
+        except (socket.timeout, OSError):
+            continue
+        try:
+            d = A._v3_parse(data)
+            if d and not d['engine_id']:
+                _pdu_tag, reqid, _oids = _scoped_oids(data)
+                rep_perime = A._v3_message(1, FAKE_ENGINE, 3, 555, b'',
+                                           _report(reqid + 999, '1.3.6.1.6.3.15.1.1.4.0'), taglen=0)
+                sock.sendto(rep_perime, addr)
+                rep = A._v3_message(1, FAKE_ENGINE, 3, 555, b'',
+                                    _report(reqid, '1.3.6.1.6.3.15.1.1.4.0'), taglen=0)
+                sock.sendto(rep, addr)
+        except Exception as e:
+            print('   [agent-discover-perime] exception', e)
+
+
+def _demarrer(fn, **kw):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(('127.0.0.1', 0))
+    s.settimeout(0.3)
+    stop = threading.Event()
+    t = threading.Thread(target=fn, args=(s, stop), kwargs=kw, daemon=True)
     t.start()
     return s.getsockname()[1], stop, s
 
@@ -244,6 +318,29 @@ A._v3_engine_cache.clear(); A._v3_engine_negatif.clear()
 verifier(A._v3_discover('127.0.0.1', port=1, timeout=0.4) is None, 'découverte : rien sur un port fermé')
 present, exploit, _ = A._snmp_presence('127.0.0.1', ['public'], port=1, timeout=0.4)
 verifier(not present and not exploit, 'presence : aucun SNMP -> (False, False)')
+
+print('\n=== 7. _snmp_v3_exchange ignore une réponse au mauvais request-id (audit #09) ===')
+A._v3_engine_cache.clear(); A._v3_engine_negatif.clear()
+A.cfg_set('diag_snmp_v3_auth_pass', PASSWORD)
+port, stop, sock = _demarrer(_agent_reponse_perimee)
+try:
+    r = A._snmp_get_typed('127.0.0.1', [A._OID_SYS_DESCR], port=port, timeout=1.5)
+    verifier(r.get(A._OID_SYS_DESCR) == 'FauxSwitch v3',
+             "la vraie réponse (bon request-id) est retenue malgré une réponse périmée envoyée avant elle",
+             str(r))
+finally:
+    stop.set(); sock.close()
+
+print('\n=== 8. _v3_discover ignore aussi une réponse au mauvais request-id ===')
+A._v3_engine_cache.clear(); A._v3_engine_negatif.clear()
+port, stop, sock = _demarrer(_agent_discover_perime)
+try:
+    disc = A._v3_discover('127.0.0.1', port=port, timeout=1.0)
+    verifier(disc is not None and disc[0] == FAKE_ENGINE,
+             "la découverte d'engine ignore la réponse périmée et retient la bonne",
+             str(disc))
+finally:
+    stop.set(); sock.close()
 
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

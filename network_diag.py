@@ -1040,7 +1040,8 @@ def interroger_equipement(ip: str, communautes) -> dict | None:
             'late_coll': _i(late, idx), 'exc_coll': _i(exc, idx),
             'duplex': _i(duplex, idx),
         })
-    return {'sysname': sysname, 'ts': time.time(), 'ports': ports}
+    return {'sysname': sysname, 'ts': time.time(), 'ports': ports,
+            'hc': bool(grp2.get(_OID_IF_HCIN, {}))}
 
 
 _COMPTEURS_PORT = ('in_oct', 'out_oct', 'in_err', 'out_err', 'in_disc', 'out_disc',
@@ -1059,6 +1060,26 @@ def _dernier_releve(conn, client_id, ip, port_index):
     except Exception:
         cpt = {}
     return {'epoch': row[0], 'compteurs': cpt, 'oper': row[2]}
+
+
+def _delta_compteur_32(cur: int, prev: int, large: int = 2 ** 32) -> int:
+    """Delta entre deux relevés d'un compteur SNMP, robuste au bouclage d'un
+    compteur 32 bits (`large=2**32`) ou 64 bits (`large=0` : jamais de
+    bouclage en pratique sur l'intervalle d'un relevé). Un delta négatif
+    proche du PLAFOND du compteur est un bouclage (delta réel recalculé) ;
+    proche de ZÉRO, un redémarrage probable de l'agent (on repart de la
+    valeur brute). Même logique que celle déjà utilisée par `_etat_led`
+    pour les LEDs de la baie — audit réseau 2026-09-05, constat #01 :
+    `_analyser_snmp` traitait auparavant tout delta négatif comme un
+    redémarrage, prenant un simple bouclage (fréquent sur un lien chargé)
+    pour un reset et injectant la valeur brute du compteur comme si
+    c'était le delta depuis le relevé précédent."""
+    d = cur - prev
+    if d >= 0:
+        return d
+    if large and prev > large // 2:
+        return (large - prev) + cur
+    return cur
 
 
 def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> list:
@@ -1082,10 +1103,13 @@ def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> li
 
             if precedent and precedent['epoch']:
                 dt = max(1.0, equipement['ts'] - precedent['epoch'])
+                hc = equipement.get('hc', False)
                 delta = {}
                 for k in _COMPTEURS_PORT:
-                    d = p[k] - precedent['compteurs'].get(k, p[k])
-                    delta[k] = d if d >= 0 else p[k]  # reset compteur / reboot → on repart de la valeur brute
+                    # in_oct/out_oct sont en Counter64 (HC) si l'agent les expose,
+                    # sinon Counter32 comme tous les autres compteurs de ce groupe.
+                    large = (0 if hc else 2 ** 32) if k in ('in_oct', 'out_oct') else 2 ** 32
+                    delta[k] = _delta_compteur_32(p[k], precedent['compteurs'].get(k, p[k]), large)
 
                 # Duplex mismatch
                 if p['oper'] == 1 and p['speed_mbps'] >= 100 and (
@@ -2438,6 +2462,16 @@ def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> 
     vues = {ip for _a, ip, _p in a_faire}
     lignes_par_ip = {}
     nb_faits = [0]
+    pct_max = [5]  # plafond déjà atteint : la découverte récursive grossit `vues`
+    # en cours de route (de nouveaux switches trouvés via LLDP), ce qui ferait
+    # RECULER le pourcentage affiché si on le recalculait tel quel — l'interface
+    # progresse par nature, jamais par à-coups vers l'arrière (audit #05).
+
+    def _pct():
+        p = 5 + min(85, nb_faits[0] * 85 // max(1, len(vues)))
+        if p > pct_max[0]:
+            pct_max[0] = p
+        return pct_max[0]
 
     def _avance(ip_courante=''):
         """Progression réelle, appelée à CHAQUE équipement terminé. Elle n'était
@@ -2445,16 +2479,14 @@ def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> 
         qu'un seul lot, donc un seul message — l'interface restait figée sur
         « Relevé de 1/2 » du début à la fin."""
         nb_faits[0] += 1
-        _prog(5 + min(85, nb_faits[0] * 85 // max(1, len(vues))),
-              "Relevé %d/%d — %s" % (nb_faits[0], len(vues), ip_courante))
+        _prog(_pct(), "Relevé %d/%d — %s" % (nb_faits[0], len(vues), ip_courante))
 
     while a_faire and len(vues) <= _TOPO_EQUIP_MAX:
         restant = (budget_s - (time.time() - t0)) if budget_s else None
         if restant is not None and restant <= 1:
             break
         lot, a_faire = a_faire[:_TOPO_WORKERS], a_faire[_TOPO_WORKERS:]
-        _prog(5 + min(85, nb_faits[0] * 85 // max(1, len(vues))),
-              "Relevé %d/%d — %s" % (nb_faits[0] + 1, len(vues), lot[0][1]))
+        _prog(_pct(), "Relevé %d/%d — %s" % (nb_faits[0] + 1, len(vues), lot[0][1]))
         # échéance transmise à chaque relevé : les parcours SNMP secondaires
         # s'arrêtent d'eux-mêmes au lieu d'expirer un par un.
         deadline = (t0 + budget_s) if budget_s else 0.0
@@ -4172,6 +4204,7 @@ _ACTIVITE_ECHECS_MAX = 3    # au-delà : on publie {'actif': False, 'motif': 'er
 # est testé-et-posé sous _activite_lock (voir _noms_interfaces) ; le reste est
 # de l'écriture atomique de clé (remplacement de dict).
 _activite_noms       = {}   # ip -> {'ts', 'infos': {ifindex: {'nom','alias','ethernet'}}, 'maj_en_cours', 'retry_after'}
+_activite_noms_froid = {}   # ip -> threading.Event() : un relevé à froid (jamais vu) est en cours
 _activite_thread     = None
 
 _OID_SYS_UPTIME = '1.3.6.1.2.1.1.3'    # sysUpTime (TimeTicks, 1/100 s) — base : GETBULK renvoie .0
@@ -4389,7 +4422,26 @@ def _noms_interfaces(ip, communautes):
             threading.Thread(target=_maj_noms_interfaces, args=(ip, communautes),
                              daemon=True, name='DiagBaieNoms').start()
         return ent['infos']
-    return _maj_noms_interfaces(ip, communautes)
+
+    # Cache totalement froid (switch jamais interrogé) : un seul thread lance
+    # le relevé SNMP, les autres attendent son résultat au lieu de dupliquer
+    # le même GETBULK si la boucle d'activité, une cartographie et le moniteur
+    # atteignent ce switch au même moment (audit réseau 2026-09-05, #06).
+    with _activite_lock:
+        evt = _activite_noms_froid.get(ip)
+        je_fais = evt is None
+        if je_fais:
+            evt = _activite_noms_froid[ip] = threading.Event()
+    if not je_fais:
+        evt.wait(timeout=10)
+        ent = _activite_noms.get(ip)
+        return ent['infos'] if ent else {}
+    try:
+        return _maj_noms_interfaces(ip, communautes)
+    finally:
+        evt.set()
+        with _activite_lock:
+            _activite_noms_froid.pop(ip, None)
 
 
 def _maj_noms_interfaces(ip, communautes):
@@ -4709,14 +4761,7 @@ def _etat_led(prev, cur, dt, seuils, reboot=False):
         def _d(k, large=0):
             c = cur.get(k, 0)
             p = prev.get(k, c)
-            d = c - p
-            if d >= 0:
-                return d
-            # delta négatif : bouclage d'un compteur 32 bits (prev proche du
-            # plafond) OU vrai redémarrage (le compteur repart de ~0).
-            if large and p > large // 2:
-                return (large - p) + c        # bouclage : delta réel
-            return c                          # redémarrage
+            return _delta_compteur_32(c, p, large)
         oct_large = 0 if hc else 2 ** 32       # ifTable = Counter32
         raw_in = cur.get('in_oct', 0) - prev.get('in_oct', 0)
         raw_out = cur.get('out_oct', 0) - prev.get('out_oct', 0)
@@ -4834,8 +4879,11 @@ def _lire_sysinfo(ip, communautes):
     ent = {'ts': time.time(),
            'sysname': _first(cols.get(_OID_SYS_NAME_B, {})),
            'sysdescr': _first(cols.get(_OID_SYS_DESCR_B, {}))}
-    if ent['sysname'] or ent['sysdescr']:
-        _activite_sysinfo[ip] = ent
+    # Un résultat vide est mis en cache aussi (comme _entite_physique) : un
+    # switch qui n'expose ni sysName ni sysDescr était sinon re-sondé à
+    # chaque cycle d'activité, jusqu'à toutes les 3 s en réchauffe (audit
+    # réseau 2026-09-05, constat #04).
+    _activite_sysinfo[ip] = ent
     return ent
 
 
@@ -4845,7 +4893,21 @@ def _modele_court(sysdescr):
     return sysdescr.split('\n')[0].split(',')[0].strip()[:48]
 
 
-_activite_fdb_lock = threading.Lock()   # _fdb_switch : loop d'activité + requête Flask
+_activite_fdb_locks = {}   # ip -> threading.Lock() : un verrou PAR SWITCH, pas global (audit #07 :
+                            # un verrou unique pour tous les switches faisait qu'un relevé lent sur
+                            # l'un (jusqu'à _FDB_VLAN_BUDGET_S = 45 s) bloquait les LEDs d'activité ou
+                            # un job "Deviner le brassage" sur TOUS les autres, sans rapport avec lui)
+
+
+def _fdb_lock(ip):
+    """Verrou dédié à ce switch (créé une fois, jamais retiré) — protège
+    `_fdb_switch` (loop d'activité + requêtes Flask concurrentes) sans
+    sérialiser les switches entre eux."""
+    with _activite_lock:
+        lk = _activite_fdb_locks.get(ip)
+        if lk is None:
+            lk = _activite_fdb_locks[ip] = threading.Lock()
+    return lk
 
 
 def _mac_octets(brut):
@@ -4983,7 +5045,7 @@ def _fdb_switch(ip, communautes):
     (`ipNetToMediaPhysAddress`, précieuse pour un routeur / switch L3 sans FDB).
     Cache `_ACTIVITE_FDB_TTL` s ; sur échec de walk, conserve la dernière valeur
     connue si elle n'est pas trop vieille."""
-    with _activite_fdb_lock:
+    with _fdb_lock(ip):
         hit = _activite_fdb.get(ip)
         if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_TTL:
             return hit[1], hit[2]
@@ -5386,6 +5448,7 @@ def _cycle_activite(clients):
                 switchs = _switchs_baie(conn, cid)
                 equipements, ports_ui, detail_sw, detail_ports, detail_ifs = [], [], [], [], []
                 nb_muets = 0
+                ips_muets = set()  # dédup par IP : un switch sur 2 emplacements ne compte qu'une fois
                 poll_par_ip = {}   # ip -> (infos, cur_ports, ok, hc, dt_switch, reboot, poe, sysinfo, uptime_s)
                 etats_par_ip = {}     # ip -> {ifindex: led}  (pour les prises murales d'un bandeau)
                 mapping_par_slot = {} # slot_id switch -> {numero: ifindex}
@@ -5462,7 +5525,8 @@ def _cycle_activite(clients):
                     poe_ports = poe.get('ports', {})
                     now = time.time()
                     comm = communautes[0] if communautes else 'public'
-                    if not ok:
+                    if not ok and ip not in ips_muets:
+                        ips_muets.add(ip)
                         nb_muets += 1
                     dt_def = dt_switch or _ACTIVITE_INTERVAL
 
@@ -5691,7 +5755,8 @@ def _cycle_activite(clients):
             motif = ''
             if not switchs:
                 motif = 'aucun_switch'
-            elif not any(e['nb_ports_up'] or e['nb_actifs'] for e in equipements) and nb_muets == len(switchs):
+            elif not any(e['nb_ports_up'] or e['nb_actifs'] for e in equipements) \
+                    and nb_muets == len({s['ip'] for s in switchs}):
                 motif = 'sans_reponse'
             with _activite_lock:
                 _activite_resultat[cid] = {
@@ -6564,8 +6629,13 @@ def capturer_trafic(duree: int, client_id=None) -> dict:
     except PermissionError:
         return {'disponible': False, 'motif': 'privileges_insuffisants'}
     except Exception:
+        # Toute AUTRE panne (erreur scapy interne, interface débranchée en
+        # cours de capture...) ne doit pas être présentée comme un problème
+        # de privilèges — motif neutre + la vraie cause en log (audit réseau
+        # 2026-09-05, constat #03 : le motif précis mais faux envoyait
+        # systématiquement l'utilisateur vérifier sudo/Npcap à tort).
         logger.debug('network_diag: capturer_trafic interrompue', exc_info=True)
-        return {'disponible': False, 'motif': 'privileges_insuffisants'}
+        return {'disponible': False, 'motif': 'erreur_capture'}
     ecoule = max(1.0, time.time() - t0)
 
     inv = {}

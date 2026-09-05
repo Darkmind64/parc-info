@@ -1,5 +1,24 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.41] - 2026-09-05 🔍
+
+### 🔍 Audit réseau, lot 1 : 12 correctifs de fiabilité et performance
+
+Audit complet des fonctionnalités réseau demandé par l'utilisateur (cohérence, bugs, ralentissements, blocages), mené par 4 relectures indépendantes de `network_diag.py`, des primitives SNMP/scan de `app.py`, du frontend et de la couverture de tests. Douze constats corrigés dans ce lot :
+
+- **Un rebouclage normal de compteur SNMP 32 bits n'est plus pris pour un redémarrage de switch.** Sur un lien chargé, un compteur boucle en quelques dizaines de secondes ; `_analyser_snmp` utilisait auparavant la valeur brute entière du compteur comme delta, générant des débits en térabits fantômes et de fausses alertes de saturation/erreurs. Réutilise désormais la même logique déjà écrite et testée pour les LEDs de la baie.
+- **Le badge « vu via SNMP/capture » du scan réseau n'est plus attribué à tort à un appareil résolu normalement en local.** La provenance de la MAC était déduite après coup par égalité de valeur — un appareil du réseau local était réétiqueté « vu via SNMP, sous-réseau routé » dès que le routeur de l'inventaire connaissait aussi cette IP, le cas courant pour n'importe quelle passerelle. Elle est désormais tracée au moment où la MAC est trouvée.
+- Le comptage « N switches / N muets » de la baie de brassage compte sur la même base (déduplication par IP) : un switch injoignable occupant deux emplacements de rack ne compte plus double.
+- Le test de capture de la baie n'accuse plus systématiquement des « privilèges insuffisants » pour n'importe quelle erreur (interface débranchée, erreur scapy interne...).
+- Un switch qui n'expose ni `sysName` ni `sysDescr` n'est plus re-sondé à chaque cycle d'activité.
+- La barre de progression de la cartographie ne recule plus quand la découverte récursive trouve de nouveaux équipements en cours de route.
+- Un switch jamais interrogé ne peut plus être sondé plusieurs fois en parallèle par la boucle d'activité, une cartographie et le moniteur en même temps.
+- Le relevé de la table MAC d'un switch (jusqu'à 45 s sur un gros switch) ne bloque plus l'activité de tous les autres switches de la baie : verrou par switch au lieu d'un verrou global.
+- SNMPv3 vérifie désormais que la réponse reçue correspond bien à la requête envoyée (request-id), comme le fait déjà le SNMP v1/v2c — une réponse tardive à un échange précédent n'est plus acceptée par erreur.
+- Une résolution DNS inverse lente (sans délai propre) ne peut plus retenir un hôte du scan au-delà du budget de temps affiché.
+- Fuite de socket corrigée sur le cas normal (timeout, la plupart des hôtes n'ont pas NetBIOS) de la détection NetBIOS.
+- Les échecs de découverte UPnP/mDNS/ONVIF sont désormais journalisés, comme les sondes SNMP/capture voisines.
+
 ## [2.19.40] - 2026-09-05 🩹
 
 ### 🩹 Case à cocher « Interrogation SNMP » invisible dans le diagnostic réseau
