@@ -418,7 +418,24 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             {{ row("Numéro de série", rapport.serial_number or appareil.numero_serie) }}
             {{ row("Asset tag", rapport.asset_tag) }}
             {{ row("Adresse MAC", rapport.mac_address or appareil.adresse_mac) }}
+            {% if appareil.adresse_mac %}
+            <div class="fs-row"><span class="fs-label"></span><span class="fs-value">
+                <button type="button" class="btn btn-sm" onclick="reveillerAppareil({{ appareil.id }}, this)"
+                        title="Envoie un paquet magique Wake-on-LAN — ne fonctionne que si le Wake-on-LAN est activé sur l'appareil et qu'il est sur le même réseau local que ce serveur">
+                    ⚡ Réveiller (Wake-on-LAN)</button>
+                <span id="reveil-msg-{{ appareil.id }}" style="font-size:.78rem;margin-left:.5rem;"></span>
+            </span></div>
+            {% endif %}
             {{ row("Adresse(s) IP", rapport.ip_addresses|join(', ') if rapport.ip_addresses else appareil.adresse_ip) }}
+            {% if appareil.adresse_ip %}
+            <div class="fs-row"><span class="fs-label"></span><span class="fs-value">
+                <button type="button" class="btn btn-sm" onclick="chargerHostResources({{ appareil.id }}, this)"
+                        title="Interroge l'agent SNMP de l'appareil (HOST-RESOURCES-MIB) pour un inventaire logiciel gratuit, sans dépendre du collecteur ParcInfo — utile pour un NAS ou un serveur Linux">
+                    🔍 Inventaire SNMP</button>
+                <span id="hostres-msg-{{ appareil.id }}" style="font-size:.78rem;margin-left:.5rem;"></span>
+            </span></div>
+            <div id="hostres-result-{{ appareil.id }}" style="display:none;grid-column:1/-1;font-size:.8rem;"></div>
+            {% endif %}
         </div>
         <div>
             {{ row("Système", rapport.os_name or appareil.os) }}
@@ -2322,5 +2339,72 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 });
+
+// Réveil à la demande (Wake-on-LAN, audit réseau 2026-09-05, #26) — action
+// manuelle explicite, jamais automatique.
+function reveillerAppareil(id, btn) {
+    var msg = document.getElementById('reveil-msg-' + id);
+    btn.disabled = true;
+    if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'Envoi…'; }
+    fetch('/api/appareil/' + id + '/reveiller', { method: 'POST' })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+            if (msg) {
+                msg.style.color = res.ok ? 'var(--accent-green)' : '#ff6b81';
+                msg.textContent = res.ok
+                    ? 'Paquet envoyé. L\'appareil peut mettre jusqu\'à une minute à répondre, s\'il a le Wake-on-LAN activé.'
+                    : (res.d.error || 'Échec de l\'envoi');
+            }
+        })
+        .catch(function () { if (msg) { msg.style.color = '#ff6b81'; msg.textContent = 'Erreur réseau'; } })
+        .finally(function () { btn.disabled = false; });
+}
+
+function chargerHostResources(id, btn) {
+    var msg = document.getElementById('hostres-msg-' + id);
+    var box = document.getElementById('hostres-result-' + id);
+    btn.disabled = true;
+    if (msg) { msg.style.color = 'var(--text-muted)'; msg.textContent = 'Interrogation SNMP…'; }
+    if (box) { box.style.display = 'none'; box.textContent = ''; }
+    fetch('/api/appareil/' + id + '/host-resources')
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+            var d = res.d || {};
+            if (!res.ok || !d.ok) {
+                if (msg) { msg.style.color = '#ff6b81'; msg.textContent = d.error || d.motif || 'Échec'; }
+                return;
+            }
+            if (msg) { msg.style.color = 'var(--accent-green)'; msg.textContent = ''; }
+            if (!box) return;
+            box.textContent = '';
+            function section(titre, items, formater) {
+                if (!items || !items.length) return;
+                var h = document.createElement('div');
+                h.style.marginTop = '.5rem';
+                h.style.fontWeight = '600';
+                h.textContent = titre + ' (' + items.length + ')';
+                box.appendChild(h);
+                var ul = document.createElement('ul');
+                ul.style.margin = '.2rem 0 0 1rem';
+                ul.style.maxHeight = '220px';
+                ul.style.overflowY = 'auto';
+                items.forEach(function (it) {
+                    var li = document.createElement('li');
+                    li.textContent = formater ? formater(it) : it;
+                    ul.appendChild(li);
+                });
+                box.appendChild(ul);
+            }
+            section('Logiciels installés', d.logiciels);
+            section('Processus en cours', d.processus);
+            section('Stockage', d.stockage, function (s) {
+                return s.descr + ' — ' + s.utilise_mo + ' Mo / ' + s.taille_mo + ' Mo';
+            });
+            box.style.display = box.childNodes.length ? 'block' : 'none';
+            if (!box.childNodes.length && msg) { msg.textContent = 'Aucune donnée exploitable'; }
+        })
+        .catch(function () { if (msg) { msg.style.color = '#ff6b81'; msg.textContent = 'Erreur réseau'; } })
+        .finally(function () { btn.disabled = false; });
+}
 </script>
 {% endblock %}

@@ -1,10 +1,291 @@
-PARCINFO_VERSION=2.19.39
+PARCINFO_VERSION=2.19.44
 RELEASE_DATE=2026-09-05
-BUILD_NUMBER=2026090503
+BUILD_NUMBER=2026090508
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.19.39 - Integration : interface mobile enrichie + correctifs en attente
+# Version 2.19.44 - Audit reseau, lot 4 : granularite - techniques alternatives
+# Suite des lots 1 a 3. Sept propositions de l'audit validees par l'utilisateur,
+# toutes visant a detecter/identifier des appareils jusque-la invisibles ou mal
+# identifies :
+# - Reveil a distance (Wake-on-LAN) a la demande depuis la fiche systeme.
+# - Inventaire logiciel gratuit via HOST-RESOURCES-MIB (hrSWInstalledName/
+#   hrSWRunName/hrStorage*) pour un NAS/serveur avec agent SNMP mais sans le
+#   collecteur ParcInfo.
+# - Empreinte OS passive facon p0f (TTL + options TCP du SYN initial) sur le
+#   scan reseau, pour un appareil muet sur toute sonde active.
+# - Recepteur de traps SNMP v1/v2c (UDP 162), opt-in, journalise dans les
+#   evenements du diagnostic reseau - complement temps reel au relevé actif.
+# - Table de voisinage IPv6 (NDP) + ping multicast de courtoisie (ff02::1)
+#   dans l'apercu du diagnostic reseau.
+# - Alias d'interface (ifAlias) affiche dans la vue Topologie.
+# Suite de tests complete revérifiée (37 scripts + tests dédiés pour chaque
+# nouvelle fonction, dont un encodage/decodage BER de trap SNMP synthétique) +
+# pytest (235 passants, 10 echecs preexistants sans rapport, en cours de
+# correction separement), aucune regression.
+
+# Version 2.19.43 - Audit reseau, lot 3 : couverture de tests + 2 bugs reels
+# Suite des lots 1 et 2. Constats #17 a #21 de l'audit (couverture de tests) :
+#
+# #17 capture_passive (palier 2, ecoute passive) n'avait AUCUN test alors
+#     qu'elle alimente a elle seule 6 categories de detection (arp_spoofing,
+#     tempete_broadcast, mac_flapping, dhcp_pirate, ra_pirate, stp_instable,
+#     tcp_retransmissions) dans un unique callback scapy opaque. Nouveau
+#     fichier test_capture_passive.py : faux module scapy minimal (classes de
+#     repere + AsyncSniffer synchrone qui rejoue une liste de faux paquets),
+#     sans dependance a scapy ni au reseau reel. 15 assertions couvrant les 7
+#     categories + les cas negatifs (sous le seuil, paquet malforme qui ne
+#     casse pas la capture, scapy absent).
+# #18 _stp_switch (sens des liens par STP, constat d'audit #12 de 2.19.32) et
+#     la decouverte RECURSIVE de decouvrir_topologie (constat #10 de 2.19.32,
+#     plafond _TOPO_PROFONDEUR_MAX) n'etaient testes que de facon indirecte
+#     (topologie a un seul saut). Nouveaux tests (section 27/27bis/28 de
+#     test_diagnostic_reseau.py) : _stp_switch verifie directement (racine,
+#     port racine, pont amont, etat de port) ; _topologie_equipement remplacee
+#     par un faux releve qui rapporte TOUJOURS un nouveau voisin jamais vu -
+#     verifie que la recursion s'arrete a la profondeur exacte (4 equipements
+#     relevés, pas les 40 de _TOPO_EQUIP_MAX si le plafond etait casse).
+# #19 detecter_dhcp_pirate et detecter_conflits_noms (detecteurs actifs du
+#     palier 1) n'avaient AUCUN test. En ecrivant le test du premier, deux
+#     bugs reels decouverts et corriges :
+#     - _mac_locale() (l'adresse MAC de CE poste, utilisee pour construire le
+#       DHCPDISCOVER) etait ECRASEE par une fonction totalement differente
+#       portant le MEME NOM plus bas dans network_diag.py (_mac_locale(mac),
+#       un test "MAC localement administree ?" sans aucun rapport, ajoute
+#       depuis pour _classer_cascade). Python ne garde que la DERNIERE
+#       definition d'un nom au niveau module : l'appel `_mac_locale()` sans
+#       argument levait donc systematiquement une TypeError, absorbee en
+#       silence par le `except Exception` englobant de detecter_dhcp_pirate -
+#       ce detecteur n'envoyait donc JAMAIS le moindre DHCPDISCOVER, en
+#       silence, depuis l'introduction de l'autre fonction. Renommee en
+#       _mac_locale_poste() (seul appelant mis a jour).
+#     - _construire_dhcp_discover produisait un paquet 4 octets trop court :
+#       le bloc ciaddr/yiaddr/siaddr/giaddr (4 champs de 4 octets = 16)
+#       n'ecrivait que 12 octets, decalant chaddr/sname/file/magic cookie/
+#       options de 4 octets par rapport au format DHCP standard attendu par
+#       un vrai serveur.
+#     Nouveaux tests (section 24/25/26 de test_diagnostic_reseau.py) :
+#     detecter_dhcp_pirate verifiee de bout en bout via un faux socket UDP
+#     (bind reussit toujours, pas de privileges necessaires ; capture le
+#     paquet envoye pour verifier son magic cookie a l'offset exact ;
+#     fabrique des DHCPOFFER coherents avec le xid capture) - preuve directe
+#     que le bug de collision de nom est corrige (sinon 'bind' ne serait
+#     jamais atteint) ; _dhcp_server_id et _mac_locale_poste testees
+#     directement ; detecter_conflits_noms verifiee avec 2 IP annoncant le
+#     meme nom NetBIOS.
+# #20 Seul le Wi-Fi Windows etait teste ; un deploiement Linux ou macOS
+#     pouvait avoir un diagnostic Wi-Fi casse sans qu'aucun test ne le
+#     revele. Nouveaux tests (section 29/29bis/30/30bis) : _wifi_linux()
+#     avec des sorties `iw dev` / `iw dev X link` / `iw dev X scan` figees
+#     (connecte, non connecte, aucun adaptateur, 2 BSS voisins avec les 2
+#     formats de canal "DS Parameter set"/"primary channel") ; _wifi_macos()
+#     avec du JSON `system_profiler -json SPAirPortDataType` figé (connecte,
+#     non connecte, aucune interface, JSON illisible).
+# #21 SNMPv3 n'etait verifie de bout en bout qu'en SHA-1 (test_snmp_v3.py) ;
+#     MD5 n'avait qu'un test de derivation de cle (pas de vrai GET), les
+#     variantes SHA-224/256/384/512 - pourtant documentees comme protocoles
+#     possibles pour diag_snmp_v3_auth_proto - n'avaient AUCUN test. Nouvelle
+#     section 9 : boucle sur les 5 protocoles, GET authentifie bout en bout
+#     verifie pour chacun contre le meme faux agent SNMPv3 deja utilise pour
+#     SHA-1.
+#
+# Suite de tests complete reverifiee (37 scripts dont le nouveau
+# test_capture_passive.py + 235 tests pytest) : aucune regression, les 10
+# echecs pytest preexistants et sans rapport (pris en charge separement)
+# subsistent a l'identique.
+
+# Version 2.19.42 - Audit reseau, lot 2 : coherence et performance du frontend
+# Suite du lot 1 (network_diag.py / app.py). 4 correctifs sur scan_reseau.html,
+# diag_reseau.html, baie_brassage.html :
+#
+# #13 Le tri par "Statut" du tableau de resultats du scan reseau ne triait
+#     rien : le comparateur lisait a[sortCol] avec sortCol='statut', mais
+#     aucun objet de resultat ne porte ce champ (le badge Nouveau/Inventaire
+#     est calcule a l'AFFICHAGE, jamais ecrit sur la ligne, via
+#     INVENTAIRE_IPS.has(h.ip)) -> comparaison toujours '' vs '', tri sans
+#     effet, alors que la fleche de tri s'affichait comme si ca avait
+#     fonctionne. Le comparateur calcule desormais ce meme statut pour le cas
+#     sortCol==='statut', pour trier reellement quelque chose.
+# #14 Le tableau de resultats du scan (pollStatus, 800 ms) ET la liste de
+#     constats du diagnostic (pollDiag, 900 ms) reconstruisaient l'INTEGRALITE
+#     du DOM (tri + filtre + concatenation de chaines + remplacement complet)
+#     a CHAQUE tick de sondage, meme quand rien n'avait change depuis le tick
+#     precedent - jusqu'a plus d'une fois par seconde sur un scan complet
+#     (254 lignes sur un /24), avec reinitialisation des cases de selection a
+#     chaque reconstruction. Le sondage reste rapide (necessaire pour la barre
+#     de progression), mais le tableau/la liste ne se reconstruit desormais
+#     QUE si le nombre de resultats a reellement change (scanLastCount /
+#     diagLastCount), ou a la toute fin du scan/diagnostic.
+# #15 Le menu deroulant "mode FDB" de l'avertissement de fiabilite de la
+#     table MAC (fonctionnalite "Deviner le brassage") n'avait ni classe ni
+#     largeur definie, contrairement a un select QUASI IDENTIQUE 4 lignes
+#     plus loin (data-bport, class="cfg-input cfg-input-sm" style="width:
+#     auto") - signe d'un oubli plutot que d'un choix. Meme classe/largeur
+#     appliquee.
+# #16 Un nom de fabricant/modele detecte via WMI/UPnP (chaine "friendly
+#     name" libre) peut faire 40-60+ caracteres ; la cellule correspondante
+#     du scan reseau n'avait pas de troncature (white-space:nowrap seul) et
+#     elargissait toute la colonne pour une seule ligne longue. Troncature
+#     (text-overflow:ellipsis + max-width:220px) ajoutee, valeur complete
+#     (marque + modele ou fabricant OUI) desormais dans l'infobulle. Meme
+#     principe pour la cellule MAC du tableau "hors inventaire" de la baie de
+#     brassage, seule colonne truncable de ce tableau sans infobulle
+#     jusqu'ici.
+#
+# Verifie en navigateur : tri par Statut (3 hotes marques artificiellement
+# "en inventaire" -> regroupes correctement en ordre croissant ET decroissant),
+# cellule fabricant (troncature + infobulle avec valeur complete verifiees),
+# scan et diagnostic lances sans erreur JS console. Suite de tests complete
+# reverifiee (36 scripts, purement backend donc non affectee par ce lot
+# frontend) : aucune regression.
+
+# Version 2.19.41 - Audit reseau, lot 1 : 12 correctifs de fiabilite/performance
+# Suite a la demande explicite de l'utilisateur : parcourir l'ensemble des
+# fonctionnalites reseau, verifier la coherence et l'absence de bugs, de
+# ralentissements, de blocages, et proposer des ameliorations. 4 relectures
+# independantes (network_diag.py, primitives SNMP/scan de app.py, frontend,
+# couverture de tests) -> 28 constats presentes en artefact de decision,
+# TOUS valides par l'utilisateur. Ce lot traite les 12 premiers (bugs et
+# performance de network_diag.py + app.py) :
+#
+# #01 _analyser_snmp confondait un rebouclage normal de compteur 32 bits
+#     (frequent sur un lien Gigabit charge : ifInOctets boucle en ~34 s) avec
+#     un redemarrage de switch -> utilisait la valeur BRUTE du compteur comme
+#     delta depuis le releve precedent (jusqu'a 5 min), produisant des debits
+#     en terabits fantomes et de fausses alertes port_sature/port_erreurs/
+#     duplex_mismatch. Nouvelle fonction partagee _delta_compteur_32()
+#     (meme logique que celle deja ecrite et testee pour les LEDs de la baie,
+#     _etat_led/_d, desormais factorisee) : distingue le bouclage (delta
+#     negatif proche du PLAFOND du compteur) du redemarrage (proche de ZERO).
+#     interroger_equipement() expose maintenant un flag hc (compteurs 64 bits
+#     ou non) pour appliquer le bon plafond (2**32 ou illimite) selon le
+#     compteur (in_oct/out_oct en HC si l'agent les expose, les autres
+#     compteurs du groupe restent toujours en Counter32).
+# #02 nb_switchs (deduplique par IP) et nb_muets (compte par emplacement de
+#     rack) ne comptaient pas sur la meme base -> un switch injoignable sur 2
+#     emplacements affichait "3 switches, 2 muets" pour 2 switches physiques.
+#     nb_muets deduplique desormais par IP ; la comparaison nb_muets==nb
+#     switchs (motif 'sans_reponse') corrigee au passage (meme bug, meme
+#     endroit).
+# #03 capturer_trafic() renvoyait systematiquement le motif precis mais
+#     potentiellement FAUX 'privileges_insuffisants' pour N'IMPORTE QUELLE
+#     exception (erreur scapy interne, interface debranchee...), contrairement
+#     aux fonctions soeurs (capture_passive, capture_arp_sightings) qui
+#     journalisent la vraie cause. Nouveau motif neutre 'erreur_capture' pour
+#     toute exception AUTRE qu'un vrai PermissionError ; libelle ajoute dans
+#     baie_brassage.html.
+# #04 _lire_sysinfo ne mettait pas en cache un resultat vide (sysName/
+#     sysDescr absents) -> switch qui ne les expose pas re-sonde a CHAQUE
+#     cycle d'activite (jusqu'a toutes les 3 s en rechauffe), contrairement a
+#     _entite_physique qui cache deja son echec. Meme traitement applique.
+# #05 La barre de progression de la cartographie ("Releve N/M") pouvait
+#     RECULER : son denominateur (equipements vus) grandit en cours de route
+#     quand la decouverte recursive LLDP trouve de nouveaux switches, plus
+#     vite que le numerateur n'avance. Plafond (pct_max) qui ne redescend
+#     jamais.
+# #06 _noms_interfaces, sur un switch JAMAIS interroge (cache totalement
+#     froid), ne posait aucun verrou -> la boucle d'activite, une
+#     cartographie et le moniteur pouvaient chacun lancer le meme parcours
+#     GETBULK simultanement s'ils atteignaient ce switch au meme moment.
+#     Verrou par IP (Event) : un seul thread fait le releve, les autres
+#     attendent son resultat.
+# #07 _fdb_switch (relevé de la table MAC, jusqu'a 45 s sur un gros switch
+#     via le parcours VLAN par VLAN) etait protegee par un verrou GLOBAL
+#     unique -> un relevé lent sur UN switch bloquait les LEDs d'activite de
+#     TOUS les autres switches de la baie, ou un job "Deviner le brassage" en
+#     parallele, sans rapport avec lui. Verrou PAR SWITCH (_fdb_lock(ip),
+#     dict de verrous cree a la demande) : les switches s'interrogent
+#     desormais reellement en parallele.
+# #08 Le badge "vu via SNMP/capture" (badges 🌐/📡 du scan reseau, ajoutes en
+#     2.19.38) etait attribue par simple EGALITE DE VALEUR entre la mac
+#     trouvee et celle presente dans snmp_arp_par_ip/capture_arp_par_ip -> un
+#     appareil resolu NORMALEMENT en ARP local etait etiquete a tort "vu via
+#     SNMP, sous-reseau route" des que cette meme mac apparaissait AUSSI dans
+#     la table ARP d'un routeur de l'inventaire (le cas courant pour
+#     n'importe quelle passerelle, potentiellement la majorite des appareils
+#     locaux). _scan_host() trace desormais la provenance au moment exact ou
+#     la mac est TROUVEE (_resoudre_mac()/_mac_snmp_ou_capture() renvoient
+#     (mac, source)), plus jamais rededuite apres coup. Test de regression
+#     dedie (section 9 de test_scan_completude_oui_arp.py) : mac identique
+#     par coincidence entre ARP local et table SNMP -> mac_source reste vide.
+# #09 Le protocole SNMPv3 (decouverte d'engine ET echange authentifie)
+#     acceptait le PREMIER datagramme UDP recu sans verifier qu'il
+#     correspond a la requete envoyee (request-id/PDU) -> contrairement aux
+#     echanges v1/v2c du meme fichier qui comparent deja explicitement le
+#     request-id pour ignorer une reponse tardive a une requete precedente.
+#     Meme garantie ajoutee : _v3_parse() expose desormais le request-id de
+#     la PDU (`reqid`), _v3_discover() et _snmp_v3_exchange() purgent les
+#     reponses qui ne correspondent pas (boucle de 4 essais, comme le v1/v2c).
+#     2 tests dedies dans test_snmp_v3.py (agents qui envoient DELIBEREMENT
+#     une reponse perimee avant la vraie, avec une valeur differente pour
+#     detecter sans ambiguite si l'ancien comportage l'aurait acceptee).
+# #10 _hostname() (resolution DNS inverse, gethostbyaddr) n'a pas de delai
+#     propre ; le garde-fou future.result(timeout=5) ne borne que l'ATTENTE
+#     du resultat cote appelant, pas la duree de vie du thread. Le bloc
+#     `with ThreadPoolExecutor(...)` attendait ensuite que CE thread se
+#     termine reellement (shutdown(wait=True) implicite a la sortie du
+#     `with`) -> un seul hote au DNS inverse muet pouvait immobiliser un
+#     thread de scan bien au-dela des budgets affiches. Executor cree sans
+#     `with`, shutdown(wait=False) explicite : un thread bloque ne retient
+#     plus l'appelant.
+# #11 _netbios_name() ne fermait sa socket qu'en cas de succes ; sur timeout
+#     (le cas le PLUS FREQUENT, la plupart des hotes n'ont pas NetBIOS),
+#     l'exception etait absorbee sans fermer la socket (liberee seulement par
+#     le ramasse-miettes). Socket geree par un `with`, fermee dans tous les
+#     cas.
+# #12 Les 3 sondes de decouverte UPnP/mDNS/ONVIF de _run_scan avalaient toute
+#     exception SANS AUCUNE trace de log, contrairement aux 2 sondes
+#     voisines plus recentes (SNMP/capture, ajoutees en 2.19.38) qui
+#     journalisent deja l'erreur reelle. logger.debug(exc_info=True) ajoute
+#     aux 3 sondes, meme niveau que leurs voisines.
+#
+# Suite de tests complete reverifiee apres ce lot (36 scripts + 235 tests
+# pytest) : aucune regression, seuls les 10 echecs pytest deja identifies
+# comme preexistants (test_diag_reseau.py, sans rapport avec cet audit, pris
+# en charge dans une tache separee) subsistent a l'identique.
+
+# Version 2.19.40 - Case a cocher "Interrogation SNMP" invisible (diagnostic reseau)
+# Signale par l'utilisateur. La regle CSS globale de base.html qui stylise
+# tous les champs de formulaire (input, select, textarea { width:100%;
+# padding:.55rem .8rem; ... }) ne mettait pas les cases a cocher / boutons
+# radio a part -> toute case SANS classe de style dediee heritait d'une
+# largeur a 100% et d'un padding pense pour du texte, s'etirant en une barre
+# plate (~230 x 13 px releve en pratique) au lieu d'un carre normal (13x13).
+#
+# Discret dans la plupart des cas (case dans une cellule de tableau etroite,
+# ex. selection des lignes du scan reseau, ou grep confirme d'autres cases
+# sans classe : admin_user_form.html "Compte actif", diag_reseau.html
+# "chk-rapide"). Mais la case "Interrogation SNMP" du panneau de config du
+# diagnostic reseau n'a pas cette chance : son texte d'accompagnement
+# (communautes SNMP + utilisateur SNMPv3) peut etre long, et une carte
+# elargie par ce texte + une case etiree sur toute la largeur produit, dans
+# les cas extremes (communaute tres longue sans separateur), un effondrement
+# complet de la mise en page de la grille CSS (`.cfg-etat`,
+# repeat(auto-fill,minmax(230px,1fr))) - reproduit en environnement de dev en
+# configurant une communaute artificiellement longue, la case finissait
+# litteralement hors du cadre visible.
+#
+# Deux correctifs complementaires :
+# - base.html : input[type="checkbox"]/[type="radio"] exclus de la regle
+#   globale (`input:not([type="checkbox"]):not([type="radio"]), select,
+#   textarea { ... }`), + accent-color coherent avec le theme.
+# - diag_reseau.html : `.cfg-etat-row` gagne min-width:0 (leve la contrainte
+#   de largeur mini heritee du contenu sur un enfant grid/flex) et le
+#   libelle `overflow-wrap:anywhere` (le texte passe a la ligne plutot que
+#   de deborder ou de pousser la case), la case elle-meme `flex-shrink:0`
+#   (ne retrecit jamais). Meme principe deja applique ailleurs dans l'app
+#   face a un contenu de largeur variable (v2.19.33/34, defilement
+#   horizontal).
+#
+# Verifie en navigateur : cas normal (case 13x13 visible), cas degrade avec
+# utilisateur SNMPv3 + communautes multiples (texte sur 5 lignes, case
+# visible), cas extreme avec un mot de 90 caracteres sans separateur (texte
+# wrappe proprement dans la carte, case toujours visible en 13x13) ; verifie
+# aussi que les cases de selection du scan reseau (#chk-all/.chk-host, deja
+# dans une cellule etroite) restent a leur taille normale apres le
+# changement global.
+#
+
 # Release qui rassemble le travail termine et teste de plusieurs sessions
 # paralleles (worktrees) en plus du scan reseau SNMP/capture de 2.19.39 :
 #

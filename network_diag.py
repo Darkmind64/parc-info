@@ -81,6 +81,7 @@ _GRAVITE_DEFAUT = {
     'ups_batterie_usee':     'avertissement',
     'ups_alarme':            'avertissement',
     'ups_secteur_instable':  'info',
+    'trap_snmp':             'avertissement',
 }
 
 _CATEGORIES_LIBELLES = {
@@ -115,6 +116,7 @@ _CATEGORIES_LIBELLES = {
     'ups_batterie_usee':      "Onduleur — batterie à remplacer",
     'ups_alarme':             "Onduleur — alarme active",
     'ups_secteur_instable':   "Onduleur — tension d'entrée hors plage",
+    'trap_snmp':              "Trap SNMP reçu (évènement poussé par l'équipement)",
 }
 
 
@@ -479,7 +481,7 @@ def detecter_dhcp_pirate(serveurs_attendus: list) -> list:
     liste vide (et journalise) si l'écoute n'a pas pu se faire.
     """
     try:
-        mac = _mac_locale()
+        mac = _mac_locale_poste()
         xid = os.urandom(4)
         paquet = _construire_dhcp_discover(mac, xid)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -522,7 +524,17 @@ def detecter_dhcp_pirate(serveurs_attendus: list) -> list:
     return findings
 
 
-def _mac_locale() -> bytes:
+def _mac_locale_poste() -> bytes:
+    """MAC de CE poste (pas d'un appareil distant — à ne pas confondre avec
+    `_mac_locale(mac)` plus bas, qui teste le bit « localement administré »
+    d'une MAC quelconque). Portait le MÊME nom que cette autre fonction avant
+    l'audit réseau du 2026-09-05 (#19) : la seconde définition, plus bas dans
+    ce fichier, écrasait purement et simplement celle-ci au chargement du
+    module — `detecter_dhcp_pirate` appelait donc en réalité
+    `_mac_locale(mac)` SANS argument, une `TypeError` systématique absorbée
+    par le `except Exception` englobant, si bien que ce détecteur n'envoyait
+    JAMAIS le moindre DHCPDISCOVER, silencieusement, depuis l'introduction de
+    l'autre fonction. Renommée pour lever l'ambiguïté."""
     import uuid
     n = uuid.getnode()
     return n.to_bytes(6, 'big')
@@ -531,7 +543,12 @@ def _mac_locale() -> bytes:
 def _construire_dhcp_discover(mac: bytes, xid: bytes) -> bytes:
     p = struct.pack('>BBBB', 1, 1, 6, 0)          # op, htype, hlen, hops
     p += xid + struct.pack('>HH', 0, 0x8000)      # secs, flags (broadcast)
-    p += b'\x00' * 12                              # ciaddr/yiaddr/siaddr/giaddr
+    # ciaddr + yiaddr + siaddr + giaddr = 4 champs de 4 octets = 16, pas 12 —
+    # bug trouvé en écrivant le test de ce détecteur (audit réseau
+    # 2026-09-05, #19) : le paquet envoyé était 4 octets plus court que le
+    # format DHCP standard, décalant chaddr/sname/file/magic cookie/options
+    # de 4 octets par rapport à ce qu'un serveur DHCP attend.
+    p += b'\x00' * 16                              # ciaddr/yiaddr/siaddr/giaddr
     p += mac + b'\x00' * 10                        # chaddr (16)
     p += b'\x00' * 64 + b'\x00' * 128             # sname + file
     p += bytes([99, 130, 83, 99])                 # magic cookie
@@ -1040,7 +1057,8 @@ def interroger_equipement(ip: str, communautes) -> dict | None:
             'late_coll': _i(late, idx), 'exc_coll': _i(exc, idx),
             'duplex': _i(duplex, idx),
         })
-    return {'sysname': sysname, 'ts': time.time(), 'ports': ports}
+    return {'sysname': sysname, 'ts': time.time(), 'ports': ports,
+            'hc': bool(grp2.get(_OID_IF_HCIN, {}))}
 
 
 _COMPTEURS_PORT = ('in_oct', 'out_oct', 'in_err', 'out_err', 'in_disc', 'out_disc',
@@ -1059,6 +1077,26 @@ def _dernier_releve(conn, client_id, ip, port_index):
     except Exception:
         cpt = {}
     return {'epoch': row[0], 'compteurs': cpt, 'oper': row[2]}
+
+
+def _delta_compteur_32(cur: int, prev: int, large: int = 2 ** 32) -> int:
+    """Delta entre deux relevés d'un compteur SNMP, robuste au bouclage d'un
+    compteur 32 bits (`large=2**32`) ou 64 bits (`large=0` : jamais de
+    bouclage en pratique sur l'intervalle d'un relevé). Un delta négatif
+    proche du PLAFOND du compteur est un bouclage (delta réel recalculé) ;
+    proche de ZÉRO, un redémarrage probable de l'agent (on repart de la
+    valeur brute). Même logique que celle déjà utilisée par `_etat_led`
+    pour les LEDs de la baie — audit réseau 2026-09-05, constat #01 :
+    `_analyser_snmp` traitait auparavant tout delta négatif comme un
+    redémarrage, prenant un simple bouclage (fréquent sur un lien chargé)
+    pour un reset et injectant la valeur brute du compteur comme si
+    c'était le delta depuis le relevé précédent."""
+    d = cur - prev
+    if d >= 0:
+        return d
+    if large and prev > large // 2:
+        return (large - prev) + cur
+    return cur
 
 
 def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> list:
@@ -1082,10 +1120,13 @@ def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> li
 
             if precedent and precedent['epoch']:
                 dt = max(1.0, equipement['ts'] - precedent['epoch'])
+                hc = equipement.get('hc', False)
                 delta = {}
                 for k in _COMPTEURS_PORT:
-                    d = p[k] - precedent['compteurs'].get(k, p[k])
-                    delta[k] = d if d >= 0 else p[k]  # reset compteur / reboot → on repart de la valeur brute
+                    # in_oct/out_oct sont en Counter64 (HC) si l'agent les expose,
+                    # sinon Counter32 comme tous les autres compteurs de ce groupe.
+                    large = (0 if hc else 2 ** 32) if k in ('in_oct', 'out_oct') else 2 ** 32
+                    delta[k] = _delta_compteur_32(p[k], precedent['compteurs'].get(k, p[k]), large)
 
                 # Duplex mismatch
                 if p['oper'] == 1 and p['speed_mbps'] >= 100 and (
@@ -1742,6 +1783,99 @@ def diag_wifi_apercu(client_id: int) -> dict:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  Palier 7c — table de voisinage IPv6 (NDP) + ping multicast local (#28)
+# ════════════════════════════════════════════════════════════════════════════
+# Complément IPv6 à l'ARP local : le protocole NDP (Neighbor Discovery,
+# RFC 4861) joue pour IPv6 le même rôle que l'ARP pour IPv4 — chaque OS tient
+# un cache de voisinage qu'on peut lire sans privilège élevé (contrairement à
+# un vrai sniff). Un ping vers l'adresse multicast de tous les nœuds du lien
+# (ff02::1) est tenté au préalable pour inciter les hôtes IPv6 actifs sur ce
+# segment à se manifester, avant de lire ce cache — jamais bloquant si
+# l'interface/l'outil manque.
+
+def _ping_multicast_ipv6() -> bool:
+    """Envoie UN écho ICMPv6 à ff02::1 (tous les nœuds du lien) pour
+    rafraîchir le cache de voisinage NDP avant de le lire. Best-effort :
+    signale seulement si la commande s'est exécutée sans erreur, jamais les
+    réponses elles-mêmes (les utilitaires ping standard ne distinguent pas
+    proprement les multiples réponses d'un ping multicast)."""
+    try:
+        if IS_WINDOWS:
+            r = _run(['ping', '-6', '-n', '1', '-w', '1000', 'ff02::1'], timeout=4)
+        elif platform.system() == 'Darwin':
+            r = _run(['ping6', '-c', '1', '-W', '1000', 'ff02::1'], timeout=4)
+        else:
+            r = _run(['ping', '-6', '-c', '1', '-W', '1', 'ff02::1'], timeout=4)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _ndp_windows() -> list:
+    out = _run(['netsh', 'interface', 'ipv6', 'show', 'neighbors'], timeout=8).stdout
+    voisins, interface_courante = [], ''
+    for ligne in out.splitlines():
+        m = re.match(r'^Interface\s+\d+\s*:\s*(.+)$', ligne.strip(), re.I)
+        if m:
+            interface_courante = m.group(1).strip()
+            continue
+        m = re.match(r'^\s*([0-9a-f:]+:[0-9a-f:]*)\s+([0-9a-f-]{17})\s+(\S+)', ligne, re.I)
+        if m:
+            voisins.append({'ip': m.group(1), 'mac': m.group(2).replace('-', ':').lower(),
+                            'etat': m.group(3), 'interface': interface_courante})
+    return voisins
+
+
+def _ndp_linux() -> list:
+    out = _run(['ip', '-6', 'neighbor', 'show'], timeout=6).stdout
+    voisins = []
+    for ligne in out.splitlines():
+        m = re.match(r'^(\S+)\s+dev\s+(\S+)\s+lladdr\s+([0-9a-f:]{17})\s+(\S+)', ligne.strip(), re.I)
+        if m:
+            voisins.append({'ip': m.group(1), 'interface': m.group(2),
+                            'mac': m.group(3).lower(), 'etat': m.group(4)})
+    return voisins
+
+
+def _ndp_macos() -> list:
+    out = _run(['ndp', '-an'], timeout=6).stdout
+    voisins = []
+    for ligne in out.splitlines()[1:]:
+        parts = ligne.split()
+        if len(parts) >= 4 and re.match(r'^([0-9a-f]{1,2}:){5}[0-9a-f]{1,2}$', parts[1], re.I):
+            voisins.append({'ip': parts[0].split('%')[0], 'mac': parts[1].lower(),
+                            'interface': parts[2], 'etat': parts[3]})
+    return voisins
+
+
+def voisinage_ipv6(rafraichir: bool = True) -> dict:
+    """Table de voisinage IPv6 (NDP) de ce poste : le pendant IPv6 de l'ARP,
+    lue depuis le cache du système d'exploitation. Complète la découverte
+    IPv4 (scan réseau, ARP local) pour les appareils qui ne répondent qu'en
+    IPv6 sur ce segment — de plus en plus fréquent (objets connectés, mobiles).
+
+    `rafraichir=True` tente d'abord un ping multicast (ff02::1) pour que le
+    cache ne soit pas limité aux échanges déjà survenus depuis le démarrage
+    du poste."""
+    ping_ok = _ping_multicast_ipv6() if rafraichir else None
+    try:
+        if IS_WINDOWS:
+            voisins = _ndp_windows()
+        elif platform.system() == 'Darwin':
+            voisins = _ndp_macos()
+        else:
+            voisins = _ndp_linux()
+    except Exception:
+        logger.debug('network_diag: lecture table NDP impossible', exc_info=True)
+        voisins = []
+    # adresses multicast (ff00::/8) : bruit de la table, jamais un appareil —
+    # le lien-local (fe80::) reste gardé, c'est la forme la plus courante
+    # d'une VRAIE entrée de voisinage NDP.
+    voisins = [v for v in voisins if v.get('ip') and not v['ip'].lower().startswith('ff')]
+    return {'voisins': voisins, 'ping_multicast_ok': ping_ok, 'nb': len(voisins)}
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  Palier 4 — cartographie de topologie L2 (FDB bridge-MIB + LLDP/CDP)
 # ════════════════════════════════════════════════════════════════════════════
 #
@@ -1779,6 +1913,13 @@ _OID_ENT_NAME         = '1.3.6.1.2.1.47.1.1.1.1.7'      # entPhysicalName
 _OID_ENT_SERIAL       = '1.3.6.1.2.1.47.1.1.1.1.11'     # entPhysicalSerialNum
 _OID_ENT_MODEL        = '1.3.6.1.2.1.47.1.1.1.1.13'     # entPhysicalModelName
 _ENT_CLASSE_CHASSIS   = 3
+# ── HOST-RESOURCES-MIB : inventaire logiciel gratuit, sans collecteur (#24)
+_OID_HR_STORAGE_DESCR = '1.3.6.1.2.1.25.2.3.1.3'        # hrStorageDescr
+_OID_HR_STORAGE_ALLOC = '1.3.6.1.2.1.25.2.3.1.4'        # hrStorageAllocationUnits (octets/unité)
+_OID_HR_STORAGE_SIZE  = '1.3.6.1.2.1.25.2.3.1.5'        # hrStorageSize (en unités)
+_OID_HR_STORAGE_USED  = '1.3.6.1.2.1.25.2.3.1.6'        # hrStorageUsed (en unités)
+_OID_HR_SW_RUN_NAME   = '1.3.6.1.2.1.25.4.2.1.2'        # hrSWRunName (processus en cours)
+_OID_HR_SW_INST_NAME  = '1.3.6.1.2.1.25.6.3.1.2'        # hrSWInstalledName (logiciels installés)
 # ── IP-MIB : sous-réseaux effectivement routés / portés (constat #13)
 _OID_IP_ADENT_IFX     = '1.3.6.1.2.1.4.20.1.2'          # ipAdEntIfIndex : ip -> ifIndex
 _OID_IP_ADENT_MASK    = '1.3.6.1.2.1.4.20.1.3'          # ipAdEntNetMask : ip -> masque
@@ -2029,6 +2170,46 @@ def _entite_physique(ip, communautes):
                'descr': principal['descr'],
                'membres': membres if len(membres) > 1 else []}
     _activite_entite[ip] = (time.time(), res)
+    return res
+
+
+def inventaire_host_resources(ip, communautes):
+    """HOST-RESOURCES-MIB (hrSWInstalledName + hrSWRunName + hrStorage*) :
+    inventaire logiciel, processus et stockage gratuit pour tout hôte qui
+    expose un agent SNMP standard (Net-SNMP Linux, service SNMP Windows,
+    NAS...), sans dépendre du collecteur ParcInfo (constat d'audit #24).
+    `{}` si l'agent ne l'expose pas (cas courant des switches/routeurs
+    réseau, qui n'implémentent en général pas cette MIB). Caché comme les
+    autres informations quasi statiques (`_ACTIVITE_SYSINFO_TTL`)."""
+    cache = _activite_hostres.get(ip)
+    if cache and time.time() - cache[0] < _ACTIVITE_SYSINFO_TTL:
+        return cache[1]
+    logiciels_bruts = _snmp_walk(_OID_HR_SW_INST_NAME, ip, communautes, max_vars=2000)
+    if not logiciels_bruts:
+        _activite_hostres[ip] = (time.time(), {})
+        return {}
+    logiciels = sorted({str(v).strip() for v in logiciels_bruts.values() if str(v).strip()})
+    processus_bruts = _snmp_walk(_OID_HR_SW_RUN_NAME, ip, communautes, max_vars=500)
+    processus = sorted({str(v).strip() for v in processus_bruts.values() if str(v).strip()})
+    descr = _snmp_walk(_OID_HR_STORAGE_DESCR, ip, communautes, max_vars=100)
+    alloc = _snmp_walk(_OID_HR_STORAGE_ALLOC, ip, communautes, max_vars=100)
+    taille = _snmp_walk(_OID_HR_STORAGE_SIZE, ip, communautes, max_vars=100)
+    utilise = _snmp_walk(_OID_HR_STORAGE_USED, ip, communautes, max_vars=100)
+    stockage = []
+    for idx, lib in descr.items():
+        try:
+            unite = int(alloc.get(idx) or 0)
+            taille_o = int(taille.get(idx) or 0) * unite
+            utilise_o = int(utilise.get(idx) or 0) * unite
+        except (TypeError, ValueError):
+            continue
+        if taille_o <= 0:
+            continue
+        stockage.append({'descr': str(lib).strip(),
+                          'taille_mo': round(taille_o / 1_048_576, 1),
+                          'utilise_mo': round(utilise_o / 1_048_576, 1)})
+    res = {'logiciels': logiciels, 'processus': processus, 'stockage': stockage}
+    _activite_hostres[ip] = (time.time(), res)
     return res
 
 
@@ -2303,6 +2484,207 @@ def hotes_vus_snmp(client_id: int, budget_s: float = _HOTES_SNMP_BUDGET_S) -> di
     return {'ok': True, 'motif': '', 'hotes': hotes}
 
 
+# ── Empreinte DHCP passive (audit réseau 2026-09-05, #23) ──────────────────
+# Un DHCPDISCOVER/DHCPREQUEST porte, en option 55, la liste des paramètres
+# que le client demande — un ordre et une composition qui identifient la
+# FAMILLE de sa pile DHCP (Windows/Apple/objet embarqué...) indépendamment du
+# TTL ou du préfixe MAC (OUI) déjà utilisés ailleurs, et MÊME derrière une MAC
+# aléatoire (un téléphone qui en change à chaque association garde la même
+# pile DHCP). Marqueurs volontairement peu nombreux et documentés
+# publiquement (type Fingerbank) : un signal DE PLUS à pondérer, jamais une
+# identification à lui seul — comme le fabricant OUI ou le TTL déjà en place.
+_DHCP_FAMILLE_INDICES = (
+    (lambda o: 249 in o, "probablement Windows (option 249 : route statique MS)"),
+    (lambda o: 119 in o and 95 in o, "probablement Apple (options 119+95 : recherche de domaine + LDAP)"),
+    (lambda o: len(o) <= 4 and o <= {1, 3, 6, 15, 51, 58, 59},
+     "probablement un objet embarqué (liste de requête courte)"),
+)
+
+
+def _dhcp_famille(options):
+    for test, libelle in _DHCP_FAMILLE_INDICES:
+        try:
+            if test(options):
+                return libelle
+        except Exception:
+            continue
+    return ''
+
+
+def capture_dhcp_fingerprints(duree: int = 15) -> dict:
+    """Sniffe le trafic DHCP pendant `duree` secondes et renvoie
+    `{mac: {'options': (55, 3, ...), 'famille': libelle}}`.
+
+    Fenêtre plus étroite qu'une simple écoute ARP (`capture_arp_sightings`) :
+    un DHCPDISCOVER/REQUEST n'est émis qu'au démarrage ou au renouvellement de
+    bail, pas en continu — `duree` par défaut plus longue pour compenser.
+
+    `{}` si la capture est désactivée dans les réglages (`diag_capture_active`,
+    même bascule que le reste de la capture passive) ou si scapy/les
+    privilèges manquent — jamais bloquant, un scan doit pouvoir s'en passer."""
+    if str(_cfg('diag_capture_active', '0')) != '1':
+        return {}
+    if not etat_capture().get('disponible'):
+        return {}
+    s = _charger_scapy()
+    if s is None:
+        return {}
+    vus = {}
+
+    def _on(pkt):
+        try:
+            if not (pkt.haslayer(s.DHCP) and pkt.haslayer(s.Ether)):
+                return
+            options = None
+            for opt in pkt[s.DHCP].options:
+                if isinstance(opt, tuple) and opt[0] == 'param_req_list':
+                    options = frozenset(int(x) for x in opt[1])
+                    break
+            if not options:
+                return
+            mac = _norm_mac(pkt[s.Ether].src)
+            if mac and mac not in _MAC_NULLES:
+                vus[mac] = {'options': tuple(sorted(options)), 'famille': _dhcp_famille(options)}
+        except Exception:
+            pass
+
+    try:
+        sniffer = s.AsyncSniffer(prn=_on, store=False, filter='udp and (port 67 or port 68)')
+        sniffer.start()
+        time.sleep(max(5, duree))
+        sniffer.stop()
+    except PermissionError:
+        return {}
+    except Exception:
+        logger.debug('network_diag: capture DHCP (empreinte) interrompue', exc_info=True)
+        return {}
+    return vus
+
+
+# ── Empreinte OS passive façon p0f (audit réseau 2026-09-05, #25) ───────────
+# Approche volontairement simplifiée par rapport à un vrai p0f (pas de base
+# de signatures externe, aucune dépendance) : seul le TTL initial estimé et
+# la présence des options TCP les plus discriminantes (fenêtre d'échelle,
+# horodatage) sont utilisés. Le résultat reste une FAMILLE probable, jamais
+# une version précise — un signal de plus, au même titre que le fabricant
+# OUI ou l'empreinte DHCP, jamais une identification à lui seul.
+def _p0f_ttl_initial(ttl_observe):
+    """TTL initial le plus probable pour un TTL observé (compte les sauts de
+    routeurs en amont, chacun décrémentant de 1) : 64 (Linux/Unix/macOS/BSD),
+    128 (Windows), 255 (beaucoup d'équipements réseau). `None` au-delà de 255
+    (valeur incohérente)."""
+    try:
+        ttl_observe = int(ttl_observe)
+    except (TypeError, ValueError):
+        return None
+    for base in (64, 128, 255):
+        if ttl_observe <= base:
+            return base
+    return None
+
+
+def _p0f_famille(ttl_init, a_ws, a_ts):
+    if ttl_init == 255:
+        return 'Équipement réseau (routeur/switch, TTL initial 255)'
+    if ttl_init == 128:
+        return 'Windows (probable)'
+    if ttl_init == 64:
+        if a_ws and a_ts:
+            return 'Linux ou assimilé (probable)'
+        return 'macOS/BSD ou assimilé (probable)'
+    return 'Indéterminé'
+
+
+def capture_os_fingerprints(duree: int = 10) -> dict:
+    """Sniffe les paquets TCP SYN pendant `duree` secondes et renvoie
+    `{ip: {'os_probable', 'ttl_observe', 'ttl_initial_estime', 'fenetre'}}` —
+    une classification passive façon p0f, sans sonde active ni collecteur.
+
+    Ne regarde QUE le SYN initial (avant tout ACK) : c'est le seul paquet
+    dont les caractéristiques (TTL de départ, taille de fenêtre, options)
+    sont fixées par la pile TCP/IP de l'émetteur plutôt que par la
+    négociation de la connexion.
+
+    `{}` si la capture est désactivée dans les réglages (`diag_capture_active`)
+    ou si scapy/les privilèges manquent (`etat_capture`) — jamais bloquant
+    pour l'appelant, un scan réseau doit pouvoir s'en passer."""
+    if str(_cfg('diag_capture_active', '0')) != '1':
+        return {}
+    if not etat_capture().get('disponible'):
+        return {}
+    s = _charger_scapy()
+    if s is None:
+        return {}
+    vus = {}
+
+    def _on(pkt):
+        try:
+            if not (pkt.haslayer(s.TCP) and pkt.haslayer(s.IP)):
+                return
+            tcp = pkt[s.TCP]
+            if int(tcp.flags) & 0x12 != 0x02:      # SYN sans ACK uniquement
+                return
+            ip4 = pkt[s.IP]
+            if ip4.src in vus:
+                return
+            options = tcp.options or []
+            a_ws = any(o[0] == 'WScale' for o in options if isinstance(o, tuple))
+            a_ts = any(o[0] == 'Timestamp' for o in options if isinstance(o, tuple))
+            ttl_init = _p0f_ttl_initial(ip4.ttl)
+            vus[ip4.src] = {'os_probable': _p0f_famille(ttl_init, a_ws, a_ts),
+                            'ttl_observe': int(ip4.ttl), 'ttl_initial_estime': ttl_init,
+                            'fenetre': int(tcp.window)}
+        except Exception:
+            pass
+
+    try:
+        sniffer = s.AsyncSniffer(prn=_on, store=False, filter='tcp')
+        sniffer.start()
+        time.sleep(max(3, duree))
+        sniffer.stop()
+    except PermissionError:
+        return {}
+    except Exception:
+        logger.debug('network_diag: capture TCP (empreinte OS) interrompue', exc_info=True)
+        return {}
+    return vus
+
+
+# ── Réveil à la demande (audit réseau 2026-09-05, #26) ──────────────────────
+def reveiller_appareil(mac: str):
+    """Envoie un paquet magique Wake-on-LAN à `mac`. Renvoie `(ok, motif)` —
+    `ok` ne dit QUE si le paquet a pu être ÉMIS (diffusion broadcast locale,
+    sans accusé de réception), jamais si l'appareil a effectivement démarré :
+    à l'appelant de revérifier ensuite (ping/ARP) sur une fenêtre de quelques
+    dizaines de secondes.
+
+    Deux limites structurelles, non contournables :
+    - ne fonctionne QUE si le Wake-on-LAN est activé côté appareil (BIOS/OS —
+      désactivé par défaut sur beaucoup de configurations grand public) ;
+    - ne franchit PAS un routeur (comme l'ARP) sans relais WoL dédié : la
+      diffusion doit atteindre l'appareil sur son propre segment L2.
+
+    Toujours une action MANUELLE et explicite (bouton), jamais un comportement
+    de fond : réveiller un poste à l'improviste n'est pas anodin pour son
+    utilisateur."""
+    m = _norm_mac(mac).replace('-', ':').strip()
+    try:
+        octets = bytes.fromhex(m.replace(':', ''))
+        if len(octets) != 6:
+            return False, "adresse MAC invalide"
+    except ValueError:
+        return False, "adresse MAC invalide"
+    paquet = b'\xff' * 6 + octets * 16
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            s.sendto(paquet, ('255.255.255.255', 9))
+        return True, ''
+    except Exception as e:
+        logger.debug('network_diag: reveiller_appareil en échec', exc_info=True)
+        return False, str(e)
+
+
 def capture_arp_sightings(duree: int = 8) -> dict:
     """Sniffe le trafic ARP pendant `duree` secondes sur ce poste et renvoie
     les couples `{ip: mac}` vus — y compris pour des appareils qui ne
@@ -2368,7 +2750,7 @@ _TOPO_COLS = ('client_id', 'equipement_ip', 'equipement_appareil_id', 'port_inde
               'type_lien', 'voisin_nom', 'voisin_port', 'horodatage',
               'voisin_caps', 'voisin_mac', 'voisin_port_subtype', 'voisin_source',
               'nb_macs_port', 'est_uplink', 'vlan', 'stp_etat', 'stp_amont',
-              'voisin_ip', 'voisin_modele')
+              'voisin_ip', 'voisin_modele', 'port_alias')
 _TOPO_PROFONDEUR_MAX = 3    # sauts LLDP au-delà des équipements inventoriés (#10)
 _TOPO_EQUIP_MAX = 40        # garde-fou absolu sur le nombre d'équipements interrogés
 _TOPO_WORKERS = 6           # relevés SNMP menés de front (#08)
@@ -2438,6 +2820,16 @@ def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> 
     vues = {ip for _a, ip, _p in a_faire}
     lignes_par_ip = {}
     nb_faits = [0]
+    pct_max = [5]  # plafond déjà atteint : la découverte récursive grossit `vues`
+    # en cours de route (de nouveaux switches trouvés via LLDP), ce qui ferait
+    # RECULER le pourcentage affiché si on le recalculait tel quel — l'interface
+    # progresse par nature, jamais par à-coups vers l'arrière (audit #05).
+
+    def _pct():
+        p = 5 + min(85, nb_faits[0] * 85 // max(1, len(vues)))
+        if p > pct_max[0]:
+            pct_max[0] = p
+        return pct_max[0]
 
     def _avance(ip_courante=''):
         """Progression réelle, appelée à CHAQUE équipement terminé. Elle n'était
@@ -2445,16 +2837,14 @@ def decouvrir_topologie(client_id: int, _progress=None, budget_s: float = 0) -> 
         qu'un seul lot, donc un seul message — l'interface restait figée sur
         « Relevé de 1/2 » du début à la fin."""
         nb_faits[0] += 1
-        _prog(5 + min(85, nb_faits[0] * 85 // max(1, len(vues))),
-              "Relevé %d/%d — %s" % (nb_faits[0], len(vues), ip_courante))
+        _prog(_pct(), "Relevé %d/%d — %s" % (nb_faits[0], len(vues), ip_courante))
 
     while a_faire and len(vues) <= _TOPO_EQUIP_MAX:
         restant = (budget_s - (time.time() - t0)) if budget_s else None
         if restant is not None and restant <= 1:
             break
         lot, a_faire = a_faire[:_TOPO_WORKERS], a_faire[_TOPO_WORKERS:]
-        _prog(5 + min(85, nb_faits[0] * 85 // max(1, len(vues))),
-              "Relevé %d/%d — %s" % (nb_faits[0] + 1, len(vues), lot[0][1]))
+        _prog(_pct(), "Relevé %d/%d — %s" % (nb_faits[0] + 1, len(vues), lot[0][1]))
         # échéance transmise à chaque relevé : les parcours SNMP secondaires
         # s'arrêtent d'eux-mêmes au lieu d'expirer un par un.
         deadline = (t0 + budget_s) if budget_s else 0.0
@@ -2744,6 +3134,11 @@ def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now,
         if v_ip:
             voisins_ip.append((v_ip, v.get('nom', ''), v.get('platform', '')))
 
+        # ifAlias : le nom qu'un administrateur tape sur le port (audit #22).
+        # Déjà présent dans `infos` (alimenté par _noms_interfaces pour le
+        # mapping des ports) — jamais lu jusqu'ici pour autre chose.
+        port_alias = infos.get(ifindex, {}).get('alias', '') or ''
+
         rows_macs = macs or ([''] if (v or st) else [])
         for mac in rows_macs:
             inv = inventaire.get(mac) if mac else None
@@ -2756,7 +3151,7 @@ def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now,
                            v.get('nom', ''), v.get('port', ''), now,
                            v_caps, v_mac, v.get('port_subtype', ''), v.get('source', ''),
                            nb_macs, est_uplink, vlan, st.get('etat', ''), stp_amont,
-                           v_ip, v.get('platform', '') or entite.get('modele', '')))
+                           v_ip, v.get('platform', '') or entite.get('modele', ''), port_alias))
 
         # recoupement baie : le switch voit un appareil connu, SEUL, sur un port
         # d'accès, différent de celui déclaré dans la baie pour ce port
@@ -2890,7 +3285,8 @@ def etat_topologie(client_id: int) -> dict:
         if d.get('horodatage') and (not eq['horodatage'] or d['horodatage'] < eq['horodatage']):
             eq['horodatage'] = d['horodatage']      # le plus ANCIEN : l'âge réel de la carte
         p = eq['ports'].setdefault(d['port_index'], {
-            'port_index': d['port_index'], 'port_nom': d['port_nom'], 'hotes': [],
+            'port_index': d['port_index'], 'port_nom': d['port_nom'],
+            'port_alias': _v(d, 'port_alias', '') or '', 'hotes': [],
             'incoherent': f"{cle}:{d['port_index']}" in incoherents,
             'est_uplink': bool(_v(d, 'est_uplink', 0)),
             'nb_macs': int(_v(d, 'nb_macs_port', 0) or 0),
@@ -4090,6 +4486,109 @@ _moniteur_thread.start()
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  Récepteur de traps SNMP, UDP 162 (audit réseau 2026-09-05, #27)
+# ════════════════════════════════════════════════════════════════════════════
+# Complément « poussé » aux relevés SNMP actifs (palier 3, qui interroge à
+# intervalle régulier) : un trap arrive au moment de l'évènement (linkDown,
+# coldStart, alarme constructeur...), pas seulement au prochain cycle du
+# moniteur. Portée volontairement limitée à v1/v2c (voir `_snmp_trap_parse`
+# côté app.py) — un trap n'est journalisé QUE s'il provient d'une IP déjà
+# présente dans l'inventaire d'un client, pour ne jamais créer d'évènement
+# hors du périmètre ACL multi-client.
+_TRAP_PORT = 162
+_trap_state = {'actif': False, 'motif': 'non demarre', 'nb_recus': 0, 'nb_attribues': 0, 'dernier': None}
+
+
+def etat_recepteur_traps() -> dict:
+    return dict(_trap_state)
+
+
+def _client_pour_ip_trap(conn, ip: str):
+    row = conn.execute("SELECT client_id FROM appareils WHERE adresse_ip=? LIMIT 1", (ip,)).fetchone()
+    return row[0] if row else None
+
+
+def _trap_vers_finding(trap: dict, ip_source: str) -> dict:
+    varbinds = list(trap.get('varbinds', []) or [])[:20]
+    if trap.get('type') == 'v1':
+        libelle = trap.get('generic_trap_libelle') or 'inconnu'
+        titre = f"Trap SNMP « {libelle} » reçu de {ip_source}"
+        details = {'ip': ip_source, 'type': 'v1', 'generic_trap': libelle,
+                   'entreprise': trap.get('entreprise', ''), 'varbinds': varbinds}
+        cle_signature = libelle
+    else:
+        trap_oid = trap.get('trap_oid') or ''
+        titre = f"Trap SNMP ({trap_oid or 'v2c'}) reçu de {ip_source}"
+        details = {'ip': ip_source, 'type': 'v2c', 'trap_oid': trap_oid, 'varbinds': varbinds}
+        cle_signature = trap_oid
+    return _finding('trap_snmp', titre, details, ip_source, cle_signature)
+
+
+def _trap_receiver_loop():
+    """Tourne en permanence ; ne se lie réellement au port 162 QUE quand
+    `diag_snmp_trap_active` est actif — poll la config toutes les 30 s sinon,
+    pour réagir sans redémarrage à une activation/désactivation."""
+    from database import get_db
+    while True:
+        if str(_cfg('diag_snmp_trap_active', '0')) != '1':
+            _trap_state.update({'actif': False, 'motif': 'desactive'})
+            time.sleep(30)
+            continue
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('0.0.0.0', _TRAP_PORT))
+            sock.settimeout(5)
+        except PermissionError:
+            _trap_state.update({'actif': False, 'motif': 'privileges_insuffisants'})
+            if sock:
+                sock.close()
+            time.sleep(300)
+            continue
+        except OSError as e:
+            _trap_state.update({'actif': False, 'motif': f'port_indisponible ({e})'})
+            if sock:
+                sock.close()
+            time.sleep(300)
+            continue
+        _trap_state.update({'actif': True, 'motif': 'ok'})
+        try:
+            while str(_cfg('diag_snmp_trap_active', '0')) == '1':
+                try:
+                    data, (ip_source, _port) = sock.recvfrom(4096)
+                except socket.timeout:
+                    continue
+                except Exception:
+                    break
+                try:
+                    from app import _snmp_trap_parse
+                    trap = _snmp_trap_parse(data)
+                except Exception:
+                    trap = None
+                if not trap or trap.get('chiffre'):
+                    continue
+                _trap_state['nb_recus'] += 1
+                _trap_state['dernier'] = _now_z()
+                try:
+                    conn = get_db()
+                    cid = _client_pour_ip_trap(conn, ip_source)
+                    if cid:
+                        _enregistrer_evenements(cid, [_trap_vers_finding(trap, ip_source)], 'trap')
+                        _trap_state['nb_attribues'] += 1
+                    conn.close()
+                except Exception:
+                    logger.debug('network_diag: enregistrement trap SNMP', exc_info=True)
+        finally:
+            sock.close()
+            _trap_state.update({'actif': False, 'motif': 'arret'})
+
+
+_trap_thread = threading.Thread(target=_trap_receiver_loop, daemon=True, name='DiagReseauTrapSNMP')
+_trap_thread.start()
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  Vue d'activité de la baie — LEDs SNMP « live »
 # ════════════════════════════════════════════════════════════════════════════
 #
@@ -4160,6 +4659,7 @@ _activite_sut        = {}   # (client_id, ip) -> (sysUpTime_ticks, epoch) : dt e
 _activite_fdb        = {}   # ip -> (epoch, {ifindex: set(mac normalisée)}, info) : FDB bridge-MIB + VLAN, cache _ACTIVITE_FDB_TTL
 _activite_pvid       = {}   # ip -> (epoch, [vid ordonnés par charge], {dot1dBasePort: vid}) : dot1qPvid
 _activite_entite     = {}   # ip -> (epoch, {modele, serie, descr, membres}) : ENTITY-MIB
+_activite_hostres    = {}   # ip -> (epoch, {logiciels, processus, stockage}) : HOST-RESOURCES-MIB
 _activite_fdb_baseport = {} # ip -> (epoch, {bridge_port: ifIndex}) : dot1dBasePortIfIndex, quasi statique
 _activite_fdb_dialecte = {} # ip -> 'dot1q' | 'dot1d' | 'dot1q-vlan' : quel jeu FDB répond
 _activite_fdb_echec  = {}   # ip -> epoch du dernier walk FDB infructueux (backoff)
@@ -4172,6 +4672,7 @@ _ACTIVITE_ECHECS_MAX = 3    # au-delà : on publie {'actif': False, 'motif': 'er
 # est testé-et-posé sous _activite_lock (voir _noms_interfaces) ; le reste est
 # de l'écriture atomique de clé (remplacement de dict).
 _activite_noms       = {}   # ip -> {'ts', 'infos': {ifindex: {'nom','alias','ethernet'}}, 'maj_en_cours', 'retry_after'}
+_activite_noms_froid = {}   # ip -> threading.Event() : un relevé à froid (jamais vu) est en cours
 _activite_thread     = None
 
 _OID_SYS_UPTIME = '1.3.6.1.2.1.1.3'    # sysUpTime (TimeTicks, 1/100 s) — base : GETBULK renvoie .0
@@ -4389,7 +4890,26 @@ def _noms_interfaces(ip, communautes):
             threading.Thread(target=_maj_noms_interfaces, args=(ip, communautes),
                              daemon=True, name='DiagBaieNoms').start()
         return ent['infos']
-    return _maj_noms_interfaces(ip, communautes)
+
+    # Cache totalement froid (switch jamais interrogé) : un seul thread lance
+    # le relevé SNMP, les autres attendent son résultat au lieu de dupliquer
+    # le même GETBULK si la boucle d'activité, une cartographie et le moniteur
+    # atteignent ce switch au même moment (audit réseau 2026-09-05, #06).
+    with _activite_lock:
+        evt = _activite_noms_froid.get(ip)
+        je_fais = evt is None
+        if je_fais:
+            evt = _activite_noms_froid[ip] = threading.Event()
+    if not je_fais:
+        evt.wait(timeout=10)
+        ent = _activite_noms.get(ip)
+        return ent['infos'] if ent else {}
+    try:
+        return _maj_noms_interfaces(ip, communautes)
+    finally:
+        evt.set()
+        with _activite_lock:
+            _activite_noms_froid.pop(ip, None)
 
 
 def _maj_noms_interfaces(ip, communautes):
@@ -4709,14 +5229,7 @@ def _etat_led(prev, cur, dt, seuils, reboot=False):
         def _d(k, large=0):
             c = cur.get(k, 0)
             p = prev.get(k, c)
-            d = c - p
-            if d >= 0:
-                return d
-            # delta négatif : bouclage d'un compteur 32 bits (prev proche du
-            # plafond) OU vrai redémarrage (le compteur repart de ~0).
-            if large and p > large // 2:
-                return (large - p) + c        # bouclage : delta réel
-            return c                          # redémarrage
+            return _delta_compteur_32(c, p, large)
         oct_large = 0 if hc else 2 ** 32       # ifTable = Counter32
         raw_in = cur.get('in_oct', 0) - prev.get('in_oct', 0)
         raw_out = cur.get('out_oct', 0) - prev.get('out_oct', 0)
@@ -4834,8 +5347,11 @@ def _lire_sysinfo(ip, communautes):
     ent = {'ts': time.time(),
            'sysname': _first(cols.get(_OID_SYS_NAME_B, {})),
            'sysdescr': _first(cols.get(_OID_SYS_DESCR_B, {}))}
-    if ent['sysname'] or ent['sysdescr']:
-        _activite_sysinfo[ip] = ent
+    # Un résultat vide est mis en cache aussi (comme _entite_physique) : un
+    # switch qui n'expose ni sysName ni sysDescr était sinon re-sondé à
+    # chaque cycle d'activité, jusqu'à toutes les 3 s en réchauffe (audit
+    # réseau 2026-09-05, constat #04).
+    _activite_sysinfo[ip] = ent
     return ent
 
 
@@ -4845,7 +5361,21 @@ def _modele_court(sysdescr):
     return sysdescr.split('\n')[0].split(',')[0].strip()[:48]
 
 
-_activite_fdb_lock = threading.Lock()   # _fdb_switch : loop d'activité + requête Flask
+_activite_fdb_locks = {}   # ip -> threading.Lock() : un verrou PAR SWITCH, pas global (audit #07 :
+                            # un verrou unique pour tous les switches faisait qu'un relevé lent sur
+                            # l'un (jusqu'à _FDB_VLAN_BUDGET_S = 45 s) bloquait les LEDs d'activité ou
+                            # un job "Deviner le brassage" sur TOUS les autres, sans rapport avec lui)
+
+
+def _fdb_lock(ip):
+    """Verrou dédié à ce switch (créé une fois, jamais retiré) — protège
+    `_fdb_switch` (loop d'activité + requêtes Flask concurrentes) sans
+    sérialiser les switches entre eux."""
+    with _activite_lock:
+        lk = _activite_fdb_locks.get(ip)
+        if lk is None:
+            lk = _activite_fdb_locks[ip] = threading.Lock()
+    return lk
 
 
 def _mac_octets(brut):
@@ -4983,7 +5513,7 @@ def _fdb_switch(ip, communautes):
     (`ipNetToMediaPhysAddress`, précieuse pour un routeur / switch L3 sans FDB).
     Cache `_ACTIVITE_FDB_TTL` s ; sur échec de walk, conserve la dernière valeur
     connue si elle n'est pas trop vieille."""
-    with _activite_fdb_lock:
+    with _fdb_lock(ip):
         hit = _activite_fdb.get(ip)
         if hit and (time.time() - hit[0]) < _ACTIVITE_FDB_TTL:
             return hit[1], hit[2]
@@ -5386,6 +5916,7 @@ def _cycle_activite(clients):
                 switchs = _switchs_baie(conn, cid)
                 equipements, ports_ui, detail_sw, detail_ports, detail_ifs = [], [], [], [], []
                 nb_muets = 0
+                ips_muets = set()  # dédup par IP : un switch sur 2 emplacements ne compte qu'une fois
                 poll_par_ip = {}   # ip -> (infos, cur_ports, ok, hc, dt_switch, reboot, poe, sysinfo, uptime_s)
                 etats_par_ip = {}     # ip -> {ifindex: led}  (pour les prises murales d'un bandeau)
                 mapping_par_slot = {} # slot_id switch -> {numero: ifindex}
@@ -5462,7 +5993,8 @@ def _cycle_activite(clients):
                     poe_ports = poe.get('ports', {})
                     now = time.time()
                     comm = communautes[0] if communautes else 'public'
-                    if not ok:
+                    if not ok and ip not in ips_muets:
+                        ips_muets.add(ip)
                         nb_muets += 1
                     dt_def = dt_switch or _ACTIVITE_INTERVAL
 
@@ -5691,7 +6223,8 @@ def _cycle_activite(clients):
             motif = ''
             if not switchs:
                 motif = 'aucun_switch'
-            elif not any(e['nb_ports_up'] or e['nb_actifs'] for e in equipements) and nb_muets == len(switchs):
+            elif not any(e['nb_ports_up'] or e['nb_actifs'] for e in equipements) \
+                    and nb_muets == len({s['ip'] for s in switchs}):
                 motif = 'sans_reponse'
             with _activite_lock:
                 _activite_resultat[cid] = {
@@ -6564,8 +7097,13 @@ def capturer_trafic(duree: int, client_id=None) -> dict:
     except PermissionError:
         return {'disponible': False, 'motif': 'privileges_insuffisants'}
     except Exception:
+        # Toute AUTRE panne (erreur scapy interne, interface débranchée en
+        # cours de capture...) ne doit pas être présentée comme un problème
+        # de privilèges — motif neutre + la vraie cause en log (audit réseau
+        # 2026-09-05, constat #03 : le motif précis mais faux envoyait
+        # systématiquement l'utilisateur vérifier sudo/Npcap à tort).
         logger.debug('network_diag: capturer_trafic interrompue', exc_info=True)
-        return {'disponible': False, 'motif': 'privileges_insuffisants'}
+        return {'disponible': False, 'motif': 'erreur_capture'}
     ecoule = max(1.0, time.time() - t0)
 
     inv = {}

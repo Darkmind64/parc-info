@@ -1,26 +1,24 @@
 {
-  "version": "2.19.39",
+  "version": "2.19.44",
   "release_date": "2026-09-05",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.39/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.39/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.39/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.39",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.39/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.39/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.39/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.39/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.39/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.44",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Scan réseau — croisement multi-méthodes pour détecter un maximum d'appareils, y compris hors du segment local (autre VLAN/sous-réseau routé). Deux nouvelles sources viennent compléter l'ARP local quand celui-ci ne peut structurellement rien donner : la table ARP des routeurs/switchs SNMP de l'inventaire (`hotes_vus_snmp`, franchit les VLAN — un appareil derrière un routeur reste invisible en ARP local, mais le routeur, lui, connaît sa vraie MAC) et l'écoute passive du trafic ARP local (`capture_arp_sightings`, pour les appareils muets sur toute sonde active). La liste des résultats indique désormais la provenance de chaque MAC ainsi obtenue (badge 🌐 pour SNMP avec le nom de l'équipement source, badge 📡 pour la capture). Interface mobile (PWA) enrichie : disponibilité/garanties/valeur du parc et activité récente sur le tableau de bord, dernier ping/licences/clés BitLocker/documents téléchargeables sur les appareils, interventions et documents sur les contrats, notes sur les utilisateurs.",
+    "new_features": "Audit réseau, lot 4 : granularité — sept techniques de détection alternatives ajoutées pour identifier des appareils jusque-là invisibles ou mal identifiés. Réveil à distance (Wake-on-LAN) à la demande depuis la fiche système ; inventaire logiciel gratuit via HOST-RESOURCES-MIB pour un NAS/serveur SNMP sans collecteur ; empreinte OS passive façon p0f sur le scan réseau ; récepteur de traps SNMP (UDP 162, opt-in) ; table de voisinage IPv6 (NDP) avec ping multicast de courtoisie ; alias d'interface (ifAlias) affiché dans la vue Topologie.",
     "improvements": [
-      "L'ARP local reste toujours prioritaire quand il répond ; SNMP/capture ne servent qu'en repli, jamais à écraser une résolution directe.",
-      "Le motif d'un routeur/switch SNMP muet (pas de réponse, refusé, inactif) est propagé jusqu'à l'interface plutôt que d'aboutir à un résultat vide silencieux.",
-      "Interface mobile : le CSS personnalisé (couleurs, thème) s'applique de nouveau correctement au lieu de s'afficher en texte brut en haut de page.",
-      "Une connexion forcée à changer de mot de passe depuis /m revient bien sur la version mobile ensuite, au lieu de basculer sur l'interface bureau.",
-      "Fiche appareil : la section « Périphériques associés » (manquante depuis un changement de conteneur JS) est de retour."
+      "Le scan réseau croise désormais aussi l'empreinte TCP/IP passive (TTL, options du SYN initial) pour estimer la famille d'OS d'un appareil muet sur toute sonde active.",
+      "Un NAS ou un serveur Linux avec un agent SNMP standard, mais sans le collecteur ParcInfo, peut désormais fournir un inventaire logiciel gratuit (bouton dédié sur la fiche système).",
+      "Les traps SNMP poussés par les équipements (linkDown, coldStart, alarmes...) peuvent désormais être journalisés en temps réel dans les évènements du diagnostic réseau."
     ]
   },
   "checksums": {
@@ -31,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.39"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.44"
 }

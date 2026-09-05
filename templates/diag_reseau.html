@@ -103,7 +103,14 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
 .diag-pane.active { display:block; }
 .cfg-etat { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:.5rem .9rem; }
 .cfg-etat-row { display:flex; align-items:center; justify-content:space-between; gap:.5rem; font-size:.8rem;
-    border:1px solid var(--border); border-radius:4px; padding:.4rem .6rem; background:var(--bg-secondary); }
+    border:1px solid var(--border); border-radius:4px; padding:.4rem .6rem; background:var(--bg-secondary);
+    min-width:0; }
+/* Un libellé long (communautés SNMP multiples, utilisateur v3...) ne doit
+   jamais pousser la case à cocher hors du cadre visible : le texte passe à
+   la ligne (min-width:0 lève la contrainte de largeur mini d'un enfant
+   flex/grid) plutôt que de déborder, et la case garde toujours sa taille. */
+.cfg-etat-row > span:first-child { min-width:0; overflow-wrap:anywhere; }
+.cfg-etat-row input[type="checkbox"] { flex-shrink:0; }
 .cfg-etat-row .sub { font-size:.68rem; color:var(--text-muted); }
 .phase-times { font-family:'Share Tech Mono',monospace; font-size:.68rem; color:var(--text-muted); margin-top:.4rem; }
 </style>
@@ -139,6 +146,9 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
             ('diag_snmp_actif', 'Interrogation SNMP', (('v3 : ' ~ diag_cfg.diag_snmp_v3_user ~ ' + ') if diag_cfg.diag_snmp_v3_user else '') ~ diag_cfg.diag_snmp_communautes),
             ('diag_topologie_active', 'Topologie L2', 'nécessite le SNMP'),
             ('diag_capture_active', 'Capture passive (palier 2)', etat_capture.motif),
+            ('diag_snmp_trap_active', 'Récepteur de traps SNMP (UDP 162)',
+             'nécessite des droits élevés pour ce port — ' ~ etat_traps.motif
+             ~ (' — ' ~ etat_traps.nb_recus ~ ' reçu(s)' if etat_traps.nb_recus else '')),
             ('diag_baseline_active', 'Tendances / baseline', ''),
             ('diag_wifi_active', 'Diagnostic Wi-Fi', 'côté poste'),
             ('diag_ups_active', 'Supervision onduleurs', 'via SNMP'),
@@ -209,6 +219,14 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
 <div class="diag-card" id="wifi-wrap" style="margin-bottom:1.2rem;">
     <h2>📶 Wi-Fi (poste)</h2>
     <div id="wifi-body" class="diag-line">Chargement…</div>
+</div>
+
+<!-- ── IPv6 : table de voisinage NDP (audit réseau 2026-09-05, #28) ── -->
+<div class="diag-card" id="ipv6-wrap" style="margin-bottom:1.2rem;">
+    <h2>🔎 Voisinage IPv6 (NDP)
+        <button class="link-btn" style="margin-left:.6rem;" onclick="chargerIpv6()">Rafraîchir</button>
+    </h2>
+    <div id="ipv6-body" class="diag-line">Chargement…</div>
 </div>
 
 <!-- ── Résultat du dernier snapshot ── -->
@@ -309,6 +327,7 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
 const PEUT_ECRIRE = {{ 'true' if peut_ecrire else 'false' }};
 let currentPage = 1;
 let diagInterval = null;
+let diagLastCount = -1;   // nb de constats au dernier rendu de la liste (audit #14)
 
 const MOTIFS_CAPTURE = {
     ok: "disponible",
@@ -418,6 +437,7 @@ function lancerDiag(){
     }).then(r => r.json().then(d => ({ok:r.ok, d}))).then(({ok,d}) => {
         if (!ok){ showToast(d.error || 'Erreur', 'error'); btn.disabled = false; return; }
         document.getElementById('snapshot-wrap').style.display = 'block';
+        diagLastCount = -1;
         diagInterval = setInterval(pollDiag, 900);
     }).catch(() => { showToast('Erreur réseau', 'error'); btn.disabled = false; });
 }
@@ -426,7 +446,13 @@ function pollDiag(){
     fetch('/api/diag-reseau/snapshot/status').then(r=>r.json()).then(d => {
         document.getElementById('diag-prog').style.width = (d.progress||0) + '%';
         document.getElementById('diag-msg').textContent = d.message || '';
-        if (d.findings) renderFindings(d.findings, d.avertissements || []);
+        // Même principe que le scan réseau (audit réseau 2026-09-05, #14) :
+        // ne reconstruire la liste de constats que si elle a réellement
+        // changé, pas à chaque tick de sondage (900 ms).
+        if (d.findings && (d.findings.length !== diagLastCount || !d.running)) {
+            diagLastCount = d.findings.length;
+            renderFindings(d.findings, d.avertissements || []);
+        }
         if (d.phases && Object.keys(d.phases).length){
             const pt = document.getElementById('phase-times');
             if (pt) pt.textContent = 'Temps par phase : ' +
@@ -657,10 +683,15 @@ function lignePort(p){
     const nomHote = h => h.appareil_id
         ? '<a href="/appareil/' + h.appareil_id + '/fiche-systeme">' + esc(h.appareil_nom) + '</a>'
         : '<span class="mono">' + esc(h.mac) + '</span>';
+    // ifAlias : le nom qu'un administrateur tape sur le port (ex.
+    // « PC-Comptabilité ») — déjà relevé en SNMP, jusqu'ici jeté (audit #22).
+    const nomPort = esc(p.port_nom) + (p.port_alias
+        ? ' <span style="color:var(--text-muted);font-size:.7rem;" title="Étiquette du port (ifAlias)">« ' + esc(p.port_alias) + ' »</span>'
+        : '');
     if (p.est_uplink){
         const cible = p.voisin ? esc(p.voisin) + (p.voisin_port ? ' (' + esc(p.voisin_port) + ')' : '') : '';
         return '<tr class="topo-uplink" title="Cliquer pour voir les appareils en aval">'
-            + '<td>' + esc(p.port_nom) + '</td><td>' + (p.vlan || '') + '</td>'
+            + '<td>' + nomPort + '</td><td>' + (p.vlan || '') + '</td>'
             + '<td>' + (cible ? '→ ' + cible + ' · ' : '') + hotes.length + ' appareil(s) en aval ' + badges
             + ' <span style="color:var(--text-muted);font-size:.7rem;">(cliquer pour déplier)</span></td>'
             + '<td style="font-size:.72rem;color:var(--text-muted);">' + esc(p.stp || '') + '</td></tr>'
@@ -669,7 +700,7 @@ function lignePort(p){
             + '</td></tr>';
     }
     return '<tr style="' + (p.incoherent ? 'background:rgba(255,140,0,.08);' : '') + '">'
-        + '<td>' + esc(p.port_nom) + '</td><td>' + (p.vlan || '') + '</td>'
+        + '<td>' + nomPort + '</td><td>' + (p.vlan || '') + '</td>'
         + '<td>' + hotes.map(nomHote).join('<br>') + badges + '</td>'
         + '<td style="font-size:.72rem;color:var(--text-muted);">'
         + hotes.map(h => esc(h.vendor||'')).filter(Boolean).join(', ') + '</td></tr>';
@@ -923,6 +954,22 @@ function chargerWifi(){
     }).catch(() => {});
 }
 
+function chargerIpv6(){
+    const wrap = document.getElementById('ipv6-body');
+    wrap.textContent = 'Interrogation en cours…';
+    fetch('/api/diag-reseau/ipv6-voisins').then(r=>r.json()).then(d => {
+        if (!d.voisins || !d.voisins.length){
+            wrap.innerHTML = '<span style="color:var(--text-muted);">Aucun voisin IPv6 dans le cache NDP de ce poste.</span>';
+            return;
+        }
+        wrap.innerHTML = `<div style="font-size:.72rem;color:var(--text-secondary);margin-bottom:.3rem;">${d.nb} voisin(s)${d.ping_multicast_ok===false?' — ping multicast (ff02::1) sans réponse':''}</div>
+            <div style="overflow-x:auto;"><table class="diag-table"><thead><tr><th>Adresse IPv6</th><th>MAC</th><th>Interface</th><th>État</th></tr></thead><tbody>
+            ${d.voisins.map(v => `<tr><td style="font-family:'Share Tech Mono',monospace;font-size:.72rem;">${esc(v.ip)}</td>
+                <td>${esc(v.mac||'')}</td><td>${esc(v.interface||'')}</td><td>${esc(v.etat||'')}</td></tr>`).join('')}
+            </tbody></table></div>`;
+    }).catch(() => { wrap.innerHTML = '<span style="color:var(--text-muted);">Indisponible.</span>'; });
+}
+
 function chargerUps(){
     fetch('/api/diag-reseau/ups').then(r=>r.json()).then(d => {
         const wrap = document.getElementById('ups-body');
@@ -960,5 +1007,6 @@ chargerTopologie();
 chargerTendances();
 chargerWifi();
 chargerUps();
+chargerIpv6();
 </script>
 {% endblock %}

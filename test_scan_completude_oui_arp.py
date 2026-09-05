@@ -276,5 +276,119 @@ verifier(resultat_prio is not None and resultat_prio.get('mac') == 'dd:ee:ff:44:
           "l'ARP local reste prioritaire : jamais écrasé par SNMP/capture quand il répond déjà",
           str(resultat_prio.get('mac')))
 
+# Audit réseau 2026-09-05, #08 : un hôte résolu normalement en ARP local ne
+# doit JAMAIS recevoir le badge 🌐/📡 même si cette MÊME mac apparaît AUSSI
+# dans snmp_arp_par_ip — le cas courant d'une passerelle, que le routeur de
+# l'inventaire connaît forcément lui aussi dans sa propre table ARP. L'ancien
+# code déduisait la provenance après coup par simple égalité de valeur et se
+# trompait précisément dans ce cas ; elle doit être tracée au moment où la
+# mac est trouvée, pas redéduite ensuite.
+A._ping           = lambda ip: True
+A._hostname       = lambda ip: 'passerelle'
+A._netbios_name   = lambda ip: ''
+A._ttl_os_guess   = lambda ip: 'Linux/Unix'
+A._scan_ports     = lambda ip: [80]
+A._mac_from_arp   = lambda ip: 'aa:bb:cc:00:01:02'   # même mac que la table ARP du routeur ci-dessous
+A._snmp_get_typed = lambda ip, oids, **kw: {}
+A.time.sleep      = lambda s: None
+try:
+    resultat_meme_mac = A._scan_host(
+        '192.0.2.83',
+        snmp_arp_par_ip={'192.0.2.83': {'mac': 'aa:bb:cc:00:01:02',
+                                        'sources': [{'nom': 'Routeur-Site', 'ip': '192.0.2.254'}]}})
+finally:
+    A._ping, A._hostname, A._netbios_name = _ping_orig, _hostname_orig, _netbios_orig
+    A._ttl_os_guess, A._scan_ports = _ttl_orig, _ports_orig
+    A._mac_from_arp = _arp_orig
+    A.time.sleep = _sleep_orig
+verifier(resultat_meme_mac is not None and resultat_meme_mac.get('mac') == 'aa:bb:cc:00:01:02'
+          and not resultat_meme_mac.get('mac_source'),
+          "une mac identique par coïncidence entre l'ARP local et la table SNMP d'un routeur "
+          "n'étiquette PAS l'hôte comme « vu via SNMP » : la provenance suit la RÉSOLUTION, pas la valeur",
+          str((resultat_meme_mac.get('mac'), resultat_meme_mac.get('mac_source'))))
+
+print('\n=== 10. _scan_host() : empreinte DHCP passive rattachée par MAC (audit #23) ===')
+A._ping           = lambda ip: True
+A._hostname       = lambda ip: 'poste-dhcp'
+A._netbios_name   = lambda ip: ''
+A._ttl_os_guess   = lambda ip: 'Windows'
+A._scan_ports     = lambda ip: [445]
+A._mac_from_arp   = lambda ip: 'aa:bb:cc:00:02:02'
+A._snmp_get_typed = lambda ip, oids, **kw: {}
+A.time.sleep      = lambda s: None
+_empreintes_dhcp = {'aa:bb:cc:00:02:02': {'options': (1, 3, 6, 15, 249),
+                                          'famille': 'probablement Windows (option 249 : route statique MS)'}}
+try:
+    resultat_dhcp = A._scan_host('192.0.2.84', dhcp_par_mac=_empreintes_dhcp)
+finally:
+    A._ping, A._hostname, A._netbios_name = _ping_orig, _hostname_orig, _netbios_orig
+    A._ttl_os_guess, A._scan_ports = _ttl_orig, _ports_orig
+    A._mac_from_arp = _arp_orig
+    A.time.sleep = _sleep_orig
+verifier(resultat_dhcp is not None
+          and resultat_dhcp.get('dhcp_fingerprint') == _empreintes_dhcp['aa:bb:cc:00:02:02'],
+          "l'empreinte DHCP est rattachée au résultat quand la MAC correspond",
+          str(resultat_dhcp and resultat_dhcp.get('dhcp_fingerprint')))
+
+A._ping           = lambda ip: True
+A._hostname       = lambda ip: 'poste-sans-empreinte'
+A._netbios_name   = lambda ip: ''
+A._ttl_os_guess   = lambda ip: 'Windows'
+A._scan_ports     = lambda ip: [445]
+A._mac_from_arp   = lambda ip: 'aa:bb:cc:00:02:03'
+A._snmp_get_typed = lambda ip, oids, **kw: {}
+A.time.sleep      = lambda s: None
+try:
+    resultat_sans_dhcp = A._scan_host('192.0.2.85', dhcp_par_mac=_empreintes_dhcp)
+finally:
+    A._ping, A._hostname, A._netbios_name = _ping_orig, _hostname_orig, _netbios_orig
+    A._ttl_os_guess, A._scan_ports = _ttl_orig, _ports_orig
+    A._mac_from_arp = _arp_orig
+    A.time.sleep = _sleep_orig
+verifier(resultat_sans_dhcp is not None and 'dhcp_fingerprint' not in resultat_sans_dhcp,
+          "aucune entrée DHCP pour cette MAC -> pas de champ dhcp_fingerprint (jamais de faux positif)",
+          str(resultat_sans_dhcp))
+
+print('\n=== 11. _scan_host() : empreinte OS passive façon p0f rattachée par IP (audit #25) ===')
+A._ping           = lambda ip: True
+A._hostname       = lambda ip: 'poste-os'
+A._netbios_name   = lambda ip: ''
+A._ttl_os_guess   = lambda ip: 'Windows'
+A._scan_ports     = lambda ip: [445]
+A._mac_from_arp   = lambda ip: 'aa:bb:cc:00:03:01'
+A._snmp_get_typed = lambda ip, oids, **kw: {}
+A.time.sleep      = lambda s: None
+_empreintes_os = {'192.0.2.86': {'os_probable': 'Windows (probable)', 'ttl_observe': 127,
+                                 'ttl_initial_estime': 128, 'fenetre': 8192}}
+try:
+    resultat_os = A._scan_host('192.0.2.86', os_par_ip=_empreintes_os)
+finally:
+    A._ping, A._hostname, A._netbios_name = _ping_orig, _hostname_orig, _netbios_orig
+    A._ttl_os_guess, A._scan_ports = _ttl_orig, _ports_orig
+    A._mac_from_arp = _arp_orig
+    A.time.sleep = _sleep_orig
+verifier(resultat_os is not None and resultat_os.get('os_fingerprint') == _empreintes_os['192.0.2.86'],
+          "l'empreinte OS passive est rattachée au résultat quand l'IP correspond",
+          str(resultat_os and resultat_os.get('os_fingerprint')))
+
+A._ping           = lambda ip: True
+A._hostname       = lambda ip: 'poste-sans-empreinte-os'
+A._netbios_name   = lambda ip: ''
+A._ttl_os_guess   = lambda ip: 'Windows'
+A._scan_ports     = lambda ip: [445]
+A._mac_from_arp   = lambda ip: 'aa:bb:cc:00:03:02'
+A._snmp_get_typed = lambda ip, oids, **kw: {}
+A.time.sleep      = lambda s: None
+try:
+    resultat_sans_os = A._scan_host('192.0.2.87', os_par_ip=_empreintes_os)
+finally:
+    A._ping, A._hostname, A._netbios_name = _ping_orig, _hostname_orig, _netbios_orig
+    A._ttl_os_guess, A._scan_ports = _ttl_orig, _ports_orig
+    A._mac_from_arp = _arp_orig
+    A.time.sleep = _sleep_orig
+verifier(resultat_sans_os is not None and 'os_fingerprint' not in resultat_sans_os,
+          "aucune entrée pour cette IP -> pas de champ os_fingerprint (jamais de faux positif)",
+          str(resultat_sans_os))
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

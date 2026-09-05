@@ -308,6 +308,7 @@ const INVENTAIRE_IPS = new Set({{ appareils_ips | tojson }});
 let scanResults = [];
 let sortCol = 'ip', sortDir = 1;
 let scanInterval = null;
+let scanLastCount = -1;   // nb d'hôtes au dernier rendu du tableau (audit #14)
 
 // ── PLAGES ───────────────────────────────────────────────────────────────────
 const plageWrap = document.getElementById('plages-wrap');
@@ -440,6 +441,7 @@ async function demarrerScanReel() {
     document.getElementById('prog-fill').style.width = '0%';
     document.getElementById('scan-msg').textContent = 'Démarrage...';
     scanResults = [];
+    scanLastCount = -1;
     renderTable([]);
     // Réinitialiser le panneau diff sans le cacher
     document.getElementById('diff-summary').innerHTML =
@@ -460,9 +462,17 @@ async function pollStatus() {
         document.getElementById('prog-fill').style.width = d.progress + '%';
         document.getElementById('scan-msg').textContent = d.message || '';
         scanResults = d.results || [];
-        renderTable(scanResults);
-        updateStats();
-        showDiff();   // mettre à jour en temps réel pendant le scan
+        // Le tableau (tri + filtre + reconstruction complète du DOM, jusqu'à
+        // 254 lignes sur un /24) est coûteux — le sondage reste rapide
+        // (800 ms) pour la barre de progression, mais on ne le reconstruit
+        // QUE quand un nouvel hôte est réellement apparu, ou à la toute fin
+        // du scan (audit réseau 2026-09-05, #14).
+        if (scanResults.length !== scanLastCount || !d.running) {
+            scanLastCount = scanResults.length;
+            renderTable(scanResults);
+            updateStats();
+            showDiff();   // mettre à jour en temps réel pendant le scan
+        }
         if (!d.running) {
             clearInterval(scanInterval); scanInterval = null;
             resetUI();
@@ -498,6 +508,15 @@ function renderTable(results) {
         if (sortCol === 'ip') {
             va = a.ip.split('.').map(n => n.padStart(3,'0')).join('');
             vb = b.ip.split('.').map(n => n.padStart(3,'0')).join('');
+        } else if (sortCol === 'statut') {
+            // Les objets de résultat ne portent pas de champ 'statut' : le
+            // badge Nouveau/Inventaire est calculé à l'affichage à partir de
+            // INVENTAIRE_IPS. Même calcul ici pour que le tri sur cette
+            // colonne trie réellement quelque chose (audit réseau
+            // 2026-09-05, #13 : cliquer dessus n'avait aucun effet avant,
+            // tout en affichant quand même la flèche de tri).
+            va = INVENTAIRE_IPS.has(a.ip) ? 1 : 0;   // Nouveau (0) avant Inventaire (1)
+            vb = INVENTAIRE_IPS.has(b.ip) ? 1 : 0;
         }
         return (va < vb ? -1 : va > vb ? 1 : 0) * sortDir;
     });
@@ -533,7 +552,13 @@ function renderTable(results) {
             ? `<span class="badge-os badge-os-${osBadgeClass}">${h.os_guess}</span>`
             : '—';
         const bannieresTxt = [h.bannieres ? Object.entries(h.bannieres).map(([p,b]) => `${p}: ${b}`).join('\n') : '',
-                              (h.snmp && h.snmp.sysDescr) ? `SNMP: ${h.snmp.sysDescr}` : '']
+                              (h.snmp && h.snmp.sysDescr) ? `SNMP: ${h.snmp.sysDescr}` : '',
+                              // Empreinte DHCP passive (audit #23) : famille déduite de l'option 55,
+                              // indicative — pas une identification à elle seule.
+                              (h.dhcp_fingerprint && h.dhcp_fingerprint.famille) ? `DHCP: ${h.dhcp_fingerprint.famille}` : '',
+                              // Empreinte TCP/IP passive façon p0f (audit #25) : famille déduite du
+                              // SYN initial (TTL, options) — indicative, jamais une version précise.
+                              (h.os_fingerprint && h.os_fingerprint.os_probable) ? `TCP/IP: ${h.os_fingerprint.os_probable}` : '']
                               .filter(Boolean).join('\n');
         const ports = (h.ports||[]).slice(0,7).map(p => `<span class="port-chip">${p}</span>`).join('')
                     + (h.ports&&h.ports.length>7 ? `<span class="port-chip">+${h.ports.length-7}</span>` : '');
@@ -567,6 +592,13 @@ function renderTable(results) {
         const fabricantCell = marquePrecise
             ? `${escH(marquePrecise)}${modelePrecise?` <span style="color:var(--text-muted);">${escH(modelePrecise)}</span>`:''}`
             : escH(h.vendor||'—');
+        // Un nom WMI/UPnP peut faire 40-60+ caractères (chaîne "friendly
+        // name" libre) : troncature + valeur complète en infobulle, plutôt
+        // que d'élargir toute la colonne pour une seule ligne (audit réseau
+        // 2026-09-05, #16).
+        const fabricantTitre = [marquePrecise?'Détecté (WMI/UPnP)':'Déduit du préfixe MAC',
+                                [marquePrecise, modelePrecise].filter(Boolean).join(' ') || h.vendor || '']
+                                .filter(Boolean).join(' — ');
         const statusBadge = isNew
             ? '<span class="new-badge">✦ Nouveau</span>'
             : '<span class="exists-badge">↩ Inventaire</span>';
@@ -581,7 +613,7 @@ function renderTable(results) {
             <td style="font-family:'Share Tech Mono',monospace;font-weight:700;white-space:nowrap;">${h.ip}${silencieuxBadge}</td>
             <td>${escH(nomActuel)?`<div style="font-size:.8rem;">${escH(nomActuel)}</div>`:''}${nomAltLine}${macLine}</td>
             <td style="white-space:nowrap;">${escH(h.type||'—')}</td>
-            <td style="font-size:.75rem;white-space:nowrap;" title="${escH(marquePrecise?'Détecté (WMI/UPnP)':'Déduit du préfixe MAC')}">${fabricantCell}</td>
+            <td style="font-size:.75rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${escH(fabricantTitre)}">${fabricantCell}</td>
             <td>${osBadge}</td>
             <td${bannieresTxt?` title="${escH(bannieresTxt)}"`:''}>${ports||'—'}</td>
             <td>${statusBadge}</td>

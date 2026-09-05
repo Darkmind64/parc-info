@@ -3713,7 +3713,8 @@ const MoniteurModal = {
             btn.disabled = true;
             const motifs = { scapy_absent: 'scapy non installé', docker_bridge: 'conteneur en mode bridge (network_mode: host requis)',
                              privileges_insuffisants: 'privilèges insuffisants (lancer en administrateur / root, Npcap sous Windows)',
-                             aucune_interface: 'aucune interface réseau' };
+                             aucune_interface: 'aucune interface réseau',
+                             erreur_capture: 'la capture a été interrompue par une erreur (voir les journaux du serveur)' };
             etat.textContent = 'Capture indisponible : ' + (motifs[cap.motif] || cap.motif);
         } else if (cap.en_cours) {
             btn.disabled = true;
@@ -3896,7 +3897,7 @@ const BrassageModal = {
             avert += `<div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.35rem;font-size:.7rem;color:${coul};">`
                   + `<span>${anormal ? '⚠ ' : ''}${escH(s.nom)} — table MAC : ${escH(HYP[s.transform] || s.transform)}`
                   + `, ${s.reconnues}/${s.total} appareil(s) reconnu(s)</span>`
-                  + `<select onchange="BrassageModal.setFdbMode('${escH(s.ip)}', this.value)" style="font-size:.68rem;padding:.05rem .2rem;">`
+                  + `<select onchange="BrassageModal.setFdbMode('${escH(s.ip)}', this.value)" class="cfg-input cfg-input-sm" style="width:auto;font-size:.68rem;padding:.05rem .2rem;">`
                   + ['auto', 'standard', 'prefixe', 'ignorer'].map(m =>
                         `<option value="${m}" ${s.mode === m ? 'selected' : ''}>${
                           {auto:'auto', standard:'lecture standard', prefixe:'forcer préfixe', ignorer:'ignorer ce switch'}[m]}</option>`).join('')
@@ -4022,7 +4023,7 @@ const BrassageModal = {
             const ou = x.via === 'capture' ? '📡 capture passive'
                      : `${escH(x.switch_nom)} · port ${escH('' + x.switch_port_numero)}`;
             h += `<tr><td style="white-space:normal;">${ou}</td>`
-               + `<td>${escH(x.mac)}</td><td style="white-space:normal;">${escH(x.vendor || '?')}</td></tr>`;
+               + `<td title="${escH(x.mac)}">${escH(x.mac)}</td><td style="white-space:normal;">${escH(x.vendor || '?')}</td></tr>`;
         });
         return h + '</tbody></table>';
     },

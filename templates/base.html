@@ -518,12 +518,21 @@
         .form-hint { font-size:.72rem; color:var(--text-muted); margin-top:.1rem; }
 
         label { font-size:.72rem; font-weight:600; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-secondary); }
-        input, select, textarea {
+        /* :not([type=checkbox]):not([type=radio]) — une case/bouton radio sans
+           classe de style dédiée (il en existe plusieurs dans l'app : filtres
+           de liste, sélection de lignes de scan, bascules de diagnostic
+           réseau...) héritait sinon de width:100% + le padding d'un champ
+           texte, l'étirant en une barre plate au lieu d'un carré normal —
+           au pire assez discret pour passer inaperçu (une case dans une
+           cellule de tableau étroite), au pire la rendant introuvable dans
+           une ligne large (case « Interrogation SNMP » du diagnostic réseau). */
+        input:not([type="checkbox"]):not([type="radio"]), select, textarea {
             background:var(--input-bg); border:1px solid var(--input-border); border-radius:3px;
             color:var(--text-primary); padding:.55rem .8rem;
             font-family:'Exo 2',sans-serif; font-size:.9rem; transition:border-color .2s, box-shadow .2s; width:100%;
         }
         input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(0,201,255,.1); }
+        input[type="checkbox"], input[type="radio"] { accent-color:var(--accent); cursor:pointer; }
         input[type="date"] { color-scheme:dark; }
         input[type="color"] { padding:.2rem; height:36px; cursor:pointer; }
         textarea { resize:vertical; min-height:80px; }

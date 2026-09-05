@@ -1,5 +1,76 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.44] - 2026-09-05 🛰️
+
+### 🛰️ Audit réseau, lot 4 : granularité — techniques alternatives de détection
+
+Suite des lots 1 à 3. Là où les lots précédents corrigeaient des bugs et complétaient la couverture de tests, celui-ci ajoute des sources de détection nouvelles pour gagner en granularité sur des appareils jusqu'ici invisibles ou mal identifiés — sept propositions de l'audit, toutes validées :
+
+- **Réveil à distance (Wake-on-LAN).** Bouton « ⚡ Réveiller » sur la fiche système d'un appareil qui a une adresse MAC enregistrée : envoie le paquet magique standard en diffusion locale. Ne fonctionne que si le Wake-on-LAN est activé côté appareil et qu'il est sur le même segment L2 que ce serveur — toujours une action manuelle explicite, jamais un comportement de fond.
+- **Inventaire logiciel gratuit via HOST-RESOURCES-MIB.** Bouton « 🔍 Inventaire SNMP » sur la fiche système : interroge `hrSWInstalledName`/`hrSWRunName`/`hrStorage*` sur l'agent SNMP standard d'un NAS, d'un serveur Linux ou de tout hôte avec un agent SNMP mais sans le collecteur ParcInfo installé — logiciels installés, processus en cours, occupation disque, sans rien déployer sur la cible.
+- **Empreinte OS passive façon p0f.** Le scan réseau écoute désormais aussi les paquets TCP SYN initiaux (TTL, options de fenêtre) pour estimer la famille d'OS d'un appareil qui ne répond à aucune sonde active — un signal de plus, au même titre que le fabricant OUI ou l'empreinte DHCP, jamais une identification à lui seul.
+- **Récepteur de traps SNMP (UDP 162), opt-in.** Un nouveau bouton dans la configuration du diagnostic réseau active un récepteur qui journalise les traps SNMP v1/v2c poussés par les équipements (linkDown, coldStart, alarmes constructeur...) dans les évènements du diagnostic — complément « en temps réel » au relevé SNMP actif, qui n'interroge qu'à intervalle régulier. Nécessite des droits élevés pour se lier au port 162 ; un trap n'est journalisé que s'il provient d'une IP déjà connue de l'inventaire d'un client, jamais d'évènement hors périmètre ACL.
+- **Table de voisinage IPv6 (NDP).** Nouvel encart dans l'aperçu du diagnostic réseau : lit le cache de voisinage IPv6 du système (le pendant IPv6 de l'ARP) après un ping multicast de courtoisie vers `ff02::1`, pour les appareils qui ne répondent qu'en IPv6 sur ce segment.
+- **Alias d'interface (`ifAlias`) dans la vue Topologie.** Le libellé configuré sur chaque port d'un switch (souvent le nom du poste ou de la prise murale branchée) s'affiche désormais à côté du nom technique du port.
+
+## [2.19.43] - 2026-09-05 🧪
+
+### 🧪 Audit réseau, lot 3 : couverture de tests + 2 bugs réels découverts
+
+Suite des lots 1 et 2. Cinq zones du réseau qui n'avaient jusqu'ici aucun test reçoivent une couverture dédiée — et en les écrivant, deux bugs réels et bien réels sont apparus, tous deux corrigés :
+
+- **Un détecteur DHCP actif n'a en réalité jamais envoyé le moindre paquet, depuis un temps indéterminé.** `detecter_dhcp_pirate` appelle `_mac_locale()` pour obtenir l'adresse MAC de ce poste — mais une fonction totalement différente, portant le même nom (`_mac_locale(mac)`, un test « MAC localement administrée ? » sans rapport), était définie plus bas dans `network_diag.py` et écrasait purement et simplement la première au chargement du module. L'appel levait donc systématiquement une erreur, absorbée en silence par la gestion d'erreurs de la fonction. Renommée en `_mac_locale_poste()` pour lever l'ambiguïté.
+- **Le paquet DHCPDISCOVER envoyé par ce même détecteur était 4 octets trop court** par rapport au format DHCP standard (le bloc `ciaddr/yiaddr/siaddr/giaddr` ne réservait que 12 octets au lieu de 16), décalant tout ce qui suit dans le paquet. Corrigé.
+
+Nouvelle couverture :
+- La capture réseau passive (`capture_passive`, palier 2) — jusqu'ici zéro test alors qu'elle alimente à elle seule six catégories de détection (ARP spoofing, tempête broadcast, MAC flapping, DHCP pirate, Router Advertisement pirate, instabilité STP, retransmissions TCP) — est désormais vérifiée par une suite dédiée avec un faux module de capture, sans dépendance à scapy ni au réseau réel.
+- Le calcul du sens des liens réseau par protocole STP (racine, port racine, pont amont) et la découverte récursive de topologie avec son plafond de profondeur sont désormais testés.
+- Le diagnostic Wi-Fi sous Linux (`iw`) et macOS (`system_profiler`) est désormais testé — seul Windows l'était jusqu'ici.
+- SNMPv3 est désormais vérifié de bout en bout avec les 5 protocoles d'authentification documentés (MD5, SHA-224, SHA-256, SHA-384, SHA-512), pas seulement SHA-1.
+- Le détecteur de conflit de noms NetBIOS (`detecter_conflits_noms`) est désormais testé.
+
+## [2.19.42] - 2026-09-05 🖱️
+
+### 🖱️ Audit réseau, lot 2 : cohérence et performance du frontend
+
+Suite du lot 1 (network_diag.py / app.py), 4 correctifs sur les pages Scan réseau, Diagnostic réseau et Baie de brassage :
+
+- Le tri par « Statut » du tableau de résultats du scan réseau ne triait rien (aucun champ `statut` n'existe sur un résultat, le badge Nouveau/Inventaire est calculé à l'affichage) tout en affichant quand même la flèche de tri comme si ça avait fonctionné. Le tri calcule désormais ce même badge pour trier réellement.
+- Les tableaux de résultats du scan réseau (sondage toutes les 800 ms) et de la liste de constats du diagnostic réseau (900 ms) étaient entièrement reconstruits — tri, filtre, remplacement complet du DOM — à chaque tick, même quand rien n'avait changé, jusqu'à plus d'une fois par seconde sur un scan complet. Ils ne se reconstruisent désormais que quand le nombre de résultats a réellement évolué, ou à la toute fin.
+- Un menu déroulant de la baie de brassage (mode de lecture de la table MAC, dans l'avertissement de fiabilité de « Deviner le brassage ») n'avait ni classe ni largeur définie, contrairement à un menu quasi identique juste à côté — il pouvait s'étirer et chevaucher son étiquette.
+- Un nom de fabricant/modèle détecté via WMI/UPnP peut faire 40 à 60 caractères ; la cellule correspondante du scan réseau n'était pas tronquée et élargissait toute la colonne. Troncature ajoutée avec la valeur complète en infobulle ; l'adresse MAC du tableau « hors inventaire » de la baie reçoit elle aussi une infobulle, comme les autres colonnes tronquables du même tableau.
+
+## [2.19.41] - 2026-09-05 🔍
+
+### 🔍 Audit réseau, lot 1 : 12 correctifs de fiabilité et performance
+
+Audit complet des fonctionnalités réseau demandé par l'utilisateur (cohérence, bugs, ralentissements, blocages), mené par 4 relectures indépendantes de `network_diag.py`, des primitives SNMP/scan de `app.py`, du frontend et de la couverture de tests. Douze constats corrigés dans ce lot :
+
+- **Un rebouclage normal de compteur SNMP 32 bits n'est plus pris pour un redémarrage de switch.** Sur un lien chargé, un compteur boucle en quelques dizaines de secondes ; `_analyser_snmp` utilisait auparavant la valeur brute entière du compteur comme delta, générant des débits en térabits fantômes et de fausses alertes de saturation/erreurs. Réutilise désormais la même logique déjà écrite et testée pour les LEDs de la baie.
+- **Le badge « vu via SNMP/capture » du scan réseau n'est plus attribué à tort à un appareil résolu normalement en local.** La provenance de la MAC était déduite après coup par égalité de valeur — un appareil du réseau local était réétiqueté « vu via SNMP, sous-réseau routé » dès que le routeur de l'inventaire connaissait aussi cette IP, le cas courant pour n'importe quelle passerelle. Elle est désormais tracée au moment où la MAC est trouvée.
+- Le comptage « N switches / N muets » de la baie de brassage compte sur la même base (déduplication par IP) : un switch injoignable occupant deux emplacements de rack ne compte plus double.
+- Le test de capture de la baie n'accuse plus systématiquement des « privilèges insuffisants » pour n'importe quelle erreur (interface débranchée, erreur scapy interne...).
+- Un switch qui n'expose ni `sysName` ni `sysDescr` n'est plus re-sondé à chaque cycle d'activité.
+- La barre de progression de la cartographie ne recule plus quand la découverte récursive trouve de nouveaux équipements en cours de route.
+- Un switch jamais interrogé ne peut plus être sondé plusieurs fois en parallèle par la boucle d'activité, une cartographie et le moniteur en même temps.
+- Le relevé de la table MAC d'un switch (jusqu'à 45 s sur un gros switch) ne bloque plus l'activité de tous les autres switches de la baie : verrou par switch au lieu d'un verrou global.
+- SNMPv3 vérifie désormais que la réponse reçue correspond bien à la requête envoyée (request-id), comme le fait déjà le SNMP v1/v2c — une réponse tardive à un échange précédent n'est plus acceptée par erreur.
+- Une résolution DNS inverse lente (sans délai propre) ne peut plus retenir un hôte du scan au-delà du budget de temps affiché.
+- Fuite de socket corrigée sur le cas normal (timeout, la plupart des hôtes n'ont pas NetBIOS) de la détection NetBIOS.
+- Les échecs de découverte UPnP/mDNS/ONVIF sont désormais journalisés, comme les sondes SNMP/capture voisines.
+
+## [2.19.40] - 2026-09-05 🩹
+
+### 🩹 Case à cocher « Interrogation SNMP » invisible dans le diagnostic réseau
+
+Signalé par l'utilisateur. La règle CSS globale de `base.html` qui stylise tous les champs de formulaire (`input, select, textarea { width:100%; padding:.55rem .8rem; ... }`) ne mettait pas les cases à cocher / boutons radio à part — toute case sans classe de style dédiée héritait donc d'une largeur à 100 % et d'un padding pensé pour du texte, s'étirant en une barre plate d'environ 230 px de large sur 13 px de haut au lieu d'un carré normal.
+
+Dans la plupart des cas (une case dans une cellule de tableau étroite, par exemple la sélection des lignes du scan réseau) le dégât restait discret. Mais la case « Interrogation SNMP » du panneau de configuration du diagnostic réseau (`templates/diag_reseau.html`) n'a pas cette chance : son texte d'accompagnement (communautés SNMP configurées, utilisateur SNMPv3 le cas échéant) peut être long, et une carte élargie par ce texte combinée à une case étirée sur toute la largeur produit, dans les cas extrêmes, un effondrement complet de la mise en page de la grille — la case finit hors du cadre visible.
+
+Deux correctifs complémentaires :
+- `templates/base.html` : les sélecteurs `input[type="checkbox"]`/`input[type="radio"]` sont désormais exclus de la règle globale, et reçoivent à la place une couleur d'accent cohérente avec le thème.
+- `templates/diag_reseau.html` : la carte de configuration protège aussi le cas d'un texte réellement très long (`min-width:0` + retour à la ligne du texte plutôt que débordement, case à cocher qui ne rétrécit jamais) — le même principe déjà appliqué ailleurs dans l'app face à ce type de contenu variable (voir les correctifs de défilement horizontal de la v2.19.33/34).
+
 ## [2.19.39] - 2026-09-05 📱
 
 ### 📱 Interface mobile enrichie + correctifs intégrés
