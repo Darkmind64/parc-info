@@ -817,5 +817,89 @@ verifier(len(_r21c['detectes']) == 1 and len(_r21c['detectes'][0]['sources']) ==
          "même sous-réseau vu par 2 équipements -> une entrée, deux sources",
          str(_r21c['detectes']))
 
+print('\n=== 22. _ip_depuis_suffixe_arp() : les 2 formats d\'index de table ARP SNMP ===')
+verifier(N._ip_depuis_suffixe_arp('5.192.168.1.50') == '192.168.1.50',
+         "ipNetToMediaPhysAddress (5 composants : ifIndex.A.B.C.D)")
+verifier(N._ip_depuis_suffixe_arp('5.1.4.192.168.1.51') == '192.168.1.51',
+         "ipNetToPhysicalPhysAddress (7 composants : ifIndex.type.longueur.A.B.C.D)")
+verifier(N._ip_depuis_suffixe_arp('5.1') == '', "suffixe trop court -> chaîne vide, pas d'exception")
+verifier(N._ip_depuis_suffixe_arp('5.1.4.192.168.1.999') == '',
+         "octet hors 0-255 -> rejeté plutôt qu'une IP invalide silencieuse")
+
+print('\n=== 23. hotes_vus_snmp() : croiser les tables ARP des routeurs/switchs SNMP ===')
+conn = A.get_db()
+conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (909, 'HotesSNMP')")
+conn.execute("INSERT OR REPLACE INTO config (cle, valeur) VALUES ('diag_snmp_actif', '0')")
+conn.commit(); conn.close()
+_inv21()
+verifier(N.hotes_vus_snmp(909) == {'ok': False, 'motif': 'snmp_inactif', 'hotes': {}},
+         "SNMP désactivé -> motif explicite, aucune requête tentée")
+
+conn = A.get_db()
+conn.execute("INSERT OR REPLACE INTO config (cle, valeur) VALUES ('diag_snmp_actif', '1')")
+conn.commit(); conn.close()
+_inv21()
+verifier(N.hotes_vus_snmp(909)['motif'] == 'aucun_equipement',
+         "aucun équipement réseau inventorié -> motif explicite")
+
+conn = A.get_db()
+conn.execute("INSERT INTO appareils (id, client_id, nom_machine, type_appareil, adresse_ip) "
+             "VALUES (961, 909, 'Routeur-Site', 'Routeur/Pare-feu', '192.168.1.254')")
+conn.commit(); conn.close()
+
+# (a) le routeur ne répond pas en SNMP -> sonde d'existence coupe court, sa
+#     table ARP n'est JAMAIS lue (pas d'attente inutile sur un agent muet).
+_appels_arp = []
+
+
+def _walk_octets_espion(oid, ip, comm, **kw):
+    _appels_arp.append((oid, ip))
+    return {}
+
+
+N._snmp_walk_octets = _walk_octets_espion
+A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (False, False, 'aucune réponse SNMP')
+_r22 = N.hotes_vus_snmp(909)
+verifier(_r22['motif'] == 'aucune_reponse_snmp' and _appels_arp == [],
+         "routeur muet -> motif explicite, table ARP jamais interrogée", str((_r22, _appels_arp)))
+
+# (b) le routeur répond : sa table ARP (format ipNetToMediaPhysAddress, 5
+#     composants) est lue et convertie en {ip: mac}, avec la source rapportée.
+A._snmp_presence = lambda ip, comm=('public',), port=161, timeout=1.2: (True, True, 'v1/v2c (public)')
+_mac_hex = 'aabbcc001122'
+_mac_brut = bytes.fromhex(_mac_hex)
+N._snmp_walk_octets = lambda oid, ip, comm, **kw: (
+    {'5.192.168.0.80': _mac_brut} if oid == N._OID_ARP_PHYS else {})
+A._oui_vendor = lambda mac: 'Test Vendor'
+_r22b = N.hotes_vus_snmp(909)
+verifier(_r22b['ok'] and _r22b['hotes'].get('192.168.0.80', {}).get('mac') == 'aa:bb:cc:00:11:22',
+         "l'IP vue (sur un AUTRE sous-réseau que celui du routeur) et sa vraie MAC sont remontées",
+         str(_r22b))
+verifier(_r22b['hotes']['192.168.0.80']['vendor'] == 'Test Vendor',
+         "le fabricant est résolu depuis la MAC (OUI)")
+verifier(_r22b['hotes']['192.168.0.80']['sources'] == [{'nom': 'Routeur-Site', 'ip': '192.168.1.254'}],
+         "l'équipement qui l'a vue est rapporté, pour que l'utilisateur sache où regarder")
+
+# (c) repli sur le format ipNetToPhysicalPhysAddress (7 composants) quand le
+#     premier format ne renvoie rien (agent IP-MIB moderne).
+N._snmp_walk_octets = lambda oid, ip, comm, **kw: (
+    {} if oid == N._OID_ARP_PHYS else
+    {'5.1.4.192.168.0.81': _mac_brut} if oid == N._OID_ARP_PHYS_2 else {})
+_r22c = N.hotes_vus_snmp(909)
+verifier(_r22c['hotes'].get('192.168.0.81', {}).get('mac') == 'aa:bb:cc:00:11:22',
+         "repli sur ipNetToPhysicalPhysAddress si ipNetToMediaPhysAddress est vide")
+
+# (d) deux équipements voient la MÊME IP -> une seule entrée, deux sources
+#     (pas de doublon, même si les deux tables ARP se recoupent).
+conn = A.get_db()
+conn.execute("INSERT INTO appareils (id, client_id, nom_machine, type_appareil, adresse_ip) "
+             "VALUES (962, 909, 'SW-Coeur', 'Switch', '192.168.1.253')")
+conn.commit(); conn.close()
+N._snmp_walk_octets = lambda oid, ip, comm, **kw: (
+    {'5.192.168.0.80': _mac_brut} if oid == N._OID_ARP_PHYS else {})
+_r22d = N.hotes_vus_snmp(909)
+verifier(len(_r22d['hotes']) == 1 and len(_r22d['hotes']['192.168.0.80']['sources']) == 2,
+         "même IP vue par 2 équipements -> une entrée, deux sources", str(_r22d['hotes']))
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

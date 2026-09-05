@@ -2180,6 +2180,178 @@ def sous_reseaux_detectes(client_id: int) -> dict:
             'detectes': detectes}
 
 
+def _ip_depuis_suffixe_arp(suffixe: str) -> str:
+    """Les 4 DERNIERS sous-identifiants d'un index `ipNetToMediaPhysAddress`
+    (`ifIndex.A.B.C.D`, 5 composants) ou `ipNetToPhysicalPhysAddress`
+    (`ifIndex.type.longueur.A.B.C.D`, 7 composants pour IPv4) sont toujours
+    l'adresse IPv4 elle-même — les deux formats de table ne diffèrent qu'en
+    tête d'index. Repli générique qui évite de coder les deux formats
+    séparément. `''` si le suffixe est trop court ou n'est pas 4 octets valides."""
+    parts = suffixe.split('.')
+    if len(parts) < 4:
+        return ''
+    try:
+        octets = [int(x) for x in parts[-4:]]
+    except ValueError:
+        return ''
+    if not all(0 <= o <= 255 for o in octets):
+        return ''
+    return '.'.join(str(o) for o in octets)
+
+
+_HOTES_SNMP_MAX_EQUIP = 8
+_HOTES_SNMP_BUDGET_S = 10.0
+
+
+def hotes_vus_snmp(client_id: int, budget_s: float = _HOTES_SNMP_BUDGET_S) -> dict:
+    """MAC + IP vues dans la table ARP des routeurs/switchs SNMP du client —
+    y compris sur un sous-réseau que le poste ParcInfo ne peut pas atteindre
+    en L2 (routé, sur un autre VLAN). Complète le scan actif, qui ne peut
+    JAMAIS résoudre la MAC réelle d'un appareil situé derrière un routeur : sa
+    propre résolution ARP locale ne concerne que son propre segment, alors que
+    la table ARP DU ROUTEUR, elle, est une résolution L2 réelle faite par CET
+    équipement sur chacune de ses propres interfaces — la MAC qui en ressort
+    est celle de l'appareil visé, jamais celle du routeur lui-même.
+
+    Sonde `_snmp_presence` par équipement avant de lire sa table ARP (échec en
+    ~1 s sur un équipement pas encore configuré pour le SNMP, plutôt que
+    plusieurs parcours qui expireraient chacun sur son délai).
+
+    Retourne `{'ok': bool, 'motif': str, 'hotes': {ip: {'mac', 'vendor',
+    'sources': [{'nom','ip'}]}}}`. `motif` (`snmp_inactif` / `aucun_equipement`
+    / `aucune_reponse_snmp`) explique un résultat vide sans lever d'erreur —
+    appelée depuis le scan réseau, cette fonction ne doit jamais le faire
+    échouer."""
+    vide = {'ok': False, 'motif': '', 'hotes': {}}
+    if str(_cfg('diag_snmp_actif', '0')) != '1':
+        return {**vide, 'motif': 'snmp_inactif'}
+    try:
+        from database import get_db
+        conn = get_db()
+        placeholders = ','.join('?' * len(_TYPES_EQUIP_SNMP))
+        equipements = conn.execute(
+            f"SELECT id, nom_machine, adresse_ip FROM appareils WHERE client_id=? "
+            f"AND type_appareil IN ({placeholders}) AND COALESCE(adresse_ip,'')!=''",
+            (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
+        conn.close()
+    except Exception:
+        logger.debug('network_diag: hotes_vus_snmp lecture base en échec', exc_info=True)
+        return vide
+
+    if not equipements:
+        return {**vide, 'motif': 'aucun_equipement'}
+
+    communautes = _communautes_snmp()
+    equipements = equipements[:_HOTES_SNMP_MAX_EQUIP]
+
+    def _pour_un(nom, ip):
+        try:
+            from app import _snmp_presence
+            _present, exploitable, _d = _snmp_presence(ip, communautes)
+            if not exploitable:
+                return nom, ip, {}
+        except Exception:
+            logger.debug('network_diag: _snmp_presence %s indisponible', ip, exc_info=True)
+        out = {}
+        try:
+            arp = _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes, max_rows=800)
+            if not arp:
+                arp = _snmp_walk_octets(_OID_ARP_PHYS_2, ip, communautes, max_rows=800)
+            for suf, brut in arp.items():
+                mac = _mac_octets(brut)
+                ip_vue = _ip_depuis_suffixe_arp(suf)
+                if not mac or not ip_vue or mac in _MAC_NULLES:
+                    continue
+                out[ip_vue] = mac
+        except Exception:
+            logger.debug('network_diag: table ARP %s en échec', ip, exc_info=True)
+        return nom, ip, out
+
+    hotes = {}
+    interroges = 0
+    t0 = time.time()
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(equipements)))
+    try:
+        futurs = {pool.submit(_pour_un, nom, ip): (nom, ip) for _aid, nom, ip in equipements}
+        try:
+            for fut in concurrent.futures.as_completed(
+                    futurs, timeout=max(0.1, budget_s - (time.time() - t0))):
+                nom, ip, arp_map = fut.result()
+                if arp_map:
+                    interroges += 1
+                for ip_vue, mac in arp_map.items():
+                    ent = hotes.setdefault(ip_vue, {'mac': mac, 'vendor': '', 'sources': []})
+                    ent['sources'].append({'nom': nom, 'ip': ip})
+        except concurrent.futures.TimeoutError:
+            pass
+    finally:
+        try:
+            pool.shutdown(wait=False, cancel_futures=True)
+        except TypeError:          # Python 3.8 : pas de cancel_futures
+            pool.shutdown(wait=False)
+
+    if interroges == 0:
+        return {**vide, 'motif': 'aucune_reponse_snmp'}
+
+    try:
+        from app import _oui_vendor
+        for ent in hotes.values():
+            ent['vendor'] = _oui_vendor(ent['mac']) or ''
+    except Exception:
+        logger.debug('network_diag: _oui_vendor indisponible', exc_info=True)
+
+    return {'ok': True, 'motif': '', 'hotes': hotes}
+
+
+def capture_arp_sightings(duree: int = 8) -> dict:
+    """Sniffe le trafic ARP pendant `duree` secondes sur ce poste et renvoie
+    les couples `{ip: mac}` vus — y compris pour des appareils qui ne
+    répondent JAMAIS à une sonde active (ping/ports) mais parlent ARP
+    normalement (beaucoup d'objets connectés, caméras, imprimantes qui
+    filtrent tout sauf leur propre trafic).
+
+    Complément DIFFÉRENT de `hotes_vus_snmp` : celle-ci ne voit QUE le trafic
+    qui atteint physiquement ce poste — jamais au-delà du switch/VLAN où il
+    tourne, contrairement à la lecture SNMP d'un routeur qui, elle, voit tous
+    ses sous-réseaux même distants. Les deux sont complémentaires : SNMP pour
+    franchir les VLAN, capture pour les appareils muets sur CE segment-ci.
+
+    `{}` si la capture est désactivée dans les réglages (`diag_capture_active`)
+    ou si scapy/les privilèges manquent (`etat_capture`) — jamais bloquant
+    pour l'appelant, un scan réseau doit pouvoir se passer de ce complément."""
+    if str(_cfg('diag_capture_active', '0')) != '1':
+        return {}
+    if not etat_capture().get('disponible'):
+        return {}
+    s = _charger_scapy()
+    if s is None:
+        return {}
+    vus = {}
+
+    def _on(pkt):
+        try:
+            if pkt.haslayer(s.ARP):
+                a = pkt[s.ARP]
+                if a.psrc and a.psrc != '0.0.0.0' and a.hwsrc:
+                    m = _norm_mac(a.hwsrc)
+                    if m and m not in _MAC_NULLES:
+                        vus[a.psrc] = m
+        except Exception:
+            pass
+
+    try:
+        sniffer = s.AsyncSniffer(prn=_on, store=False, filter='arp')
+        sniffer.start()
+        time.sleep(max(2, duree))
+        sniffer.stop()
+    except PermissionError:
+        return {}
+    except Exception:
+        logger.debug('network_diag: capture ARP (scan) interrompue', exc_info=True)
+        return {}
+    return vus
+
+
 def _mac_depuis_suffixe(suffixe: str, decimal_count: int = 6) -> str:
     """Les 6 derniers sous-identifiants d'un OID FDB = la MAC en décimal."""
     parts = suffixe.split('.')

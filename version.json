@@ -1,23 +1,23 @@
 {
-  "version": "2.19.37",
+  "version": "2.19.38",
   "release_date": "2026-09-05",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.37/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.37/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.37/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.37",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.37/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.37/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.37/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.37/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.37/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.38/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.38/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.38/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.38",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.38/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.38/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.38/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.38/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.38/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage — suite des correctifs. « Deviner le brassage » : quand un élément vu sur un port de switch a plusieurs ports (NAS, serveur, second switch…), on peut désormais choisir sur quel port du voisin le câble se branche, via un menu dans la proposition (au lieu d'une simple affectation sans lien). Moniteur réseau (onglet Ports) : la table ne déborde plus horizontalement quand les noms d'appareils ou d'interfaces sont longs ou nombreux — largeurs de colonnes fixées, retour à la ligne autorisé, liste des appareils vus bornée à « N appareils (vu) » au-delà de deux (détail complet en infobulle).",
+    "new_features": "Scan réseau — croisement multi-méthodes pour détecter un maximum d'appareils, y compris hors du segment local (autre VLAN/sous-réseau routé). Deux nouvelles sources viennent compléter l'ARP local quand celui-ci ne peut structurellement rien donner : la table ARP des routeurs/switchs SNMP de l'inventaire (`hotes_vus_snmp`, franchit les VLAN — un appareil derrière un routeur reste invisible en ARP local, mais le routeur, lui, connaît sa vraie MAC) et l'écoute passive du trafic ARP local (`capture_arp_sightings`, pour les appareils muets sur toute sonde active). La liste des résultats indique désormais la provenance de chaque MAC ainsi obtenue (badge 🌐 pour SNMP avec le nom de l'équipement source, badge 📡 pour la capture).",
     "improvements": [
-      "Moniteur : le bouton « détecter l'interface » est placé sous le menu de calibration (plus de chevauchement).",
-      "« Deviner le brassage » : proposition « à confiance faible » (décochée par défaut) quand le port exact du voisin est indéterminé."
+      "L'ARP local reste toujours prioritaire quand il répond ; SNMP/capture ne servent qu'en repli, jamais à écraser une résolution directe.",
+      "Le motif d'un routeur/switch SNMP muet (pas de réponse, refusé, inactif) est propagé jusqu'à l'interface plutôt que d'aboutir à un résultat vide silencieux."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.37"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.38"
 }

@@ -193,5 +193,88 @@ verifier(A._deviner_type('inconnu', [], mdns_service='matter') == 'Objet connect
 verifier(A._deviner_type('inconnu', [], mdns_service='matterc') == 'Objet connecté',
           "service mDNS Matter (en cours d'appairage) -> Objet connecté")
 
+print('\n=== 9. _scan_host() : MAC obtenue via SNMP (ARP d\'un routeur) ou capture, quand '
+      'l\'ARP local ne peut structurellement rien donner (sous-réseau routé) ===')
+# Signalé en usage réel : des appareils sur un second /24 routé par le même
+# routeur restaient invisibles du scan, car l'ARP LOCAL de ce poste ne peut
+# jamais résoudre une IP hors de son propre segment L2 — même le repli
+# existant (test 5/6 ci-dessus) ne pouvait rien y faire. `snmp_arp_par_ip`
+# (table ARP d'un routeur/switch SNMP de l'inventaire) et `capture_arp_par_ip`
+# (écoute ARP locale) sont deux sources SUPPLÉMENTAIRES, tentées uniquement
+# quand l'ARP local échoue.
+A._ping           = lambda ip: False
+A._hostname       = lambda ip: ''
+A._netbios_name   = lambda ip: ''
+A._ttl_os_guess   = lambda ip: ''
+A._scan_ports     = lambda ip: []
+A._mac_from_arp   = lambda ip: ''          # ARP local : structurellement muet (sous-réseau routé)
+A._snmp_get_typed = lambda ip, oids, **kw: {}
+A.time.sleep      = lambda s: None
+_snmp_arp = {'192.0.2.80': {'mac': 'aa:bb:cc:00:01:02', 'vendor': 'Test Vendor',
+                            'sources': [{'nom': 'Routeur-Site', 'ip': '192.0.2.254'}]}}
+try:
+    resultat_snmp = A._scan_host('192.0.2.80', snmp_arp_par_ip=_snmp_arp)
+finally:
+    A._ping, A._hostname, A._netbios_name = _ping_orig, _hostname_orig, _netbios_orig
+    A._ttl_os_guess, A._scan_ports = _ttl_orig, _ports_orig
+    A._mac_from_arp = _arp_orig
+    A.time.sleep = _sleep_orig
+verifier(resultat_snmp is not None,
+          "un hôte injoignable en ARP local mais vu dans la table ARP d'un routeur SNMP n'est plus perdu")
+verifier(resultat_snmp is not None and resultat_snmp.get('mac') == 'aa:bb:cc:00:01:02',
+          "sa VRAIE MAC (celle du routeur, résolue sur son interface) est bien remontée")
+verifier(resultat_snmp is not None and resultat_snmp.get('mac_source') == 'snmp',
+          "la provenance de la MAC est explicitement tracée ('snmp', pas confondue avec une résolution locale)")
+verifier(resultat_snmp is not None
+          and resultat_snmp.get('mac_sources') == [{'nom': 'Routeur-Site', 'ip': '192.0.2.254'}],
+          "l'équipement qui l'a vue est rapporté, pour que l'utilisateur sache où regarder")
+verifier(resultat_snmp is not None and resultat_snmp.get('silencieux') is True,
+          "reste marqué silencieux : il ne répond à AUCUNE sonde active depuis ce poste")
+
+A._ping           = lambda ip: False
+A._hostname       = lambda ip: ''
+A._netbios_name   = lambda ip: ''
+A._ttl_os_guess   = lambda ip: ''
+A._scan_ports     = lambda ip: []
+A._mac_from_arp   = lambda ip: ''
+A._snmp_get_typed = lambda ip, oids, **kw: {}
+A.time.sleep      = lambda s: None
+_capture_arp = {'192.0.2.81': 'dd:ee:ff:00:01:02'}
+try:
+    resultat_capture = A._scan_host('192.0.2.81', capture_arp_par_ip=_capture_arp)
+finally:
+    A._ping, A._hostname, A._netbios_name = _ping_orig, _hostname_orig, _netbios_orig
+    A._ttl_os_guess, A._scan_ports = _ttl_orig, _ports_orig
+    A._mac_from_arp = _arp_orig
+    A.time.sleep = _sleep_orig
+verifier(resultat_capture is not None and resultat_capture.get('mac') == 'dd:ee:ff:00:01:02',
+          "un hôte muet sur toute sonde active mais vu en écoute ARP locale n'est plus perdu")
+verifier(resultat_capture is not None and resultat_capture.get('mac_source') == 'capture',
+          "la provenance 'capture' est distincte de 'snmp' (deux sources différentes, pas confondues)")
+
+# Un hôte qui répond normalement en ARP local ne doit JAMAIS se voir
+# substituer sa MAC par une source SNMP/capture, même si elle est présente
+# (l'ARP local, direct, reste toujours prioritaire — non-régression).
+A._ping           = lambda ip: True
+A._hostname       = lambda ip: 'poste-normal'
+A._netbios_name   = lambda ip: ''
+A._ttl_os_guess   = lambda ip: 'Windows'
+A._scan_ports     = lambda ip: [445]
+A._mac_from_arp   = lambda ip: 'dd:ee:ff:44:55:66'
+A._snmp_get_typed = lambda ip, oids, **kw: {}
+A.time.sleep      = lambda s: None
+try:
+    resultat_prio = A._scan_host('192.0.2.82',
+                                 snmp_arp_par_ip={'192.0.2.82': {'mac': 'ff:ff:ff:ff:ff:00', 'sources': []}})
+finally:
+    A._ping, A._hostname, A._netbios_name = _ping_orig, _hostname_orig, _netbios_orig
+    A._ttl_os_guess, A._scan_ports = _ttl_orig, _ports_orig
+    A._mac_from_arp = _arp_orig
+    A.time.sleep = _sleep_orig
+verifier(resultat_prio is not None and resultat_prio.get('mac') == 'dd:ee:ff:44:55:66'
+          and not resultat_prio.get('mac_source'),
+          "l'ARP local reste prioritaire : jamais écrasé par SNMP/capture quand il répond déjà",
+          str(resultat_prio.get('mac')))
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

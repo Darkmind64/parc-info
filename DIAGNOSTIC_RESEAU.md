@@ -163,6 +163,47 @@ apparaître correctement placé dans la baie de brassage, c'est le switch qui
 dessert *physiquement* cet appareil qui doit être ajouté à l'inventaire et
 interrogé en SNMP — détecter le sous-réseau ne suffit pas à ça.
 
+### Croiser SNMP et capture passive pour la MAC d'un hôte hors segment local
+
+La limite ci-dessus (« pas de MAC résolue sur un sous-réseau routé ») n'est
+pas contournable par l'ARP local — mais elle l'est en partie en interrogeant
+une source qui, elle, a une vue L2 réelle sur ce segment-là : le routeur lui-
+même. Deux sources complètent `_mac_from_arp()` dans `_scan_host()`,
+**uniquement quand celui-ci ne renvoie rien** (jamais un écrasement d'une
+résolution locale déjà obtenue) :
+
+- **`network_diag.hotes_vus_snmp(client_id)`** — même sonde d'existence
+  `_snmp_presence` que `sous_reseaux_detectes` ci-dessus (coupe court en ~1 s
+  sur un équipement muet), puis lecture de la table ARP du routeur/switch
+  (`ipNetToMediaPhysAddress`, repli `ipNetToPhysicalPhysAddress`). Cette table
+  est une résolution L2 **réelle**, faite par l'équipement sur sa propre
+  interface : la MAC qui en ressort est celle de l'appareil visé, jamais celle
+  du routeur — elle traverse donc le VLAN là où l'ARP de ce poste ne le peut
+  pas. `_ip_depuis_suffixe_arp()` extrait l'IP portée par l'index SNMP (les 4
+  derniers sous-identifiants, identiques dans leur structure entre les deux
+  formats de table). Plusieurs équipements voyant la même IP sont agrégés en
+  une seule entrée, avec la liste de leurs noms.
+- **`network_diag.capture_arp_sightings(duree)`** — écoute ARP passive courte
+  (scapy, le même mécanisme que la capture du palier 2), pour un appareil qui
+  ne répond à *aucune* sonde active mais parle ARP normalement (beaucoup
+  d'objets connectés, imprimantes, caméras qui filtrent tout le reste).
+  Complémentaire de la source SNMP : elle ne voit jamais au-delà du segment où
+  tourne ParcInfo, contrairement à SNMP qui voit les sous-réseaux distants du
+  routeur.
+
+`_run_scan()` lance les deux relevés en threads parallèles (budgets 10 s /
+9 s), aux côtés des découvertes UPnP/mDNS/ONVIF déjà existantes. La provenance
+de la MAC est tracée explicitement (`result['mac_source']` = `'snmp'` ou
+`'capture'`, `result['mac_sources']` pour SNMP) — jamais fondue silencieusement
+avec une résolution locale. Dans la liste des résultats, un badge 🌐 (SNMP,
+infobulle nommant l'équipement source) ou 📡 (capture) apparaît à côté de la
+MAC ; le badge « muet » 🔇 précise « sur un sous-réseau routé (VLAN) » plutôt
+que le message générique « pare-feu / ICMP bloqué » quand la source est SNMP.
+
+Cela ne lève **pas** la limite de corrélation topologie/FDB mentionnée
+ci-dessus : un appareil ainsi résolu reste « vu » sans être *placé* dans la
+baie, faute que son propre switch d'accès soit, lui, inventorié et interrogé.
+
 ---
 
 ## Vue d'activité de la baie (LEDs live) — v2.19.6, revues v2.19.8 / v2.19.9 / v2.19.10
@@ -705,6 +746,7 @@ d'un refus ou d'un appareil qui ne fait pas de SNMP.
 | SNMP (palier 3) | `interroger_equipement`, `_analyser_snmp`, `interroger_equipements_client`, `etat_snmp` |
 | Topologie (palier 4) | `decouvrir_topologie` (récursive, parallèle, sous budget), `_topologie_equipement`, `_journaliser_mouvements`, `_stp_switch`, `_entite_physique`, `_sous_reseaux_equipement`, `etat_topologie`, `proposer_topologie_baie` / `appliquer_topologie_baie`, `lancer_cartographie` / `statut_cartographie` |
 | Sous-réseaux supplémentaires (page Scan réseau) | `network_diag.sous_reseaux_detectes` (sonde `_snmp_presence` + `_sous_reseaux_equipement` par équipement, agrégé), route `GET /api/scan/sous-reseaux`, `templates/scan_reseau.html` (`chargerSousReseaux`/`ajouterSousReseau`) ; `app._parse_cidrs` / `network_diag._parse_plages` (plage_ip_locale multi-valeur) ; `app._appareil_sur_reseau_courant` (confiance étendue à tout le site une fois une plage confirmée) |
+| MAC via SNMP/capture sur un sous-réseau routé (Scan réseau) | `network_diag.hotes_vus_snmp` (table ARP des routeurs/switchs SNMP, `_ip_depuis_suffixe_arp`) et `network_diag.capture_arp_sightings` (écoute ARP passive, scapy) ; `app._scan_host(..., snmp_arp_par_ip=, capture_arp_par_ip=)` en repli sur `_mac_from_arp` uniquement ; `app._run_scan` lance les 2 relevés en parallèle ; badges 🌐/📡 dans `templates/scan_reseau.html` |
 | Baseline (palier 5) | `enregistrer_metriques_liaison`, `evaluer_baseline`, `serie_metrique` |
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
 | Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite` (relevé SNMP mutualisé par IP → switch multi-slots), `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports` (+ `sysUpTime` pour un Δt exact), `_poll_poe` (POWER-ETHERNET-MIB), `_lire_sysinfo` (modèle/uptime), `_mapping_baie_ifindex` (nom_port RJ seulement, `divergences`) + `_port_physique_depuis_nom`, `_etat_led` (plafond débit/pps, bouclage 32 bits, `reboot`), `activite_baie`, `calibrer_port_baie` / `calibrer_decalage_baie`, `_prises_murales_activite` (v2.19.18 : LED des prises murales d'un bandeau RJ via le port de switch au bout du cordon `lie_slot_id`/`lie_port_numero`), `_fdb_switch` + `_voisins_port` (v2.19.19 : FDB bridge-MIB « live » → contrôle de câblage MAC déclarée ↔ MAC apprise, repli `diag_topologie` ; + appareils vus par port dans les infobulles), `analyser_brassage_baie` / `_elements_baie` / `_classer_cascade` / `_fdb_corriger` (v2.19.22-23 : bouton « 🧠 Deviner le brassage » → carte réseau proposée, route `GET /api/baie/brassage/proposer` lecture seule ; 4 groupes de propositions + cascades + hors inventaire ; répare une FDB tronquée par un agent SNMP buggé) ; état : `_activite_sut` (Δt), `_activite_hist` (sparkline), `_activite_sysinfo`, `_activite_fdb`/`_activite_fdb_baseport`/`_activite_fdb_dialecte`/`_activite_fdb_echec`, `_activite_echecs`, `_activite_thread_lock` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer{,/decalage}` ; `baie_brassage.html` (`#sel-activite`, `.prise-murale.pm-act-*`, badge ⚠ `.pm-cable-ko`) ; widget `network-activity` ; colonne `baie_slot_ports.if_index` |

@@ -537,7 +537,17 @@ function renderTable(results) {
                               .filter(Boolean).join('\n');
         const ports = (h.ports||[]).slice(0,7).map(p => `<span class="port-chip">${p}</span>`).join('')
                     + (h.ports&&h.ports.length>7 ? `<span class="port-chip">+${h.ports.length-7}</span>` : '');
-        const macLine = h.mac ? `<div style="font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--text-muted);">${h.mac}</div>` : '';
+        // MAC obtenue par SNMP (table ARP d'un routeur/switch de l'inventaire —
+        // franchit les sous-réseaux routés) ou par capture passive locale
+        // (appareil muet sur toute sonde active) plutôt que par résolution ARP
+        // directe de ce poste : deux sources que le scan actif seul ne peut
+        // jamais obtenir par lui-même, à signaler explicitement.
+        const macSourceBadge = h.mac_source === 'snmp'
+            ? ` <span title="MAC obtenue via la table ARP de ${escH((h.mac_sources||[]).map(s=>s.nom).join(', ') || 'un routeur/switch SNMP')} — cet appareil est probablement sur un sous-réseau routé (VLAN), hors de portée directe de ce poste" style="color:var(--accent);cursor:help;">🌐</span>`
+            : h.mac_source === 'capture'
+            ? ` <span title="MAC captée en écoutant le trafic ARP local — cet appareil ne répond à aucune sonde active (ping, ports)" style="color:var(--accent);cursor:help;">📡</span>`
+            : '';
+        const macLine = h.mac ? `<div style="font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--text-muted);">${h.mac}${macSourceBadge}</div>` : '';
         // Nom UPnP/mDNS/SNMP : affiché seulement s'il apporte quelque chose
         // que NetBIOS/DNS n'avait pas déjà (évite la redondance sur la
         // majorité des postes, où ces sondes répondent rarement de toute
@@ -562,7 +572,9 @@ function renderTable(results) {
             : '<span class="exists-badge">↩ Inventaire</span>';
 
         const silencieuxBadge = h.silencieux
-            ? ` <span title="Détecté uniquement via sa résolution ARP — l'appareil est présent sur le réseau mais ne répond ni au ping ni aux ports sondés (pare-feu, ICMP bloqué...)" style="font-size:.6rem;color:var(--text-muted);cursor:help;">🔇</span>`
+            ? (h.mac_source === 'snmp'
+                ? ` <span title="Sur un sous-réseau routé (VLAN) : ne répond ni au ping ni aux ports depuis ce poste, mais existe bel et bien — vu dans la table ARP d'un routeur/switch SNMP" style="font-size:.6rem;color:var(--text-muted);cursor:help;">🔇</span>`
+                : ` <span title="Détecté uniquement via sa résolution ARP — l'appareil est présent sur le réseau mais ne répond ni au ping ni aux ports sondés (pare-feu, ICMP bloqué...)" style="font-size:.6rem;color:var(--text-muted);cursor:help;">🔇</span>`)
             : '';
         html += `<tr class="${isNew?'diff-new':''}" data-ip="${h.ip}">
             <td class="td-check"><input type="checkbox" class="chk-host" value="${h.ip}"></td>

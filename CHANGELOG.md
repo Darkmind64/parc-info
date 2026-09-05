@@ -1,5 +1,21 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.38] - 2026-09-05 🔀
+
+### 🔀 Scan réseau : croiser SNMP et capture passive pour détecter un maximum d'appareils
+
+Demande directe : détecter le plus d'appareils possible, avec le plus d'informations utiles, y compris sur un autre sous-réseau ou VLAN, en croisant plusieurs méthodes (SNMP, écoute réseau...).
+
+La limite de fond, déjà documentée en 2.19.37, reste entière : l'ARP de ce poste ne résout **jamais** une IP située derrière un routeur, même quand la plage est désormais correctement scannée (`sous_reseaux_detectes`). Un appareil sur un VLAN routé restait donc sans MAC ni fabricant, faute d'une résolution de niveau 2 possible sur ce segment-là depuis ce poste. Deux sources viennent maintenant compléter l'ARP local — uniquement en repli, jamais pour écraser une résolution directe déjà obtenue :
+
+**`network_diag.hotes_vus_snmp(client_id)`** interroge la table ARP *des routeurs/switchs SNMP de l'inventaire* — sonde d'existence `_snmp_presence` d'abord (même principe qu'en 2.19.37, ~1 s, coupe court sur un équipement muet plutôt que d'attendre son expiration complète), puis lecture de `ipNetToMediaPhysAddress` avec repli sur `ipNetToPhysicalPhysAddress` selon l'agent. La table ARP d'un routeur est une résolution de niveau 2 *réelle*, faite par cet équipement sur chacune de ses propres interfaces : la MAC qui en ressort est celle de l'appareil visé, jamais celle du routeur — elle traverse donc le VLAN là où l'ARP de ce poste ne le peut pas. `_ip_depuis_suffixe_arp()` extrait l'IP portée par l'index SNMP, identique dans sa structure entre les deux formats de table.
+
+**`network_diag.capture_arp_sightings(duree)`** écoute brièvement le trafic ARP local (scapy, déjà utilisé par la capture passive du palier 2) pour capter un appareil qui ne répond à *aucune* sonde active — ping, ports — mais parle ARP normalement, ce qui couvre nombre d'objets connectés, caméras et imprimantes qui filtrent tout le reste. Complémentaire de la source SNMP : celle-ci ne voit jamais au-delà du segment où tourne ParcInfo, alors que SNMP voit les sous-réseaux distants du routeur.
+
+`_scan_host()` n'utilise ces deux sources qu'en repli, quand la résolution ARP locale ne renvoie rien — jamais en écrasement d'une MAC déjà trouvée directement. La provenance est tracée explicitement (`mac_source: 'snmp'` ou `'capture'`, avec la liste des équipements sources pour SNMP) plutôt que fondue silencieusement avec une résolution locale. Les deux relevés tournent en parallèle des découvertes UPnP/mDNS/ONVIF déjà existantes, sous leur propre budget de temps.
+
+Dans la liste des résultats, un badge 🌐 (SNMP, infobulle nommant l'équipement source) ou 📡 (capture) apparaît à côté de la MAC quand elle provient de l'une de ces sources ; le badge « muet » 🔇 précise « sur un sous-réseau routé (VLAN) » plutôt que le message générique « pare-feu / ICMP bloqué » quand la source est SNMP.
+
 ## [2.19.37] - 2026-09-05 🌐
 
 ### 🌐 Détection automatique des sous-réseaux supplémentaires d'un site

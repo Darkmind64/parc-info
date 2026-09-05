@@ -9812,14 +9812,34 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
             for b in oid_bases}
 
 
-def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onvif_par_ip=None):
+def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onvif_par_ip=None,
+               snmp_arp_par_ip=None, capture_arp_par_ip=None):
     """Scanne un hôte : ping, hostname, NetBIOS, OS, ports, MAC, fabricant.
 
     Optionnellement enrichit avec WMI si enrich_wmi=True et que c'est une machine Windows
     accessible en RPC. `upnp_par_ip`/`mdns_par_ip` : résultats de la découverte
     UPnP/mDNS faite UNE fois pour tout le scan (_run_scan), pas par hôte —
     on y cherche simplement l'entrée pour CETTE ip.
+
+    `snmp_arp_par_ip` (`{ip: {'mac','vendor','sources'}}`, depuis
+    `network_diag.hotes_vus_snmp`) et `capture_arp_par_ip` (`{ip: mac}`, depuis
+    `network_diag.capture_arp_sightings`) : deux sources de MAC qui ne dépendent
+    PAS de la résolution ARP locale de ce poste — la première lit la table ARP
+    d'un routeur/switch de l'inventaire (fonctionne même sur un sous-réseau
+    routé, hors de portée en L2), la seconde écoute le trafic ARP local
+    (fonctionne pour un appareil qui ne répond à AUCUNE sonde active mais parle
+    ARP). Sans elles, un hôte qui ne pingue pas ET dont l'ARP local ne résout
+    rien était purement et simplement invisible — même s'il existe bel et bien
+    de l'autre côté d'un routeur, ou juste trop filtré pour répondre à quoi
+    que ce soit d'actif.
     """
+    def _mac_snmp_ou_capture():
+        if snmp_arp_par_ip and ip_str in snmp_arp_par_ip:
+            return snmp_arp_par_ip[ip_str].get('mac', '')
+        if capture_arp_par_ip and ip_str in capture_arp_par_ip:
+            return capture_arp_par_ip[ip_str]
+        return ''
+
     ping_ok = _ping(ip_str)
     # Même si le ping échoue (pare-feu, très nombreux objets connectés qui
     # bloquent ICMP par défaut), l'OS a dû résoudre l'adresse MAC via ARP
@@ -9828,13 +9848,13 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
     # IP. Vérifier la table ARP même après un ping en échec révèle ces
     # appareils, jusqu'ici invisibles du scan (demandé explicitement : "une
     # image la plus complète possible du réseau, sans identification
-    # manuelle par IP/MAC"). Un hôte ni pingable ni résolu en ARP est
-    # considéré absent, comme avant.
+    # manuelle par IP/MAC"). Un hôte ni pingable, ni résolu en ARP local, ni
+    # vu par SNMP/capture est considéré absent, comme avant.
     time.sleep(0.4)
-    mac = _mac_from_arp(ip_str)
+    mac = _mac_from_arp(ip_str) or _mac_snmp_ou_capture()
     if not ping_ok and not mac:
         time.sleep(0.4)
-        mac = _mac_from_arp(ip_str)
+        mac = _mac_from_arp(ip_str) or _mac_snmp_ou_capture()
         if not mac:
             return None
     # Après ping, laisser l'OS finir de peupler la table ARP si le premier
@@ -9842,7 +9862,7 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
     # cache) — 0.5s est suffisant même sur les réseaux chargés.
     elif not mac:
         time.sleep(0.5)
-        mac = _mac_from_arp(ip_str)
+        mac = _mac_from_arp(ip_str) or _mac_snmp_ou_capture()
     # Lancer hostname + NetBIOS + OS + ports en parallèle
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
         f_hostname = ex.submit(_hostname,     ip_str)
@@ -9874,6 +9894,18 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
         if not mac:
             time.sleep(0.5)
             mac = _mac_from_arp(ip_str)
+    # Toujours rien en ARP local ? Dernier recours avant d'abandonner : SNMP
+    # (table ARP d'un routeur) puis capture passive — c'est exactement le cas
+    # d'un appareil sur un sous-réseau routé qui répond au ping/aux ports mais
+    # dont ce poste ne pourra JAMAIS résoudre la MAC par lui-même (l'ARP ne
+    # traverse pas un routeur).
+    mac_source = ''
+    if not mac:
+        mac = _mac_snmp_ou_capture()
+    if mac and snmp_arp_par_ip and ip_str in snmp_arp_par_ip and mac == snmp_arp_par_ip[ip_str].get('mac'):
+        mac_source = 'snmp'
+    elif mac and capture_arp_par_ip and ip_str in capture_arp_par_ip and mac == capture_arp_par_ip[ip_str]:
+        mac_source = 'capture'
     vendor    = _oui_vendor(mac)
     # Le TTL seul ne distingue pas macOS de Linux (les deux répondent à 64
     # par défaut) — signalé en usage réel : un MacBook ressortait comme
@@ -9944,6 +9976,17 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
         result["mdns"] = mdns_info
     if snmp_sysdescr or snmp_sysname:
         result["snmp"] = {'sysDescr': snmp_sysdescr, 'sysName': snmp_sysname}
+    if mac_source == 'snmp':
+        # MAC obtenue via la table ARP d'un routeur/switch de l'inventaire —
+        # jamais via l'ARP local de ce poste, donc probablement sur un
+        # sous-réseau routé (autre VLAN) où la résolution locale ne peut
+        # structurellement jamais fonctionner.
+        result['mac_source'] = 'snmp'
+        result['mac_sources'] = snmp_arp_par_ip[ip_str].get('sources', [])
+    elif mac_source == 'capture':
+        # MAC vue en écoutant le trafic ARP local — l'hôte ne répond à AUCUNE
+        # sonde active mais existe bel et bien sur CE segment.
+        result['mac_source'] = 'capture'
 
     # Marque/modèle « les plus précis disponibles » : UPnP et mDNS
     # identifient déjà l'appareil lui-même (contrairement à vendor, qui ne
@@ -9976,7 +10019,7 @@ def _scan_host(ip_str, enrich_wmi=False, upnp_par_ip=None, mdns_par_ip=None, onv
 
     return result
 
-def _run_scan(plages, nb_threads, enrich_wmi=False):
+def _run_scan(plages, nb_threads, enrich_wmi=False, client_id=None):
     global scan_status
     with scan_lock:
         scan_status = {"running": True, "progress": 0, "message": "Résolution des plages...", "results": [], "errors": [], "plages": plages}
@@ -9992,15 +10035,25 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
         hosts = list(dict.fromkeys(hosts))
 
         # Découverte UPnP (ssdp:all) + mDNS (imprimantes, Apple, Chromecast,
-        # NAS...) : UNE fois pour tout le scan, pas par hôte — et terminée
-        # AVANT de démarrer le balayage IP, pour que chaque résultat soit
-        # enrichi dès sa première apparition. Un petit balayage (peu d'IP)
-        # peut finir en moins de temps que les ~3s que prend chacune de ces
+        # NAS...) + SNMP (ARP des routeurs/switchs du client — traverse les
+        # VLAN routés) + capture passive (ARP local — révèle les appareils
+        # muets sur TOUTE sonde active) : UNE fois pour tout le scan, pas par
+        # hôte — et terminées AVANT de démarrer le balayage IP, pour que
+        # chaque résultat soit enrichi dès sa première apparition. Un petit
+        # balayage (peu d'IP) peut finir en moins de temps que ces
         # découvertes ; les lancer après aurait laissé une course où les
         # premiers hôtes scannés n'auraient jamais leur enrichissement.
+        #
+        # SNMP et capture sont deux sources DIFFÉRENTES et complémentaires,
+        # jamais redondantes : SNMP lit la table ARP d'un routeur/switch déjà
+        # inventorié (voit un sous-réseau entier, y compris routé, mais rien
+        # d'un équipement absent de l'inventaire) ; la capture écoute le
+        # trafic ARP qui atteint CE poste (voit un appareil muet sur toute
+        # sonde active, mais uniquement sur son propre segment L2).
         with scan_lock:
-            scan_status["message"] = "Découverte UPnP/mDNS/ONVIF..."
+            scan_status["message"] = "Découverte UPnP/mDNS/ONVIF/SNMP..."
         decouvertes_upnp, decouvertes_mdns, decouvertes_onvif = {}, {}, {}
+        decouvertes_snmp_arp, decouvertes_capture_arp = {}, {}
 
         def _decouvrir_upnp():
             nonlocal decouvertes_upnp
@@ -10023,13 +10076,37 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
             except Exception:
                 pass
 
-        fils_decouverte = [threading.Thread(target=_decouvrir_upnp, daemon=True),
-                           threading.Thread(target=_decouvrir_mdns, daemon=True),
-                           threading.Thread(target=_decouvrir_onvif, daemon=True)]
-        for f in fils_decouverte:
+        def _decouvrir_snmp_arp():
+            nonlocal decouvertes_snmp_arp
+            if not client_id:
+                return
+            try:
+                res = network_diag.hotes_vus_snmp(client_id)
+                if res.get('ok'):
+                    decouvertes_snmp_arp = res.get('hotes') or {}
+            except Exception:
+                logger.debug('scan: hotes_vus_snmp indisponible', exc_info=True)
+
+        def _decouvrir_capture_arp():
+            nonlocal decouvertes_capture_arp
+            try:
+                decouvertes_capture_arp = network_diag.capture_arp_sightings(duree=8)
+            except Exception:
+                logger.debug('scan: capture_arp_sightings indisponible', exc_info=True)
+
+        # Timeout individuel par thread : la capture ARP dure volontairement
+        # ~8 s (dernier recours pour les appareils muets), les autres ~6 s —
+        # comme ils tournent tous EN PARALLÈLE (déjà démarrés ci-dessous),
+        # l'attente totale est le MAX de ces durées, pas leur somme.
+        fils_decouverte = [(threading.Thread(target=_decouvrir_upnp, daemon=True), 6),
+                           (threading.Thread(target=_decouvrir_mdns, daemon=True), 6),
+                           (threading.Thread(target=_decouvrir_onvif, daemon=True), 6),
+                           (threading.Thread(target=_decouvrir_snmp_arp, daemon=True), 10),
+                           (threading.Thread(target=_decouvrir_capture_arp, daemon=True), 9)]
+        for f, _t in fils_decouverte:
             f.start()
-        for f in fils_decouverte:
-            f.join(timeout=6)
+        for f, t in fils_decouverte:
+            f.join(timeout=t)
 
         total = len(hosts); found = []; scanned = [0]
         def on_done(future, ip):
@@ -10045,7 +10122,9 @@ def _run_scan(plages, nb_threads, enrich_wmi=False):
         with concurrent.futures.ThreadPoolExecutor(max_workers=nb_threads) as executor:
             futures = {executor.submit(_scan_host, ip, enrich_wmi=enrich_wmi,
                                        upnp_par_ip=decouvertes_upnp, mdns_par_ip=decouvertes_mdns,
-                                       onvif_par_ip=decouvertes_onvif): ip
+                                       onvif_par_ip=decouvertes_onvif,
+                                       snmp_arp_par_ip=decouvertes_snmp_arp,
+                                       capture_arp_par_ip=decouvertes_capture_arp): ip
                       for ip in hosts}
             for f in concurrent.futures.as_completed(futures):
                 on_done(f, futures[f])
@@ -10120,7 +10199,13 @@ def lancer_scan():
         plages = ['192.168.1.0/24']
     nb_threads = min(int(data.get('threads', 30)), 200)
     enrich_wmi = data.get('enrich_wmi', False)  # Optionnel - enrichir via WMI
-    threading.Thread(target=_run_scan, args=(plages, nb_threads, enrich_wmi), daemon=True).start()
+    # Le client actif est déjà verrouillé côté UI avant l'appel (modale « Pour
+    # quel client ? », voir scan_reseau.html) — on le transmet pour croiser
+    # avec les tables ARP de SES routeurs/switchs SNMP (network_diag.
+    # hotes_vus_snmp), seule façon de résoudre la vraie MAC d'un appareil situé
+    # sur un sous-réseau routé (VLAN) que ce scan ne peut pas atteindre en L2.
+    cid = get_client_id()
+    threading.Thread(target=_run_scan, args=(plages, nb_threads, enrich_wmi, cid), daemon=True).start()
     return jsonify({"status": "started", "plages": plages, "enrich_wmi": enrich_wmi})
 
 @app.route('/api/scan/status')

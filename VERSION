@@ -1,9 +1,69 @@
-PARCINFO_VERSION=2.19.37
+PARCINFO_VERSION=2.19.38
 RELEASE_DATE=2026-09-05
-BUILD_NUMBER=2026090501
+BUILD_NUMBER=2026090502
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.19.38 - Scan reseau : croiser SNMP + capture passive pour detecter
+# un maximum d'appareils, y compris hors du segment local
+# Demande : "Fais en sorte qu'un maximum d'appareils soient detectes avec un
+# maximum d'informations utiles. [...] essaie de trouver tout ce qui est sur
+# un autre range, un autre vlan, etc... Utilise differentes methodes afin de
+# croiser les infos (snmp, ecoute reseau, etc...)."
+#
+# Limite structurelle de l'ARP local (deja documentee en 2.19.37, non
+# contournable par nature) : l'ARP de CE poste ne resout jamais une IP situee
+# derriere un routeur - meme quand la plage est desormais correctement
+# scannee (sous_reseaux_detectes), un appareil sur un VLAN routes restait sans
+# MAC ni fabricant, faute d'une resolution L2 sur ce segment-la. Deux sources
+# SUPPLEMENTAIRES viennent completer l'ARP local, uniquement quand celui-ci ne
+# renvoie rien (jamais prioritaires sur une resolution directe) :
+#
+# 1. network_diag.hotes_vus_snmp(client_id) : pour chaque routeur/switch SNMP
+#    de l'inventaire, sonde d'existence _snmp_presence (~1 s, coupe court sur
+#    un agent muet - meme pattern que sous_reseaux_detectes) PUIS lecture de sa
+#    PROPRE table ARP (ipNetToMediaPhysAddress puis repli
+#    ipNetToPhysicalPhysAddress, _snmp_walk_octets). La table ARP d'un routeur
+#    est une resolution L2 REELLE faite par cet equipement sur chacune de ses
+#    interfaces : la MAC qui en ressort est celle de l'appareil vise, jamais
+#    celle du routeur. _ip_depuis_suffixe_arp() extrait l'IP des 4 derniers
+#    sous-identifiants de l'index SNMP (format commun aux deux tables).
+#    Agrege plusieurs equipements voyant la meme IP en une seule entree avec
+#    toutes ses sources. Releve parallele (6 equipements max, budget 10 s).
+# 2. network_diag.capture_arp_sightings(duree) : ecoute ARP passive courte
+#    (scapy, deja utilise par la capture du palier 2) - capte un appareil qui
+#    ne repond a AUCUNE sonde active (ping, ports) mais parle ARP normalement
+#    (beaucoup d'objets connectes, imprimantes, cameras qui filtrent tout sauf
+#    leur propre trafic). Complementaire de la source SNMP : celle-ci ne voit
+#    jamais au-dela du segment local ou tourne ParcInfo, contrairement a SNMP
+#    qui voit les sous-reseaux distants du routeur.
+#
+# app._scan_host() accepte deux nouveaux parametres (snmp_arp_par_ip,
+# capture_arp_par_ip). Repli uniquement si _mac_from_arp (resolution locale)
+# ne renvoie rien - jamais un ecrasement d'une MAC deja resolue. La provenance
+# est tracee (result['mac_source'] = 'snmp'|'capture', result['mac_sources']
+# pour SNMP) plutot que fondue avec une resolution locale. _run_scan() lance
+# les deux releves en threads paralleles (10 s / 9 s de budget) aux cotes des
+# decouvertes UpNP/mDNS/ONVIF deja existantes ; lancer_scan() transmet
+# desormais le client_id necessaire a hotes_vus_snmp.
+#
+# Interface (scan_reseau.html) : badge 🌐 (MAC obtenue via SNMP, infobulle
+# nommant l'equipement source) ou 📡 (MAC captee en ecoute passive) a cote de
+# la MAC quand elle provient d'une de ces deux sources ; le badge "muet" 🔇
+# precise "sur un sous-reseau route (VLAN)" quand la source est SNMP, au lieu
+# du message generique "pare-feu / ICMP bloque".
+#
+# Tests : test_diagnostic_reseau.py section 22 (_ip_depuis_suffixe_arp, les
+# deux formats d'index SNMP) et 23 (hotes_vus_snmp - SNMP inactif, aucun
+# equipement, routeur muet coupe court sans lire sa table ARP, IP resolue +
+# source rapportee, repli de format, agregation multi-equipements) ;
+# test_scan_completude_oui_arp.py section 9 (_scan_host : repli SNMP, repli
+# capture, provenance tracee, ARP local toujours prioritaire). Verifie en
+# navigateur sur le reseau reel de developpement (scan complet, 41 hotes,
+# aucune exception serveur ni JS) - la fonctionnalite de repli n'y a pas ete
+# declenchee (ARP local suffisant sur ce LAN a plat), confirmee uniquement par
+# les tests unitaires isoles.
+#
 # Version 2.19.37 - Detection automatique des sous-reseaux d'un site
 # Signale par un utilisateur : des appareils sur un second /24 routes (meme
 # routeur, deux LAN/VLAN) n'apparaissaient nulle part - scan, baie, diag -
