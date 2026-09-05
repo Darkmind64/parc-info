@@ -1,5 +1,21 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.43] - 2026-09-05 🧪
+
+### 🧪 Audit réseau, lot 3 : couverture de tests + 2 bugs réels découverts
+
+Suite des lots 1 et 2. Cinq zones du réseau qui n'avaient jusqu'ici aucun test reçoivent une couverture dédiée — et en les écrivant, deux bugs réels et bien réels sont apparus, tous deux corrigés :
+
+- **Un détecteur DHCP actif n'a en réalité jamais envoyé le moindre paquet, depuis un temps indéterminé.** `detecter_dhcp_pirate` appelle `_mac_locale()` pour obtenir l'adresse MAC de ce poste — mais une fonction totalement différente, portant le même nom (`_mac_locale(mac)`, un test « MAC localement administrée ? » sans rapport), était définie plus bas dans `network_diag.py` et écrasait purement et simplement la première au chargement du module. L'appel levait donc systématiquement une erreur, absorbée en silence par la gestion d'erreurs de la fonction. Renommée en `_mac_locale_poste()` pour lever l'ambiguïté.
+- **Le paquet DHCPDISCOVER envoyé par ce même détecteur était 4 octets trop court** par rapport au format DHCP standard (le bloc `ciaddr/yiaddr/siaddr/giaddr` ne réservait que 12 octets au lieu de 16), décalant tout ce qui suit dans le paquet. Corrigé.
+
+Nouvelle couverture :
+- La capture réseau passive (`capture_passive`, palier 2) — jusqu'ici zéro test alors qu'elle alimente à elle seule six catégories de détection (ARP spoofing, tempête broadcast, MAC flapping, DHCP pirate, Router Advertisement pirate, instabilité STP, retransmissions TCP) — est désormais vérifiée par une suite dédiée avec un faux module de capture, sans dépendance à scapy ni au réseau réel.
+- Le calcul du sens des liens réseau par protocole STP (racine, port racine, pont amont) et la découverte récursive de topologie avec son plafond de profondeur sont désormais testés.
+- Le diagnostic Wi-Fi sous Linux (`iw`) et macOS (`system_profiler`) est désormais testé — seul Windows l'était jusqu'ici.
+- SNMPv3 est désormais vérifié de bout en bout avec les 5 protocoles d'authentification documentés (MD5, SHA-224, SHA-256, SHA-384, SHA-512), pas seulement SHA-1.
+- Le détecteur de conflit de noms NetBIOS (`detecter_conflits_noms`) est désormais testé.
+
 ## [2.19.42] - 2026-09-05 🖱️
 
 ### 🖱️ Audit réseau, lot 2 : cohérence et performance du frontend

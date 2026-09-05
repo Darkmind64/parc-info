@@ -1,8 +1,78 @@
-PARCINFO_VERSION=2.19.42
+PARCINFO_VERSION=2.19.43
 RELEASE_DATE=2026-09-05
-BUILD_NUMBER=2026090506
+BUILD_NUMBER=2026090507
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.43 - Audit reseau, lot 3 : couverture de tests + 2 bugs reels
+# Suite des lots 1 et 2. Constats #17 a #21 de l'audit (couverture de tests) :
+#
+# #17 capture_passive (palier 2, ecoute passive) n'avait AUCUN test alors
+#     qu'elle alimente a elle seule 6 categories de detection (arp_spoofing,
+#     tempete_broadcast, mac_flapping, dhcp_pirate, ra_pirate, stp_instable,
+#     tcp_retransmissions) dans un unique callback scapy opaque. Nouveau
+#     fichier test_capture_passive.py : faux module scapy minimal (classes de
+#     repere + AsyncSniffer synchrone qui rejoue une liste de faux paquets),
+#     sans dependance a scapy ni au reseau reel. 15 assertions couvrant les 7
+#     categories + les cas negatifs (sous le seuil, paquet malforme qui ne
+#     casse pas la capture, scapy absent).
+# #18 _stp_switch (sens des liens par STP, constat d'audit #12 de 2.19.32) et
+#     la decouverte RECURSIVE de decouvrir_topologie (constat #10 de 2.19.32,
+#     plafond _TOPO_PROFONDEUR_MAX) n'etaient testes que de facon indirecte
+#     (topologie a un seul saut). Nouveaux tests (section 27/27bis/28 de
+#     test_diagnostic_reseau.py) : _stp_switch verifie directement (racine,
+#     port racine, pont amont, etat de port) ; _topologie_equipement remplacee
+#     par un faux releve qui rapporte TOUJOURS un nouveau voisin jamais vu -
+#     verifie que la recursion s'arrete a la profondeur exacte (4 equipements
+#     relevés, pas les 40 de _TOPO_EQUIP_MAX si le plafond etait casse).
+# #19 detecter_dhcp_pirate et detecter_conflits_noms (detecteurs actifs du
+#     palier 1) n'avaient AUCUN test. En ecrivant le test du premier, deux
+#     bugs reels decouverts et corriges :
+#     - _mac_locale() (l'adresse MAC de CE poste, utilisee pour construire le
+#       DHCPDISCOVER) etait ECRASEE par une fonction totalement differente
+#       portant le MEME NOM plus bas dans network_diag.py (_mac_locale(mac),
+#       un test "MAC localement administree ?" sans aucun rapport, ajoute
+#       depuis pour _classer_cascade). Python ne garde que la DERNIERE
+#       definition d'un nom au niveau module : l'appel `_mac_locale()` sans
+#       argument levait donc systematiquement une TypeError, absorbee en
+#       silence par le `except Exception` englobant de detecter_dhcp_pirate -
+#       ce detecteur n'envoyait donc JAMAIS le moindre DHCPDISCOVER, en
+#       silence, depuis l'introduction de l'autre fonction. Renommee en
+#       _mac_locale_poste() (seul appelant mis a jour).
+#     - _construire_dhcp_discover produisait un paquet 4 octets trop court :
+#       le bloc ciaddr/yiaddr/siaddr/giaddr (4 champs de 4 octets = 16)
+#       n'ecrivait que 12 octets, decalant chaddr/sname/file/magic cookie/
+#       options de 4 octets par rapport au format DHCP standard attendu par
+#       un vrai serveur.
+#     Nouveaux tests (section 24/25/26 de test_diagnostic_reseau.py) :
+#     detecter_dhcp_pirate verifiee de bout en bout via un faux socket UDP
+#     (bind reussit toujours, pas de privileges necessaires ; capture le
+#     paquet envoye pour verifier son magic cookie a l'offset exact ;
+#     fabrique des DHCPOFFER coherents avec le xid capture) - preuve directe
+#     que le bug de collision de nom est corrige (sinon 'bind' ne serait
+#     jamais atteint) ; _dhcp_server_id et _mac_locale_poste testees
+#     directement ; detecter_conflits_noms verifiee avec 2 IP annoncant le
+#     meme nom NetBIOS.
+# #20 Seul le Wi-Fi Windows etait teste ; un deploiement Linux ou macOS
+#     pouvait avoir un diagnostic Wi-Fi casse sans qu'aucun test ne le
+#     revele. Nouveaux tests (section 29/29bis/30/30bis) : _wifi_linux()
+#     avec des sorties `iw dev` / `iw dev X link` / `iw dev X scan` figees
+#     (connecte, non connecte, aucun adaptateur, 2 BSS voisins avec les 2
+#     formats de canal "DS Parameter set"/"primary channel") ; _wifi_macos()
+#     avec du JSON `system_profiler -json SPAirPortDataType` figé (connecte,
+#     non connecte, aucune interface, JSON illisible).
+# #21 SNMPv3 n'etait verifie de bout en bout qu'en SHA-1 (test_snmp_v3.py) ;
+#     MD5 n'avait qu'un test de derivation de cle (pas de vrai GET), les
+#     variantes SHA-224/256/384/512 - pourtant documentees comme protocoles
+#     possibles pour diag_snmp_v3_auth_proto - n'avaient AUCUN test. Nouvelle
+#     section 9 : boucle sur les 5 protocoles, GET authentifie bout en bout
+#     verifie pour chacun contre le meme faux agent SNMPv3 deja utilise pour
+#     SHA-1.
+#
+# Suite de tests complete reverifiee (37 scripts dont le nouveau
+# test_capture_passive.py + 235 tests pytest) : aucune regression, les 10
+# echecs pytest preexistants et sans rapport (pris en charge separement)
+# subsistent a l'identique.
 
 # Version 2.19.42 - Audit reseau, lot 2 : coherence et performance du frontend
 # Suite du lot 1 (network_diag.py / app.py). 4 correctifs sur scan_reseau.html,

@@ -342,5 +342,24 @@ try:
 finally:
     stop.set(); sock.close()
 
+print('\n=== 9. SNMPv3 bout en bout avec les autres protocoles d\'authentification ===')
+# Audit réseau 2026-09-05, #21 : seul SHA-1 était vérifié par un vrai échange
+# GET (section 4) ; MD5 n'avait qu'un test de dérivation de clé (section 1),
+# les variantes SHA-2 (224/256/384/512) — pourtant documentées comme
+# protocoles possibles pour diag_snmp_v3_auth_proto — n'avaient AUCUN test.
+for _proto in ('MD5', 'SHA224', 'SHA256', 'SHA384', 'SHA512'):
+    HFN, TAGLEN = A._V3_AUTH_PROTO[_proto]
+    KU = A._v3_ku(HFN, PASSWORD)
+    KUL = A._v3_kul(HFN, KU, FAKE_ENGINE)
+    A._v3_engine_cache.clear(); A._v3_engine_negatif.clear()
+    A.cfg_set('diag_snmp_v3_auth_proto', _proto)
+    A.cfg_set('diag_snmp_v3_auth_pass', PASSWORD)
+    port, stop, sock = _demarrer(_agent)
+    try:
+        r = A._snmp_get_typed('127.0.0.1', [A._OID_SYS_DESCR], port=port, timeout=1.5)
+        verifier(r.get(A._OID_SYS_DESCR) == 'FauxSwitch v3', f"{_proto} : GET authentifié bout en bout", str(r))
+    finally:
+        stop.set(); sock.close()
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

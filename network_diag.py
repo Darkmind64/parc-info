@@ -479,7 +479,7 @@ def detecter_dhcp_pirate(serveurs_attendus: list) -> list:
     liste vide (et journalise) si l'écoute n'a pas pu se faire.
     """
     try:
-        mac = _mac_locale()
+        mac = _mac_locale_poste()
         xid = os.urandom(4)
         paquet = _construire_dhcp_discover(mac, xid)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -522,7 +522,17 @@ def detecter_dhcp_pirate(serveurs_attendus: list) -> list:
     return findings
 
 
-def _mac_locale() -> bytes:
+def _mac_locale_poste() -> bytes:
+    """MAC de CE poste (pas d'un appareil distant — à ne pas confondre avec
+    `_mac_locale(mac)` plus bas, qui teste le bit « localement administré »
+    d'une MAC quelconque). Portait le MÊME nom que cette autre fonction avant
+    l'audit réseau du 2026-09-05 (#19) : la seconde définition, plus bas dans
+    ce fichier, écrasait purement et simplement celle-ci au chargement du
+    module — `detecter_dhcp_pirate` appelait donc en réalité
+    `_mac_locale(mac)` SANS argument, une `TypeError` systématique absorbée
+    par le `except Exception` englobant, si bien que ce détecteur n'envoyait
+    JAMAIS le moindre DHCPDISCOVER, silencieusement, depuis l'introduction de
+    l'autre fonction. Renommée pour lever l'ambiguïté."""
     import uuid
     n = uuid.getnode()
     return n.to_bytes(6, 'big')
@@ -531,7 +541,12 @@ def _mac_locale() -> bytes:
 def _construire_dhcp_discover(mac: bytes, xid: bytes) -> bytes:
     p = struct.pack('>BBBB', 1, 1, 6, 0)          # op, htype, hlen, hops
     p += xid + struct.pack('>HH', 0, 0x8000)      # secs, flags (broadcast)
-    p += b'\x00' * 12                              # ciaddr/yiaddr/siaddr/giaddr
+    # ciaddr + yiaddr + siaddr + giaddr = 4 champs de 4 octets = 16, pas 12 —
+    # bug trouvé en écrivant le test de ce détecteur (audit réseau
+    # 2026-09-05, #19) : le paquet envoyé était 4 octets plus court que le
+    # format DHCP standard, décalant chaddr/sname/file/magic cookie/options
+    # de 4 octets par rapport à ce qu'un serveur DHCP attend.
+    p += b'\x00' * 16                              # ciaddr/yiaddr/siaddr/giaddr
     p += mac + b'\x00' * 10                        # chaddr (16)
     p += b'\x00' * 64 + b'\x00' * 128             # sname + file
     p += bytes([99, 130, 83, 99])                 # magic cookie

@@ -20,6 +20,7 @@ Usage :
     python test_diagnostic_reseau.py
 """
 import io
+import json
 import os
 import sys
 import tempfile
@@ -900,6 +901,336 @@ N._snmp_walk_octets = lambda oid, ip, comm, **kw: (
 _r22d = N.hotes_vus_snmp(909)
 verifier(len(_r22d['hotes']) == 1 and len(_r22d['hotes']['192.168.0.80']['sources']) == 2,
          "même IP vue par 2 équipements -> une entrée, deux sources", str(_r22d['hotes']))
+
+print('\n=== 24. detecter_dhcp_pirate() : DHCPDISCOVER actif + réponses simulées ===')
+# Audit réseau 2026-09-05, #19 : cette fonction n'était vérifiée par AUCUN
+# test — ce qui a directement permis à un bug de passer inaperçu (corrigé
+# dans cette même session) : `_mac_locale()` (l'adresse MAC de CE poste)
+# était écrasée par une fonction homonyme incompatible définie plus bas
+# dans network_diag.py (`_mac_locale(mac)`, un test "MAC localement
+# administrée ?" sans rapport), si bien que `detecter_dhcp_pirate` levait
+# une TypeError avant même d'ouvrir la socket, absorbée en silence par le
+# `except Exception` englobant — ce détecteur n'envoyait donc JAMAIS le
+# moindre DHCPDISCOVER. Renommée en `_mac_locale_poste()`.
+
+
+class _FauxSocketDHCP:
+    """bind() réussit toujours (aucun privilège nécessaire dans un test) ;
+    sendto() capture le paquet envoyé (pour vérifier sa construction et en
+    extraire le xid, nécessaire pour fabriquer des DHCPOFFER cohérents) ;
+    recvfrom() sert les réponses programmées puis lève socket.timeout."""
+    def __init__(self, serveurs, capture):
+        self._serveurs = list(serveurs)
+        self._capture = capture
+        self.xid = b''
+
+    def setsockopt(self, *a, **k):
+        pass
+
+    def bind(self, addr):
+        self._capture['bind'] = addr
+
+    def settimeout(self, t):
+        pass
+
+    def sendto(self, data, addr):
+        self.xid = data[4:8]
+        self._capture['paquet'] = data
+
+    def recvfrom(self, n):
+        if not self._serveurs:
+            raise _sock.timeout()
+        srv = self._serveurs.pop(0)
+        return _fausse_offre(self.xid, srv), (srv, 67)
+
+    def close(self):
+        pass
+
+
+def _fausse_offre(xid, serveur_ip):
+    # op(1) htype(1) hlen(1) hops(1) + xid(4) + secs/flags(4) + ciaddr..giaddr(16)
+    # + chaddr(16) + sname(64) + file(128) = 236 octets, + magic cookie(4) = 240.
+    entete = bytes([2, 1, 6, 0]) + xid + bytes(4) + bytes(16) + bytes(16) + bytes(64) + bytes(128)
+    magique = bytes([99, 130, 83, 99])
+    ip_octets = bytes(int(x) for x in serveur_ip.split('.'))
+    options = bytes([53, 1, 2]) + bytes([54, 4]) + ip_octets + bytes([255])
+    return entete + magique + options
+
+
+# (a) Cas nominal : la fonction atteint bien l'envoi RÉEL du DHCPDISCOVER —
+# preuve directe que _mac_locale_poste()/_construire_dhcp_discover n'ont pas
+# levé d'exception avant même d'ouvrir la socket.
+_capture24 = {}
+_socket_orig = N.socket.socket
+N.socket.socket = lambda *a, **k: _FauxSocketDHCP(['192.168.1.1', '192.168.1.99'], _capture24)
+try:
+    _f24 = N.detecter_dhcp_pirate(['192.168.1.1'])
+finally:
+    N.socket.socket = _socket_orig
+verifier('bind' in _capture24,
+         "detecter_dhcp_pirate atteint l'envoi réel du DHCPDISCOVER (_mac_locale_poste() ne lève plus d'exception)")
+verifier(_capture24.get('paquet', b'')[236:240] == bytes([99, 130, 83, 99]),
+         "le paquet envoyé porte le bon magic cookie DHCP", str(_capture24.get('paquet', b'')[:10]))
+verifier(any(f['categorie'] == 'dhcp_pirate' for f in _f24),
+         "un serveur non déclaré (192.168.1.99) parmi les réponses -> dhcp_pirate", str(_f24))
+
+# (b) Tous les serveurs sont attendus -> aucune alerte.
+_capture24b = {}
+N.socket.socket = lambda *a, **k: _FauxSocketDHCP(['192.168.1.1'], _capture24b)
+try:
+    _f24b = N.detecter_dhcp_pirate(['192.168.1.1'])
+finally:
+    N.socket.socket = _socket_orig
+verifier(_f24b == [], "seul le serveur attendu répond -> aucune alerte", str(_f24b))
+
+print('\n=== 25. _mac_locale_poste() / _dhcp_server_id() : fonctions pures du palier 1 DHCP ===')
+verifier(len(N._mac_locale_poste()) == 6, "_mac_locale_poste() renvoie 6 octets (une adresse MAC)")
+_xid = b'\x01\x02\x03\x04'
+_offre = _fausse_offre(_xid, '10.0.0.1')
+verifier(N._dhcp_server_id(_offre, _xid) == '10.0.0.1',
+         "_dhcp_server_id extrait la bonne IP d'un DHCPOFFER (option 54)")
+verifier(N._dhcp_server_id(_offre, b'\x99\x99\x99\x99') == '',
+         "un xid différent (réponse à une AUTRE requête) est rejeté")
+_pas_offre = bytearray(_offre)
+_pas_offre[240 + 2] = 1   # option 53 (message-type) = 1 -> DHCPDISCOVER, pas OFFER
+verifier(N._dhcp_server_id(bytes(_pas_offre), _xid) == '',
+         "un message-type != OFFER (2) ne renvoie pas de serveur")
+
+print('\n=== 26. detecter_conflits_noms() : deux IP annoncent le même nom NetBIOS ===')
+conn = A.get_db()
+conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (910, 'ConflitsNoms')")
+conn.execute("INSERT INTO appareils (id, client_id, nom_machine, adresse_ip) "
+             "VALUES (971, 910, 'PC-A', '192.168.1.31')")
+conn.execute("INSERT INTO appareils (id, client_id, nom_machine, adresse_ip) "
+             "VALUES (972, 910, 'PC-B', '192.168.1.32')")
+conn.execute("INSERT INTO appareils (id, client_id, nom_machine, adresse_ip) "
+             "VALUES (973, 910, 'PC-C', '192.168.1.33')")
+conn.commit(); conn.close()
+_netbios_name_orig = A._netbios_name
+_netbios_par_ip = {'192.168.1.31': 'DOUBLON', '192.168.1.32': 'DOUBLON', '192.168.1.33': 'UNIQUE'}
+A._netbios_name = lambda ip: _netbios_par_ip.get(ip, '')
+try:
+    _f26 = N.detecter_conflits_noms(910)
+finally:
+    A._netbios_name = _netbios_name_orig
+verifier(len(_f26) == 1 and _f26[0]['categorie'] == 'conflit_nom',
+         "2 IP annonçant le même nom NetBIOS -> conflit_nom", str(_f26))
+verifier(sorted(_f26[0]['details']['ips']) == ['192.168.1.31', '192.168.1.32'],
+         "les 2 bonnes IP sont rapportées (pas la 3e, nom différent)", str(_f26[0]['details']))
+
+print('\n=== 27. _stp_switch() : sens des liens par STP (racine, port racine, pont amont) ===')
+# Audit réseau 2026-09-05, #18 : cette fonction (constat d'audit #12 de
+# 2.19.32 — donner le SENS des liens même sans LLDP) n'était vérifiée par
+# aucun test.
+_root_id = bytes([0x80, 0x00]) + bytes.fromhex('aabbccddeeff')       # racine du spanning tree
+_design_id_p5 = bytes([0x80, 0x00]) + bytes.fromhex('112233445566')  # pont amont vu par le port 5
+N._snmp_walk = lambda oid, ip, comm, **k: (
+    {'5': '5'} if oid == N._OID_STP_PORT_STATE else     # baseport 5 : état 5 = passant
+    {'0': '5'} if oid == N._OID_STP_ROOT_PORT else       # le port racine EST le baseport 5
+    {})
+N._snmp_walk_octets = lambda oid, ip, comm, **k: (
+    {'5': _design_id_p5} if oid == N._OID_STP_DESIGN_BR else
+    {'0': _root_id} if oid == N._OID_STP_DESIGN_ROOT else
+    {})
+_ports_stp, _meta_stp = N._stp_switch('10.9.0.1', ['public'], {'5': '10'})
+verifier(10 in _ports_stp, "le baseport 5 est bien résolu vers son ifIndex de façade (10)", str(_ports_stp))
+verifier(_ports_stp.get(10, {}).get('etat') == 'passant', "état STP décodé (5 -> passant)", str(_ports_stp))
+verifier(_ports_stp.get(10, {}).get('amont') is True,
+         "le port racine (baseport 5 == port_racine) est marqué 'amont'", str(_ports_stp))
+verifier(_ports_stp.get(10, {}).get('pont_amont') == N._mac_octets(_design_id_p5[2:]),
+         "la MAC du pont amont (voisin) est décodée depuis dot1dStpPortDesignatedBridge",
+         str(_ports_stp))
+verifier(_meta_stp.get('racine') == N._mac_octets(_root_id[2:]) and _meta_stp.get('port_racine') == 10,
+         "la racine du spanning tree et le port qui y mène sont exposés", str(_meta_stp))
+
+print('\n=== 27bis. _stp_switch() : équipement qui ne fait pas de STP -> ({}, {}) ===')
+N._snmp_walk = lambda oid, ip, comm, **k: {}
+N._snmp_walk_octets = lambda oid, ip, comm, **k: {}
+verifier(N._stp_switch('10.9.0.2', ['public'], {}) == ({}, {}),
+         "aucune table STP exposée -> résultat vide, pas d'exception")
+
+
+print('\n=== 28. decouvrir_topologie() : découverte récursive + plafond de profondeur ===')
+# Audit réseau 2026-09-05, #18 : la découverte récursive (constat d'audit #10
+# de 2.19.32) et son plafond _TOPO_PROFONDEUR_MAX n'étaient testés que de
+# façon indirecte (topologie à un seul saut, section 10 ci-dessus). Ici,
+# _topologie_equipement est directement remplacée par un faux relevé qui
+# rapporte TOUJOURS un nouveau voisin jamais vu — si le plafond de profondeur
+# ne fonctionnait pas, la boucle ne s'arrêterait qu'à _TOPO_EQUIP_MAX (40).
+conn = A.get_db()
+conn.execute("INSERT OR IGNORE INTO clients (id, nom) VALUES (912, 'TopoRecursive')")
+conn.execute("INSERT INTO appareils (id, client_id, nom_machine, type_appareil, adresse_ip) "
+             "VALUES (981, 912, 'SW-Racine', 'Switch', '10.6.0.1')")
+for k in ('diag_snmp_actif', 'diag_topologie_active'):
+    conn.execute("INSERT OR REPLACE INTO config (cle, valeur) VALUES (?, '1')", (k,))
+conn.commit(); conn.close()
+from config_helpers import cfg_invalidate as _inv27
+_inv27()
+
+_compteur_topo = [0]
+
+
+def _faux_topologie_equipement(client_id, aid, ip, communautes, inventaire, now, deadline):
+    _compteur_topo[0] += 1
+    nouvel_ip = f'10.6.0.{100 + _compteur_topo[0]}'
+    voisins = [(nouvel_ip, f'SW-decouvert-{_compteur_topo[0]}', 'Modele-X')]
+    return ([], [], voisins, [], False, '')
+
+
+_topologie_equipement_orig = N._topologie_equipement
+N._topologie_equipement = _faux_topologie_equipement
+try:
+    _res28 = N.decouvrir_topologie(912)
+finally:
+    N._topologie_equipement = _topologie_equipement_orig
+
+verifier(_compteur_topo[0] == N._TOPO_PROFONDEUR_MAX + 1,
+         f"la récursion s'arrête après {N._TOPO_PROFONDEUR_MAX} sauts (profondeurs 0 à "
+         f"{N._TOPO_PROFONDEUR_MAX}), pas avant _TOPO_EQUIP_MAX (40)",
+         f"{_compteur_topo[0]} équipements relevés")
+verifier(len(_res28['decouverts']) == N._TOPO_PROFONDEUR_MAX,
+         "chaque saut sauf le dernier découvre et met en file un nouveau switch hors inventaire",
+         str(_res28['decouverts']))
+verifier(all(d['ip'].startswith('10.6.0.1') for d in _res28['decouverts']),
+         "les switches découverts sont bien ceux rapportés par le faux relevé", str(_res28['decouverts']))
+
+print('\n=== 29. _wifi_linux() : analyseur de sortie `iw` (audit réseau 2026-09-05, #20) ===')
+# Seul _wifi_windows était testé jusqu'ici ; un déploiement Linux pouvait donc
+# avoir un diagnostic Wi-Fi cassé sans qu'aucun test ne le révèle.
+_SORTIE_IW_DEV = """phy#0
+\tInterface wlan0
+\t\tifindex 3
+\t\taddr aa:bb:cc:dd:ee:ff
+\t\ttype managed
+"""
+_SORTIE_IW_LINK_CONNECTE = """Connected to a1:b2:c3:d4:e5:f6 (on wlan0)
+\tSSID: MonReseauWifi
+\tfreq: 5180
+\tRX: 1234 bytes (10 packets)
+\tTX: 5678 bytes (20 packets)
+\tsignal: -55 dBm
+\trx bitrate: 866.7 MBit/s VHT-MCS 9 80MHz short GI VHT-NSS 2
+"""
+_SORTIE_IW_LINK_DECONNECTE = "Not connected.\n"
+_SORTIE_IW_SCAN = """BSS aa:11:22:33:44:55(on wlan0)
+\tsignal: -60.00 dBm
+\tSSID: VoisinWifi
+\tDS Parameter set: channel 6
+BSS bb:11:22:33:44:66(on wlan0)
+\tsignal: -70.00 dBm
+\tSSID: AutreVoisin
+\tprimary channel: 44
+"""
+
+
+def _run_iw(cmd, timeout=6):
+    if cmd == ['iw', 'dev']:
+        return _FakeProc(_SORTIE_IW_DEV)
+    if cmd == ['iw', 'dev', 'wlan0', 'link']:
+        return _FakeProc(_etat_link[0])
+    if cmd == ['iw', 'dev', 'wlan0', 'scan']:
+        return _FakeProc(_SORTIE_IW_SCAN)
+    raise AssertionError(f"commande iw inattendue : {cmd}")
+
+
+_etat_link = [_SORTIE_IW_LINK_CONNECTE]
+N._run = _run_iw
+try:
+    _wifi_lin = N._wifi_linux()
+finally:
+    N._run = _run_orig
+verifier(_wifi_lin['connecte'] is True and _wifi_lin['ssid'] == 'MonReseauWifi',
+         "interface + SSID extraits de 'iw dev' / 'iw dev wlan0 link'", str(_wifi_lin))
+verifier(_wifi_lin['bssid'] == 'a1:b2:c3:d4:e5:f6', "BSSID extrait", str(_wifi_lin.get('bssid')))
+verifier(_wifi_lin['rssi_dbm'] == -55, "signal (dBm) extrait", str(_wifi_lin.get('rssi_dbm')))
+verifier(_wifi_lin['canal'] == 36 and _wifi_lin['bande'] == N._canal_vers_bande(36),
+         "fréquence (5180 MHz) convertie en canal (36) puis en bande", str(_wifi_lin))
+verifier(_wifi_lin['debit_mbps'] == 866, "débit rx extrait (866.7 -> 866)", str(_wifi_lin.get('debit_mbps')))
+verifier(len(_wifi_lin['aps']) == 2 and {a['ssid'] for a in _wifi_lin['aps']} == {'VoisinWifi', 'AutreVoisin'},
+         "2 BSS voisins extraits du scan ('DS Parameter set' ET 'primary channel')", str(_wifi_lin['aps']))
+verifier(next(a for a in _wifi_lin['aps'] if a['ssid'] == 'VoisinWifi')['canal'] == 6,
+         "canal du 1er voisin (DS Parameter set: channel 6)")
+verifier(next(a for a in _wifi_lin['aps'] if a['ssid'] == 'AutreVoisin')['canal'] == 44,
+         "canal du 2e voisin (primary channel: 44)")
+
+print('\n=== 29bis. _wifi_linux() : non connecté / aucun adaptateur ===')
+_etat_link[0] = _SORTIE_IW_LINK_DECONNECTE
+N._run = _run_iw
+try:
+    _wifi_dc = N._wifi_linux()
+finally:
+    N._run = _run_orig
+verifier(_wifi_dc == {'connecte': False, 'motif': 'non connecté', 'aps': _wifi_dc.get('aps')},
+         "'Not connected.' -> connecte=False", str(_wifi_dc))
+
+N._run = lambda cmd, timeout=6: _FakeProc("")   # 'iw dev' sans aucune ligne Interface
+try:
+    _wifi_sans_carte = N._wifi_linux()
+finally:
+    N._run = _run_orig
+verifier(_wifi_sans_carte == {'connecte': False, 'motif': 'aucun adaptateur Wi-Fi'},
+         "aucune interface Wi-Fi détectée -> motif explicite", str(_wifi_sans_carte))
+
+
+print('\n=== 30. _wifi_macos() : analyseur JSON de `system_profiler` ===')
+_JSON_AIRPORT_CONNECTE = json.dumps({
+    "SPAirPortDataType": [{
+        "spairport_airport_interfaces": [{
+            "spairport_current_network_information": {
+                "_name": "MonReseauWifi",
+                "spairport_network_channel": "36 (5GHz, 80MHz)",
+                "spairport_network_bssid": "A1:B2:C3:D4:E5:F6",
+                "spairport_signal_noise": "-55 dBm / -90 dBm",
+            },
+            "spairport_airport_other_local_wireless_networks": [
+                {"_name": "VoisinWifi", "spairport_network_channel": "6"},
+            ],
+        }],
+    }],
+})
+N._run = lambda cmd, timeout=6: _FakeProc(_JSON_AIRPORT_CONNECTE)
+try:
+    _wifi_mac = N._wifi_macos()
+finally:
+    N._run = _run_orig
+verifier(_wifi_mac['connecte'] is True and _wifi_mac['ssid'] == 'MonReseauWifi',
+         "SSID extrait du JSON system_profiler", str(_wifi_mac))
+verifier(_wifi_mac['bssid'] == 'a1:b2:c3:d4:e5:f6', "BSSID normalisé en minuscules", str(_wifi_mac.get('bssid')))
+verifier(_wifi_mac['canal'] == 36, "canal extrait du premier nombre de spairport_network_channel",
+         str(_wifi_mac.get('canal')))
+verifier(_wifi_mac['rssi_dbm'] == -55, "signal (premier nombre de spairport_signal_noise)",
+         str(_wifi_mac.get('rssi_dbm')))
+verifier(len(_wifi_mac['aps']) == 1 and _wifi_mac['aps'][0]['ssid'] == 'VoisinWifi',
+         "réseau voisin extrait de spairport_airport_other_local_wireless_networks",
+         str(_wifi_mac['aps']))
+
+print('\n=== 30bis. _wifi_macos() : non connecté / aucun adaptateur / JSON illisible ===')
+_JSON_AIRPORT_DECONNECTE = json.dumps({
+    "SPAirPortDataType": [{"spairport_airport_interfaces": [{}]}]})
+N._run = lambda cmd, timeout=6: _FakeProc(_JSON_AIRPORT_DECONNECTE)
+try:
+    _wifi_mac_dc = N._wifi_macos()
+finally:
+    N._run = _run_orig
+verifier(_wifi_mac_dc['connecte'] is False and _wifi_mac_dc['motif'] == 'non connecté',
+         "interface présente mais sans réseau courant -> non connecté", str(_wifi_mac_dc))
+
+_JSON_AIRPORT_SANS_CARTE = json.dumps({"SPAirPortDataType": [{"spairport_airport_interfaces": []}]})
+N._run = lambda cmd, timeout=6: _FakeProc(_JSON_AIRPORT_SANS_CARTE)
+try:
+    _wifi_mac_sc = N._wifi_macos()
+finally:
+    N._run = _run_orig
+verifier(_wifi_mac_sc == {'connecte': False, 'motif': 'aucun adaptateur Wi-Fi'},
+         "aucune interface -> motif explicite", str(_wifi_mac_sc))
+
+N._run = lambda cmd, timeout=6: _FakeProc("ceci n'est pas du JSON")
+try:
+    _wifi_mac_ko = N._wifi_macos()
+finally:
+    N._run = _run_orig
+verifier(_wifi_mac_ko == {'connecte': False, 'motif': 'lecture impossible (macOS)'},
+         "sortie illisible (JSON invalide) -> motif explicite, pas d'exception", str(_wifi_mac_ko))
 
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)
