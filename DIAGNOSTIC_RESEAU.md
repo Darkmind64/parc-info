@@ -80,9 +80,27 @@ conseil, taux d'erreur par minute, débit, mini-courbe. Routes
 - **Fiche appareil** : encart « ■ Réseau — diagnostic »
   (`GET /api/appareil/<id>/diag-reseau`) — état SNMP d'un switch + ports en
   erreur, ou sur quel port de switch un poste est vu, + évènements actifs.
-- **Baie de brassage** : marqueur ⚠ sur un port en erreur de trafic
-  (`GET /api/baie/diag-erreurs`).
-- **Tableau de bord** : alerte réseau rattachée à un appareil → lien fiche.
+  **v2.21.0 (#3)** : recoupe en plus le débit négocié / le duplex vus par le
+  switch avec le `link_speed` des cartes remontées par le collecteur-agent
+  (`netdiag.etat._incoherences_reseau`) → signale un Gigabit bridé à 100 Mb/s
+  par un câble, un lien en half-duplex.
+- **Baie de brassage** : marqueur ⚠ sur un port en erreur de trafic + **v2.21.0
+  (#1)** une **pastille de santé par équipement** (`netdiag.etat.sante_baie`).
+  `GET /api/baie/diag-erreurs` renvoie `{ports, equipements}`.
+- **Tableau de bord** : alerte réseau rattachée à un appareil → lien fiche +
+  **v2.21.0 (#6)** un **bandeau de verdict** (`netdiag.etat.verdict`) en tête de
+  la tuile « État réseau ».
+- **Topologie** : **v2.21.0 (#2)** un équipement vu en LLDP mais absent de
+  l'inventaire (`decouverts`) a un bouton « + Ajouter à l'inventaire »
+  (`POST /api/diag-reseau/topologie/promouvoir`).
+- **Parc général** : **v2.21.0 (#4)** badges « confirmé / divergent / non
+  vérifié » sur passerelle / DNS / plage IP / domaine
+  (`network_diag.verifier_parc_general`, `GET /api/parc-general/verification`).
+- **Historique** : **v2.21.0 (#7)** chaque bascule d'état majeure y est tracée
+  (`DIAG_RESEAU_PORT_ERREUR` / `_PORT_RETABLI` / `_EQUIP_INJOIGNABLE` /
+  `_EQUIP_JOIGNABLE`, via `network_diag._hist_diag`). Un équipement qui cesse de
+  répondre repasse `snmp_ok=0` (`_marquer_equipements_muets`) — avant, son
+  dernier état restait affiché et faussait le verdict.
 - **Mobile** `/m/diag-reseau` : bandeau de verdict.
 
 ---
@@ -881,7 +899,8 @@ la passerelle — voire aucune.
 | **Collecteur SNMP unifié** | `netdiag/collect.py` : `balayer(client_id, besoins, budget_s)` → `{ip: ReleveEquipement}` ; `ReleveEquipement.equipement` = forme de `interroger_equipement` ; `releve_frais(ip, max_age)` ; `ResultatBalayage.muets` |
 | **Analyse SNMP par port + classification** | `netdiag/analyse.py` (fonctions **pures**) : `classer_erreur(port, deltas)`, `analyser_port` / `analyser_equipement` → `(findings, lignes_etat)` |
 | **Auto-résolution des évènements** | `netdiag/events.py` : `auto_resoudre_snmp(client_id, absence_s, equip_frais_s)` |
-| **Read models de l'interface** | `netdiag/etat.py` : `verdict(client_id)`, `trafic(client_id, tous=)`, `pour_appareil(client_id, appareil_id)` ; routes `GET /api/diag-reseau/verdict`, `/trafic`, `/api/appareil/<id>/diag-reseau`, `/api/baie/diag-erreurs` |
+| **Read models de l'interface** | `netdiag/etat.py` : `verdict(client_id)`, `trafic(client_id, tous=)`, `pour_appareil(client_id, appareil_id)` (+ `incoherences` #3, `_incoherences_reseau`/`_speed_mbps`), `sante_baie(client_id)` (#1) ; routes `GET /api/diag-reseau/verdict`, `/trafic`, `/api/appareil/<id>/diag-reseau`, `/api/baie/diag-erreurs` (`{ports, equipements}`) |
+| **Intégrations autres catégories (v2.21.0)** | **#6** `single_client_dashboard` → `diag_reseau_verdict` + `.dashsante` dans `client_dashboard.html`. **#7** `network_diag._hist_diag` / `_marquer_equipements_muets` (fin de `interroger_equipements_client`) ; transitions dans `_ecrire_etat_snmp`. **#3** `templates/fiche_systeme.html` encart. **#2** `POST /api/diag-reseau/topologie/promouvoir` + `promouvoirEquipement()` dans `diag_reseau.html`. **#4** `network_diag.verifier_parc_general` + `GET /api/parc-general/verification` + `.pg-verif` dans `parc_general.html` |
 | Détections palier 1/2 | `network_diag.py` : `detecter_*`, `mesurer_qualite_liaison`, `capture_passive` |
 | SNMP (palier 3) | `interroger_equipements_client` (→ `collect.balayer` + `analyse` + `_ecrire_etat_snmp`), `interroger_equipement` (repli / tests), `etat_snmp` |
 | Bouton « Tester SNMP » | `app.api_diag_test_snmp` (tous les `network_diag._TYPES_EQUIP_SNMP`, v3 puis `app._snmp_sysinfo` v2c→v1, communautés config + `app._SNMP_COMMUNAUTES_COURANTES`) |

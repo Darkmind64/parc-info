@@ -11,7 +11,9 @@ bruts. Deux vues :
 """
 from __future__ import annotations
 
+import json as _json
 import logging
+import re as _re
 import time
 from datetime import datetime, timezone
 
@@ -48,6 +50,44 @@ def _age_s(iso: str) -> int | None:
         return None
 
 
+def _speed_mbps(txt) -> int | None:
+    """« 1 Gbps » / « 100 Mbps » / « 2.5 Gbps » → Mbit/s. None si illisible."""
+    m = _re.match(r'\s*([\d.,]+)\s*([GMK]?)\s*b', str(txt or ''), _re.I)
+    if not m:
+        return None
+    try:
+        v = float(m.group(1).replace(',', '.'))
+    except ValueError:
+        return None
+    return int(round(v * {'G': 1000, 'M': 1, 'K': 0.001}.get(m.group(2).upper(), 1)))
+
+
+def _incoherences_reseau(rapport_json: str, vu: dict | None) -> list[str]:
+    """Proposition #3 : recoupe ce que le switch voit du poste (port SNMP :
+    débit négocié, duplex) avec ce que le collecteur-agent ParcInfo remonte de
+    ses cartes réseau. Signale les écarts (câble/port qui bride un Gigabit,
+    half-duplex…)."""
+    if not vu:
+        return []
+    try:
+        rap = _json.loads(rapport_json or '{}')
+    except (ValueError, TypeError):
+        return []
+    nics = [a for a in (rap.get('network_adapter_details') or [])
+            if isinstance(a, dict) and a.get('physical') and a.get('connected')]
+    out = []
+    sp = vu.get('speed_mbps') or 0
+    cap = max((_speed_mbps(a.get('link_speed')) or 0 for a in nics), default=0)
+    if cap and sp and sp < cap and sp in (10, 100) and cap >= 1000:
+        out.append(f"Le switch voit ce poste négocié à {sp} Mb/s, mais sa carte réseau "
+                   f"est donnée pour {cap} Mb/s par le collecteur — câble (Cat5e+ 4 paires) "
+                   f"ou port à vérifier.")
+    if vu.get('duplex') == 2:
+        out.append("Le port de switch est en half-duplex — forcer l'autonégociation "
+                   "(ou full-duplex) des deux côtés du lien.")
+    return out
+
+
 def _cfg1(cle, defaut):
     try:
         import network_diag
@@ -63,8 +103,13 @@ def trafic(client_id: int, tous: bool = False) -> dict:
     conn = get_db()
     try:
         cols = [c[1] for c in conn.execute("PRAGMA table_info(diag_etat_port)")]
+        # Un port dont le switch ne répond plus (snmp_ok=0) porte des données
+        # périmées — on ne l'affiche pas dans « Trafic & erreurs » (le bandeau
+        # verdict compte les équipements muets à part).
         rows = [dict(zip(cols, r)) for r in conn.execute(
-            "SELECT * FROM diag_etat_port WHERE client_id=?", (client_id,))]
+            "SELECT p.* FROM diag_etat_port p JOIN diag_etat_equipement e "
+            "  ON e.client_id=p.client_id AND e.equipement_ip=p.equipement_ip "
+            "WHERE p.client_id=? AND e.snmp_ok=1", (client_id,))]
         # noms d'appareils (équipement porteur + appareil branché vu)
         aids = {r['appareil_id'] for r in rows if r['appareil_id']} | \
                {r['appareil_vu_id'] for r in rows if r['appareil_vu_id']}
@@ -130,11 +175,12 @@ def pour_appareil(client_id: int, appareil_id: int) -> dict:
     from database import get_db
     conn = get_db()
     try:
-        ap = conn.execute("SELECT nom_machine, adresse_ip, type_appareil FROM appareils "
+        ap = conn.execute("SELECT nom_machine, adresse_ip, type_appareil, "
+                          "COALESCE(rapport_systeme_json,'') FROM appareils "
                           "WHERE id=? AND client_id=?", (appareil_id, client_id)).fetchone()
         if not ap:
             return {}
-        nom, ip, type_ap = ap
+        nom, ip, type_ap, rapport_json = ap
         cols_p = [c[1] for c in conn.execute("PRAGMA table_info(diag_etat_port)")]
         # équipement lui-même ?
         eq = None
@@ -181,10 +227,50 @@ def pour_appareil(client_id: int, appareil_id: int) -> dict:
                     (client_id, appareil_id))]
     finally:
         conn.close()
+    incoherences = _incoherences_reseau(rapport_json, vu)
     return {'nom': nom, 'ip': ip or '', 'type': type_ap or '',
             'equipement': eq, 'ports_en_erreur': ports_eq,
-            'vu_sur': vu, 'evenements': evts,
-            'a_montrer': bool(eq or vu or evts)}
+            'vu_sur': vu, 'evenements': evts, 'incoherences': incoherences,
+            'a_montrer': bool(eq or vu or evts or incoherences)}
+
+
+def sante_baie(client_id: int) -> dict:
+    """Proposition #1 : pastille de santé par emplacement de baie, tirée de
+    `diag_etat_equipement`. `{slot_id: {niveau, snmp_ok, nb_ports_erreur,
+    nb_ports, age_s, sysname, phrase}}` — un seul niveau `ok` / `attention` /
+    `critique` par équipement monté en rack et relevé en SNMP. Les emplacements
+    sans relevé SNMP ne sont pas renvoyés (pas de badge « non vérifié » qui
+    encombrerait le rack)."""
+    from database import get_db
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT s.id, a.nom_machine, e.snmp_ok, e.nb_ports_erreur, e.nb_ports, "
+            "       e.motif, e.derniere_maj, e.sysname "
+            "FROM baie_slots s JOIN appareils a ON a.id = s.appareil_id "
+            "JOIN diag_etat_equipement e "
+            "  ON e.client_id = s.client_id AND e.equipement_ip = a.adresse_ip "
+            "WHERE s.client_id=? AND COALESCE(a.adresse_ip,'') <> ''",
+            (client_id,)).fetchall()
+    finally:
+        conn.close()
+    out = {}
+    for sid, nom, snmp_ok, nb_err, nb_ports, motif, maj, sysname in rows:
+        if not snmp_ok:
+            niveau = 'critique'
+            phrase = f"Ne répond plus en SNMP ({motif or 'aucune réponse'})"
+        elif nb_err:
+            niveau = 'attention'
+            phrase = f"{nb_err} port(s) en erreur de trafic"
+        else:
+            niveau = 'ok'
+            phrase = f"{nb_ports or 0} port(s) relevé(s), aucune erreur"
+        out[str(sid)] = {
+            'niveau': niveau, 'phrase': phrase, 'snmp_ok': bool(snmp_ok),
+            'nb_ports_erreur': nb_err or 0, 'nb_ports': nb_ports or 0,
+            'sysname': sysname or nom or '', 'age_s': _age_s(maj),
+        }
+    return out
 
 
 def verdict(client_id: int) -> dict:
@@ -193,7 +279,8 @@ def verdict(client_id: int) -> dict:
     conn = get_db()
     try:
         eq = conn.execute(
-            "SELECT COUNT(*), SUM(snmp_ok), SUM(nb_ports_erreur), MAX(derniere_maj) "
+            "SELECT COUNT(*), SUM(snmp_ok), "
+            "  SUM(CASE WHEN snmp_ok=1 THEN nb_ports_erreur ELSE 0 END), MAX(derniere_maj) "
             "FROM diag_etat_equipement WHERE client_id=?", (client_id,)).fetchone()
         nb_eq = eq[0] or 0
         nb_eq_ok = eq[1] or 0
@@ -213,13 +300,16 @@ def verdict(client_id: int) -> dict:
     nb_avert = par_grav.get('avertissement', 0)
     snmp_actif = _cfg1('diag_snmp_actif', '0')
 
+    nb_muets = max(0, nb_eq - nb_eq_ok)
     if nb_crit:
         niveau, phrase = 'critique', f"{nb_crit} alerte(s) critique(s) active(s)"
-    elif nb_avert or nb_ports_err:
+    elif nb_avert or nb_ports_err or nb_muets:
         niveau = 'attention'
         bits = []
         if nb_ports_err:
             bits.append(f"{nb_ports_err} port(s) en erreur")
+        if nb_muets:
+            bits.append(f"{nb_muets} équipement(s) SNMP muet(s)")
         if nb_avert:
             bits.append(f"{nb_avert} avertissement(s)")
         phrase = ' · '.join(bits)

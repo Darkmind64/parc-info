@@ -1,8 +1,58 @@
-PARCINFO_VERSION=2.20.1
+PARCINFO_VERSION=2.21.0
 RELEASE_DATE=2026-09-06
-BUILD_NUMBER=2026090604
+BUILD_NUMBER=2026090605
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.21.0 - Le diagnostic reseau irrigue les autres categories
+# Suite de la refonte (2.20.0) + de la passe perf (2.20.1) : les 6 propositions
+# "post-refonte" du plan retenues par l'utilisateur (la 7e, sortir les secrets
+# SNMP de `configurations` vers le coffre chiffre, est laissee a un plan dedie).
+#
+# #6 TABLEAU DE BORD - la tuile "Etat reseau" gagne un bandeau de verdict tire
+#    de `netdiag.etat.verdict()` : "reseau sain" / "N port(s) en erreur -
+#    M equipement(s) SNMP muet(s)", couleur + lien vers /diag-reseau.
+#
+# #1 BAIE DE BRASSAGE - une pastille de sante (vert / warn / crit) par
+#    equipement monte en rack et releve en SNMP, tiree de `diag_etat_equipement`.
+#    `netdiag.etat.sante_baie()` ; `GET /api/baie/diag-erreurs` renvoie
+#    desormais `{ports, equipements}` (le marqueur port existait deja, Lot 5).
+#
+# #7 HISTORIQUE - `_ecrire_etat_snmp` et le nouveau `_marquer_equipements_muets`
+#    journalisent chaque bascule dans `historique` (entite 'diag_reseau') :
+#    DIAG_RESEAU_PORT_ERREUR / _PORT_RETABLI / _EQUIP_INJOIGNABLE / _EQUIP_JOIGNABLE.
+#    Au passage : un equipement qui cesse de repondre repasse enfin `snmp_ok=0`
+#    (avant il gardait son dernier etat pour toujours et faussait le verdict) ;
+#    `verdict()` / `trafic()` / la vue baie ignorent les ports d'un switch muet.
+#
+# #3 FICHE APPAREIL - l'encart "Reseau - diagnostic" (Lot 5) recoupe ce que le
+#    switch voit du poste (debit negocie, duplex sur le port ou il est vu) avec
+#    ce que le collecteur-agent ParcInfo remonte de ses cartes
+#    (`network_adapter_details.link_speed`) : signale un Gigabit bride a 100 Mb/s
+#    par un cable, un lien en half-duplex. `netdiag.etat._incoherences_reseau`.
+#
+# #2 TOPOLOGIE - un equipement vu en LLDP/CDP mais absent de l'inventaire
+#    (liste `decouverts` de la cartographie) recoit un bouton
+#    "+ Ajouter a l'inventaire". Route `POST /api/diag-reseau/topologie/promouvoir`
+#    (can_write, cree un "Switch" avec son IP de gestion, log_history). Rien n'est
+#    cree sans ce clic.
+#
+# #4 PARC GENERAL - `network_diag.verifier_parc_general()` confronte les champs
+#    reseau declares (passerelle / DNS / plage IP / domaine) a la realite
+#    observable (IP des appareils de l'inventaire, sonde DNS, type des
+#    equipements) -> badge "confirme / divergent / non verifie" a cote de chaque
+#    champ. Indicatif, jamais bloquant. Route `GET /api/parc-general/verification`.
+#
+# Tests : +27 (tests/test_netdiag_etat.py etendu, test_netdiag_transitions.py,
+# test_diag_topologie_promouvoir.py, test_parc_general_verification.py). Suite :
+# 305 passants (+27), 9 echecs preexistants de test_diag_reseau.py inchanges
+# (mocks _fdb_switch + un test d'ordre fragile - verifie identique sur le commit
+# parent en lancant ce fichier seul), 39/39 scripts racine, verifie en
+# navigateur (tuile dashboard, pastille baie, encart fiche, badges parc).
+#
+# Proposition #5 (coffre SNMP chiffre) NON traitee : elle touche tous les
+# chemins de lecture des communautes/mots de passe SNMP, merite son propre plan
+# valide - a arbitrer separement.
 
 # Version 2.20.1 - Diagnostic reseau & baie : sondes menees en parallele (Lot 7)
 # Retour utilisateur apres la refonte : "tout est vraiment tres long, ne peut-on

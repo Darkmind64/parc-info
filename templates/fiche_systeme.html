@@ -359,6 +359,11 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
             if (v.classe) h += `<div style="padding:.4rem .6rem;border-left:3px solid #ff6b81;">
                 ${esc(v.classe_libelle)}${v.conseil ? `<div style="color:var(--text-secondary);font-size:.8rem;">💡 ${esc(v.conseil)}</div>` : ''}</div>`;
         }
+        (d.incoherences||[]).forEach(msg => {
+            h += `<div style="margin:.3rem 0;padding:.4rem .6rem;border-left:3px solid #6ba3ff;">
+                <strong>Incohérence SNMP ↔ collecteur</strong>
+                <div style="color:var(--text-secondary);font-size:.8rem;">${esc(msg)}</div></div>`;
+        });
         if ((d.evenements||[]).length){
             h += '<p style="margin-top:.5rem;"><strong>Évènements actifs</strong></p><ul style="margin:.2rem 0 0 1rem;">';
             d.evenements.forEach(ev => {

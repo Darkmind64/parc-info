@@ -640,6 +640,20 @@
     margin: 0.6rem 0 1rem 0;
 }
 
+/* Verdict du diagnostic réseau (proposition #6) */
+.dashsante {
+    display: flex; align-items: center; gap: .45rem;
+    margin: .5rem 0 .2rem 0; padding: .35rem .55rem;
+    border-radius: 6px; font-size: .72rem; font-weight: 600;
+    text-decoration: none; border: 1px solid transparent;
+}
+.dashsante-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.dashsante-txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dashsante-meta { font-size: .64rem; font-weight: 700; opacity: .75; flex-shrink: 0; }
+.dashsante-ok { color: #1f9d55; background: rgba(31,157,85,.10); border-color: rgba(31,157,85,.25); }
+.dashsante-attention { color: #c77700; background: rgba(224,149,42,.12); border-color: rgba(224,149,42,.3); }
+.dashsante-critique { color: #ef4444; background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.3); }
+
 .net-bar {
     height: 6px;
     background: var(--bg-secondary);
@@ -878,6 +892,15 @@
             {% elif widget_id == 'network-status' %}
                 <div class="card" style="flex:1;display:flex;flex-direction:column;margin-bottom:0;overflow:hidden;">
                         <div class="s-head">📡 État réseau <a href="/appareils">Voir tout →</a></div>
+                        {% if diag_reseau_verdict and (diag_reseau_verdict.snmp_actif or diag_reseau_verdict.nb_equipements) %}
+                        <a href="/diag-reseau" class="dashsante dashsante-{{ diag_reseau_verdict.niveau }}" title="{{ diag_reseau_verdict.phrase }}">
+                            <span class="dashsante-dot"></span>
+                            <span class="dashsante-txt">
+                                {% if diag_reseau_verdict.niveau == 'ok' %}Diagnostic : réseau sain{% else %}Diagnostic : {{ diag_reseau_verdict.phrase }}{% endif %}
+                            </span>
+                            {% if diag_reseau_verdict.nb_equipements %}<span class="dashsante-meta">{{ diag_reseau_verdict.nb_equipements_ok }}/{{ diag_reseau_verdict.nb_equipements }} SNMP</span>{% endif %}
+                        </a>
+                        {% endif %}
                         <div class="net-bar-wrap">
                             <div class="net-bar">
                                 {% if nb_app_total %}

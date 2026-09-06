@@ -1249,17 +1249,71 @@ def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> li
     return findings
 
 
+def _hist_diag(conn, client_id, appareil_id, nom, action, details):
+    """Trace une transition d'état du diagnostic réseau dans l'historique client
+    (proposition #7 : équipement injoignable↔joignable, port en erreur↔sain).
+    Best-effort — ne fait jamais échouer le cycle."""
+    try:
+        from client_helpers import log_history
+        log_history(conn, client_id, 'diag_reseau', appareil_id or 0,
+                    nom, action, details)
+    except Exception:
+        logger.debug('network_diag: log_history diag en échec', exc_info=True)
+
+
+def _marquer_equipements_muets(client_id, ips_vus, motifs=None):
+    """Après un balayage SNMP : un équipement qui avait un état `snmp_ok=1` et
+    n'a pas répondu cette passe repasse `snmp_ok=0` (+ trace historique). Sans
+    ça, `diag_etat_equipement` gardait indéfiniment le dernier état connu et le
+    verdict comptait un switch mort comme joignable."""
+    motifs = motifs or {}
+    try:
+        from database import get_db
+        conn = get_db()
+    except Exception:
+        return
+    try:
+        rows = conn.execute(
+            "SELECT equipement_ip, appareil_id, sysname FROM diag_etat_equipement "
+            "WHERE client_id=? AND snmp_ok=1", (client_id,)).fetchall()
+        touche = False
+        for eip, aid, sysname in rows:
+            if eip in ips_vus:
+                continue
+            motif = motifs.get(eip) or 'aucune réponse SNMP'
+            conn.execute(
+                "UPDATE diag_etat_equipement SET snmp_ok=0, joignable=0, motif=? "
+                "WHERE client_id=? AND equipement_ip=?", (motif, client_id, eip))
+            _hist_diag(conn, client_id, aid, sysname or eip,
+                       'DIAG_RESEAU_EQUIP_INJOIGNABLE',
+                       f"{sysname or eip} ne répond plus en SNMP ({motif})")
+            touche = True
+        if touche:
+            conn.commit()
+    except Exception:
+        logger.debug('network_diag: _marquer_equipements_muets en échec', exc_info=True)
+    finally:
+        conn.close()
+
+
 def _ecrire_etat_snmp(conn, client_id, ip, appareil_id, sysname, lignes_etat, now, ts):
     """Écrit `diag_etat_equipement` + `diag_etat_port` (refonte Lot 2). Le
     `depuis` d'un port en erreur est conservé tant que la classe ne change pas.
     Refonte Lot 5 : chaque port porte l'appareil vu (topologie) et le
     slot/port de baie correspondant, pour lier l'écran « Trafic » à la fiche
-    appareil et à la baie de brassage."""
+    appareil et à la baie de brassage.
+    Proposition #7 : chaque bascule (équipement redevenu joignable, port qui
+    entre ou sort d'un état d'erreur) est journalisée dans l'historique."""
     anciens = {}
     for r in conn.execute(
             "SELECT port_index, classe_erreur, depuis FROM diag_etat_port "
             "WHERE client_id=? AND equipement_ip=?", (client_id, ip)):
         anciens[r[0]] = (r[1], r[2])
+    _anc_eq = conn.execute(
+        "SELECT snmp_ok FROM diag_etat_equipement WHERE client_id=? AND equipement_ip=?",
+        (client_id, ip)).fetchone()
+    etait_muet = _anc_eq is not None and not _anc_eq[0]
+    _nom_hist = sysname or ip
     # appareil vu par port + alias, depuis la dernière cartographie de topologie
     vu_par_port = {}
     try:
@@ -1289,6 +1343,20 @@ def _ecrire_etat_snmp(conn, client_id, ip, appareil_id, sysname, lignes_etat, no
                                 and anc_depuis) else (now if L['classe_erreur'] else '')
         if L['classe_erreur']:
             nb_err += 1
+        if pi in anciens and L['classe_erreur'] != anc_classe:
+            _pn = L['port_nom'] or f"port {pi}"
+            _lib = L['classe_libelle'] or L['classe_erreur']
+            if L['classe_erreur'] and not anc_classe:
+                _hist_diag(conn, client_id, appareil_id, _nom_hist,
+                           'DIAG_RESEAU_PORT_ERREUR', f"{_nom_hist} — {_pn} : {_lib}")
+            elif anc_classe and not L['classe_erreur']:
+                _hist_diag(conn, client_id, appareil_id, _nom_hist,
+                           'DIAG_RESEAU_PORT_RETABLI',
+                           f"{_nom_hist} — {_pn} : trafic redevenu sain")
+            elif L['classe_erreur'] and anc_classe:
+                _hist_diag(conn, client_id, appareil_id, _nom_hist,
+                           'DIAG_RESEAU_PORT_ERREUR',
+                           f"{_nom_hist} — {_pn} : {_lib} (était : {anc_classe})")
         avid, palias = vu_par_port.get(pi, (None, L['port_alias']))
         b_slot, b_port = baie_par_ifx.get(pi, (None, None))
         conn.execute(
@@ -1321,6 +1389,9 @@ def _ecrire_etat_snmp(conn, client_id, ip, appareil_id, sysname, lignes_etat, no
         "nb_ports_up=excluded.nb_ports_up, nb_ports_erreur=excluded.nb_ports_erreur, "
         "derniere_maj=excluded.derniere_maj, epoch=excluded.epoch",
         (client_id, ip, appareil_id, sysname, len(lignes_etat), nb_up, nb_err, now, ts))
+    if etait_muet:
+        _hist_diag(conn, client_id, appareil_id, _nom_hist,
+                   'DIAG_RESEAU_EQUIP_JOIGNABLE', f"{_nom_hist} répond à nouveau en SNMP")
 
 
 def _compter_changements_oper(conn, client_id, ip, port_index, oper_actuel):
@@ -1379,13 +1450,23 @@ def interroger_equipements_client(client_id: int, budget_s: float = 0.0) -> list
     except Exception:
         logger.exception('network_diag: balayage SNMP impossible')
         return findings
+    vus = set()
     for ip, rv in bal.releves.items():
         if rv.equipement is None:
             continue
+        vus.add(ip)
         try:
             findings += _analyser_snmp(client_id, ip, rv.appareil_id, rv.equipement)
         except Exception:
             logger.debug('network_diag: analyse SNMP %s en échec', ip, exc_info=True)
+    # Équipements qui avaient un état SNMP et n'ont pas répondu cette passe :
+    # on les marque injoignables (verdict + historique — proposition #7).
+    try:
+        motifs = {m['ip']: m.get('detail', '') for m in getattr(bal, 'muets', [])
+                  if isinstance(m, dict) and m.get('ip')}
+        _marquer_equipements_muets(client_id, vus, motifs)
+    except Exception:
+        logger.debug('network_diag: marquage des équipements muets en échec', exc_info=True)
     return findings
 
 
@@ -2411,6 +2492,116 @@ def _parse_plages(chaine):
         except ValueError:
             continue
     return out
+
+
+def verifier_parc_general(client_id: int) -> dict:
+    """Proposition #4 : confronte les champs réseau DÉCLARÉS de `parc_general`
+    (passerelle, DNS, plage IP, domaine) à ce qu'on peut réellement observer —
+    IP des appareils de l'inventaire, sonde DNS, type des équipements. Purement
+    indicatif : chaque champ reçoit `confirme` / `divergent` / `non_verifie`,
+    jamais un blocage. Lecture seule, aucun balayage réseau lourd."""
+    from database import get_db
+    conn = get_db()
+    try:
+        pg = conn.execute(
+            "SELECT passerelle, serveur_dns, plage_ip_locale, domaine "
+            "FROM parc_general WHERE client_id=?", (client_id,)).fetchone()
+        ips_inv = [r[0] for r in conn.execute(
+            "SELECT adresse_ip FROM appareils WHERE client_id=? AND COALESCE(adresse_ip,'')<>''",
+            (client_id,))]
+        routeurs = {r[0] for r in conn.execute(
+            "SELECT adresse_ip FROM appareils WHERE client_id=? AND COALESCE(adresse_ip,'')<>'' "
+            "AND type_appareil IN ('Routeur/Pare-feu','Box internet (FAI)')", (client_id,))}
+        dns_inv = [r[0] for r in conn.execute(
+            "SELECT nom_dns FROM appareils WHERE client_id=? AND COALESCE(nom_dns,'')<>''",
+            (client_id,))]
+    finally:
+        conn.close()
+    passerelle_d, dns_d, plage_d, domaine_d = (tuple(pg) if pg else ('', '', '', ''))
+    passerelle_d = (passerelle_d or '').strip()
+    dns_d = (dns_d or '').strip()
+    domaine_d = (domaine_d or '').strip()
+    res = {}
+
+    # ── plage_ip_locale ──
+    cidrs = _parse_plages(plage_d)
+
+    def _dans_cidrs(ipstr):
+        try:
+            a = ipaddress.ip_address(str(ipstr).split('/')[0])
+        except ValueError:
+            return None
+        return any(a in n for n in cidrs)
+
+    dedans = [i for i in ips_inv if _dans_cidrs(i) is True]
+    dehors = [i for i in ips_inv if _dans_cidrs(i) is False]
+    if not cidrs:
+        res['plage_ip_locale'] = {'declare': plage_d, 'etat': 'non_verifie',
+                                  'detail': "Aucune plage IP déclarée."}
+    elif not ips_inv:
+        res['plage_ip_locale'] = {'declare': plage_d, 'etat': 'non_verifie',
+                                  'detail': "Aucun appareil avec une IP dans l'inventaire."}
+    elif dehors and len(dehors) >= max(1, len(ips_inv) // 5):
+        subs = sorted({str(ipaddress.ip_network(f'{i}/24', strict=False))
+                       for i in dehors if _dans_cidrs(i) is False})
+        res['plage_ip_locale'] = {
+            'declare': plage_d, 'etat': 'divergent',
+            'detail': "%d appareil(s) hors des plages déclarées (ex. %s)."
+                      % (len(dehors), ', '.join(subs[:3]))}
+    else:
+        res['plage_ip_locale'] = {
+            'declare': plage_d, 'etat': 'confirme',
+            'detail': "%d/%d appareil(s) de l'inventaire dans les plages déclarées."
+                      % (len(dedans), len(ips_inv))}
+
+    # ── passerelle ──
+    if not passerelle_d:
+        res['passerelle'] = {'declare': '', 'etat': 'non_verifie',
+                             'detail': "Aucune passerelle déclarée."}
+    elif passerelle_d in routeurs:
+        res['passerelle'] = {'declare': passerelle_d, 'etat': 'confirme',
+                             'detail': "Correspond à un routeur / box de l'inventaire."}
+    else:
+        detectee = '' if os.environ.get('RUNNING_IN_DOCKER') else _passerelle_defaut()
+        if detectee and detectee == passerelle_d:
+            res['passerelle'] = {'declare': passerelle_d, 'etat': 'confirme',
+                                 'detail': "Correspond à la passerelle de ce poste."}
+        elif detectee and detectee != passerelle_d:
+            res['passerelle'] = {'declare': passerelle_d, 'etat': 'divergent',
+                                 'detail': "Ce poste utilise plutôt %s." % detectee}
+        else:
+            res['passerelle'] = {
+                'declare': passerelle_d, 'etat': 'non_verifie',
+                'detail': "Déclarez un routeur/box avec cette IP dans l'inventaire pour la confirmer."}
+
+    # ── serveur_dns ──
+    dns_list = [d for d in re.split(r'[,;\s]+', dns_d) if d]
+    if not dns_list:
+        res['serveur_dns'] = {'declare': '', 'etat': 'non_verifie',
+                              'detail': "Aucun serveur DNS déclaré."}
+    else:
+        repond = any(_requete_dns_a(d, 'www.google.com', timeout=2.0) for d in dns_list)
+        res['serveur_dns'] = {
+            'declare': dns_d, 'etat': 'confirme' if repond else 'divergent',
+            'detail': ("Répond à une requête DNS test." if repond
+                       else "Ne répond à aucune requête DNS test (injoignable ou pas un résolveur).")}
+
+    # ── domaine ──
+    if not domaine_d:
+        res['domaine'] = {'declare': '', 'etat': 'non_verifie', 'detail': "Aucun domaine déclaré."}
+    else:
+        d_bas = domaine_d.lower().lstrip('.')
+        n = sum(1 for x in dns_inv if x and d_bas in x.lower())
+        if not dns_inv:
+            res['domaine'] = {'declare': domaine_d, 'etat': 'non_verifie',
+                              'detail': "Aucun nom DNS d'appareil pour recouper."}
+        elif n:
+            res['domaine'] = {'declare': domaine_d, 'etat': 'confirme',
+                              'detail': "%d appareil(s) portent ce domaine dans leur nom DNS." % n}
+        else:
+            res['domaine'] = {'declare': domaine_d, 'etat': 'divergent',
+                              'detail': "Aucun nom DNS d'appareil ne contient ce domaine."}
+    return res
 
 
 _SOUS_RESEAUX_MAX_EQUIP = 8     # garde-fou : équipements interrogés par appel

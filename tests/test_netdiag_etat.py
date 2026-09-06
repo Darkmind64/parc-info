@@ -113,3 +113,100 @@ def test_pour_appareil_rien_a_montrer(conn, make_client, make_appareil):
     a = make_appareil(cid, nom_machine='POSTE-ISOLE')
     d = etat.pour_appareil(cid, a)
     assert d['a_montrer'] is False
+
+
+# ── proposition #1 : pastille de santé de la baie ──────────────────────────────
+
+def test_sante_baie_par_equipement(parc, conn):
+    sw = conn.execute("SELECT id FROM appareils WHERE nom_machine='SW-CORE' AND client_id=?",
+                      (parc,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)",
+                 (parc, sw))
+    sid = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.commit()
+    d = etat.sante_baie(parc)
+    assert str(sid) in d
+    # le switch du fixture a 2 ports en erreur -> niveau 'attention'
+    assert d[str(sid)]['niveau'] == 'attention'
+    assert d[str(sid)]['nb_ports_erreur'] == 2
+
+
+def test_sante_baie_equipement_muet_est_critique(parc, conn):
+    sw = conn.execute("SELECT id FROM appareils WHERE nom_machine='SW-CORE' AND client_id=?",
+                      (parc,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)",
+                 (parc, sw))
+    sid = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("UPDATE diag_etat_equipement SET snmp_ok=0, motif='aucune réponse SNMP' "
+                 "WHERE client_id=? AND equipement_ip='10.0.0.2'", (parc,))
+    conn.commit()
+    d = etat.sante_baie(parc)
+    assert d[str(sid)]['niveau'] == 'critique'
+    assert d[str(sid)]['snmp_ok'] is False
+
+
+def test_verdict_compte_les_equipements_muets(parc, conn):
+    # 2e switch, jamais relevé cette passe
+    conn.execute(
+        "INSERT INTO diag_etat_equipement (client_id, equipement_ip, sysname, joignable, "
+        "snmp_ok, motif, nb_ports, nb_ports_erreur, derniere_maj, epoch) "
+        "VALUES (?,?,?,0,0,'aucune réponse SNMP',8,3,?,?)",
+        (parc, '10.0.0.9', 'SW-EDGE', _now_z(), 2))
+    conn.commit()
+    v = etat.verdict(parc)
+    assert v['nb_equipements'] == 2 and v['nb_equipements_muets'] == 1
+    # les 3 "ports en erreur" du switch muet ne comptent pas dans le verdict
+    assert v['nb_ports_erreur'] == 2
+    assert v['niveau'] == 'attention' and 'muet' in v['phrase']
+
+
+def test_trafic_ignore_les_ports_dun_switch_muet(parc, conn):
+    conn.execute("UPDATE diag_etat_equipement SET snmp_ok=0 WHERE client_id=? "
+                 "AND equipement_ip='10.0.0.2'", (parc,))
+    conn.commit()
+    d = etat.trafic(parc, tous=True)
+    assert d['nb_erreur'] == 0 and d['nb_actifs'] == 0
+
+
+# ── proposition #3 : recoupement SNMP ↔ collecteur-agent ───────────────────────
+
+@pytest.mark.parametrize('txt,attendu', [
+    ('1 Gbps', 1000), ('100 Mbps', 100), ('2.5 Gbps', 2500),
+    ('10 Gbps', 10000), ('1Gbps', 1000), ('', None), ('inconnu', None)])
+def test_speed_mbps(txt, attendu):
+    assert etat._speed_mbps(txt) == attendu
+
+
+def test_incoherences_reseau_gigabit_bride():
+    rap = '{"network_adapter_details":[{"physical":true,"connected":true,"link_speed":"1 Gbps"}]}'
+    msgs = etat._incoherences_reseau(rap, {'speed_mbps': 100, 'duplex': 3})
+    assert len(msgs) == 1 and '100 Mb/s' in msgs[0] and '1000 Mb/s' in msgs[0]
+
+
+def test_incoherences_reseau_half_duplex():
+    rap = '{"network_adapter_details":[{"physical":true,"connected":true,"link_speed":"1 Gbps"}]}'
+    msgs = etat._incoherences_reseau(rap, {'speed_mbps': 1000, 'duplex': 2})
+    assert len(msgs) == 1 and 'half-duplex' in msgs[0]
+
+
+def test_incoherences_reseau_rien_a_signaler():
+    rap = '{"network_adapter_details":[{"physical":true,"connected":true,"link_speed":"1 Gbps"}]}'
+    assert etat._incoherences_reseau(rap, {'speed_mbps': 1000, 'duplex': 3}) == []
+    assert etat._incoherences_reseau(rap, None) == []
+    assert etat._incoherences_reseau('pas du json', {'speed_mbps': 100}) == []
+
+
+def test_pour_appareil_incoherence_visible(parc, conn):
+    pc = conn.execute("SELECT id FROM appareils WHERE nom_machine='PC-COMPTA' AND client_id=?",
+                      (parc,)).fetchone()[0]
+    # le port 1 (où PC-COMPTA est vu) est à 1000 Mb/s dans le fixture -> on le
+    # rabaisse à 100 et on donne une carte Gigabit au collecteur
+    conn.execute("UPDATE diag_etat_port SET speed_mbps=100 WHERE client_id=? "
+                 "AND equipement_ip='10.0.0.2' AND port_index=1", (parc,))
+    conn.execute("UPDATE appareils SET rapport_systeme_json=? WHERE id=?",
+                 ('{"network_adapter_details":[{"physical":true,"connected":true,'
+                  '"link_speed":"1 Gbps"}]}', pc))
+    conn.commit()
+    d = etat.pour_appareil(parc, pc)
+    assert d['a_montrer'] and len(d['incoherences']) == 1
+    assert 'carte réseau' in d['incoherences'][0]
