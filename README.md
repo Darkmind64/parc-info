@@ -6,7 +6,7 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.20.0 ⭐ **Refonte du diagnostic réseau (en cours) — Lot 1/6 : collecteur SNMP unifié, palier 3 ×9 plus rapide sur un parc de 20 équipements**  
+**Version** : 2.20.0 ⭐ **Refonte du diagnostic réseau : collecteur SNMP ×9 plus rapide, écran « Trafic & erreurs » dédié (cause en clair + conseil), verdict permanent, auto-résolution, liens fiche/baie/dashboard**  
 **Dernière mise à jour** : 2026-09-06
 
 ---

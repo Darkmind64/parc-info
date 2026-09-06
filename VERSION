@@ -1,10 +1,37 @@
 PARCINFO_VERSION=2.20.0
 RELEASE_DATE=2026-09-06
-BUILD_NUMBER=2026090602
+BUILD_NUMBER=2026090603
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.20.0 - Refonte diagnostic reseau (en cours) - Lot 1/6 : collecteur SNMP unifie
+# Version 2.20.0 - REFONTE DU DIAGNOSTIC RESEAU (6 lots, une seule release)
+# Demande : reprendre le diagnostic reseau a zero pour quelque chose de
+# particulierement efficace et rapide, avec un affichage clair des erreurs de
+# trafic, en tenant compte des liaisons avec les autres categories. Decision :
+# redesign structure -- on garde les primitives eprouvees (BER, SNMPv3, capture
+# scapy), on reconstruit tout au-dessus (package netdiag/).
+#
+# CE QUI CHANGE POUR L'UTILISATEUR :
+#  - balayage SNMP d'un parc de 20 equipements : ~9,6 s -> ~1,1 s
+#  - le SNMP n'est plus jamais "saute"
+#  - nouvel onglet "Trafic & erreurs" : chaque port en defaut, trie pire
+#    d'abord, cause EN CLAIR + conseil, taux d'erreur/min, mini-courbe
+#  - bandeau de verdict permanent
+#  - les evenements de port se resolvent tout seuls une fois corriges
+#  - diagnostic relie a la fiche appareil, a la baie et au dashboard
+#
+# --- Lot 6/6 : documentation ---
+# DIAGNOSTIC_RESEAU.md reecrit (archi netdiag/, modele d'etat, ordonnanceur,
+# ecran Trafic, integrations) ; claude.md a jour. Rapport PDF/HTML revere
+# fonctionnel. L'extraction des primitives SNMP de app.py vers un module dedie
+# a ete VOLONTAIREMENT laissee de cote (nettoyage pur, sans benefice
+# fonctionnel, code SNMPv3/BER couteux a revalider) -- le pattern d'imports
+# paresseux app<->network_diag, deja documente et eprouve, est conserve.
+#
+# --- Lot 1/6 : collecteur SNMP unifie ---
+# Le diagnostic reseau frappait les memes switchs en TROIS balayages SNMP
+# independants : palier 3 (compteurs par port) en boucle SEQUENTIELLE, palier 4
+# (topologie) refaisait sa propre passe, la vue d'activite baie une troisieme.
 # Le diagnostic reseau frappait les memes switchs en TROIS balayages SNMP
 # independants : palier 3 (compteurs par port) en boucle SEQUENTIELLE, palier 4
 # (topologie) refaisait sa propre passe, la vue d'activite baie une troisieme.

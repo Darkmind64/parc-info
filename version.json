@@ -14,11 +14,13 @@
     "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.20.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Refonte du diagnostic réseau — Lot 1/6 : collecteur SNMP unifié. Le palier 3 (interrogation SNMP des switchs / routeurs / NAS) est désormais mené en une seule passe parallèle au lieu d'une boucle séquentielle — sur un parc simulé de 20 équipements à 48 ports, le balayage passe de ~9,6 s à ~1,1 s. La cartographie de topologie réutilise ce relevé au lieu de re-sonder chaque équipement. Aucun changement visible d'interface à ce stade ; les lots suivants portent le modèle d'état, l'orchestrateur continu, la nouvelle interface avec écran « Trafic & erreurs » dédié, et les intégrations avec l'inventaire / la baie / la fiche système.",
+    "new_features": "Refonte complète du diagnostic réseau (6 lots). Un collecteur SNMP unifié relève tout le parc en une seule passe parallèle : le balayage d'un parc de 20 équipements passe de ~9,6 s à ~1,1 s, et le SNMP n'est plus jamais « sauté ». Un nouvel onglet « Trafic & erreurs » montre chaque port en défaut, trié pire d'abord, avec sa cause en clair (couche physique / duplex mismatch / saturation…) et un conseil de résolution ; un bandeau de verdict permanent résume l'état. Les évènements d'erreur de port se résolvent tout seuls une fois le problème corrigé. Le diagnostic est relié à la fiche appareil (encart Réseau), à la baie de brassage (marqueur ⚠ sur les ports en erreur) et au tableau de bord. La surveillance continue devient un ordonnanceur où le SNMP et la topologie ont chacun leur cadence.",
     "improvements": [
-      "Palier 3 SNMP : une passe parallèle (netdiag.collect.balayer) remplace la boucle séquentielle — ~9x plus rapide sur 20 équipements.",
-      "Topologie L2 : réutilise le relevé du collecteur (présence + interfaces déjà connues), plus de double sondage.",
-      "Nouveau réglage diag_snmp_workers (défaut 8) : nombre d'équipements SNMP balayés de front."
+      "Collecteur SNMP unifié (netdiag.collect) : une passe GETBULK multi-colonnes par équipement, en parallèle — ~9x plus rapide sur 20 équipements, jamais sauté.",
+      "Écran « Trafic & erreurs » : port en défaut trié pire d'abord, classification en clair + conseil, taux d'erreur par minute, mini-courbe de tendance.",
+      "Auto-résolution des évènements de port SNMP une fois la condition disparue (sur un équipement toujours relevé).",
+      "Bandeau de verdict permanent ; liens croisés fiche appareil / baie de brassage / tableau de bord ; bandeau de verdict sur l'interface mobile.",
+      "Nouveaux réglages : diag_snmp_intervalle_s (120), diag_topo_intervalle_s (900), diag_snmp_workers (8), diag_snmp_auto_resolution_s (1800)."
     ]
   },
   "checksums": {

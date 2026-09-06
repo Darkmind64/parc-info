@@ -1,8 +1,16 @@
 # CHANGELOG - ParcInfo
 
-## [2.20.0] - 2026-09 ⚡ (en cours — refonte diagnostic réseau)
+## [2.20.0] - 2026-09-06 ⚡
 
-### ⚡ Refonte du diagnostic réseau — Lot 1/6 : collecteur SNMP unifié
+### ⚡ Refonte du diagnostic réseau (6 lots)
+
+Sur demande : reprendre le diagnostic réseau à zéro pour quelque chose de **particulièrement efficace et rapide**, avec un **affichage clair des erreurs de trafic**, en tenant compte des **liaisons avec les autres catégories** et en s'appuyant sur les problèmes déjà rencontrés pour ne pas les reproduire. Décision : redesign structuré — on garde les primitives éprouvées (codec BER, SNMPv3, capture scapy), on reconstruit tout au-dessus. Livré en 6 lots, une seule release.
+
+**Ce qui change pour l'utilisateur** : le balayage SNMP d'un parc de 20 équipements passe de ~9,6 s à ~1,1 s ; le SNMP n'est plus jamais « sauté » ; un nouvel onglet **« Trafic & erreurs »** montre chaque port en défaut, trié pire d'abord, avec sa cause en clair et un conseil ; un bandeau de verdict permanent ; les évènements de port se résolvent tout seuls une fois le problème corrigé ; et le diagnostic est relié à la fiche appareil, à la baie de brassage et au tableau de bord.
+
+---
+
+#### Lot 1/6 : collecteur SNMP unifié
 
 Le diagnostic réseau frappait les mêmes switchs en **trois balayages SNMP indépendants** : le palier 3 (compteurs par port) le faisait dans une **boucle séquentielle**, le palier 4 (topologie) refaisait sa propre passe, et la vue d'activité de la baie une troisième. Sur un parc de 20 équipements, le palier 3 seul prenait une trentaine de secondes.
 
@@ -13,14 +21,14 @@ Ce premier lot introduit `netdiag/collect.py`, un **collecteur unique** qui rel�
 - **Budget** : un balayage borné dans le temps renvoie les équipements non terminés dans une liste `muets` avec le motif exact — jamais un balayage sauté en silence.
 - Nouveau réglage `diag_snmp_workers` (défaut 8) : nombre d'équipements balayés de front.
 
-**Lot 2 — modèle d'état + analyse pure + auto-résolution.**
+#### Lot 2/6 : modèle d'état + analyse pure + auto-résolution
 
 - **`netdiag/analyse.py`** (fonctions **pures**, testables sans réseau ni base) : la détection des erreurs de port (duplex mismatch, CRC/FCS, erreurs/rejets, saturation, flapping, vitesse réduite) est extraite de `_analyser_snmp` ; `classer_erreur()` étiquette chaque port en **langage clair** — « couche physique (câble/SFP) », « duplex mismatch », « rejets (mémoire tampon / saturation) », « erreurs de cause indéterminée » — avec un conseil. C'est la fondation de l'écran « Trafic & erreurs » du Lot 4.
 - **Nouvelles tables `diag_etat_equipement` / `diag_etat_port`** : l'état courant de chaque équipement et de chaque port (débit, taux d'erreur par minute, classe d'erreur, « depuis ») est persisté à chaque cycle → la future interface lira une petite table au lieu de tout recalculer.
 - **Auto-résolution** : un évènement d'erreur de port (`port_crc`, `duplex_mismatch`…) se **résout tout seul** quand sa condition n'a pas reparu depuis `diag_snmp_auto_resolution_s` (défaut 30 min) sur un équipement **toujours relevé** — on ne clôt jamais un problème simplement parce que le switch est devenu injoignable. Avant, il fallait cliquer « résoudre » à la main même des jours après le remplacement du câble.
 - `diag_reseau_evenements` gagne les colonnes `equipement_ip` / `port_index` / `baie_slot_id` (elles étaient noyées dans `details_json`).
 
-**Lot 3 — orchestrateur à cadences indépendantes.**
+#### Lot 3/6 : orchestrateur à cadences indépendantes
 
 Avant, la surveillance continue faisait un cycle **monolithique** toutes les 5 min : sondes hôte (ping, DNS, DHCP, Wi-Fi) *puis* SNMP *puis* topologie *puis* capture, en série. Un ping lent ou un scan Wi-Fi qui traînait suffisait à faire manquer le SNMP.
 
@@ -33,7 +41,7 @@ Le **SNMP n'est jamais conditionné par les sondes hôte** — il tourne sur son
 
 Aucun changement visible d'interface à ce stade.
 
-**Lot 4 — interface : bandeau verdict + écran « Trafic & erreurs ».**
+#### Lot 4/6 : interface — bandeau verdict + écran « Trafic & erreurs »
 
 Premier lot visible. La page `/diag-reseau` gagne :
 
@@ -42,7 +50,7 @@ Premier lot visible. La page `/diag-reseau` gagne :
 
 Nouveau module `netdiag/etat.py` (read models `verdict()` / `trafic()` — lisent les tables d'état du Lot 2, aucun recalcul) ; routes `GET /api/diag-reseau/verdict` et `GET /api/diag-reseau/trafic`.
 
-**Lot 5 — intégrations avec les autres catégories.**
+#### Lot 5/6 : intégrations avec les autres catégories
 
 - Chaque port relevé porte désormais l'**appareil branché** (via la topologie) et le **slot/port de baie** correspondant — le lien entre l'écran « Trafic », la fiche appareil et la baie de brassage.
 - **Fiche appareil** : nouvel encart « ■ Réseau — diagnostic » — pour un switch/routeur : son état SNMP + ses ports en erreur + conseil ; pour un poste : sur quel port de quel switch il est vu et l'état de ce port ; toujours : les évènements de diagnostic réseau actifs le concernant. Visible même sans collecte système (un switch en a rarement une). Route `GET /api/appareil/<id>/diag-reseau`.
@@ -50,9 +58,23 @@ Nouveau module `netdiag/etat.py` (read models `verdict()` / `trafic()` — lisen
 - **Tableau de bord** : une alerte réseau rattachée à un appareil pointe désormais vers sa fiche plutôt que vers la page générale.
 - **Mobile** (`/m/diag-reseau`) : le bandeau de verdict apparaît en tête.
 
-Le dernier lot porte le découpage en package `netdiag` (extraction des primitives SNMP hors de `app.py`), la mise à jour du rapport et la réécriture de la documentation (Lot 6).
+#### Lot 6/6 : documentation
 
-**Tests** : `tests/test_netdiag_collect.py` (8), `tests/test_netdiag_analyse.py` (11), `tests/test_netdiag_events.py` (5), `tests/test_netdiag_orchestrateur.py` (2), `tests/test_netdiag_etat.py` (8 : tri pire d'abord, ports sains, appareil branché résolu, verdict, encart fiche). Bench reproductible : `python bench_collecte.py`. Vérifié en navigateur : bandeau verdict, écran Trafic (données saines et en erreur), sparklines, encart « Réseau — diagnostic » de la fiche appareil, page baie, onglet Tendances. Deux bugs introduits puis corrigés en cours de route : une collision de nom JS `sparkline` (Lot 4), et un `{% if %}` littéral resté dans un commentaire HTML de la fiche que Jinja interprétait (Lot 5). Suite complète revérifiée (270 passants, +34 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
+`DIAGNOSTIC_RESEAU.md` réécrit (nouvelle architecture `netdiag/`, modèle d'état, ordonnanceur, écran Trafic, intégrations) ; `claude.md` mis à jour. Le rapport PDF/HTML reste fonctionnel avec le nouveau modèle. L'extraction des primitives SNMP de `app.py` vers un module dédié a été **volontairement laissée de côté** (nettoyage d'architecture pur, sans bénéfice fonctionnel, sur du code SNMPv3/BER coûteux à revalider) — le pattern d'imports paresseux `app ↔ network_diag`, déjà documenté et éprouvé, est conservé.
+
+### Propositions ouvertes par la refonte (à arbitrer séparément)
+
+1. **Baie** — colonne « santé » par équipement dans la vue rack ; faire consommer à `_cycle_activite` (LEDs) le relevé du collecteur au lieu de son propre poll.
+2. **Scan réseau** — flux « promouvoir en inventaire » pour un équipement vu en LLDP mais absent ; une seule découverte SNMP partagée avec le diagnostic.
+3. **Fiche système** — panneau « Réseau » unifié : croiser ce que le collecteur SNMP voit (port, VLAN, débit, erreurs) avec ce que le collecteur-agent remonte, et signaler les incohérences.
+4. **`parc_general`** — transformer passerelle / DNS / plage IP déclarés en champs **validés contre la réalité** (badge confirmé / divergent / non vérifié).
+5. **Identifiants** — déplacer les communautés SNMP et le mot de passe SNMPv3 (aujourd'hui en clair dans `configurations`) vers le coffre `identifiants` chiffré.
+6. **Dashboard** — tuile « Santé réseau » (verdict + mini-sparkline du taux d'erreur agrégé).
+7. **Historique** — journaliser les transitions d'état majeures (équipement injoignable ↔ joignable, port en erreur ↔ sain) dans `histories`.
+
+---
+
+**Tests** : 5 nouveaux fichiers — `tests/test_netdiag_collect.py` (8), `test_netdiag_analyse.py` (11), `test_netdiag_events.py` (5), `test_netdiag_orchestrateur.py` (2), `test_netdiag_etat.py` (8). Bench reproductible : `python bench_collecte.py`. Vérifié en navigateur : bandeau verdict, écran Trafic (données saines et en erreur), sparklines, encart « Réseau — diagnostic » de la fiche appareil, page baie, onglet Tendances. Deux bugs introduits puis corrigés en cours de route : une collision de nom JS `sparkline` (Lot 4), et un `{% if %}` littéral resté dans un commentaire HTML que Jinja interprétait (Lot 5). Suite complète : **270 passants (+34)** ; les 10 échecs baie préexistants sans rapport restent inchangés ; 38/38 scripts racine.
 
 ## [2.19.45] - 2026-09-06 🔎
 
