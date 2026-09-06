@@ -120,6 +120,73 @@ def trafic(client_id: int, tous: bool = False) -> dict:
     }
 
 
+def pour_appareil(client_id: int, appareil_id: int) -> dict:
+    """Encart « Réseau (diagnostic) » de la fiche d'un appareil (refonte Lot 5).
+
+    - si c'est un switch / routeur relevé en SNMP : son état + ses ports en erreur ;
+    - sinon : sur quel port de quel switch il est vu, et l'état de ce port ;
+    - toujours : les évènements de diagnostic réseau actifs rattachés à lui.
+    """
+    from database import get_db
+    conn = get_db()
+    try:
+        ap = conn.execute("SELECT nom_machine, adresse_ip, type_appareil FROM appareils "
+                          "WHERE id=? AND client_id=?", (appareil_id, client_id)).fetchone()
+        if not ap:
+            return {}
+        nom, ip, type_ap = ap
+        cols_p = [c[1] for c in conn.execute("PRAGMA table_info(diag_etat_port)")]
+        # équipement lui-même ?
+        eq = None
+        if ip:
+            r = conn.execute(
+                "SELECT sysname, snmp_ok, motif, nb_ports, nb_ports_up, nb_ports_erreur, "
+                "derniere_maj FROM diag_etat_equipement WHERE client_id=? AND equipement_ip=?",
+                (client_id, ip)).fetchone()
+            if r:
+                eq = {'sysname': r[0], 'snmp_ok': bool(r[1]), 'motif': r[2],
+                      'nb_ports': r[3], 'nb_ports_up': r[4], 'nb_ports_erreur': r[5],
+                      'age_s': _age_s(r[6])}
+        ports_eq = []
+        if eq and ip:
+            for pr in conn.execute(
+                    "SELECT * FROM diag_etat_port WHERE client_id=? AND equipement_ip=? "
+                    "AND classe_erreur!=''", (client_id, ip)):
+                d = dict(zip(cols_p, pr))
+                ports_eq.append({'port_nom': d['port_nom'], 'classe': d['classe_erreur'],
+                                 'classe_libelle': d['classe_libelle'], 'gravite': d['gravite'],
+                                 'conseil': _CONSEIL.get(d['classe_erreur'], '')})
+        # cet appareil vu sur un port de switch ?
+        vu = None
+        r = conn.execute(
+            "SELECT * FROM diag_etat_port WHERE client_id=? AND appareil_vu_id=? LIMIT 1",
+            (client_id, appareil_id)).fetchone()
+        if r:
+            d = dict(zip(cols_p, r))
+            eq_nom = conn.execute(
+                "SELECT nom_machine FROM appareils WHERE client_id=? AND adresse_ip=? LIMIT 1",
+                (client_id, d['equipement_ip'])).fetchone()
+            vu = {'equipement_ip': d['equipement_ip'],
+                  'equipement_nom': (eq_nom[0] if eq_nom else d['equipement_ip']),
+                  'port_nom': d['port_nom'], 'speed_mbps': d['speed_mbps'],
+                  'duplex': d['duplex'], 'baie_slot_id': d['baie_slot_id'],
+                  'classe': d['classe_erreur'], 'classe_libelle': d['classe_libelle'],
+                  'conseil': _CONSEIL.get(d['classe_erreur'], '')}
+        evts = [{'categorie': c, 'gravite': g, 'titre': t,
+                 'derniere_occurrence': o}
+                for c, g, t, o in conn.execute(
+                    "SELECT categorie, gravite, titre, derniere_occurrence "
+                    "FROM diag_reseau_evenements WHERE client_id=? AND appareil_id=? "
+                    "AND resolu=0 ORDER BY derniere_occurrence DESC LIMIT 12",
+                    (client_id, appareil_id))]
+    finally:
+        conn.close()
+    return {'nom': nom, 'ip': ip or '', 'type': type_ap or '',
+            'equipement': eq, 'ports_en_erreur': ports_eq,
+            'vu_sur': vu, 'evenements': evts,
+            'a_montrer': bool(eq or vu or evts)}
+
+
 def verdict(client_id: int) -> dict:
     """Synthèse pour le bandeau : hôte + SNMP + trafic + évènements."""
     from database import get_db

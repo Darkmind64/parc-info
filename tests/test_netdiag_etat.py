@@ -87,3 +87,29 @@ def test_verdict_ok_quand_rien(conn, make_client, monkeypatch):
     cid = make_client()
     v = etat.verdict(cid)
     assert v['niveau'] == 'ok' and 'Aucun problème' in v['phrase']
+
+
+def test_pour_appareil_switch(parc, conn):
+    sw = conn.execute("SELECT id FROM appareils WHERE nom_machine='SW-CORE' AND client_id=?",
+                      (parc,)).fetchone()[0]
+    d = etat.pour_appareil(parc, sw)
+    assert d['a_montrer'] and d['equipement'] and d['equipement']['snmp_ok']
+    assert len(d['ports_en_erreur']) == 2
+    assert d['vu_sur'] is None
+
+
+def test_pour_appareil_poste_vu_sur_switch(parc, conn):
+    pc = conn.execute("SELECT id FROM appareils WHERE nom_machine='PC-COMPTA' AND client_id=?",
+                      (parc,)).fetchone()[0]
+    d = etat.pour_appareil(parc, pc)
+    assert d['a_montrer'] and d['vu_sur']
+    assert d['vu_sur']['equipement_nom'] == 'SW-CORE'
+    assert d['vu_sur']['port_nom'] == 'Gi1/0/1'
+    assert d['vu_sur']['classe'] == 'physique'
+
+
+def test_pour_appareil_rien_a_montrer(conn, make_client, make_appareil):
+    cid = make_client()
+    a = make_appareil(cid, nom_machine='POSTE-ISOLE')
+    d = etat.pour_appareil(cid, a)
+    assert d['a_montrer'] is False

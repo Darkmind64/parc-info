@@ -13,6 +13,20 @@
     </div>
 </div>
 
+{% if verdict %}
+<div class="card" style="border-left:3px solid {{ '#ff6b81' if verdict.niveau == 'critique' else ('#ffb057' if verdict.niveau == 'attention' else '#22c55e') }};">
+    <div class="card-title">
+        {{ '🔴' if verdict.niveau == 'critique' else ('⚠️' if verdict.niveau == 'attention' else '✅') }}
+        {{ verdict.phrase }}
+    </div>
+    <div class="card-sub">
+        {% if verdict.snmp_actif %}{{ verdict.nb_equipements_ok }}/{{ verdict.nb_equipements }} équipement(s) SNMP OK{% endif %}
+        {% if verdict.nb_ports_erreur %} · {{ verdict.nb_ports_erreur }} port(s) en erreur{% endif %}
+        {% if verdict.age_s is not none %} · relevé il y a {{ (verdict.age_s / 60) | round | int }} min{% endif %}
+    </div>
+</div>
+{% endif %}
+
 {% if not evenements %}
 <div class="empty-state">
     <div class="icon">✓</div>

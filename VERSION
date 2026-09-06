@@ -68,15 +68,27 @@ STATUS=STABLE
 # netdiag/etat.py : read models verdict() / trafic() (lisent diag_etat_* du
 # Lot 2, aucun recalcul). Routes GET /api/diag-reseau/verdict et /trafic.
 #
-# Lots suivants : integrations inventaire/baie/fiche/dashboard (5), package
-# netdiag + doc (6).
+# Lot 5 : integrations avec les autres categories.
+#  - chaque port releve porte l'APPAREIL BRANCHE (via topologie) + le
+#    SLOT/PORT DE BAIE correspondant -> lien ecran Trafic <-> fiche <-> baie.
+#  - FICHE APPAREIL : encart "Reseau -- diagnostic" (etat SNMP + ports en
+#    erreur + conseil pour un switch ; sur quel port de switch un poste est
+#    vu ; evenements actifs). Visible meme sans collecte systeme. Route
+#    GET /api/appareil/<id>/diag-reseau.
+#  - BAIE : marqueur ! sur un port avec une erreur de trafic active. Route
+#    GET /api/baie/diag-erreurs.
+#  - DASHBOARD : alerte reseau rattachee a un appareil -> lien vers sa fiche.
+#  - MOBILE /m/diag-reseau : bandeau de verdict en tete.
 #
-# Tests : test_netdiag_collect.py (8), _analyse.py (11), _events.py (5),
-# _orchestrateur.py (2), _etat.py (5) ; bench_collecte.py. Verifie en
-# navigateur (bandeau, ecran Trafic sain + en erreur, sparklines, onglet
-# Tendances -- collision de nom `sparkline` introduite puis corrigee).
-# Suite : 267 passants (+31), 10 echecs baie preexistants inchanges, 38/38
-# scripts racine.
+# Dernier lot : package netdiag (extraction primitives SNMP hors app.py) +
+# rapport + doc (6).
+#
+# Tests : _collect (8), _analyse (11), _events (5), _orchestrateur (2),
+# _etat (8) ; bench_collecte.py. Verifie en navigateur (bandeau, ecran
+# Trafic, encart fiche, page baie, onglet Tendances). 2 bugs introduits puis
+# corriges : collision de nom JS `sparkline` (Lot 4), `{% if %}` litteral
+# dans un commentaire HTML interprete par Jinja (Lot 5). Suite : 270 passants
+# (+34), 10 echecs baie preexistants inchanges, 38/38 scripts racine.
 
 # Version 2.19.45 - Diagnostic reseau : test SNMP + voisinage IPv6 plus clairs
 # Retour terrain (utilisateur sur PC en administrateur) : "Tester SNMP" repondait

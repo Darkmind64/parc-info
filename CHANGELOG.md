@@ -42,9 +42,17 @@ Premier lot visible. La page `/diag-reseau` gagne :
 
 Nouveau module `netdiag/etat.py` (read models `verdict()` / `trafic()` — lisent les tables d'état du Lot 2, aucun recalcul) ; routes `GET /api/diag-reseau/verdict` et `GET /api/diag-reseau/trafic`.
 
-Les lots suivants portent : intégrations inventaire / baie / fiche système / dashboard (Lot 5), découpage en package et réécriture de la doc (Lot 6).
+**Lot 5 — intégrations avec les autres catégories.**
 
-**Tests** : `tests/test_netdiag_collect.py` (8), `tests/test_netdiag_analyse.py` (11), `tests/test_netdiag_events.py` (5), `tests/test_netdiag_orchestrateur.py` (2), `tests/test_netdiag_etat.py` (5 : tri pire d'abord, ports sains, appareil branché résolu, verdict). Bench reproductible : `python bench_collecte.py`. Vérifié en navigateur (bandeau verdict, écran Trafic sur données saines et en erreur simulées, sparklines, liens, onglet Tendances — un bug de collision de nom `sparkline` introduit puis corrigé). Suite complète revérifiée (267 passants, +31 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
+- Chaque port relevé porte désormais l'**appareil branché** (via la topologie) et le **slot/port de baie** correspondant — le lien entre l'écran « Trafic », la fiche appareil et la baie de brassage.
+- **Fiche appareil** : nouvel encart « ■ Réseau — diagnostic » — pour un switch/routeur : son état SNMP + ses ports en erreur + conseil ; pour un poste : sur quel port de quel switch il est vu et l'état de ce port ; toujours : les évènements de diagnostic réseau actifs le concernant. Visible même sans collecte système (un switch en a rarement une). Route `GET /api/appareil/<id>/diag-reseau`.
+- **Baie de brassage** : un port dont le diagnostic signale une erreur de trafic active (CRC, duplex mismatch, saturation…) reçoit un marqueur ⚠ (orange, ou rouge si critique) dans la vue rack. Route `GET /api/baie/diag-erreurs`.
+- **Tableau de bord** : une alerte réseau rattachée à un appareil pointe désormais vers sa fiche plutôt que vers la page générale.
+- **Mobile** (`/m/diag-reseau`) : le bandeau de verdict apparaît en tête.
+
+Le dernier lot porte le découpage en package `netdiag` (extraction des primitives SNMP hors de `app.py`), la mise à jour du rapport et la réécriture de la documentation (Lot 6).
+
+**Tests** : `tests/test_netdiag_collect.py` (8), `tests/test_netdiag_analyse.py` (11), `tests/test_netdiag_events.py` (5), `tests/test_netdiag_orchestrateur.py` (2), `tests/test_netdiag_etat.py` (8 : tri pire d'abord, ports sains, appareil branché résolu, verdict, encart fiche). Bench reproductible : `python bench_collecte.py`. Vérifié en navigateur : bandeau verdict, écran Trafic (données saines et en erreur), sparklines, encart « Réseau — diagnostic » de la fiche appareil, page baie, onglet Tendances. Deux bugs introduits puis corrigés en cours de route : une collision de nom JS `sparkline` (Lot 4), et un `{% if %}` littéral resté dans un commentaire HTML de la fiche que Jinja interprétait (Lot 5). Suite complète revérifiée (270 passants, +34 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
 
 ## [2.19.45] - 2026-09-06 🔎
 

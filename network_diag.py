@@ -1167,12 +1167,36 @@ def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> li
 
 def _ecrire_etat_snmp(conn, client_id, ip, appareil_id, sysname, lignes_etat, now, ts):
     """Écrit `diag_etat_equipement` + `diag_etat_port` (refonte Lot 2). Le
-    `depuis` d'un port en erreur est conservé tant que la classe ne change pas."""
+    `depuis` d'un port en erreur est conservé tant que la classe ne change pas.
+    Refonte Lot 5 : chaque port porte l'appareil vu (topologie) et le
+    slot/port de baie correspondant, pour lier l'écran « Trafic » à la fiche
+    appareil et à la baie de brassage."""
     anciens = {}
     for r in conn.execute(
             "SELECT port_index, classe_erreur, depuis FROM diag_etat_port "
             "WHERE client_id=? AND equipement_ip=?", (client_id, ip)):
         anciens[r[0]] = (r[1], r[2])
+    # appareil vu par port + alias, depuis la dernière cartographie de topologie
+    vu_par_port = {}
+    try:
+        for pidx, avid, palias in conn.execute(
+                "SELECT port_index, appareil_vu_id, port_alias FROM diag_topologie "
+                "WHERE client_id=? AND equipement_ip=? AND est_uplink=0", (client_id, ip)):
+            if avid:
+                vu_par_port[pidx] = (avid, palias or '')
+    except Exception:
+        pass
+    # slot/port de baie de ce switch, indexé par ifIndex quand il est calibré
+    baie_par_ifx = {}
+    try:
+        for sid, num, ifx in conn.execute(
+                "SELECT p.slot_id, p.numero, p.if_index FROM baie_slot_ports p "
+                "JOIN baie_slots s ON s.id=p.slot_id "
+                "WHERE s.client_id=? AND s.appareil_id=? AND p.if_index IS NOT NULL",
+                (client_id, appareil_id)):
+            baie_par_ifx[int(ifx)] = (sid, num)
+    except Exception:
+        pass
     nb_err = 0
     for L in lignes_etat:
         pi = L['port_index']
@@ -1181,20 +1205,26 @@ def _ecrire_etat_snmp(conn, client_id, ip, appareil_id, sysname, lignes_etat, no
                                 and anc_depuis) else (now if L['classe_erreur'] else '')
         if L['classe_erreur']:
             nb_err += 1
+        avid, palias = vu_par_port.get(pi, (None, L['port_alias']))
+        b_slot, b_port = baie_par_ifx.get(pi, (None, None))
         conn.execute(
             "INSERT INTO diag_etat_port (client_id, equipement_ip, port_index, appareil_id, "
-            "port_nom, port_alias, oper, admin, speed_mbps, duplex, err_min, disc_min, "
+            "port_nom, port_alias, oper, admin, speed_mbps, duplex, appareil_vu_id, "
+            "baie_slot_id, baie_port, err_min, disc_min, "
             "crc_min, debit_pct, classe_erreur, classe_libelle, gravite, depuis, derniere_maj) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(client_id, equipement_ip, port_index) DO UPDATE SET "
             "appareil_id=excluded.appareil_id, port_nom=excluded.port_nom, "
             "port_alias=excluded.port_alias, oper=excluded.oper, admin=excluded.admin, "
-            "speed_mbps=excluded.speed_mbps, duplex=excluded.duplex, err_min=excluded.err_min, "
+            "speed_mbps=excluded.speed_mbps, duplex=excluded.duplex, "
+            "appareil_vu_id=excluded.appareil_vu_id, baie_slot_id=excluded.baie_slot_id, "
+            "baie_port=excluded.baie_port, err_min=excluded.err_min, "
             "disc_min=excluded.disc_min, crc_min=excluded.crc_min, debit_pct=excluded.debit_pct, "
             "classe_erreur=excluded.classe_erreur, classe_libelle=excluded.classe_libelle, "
             "gravite=excluded.gravite, depuis=excluded.depuis, derniere_maj=excluded.derniere_maj",
-            (client_id, ip, pi, appareil_id, L['port_nom'], L['port_alias'], L['oper'],
-             L['admin'], L['speed_mbps'], L['duplex'], L['err_min'], L['disc_min'],
+            (client_id, ip, pi, appareil_id, L['port_nom'], palias, L['oper'],
+             L['admin'], L['speed_mbps'], L['duplex'], avid, b_slot, b_port,
+             L['err_min'], L['disc_min'],
              L['crc_min'], L['debit_pct'], L['classe_erreur'], L['classe_libelle'],
              L['gravite'], depuis, now))
     nb_up = sum(1 for L in lignes_etat if L['oper'] == 1)
