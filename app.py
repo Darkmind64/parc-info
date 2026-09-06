@@ -9121,6 +9121,32 @@ def _snmp_get(ip_str, oids, communaute='public', timeout=0.8, port=161):
     return {o: v for o, v in r.items() if isinstance(v, str) and v}
 
 
+# Communautés SNMP v1/v2c par défaut les plus répandues sur le matériel réseau.
+# Essayées UNIQUEMENT par le bouton « Tester SNMP », en lecture seule (GET
+# sysName/sysDescr), sur l'inventaire du client actif et sur clic explicite :
+# une aide au diagnostic (« quelle communauté mon switch accepte-t-il ? »),
+# pas une sonde de fond. La ou les communautés configurées restent prioritaires.
+_SNMP_COMMUNAUTES_COURANTES = (
+    'public', 'private', 'community', 'admin', 'manager', 'read', 'readonly',
+    'read-only', 'snmp', 'snmpd', 'cisco', 'network', 'monitor', 'default',
+)
+
+
+def _snmp_sysinfo(ip_str, communaute, timeout=1.0, port=161):
+    """sysName + sysDescr d'un agent SNMP v1/v2c — essaie v2c PUIS v1 (beaucoup
+    de switchs récents ont désactivé v1). Retourne {oid: str} ou {}. Sert au
+    bouton « Tester SNMP » : `interroger_equipement` (onglet Équipements) parle
+    v2c GETBULK, un test qui ne tentait que v1 GET pouvait donc échouer là où
+    le diagnostic réussissait."""
+    for version in (1, 0):     # 1 = v2c, 0 = v1
+        r = _snmp_get_typed(ip_str, [_OID_SYS_NAME, _OID_SYS_DESCR], communaute,
+                            timeout=timeout, port=port, version=version, _essai_v3=False)
+        if r:
+            return {_OID_SYS_NAME: str(r.get(_OID_SYS_NAME, '')),
+                    _OID_SYS_DESCR: str(r.get(_OID_SYS_DESCR, ''))}
+    return {}
+
+
 def _snmp_get_typed(ip_str, oids, communaute='public', timeout=1.0, port=161,
                     version=1, _essai_v3=True):
     """GET SNMP (v2c par défaut, v1 si version=0). Renvoie la valeur TYPÉE
@@ -10516,38 +10542,59 @@ def api_diag_test_snmp():
     cid = get_client_id()
     if not can_write(cid):
         return jsonify({'error': 'Forbidden'}), 403
+    # Tous les équipements réseau de l'inventaire (même liste de types que le
+    # palier 3), pas seulement le premier : un test à `LIMIT 1` tombait sur une
+    # box FAI muette et concluait « aucune réponse » alors que le switch juste
+    # derrière répondait.
+    types = tuple(network_diag._TYPES_EQUIP_SNMP)
     conn = get_db()
-    row = conn.execute(
+    rows = conn.execute(
         "SELECT nom_machine, adresse_ip FROM appareils WHERE client_id=? "
-        "AND type_appareil IN ('Switch','Switch/AP','Routeur/Pare-feu','NAS') "
-        "AND adresse_ip!='' AND adresse_ip IS NOT NULL ORDER BY id LIMIT 1", (cid,)).fetchone()
+        "AND type_appareil IN (%s) AND adresse_ip!='' AND adresse_ip IS NOT NULL "
+        "ORDER BY id" % ','.join('?' * len(types)), (cid, *types)).fetchall()
     conn.close()
-    if not row:
-        return jsonify({'ok': False, 'motif': "Aucun appareil de type Switch/Routeur/NAS avec une IP"})
-    nom, ip = row
-    communautes = [c.strip() for c in re.split(r'[,;\s]+',
-                   (cfg_get('diag_snmp_communautes', 'public') or 'public')) if c.strip()] or ['public']
+    if not rows:
+        return jsonify({'ok': False,
+                        'motif': "Aucun appareil réseau (switch, routeur, borne Wi-Fi, NAS, onduleur…) "
+                                 "avec une adresse IP dans l'inventaire de ce client"})
+    communautes_cfg = [c.strip() for c in re.split(r'[,;\s]+',
+                       (cfg_get('diag_snmp_communautes', 'public') or 'public')) if c.strip()] or ['public']
+    # configurées d'abord, puis les défauts courants pas déjà couverts
+    communautes = communautes_cfg + [c for c in _SNMP_COMMUNAUTES_COURANTES if c not in communautes_cfg]
     v3 = _snmp_v3_params()
-    if v3:
-        r3 = _snmp_get_typed(ip, [_OID_SYS_NAME, _OID_SYS_DESCR], timeout=1.5)
-        if r3:
-            return jsonify({'ok': True, 'equipement': nom, 'ip': ip,
-                            'communaute': 'SNMPv3 (%s)' % v3[0],
-                            'sysname': str(r3.get(_OID_SYS_NAME, '')),
-                            'sysdescr': str(r3.get(_OID_SYS_DESCR, ''))[:200]})
-    for comm in communautes:
-        res = _snmp_get(ip, [_OID_SYS_NAME, _OID_SYS_DESCR], comm, timeout=1.5)
-        if res:
-            return jsonify({'ok': True, 'equipement': nom, 'ip': ip, 'communaute': comm,
-                            'sysname': res.get(_OID_SYS_NAME, ''),
-                            'sysdescr': res.get(_OID_SYS_DESCR, '')[:200]})
-    # Rien n'a répondu : un agent SNMP est-il quand même là (mauvaise
-    # communauté / v3 exigé / ACL) ou l'appareil ne fait-il pas de SNMP ?
-    present, exploitable, detail = _snmp_presence(ip, communautes)
-    return jsonify({'ok': False, 'equipement': nom, 'ip': ip, 'snmp_present': present,
-                    'motif': (('SNMP présent mais non exploitable — %s' % detail) if present
-                              else f"Aucune réponse SNMP (communautés : {', '.join(communautes)}"
-                                   + (', + utilisateur v3' if v3 else '') + ")")})
+    budget = time.time() + 25          # garde-fou : ne jamais bloquer la requête
+    essayes = []                       # {nom, ip, snmp_present, detail} des équipements sans réponse
+
+    for nom, ip in rows:
+        if time.time() > budget:
+            break
+        if v3:
+            r3 = _snmp_get_typed(ip, [_OID_SYS_NAME, _OID_SYS_DESCR], timeout=1.5)
+            if r3:
+                return jsonify({'ok': True, 'equipement': nom, 'ip': ip,
+                                'communaute': 'SNMPv3 (%s)' % v3[0], 'hors_config': False,
+                                'nb_equipements': len(rows),
+                                'sysname': str(r3.get(_OID_SYS_NAME, '')),
+                                'sysdescr': str(r3.get(_OID_SYS_DESCR, ''))[:200]})
+        for comm in communautes:
+            if time.time() > budget:
+                break
+            res = _snmp_sysinfo(ip, comm, timeout=1.0)
+            if res:
+                return jsonify({'ok': True, 'equipement': nom, 'ip': ip, 'communaute': comm,
+                                'hors_config': comm not in communautes_cfg,
+                                'nb_equipements': len(rows),
+                                'sysname': res.get(_OID_SYS_NAME, ''),
+                                'sysdescr': res.get(_OID_SYS_DESCR, '')[:200]})
+        # cet équipement n'a pas répondu : agent SNMP présent mais refusé, ou pas de SNMP ?
+        present, _exploitable, detail = _snmp_presence(ip, communautes_cfg)
+        essayes.append({'nom': nom, 'ip': ip, 'snmp_present': present, 'detail': detail})
+
+    return jsonify({'ok': False, 'nb_equipements': len(rows),
+                    'motif': "Aucun des %d équipements réseau n'a répondu (communautés essayées : %s%s)"
+                             % (len(rows), ', '.join(communautes),
+                                ' + utilisateur v3' if v3 else ''),
+                    'equipements': essayes})
 
 
 @app.route('/api/diag-reseau/snapshot/status')

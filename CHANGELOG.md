@@ -1,5 +1,17 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.45] - 2026-09-06 🔎
+
+### 🔎 Diagnostic réseau : test SNMP et voisinage IPv6 plus clairs
+
+Retour terrain d'un utilisateur (instance sur PC, en administrateur) : « Tester SNMP » répondait « aucune réponse » alors que l'onglet Équipements listait bien trois équipements SNMP avec leurs ports ; le voisinage IPv6 n'affichait qu'une seule adresse MAC réelle, tout le reste à `00:00:00:00:00:00` / injoignable ; et la Topologie ne montrait que deux des trois équipements sans dire pourquoi.
+
+- **Le bouton « Tester SNMP » ne testait qu'un seul appareil.** Il prenait le premier par identifiant dans une liste de types plus courte que celle du diagnostic (ni borne Wi-Fi, ni box FAI, ni onduleur) : une box opérateur muette en tête de liste suffisait à conclure « aucune réponse », alors que le switch juste derrière répondait. Le test parcourt désormais **tous les équipements réseau de l'inventaire**, s'arrête au premier qui répond, et liste les autres avec la raison exacte quand aucun ne répond.
+- **Il ne tentait que du SNMPv1.** L'onglet Équipements interroge en SNMPv2c (GETBULK) — un switch sur lequel v1 est désactivé échouait donc au test tout en réussissant au diagnostic. Le test essaie maintenant **v2c puis v1**.
+- **Communautés courantes.** En plus des communautés configurées, le test essaie une quinzaine de communautés par défaut répandues (`public`, `private`, `community`, `cisco`…) et signale celle qui a fonctionné si elle n'est pas dans vos réglages, pour vous inviter à l'ajouter. Uniquement sur clic explicite, en lecture seule, sur l'inventaire du client actif.
+- **Voisinage IPv6 : les entrées mortes du cache sont masquées.** Le cache de voisinage NDP de Windows liste en permanence toute adresse jamais résolue, à l'état « injoignable » / « incomplet » avec une MAC nulle. Elles noyaient la seule ligne utile (la passerelle) : elles sont désormais écartées et comptées à part (« N entrée(s) injoignable(s)/incomplète(s) du cache ignorée(s) »).
+- **Onglet Topologie : note d'aide.** Un rappel permanent explique qu'un équipement présent dans « Équipements » peut manquer de la carte, car celle-ci a besoin en plus de la table d'adresses MAC (bridge-MIB) ou du LLDP, moins souvent exposées que les compteurs de ports — et que « Cartographier maintenant » liste les équipements joignables mais sans table MAC exploitable avec la raison.
+
 ## [2.19.44] - 2026-09-05 🛰️
 
 ### 🛰️ Audit réseau, lot 4 : granularité — techniques alternatives de détection

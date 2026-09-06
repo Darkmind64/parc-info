@@ -263,6 +263,12 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
         {% endif %}
         <span id="topo-fraicheur" class="topo-fraicheur"></span>
     </h2>
+    <p style="font-size:.76rem;color:var(--text-muted);margin:.2rem 0 .7rem;">
+        Un équipement listé dans l'onglet <strong>Équipements</strong> peut être absent de cette carte :
+        celle-ci a besoin en plus de la table d'adresses MAC (bridge-MIB) ou du LLDP, moins souvent
+        exposées que les simples compteurs de ports. Lancez « Cartographier maintenant » — les
+        équipements joignables mais sans table MAC exploitable sont listés en dessous avec la raison.
+    </p>
     <div id="topo-carte" class="diag-line">Chargement…</div>
     <div id="topo-decouverts"></div>
 </div>
@@ -413,14 +419,27 @@ function basculerCfg(el){
 function testerSNMP(btn){
     btn.disabled = true;
     const res = document.getElementById('snmp-test-res');
-    res.textContent = 'Test en cours…';
+    res.style.color = 'var(--text-muted)';
+    res.textContent = 'Test en cours — tous les équipements réseau, communautés courantes incluses…';
     fetch('/api/diag-reseau/test-snmp', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
         .then(r => r.json()).then(d => {
-            res.style.color = d.ok ? 'var(--accent-green)' : '#ffb057';
-            res.textContent = d.ok
-                ? `✔ ${d.equipement} (${d.ip}) répond — communauté « ${d.communaute} », sysName « ${d.sysname || '?'} »`
-                : `✖ ${d.motif}`;
-        }).catch(() => { res.textContent = 'Erreur réseau'; })
+            if (d.ok){
+                res.style.color = 'var(--accent-green)';
+                let h = `✔ <strong>${esc(d.equipement)}</strong> (${esc(d.ip)}) répond — ${esc(d.communaute)}, sysName « ${esc(d.sysname || '?')} »`;
+                if (d.hors_config)
+                    h += `<div style="color:#ffb057;margin-top:.3rem;">⚠ « ${esc(d.communaute)} » n'est pas dans vos réglages. Ajoutez-la au champ « Interrogation SNMP » pour que le diagnostic et la baie l'utilisent.</div>`;
+                res.innerHTML = h;
+            } else {
+                res.style.color = '#ffb057';
+                let h = '✖ ' + esc(d.motif || 'Aucune réponse');
+                if ((d.equipements || []).length){
+                    h += '<div style="margin-top:.3rem;color:var(--text-muted);">'
+                       + d.equipements.map(e => `<span class="mono">${esc(e.ip)}</span> ${esc(e.nom || '')} — ${esc(e.detail || '')}`).join('<br>')
+                       + '</div>';
+                }
+                res.innerHTML = h;
+            }
+        }).catch(() => { res.style.color = '#ffb057'; res.textContent = 'Erreur réseau'; })
         .finally(() => { btn.disabled = false; });
 }
 
@@ -958,11 +977,16 @@ function chargerIpv6(){
     const wrap = document.getElementById('ipv6-body');
     wrap.textContent = 'Interrogation en cours…';
     fetch('/api/diag-reseau/ipv6-voisins').then(r=>r.json()).then(d => {
+        const ign = d.ignores ? ` — ${d.ignores} entrée(s) injoignable(s)/incomplète(s) du cache ignorée(s)` : '';
         if (!d.voisins || !d.voisins.length){
-            wrap.innerHTML = '<span style="color:var(--text-muted);">Aucun voisin IPv6 dans le cache NDP de ce poste.</span>';
+            wrap.innerHTML = '<span style="color:var(--text-muted);">'
+                + (d.ignores
+                    ? `${d.ignores} entrée(s) du cache NDP ignorée(s) (injoignables ou incomplètes) — aucun voisin IPv6 exploitable. IPv6 n'est peut-être pas actif sur ce segment.`
+                    : 'Aucun voisin IPv6 dans le cache NDP de ce poste.')
+                + '</span>';
             return;
         }
-        wrap.innerHTML = `<div style="font-size:.72rem;color:var(--text-secondary);margin-bottom:.3rem;">${d.nb} voisin(s)${d.ping_multicast_ok===false?' — ping multicast (ff02::1) sans réponse':''}</div>
+        wrap.innerHTML = `<div style="font-size:.72rem;color:var(--text-secondary);margin-bottom:.3rem;">${d.nb} voisin(s)${d.ping_multicast_ok===false?' — ping multicast (ff02::1) sans réponse':''}${ign}</div>
             <div style="overflow-x:auto;"><table class="diag-table"><thead><tr><th>Adresse IPv6</th><th>MAC</th><th>Interface</th><th>État</th></tr></thead><tbody>
             ${d.voisins.map(v => `<tr><td style="font-family:'Share Tech Mono',monospace;font-size:.72rem;">${esc(v.ip)}</td>
                 <td>${esc(v.mac||'')}</td><td>${esc(v.interface||'')}</td><td>${esc(v.etat||'')}</td></tr>`).join('')}
