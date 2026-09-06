@@ -1,5 +1,24 @@
 # CHANGELOG - ParcInfo
 
+## [2.21.0] - 2026-09-06 🔗
+
+### 🔗 Le diagnostic réseau irrigue les autres catégories
+
+Suite de la refonte du diagnostic réseau (2.20.0) et de la passe performance (2.20.1) : les **6 propositions « post-refonte »** du plan retenues par l'utilisateur. La 7ᵉ (sortir les communautés SNMP / mot de passe v3 de `configurations` vers le coffre chiffré `identifiants`) est laissée à un plan dédié — elle touche tous les chemins de lecture SNMP.
+
+- **Tableau de bord** — la tuile « État réseau » gagne un bandeau de **verdict** (`netdiag.etat.verdict()`) : *« réseau sain »* / *« N port(s) en erreur · M équipement(s) SNMP muet(s) »*, coloré, cliquable vers `/diag-reseau`.
+- **Baie de brassage** — une **pastille de santé** (vert / ⚠ / 🔴) par équipement monté en rack et relevé en SNMP, tirée de `diag_etat_equipement`. `GET /api/baie/diag-erreurs` renvoie désormais `{ports, equipements}`.
+- **Fiche appareil** — l'encart « Réseau — diagnostic » **recoupe** ce que le switch voit du poste (débit négocié, duplex sur le port où il est vu) avec ce que le collecteur-agent ParcInfo remonte de ses cartes réseau. Il signale les écarts : un **Gigabit bridé à 100 Mb/s** par un câble, un lien en **half-duplex**.
+- **Parc général** — badges **« confirmé / divergent / non vérifié »** à côté de la passerelle, du DNS, de la plage IP locale et du domaine, en confrontant les valeurs déclarées à la réalité observable (IP des appareils de l'inventaire, sonde DNS, type des équipements). Indicatif, jamais bloquant. `GET /api/parc-general/verification`.
+- **Topologie** — un équipement vu en LLDP/CDP mais **absent de l'inventaire** reçoit un bouton **« + Ajouter à l'inventaire »**. `POST /api/diag-reseau/topologie/promouvoir` (crée un « Switch » avec son IP de gestion, `can_write`, `log_history`). Rien n'est créé sans ce clic.
+- **Historique** — les bascules d'état du diagnostic réseau y sont tracées : `DIAG_RESEAU_PORT_ERREUR` / `_PORT_RETABLI` / `_EQUIP_INJOIGNABLE` / `_EQUIP_JOIGNABLE`.
+
+**Au passage** : un équipement SNMP qui cesse de répondre repasse enfin `snmp_ok=0` (avant, `diag_etat_equipement` gardait son dernier état connu indéfiniment et le verdict le comptait comme joignable) ; le verdict, l'écran « Trafic & erreurs » et la vue baie ignorent maintenant les ports d'un switch muet.
+
+Tests : +27 (`tests/test_netdiag_etat.py` étendu, `test_netdiag_transitions.py`, `test_diag_topologie_promouvoir.py`, `test_parc_general_verification.py`). Suite : 305 passants (+27), 9 échecs préexistants de `test_diag_reseau.py` inchangés (mocks `_fdb_switch` + un test d'ordre fragile — vérifié identique sur le commit parent). Vérifié en navigateur.
+
+---
+
 ## [2.20.1] - 2026-09-06 ⚡
 
 ### ⚡ Diagnostic réseau & baie de brassage : sondes menées en parallèle

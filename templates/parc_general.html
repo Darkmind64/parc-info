@@ -38,7 +38,7 @@
                 <input id="id-nb_utilisateurs" type="number" name="nb_utilisateurs" value="{{ parc.nb_utilisateurs or '' }}" placeholder="0" min="0">
             </div>
             <div class="form-group">
-                <label for="id-domaine">Domaine Windows</label>
+                <label for="id-domaine">Domaine Windows <span class="pg-verif" data-verif="domaine"></span></label>
                 <input id="id-domaine" type="text" name="domaine" value="{{ parc.domaine or '' }}" placeholder="Ex: entreprise.local">
             </div>
         </div>
@@ -76,7 +76,7 @@
                 <input id="id-ip_publique" type="text" name="ip_publique" value="{{ parc.ip_publique or '' }}" placeholder="Ex: 82.64.x.x">
             </div>
             <div class="form-group">
-                <label for="id-plage_ip_locale">Plage(s) IP locale(s)</label>
+                <label for="id-plage_ip_locale">Plage(s) IP locale(s) <span class="pg-verif" data-verif="plage_ip_locale"></span></label>
                 <input id="id-plage_ip_locale" type="text" name="plage_ip_locale" value="{{ parc.plage_ip_locale or '192.168.1.0/24' }}" placeholder="192.168.1.0/24, 192.168.0.0/24" title="Plusieurs sous-réseaux routés au même site ? Séparez-les par une virgule.">
                 <p class="form-hint">
                     Site avec plusieurs sous-réseaux (ex. routeur qui dessert 192.168.1.0/24 ET 192.168.0.0/24) : séparez-les par une virgule. La page Scan réseau peut aussi les proposer automatiquement, s'ils sont vus via SNMP sur un routeur/switch de l'inventaire.
@@ -85,11 +85,11 @@
         </div>
         <div class="form-row cols-2">
             <div class="form-group">
-                <label for="id-passerelle">Passerelle par défaut</label>
+                <label for="id-passerelle">Passerelle par défaut <span class="pg-verif" data-verif="passerelle"></span></label>
                 <input id="id-passerelle" type="text" name="passerelle" value="{{ parc.passerelle or '' }}" placeholder="Ex: 192.168.1.1">
             </div>
             <div class="form-group">
-                <label for="id-serveur_dns">Serveur(s) DNS</label>
+                <label for="id-serveur_dns">Serveur(s) DNS <span class="pg-verif" data-verif="serveur_dns"></span></label>
                 <input id="id-serveur_dns" type="text" name="serveur_dns" value="{{ parc.serveur_dns or '' }}" placeholder="Ex: 8.8.8.8, 1.1.1.1">
             </div>
         </div>
@@ -594,5 +594,33 @@ function confirmerImport() {
     });
     return false;
 }
+
+// ── Proposition #4 : badges « confirmé / divergent / non vérifié » ────────────
+// Recoupe les champs réseau déclarés avec la réalité observable (IP des
+// appareils de l'inventaire, sonde DNS, type des équipements). Indicatif.
+(function(){
+    const spans = document.querySelectorAll('.pg-verif');
+    if (!spans.length) return;
+    const T = { confirme: ['✓ confirmé', 'pgv-ok'],
+                divergent: ['⚠ divergent', 'pgv-ko'],
+                non_verifie: ['· non vérifié', 'pgv-na'] };
+    fetch('/api/parc-general/verification').then(r => r.json()).then(d => {
+        spans.forEach(s => {
+            const v = d[s.dataset.verif];
+            if (!v || !T[v.etat]) return;
+            const [txt, cls] = T[v.etat];
+            s.textContent = txt;
+            s.className = 'pg-verif ' + cls;
+            if (v.detail) s.title = v.detail;
+        });
+    }).catch(()=>{});
+})();
 </script>
+<style>
+.pg-verif { font-size: .7rem; font-weight: 600; padding: 1px 6px; border-radius: 8px;
+    margin-left: .3rem; vertical-align: middle; cursor: help; }
+.pg-verif.pgv-ok { color: #1f9d55; background: rgba(31,157,85,.13); }
+.pg-verif.pgv-ko { color: #c77700; background: rgba(224,149,42,.15); }
+.pg-verif.pgv-na { color: var(--text-muted); background: rgba(128,128,128,.12); }
+</style>
 {% endblock %}

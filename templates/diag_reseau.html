@@ -873,10 +873,13 @@ function suivreCartographie(){
         }
         if ((r2.decouverts || []).length){
             html += '<div class="diag-line" style="margin-top:.7rem;font-size:.78rem;">'
-                + '<strong>' + r2.decouverts.length + " équipement(s) réseau vus en LLDP mais absents de l'inventaire :</strong><br>"
-                + r2.decouverts.map(x => '<span class="mono">' + esc(x.ip) + '</span>'
+                + '<strong>' + r2.decouverts.length + " équipement(s) réseau vus en LLDP mais absents de l'inventaire :</strong>"
+                + r2.decouverts.map(x => '<div class="topo-decouvert" style="margin:.35rem 0;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;">'
+                    + '<span class="mono">' + esc(x.ip) + '</span>'
                     + (x.nom ? ' — ' + esc(x.nom) : '')
-                    + (x.modele ? ' <span style="color:var(--text-muted);">' + esc(x.modele) + '</span>' : '')).join('<br>')
+                    + (x.modele ? ' <span style="color:var(--text-muted);">' + esc(x.modele) + '</span>' : '')
+                    + (PEUT_ECRIRE ? ' <button class="link-btn" data-promo-ip="' + esc(x.ip) + '" data-promo-nom="' + esc(x.nom || '') + '" data-promo-modele="' + esc(x.modele || '') + '" onclick="promouvoirEquipement(this)">+ Ajouter à l’inventaire</button>' : '')
+                    + '</div>').join('')
                 + '<div style="color:var(--text-muted);margin-top:.3rem;">Ajoutez-les à l’inventaire pour qu’ils soient interrogés à chaque passage.</div></div>';
         }
         if ((r2.reseaux || []).length){
@@ -891,6 +894,22 @@ function suivreCartographie(){
 function finCartographie(){
     const b = document.getElementById('btn-cartographier');
     if (b) { b.disabled = false; b.textContent = 'Cartographier maintenant'; }
+}
+
+// Proposition #2 : promouvoir un équipement vu en LLDP dans l'inventaire.
+function promouvoirEquipement(btn){
+    btn.disabled = true;
+    fetch('/api/diag-reseau/topologie/promouvoir', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ip: btn.dataset.promoIp, nom: btn.dataset.promoNom,
+                              modele: btn.dataset.promoModele})
+    }).then(r => r.json().then(d => ({ok: r.ok, d}))).then(({ok, d}) => {
+        if (!ok){ btn.disabled = false; showToast(d.error || 'Erreur', 'error'); return; }
+        const row = btn.closest('.topo-decouvert');
+        if (row) row.innerHTML = '<span style="color:var(--accent-green);">✓ ajouté à l’inventaire</span> '
+            + '<a href="/appareil/' + d.id + '/editer">compléter la fiche →</a>';
+        showToast('Équipement ajouté', 'success');
+    }).catch(() => { btn.disabled = false; showToast('Erreur réseau', 'error'); });
 }
 
 // ── Reporter dans la baie : aperçu AVANT écriture (audit #16) ──────────────

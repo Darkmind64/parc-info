@@ -454,6 +454,14 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .port.port-diag-err::after { content:'⚠'; position:absolute; top:-6px; right:-5px; font-size:9px;
     line-height:1; color:#fff; background:#e0952a; border-radius:50%; padding:1px 2px; z-index:5; }
 .port.port-diag-err.port-diag-crit::after { background:#ef4444; }
+/* proposition #1 : pastille de santé de l'équipement (diagnostic réseau SNMP) */
+.cell-sante { display:inline-flex; align-items:center; gap:3px; flex-shrink:0;
+    font-size:.6rem; font-weight:700; padding:1px 5px; border-radius:9px; margin-right:.3rem;
+    text-transform:uppercase; letter-spacing:.5px; cursor:help; }
+.cell-sante::before { content:''; width:6px; height:6px; border-radius:50%; background:currentColor; }
+.cell-sante.cs-ok { color:#1f9d55; background:rgba(31,157,85,.14); }
+.cell-sante.cs-attention { color:#c77700; background:rgba(224,149,42,.16); }
+.cell-sante.cs-critique { color:#ef4444; background:rgba(239,68,68,.16); }
 
 /* ── Modale « Moniteur réseau » ─────────────────────────────────────────── */
 .mon-box { background:var(--bg-secondary); border:1px solid var(--border-glow); border-radius:8px;
@@ -5246,11 +5254,14 @@ document.addEventListener('keydown', e => {
 // ── Erreurs de trafic (diagnostic réseau, refonte Lot 5) ─────────────────────
 // Un port de la baie dont le diagnostic réseau signale une erreur de trafic
 // active (CRC, duplex mismatch, saturation…) reçoit un marqueur ⚠.
-let _diagErreurs = {};
+let _diagErreurs = {};       // "<slot>:<port>" -> {classe, libelle, gravite}
+let _diagSante = {};         // "<slot_id>"     -> {niveau, phrase, ...}
 async function chargerDiagErreurs() {
     try {
-        _diagErreurs = await (await fetch('/api/baie/diag-erreurs')).json() || {};
-    } catch { _diagErreurs = {}; }
+        const d = await (await fetch('/api/baie/diag-erreurs')).json() || {};
+        _diagErreurs = d.ports || {};
+        _diagSante = d.equipements || {};
+    } catch { _diagErreurs = {}; _diagSante = {}; }
     appliquerDiagErreurs();
 }
 function appliquerDiagErreurs() {
@@ -5266,6 +5277,19 @@ function appliquerDiagErreurs() {
             const t = 'Diagnostic réseau : ' + (info.libelle || info.classe);
             el.title = el.title ? el.title + ' · ' + t : t;
         });
+    }
+    // pastille de santé par équipement (proposition #1)
+    document.querySelectorAll('.cell-sante').forEach(el => el.remove());
+    const CS = { ok:'cs-ok', attention:'cs-attention', critique:'cs-critique' };
+    const LB = { ok:'OK', attention:'⚠', critique:'🔴' };
+    for (const [sid, s] of Object.entries(_diagSante)) {
+        const row = document.querySelector(`.rack-cell.occupied[data-id="${sid}"] .cell-row`);
+        if (!row) continue;
+        const b = document.createElement('span');
+        b.className = 'cell-sante ' + (CS[s.niveau] || 'cs-ok');
+        b.textContent = LB[s.niveau] || 'OK';
+        b.title = 'Diagnostic réseau — ' + (s.phrase || s.niveau);
+        row.insertBefore(b, row.firstChild);
     }
 }
 // re-décorer après chaque redraw du rack

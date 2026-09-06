@@ -3718,11 +3718,20 @@ def single_client_dashboard(cid):
         except Exception:
             a_switchs_baie = False
 
+        # Verdict du diagnostic réseau pour le widget « État réseau »
+        # (proposition #6 : santé réseau visible sur le tableau de bord).
+        try:
+            from netdiag import etat as _netetat
+            diag_reseau_verdict = _netetat.verdict(cid)
+        except Exception:
+            diag_reseau_verdict = None
+
         # Combine all data for template
         template_data = {
             'parc': parc,
             'client': client,
             'a_switchs_baie': a_switchs_baie,
+            'diag_reseau_verdict': diag_reseau_verdict,
             'appareils': stats['appareils'],
             'nb_en_ligne': stats['nb_en_ligne'],
             'nb_hors_ligne': stats['nb_hors_ligne'],
@@ -4018,6 +4027,22 @@ def parc_general():
                            serveur_marques=serveur_marques,
                            serveur_modeles=serveur_modeles,
                            clients=get_clients(), client_actif_id=cid)
+
+
+@app.route('/api/parc-general/verification')
+@login_required
+def api_parc_general_verification():
+    """Proposition #4 : recoupe les champs réseau déclarés du parc (passerelle,
+    DNS, plage IP, domaine) avec la réalité observable. Lecture seule ; une
+    sonde DNS peut prendre ~2 s."""
+    cid = get_client_id()
+    if not cid or not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        return jsonify(network_diag.verifier_parc_general(cid))
+    except Exception:
+        logger.exception('verification parc_general')
+        return jsonify({})
 
 # ─── ROUTES API PRESTATAIRES ─────────────────────────────────────────────────────
 
@@ -7300,21 +7325,35 @@ def api_baie_activite():
 @app.route('/api/baie/diag-erreurs')
 @login_required
 def api_baie_diag_erreurs():
-    """Ports de la baie qui portent une erreur de trafic active, d'après le
-    diagnostic réseau (refonte Lot 5) : `{"<slot_id>:<port>": {classe, libelle}}`.
-    La baie y ajoute un marqueur ⚠. Ne s'affiche que pour les ports dont
-    l'ifIndex est calibré (le lien port de façade ↔ ifIndex SNMP)."""
+    """Diagnostic réseau projeté sur la baie :
+      - `ports` : `{"<slot_id>:<port>": {classe, libelle, gravite}}` — un port
+        de façade avec une erreur de trafic active (marqueur ⚠, refonte Lot 5,
+        seulement si l'ifIndex est calibré) ;
+      - `equipements` : `{"<slot_id>": {niveau, phrase, ...}}` — pastille de
+        santé par équipement monté en rack et relevé en SNMP (proposition #1).
+    """
     cid = get_client_id()
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
     conn = get_db()
     rows = conn.execute(
-        "SELECT baie_slot_id, baie_port, classe_erreur, classe_libelle, gravite "
-        "FROM diag_etat_port WHERE client_id=? AND baie_slot_id IS NOT NULL "
-        "AND baie_port IS NOT NULL AND classe_erreur!=''", (cid,)).fetchall()
+        "SELECT p.baie_slot_id, p.baie_port, p.classe_erreur, p.classe_libelle, p.gravite "
+        "FROM diag_etat_port p JOIN diag_etat_equipement e "
+        "  ON e.client_id=p.client_id AND e.equipement_ip=p.equipement_ip "
+        "WHERE p.client_id=? AND p.baie_slot_id IS NOT NULL AND p.baie_port IS NOT NULL "
+        "AND p.classe_erreur!='' AND e.snmp_ok=1", (cid,)).fetchall()
     conn.close()
-    return jsonify({f"{r[0]}:{r[1]}": {'classe': r[2], 'libelle': r[3], 'gravite': r[4]}
-                    for r in rows})
+    try:
+        from netdiag import etat as _netetat
+        equipements = _netetat.sante_baie(cid)
+    except Exception:
+        logger.debug('sante_baie en échec', exc_info=True)
+        equipements = {}
+    return jsonify({
+        'ports': {f"{r[0]}:{r[1]}": {'classe': r[2], 'libelle': r[3], 'gravite': r[4]}
+                  for r in rows},
+        'equipements': equipements,
+    })
 
 
 @app.route('/api/baie/activite/moniteur')
@@ -10829,6 +10868,49 @@ def api_diag_topologie_statut():
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
     return jsonify(network_diag.statut_cartographie(cid))
+
+
+@app.route('/api/diag-reseau/topologie/promouvoir', methods=['POST'])
+@login_required
+def api_diag_topologie_promouvoir():
+    """Proposition #2 : crée dans l'inventaire un équipement réseau vu en LLDP/CDP
+    (liste `decouverts` de la cartographie) mais absent jusque-là. Créé en
+    « Switch » avec son IP de gestion — l'utilisateur affine ensuite la fiche.
+    Rien n'est créé sans ce clic explicite."""
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    data = request.json or {}
+    ip = (data.get('ip') or '').strip()
+    try:
+        ipaddress.ip_address(ip)
+    except ValueError:
+        return jsonify({'error': 'IP invalide'}), 400
+    nom = (data.get('nom') or '').strip() or f"Switch {ip}"
+    modele = (data.get('modele') or '').strip()
+    conn = get_db()
+    try:
+        deja = conn.execute("SELECT id FROM appareils WHERE client_id=? AND adresse_ip=?",
+                            (cid, ip)).fetchone()
+        if deja:
+            return jsonify({'error': 'Un appareil porte déjà cette IP', 'id': deja[0]}), 409
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO appareils (client_id, adresse_ip, nom_machine, marque, modele, "
+            "type_appareil, en_ligne, decouvert_scan, statut, date_creation, date_maj) "
+            "VALUES (?,?,?,?,?,?,0,1,'actif',?,?)",
+            (cid, ip, nom, (modele.split()[0] if modele else ''), modele, 'Switch', now, now))
+        app_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+        log_history(conn, cid, 'appareil', app_id, nom,
+                    'Création (topologie LLDP)', {'source': 'diag-topologie', 'ip': ip})
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.exception('promouvoir topologie')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+    return jsonify({'ok': True, 'id': app_id, 'nom': nom})
 
 
 @app.route('/api/diag-reseau/wifi')
