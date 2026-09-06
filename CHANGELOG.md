@@ -1,5 +1,23 @@
 # CHANGELOG - ParcInfo
 
+## [2.21.2] - 2026-09-06 🔗
+
+### FDB tronquée réparée via la table ARP d'un routeur du parc
+
+Suite du relevé « FDB brut » de la 2.21.1. **Sur pièces** (HP ProCurve J9450A) : l'agent renvoie un index `dot1d` de 7 sous-identifiants = `<longueur 6>` + `<00:01>` + **les 4 premiers octets** de la vraie MAC. Les 2 derniers octets sont **réellement perdus**. L'hypothèse `prefixe2` de `_fdb_corriger` sait recouper ces 4 octets, **mais** avec un inventaire pauvre (< 20 MAC) elle n'atteignait pas le seuil de 3 reconnaissances : la déformation passait inaperçue et tout restait en `00:01:…`.
+
+La **table ARP du routeur du parc** (OpenWrt : 47 entrées, MAC entières et propres) est la référence qui manquait.
+
+- **`_fdb_switch`** expose `info['arp_macs']` — les MAC vues dans sa table ARP (valeur OCTET STRING, structurellement propre).
+- **`_fdb_corriger(par_if, inv_mac, mode, reference=None)`** : `reference` = MAC réelles supplémentaires pour **détecter ET réparer** la déformation. Une MAC réparée depuis la référence mais absente de l'inventaire est conservée **entière** (elle apparaît « hors inventaire » avec son vrai fabricant, plus jamais `00:01:…`).
+- **`analyser_brassage_baie`** : 2ᵉ passe — réunit les `arp_macs` de **tous** les équipements relevés et relance `_fdb_corriger` sur chaque switch (le relevé SNMP est en cache, seule la fonction pure rejoue). Adoptée uniquement si elle reconnaît plus que la 1ʳᵉ passe.
+
+Limite inchangée : sans routeur SNMP dans le parc (donc sans ARP de référence) et avec un inventaire trop pauvre, seuls les 4 premiers octets sont exploitables — le bouton « 🔬 FDB brut » le montre.
+
+Tests : `tests/test_fdb_brut.py` (+3). Suite : 312 passants, 8-9 échecs préexistants de `test_diag_reseau.py` inchangés.
+
+---
+
 ## [2.21.1] - 2026-09-06 🔬
 
 ### Adresses MAC préfixées par un agent SNMP défectueux

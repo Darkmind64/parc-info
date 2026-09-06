@@ -57,3 +57,42 @@ def test_diagnostiquer_fdb_brute(conn, make_client, make_appareil, monkeypatch):
     a0 = e['arp']['exemples'][0]
     assert a0['nb_octets'] == 8 and a0['mac_6_derniers'] == 'de:ad:be:ef:00:11'
     assert a0['dans_inventaire'] == 'PC1'
+
+
+# ── correction d'une FDB tronquée avec la table ARP d'un routeur comme référence ──
+
+def test_fdb_corriger_prefixe2_sans_reference_ne_detecte_rien():
+    # switch ProCurve : 4 premiers octets de la vraie MAC, préfixés 00:01
+    raw = {3: {'00:01:00:23:24:53', '00:01:20:7b:d2:a3'}, 5: {'00:01:00:09:4c:c5'}}
+    inv = {'de:ad:be:ef:00:11': (1, 'x', 'PC')}   # inventaire pauvre
+    fdb, meta = N._fdb_corriger(raw, inv, '')
+    assert meta['transform'] == 'exact'          # rien détecté -> les 00:01 passent
+    assert fdb[3] == raw[3]
+
+
+def test_fdb_corriger_prefixe2_avec_reference_arp_recupere_la_mac_entiere():
+    raw = {3: {'00:01:00:23:24:53', '00:01:20:7b:d2:a3'}, 5: {'00:01:00:09:4c:c5'}}
+    inv = {'de:ad:be:ef:00:11': (1, 'x', 'PC')}
+    # la table ARP d'un routeur du parc porte les MAC ENTIÈRES
+    ref = {'00:23:24:53:87:3d', '20:7b:d2:a3:1f:b7', '00:09:4c:c5:11:22'}
+    fdb, meta = N._fdb_corriger(raw, inv, '', reference=ref)
+    assert meta['transform'] == 'prefixe2' and meta['reconnues'] == 3
+    assert fdb[3] == {'00:23:24:53:87:3d', '20:7b:d2:a3:1f:b7'}
+    assert fdb[5] == {'00:09:4c:c5:11:22'}       # récupérée même si absente de l'inventaire
+
+
+def test_fdb_switch_expose_arp_macs(monkeypatch):
+    # `_fdb_switch` écrit dans des dicts globaux (cache) : on les isole pour ne
+    # pas polluer les autres tests.
+    monkeypatch.setattr(N, '_activite_fdb', {})
+    monkeypatch.setattr(N, '_activite_fdb_dialecte', {})
+    monkeypatch.setattr(N, '_activite_fdb_echec', {})
+    monkeypatch.setattr(N, '_activite_fdb_baseport', {})
+    monkeypatch.setattr(N, '_snmp_walk', lambda *a, **k: {})         # pas de bridge FDB
+    monkeypatch.setattr(N, '_vlans_actifs', lambda *a, **k: ([], {}))
+    monkeypatch.setattr(N, '_fdb_par_vlan', lambda *a, **k: ({}, {}))
+    monkeypatch.setattr(N, '_snmp_walk_octets',
+                        lambda oid, ip, comm, **k: {'2.192.168.1.20': bytes.fromhex('f48c504eb574')}
+                        if oid == N._OID_ARP_PHYS else {})
+    par_if, info = N._fdb_switch('10.0.0.1', ['public'])
+    assert info['arp_macs'] == {'f4:8c:50:4e:b5:74'}
