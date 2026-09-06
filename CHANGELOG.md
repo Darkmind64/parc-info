@@ -1,5 +1,30 @@
 # CHANGELOG - ParcInfo
 
+## [2.20.1] - 2026-09-06 ⚡
+
+### ⚡ Diagnostic réseau & baie de brassage : sondes menées en parallèle
+
+Retour de l'utilisateur après la refonte : *« tout est vraiment très long, ne peut-on rien faire pour accélérer le diagnostic et la baie de brassage ? »*. La refonte 2.20.0 avait parallélisé le **balayage SNMP** (×9), mais tout le reste tournait encore en série.
+
+**Snapshot (bouton « Rafraîchir » / diagnostic ponctuel)** — les paliers 1/2/7a (ARP, rafales de ping, DNS, DHCP, noms NetBIOS, Wi-Fi) s'enchaînaient un par un, chacun avec ses délais réseau. Le plus gros poste : `mesurer_qualite_liaison` pingait ses cibles **en série**, et sous Windows `ping -n N` envoie ~1 paquet/s — 3 cibles = 3× la rafale.
+
+- Nouveau `_executer_sondes` : lance un lot de sondes **en parallèle** (une sonde qui lève n'entraîne pas les autres) ; `_sondes_hote` agrège le tout.
+- `mesurer_qualite_liaison` pingue ses cibles **en parallèle**.
+- `_run_snapshot` : les 6 sondes du poste deviennent **une seule phase parallèle**.
+- Rafale de ping : 20 → 12 paquets en mode normal (suffisant pour le taux de perte / la gigue).
+- Bench (`bench_sondes.py`, 3 sondes × 1,2 s) : **~8,4 s → ~1,2 s** pour ce bloc. Diagnostic complet mesuré : **~90 s → ~20 s**.
+
+**Baie de brassage (LED d'activité)** — `_cycle_activite` relevait les switchs un par un, et pour **chaque** switch enchaînait FDB + interfaces + ports + PoE + sysinfo. Sur 3 switchs, 3× la chaîne → les LED mettaient « un bon moment » à démarrer.
+
+- Nouveau `_relever_switch_activite` : le relevé complet d'un switch, extrait et rendu thread-safe (les helpers SNMP sont déjà verrouillés par IP).
+- `_cycle_activite` relève **tous les switchs en parallèle** (`diag_snmp_workers`).
+- **1er cycle** : le walk de la table d'apprentissage MAC (le plus long, il ne sert qu'au contrôle de câblage, pas aux LED) est sauté → premier affichage plus rapide, le câblage apparaît au cycle suivant (3 s après).
+- Un switch qui lève pendant son relevé ne fait plus tomber le cycle des autres.
+
+Aucun changement d'interface. Tests : `tests/test_diag_perf.py` (7). Suite : 279 passants (+9), 8 échecs baie préexistants (mocks sans rapport, en baisse de 10 à 8).
+
+---
+
 ## [2.20.0] - 2026-09-06 ⚡
 
 ### ⚡ Refonte du diagnostic réseau (6 lots)

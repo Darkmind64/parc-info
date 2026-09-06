@@ -391,18 +391,36 @@ def _ping_rafale(ip: str, n: int = 20) -> dict:
 def mesurer_qualite_liaison(cibles: list, seuil_perte: float, seuil_gigue: float,
                             n: int = 20, collecte: list = None) -> list:
     findings = []
+    # Cibles pingées EN PARALLÈLE : sous Windows `ping -n N` envoie ~1 paquet/s,
+    # donc 3 cibles en série = 3× la rafale. En parallèle, le palier ne dure que
+    # la plus lente des cibles.
+    normes = []
     for cible in cibles:
         ip = cible.get('ip') if isinstance(cible, dict) else cible
         libelle = cible.get('libelle', ip) if isinstance(cible, dict) else ip
-        if not ip:
-            continue
-        st = _ping_rafale(ip, n)
-        st['libelle'] = libelle
+        role = cible.get('role') if isinstance(cible, dict) else None
+        if ip:
+            normes.append((ip, libelle, role))
+    if not normes:
+        return findings
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _rafale(t):
+        _ip, _lib, _role = t
+        _st = _ping_rafale(_ip, n)
+        _st['libelle'] = _lib
+        return _ip, _lib, _role, _st
+
+    with ThreadPoolExecutor(max_workers=min(8, len(normes)),
+                            thread_name_prefix='diag-ping') as ex:
+        resultats = list(ex.map(_rafale, normes))
+
+    for ip, libelle, role, st in resultats:
         if collecte is not None:
             collecte.append(st)
         if st['recus'] == 0:
             findings.append(_finding(
-                'passerelle_injoignable' if cible.get('role') == 'passerelle' else 'qualite_liaison',
+                'passerelle_injoignable' if role == 'passerelle' else 'qualite_liaison',
                 f"{libelle} ({ip}) ne répond à aucun des {n} paquets",
                 st, ip,
                 gravite='critique',
@@ -647,6 +665,72 @@ def _cibles_ping(client_id: int, passerelle: str) -> list:
         if d:
             cibles.append({'ip': d, 'libelle': f'DNS {d}', 'role': 'dns'})
     return cibles
+
+
+def _executer_sondes(taches: dict, max_workers: int = 6) -> dict:
+    """Exécute `{nom: callable_sans_arg}` EN PARALLÈLE → `{nom: (resultat, duree_s)}`.
+
+    Les sondes du poste (ARP, ping, DNS, DHCP, NetBIOS, Wi-Fi) sont indépendantes
+    les unes des autres ; les enchaîner en série coûtait ~80 s à chaque snapshot,
+    dominé par les rafales de ping (Windows plafonne à ~1 paquet/s). Une sonde qui
+    lève est journalisée en debug et rend `([], duree)` — elle ne fait pas tomber
+    les autres."""
+    from concurrent.futures import ThreadPoolExecutor
+    items = list(taches.items())
+    if not items:
+        return {}
+
+    def _run(kv):
+        nom, fn = kv
+        t = time.time()
+        try:
+            return nom, fn(), round(time.time() - t, 1)
+        except Exception:
+            logger.debug('network_diag: sonde hôte %s en échec', nom, exc_info=True)
+            return nom, [], round(time.time() - t, 1)
+
+    out = {}
+    with ThreadPoolExecutor(max_workers=min(max_workers, len(items)),
+                            thread_name_prefix='diag-hote') as ex:
+        for nom, res, duree in ex.map(_run, items):
+            out[nom] = (res, duree)
+    return out
+
+
+def _sondes_hote(client_id: int, *, rapide: bool = False, n_ping: int = 12,
+                 releves_arp: int = 1, avec_wifi: bool = True,
+                 avec_dns: bool = True, avec_dhcp: bool = True):
+    """Palier 1 + (DNS + DHCP) + conflits de noms + Wi-Fi, menés EN PARALLÈLE.
+
+    Retourne `(findings, stats_liaison, cibles, phases)`. L'appelant se charge
+    d'écrire les métriques de liaison (`enregistrer_metriques_liaison`) et
+    d'évaluer la baseline — l'ordre et le découpage en « phases » diffèrent entre
+    le snapshot ponctuel et le cycle de surveillance."""
+    passerelle = _passerelle_defaut()
+    seuil_perte = _cfg_float('diag_seuil_perte_pct', 5)
+    seuil_gigue = _cfg_float('diag_seuil_jitter_ms', 30)
+    cibles = _cibles_ping(client_id, passerelle)
+    serveur_dns = next((c['ip'] for c in cibles if c.get('role') == 'dns'), '')
+    attendus = re.split(r'[,;\s]+', str(_cfg('diag_dhcp_serveurs_attendus', '') or ''))
+    stats_liaison = []
+    taches = {
+        'arp': lambda: detecter_conflits_ip(passerelle, releves=releves_arp),
+        'liaison': lambda: mesurer_qualite_liaison(
+            cibles, seuil_perte, seuil_gigue, n=n_ping, collecte=stats_liaison),
+        'noms': lambda: detecter_conflits_noms(client_id),
+    }
+    if avec_dns:
+        taches['dns'] = lambda: verifier_dns(serveur_dns)
+    if avec_dhcp:
+        taches['dhcp'] = lambda: detecter_dhcp_pirate(attendus)
+    if avec_wifi and str(_cfg('diag_wifi_active', '1')) == '1':
+        taches['wifi'] = lambda: diagnostiquer_wifi(client_id)
+    res = _executer_sondes(taches)
+    findings, phases = [], {}
+    for nom, (r, duree) in res.items():
+        findings += r or []
+        phases[nom] = duree
+    return findings, stats_liaison, cibles, phases
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -4211,12 +4295,10 @@ def _run_snapshot(client_id: int, plage: str, avec_capture, rapide=None):
         rapide = str(_cfg('diag_snapshot_rapide', '0')) == '1'
     budget = _cfg_int('diag_snapshot_budget_s', 120)
 
-    seuil_perte = _cfg_float('diag_seuil_perte_pct', 5)
-    seuil_gigue = _cfg_float('diag_seuil_jitter_ms', 30)
     seuil_bc = _cfg_int('diag_seuil_broadcast_pps', 150)
     duree_capture = _cfg_int('diag_snapshot_duree_s', 20)
-    n_ping = 8 if rapide else 20
-    passerelle = _passerelle_defaut()
+    n_ping = 8 if rapide else 12   # 12 (au lieu de 20) : suffisant pour perte/gigue,
+    #                                et les cibles sont désormais pingées en parallèle
 
     def _phase(nom, progress, libelle):
         _maj_statut(progress=progress,
@@ -4233,36 +4315,14 @@ def _run_snapshot(client_id: int, plage: str, avec_capture, rapide=None):
         return True
 
     try:
-        tp = _phase('arp', 10, 'Analyse des tables ARP (conflits d’adresses)')
-        findings += detecter_conflits_ip(passerelle, releves=1 if rapide else 2)
-        _fin_phase('arp', tp)
-
-        tp = _phase('liaison', 30, 'Test de qualité de liaison (passerelle, DNS)')
-        cibles = _cibles_ping(client_id, passerelle)
-        stats_liaison = []
-        findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue,
-                                            n=n_ping, collecte=stats_liaison)
+        tp = _phase('sondes_hote', 40,
+                    'Sondes du poste — ARP, liaison, DNS, DHCP, noms, Wi-Fi (en parallèle)')
+        fh, stats_liaison, cibles, ph_sondes = _sondes_hote(
+            client_id, rapide=rapide, n_ping=n_ping, releves_arp=1 if rapide else 2)
+        findings += fh
         enregistrer_metriques_liaison(client_id, stats_liaison)
-        _fin_phase('liaison', tp)
-
-        if str(_cfg('diag_wifi_active', '1')) == '1':
-            tp = _phase('wifi', 40, 'Diagnostic Wi-Fi du poste')
-            findings += diagnostiquer_wifi(client_id)
-            _fin_phase('wifi', tp)
-
-        tp = _phase('dns', 50, 'Contrôle de la résolution DNS')
-        serveur_dns = next((c['ip'] for c in cibles if c.get('role') == 'dns'), '')
-        findings += verifier_dns(serveur_dns)
-        _fin_phase('dns', tp)
-
-        tp = _phase('dhcp', 60, 'Recherche d’un serveur DHCP non autorisé')
-        attendus = re.split(r'[,;\s]+', str(_cfg('diag_dhcp_serveurs_attendus', '') or ''))
-        findings += detecter_dhcp_pirate(attendus)
-        _fin_phase('dhcp', tp)
-
-        tp = _phase('noms', 70, 'Détection des conflits de noms réseau')
-        findings += detecter_conflits_noms(client_id)
-        _fin_phase('noms', tp)
+        phases.update(ph_sondes)
+        _fin_phase('sondes_hote', tp)
 
         # Le SNMP n'est plus derrière un garde de budget : le collecteur unifié
         # (Lot 1) est rapide et parallèle, et « aucune donnée SNMP » sur du
@@ -4530,21 +4590,13 @@ def _moniteur_clients():
 
 
 def _cycle_sondes_hote(cid: int) -> list:
-    """Palier 1 (+ Wi-Fi, baseline) : sondes menées depuis ce poste. Rapides,
-    cadence `diag_intervalle_s`."""
-    passerelle = _passerelle_defaut()
-    seuil_perte = _cfg_float('diag_seuil_perte_pct', 5)
-    seuil_gigue = _cfg_float('diag_seuil_jitter_ms', 30)
-    findings = detecter_conflits_ip(passerelle, releves=1)
-    cibles = _cibles_ping(cid, passerelle)
-    stats_liaison = []
-    _n = 8 if str(_cfg('diag_snapshot_rapide', '0')) == '1' else 10
-    findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, n=_n,
-                                        collecte=stats_liaison)
+    """Palier 1 (+ DNS, DHCP, noms, Wi-Fi, baseline) : sondes menées depuis ce
+    poste, EN PARALLÈLE. Cadence `diag_intervalle_s`."""
+    rapide = str(_cfg('diag_snapshot_rapide', '0')) == '1'
+    findings, stats_liaison, _cibles, _ph = _sondes_hote(
+        cid, rapide=rapide, n_ping=8 if rapide else 10, releves_arp=1,
+        avec_dns=False, avec_dhcp=False)   # cadence hôte : équivalent à l'existant
     enregistrer_metriques_liaison(cid, stats_liaison)
-    findings += detecter_conflits_noms(cid)
-    if str(_cfg('diag_wifi_active', '1')) == '1':
-        findings += diagnostiquer_wifi(cid)
     findings += evaluer_baseline(cid)
     return findings
 
@@ -4841,7 +4893,9 @@ _activite_resultat   = {}   # client_id -> dict prêt pour l'UI (LEDs)
 _activite_detail     = {}   # client_id -> {ts, switchs:[...], ports:[...], interfaces:[...]}
 _activite_journal    = collections.deque(maxlen=250)   # évènements, récent en tête
 _activite_calib      = None  # (défini plus bas) — SOUS _activite_lock : partagé loop <-> requête
-# Touchés UNIQUEMENT par le thread _activite_loop (_cycle_activite + purge, séquentiels) :
+# Touchés par le seul thread _activite_loop. La purge (sous _activite_lock) et la
+# phase de relevé (_relever_switch_activite, parallélisée par IP) ne se recouvrent
+# jamais ; chaque clé (client_id, ip[, ifindex]) n'a qu'un seul writer à la fois.
 _activite_prev       = {}   # (client_id, ip, ifindex) -> {compteurs, etat, *_ema, manques, ts, sut}
 _activite_switch_ok  = {}   # (client_id, ip) -> bool (dernier relevé répondu ?)
 _activite_etat_mappe = {}   # (client_id, slot_id) -> {clé: dernier etat} (transitions journal)
@@ -6092,6 +6146,73 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
     return ports_ui, journal_ops
 
 
+def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac, avec_fdb=True):
+    """Relevé SNMP complet d'un switch pour le cycle d'activité de la baie
+    (FDB + interfaces + ports + PoE + sysinfo). Thread-safe : chaque helper SNMP
+    est verrouillé par IP (`_fdb_lock`, verrou d'interfaces, cache sysinfo…), donc
+    plusieurs switchs peuvent être relevés en parallèle. N'écrit PAS en base.
+
+    Retourne le dict consommé par `_cycle_activite`, ou un relevé « muet » si le
+    switch ne répond pas."""
+    journal = []
+    muet = {'ip': ip, 'fdb': {}, 'fdb_meta': {},
+            'poll': ({}, {}, False, False, None, False, {},
+                     {'sysname': '', 'sysdescr': ''}, None),
+            'journal': journal, 'calib': None, 'dms': 0}
+    try:
+        fdb, fdb_meta = {}, {}
+        if avec_fdb:
+            # FDB en premier : quand elle est due (TTL long), le switch n'a pas
+            # encore été martelé par les GETBULK du cycle — un agent lent lâche
+            # les walks enchaînés (cas ProCurve 1810G).
+            fdb, fdb_meta = _releve_mac_switch(ip, communautes, inv_mac)
+            if fdb_meta.get('tronquee'):
+                journal.append((f"{nom} ({ip}) — table d'apprentissage MAC "
+                                f"déformée (agent SNMP) : {fdb_meta['reconnues']} "
+                                f"appareil(s) recoupé(s) avec l'inventaire "
+                                f"(hypothèse « {fdb_meta['transform']} »)", 'warn', ip))
+        t0 = time.time()
+        infos = _noms_interfaces(ip, communautes)
+        cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos)
+        poe = _poll_poe(ip, communautes) if ok else {}
+        sysinfo = _lire_sysinfo(ip, communautes) if ok else {'sysname': '', 'sysdescr': ''}
+        dms = int((time.time() - t0) * 1000)
+        now = time.time()
+
+        # dt via l'horloge de l'agent (sysUpTime), exact quelle que soit la durée
+        # du poll ; détection de redémarrage.
+        prev_sut = _activite_sut.get((cid, ip))
+        dt_switch, reboot, uptime_s = None, False, (sut / 100.0 if sut else None)
+        if sut and prev_sut:
+            d_ticks = sut - prev_sut[0]
+            if d_ticks < 0:
+                reboot = True
+            elif 0 < d_ticks < 2 ** 31:
+                dt_switch = d_ticks / 100.0
+        if sut:
+            _activite_sut[(cid, ip)] = (sut, now)
+        if dt_switch is None and prev_sut:
+            dt_switch = max(0.5, now - prev_sut[1])   # repli horloge poste
+        if reboot:
+            journal.append((f"{nom} ({ip}) — le switch a redémarré "
+                            f"(compteurs remis à zéro)", 'warn', ip))
+
+        etait_ok = _activite_switch_ok.get((cid, ip), True)
+        if not ok and etait_ok:
+            journal.append((f"{nom} ({ip}) — relevé SNMP sans réponse", 'warn', ip))
+        elif ok and not etait_ok:
+            journal.append((f"{nom} ({ip}) — relevé SNMP rétabli", 'info', ip))
+        _activite_switch_ok[(cid, ip)] = ok
+
+        calib = _maj_assistant_calibration(cid, slot_id, ip, cur_ports) if ok else None
+        return {'ip': ip, 'fdb': fdb, 'fdb_meta': fdb_meta,
+                'poll': (infos, cur_ports, ok, hc, dt_switch, reboot, poe, sysinfo, uptime_s),
+                'journal': journal, 'calib': calib, 'dms': dms}
+    except Exception:
+        logger.debug('network_diag: relevé activité %s en échec', ip, exc_info=True)
+        return muet
+
+
 def _cycle_activite(clients):
     from database import get_local_db
     communautes = _communautes_snmp()
@@ -6127,59 +6248,36 @@ def _cycle_activite(clients):
                         if _m not in inv_mac and _aid in _meta_aid:
                             inv_mac[_m] = (_aid, _meta_aid[_aid][0], _meta_aid[_aid][1])
 
+                # ── relevés SNMP : UNE passe par IP, EN PARALLÈLE ──
+                # Avant : boucle séquentielle → N switchs = N× la chaîne
+                # (FDB + interfaces + ports + PoE + sysinfo), les LEDs mettaient
+                # « un bon moment » à démarrer. Les helpers SNMP sont verrouillés
+                # par IP, sûrs à appeler de plusieurs threads.
+                avec_fdb = _activite_rechauffe[0] >= 1   # 1er cycle : LEDs d'abord, FDB au suivant
+                premier_slot = {}
+                for _sw in switchs:
+                    premier_slot.setdefault(_sw['ip'], _sw)
+                if premier_slot:
+                    from concurrent.futures import ThreadPoolExecutor
+                    _nw = max(2, min(len(premier_slot), _cfg_int('diag_snmp_workers', 8)))
+                    with ThreadPoolExecutor(max_workers=_nw, thread_name_prefix='baie-act') as _ex:
+                        _releves = list(_ex.map(
+                            lambda kv: _relever_switch_activite(
+                                cid, kv[0], kv[1]['slot_id'], kv[1]['nom'],
+                                communautes, inv_mac, avec_fdb),
+                            list(premier_slot.items())))
+                    for _r in _releves:
+                        poll_par_ip[_r['ip']] = _r['poll']
+                        fdb_par_ip[_r['ip']] = _r['fdb']
+                        journal_ops.extend(_r['journal'])
+                        if _r['calib']:
+                            calib_a_appliquer.append(_r['calib'])
+                        _poll_max_ms[0] = max(_poll_max_ms[0], _r['dms'])
+
                 for sw in switchs:
                     ip, slot_id = sw['ip'], sw['slot_id']
-
-                    # ── relevé SNMP : UNE fois par IP, partagé entre ses slots ──
                     if ip not in poll_par_ip:
-                        # FDB en premier : quand elle est due (TTL long), le switch
-                        # n'a pas encore été martelé par les GETBULK du cycle — un
-                        # agent lent lâche les walks enchaînés (cas ProCurve 1810G).
-                        fdb_par_ip[ip], _fdb_meta = _releve_mac_switch(ip, communautes, inv_mac)
-                        if _fdb_meta['tronquee']:
-                            journal_ops.append((f"{sw['nom']} ({ip}) — table d'apprentissage MAC "
-                                                f"déformée (agent SNMP) : {_fdb_meta['reconnues']} "
-                                                f"appareil(s) recoupé(s) avec l'inventaire "
-                                                f"(hypothèse « {_fdb_meta['transform']} »)", 'warn', ip))
-                        t0 = time.time()
-                        infos = _noms_interfaces(ip, communautes)
-                        cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos)
-                        poe = _poll_poe(ip, communautes) if ok else {}
-                        sysinfo = _lire_sysinfo(ip, communautes) if ok else {'sysname': '', 'sysdescr': ''}
-                        _poll_max_ms[0] = max(_poll_max_ms[0], int((time.time() - t0) * 1000))
-                        now = time.time()
-
-                        # dt via l'horloge de l'agent (sysUpTime), exact quelle que
-                        # soit la durée du poll ; détection de redémarrage.
-                        prev_sut = _activite_sut.get((cid, ip))
-                        dt_switch, reboot, uptime_s = None, False, (sut / 100.0 if sut else None)
-                        if sut and prev_sut:
-                            d_ticks = sut - prev_sut[0]
-                            if d_ticks < 0:
-                                reboot = True
-                            elif 0 < d_ticks < 2 ** 31:
-                                dt_switch = d_ticks / 100.0
-                        if sut:
-                            _activite_sut[(cid, ip)] = (sut, now)
-                        if dt_switch is None and prev_sut:
-                            dt_switch = max(0.5, now - prev_sut[1])   # repli horloge poste
-                        if reboot:
-                            journal_ops.append((f"{sw['nom']} ({ip}) — le switch a redémarré "
-                                                f"(compteurs remis à zéro)", 'warn', ip))
-
-                        poll_par_ip[ip] = (infos, cur_ports, ok, hc, dt_switch, reboot,
-                                           poe, sysinfo, uptime_s)
-                        etait_ok = _activite_switch_ok.get((cid, ip), True)
-                        if not ok and etait_ok:
-                            journal_ops.append((f"{sw['nom']} ({ip}) — relevé SNMP sans réponse", 'warn', ip))
-                        elif ok and not etait_ok:
-                            journal_ops.append((f"{sw['nom']} ({ip}) — relevé SNMP rétabli", 'info', ip))
-                        _activite_switch_ok[(cid, ip)] = ok
-                        if ok:
-                            c = _maj_assistant_calibration(cid, slot_id, ip, cur_ports)
-                            if c:
-                                calib_a_appliquer.append(c)
-
+                        continue   # relevé en échec pour cette IP
                     (infos, cur_ports, ok, hc, dt_switch, reboot,
                      poe, sysinfo, uptime_s) = poll_par_ip[ip]
                     poe_ports = poe.get('ports', {})

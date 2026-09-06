@@ -55,6 +55,18 @@ Le **diagnostic ponctuel** (« Lancer un diagnostic », `_run_snapshot`) fait to
 en une passe ; le SNMP y est toujours exécuté (plus de garde de budget) — un
 balayage qui déborde remonte ses équipements lents dans `muets`.
 
+**Sondes hôte parallélisées (v2.20.1).** Les paliers 1/2/7a sont indépendants les
+uns des autres ; les enchaîner en série coûtait ~80 s (surtout les rafales de
+ping — Windows plafonne à ~1 paquet/s). `_executer_sondes(taches, max_workers)`
+lance un lot `{nom: callable}` en parallèle (une sonde qui lève n'entraîne pas
+les autres) ; `_sondes_hote(cid, *, rapide, n_ping, releves_arp, avec_wifi/dns/
+dhcp)` regroupe ARP + ping + DNS + DHCP + noms + Wi-Fi et rend
+`(findings, stats_liaison, cibles, phases)`. Consommé par `_run_snapshot` (phase
+unique `sondes_hote`) et `_cycle_sondes_hote` (`avec_dns=False, avec_dhcp=False`
+pour rester iso au comportement d'avant). `mesurer_qualite_liaison` pingue en
+plus ses cibles en parallèle. Rafale de ping ramenée de 20 à 12 paquets en mode
+normal. Bench `bench_sondes.py` ; un diagnostic complet passe de ~90 s à ~20 s.
+
 ### Écran « Trafic & erreurs »
 
 Onglet dédié + bandeau de verdict permanent (`✅` / `⚠️ N port(s) en erreur` /
@@ -287,6 +299,18 @@ des switchs de la baie et calcule l'état à peindre par port.
   **ou** dont l'étiquette de slot `type_equipement` vaut Switch/Switch·AP/Routeur.
   Le résultat porte `nb_switchs` / `nb_muets` / `motif` (`aucun_switch` |
   `sans_reponse`) pour que le bandeau explique l'absence de données.
+- **Relevé en parallèle (v2.20.1)** : `_relever_switch_activite(cid, ip, slot_id,
+  nom, communautes, inv_mac, avec_fdb)` fait le relevé complet d'un switch
+  (FDB + `_noms_interfaces` + `_poll_switch_ports` + `_poll_poe` + `_lire_sysinfo`
+  + Δt/reboot + transition ok + assistant de calibration). Les helpers SNMP sont
+  déjà verrouillés par IP, donc `_cycle_activite` lance un
+  `ThreadPoolExecutor('baie-act', diag_snmp_workers)` sur les **IP uniques** avant
+  la boucle par slot — 3 switchs ne coûtent plus 3× la chaîne. Un switch qui lève
+  pendant son relevé rend un relevé « muet » (`ok=False`) sans faire tomber le
+  cycle des autres. **Au 1er cycle** (`_activite_rechauffe[0] == 0`), le walk de
+  la table d'apprentissage MAC (`_releve_mac_switch`, le plus long) est **sauté** :
+  il ne sert qu'au contrôle de câblage des prises, pas aux LED — le câblage
+  apparaît au cycle suivant (3 s après).
 - **Relevé SNMP** (v2.19.9) : `_noms_interfaces` récupère nom/alias/type/vitesse
   de toutes les interfaces (caché ~90 s, **rafraîchi en tâche de fond** pour ne
   pas bloquer le relevé sur un switch lent) ; `_poll_switch_ports` relève chaque
