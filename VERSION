@@ -1,10 +1,10 @@
-PARCINFO_VERSION=2.19.46
+PARCINFO_VERSION=2.20.0
 RELEASE_DATE=2026-09-06
 BUILD_NUMBER=2026090602
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.19.46 - Refonte diagnostic reseau, Lot 1/6 : collecteur SNMP unifie
+# Version 2.20.0 - Refonte diagnostic reseau (en cours) - Lot 1/6 : collecteur SNMP unifie
 # Le diagnostic reseau frappait les memes switchs en TROIS balayages SNMP
 # independants : palier 3 (compteurs par port) en boucle SEQUENTIELLE, palier 4
 # (topologie) refaisait sa propre passe, la vue d'activite baie une troisieme.

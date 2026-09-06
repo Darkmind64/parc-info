@@ -1,17 +1,17 @@
 {
-  "version": "2.19.46",
+  "version": "2.20.0",
   "release_date": "2026-09-06",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.46/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.46/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.46/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.46",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.46/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.46/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.46/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.46/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.46/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.20.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.20.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.20.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.20.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.20.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.20.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.20.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.20.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.20.0/SHA256SUMS.txt"
   },
   "notes": {
     "new_features": "Refonte du diagnostic réseau — Lot 1/6 : collecteur SNMP unifié. Le palier 3 (interrogation SNMP des switchs / routeurs / NAS) est désormais mené en une seule passe parallèle au lieu d'une boucle séquentielle — sur un parc simulé de 20 équipements à 48 ports, le balayage passe de ~9,6 s à ~1,1 s. La cartographie de topologie réutilise ce relevé au lieu de re-sonder chaque équipement. Aucun changement visible d'interface à ce stade ; les lots suivants portent le modèle d'état, l'orchestrateur continu, la nouvelle interface avec écran « Trafic & erreurs » dédié, et les intégrations avec l'inventaire / la baie / la fiche système.",
@@ -29,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.46"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.20.0"
 }

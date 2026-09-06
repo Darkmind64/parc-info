@@ -1,6 +1,6 @@
 # CHANGELOG - ParcInfo
 
-## [2.19.46] - 2026-09-06 ⚡
+## [2.20.0] - 2026-09 ⚡ (en cours — refonte diagnostic réseau)
 
 ### ⚡ Refonte du diagnostic réseau — Lot 1/6 : collecteur SNMP unifié
 
