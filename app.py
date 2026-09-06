@@ -2276,6 +2276,67 @@ def init_db():
     c.execute('''CREATE INDEX IF NOT EXISTS idx_diag_metriques
         ON diag_metriques(client_id, categorie, cible, epoch)''')
 
+    # ── Refonte diagnostic réseau, Lot 2 : modèle d'état + auto-résolution ─────
+    # `diag_reseau_evenements` gagne l'IP + le port de l'équipement concerné (ils
+    # étaient noyés dans `details_json`) → auto-résolution d'un évènement de port
+    # SNMP dès que la condition a disparu depuis assez longtemps sur un
+    # équipement toujours joignable.
+    _evt_cols = {r[1] for r in c.execute('PRAGMA table_info(diag_reseau_evenements)')}
+    for _col, _typ in (('equipement_ip', "TEXT DEFAULT ''"),
+                       ('port_index', 'INTEGER DEFAULT 0'),
+                       ('baie_slot_id', 'INTEGER')):
+        if _col not in _evt_cols:
+            try:
+                c.execute(f"ALTER TABLE diag_reseau_evenements ADD COLUMN {_col} {_typ}")
+            except Exception:
+                pass
+    # État courant par équipement — la Vue d'ensemble lit cette petite table au
+    # lieu de recalculer depuis les relevés bruts.
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_etat_equipement (
+        client_id INTEGER NOT NULL,
+        equipement_ip TEXT NOT NULL,
+        appareil_id INTEGER,
+        sysname TEXT DEFAULT '',
+        modele TEXT DEFAULT '',
+        joignable INTEGER DEFAULT 0,
+        snmp_ok INTEGER DEFAULT 0,
+        motif TEXT DEFAULT '',
+        nb_ports INTEGER DEFAULT 0,
+        nb_ports_up INTEGER DEFAULT 0,
+        nb_ports_erreur INTEGER DEFAULT 0,
+        derniere_maj TEXT DEFAULT '',
+        epoch REAL DEFAULT 0,
+        PRIMARY KEY (client_id, equipement_ip),
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    # État courant par port — backe directement la vue « Trafic & erreurs ».
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_etat_port (
+        client_id INTEGER NOT NULL,
+        equipement_ip TEXT NOT NULL,
+        port_index INTEGER NOT NULL,
+        appareil_id INTEGER,
+        port_nom TEXT DEFAULT '',
+        port_alias TEXT DEFAULT '',
+        oper INTEGER DEFAULT 0,
+        admin INTEGER DEFAULT 0,
+        speed_mbps INTEGER DEFAULT 0,
+        duplex INTEGER DEFAULT 0,
+        appareil_vu_id INTEGER,
+        baie_slot_id INTEGER,
+        baie_port INTEGER,
+        err_min REAL DEFAULT 0,
+        disc_min REAL DEFAULT 0,
+        crc_min REAL DEFAULT 0,
+        debit_pct REAL DEFAULT 0,
+        classe_erreur TEXT DEFAULT '',
+        classe_libelle TEXT DEFAULT '',
+        gravite TEXT DEFAULT '',
+        depuis TEXT DEFAULT '',
+        derniere_maj TEXT DEFAULT '',
+        PRIMARY KEY (client_id, equipement_ip, port_index),
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    c.execute('''CREATE INDEX IF NOT EXISTS idx_diag_etat_port
+        ON diag_etat_port(client_id, classe_erreur)''')
+
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
         now = _utcnow().isoformat()
@@ -3249,14 +3310,15 @@ def _compute_critical_alerts(conn, cid, today):
     # Évènements de diagnostic réseau non résolus
     try:
         for row in conn.execute(
-            "SELECT titre, gravite, nb_occurrences FROM diag_reseau_evenements "
+            "SELECT titre, gravite, nb_occurrences, appareil_id FROM diag_reseau_evenements "
             "WHERE client_id=? AND resolu=0", (cid,)).fetchall():
             d = row_to_dict(row)
             alerts.append({
                 'type': 'diag_reseau',
                 'device': d['titre'],
                 'severity': 'critical' if d['gravite'] == 'critique' else 'warning',
-                'link': '/diag-reseau',
+                'link': (f"/appareil/{d['appareil_id']}/fiche-systeme"
+                         if d.get('appareil_id') else '/diag-reseau'),
             })
     except Exception:
         pass  # table absente sur une très vieille base non encore migrée
@@ -5852,6 +5914,19 @@ def api_appareil_host_resources(id):
     return jsonify({'ok': True, **res})
 
 
+@app.route('/api/appareil/<int:id>/diag-reseau')
+@login_required
+def api_appareil_diag_reseau(id):
+    """Encart « Réseau (diagnostic) » de la fiche appareil (refonte Lot 5) :
+    l'état SNMP de l'équipement s'il en est un, sur quel port de switch il est
+    vu sinon, et les évènements de diagnostic réseau actifs le concernant."""
+    client_id = get_client_id()
+    if not get_client_access(client_id):
+        return jsonify({'error': 'Forbidden'}), 403
+    from netdiag import etat as _etat
+    return jsonify(_etat.pour_appareil(client_id, id))
+
+
 @app.route('/api/appareil/<int:id>/garantie-ignorer', methods=['POST'])
 @login_required
 def api_garantie_ignorer(id):
@@ -7220,6 +7295,26 @@ def api_baie_activite():
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
     return jsonify(network_diag.activite_baie(cid))
+
+
+@app.route('/api/baie/diag-erreurs')
+@login_required
+def api_baie_diag_erreurs():
+    """Ports de la baie qui portent une erreur de trafic active, d'après le
+    diagnostic réseau (refonte Lot 5) : `{"<slot_id>:<port>": {classe, libelle}}`.
+    La baie y ajoute un marqueur ⚠. Ne s'affiche que pour les ports dont
+    l'ifIndex est calibré (le lien port de façade ↔ ifIndex SNMP)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT baie_slot_id, baie_port, classe_erreur, classe_libelle, gravite "
+        "FROM diag_etat_port WHERE client_id=? AND baie_slot_id IS NOT NULL "
+        "AND baie_port IS NOT NULL AND classe_erreur!=''", (cid,)).fetchall()
+    conn.close()
+    return jsonify({f"{r[0]}:{r[1]}": {'classe': r[2], 'libelle': r[3], 'gravite': r[4]}
+                    for r in rows})
 
 
 @app.route('/api/baie/activite/moniteur')
@@ -10645,6 +10740,30 @@ def api_diag_snmp():
         for p in eq.get('ports', []):
             p['findings'] = par_port.get(f"{eq['ip']}:{p['port_index']}", [])
     return jsonify(etat)
+
+
+@app.route('/api/diag-reseau/verdict')
+@login_required
+def api_diag_verdict():
+    """Synthèse pour le bandeau de la page (refonte Lot 4)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    from netdiag import etat as _etat
+    return jsonify(_etat.verdict(cid))
+
+
+@app.route('/api/diag-reseau/trafic')
+@login_required
+def api_diag_trafic():
+    """Écran « Trafic & erreurs » (refonte Lot 4) : chaque port en erreur,
+    trié pire d'abord, avec sa classification en clair."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    from netdiag import etat as _etat
+    tous = request.args.get('tous') == '1'
+    return jsonify(_etat.trafic(cid, tous=tous))
 
 
 @app.route('/api/diag-reseau/topologie')
@@ -17867,8 +17986,10 @@ def mobile_diag_reseau():
         d = row_to_dict(r)
         d['categorie_libelle'] = network_diag.libelle_categorie(d.get('categorie', ''))
         evenements.append(d)
+    from netdiag import etat as _etat
     return render_template('mobile/diag_reseau.html', evenements=evenements,
                            etat_moniteur=network_diag.etat_moniteur(),
+                           verdict=_etat.verdict(cid),
                            client=client, clients=get_clients(), client_actif_id=cid)
 
 

@@ -324,6 +324,54 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 </div>
 {% endif %}
 
+<!-- ── DIAGNOSTIC RÉSEAU (refonte Lot 5) — placé hors du garde "rapport"
+     (un switch/routeur n'a souvent pas de collecte système) ── -->
+<div class="fs-section" id="fs-diag-reseau" style="display:none;">
+    <h3>■ Réseau — diagnostic
+        <a href="/diag-reseau" class="btn btn-sm" style="margin-left:.5rem;font-weight:400;">ouvrir le diagnostic →</a>
+    </h3>
+    <div id="fs-diag-reseau-body" style="font-size:.85rem;"></div>
+</div>
+<script>
+(function(){
+    fetch('/api/appareil/{{ appareil.id }}/diag-reseau').then(r=>r.json()).then(d => {
+        if (!d || !d.a_montrer) return;
+        const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+        let h = '';
+        if (d.equipement){
+            const e = d.equipement;
+            h += `<p><strong>Équipement SNMP</strong> — ${e.snmp_ok ? 'joignable' : esc(e.motif || 'injoignable')}`;
+            if (e.snmp_ok) h += ` · ${e.nb_ports_up}/${e.nb_ports} port(s) actif(s)`
+                             + (e.nb_ports_erreur ? ` · <span style="color:#e0952a;">${e.nb_ports_erreur} en erreur</span>` : '')
+                             + (e.age_s != null ? ` · relevé il y a ${Math.round(e.age_s/60)} min` : '');
+            h += '</p>';
+            (d.ports_en_erreur||[]).forEach(p => {
+                h += `<div style="margin:.3rem 0;padding:.4rem .6rem;border-left:3px solid #e0952a;">
+                    <strong>${esc(p.port_nom)}</strong> — ${esc(p.classe_libelle)}
+                    ${p.conseil ? `<div style="color:var(--text-secondary);font-size:.8rem;">💡 ${esc(p.conseil)}</div>` : ''}</div>`;
+            });
+        }
+        if (d.vu_sur){
+            const v = d.vu_sur;
+            h += `<p><strong>Vu sur</strong> ${esc(v.equipement_nom)} · port ${esc(v.port_nom)}`
+               + (v.speed_mbps ? ` · ${v.speed_mbps} Mb/s${v.duplex === 2 ? ' half' : ''}` : '')
+               + (v.baie_slot_id ? ` · <a href="/baie">baie</a>` : '') + '</p>';
+            if (v.classe) h += `<div style="padding:.4rem .6rem;border-left:3px solid #ff6b81;">
+                ${esc(v.classe_libelle)}${v.conseil ? `<div style="color:var(--text-secondary);font-size:.8rem;">💡 ${esc(v.conseil)}</div>` : ''}</div>`;
+        }
+        if ((d.evenements||[]).length){
+            h += '<p style="margin-top:.5rem;"><strong>Évènements actifs</strong></p><ul style="margin:.2rem 0 0 1rem;">';
+            d.evenements.forEach(ev => {
+                h += `<li><span style="color:${ev.gravite === 'critique' ? '#ff6b81' : '#e0952a'};">${esc(ev.gravite)}</span> — ${esc(ev.titre)}</li>`;
+            });
+            h += '</ul>';
+        }
+        document.getElementById('fs-diag-reseau-body').innerHTML = h;
+        document.getElementById('fs-diag-reseau').style.display = '';
+    }).catch(()=>{});
+})();
+</script>
+
 {% if not rapport and not logiciels %}
 <div class="fs-section">
     <div class="fs-empty">

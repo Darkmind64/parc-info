@@ -1,16 +1,81 @@
 # Diagnostic réseau — référence
 
-Module `network_diag.py` + routes `/api/diag-reseau/*` dans `app.py`. Page
-**Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la santé du réseau
-du **client actif** ; les évènements sont rattachés à ce client.
+Module `network_diag.py` + package `netdiag/` + routes `/api/diag-reseau/*` dans
+`app.py`. Page **Inventaire → Diagnostic réseau** (`/diag-reseau`). Analyse la
+santé du réseau du **client actif** ; les évènements sont rattachés à ce client.
 
-> Ce document décrit le comportement au 2026-09-05 (v2.19.37). En cas de doute
-> sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS` et
-> `network_diag.py`.
+> Ce document décrit le comportement au 2026-09-06 (v2.20.0, **refonte**). En cas
+> de doute sur une valeur par défaut, vérifier `config_helpers.py:CFG_DEFAULTS`.
 
 ---
 
-## Les six paliers
+## Architecture (refonte v2.20.0)
+
+La refonte a introduit le package **`netdiag/`** au-dessus des primitives
+existantes (codec BER, SNMPv3, capture scapy — inchangées, importées
+paresseusement depuis `app`) :
+
+| Module | Rôle |
+|--------|------|
+| `netdiag/collect.py` | **Collecteur SNMP unifié** : `balayer(client_id, besoins, budget_s)` relève chaque équipement en **une passe GETBULK multi-colonnes**, en parallèle (`ThreadPoolExecutor`, `diag_snmp_workers`), sonde `_snmp_presence` en tête, `deadline` propagée. Remplace les 3 balayages SNMP indépendants d'avant (palier 3 séquentiel, palier 4, vue baie). `releve_frais(ip, max_age)` sert un relevé récent sans re-poller. |
+| `netdiag/analyse.py` | **Fonctions pures** `relevé → findings` + `classer_erreur()` : étiquette chaque port en clair (*couche physique (CRC/FCS)* / *duplex mismatch* / *rejets (mémoire tampon / saturation)* / *cause indéterminée*) + conseil. |
+| `netdiag/events.py` | **Auto-résolution** : un évènement de port (`port_crc`, `duplex_mismatch`…) se résout seul si sa condition n'a pas reparu depuis `diag_snmp_auto_resolution_s` sur un équipement toujours relevé. |
+| `netdiag/etat.py` | **Read models** de l'interface : `verdict()` (bandeau) et `trafic()` (écran « Trafic & erreurs ») — lisent `diag_etat_equipement`/`diag_etat_port`, aucun recalcul. `pour_appareil()` alimente l'encart de la fiche appareil. |
+
+`network_diag.py` garde l'orchestration, les sondes hôte (palier 1/2), la
+topologie, la baseline, le rapport, la vue d'activité baie.
+
+### Modèle « état courant »
+
+Le collecteur écrit à chaque cycle deux tables d'**état courant** que
+l'interface lit directement :
+
+- **`diag_etat_equipement`** — 1 ligne / équipement : joignable, `snmp_ok`,
+  motif, nb ports up / en erreur, `derniere_maj`.
+- **`diag_etat_port`** — 1 ligne / (équipement, port) : oper/speed/duplex,
+  **appareil branché** (`appareil_vu_id`, via la topologie), **slot/port de
+  baie** (`baie_slot_id`/`baie_port`), taux d'erreur par minute
+  (`err_min`/`disc_min`/`crc_min`), `debit_pct`, **classe d'erreur** en clair,
+  `depuis`.
+
+### Ordonnancement — cadences indépendantes
+
+Le thread de surveillance (`_moniteur_loop` → `_moniteur_tick`) est un
+**ordonnanceur** (tick 30 s). Chaque sous-tâche a **sa propre horloge**, le
+SNMP n'est plus conditionné par la lenteur des sondes hôte :
+
+| Sous-tâche | Fonction | Cadence (clé) | Défaut |
+|------------|----------|---------------|--------|
+| Sondes hôte (ARP, ping, DNS, DHCP, NetBIOS, Wi-Fi, baseline) | `_cycle_sondes_hote` | `diag_intervalle_s` | 300 s |
+| Balayage SNMP (palier 3 + auto-résolution + métriques) | `_cycle_snmp` | `diag_snmp_intervalle_s` | 120 s |
+| Cartographie de topologie (palier 4) | `_cycle_topo` | `diag_topo_intervalle_s` | 900 s |
+| Capture passive (palier 2) | `_cycle_capture` | avec les sondes hôte, si `diag_capture_active` | — |
+
+Le **diagnostic ponctuel** (« Lancer un diagnostic », `_run_snapshot`) fait tout
+en une passe ; le SNMP y est toujours exécuté (plus de garde de budget) — un
+balayage qui déborde remonte ses équipements lents dans `muets`.
+
+### Écran « Trafic & erreurs »
+
+Onglet dédié + bandeau de verdict permanent (`✅` / `⚠️ N port(s) en erreur` /
+`🔴 N alerte(s) critique(s)`). Chaque port en erreur, **trié pire d'abord**, en
+carte : équipement + port (liens fiche / baie), **classification en clair** +
+conseil, taux d'erreur par minute, débit, mini-courbe. Routes
+`GET /api/diag-reseau/verdict` et `/trafic`.
+
+### Intégrations
+
+- **Fiche appareil** : encart « ■ Réseau — diagnostic »
+  (`GET /api/appareil/<id>/diag-reseau`) — état SNMP d'un switch + ports en
+  erreur, ou sur quel port de switch un poste est vu, + évènements actifs.
+- **Baie de brassage** : marqueur ⚠ sur un port en erreur de trafic
+  (`GET /api/baie/diag-erreurs`).
+- **Tableau de bord** : alerte réseau rattachée à un appareil → lien fiche.
+- **Mobile** `/m/diag-reseau` : bandeau de verdict.
+
+---
+
+## Les paliers (ce qui est observé)
 
 | # | Nom | Ce qu'il observe | Prérequis | Limites |
 |---|-----|------------------|-----------|---------|
@@ -23,9 +88,10 @@ du **client actif** ; les évènements sont rattachés à ce client.
 | 7a | **Wi-Fi (poste)** | État Wi-Fi du poste ParcInfo + AP visibles (`netsh wlan` / `iw` / `system_profiler`) | `diag_wifi_active` (défaut on) ; un adaptateur Wi-Fi | Vision depuis un seul point ; scan macOS best-effort |
 | 7b | **Onduleurs SNMP** | UPS-MIB (source secteur/batterie, charge, autonomie, batterie, alarmes) + repli APC | Palier 3 actif + `diag_ups_active` ; appareil de type `Onduleur / UPS` avec IP | Dépend de ce que la carte réseau de l'onduleur expose |
 
-**Deux modes** : *snapshot* à la demande (bouton « Lancer un diagnostic », mode
-rapide possible) et *surveillance continue* (`diag_surveillance_active`, thread
-démon `_moniteur_loop` calqué sur le watchdog ping, période `diag_intervalle_s`).
+**Deux modes** : *diagnostic ponctuel* à la demande (bouton « Lancer un
+diagnostic », `_run_snapshot`, mode rapide possible) et *surveillance continue*
+(`diag_surveillance_active`, ordonnanceur `_moniteur_loop` à cadences
+indépendantes — voir Architecture ci-dessus).
 
 ---
 
@@ -581,11 +647,15 @@ corriger ? »), dans le rapport et dans l'e-mail d'alerte.
 
 | clé | défaut | effet |
 |-----|--------|-------|
-| `diag_surveillance_active` | `0` | active le thread de surveillance continue |
-| `diag_intervalle_s` | `300` | période du moniteur continu |
-| `diag_snapshot_duree_s` | `20` | fenêtre d'un snapshot / d'une capture |
+| `diag_surveillance_active` | `0` | active l'ordonnanceur de surveillance continue |
+| `diag_intervalle_s` | `300` | cadence des **sondes hôte** (ARP, ping, DNS, DHCP, Wi-Fi) |
+| `diag_snmp_intervalle_s` | `120` | cadence du **balayage SNMP** (palier 3), indépendante des sondes hôte |
+| `diag_topo_intervalle_s` | `900` | cadence de la **cartographie de topologie** (palier 4) |
+| `diag_snmp_workers` | `8` | équipements SNMP balayés de front (collecteur unifié) |
+| `diag_snmp_auto_resolution_s` | `1800` | un évènement de port SNMP se résout seul si sa condition n'a pas reparu depuis ce délai (0 = jamais) |
+| `diag_snapshot_duree_s` | `20` | fenêtre d'un diagnostic ponctuel / d'une capture |
 | `diag_snapshot_rapide` | `0` | mode court : ping n=8, 1 relevé ARP, pas de capture |
-| `diag_snapshot_budget_s` | `120` | plafond souple ; au-delà, SNMP/topologie/capture sont sautées |
+| `diag_snapshot_budget_s` | `120` | plafond souple d'un diagnostic ponctuel ; au-delà, topologie/capture sautées (**le SNMP, lui, tourne toujours**) |
 | `diag_capture_active` | `0` | palier 2 (capture passive scapy) |
 | `diag_seuil_broadcast_pps` | `150` | seuil tempête de broadcast |
 | `diag_seuil_perte_pct` | `5` | seuil de perte de paquets (%) |
@@ -733,12 +803,14 @@ inviter à l'ajouter. Lecture seule, clic explicite, budget global 25 s.
 
 | Table | Rôle | Rétention |
 |-------|------|-----------|
-| `diag_reseau_evenements` | évènements dédoublonnés par `signature` (`nb_occurrences`, `resolu`, `appareil_id`) | `diag_reseau_max_jours` (résolus uniquement) |
-| `diag_reseau_runs` | un enregistrement par snapshot (durée, `resume_json` avec les temps de phase) | `diag_reseau_max_jours` |
-| `diag_snmp_releves` | compteurs par port horodatés (delta) | `diag_reseau_max_jours` |
+| `diag_reseau_evenements` | évènements dédoublonnés par `signature` (`nb_occurrences`, `resolu`, `appareil_id`, + `equipement_ip`/`port_index`/`baie_slot_id` depuis v2.20.0) | `diag_reseau_max_jours` (résolus uniquement) |
+| **`diag_etat_equipement`** *(v2.20.0)* | état courant par équipement (joignable, `snmp_ok`, motif, nb ports up / en erreur, `derniere_maj`) — lu directement par le bandeau de verdict | écrasée à chaque cycle SNMP |
+| **`diag_etat_port`** *(v2.20.0)* | état courant par port (oper/speed/duplex, appareil branché, slot/port de baie, taux d'erreur/min, `debit_pct`, classe d'erreur, `depuis`) — **backe l'écran « Trafic & erreurs »** | écrasée à chaque cycle SNMP |
+| `diag_reseau_runs` | un enregistrement par diagnostic ponctuel (durée, `resume_json` avec les temps de phase) | `diag_reseau_max_jours` |
+| `diag_snmp_releves` | compteurs par port horodatés — sert au calcul du **delta** entre deux relevés | `diag_reseau_max_jours` |
 | `diag_topologie` | instantané FDB/LLDP/STP par équipement (+ `nb_macs_port`, `est_uplink`, `vlan`, `stp_etat`, `stp_amont`, `voisin_ip`, `voisin_modele`) | remplacée à chaque poll |
 | `diag_topologie_mouvements` | transitions d'un relevé à l'autre : appareil apparu / disparu / déplacé de port | `diag_reseau_max_jours` |
-| `diag_metriques` | série temporelle (liaison, débit/erreurs port) pour la baseline | `diag_reseau_max_jours` |
+| `diag_metriques` | série temporelle (liaison, débit/erreurs port) pour la baseline + sparklines | `diag_reseau_max_jours` |
 
 ---
 
@@ -782,8 +854,12 @@ la passerelle — voire aucune.
 
 | Besoin | Repère |
 |--------|--------|
+| **Collecteur SNMP unifié** | `netdiag/collect.py` : `balayer(client_id, besoins, budget_s)` → `{ip: ReleveEquipement}` ; `ReleveEquipement.equipement` = forme de `interroger_equipement` ; `releve_frais(ip, max_age)` ; `ResultatBalayage.muets` |
+| **Analyse SNMP par port + classification** | `netdiag/analyse.py` (fonctions **pures**) : `classer_erreur(port, deltas)`, `analyser_port` / `analyser_equipement` → `(findings, lignes_etat)` |
+| **Auto-résolution des évènements** | `netdiag/events.py` : `auto_resoudre_snmp(client_id, absence_s, equip_frais_s)` |
+| **Read models de l'interface** | `netdiag/etat.py` : `verdict(client_id)`, `trafic(client_id, tous=)`, `pour_appareil(client_id, appareil_id)` ; routes `GET /api/diag-reseau/verdict`, `/trafic`, `/api/appareil/<id>/diag-reseau`, `/api/baie/diag-erreurs` |
 | Détections palier 1/2 | `network_diag.py` : `detecter_*`, `mesurer_qualite_liaison`, `capture_passive` |
-| SNMP (palier 3) | `interroger_equipement`, `_analyser_snmp`, `interroger_equipements_client`, `etat_snmp` |
+| SNMP (palier 3) | `interroger_equipements_client` (→ `collect.balayer` + `analyse` + `_ecrire_etat_snmp`), `interroger_equipement` (repli / tests), `etat_snmp` |
 | Bouton « Tester SNMP » | `app.api_diag_test_snmp` (tous les `network_diag._TYPES_EQUIP_SNMP`, v3 puis `app._snmp_sysinfo` v2c→v1, communautés config + `app._SNMP_COMMUNAUTES_COURANTES`) |
 | Voisinage IPv6 (NDP) | `network_diag.voisinage_ipv6` (+ `_ndp_windows`/`_ndp_linux`/`_ndp_macos`, `_ping_multicast_ipv6`, `_NDP_ETATS_MORTS`), route `GET /api/diag-reseau/ipv6-voisins` |
 | Topologie (palier 4) | `decouvrir_topologie` (récursive, parallèle, sous budget), `_topologie_equipement`, `_journaliser_mouvements`, `_stp_switch`, `_entite_physique`, `_sous_reseaux_equipement`, `etat_topologie`, `proposer_topologie_baie` / `appliquer_topologie_baie`, `lancer_cartographie` / `statut_cartographie` |
@@ -793,6 +869,6 @@ la passerelle — voire aucune.
 | Rapport / remédiation (palier 6) | `_REMEDIATION`, `remediation`, `generer_rapport_diag`, `tache_rapport_planifie` |
 | Vue d'activité baie (LEDs live) | `network_diag.py` : `_activite_loop` (cadence adaptative), `_cycle_activite` (relevé SNMP mutualisé par IP → switch multi-slots), `_noms_interfaces`/`_maj_noms_interfaces` (async), `_poll_switch_ports` (+ `sysUpTime` pour un Δt exact), `_poll_poe` (POWER-ETHERNET-MIB), `_lire_sysinfo` (modèle/uptime), `_mapping_baie_ifindex` (nom_port RJ seulement, `divergences`) + `_port_physique_depuis_nom`, `_etat_led` (plafond débit/pps, bouclage 32 bits, `reboot`), `activite_baie`, `calibrer_port_baie` / `calibrer_decalage_baie`, `_prises_murales_activite` (v2.19.18 : LED des prises murales d'un bandeau RJ via le port de switch au bout du cordon `lie_slot_id`/`lie_port_numero`), `_fdb_switch` + `_voisins_port` (v2.19.19 : FDB bridge-MIB « live » → contrôle de câblage MAC déclarée ↔ MAC apprise, repli `diag_topologie` ; + appareils vus par port dans les infobulles), `analyser_brassage_baie` / `_elements_baie` / `_classer_cascade` / `_fdb_corriger` (v2.19.22-23 : bouton « 🧠 Deviner le brassage » → carte réseau proposée, route `GET /api/baie/brassage/proposer` lecture seule ; 4 groupes de propositions + cascades + hors inventaire ; répare une FDB tronquée par un agent SNMP buggé) ; état : `_activite_sut` (Δt), `_activite_hist` (sparkline), `_activite_sysinfo`, `_activite_fdb`/`_activite_fdb_baseport`/`_activite_fdb_dialecte`/`_activite_fdb_echec`, `_activite_echecs`, `_activite_thread_lock` ; `app.py` : `_snmp_bulk_cols` (GETBULK), routes `GET /api/baie/activite` + `POST /api/baie/activite/calibrer{,/decalage}` ; `baie_brassage.html` (`#sel-activite`, `.prise-murale.pm-act-*`, badge ⚠ `.pm-cable-ko`) ; widget `network-activity` ; colonne `baie_slot_ports.if_index` |
 | Moniteur réseau de la baie (modale) | `network_diag.py` : `moniteur_baie` (GET, lecture seule), `_journal`/`_activite_journal` (conditions permanentes émises une seule fois), `_activite_detail`, `assistant_calibration`/`_maj_assistant_calibration` (calibrer par débranchement — décision quand le réseau se calme, écriture par `_activite_loop`), `capturer_trafic`, `lancer_capture_baie`/`statut_capture_baie` ; `_activite_calib` + `_noms_interfaces` (flag `maj_en_cours`) sous `_activite_lock` ; routes `GET /api/baie/activite/moniteur` + `POST /api/baie/activite/capture` + `POST /api/baie/activite/calibrer/assistant` ; `baie_brassage.html` (`#moniteur-modal`, `MoniteurModal` : en-tête modèle/uptime, colonne « tendance » (`sparkline`), « décaler de N », marqueur divergence, gel du re-render pendant qu'un `<select>` est manipulé, poll suspendu sur `document.hidden`) |
-| Orchestration | `_run_snapshot` (snapshot), `_moniteur_loop` / `_moniteur_cycle` (continu), `_enregistrer_evenements`, `_purger_anciens` |
+| Orchestration | `_run_snapshot` (diagnostic ponctuel), `_moniteur_loop` → `_moniteur_tick` (ordonnanceur à cadences indépendantes) + `_cycle_sondes_hote` / `_cycle_snmp` / `_cycle_topo` / `_cycle_capture` + `_moniteur_clients`, `_enregistrer_evenements`, `_purger_anciens` |
 | Walk SNMP + BER | `app.py` : `_snmp_get`, `_snmp_get_typed`, `_snmp_walk` (GETNEXT), `_snmp_bulk_cols` (GETBULK v2c multi-colonnes, auto-descriptif), `_ber_decoder_oid`, `_ber_decoder_valeur` — tous vérifient le request-id de la réponse |
 | Routes | `app.py` : `grep "@app.route('/api/diag-reseau"` + `/diag-reseau` + `/diag-reseau/rapport.{pdf,html}` |

@@ -161,7 +161,13 @@ CFG_DEFAULTS = {
     # ── Diagnostic réseau (module network_diag) ───────────────────────────────
     'diag_surveillance_active': '0',   # thread de surveillance continue
     'diag_capture_active': '0',        # palier 2 : capture passive scapy (OFF par défaut)
-    'diag_intervalle_s': '300',        # période du moniteur continu
+    'diag_intervalle_s': '300',        # période des sondes hôte (ARP, ping, DNS, DHCP, Wi-Fi)
+    # Refonte Lot 3 : le SNMP et la topologie ont leur PROPRE cadence, jamais
+    # conditionnée par les sondes hôte qui les précédaient (et pouvaient les
+    # « sauter » sur budget). Le collecteur unifié étant rapide, on peut sonder
+    # plus souvent.
+    'diag_snmp_intervalle_s': '120',   # période du balayage SNMP (palier 3)
+    'diag_topo_intervalle_s': '900',   # période de la cartographie de topologie (palier 4)
     'diag_snapshot_duree_s': '20',     # fenêtre d'un snapshot / d'une capture
     'diag_seuil_broadcast_pps': '150', # seuil tempête de broadcast (paquets/s)
     'diag_seuil_perte_pct': '5',       # seuil perte de paquets (%)
@@ -182,6 +188,9 @@ CFG_DEFAULTS = {
     'diag_snmp_v3_auth_pass': '',      # mot de passe d'authentification
     'diag_snmp_seuil_erreurs': '50',   # Δ erreurs/discards/CRC par fenêtre avant alerte
     'diag_snmp_seuil_saturation_pct': '90',  # seuil de saturation de lien (%)
+    'diag_snmp_workers': '8',          # équipements SNMP balayés de front (collecteur unifié)
+    'diag_snmp_auto_resolution_s': '1800',  # un évènement de port SNMP se résout seul si
+                                            # sa condition n'a pas reparu depuis ce délai (0 = jamais)
     # Récepteur de traps SNMP, UDP 162 (audit réseau 2026-09-05, #27) : requiert
     # généralement des privilèges élevés pour se lier au port 162 (< 1024) —
     # OFF par défaut, à activer explicitement une fois l'app lancée avec les

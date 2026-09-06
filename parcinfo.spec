@@ -83,6 +83,10 @@ hiddenimports = [
 ]
 hiddenimports += collect_submodules('zeroconf')
 
+# Refonte diagnostic réseau : le package netdiag (collecteur SNMP unifié, etc.)
+# est importé paresseusement par network_diag.py — à embarquer explicitement.
+hiddenimports += collect_submodules('netdiag')
+
 # Diagnostic réseau palier 2 (network_diag.py) : scapy résout ses couches de
 # protocole dynamiquement (scapy.layers.*) — non détectées par l'analyse
 # statique. Import protégé côté code : l'absence du pilote de capture

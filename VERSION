@@ -1,8 +1,121 @@
-PARCINFO_VERSION=2.19.45
+PARCINFO_VERSION=2.20.0
 RELEASE_DATE=2026-09-06
-BUILD_NUMBER=2026090601
+BUILD_NUMBER=2026090603
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.20.0 - REFONTE DU DIAGNOSTIC RESEAU (6 lots, une seule release)
+# Demande : reprendre le diagnostic reseau a zero pour quelque chose de
+# particulierement efficace et rapide, avec un affichage clair des erreurs de
+# trafic, en tenant compte des liaisons avec les autres categories. Decision :
+# redesign structure -- on garde les primitives eprouvees (BER, SNMPv3, capture
+# scapy), on reconstruit tout au-dessus (package netdiag/).
+#
+# CE QUI CHANGE POUR L'UTILISATEUR :
+#  - balayage SNMP d'un parc de 20 equipements : ~9,6 s -> ~1,1 s
+#  - le SNMP n'est plus jamais "saute"
+#  - nouvel onglet "Trafic & erreurs" : chaque port en defaut, trie pire
+#    d'abord, cause EN CLAIR + conseil, taux d'erreur/min, mini-courbe
+#  - bandeau de verdict permanent
+#  - les evenements de port se resolvent tout seuls une fois corriges
+#  - diagnostic relie a la fiche appareil, a la baie et au dashboard
+#
+# --- Lot 6/6 : documentation ---
+# DIAGNOSTIC_RESEAU.md reecrit (archi netdiag/, modele d'etat, ordonnanceur,
+# ecran Trafic, integrations) ; claude.md a jour. Rapport PDF/HTML revere
+# fonctionnel. L'extraction des primitives SNMP de app.py vers un module dedie
+# a ete VOLONTAIREMENT laissee de cote (nettoyage pur, sans benefice
+# fonctionnel, code SNMPv3/BER couteux a revalider) -- le pattern d'imports
+# paresseux app<->network_diag, deja documente et eprouve, est conserve.
+#
+# --- Lot 1/6 : collecteur SNMP unifie ---
+# Le diagnostic reseau frappait les memes switchs en TROIS balayages SNMP
+# independants : palier 3 (compteurs par port) en boucle SEQUENTIELLE, palier 4
+# (topologie) refaisait sa propre passe, la vue d'activite baie une troisieme.
+# Le diagnostic reseau frappait les memes switchs en TROIS balayages SNMP
+# independants : palier 3 (compteurs par port) en boucle SEQUENTIELLE, palier 4
+# (topologie) refaisait sa propre passe, la vue d'activite baie une troisieme.
+# Sur un parc de 20 equipements, le palier 3 seul prenait ~30 s.
+#
+# Nouveau module netdiag/collect.py : un collecteur UNIQUE qui releve chaque
+# equipement en UNE passe GETBULK multi-colonnes (ifTable + ifXTable +
+# dot3StatsTable batchees), en parallele sur tout le parc (ThreadPoolExecutor,
+# _snmp_presence en tete pour couper court sur un agent muet, deadline propagee),
+# sous budget (equipements non termines -> liste `muets` avec motif, jamais un
+# balayage saute en silence). Cache memoire + `releve_frais(ip, max_age)` pour
+# un consommateur temps reel.
+#
+# - interroger_equipements_client : passe parallele au lieu de la boucle
+#   sequentielle de interroger_equipement (3 GETBULK + 1 GET chacun). Bench
+#   (parc simule 20 equip. x 48 ports, latence 120 ms) : ~9,6 s -> ~1,1 s (x9).
+#   Les onduleurs restent traites a part (GET cible UPS-MIB).
+# - _topologie_equipement : reutilise le releve du collecteur quand il est frais
+#   (presence deja sondee, interfaces deja connues) au lieu de re-sonder.
+# - nouveau reglage diag_snmp_workers (defaut 8).
+#
+# Lot 2 : modele d'etat + analyse pure + auto-resolution.
+# - netdiag/analyse.py (fonctions PURES) : detection des erreurs de port
+#   extraite de _analyser_snmp ; classer_erreur() etiquette chaque port en
+#   langage clair (couche physique / duplex mismatch / saturation-buffer /
+#   cause indeterminee) + conseil. Fondation de l'ecran "Trafic & erreurs".
+# - tables diag_etat_equipement / diag_etat_port : etat courant persiste a
+#   chaque cycle (debit, taux d'erreur/min, classe, "depuis") -> l'UI lira une
+#   petite table au lieu de recalculer.
+# - auto-resolution : un evenement port_crc/duplex_mismatch/... se resout seul
+#   quand sa condition n'a pas repuru depuis diag_snmp_auto_resolution_s
+#   (defaut 30 min) sur un equipement TOUJOURS releve (jamais parce que le
+#   switch a disparu). netdiag/events.auto_resoudre_snmp, appele apres chaque
+#   cycle snapshot / surveillance.
+# - diag_reseau_evenements gagne equipement_ip / port_index / baie_slot_id.
+#
+# Lot 3 : orchestrateur a cadences INDEPENDANTES.
+# Avant : un cycle monolithique toutes les 5 min (sondes hote PUIS SNMP PUIS
+# topologie PUIS capture, en serie) -> un ping lent faisait manquer le SNMP.
+# Le thread de surveillance devient un ordonnanceur (tick 30 s) ; chaque
+# sous-tache a sa propre horloge :
+#  - sondes hote : diag_intervalle_s (300 s)
+#  - balayage SNMP : diag_snmp_intervalle_s (NOUVEAU, 120 s)
+#  - topologie : diag_topo_intervalle_s (NOUVEAU, 900 s)
+# Le SNMP n'est JAMAIS conditionne par les sondes hote. Un diagnostic ponctuel
+# ne met plus non plus le SNMP derriere un garde de budget (un balayage qui
+# deborde remonte ses equipements lents dans `muets`). etat_moniteur expose
+# les cadences. _moniteur_cycle decoupe en _cycle_sondes_hote / _cycle_snmp /
+# _cycle_topo / _cycle_capture ; _moniteur_tick porte l'ordonnancement.
+#
+# Lot 4 : interface -- bandeau verdict + ecran "Trafic & erreurs".
+# Premier lot VISIBLE. /diag-reseau gagne :
+#  - un bandeau de verdict permanent : "Aucun probleme" / "N port(s) en
+#    erreur" / "N alerte(s) critique(s)" + age du dernier releve + nb
+#    d'equipements SNMP joignables.
+#  - un onglet "Trafic & erreurs" (2e position) : chaque port en erreur, TRIE
+#    PIRE D'ABORD, en carte -- equipement + port (liens fiche/baie),
+#    classification EN CLAIR (Duplex mismatch / Couche physique CRC-FCS /
+#    Rejets memoire tampon...), taux d'erreur par minute, debit, mini-courbe,
+#    conseil de resolution. Case "afficher aussi les ports sans erreur".
+# netdiag/etat.py : read models verdict() / trafic() (lisent diag_etat_* du
+# Lot 2, aucun recalcul). Routes GET /api/diag-reseau/verdict et /trafic.
+#
+# Lot 5 : integrations avec les autres categories.
+#  - chaque port releve porte l'APPAREIL BRANCHE (via topologie) + le
+#    SLOT/PORT DE BAIE correspondant -> lien ecran Trafic <-> fiche <-> baie.
+#  - FICHE APPAREIL : encart "Reseau -- diagnostic" (etat SNMP + ports en
+#    erreur + conseil pour un switch ; sur quel port de switch un poste est
+#    vu ; evenements actifs). Visible meme sans collecte systeme. Route
+#    GET /api/appareil/<id>/diag-reseau.
+#  - BAIE : marqueur ! sur un port avec une erreur de trafic active. Route
+#    GET /api/baie/diag-erreurs.
+#  - DASHBOARD : alerte reseau rattachee a un appareil -> lien vers sa fiche.
+#  - MOBILE /m/diag-reseau : bandeau de verdict en tete.
+#
+# Dernier lot : package netdiag (extraction primitives SNMP hors app.py) +
+# rapport + doc (6).
+#
+# Tests : _collect (8), _analyse (11), _events (5), _orchestrateur (2),
+# _etat (8) ; bench_collecte.py. Verifie en navigateur (bandeau, ecran
+# Trafic, encart fiche, page baie, onglet Tendances). 2 bugs introduits puis
+# corriges : collision de nom JS `sparkline` (Lot 4), `{% if %}` litteral
+# dans un commentaire HTML interprete par Jinja (Lot 5). Suite : 270 passants
+# (+34), 10 echecs baie preexistants inchanges, 38/38 scripts racine.
 
 # Version 2.19.45 - Diagnostic reseau : test SNMP + voisinage IPv6 plus clairs
 # Retour terrain (utilisateur sur PC en administrateur) : "Tester SNMP" repondait

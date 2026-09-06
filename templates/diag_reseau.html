@@ -113,6 +113,28 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
 .cfg-etat-row input[type="checkbox"] { flex-shrink:0; }
 .cfg-etat-row .sub { font-size:.68rem; color:var(--text-muted); }
 .phase-times { font-family:'Share Tech Mono',monospace; font-size:.68rem; color:var(--text-muted); margin-top:.4rem; }
+/* ── Bandeau verdict + écran Trafic & erreurs (refonte Lot 4) ── */
+.diag-verdict { border:1px solid var(--border); border-radius:5px; padding:.7rem 1rem; margin-bottom:1rem;
+    display:flex; align-items:center; gap:.7rem; font-size:.9rem; }
+.diag-verdict .vd-ico { font-size:1.3rem; }
+.diag-verdict .vd-sub { font-size:.75rem; color:var(--text-muted); }
+.diag-verdict.vd-ok        { border-color:rgba(0,255,136,.4); background:rgba(0,255,136,.07); }
+.diag-verdict.vd-attention { border-color:rgba(255,140,0,.4); background:rgba(255,140,0,.07); }
+.diag-verdict.vd-critique  { border-color:rgba(255,51,85,.45); background:rgba(255,51,85,.09); }
+.tr-port { border:1px solid var(--border); border-radius:5px; padding:.7rem .9rem; margin-bottom:.7rem; }
+.tr-port.grav-critique      { border-left:3px solid #ff6b81; }
+.tr-port.grav-avertissement { border-left:3px solid #ffb057; }
+.tr-port .tr-head { display:flex; align-items:baseline; gap:.5rem; flex-wrap:wrap; }
+.tr-port .tr-name { font-weight:700; font-size:.86rem; }
+.tr-port .tr-classe { font-size:.72rem; padding:1px 8px; border-radius:10px; border:1px solid var(--border); }
+.tr-port .tr-meta { font-size:.72rem; color:var(--text-muted); }
+.tr-port .tr-badges { margin:.4rem 0; display:flex; gap:.4rem; flex-wrap:wrap; }
+.tr-badge { font-family:'Share Tech Mono',monospace; font-size:.68rem; padding:2px 7px; border-radius:3px;
+    background:var(--bg-secondary); border:1px solid var(--border); }
+.tr-badge.hot { color:#ff9f43; border-color:rgba(255,140,0,.4); }
+.tr-port .tr-conseil { font-size:.78rem; color:var(--text-secondary); margin-top:.3rem; }
+.tr-spark { height:22px; }
+.tr-spark polyline { fill:none; stroke:#ff9f43; stroke-width:1.5; }
 </style>
 {% endblock %}
 
@@ -125,8 +147,12 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
     <a class="link-btn" href="/diag-reseau/rapport.pdf" style="padding:.45rem .9rem;font-size:.8rem;">📄 Rapport</a>
 </div>
 
+<!-- ── Bandeau verdict (refonte Lot 4) ── -->
+<div id="diag-verdict" class="diag-verdict" style="display:none;"></div>
+
 <div class="diag-tabs" id="diag-tabs">
     <button class="diag-tab" data-pane="pane-apercu">Vue d'ensemble</button>
+    <button class="diag-tab" data-pane="pane-trafic">Trafic &amp; erreurs</button>
     <button class="diag-tab" data-pane="pane-ports">Équipements</button>
     <button class="diag-tab" data-pane="pane-topologie">Topologie</button>
     <button class="diag-tab" data-pane="pane-tendances">Tendances</button>
@@ -237,6 +263,21 @@ tr.topo-uplink.ouvert + tr.topo-aval { display:table-row; }
 </div>
 
 </div><!-- /pane-apercu -->
+
+<!-- ── Trafic & erreurs (refonte Lot 4) ── -->
+<div class="diag-pane" id="pane-trafic">
+<div class="diag-card">
+    <h2>🚦 Erreurs de trafic par port
+        <button class="link-btn" style="margin-left:.6rem;" onclick="chargerTrafic()">↻ Rafraîchir</button>
+        <label style="margin-left:.6rem;font-size:.72rem;font-weight:400;color:var(--text-muted);">
+            <input type="checkbox" id="trafic-tous" onchange="chargerTrafic()" style="vertical-align:middle;">
+            afficher aussi les ports actifs sans erreur
+        </label>
+    </h2>
+    <div id="trafic-verdict" class="diag-line" style="margin-bottom:.6rem;"></div>
+    <div id="trafic-body" class="diag-line">Chargement…</div>
+</div>
+</div><!-- /pane-trafic -->
 
 <div class="diag-pane" id="pane-ports">
 <!-- ── Onduleurs ── -->
@@ -480,7 +521,7 @@ function pollDiag(){
         if (!d.running){
             clearInterval(diagInterval); diagInterval = null;
             document.getElementById('btn-diag').disabled = false;
-            chargerEvenements(1);
+            chargerEvenements(1); chargerVerdict(); chargerTrafic();
             chargerSNMP(); chargerTopologie(); chargerTendances(); chargerWifi(); chargerUps();
         }
     }).catch(() => {});
@@ -1019,12 +1060,93 @@ function chargerUps(){
     }).catch(() => {});
 }
 
+// ── Bandeau verdict + écran « Trafic & erreurs » (refonte Lot 4) ──────────
+const VD_ICO = { ok: '✅', attention: '⚠️', critique: '🔴' };
+
+function chargerVerdict(){
+    fetch('/api/diag-reseau/verdict').then(r=>r.json()).then(d => {
+        const el = document.getElementById('diag-verdict');
+        if (!el) return;
+        el.className = 'diag-verdict vd-' + esc(d.niveau);
+        const sub = [];
+        if (d.snmp_actif) sub.push(`${d.nb_equipements_ok}/${d.nb_equipements} équipement(s) SNMP OK`);
+        if (d.nb_equipements_muets) sub.push(`${d.nb_equipements_muets} muet(s)`);
+        if (d.age_s != null) sub.push(`relevé il y a ${Math.round(d.age_s/60)} min`);
+        el.innerHTML = `<span class="vd-ico">${VD_ICO[d.niveau] || 'ℹ️'}</span>
+            <span><strong>${esc(d.phrase)}</strong>
+            ${sub.length ? `<br><span class="vd-sub">${esc(sub.join(' · '))}</span>` : ''}</span>`;
+        el.style.display = 'flex';
+    }).catch(() => {});
+}
+
+// NB : ne pas nommer `sparkline` — collision avec la fonction du même nom de
+// l'onglet Tendances (signature différente), la dernière déclaration gagne.
+function miniSparkTrafic(vals){
+    if (!vals || vals.length < 2) return '';
+    const max = Math.max(...vals, 1);
+    const pts = vals.map((v, i) => `${(i / (vals.length - 1) * 100).toFixed(1)},${(20 - v / max * 18).toFixed(1)}`).join(' ');
+    return `<svg class="tr-spark" viewBox="0 0 100 22" preserveAspectRatio="none" style="width:120px;">
+        <polyline points="${pts}"></polyline></svg>`;
+}
+
+function chargerTrafic(){
+    const tous = document.getElementById('trafic-tous') && document.getElementById('trafic-tous').checked;
+    fetch('/api/diag-reseau/trafic' + (tous ? '?tous=1' : '')).then(r=>r.json()).then(d => {
+        const vd = document.getElementById('trafic-verdict');
+        const wrap = document.getElementById('trafic-body');
+        if (!d.actif){
+            vd.innerHTML = '';
+            wrap.innerHTML = '<span style="color:var(--text-muted);">Interrogation SNMP désactivée — à activer dans le panneau de configuration ci-dessus (onglet Vue d\'ensemble).</span>';
+            return;
+        }
+        const ico = VD_ICO[d.verdict] || 'ℹ️';
+        vd.innerHTML = d.nb_erreur
+            ? `<strong style="color:${d.nb_critique ? '#ff6b81' : '#ffb057'};">${ico} ${d.nb_erreur} port(s) en erreur${d.nb_critique ? ` — ${d.nb_critique} critique(s)` : ''}</strong> sur ${d.nb_actifs} port(s) actif(s)`
+            : `<strong style="color:var(--accent-green);">${ico} Aucune erreur de trafic sur les ${d.nb_actifs} port(s) actif(s)</strong>`;
+        const rows = (d.ports_en_erreur || []).concat(d.ports_sains || []);
+        if (!rows.length){
+            wrap.innerHTML = d.nb_actifs ? '' : '<span style="color:var(--text-muted);">Aucun relevé SNMP pour l\'instant. Ajoutez vos switchs/routeurs (avec IP) puis lancez un diagnostic.</span>';
+            return;
+        }
+        wrap.innerHTML = rows.map(p => {
+            const sain = !p.classe;
+            const cible = p.appareil_vu_nom || p.port_alias || '';
+            const depuis = p.depuis_age_s != null ? `depuis ${p.depuis_age_s < 3600 ? Math.round(p.depuis_age_s/60)+' min' : Math.round(p.depuis_age_s/3600)+' h'}` : '';
+            const lienEq = p.appareil_id ? `/appareil/${p.appareil_id}/fiche-systeme` : null;
+            const lienBaie = p.baie_slot_id ? `/baie` : null;
+            return `<div class="tr-port ${sain ? '' : 'grav-' + esc(p.gravite)}">
+                <div class="tr-head">
+                    <span class="tr-name">${lienEq ? `<a href="${lienEq}">${esc(p.equipement_nom)}</a>` : esc(p.equipement_nom)} · ${esc(p.port_nom)}</span>
+                    ${cible ? `<span class="tr-meta">→ ${esc(cible)}${lienBaie ? ` <a class="link-btn" href="${lienBaie}">baie</a>` : ''}</span>` : ''}
+                    ${sain ? '<span class="tr-classe" style="color:var(--accent-green);">OK</span>'
+                           : `<span class="tr-classe" style="color:${p.gravite === 'critique' ? '#ff6b81' : '#ffb057'};">${esc(p.classe_libelle)}</span>`}
+                    ${depuis ? `<span class="tr-meta">${esc(depuis)}</span>` : ''}
+                </div>
+                <div class="tr-badges">
+                    <span class="tr-badge ${p.crc_min > 0 ? 'hot' : ''}">CRC ${p.crc_min}/min</span>
+                    <span class="tr-badge ${p.err_min > 0 ? 'hot' : ''}">err ${p.err_min}/min</span>
+                    <span class="tr-badge ${p.disc_min > 0 ? 'hot' : ''}">rejets ${p.disc_min}/min</span>
+                    <span class="tr-badge">${p.speed_mbps || '?'} Mb/s${p.duplex === 2 ? ' half' : ''}</span>
+                    ${p.debit_pct >= 1 ? `<span class="tr-badge ${p.debit_pct >= 80 ? 'hot' : ''}">${Math.round(p.debit_pct)} %</span>` : ''}
+                    ${miniSparkTrafic(p.spark)}
+                </div>
+                ${p.conseil ? `<div class="tr-conseil">💡 ${esc(p.conseil)}</div>` : ''}
+            </div>`;
+        }).join('');
+    }).catch(() => {
+        document.getElementById('trafic-body').innerHTML = '<span style="color:var(--text-muted);">Indisponible.</span>';
+    });
+}
+
 // Rafraîchir périodiquement l'état du moniteur
 setInterval(() => {
     fetch('/api/diag-reseau/etat-capture').then(r=>r.json()).then(majEtatCapture).catch(()=>{});
+    chargerVerdict(); chargerTrafic();
     chargerSNMP(); chargerTopologie(); chargerTendances(); chargerWifi(); chargerUps();
 }, 30000);
 
+chargerVerdict();
+chargerTrafic();
 chargerEvenements(1);
 chargerSNMP();
 chargerTopologie();
