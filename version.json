@@ -1,28 +1,29 @@
 {
-  "version": "2.21.0",
+  "version": "2.21.1",
   "release_date": "2026-09-06",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.21.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.0/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.0/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.0/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.1/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.1/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.1/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.21.1",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.1/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.1/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.1/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.1/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.1/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Le diagnostic réseau irrigue maintenant les autres écrans de ParcInfo. Le tableau de bord affiche un verdict « Santé réseau » (ports en erreur, équipements SNMP muets) dans la tuile État réseau. La baie de brassage porte une pastille de santé par équipement relevé en SNMP (vert / ⚠ / 🔴). La fiche d'un appareil recoupe ce que le switch voit de lui (débit négocié, duplex) avec ce que le collecteur-agent remonte de ses cartes réseau et signale les incohérences (un Gigabit bridé à 100 Mb/s par un câble, du half-duplex…). Les champs réseau déclarés du parc (passerelle, DNS, plage IP, domaine) reçoivent un badge « confirmé / divergent / non vérifié ». Un équipement vu en LLDP mais absent de l'inventaire peut être ajouté en un clic depuis la carte de topologie. Les transitions d'état majeures (équipement injoignable↔joignable, port en erreur↔sain) sont journalisées dans l'historique du client.",
+    "new_features": "Correctif SNMP : certains switchs (constaté sur HP ProCurve) renvoient leurs adresses MAC précédées d'un préfixe parasite (00:01…, ou des chaînes de 8 à 10 octets). Ces adresses étaient jusqu'ici jetées silencieusement sur le chemin « table ARP / ifPhysAddress / voisins LLDP » (qui exigeait exactement 6 octets) ; au-delà de 6 octets, on garde désormais les 6 derniers — le parasite est toujours en tête. Un nouveau bouton « FDB brut » sur la page Baie montre exactement ce que chaque switch renvoie (sans aucune correction) pour diagnostiquer un agent défectueux. Cette version prolonge l'intégration du diagnostic réseau aux autres écrans (verdict au tableau de bord, pastille dans la baie, recoupement sur la fiche appareil, badges sur le parc, « promouvoir en inventaire » depuis la topologie, transitions dans l'historique) livrée en 2.21.0.",
     "improvements": [
-      "Tableau de bord : verdict « Santé réseau » (diagnostic SNMP) dans la tuile État réseau, avec lien direct.",
-      "Baie de brassage : pastille de santé par équipement, tirée du dernier relevé SNMP du diagnostic.",
-      "Fiche appareil : encart Réseau qui recoupe SNMP ↔ collecteur-agent et signale un lien bridé ou en half-duplex.",
-      "Parc : badges « confirmé / divergent / non vérifié » sur passerelle, DNS, plage IP locale et domaine.",
-      "Topologie : bouton « + Ajouter à l'inventaire » pour un équipement vu en LLDP mais absent.",
-      "Historique : les bascules d'état du diagnostic réseau y sont tracées.",
-      "Un équipement SNMP qui cesse de répondre est désormais compté « muet » dans le verdict (avant : son dernier état restait affiché indéfiniment)."
+      "MAC préfixée par un agent SNMP défectueux (00:01…, 8-10 octets) : on garde les 6 derniers octets au lieu de jeter l'adresse.",
+      "Nouveau bouton « FDB brut » sur la page Baie : relevé brut de la table d'apprentissage MAC de chaque switch (aucune correction) pour voir la forme exacte des adresses.",
+      "Tableau de bord : verdict « Santé réseau » (diagnostic SNMP) dans la tuile État réseau (2.21.0).",
+      "Baie de brassage : pastille de santé par équipement relevé en SNMP (2.21.0).",
+      "Fiche appareil : recoupement SNMP ↔ collecteur-agent (lien bridé, half-duplex) (2.21.0).",
+      "Parc : badges « confirmé / divergent / non vérifié » sur passerelle, DNS, plage IP, domaine (2.21.0).",
+      "Topologie : « + Ajouter à l'inventaire » pour un équipement vu en LLDP mais absent (2.21.0).",
+      "Historique : les bascules d'état du diagnostic réseau y sont tracées ; un équipement qui cesse de répondre est enfin compté « muet » (2.21.0)."
     ]
   },
   "checksums": {

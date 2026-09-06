@@ -1,5 +1,18 @@
 # CHANGELOG - ParcInfo
 
+## [2.21.1] - 2026-09-06 🔬
+
+### Adresses MAC préfixées par un agent SNMP défectueux
+
+Retour terrain : un switch (HP ProCurve) renvoie ses adresses MAC **préfixées** de `00:01` / `00:0A`, ou sous forme de chaînes de **8 à 10 octets**. Le mécanisme d'hypothèses `_fdb_corriger` ne couvrait que le cas « 6 octets = 2 parasites + 4 octets réels » (2 octets réellement perdus) ; il ratait le cas « 8+ octets = préfixe + MAC entière » — **récupérable sans perte**.
+
+- **`_mac_octets()`** (chemin « valeur OCTET STRING » : table ARP, `ifPhysAddress`, MAC de base du bridge, voisins LLDP) **tolère désormais un préfixe parasite** : au-delà de 6 octets on garde les **6 derniers** (borné à 12 octets pour ne pas confondre une MAC avec une chaîne quelconque). Avant : exigeait exactement 6 octets et jetait silencieusement tout le reste.
+- **Nouveau bouton « 🔬 FDB brut »** sur la page Baie (`GET /api/baie/brassage/fdb-brut`, `network_diag.diagnostiquer_fdb_brute`) : relevé **brut** (aucune correction, aucune écriture) de la table d'apprentissage MAC de chaque switch — dialecte bridge-MIB, liste complète des sous-identifiants de l'index FDB, octets bruts de la table ARP, MAC obtenue en gardant les 6 derniers + si elle est reconnue dans l'inventaire. Permet de voir **sur pièces** si l'agent ajoute juste un préfixe (récupérable) ou tronque la vraie MAC.
+
+Tests : `tests/test_fdb_brut.py` (3). Suite : 308 passants (+3), 9 échecs préexistants inchangés.
+
+---
+
 ## [2.21.0] - 2026-09-06 🔗
 
 ### 🔗 Le diagnostic réseau irrigue les autres catégories

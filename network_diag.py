@@ -5816,7 +5816,17 @@ def _fdb_lock(ip):
 
 
 def _mac_octets(brut):
-    return ':'.join('%02x' % b for b in brut) if brut and len(brut) == 6 else ''
+    """OCTET STRING d'un agent SNMP → `'aa:bb:cc:dd:ee:ff'`.
+
+    Tolère un **préfixe parasite** : certains agents renvoient une MAC précédée
+    de la longueur ré-encodée en BER, d'un identifiant de VLAN, ou (STP) des 2
+    octets de priorité du pont. Le parasite est toujours EN TÊTE — jamais en
+    fin — donc au-delà de 6 octets on garde les **6 derniers**. Borné à 12
+    octets pour ne pas confondre une chaîne quelconque (nom d'interface…) avec
+    une MAC. `< 6` octets = donnée irrécupérable → chaîne vide."""
+    if not brut or not (6 <= len(brut) <= 12):
+        return ''
+    return ':'.join('%02x' % b for b in brut[-6:])
 
 
 def _vlans_actifs(ip, communautes):
@@ -6032,6 +6042,94 @@ def _macs_infra_switch(ip, communautes):
     if macs:
         _activite_infra_mac[ip] = (time.time(), macs)
     return macs
+
+
+def diagnostiquer_fdb_brute(client_id: int, max_exemples: int = 12) -> dict:
+    """Relevé BRUT de la table d'apprentissage MAC de chaque switch de la baie,
+    pour comprendre comment un agent SNMP défectueux formate ses MAC (retour
+    terrain : MAC préfixées `00:01` / `00:0A`, chaînes de 8 ou 10 octets…).
+
+    Aucune correction, aucune écriture : on montre exactement ce que le switch
+    renvoie. Par équipement :
+      - le dialecte bridge-MIB qui répond (dot1q / dot1d / contexte VLAN) ;
+      - pour un échantillon d'entrées FDB : la liste complète des
+        sous-identifiants de l'index, la MAC obtenue en gardant les 6 derniers,
+        et si elle est dans l'inventaire ;
+      - même chose pour la table ARP (`ipNetToMediaPhysAddress`), où la MAC est
+        une valeur OCTET STRING : nombre d'octets réellement reçus + hex.
+    """
+    from database import get_db
+    try:
+        from app import _snmp_presence
+    except Exception:
+        _snmp_presence = None
+    communautes = _communautes_snmp()
+    conn = get_db()
+    try:
+        inv = {}
+        for aid, nom, mac in conn.execute(
+                "SELECT id, nom_machine, adresse_mac FROM appareils "
+                "WHERE client_id=? AND COALESCE(adresse_mac,'')<>''", (client_id,)):
+            inv[_norm_mac(mac)] = nom or f"#{aid}"
+        for m, aid in _macs_secondaires(conn, client_id).items():
+            inv.setdefault(m, f"#{aid}")
+        switchs = _switchs_baie(conn, client_id)
+    finally:
+        conn.close()
+
+    vus_ip = {}
+    for sw in switchs:
+        vus_ip.setdefault(sw['ip'], sw['nom'])
+    equipements = []
+    for ip, nom in vus_ip.items():
+        e = {'ip': ip, 'nom': nom, 'snmp': 'ok', 'dialecte': '',
+             'fdb': {'nb': 0, 'longueurs': {}, 'exemples': []},
+             'arp': {'nb': 0, 'longueurs_octets': {}, 'exemples': []}}
+        if _snmp_presence:
+            present, exploitable, detail = _snmp_presence(ip, communautes)
+            if not exploitable:
+                e['snmp'] = detail or ('présent mais refusé' if present else 'aucune réponse SNMP')
+                equipements.append(e)
+                continue
+
+        # ── FDB : MAC dans l'index de l'OID ──
+        for dial, oid in (('dot1q', _OID_FDB_DOT1Q_PORT), ('dot1d', _OID_FDB_DOT1D_PORT)):
+            f = _snmp_walk(oid, ip, communautes, max_vars=600)
+            if not f:
+                continue
+            e['dialecte'] = dial
+            e['fdb']['nb'] = len(f)
+            for suf in f:
+                parts = str(suf).split('.')
+                n = len(parts)
+                e['fdb']['longueurs'][str(n)] = e['fdb']['longueurs'].get(str(n), 0) + 1
+                if len(e['fdb']['exemples']) < max_exemples:
+                    mac6 = _mac_depuis_suffixe(suf, 6)
+                    e['fdb']['exemples'].append({
+                        'sous_identifiants': [int(x) for x in parts if x.isdigit()],
+                        'mac_6_derniers': mac6,
+                        'dans_inventaire': inv.get(_norm_mac(mac6), '')})
+            break
+
+        # ── ARP : MAC en valeur OCTET STRING ──
+        for oid in (_OID_ARP_PHYS, _OID_ARP_PHYS_2):
+            a = _snmp_walk_octets(oid, ip, communautes, max_rows=400)
+            if not a:
+                continue
+            e['arp']['nb'] = len(a)
+            for suf, brut in a.items():
+                lb = len(brut or b'')
+                e['arp']['longueurs_octets'][str(lb)] = e['arp']['longueurs_octets'].get(str(lb), 0) + 1
+                if len(e['arp']['exemples']) < max_exemples:
+                    hexs = ':'.join('%02x' % b for b in (brut or b''))
+                    mac6 = _mac_octets(brut)
+                    e['arp']['exemples'].append({
+                        'octets_hex': hexs, 'nb_octets': lb,
+                        'mac_6_derniers': mac6,
+                        'dans_inventaire': inv.get(_norm_mac(mac6), '')})
+            break
+        equipements.append(e)
+    return {'equipements': equipements, 'nb_inventaire_mac': len(inv)}
 
 
 def _releve_mac_switch(ip, communautes, inv_mac):

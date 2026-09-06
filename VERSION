@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.21.0
+PARCINFO_VERSION=2.21.1
 RELEASE_DATE=2026-09-06
-BUILD_NUMBER=2026090605
+BUILD_NUMBER=2026090606
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.21.1 - MAC prefixees par un agent SNMP defectueux + relevé FDB brut
+# Retour terrain : un switch (HP ProCurve) renvoie ses adresses MAC prefixees
+# de 00:01 / 00:0A, ou sous forme de chaines de 8-10 octets. Le mecanisme
+# d'hypotheses `_fdb_corriger` ne couvrait que le cas "6 octets = 2 parasites +
+# 4 octets reels" (2 octets reellement perdus) ; il ratait le cas "8+ octets =
+# prefixe + MAC entiere" (recuperable sans perte).
+#
+# 1. `_mac_octets(brut)` (chemin "valeur OCTET STRING" : table ARP,
+#    `ifPhysAddress`, MAC de base du bridge, voisins LLDP) tolere desormais un
+#    prefixe parasite : au-dela de 6 octets on garde les 6 DERNIERS (borne a 12
+#    octets pour ne pas confondre avec une chaine quelconque). Avant : exigeait
+#    EXACTEMENT 6 octets et jetait silencieusement tout le reste. Le chemin
+#    "index de l'OID" (`_mac_depuis_suffixe`) prenait deja les 6 derniers
+#    sous-identifiants.
+# 2. Nouveau `network_diag.diagnostiquer_fdb_brute(client_id)` + route
+#    `GET /api/baie/brassage/fdb-brut` + bouton "🔬 FDB brut" sur /baie :
+#    relevé BRUT (aucune correction, aucune ecriture) de la table
+#    d'apprentissage MAC de chaque switch de la baie -- dialecte bridge-MIB,
+#    liste complete des sous-identifiants de l'index FDB, octets bruts de la
+#    table ARP, MAC obtenue en gardant les 6 derniers + si elle est dans
+#    l'inventaire. Permet de voir sur pieces si un agent ajoute un prefixe
+#    (recuperable) ou tronque la vraie MAC (2 octets perdus).
+#
+# Etape 3 (regle "fenetre de 6 octets qui recoupe le mieux l'inventaire" dans
+# `_fdb_corriger`) laissee en attente du relevé terrain.
+#
+# Tests : tests/test_fdb_brut.py (3). Suite : 308 passants (+3), 9 echecs
+# preexistants de test_diag_reseau.py inchanges, 39/39 scripts racine.
 
 # Version 2.21.0 - Le diagnostic reseau irrigue les autres categories
 # Suite de la refonte (2.20.0) + de la passe perf (2.20.1) : les 6 propositions

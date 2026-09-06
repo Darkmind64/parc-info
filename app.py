@@ -7502,6 +7502,23 @@ def api_baie_brassage_fdb_mode():
     return jsonify({'ok': True})
 
 
+@app.route('/api/baie/brassage/fdb-brut')
+@login_required
+def api_baie_brassage_fdb_brut():
+    """Relevé BRUT de la table MAC de chaque switch de la baie (aucune
+    correction, aucune écriture) : forme exacte des MAC renvoyées par l'agent
+    SNMP (sous-identifiants de l'index FDB, octets bruts de la table ARP) pour
+    diagnostiquer un agent défectueux. Relevé SNMP synchrone → action explicite."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        return jsonify(network_diag.diagnostiquer_fdb_brute(cid))
+    except Exception:
+        logger.exception('fdb-brut')
+        return jsonify({'equipements': [], 'erreur': 'relevé impossible'})
+
+
 def _liste_cablage(conn, cid):
     """Chaque lien port-à-port du client, une seule fois (pas les deux sens),
     avec le nom des deux éléments — sert à la fois à la page imprimable et à
