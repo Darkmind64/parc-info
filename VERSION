@@ -55,13 +55,28 @@ STATUS=STABLE
 # les cadences. _moniteur_cycle decoupe en _cycle_sondes_hote / _cycle_snmp /
 # _cycle_topo / _cycle_capture ; _moniteur_tick porte l'ordonnancement.
 #
-# Aucun changement d'interface. Lots suivants : refonte UI + ecran
-# "Trafic & erreurs" (4), integrations (5), package netdiag + doc (6).
+# Lot 4 : interface -- bandeau verdict + ecran "Trafic & erreurs".
+# Premier lot VISIBLE. /diag-reseau gagne :
+#  - un bandeau de verdict permanent : "Aucun probleme" / "N port(s) en
+#    erreur" / "N alerte(s) critique(s)" + age du dernier releve + nb
+#    d'equipements SNMP joignables.
+#  - un onglet "Trafic & erreurs" (2e position) : chaque port en erreur, TRIE
+#    PIRE D'ABORD, en carte -- equipement + port (liens fiche/baie),
+#    classification EN CLAIR (Duplex mismatch / Couche physique CRC-FCS /
+#    Rejets memoire tampon...), taux d'erreur par minute, debit, mini-courbe,
+#    conseil de resolution. Case "afficher aussi les ports sans erreur".
+# netdiag/etat.py : read models verdict() / trafic() (lisent diag_etat_* du
+# Lot 2, aucun recalcul). Routes GET /api/diag-reseau/verdict et /trafic.
 #
-# Tests : test_netdiag_collect.py (8), test_netdiag_analyse.py (11),
-# test_netdiag_events.py (5), test_netdiag_orchestrateur.py (2) ;
-# bench_collecte.py. Suite : 262 passants (+26), 10 echecs baie preexistants
-# inchanges, 38/38 scripts racine.
+# Lots suivants : integrations inventaire/baie/fiche/dashboard (5), package
+# netdiag + doc (6).
+#
+# Tests : test_netdiag_collect.py (8), _analyse.py (11), _events.py (5),
+# _orchestrateur.py (2), _etat.py (5) ; bench_collecte.py. Verifie en
+# navigateur (bandeau, ecran Trafic sain + en erreur, sparklines, onglet
+# Tendances -- collision de nom `sparkline` introduite puis corrigee).
+# Suite : 267 passants (+31), 10 echecs baie preexistants inchanges, 38/38
+# scripts racine.
 
 # Version 2.19.45 - Diagnostic reseau : test SNMP + voisinage IPv6 plus clairs
 # Retour terrain (utilisateur sur PC en administrateur) : "Tester SNMP" repondait

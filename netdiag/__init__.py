@@ -11,8 +11,10 @@ déléguera ici au fur et à mesure.
 - Lot 2 : ``netdiag.analyse`` — analyse SNMP par port (fonctions pures,
   classification en clair des erreurs de trafic) ; ``netdiag.events`` —
   auto-résolution des évènements de port.
+- Lot 4 : ``netdiag.etat`` — read models pour l'interface (``verdict``,
+  ``trafic``).
 """
 
-from . import analyse, collect, events  # noqa: F401
+from . import analyse, collect, etat, events  # noqa: F401
 
-__all__ = ['analyse', 'collect', 'events']
+__all__ = ['analyse', 'collect', 'etat', 'events']

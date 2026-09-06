@@ -31,9 +31,20 @@ Le thread de surveillance devient un **ordonnanceur** (tick de 30 s) où chaque 
 
 Le **SNMP n'est jamais conditionné par les sondes hôte** — il tourne sur son propre créneau, quoi qu'il arrive. Un diagnostic ponctuel (« Lancer un diagnostic ») ne place plus non plus le SNMP derrière un garde de budget : un balayage qui dépasse quand même remonte ses équipements lents dans la liste `muets`, il n'est plus sauté en silence. `etat_moniteur` expose les cadences.
 
-Aucun changement visible d'interface. Les lots suivants portent : refonte de l'interface avec un écran **« Trafic & erreurs »** dédié et lisible (Lot 4), intégrations inventaire / baie / fiche système / dashboard (Lot 5), découpage en package et réécriture de la doc (Lot 6).
+Aucun changement visible d'interface à ce stade.
 
-**Tests** : `tests/test_netdiag_collect.py` (8), `tests/test_netdiag_analyse.py` (11 : chaque classe d'erreur, deltas robustes au bouclage, findings + lignes d'état), `tests/test_netdiag_events.py` (5 : auto-résolution, non-résolution si condition récente ou équipement injoignable), `tests/test_netdiag_orchestrateur.py` (2 : cadences indépendantes SNMP/topo/hôte, SNMP désactivé). Bench reproductible : `python bench_collecte.py`. Suite complète revérifiée (262 passants, +26 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
+**Lot 4 — interface : bandeau verdict + écran « Trafic & erreurs ».**
+
+Premier lot visible. La page `/diag-reseau` gagne :
+
+- un **bandeau de verdict** permanent en haut : `✅ Aucun problème détecté` / `⚠️ 2 port(s) en erreur` / `🔴 N alerte(s) critique(s)`, avec l'âge du dernier relevé et le compte d'équipements SNMP joignables ;
+- un onglet **« Trafic & erreurs »** dédié (en 2ᵉ position) : chaque port en erreur, **trié pire d'abord**, sous forme de carte — équipement + port (cliquables vers la fiche / la baie), **classification en clair** (« Duplex mismatch », « Couche physique (CRC/FCS) », « Rejets (mémoire tampon / saturation) »…), taux d'erreur **par minute** (CRC / err / rejets), débit, **mini-courbe** de tendance, et un **conseil de résolution**. Une case « afficher aussi les ports sans erreur » ; verdict de l'onglet en tête.
+
+Nouveau module `netdiag/etat.py` (read models `verdict()` / `trafic()` — lisent les tables d'état du Lot 2, aucun recalcul) ; routes `GET /api/diag-reseau/verdict` et `GET /api/diag-reseau/trafic`.
+
+Les lots suivants portent : intégrations inventaire / baie / fiche système / dashboard (Lot 5), découpage en package et réécriture de la doc (Lot 6).
+
+**Tests** : `tests/test_netdiag_collect.py` (8), `tests/test_netdiag_analyse.py` (11), `tests/test_netdiag_events.py` (5), `tests/test_netdiag_orchestrateur.py` (2), `tests/test_netdiag_etat.py` (5 : tri pire d'abord, ports sains, appareil branché résolu, verdict). Bench reproductible : `python bench_collecte.py`. Vérifié en navigateur (bandeau verdict, écran Trafic sur données saines et en erreur simulées, sparklines, liens, onglet Tendances — un bug de collision de nom `sparkline` introduit puis corrigé). Suite complète revérifiée (267 passants, +31 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
 
 ## [2.19.45] - 2026-09-06 🔎
 

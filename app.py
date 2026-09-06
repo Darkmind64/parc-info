@@ -10708,6 +10708,30 @@ def api_diag_snmp():
     return jsonify(etat)
 
 
+@app.route('/api/diag-reseau/verdict')
+@login_required
+def api_diag_verdict():
+    """Synthèse pour le bandeau de la page (refonte Lot 4)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    from netdiag import etat as _etat
+    return jsonify(_etat.verdict(cid))
+
+
+@app.route('/api/diag-reseau/trafic')
+@login_required
+def api_diag_trafic():
+    """Écran « Trafic & erreurs » (refonte Lot 4) : chaque port en erreur,
+    trié pire d'abord, avec sa classification en clair."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    from netdiag import etat as _etat
+    tous = request.args.get('tous') == '1'
+    return jsonify(_etat.trafic(cid, tous=tous))
+
+
 @app.route('/api/diag-reseau/topologie')
 @login_required
 def api_diag_topologie():
