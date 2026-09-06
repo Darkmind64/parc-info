@@ -13,9 +13,16 @@ Ce premier lot introduit `netdiag/collect.py`, un **collecteur unique** qui rel�
 - **Budget** : un balayage borné dans le temps renvoie les équipements non terminés dans une liste `muets` avec le motif exact — jamais un balayage sauté en silence.
 - Nouveau réglage `diag_snmp_workers` (défaut 8) : nombre d'équipements balayés de front.
 
-Aucun changement visible d'interface à ce stade. Les lots suivants portent : modèle d'état + auto-résolution des évènements (Lot 2), orchestrateur continu qui ne saute jamais le SNMP (Lot 3), refonte de l'interface avec un écran **« Trafic & erreurs »** dédié et lisible (Lot 4), intégrations inventaire / baie / fiche système / dashboard (Lot 5), découpage en package et réécriture de la doc (Lot 6).
+**Lot 2 — modèle d'état + analyse pure + auto-résolution.**
 
-**Tests** : `tests/test_netdiag_collect.py` (8 tests : forme compatible, une seule passe par équipement, parallélisme réel, budget → `muets`, agent muet coupe court, dédup par IP, exclusion UPS, `releve_frais`). Bench reproductible : `python bench_collecte.py`. Suite complète revérifiée (244 passants, +8 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
+- **`netdiag/analyse.py`** (fonctions **pures**, testables sans réseau ni base) : la détection des erreurs de port (duplex mismatch, CRC/FCS, erreurs/rejets, saturation, flapping, vitesse réduite) est extraite de `_analyser_snmp` ; `classer_erreur()` étiquette chaque port en **langage clair** — « couche physique (câble/SFP) », « duplex mismatch », « rejets (mémoire tampon / saturation) », « erreurs de cause indéterminée » — avec un conseil. C'est la fondation de l'écran « Trafic & erreurs » du Lot 4.
+- **Nouvelles tables `diag_etat_equipement` / `diag_etat_port`** : l'état courant de chaque équipement et de chaque port (débit, taux d'erreur par minute, classe d'erreur, « depuis ») est persisté à chaque cycle → la future interface lira une petite table au lieu de tout recalculer.
+- **Auto-résolution** : un évènement d'erreur de port (`port_crc`, `duplex_mismatch`…) se **résout tout seul** quand sa condition n'a pas reparu depuis `diag_snmp_auto_resolution_s` (défaut 30 min) sur un équipement **toujours relevé** — on ne clôt jamais un problème simplement parce que le switch est devenu injoignable. Avant, il fallait cliquer « résoudre » à la main même des jours après le remplacement du câble.
+- `diag_reseau_evenements` gagne les colonnes `equipement_ip` / `port_index` / `baie_slot_id` (elles étaient noyées dans `details_json`).
+
+Aucun changement visible d'interface. Les lots suivants portent : orchestrateur continu qui ne saute jamais le SNMP (Lot 3), refonte de l'interface avec un écran **« Trafic & erreurs »** dédié et lisible (Lot 4), intégrations inventaire / baie / fiche système / dashboard (Lot 5), découpage en package et réécriture de la doc (Lot 6).
+
+**Tests** : `tests/test_netdiag_collect.py` (8), `tests/test_netdiag_analyse.py` (11 : chaque classe d'erreur, deltas robustes au bouclage, findings + lignes d'état), `tests/test_netdiag_events.py` (5 : auto-résolution, non-résolution si condition récente ou équipement injoignable). Bench reproductible : `python bench_collecte.py`. Suite complète revérifiée (260 passants, +24 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
 
 ## [2.19.45] - 2026-09-06 🔎
 

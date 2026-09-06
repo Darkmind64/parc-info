@@ -1061,10 +1061,6 @@ def interroger_equipement(ip: str, communautes) -> dict | None:
             'hc': bool(grp2.get(_OID_IF_HCIN, {}))}
 
 
-_COMPTEURS_PORT = ('in_oct', 'out_oct', 'in_err', 'out_err', 'in_disc', 'out_disc',
-                   'align_err', 'fcs_err', 'late_coll', 'exc_coll')
-
-
 def _dernier_releve(conn, client_id, ip, port_index):
     row = conn.execute(
         "SELECT epoch, compteurs_json, oper_status FROM diag_snmp_releves "
@@ -1101,106 +1097,63 @@ def _delta_compteur_32(cur: int, prev: int, large: int = 2 ** 32) -> int:
 
 def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> list:
     """Compare l'équipement au dernier relevé, lève des findings, stocke le
-    nouveau relevé."""
+    nouveau relevé + l'**état courant par port** (`diag_etat_port`, refonte
+    Lot 2 — backe l'écran « Trafic & erreurs »).
+
+    La détection et la classification en clair des erreurs sont déléguées aux
+    fonctions pures de `netdiag.analyse` ; ici on ne fait que l'I/O (lecture du
+    relevé précédent, écriture des relevés / de l'état / des métriques)."""
     from database import get_db
-    seuil_err = _cfg_int('diag_snmp_seuil_erreurs', 50)
-    seuil_sat = _cfg_float('diag_snmp_seuil_saturation_pct', 90)
+    from netdiag import analyse
+    seuils = {'erreurs': _cfg_int('diag_snmp_seuil_erreurs', 50),
+              'saturation_pct': _cfg_float('diag_snmp_seuil_saturation_pct', 90)}
     now = _now_z()
     findings = []
     ports = equipement.get('ports', [])
-    gigabit_present = any(p['speed_mbps'] >= 1000 for p in ports)
+    hc = bool(equipement.get('hc'))
+    ts = equipement.get('ts') or time.time()
     conn = get_db()
     try:
+        # relevé précédent + Δt + changements d'oper, par port
+        prec_par_port, dt_par_port, chg_par_port = {}, {}, {}
         for p in ports:
             pi = p['index']
-            precedent = _dernier_releve(conn, client_id, ip, pi)
+            prev = _dernier_releve(conn, client_id, ip, pi)
+            if prev and prev['epoch']:
+                prec_par_port[pi] = {**prev['compteurs'], 'epoch': prev['epoch']}
+                dt_par_port[pi] = max(1.0, ts - prev['epoch'])
+            chg_par_port[pi] = _compter_changements_oper(conn, client_id, ip, pi, p['oper'])
+
+        f_tuples, lignes_etat = analyse.analyser_equipement(
+            ip, equipement.get('sysname', ''), ports, prec_par_port, dt_par_port,
+            seuils, hc, chg_par_port)
+        for cat, titre, grav, det in f_tuples:
+            findings.append(_finding(cat, titre, det, ip, det.get('port_index'), gravite=grav))
+
+        # métriques temporelles (baseline, palier 5) + relevés bruts (delta)
+        for p in ports:
+            pi = p['index']
             libelle_port = f"{p['nom']}" + (f" ({p['alias']})" if p['alias'] else '')
-            base = {'equipement': ip, 'sysname': equipement.get('sysname', ''),
-                    'port': libelle_port, 'port_index': pi}
-
-            if precedent and precedent['epoch']:
-                dt = max(1.0, equipement['ts'] - precedent['epoch'])
-                hc = equipement.get('hc', False)
-                delta = {}
-                for k in _COMPTEURS_PORT:
-                    # in_oct/out_oct sont en Counter64 (HC) si l'agent les expose,
-                    # sinon Counter32 comme tous les autres compteurs de ce groupe.
-                    large = (0 if hc else 2 ** 32) if k in ('in_oct', 'out_oct') else 2 ** 32
-                    delta[k] = _delta_compteur_32(p[k], precedent['compteurs'].get(k, p[k]), large)
-
-                # Duplex mismatch
-                if p['oper'] == 1 and p['speed_mbps'] >= 100 and (
-                        delta['late_coll'] > 0 or p['duplex'] == 2):
-                    findings.append(_finding(
-                        'duplex_mismatch',
-                        f"{libelle_port} sur {ip} : "
-                        + ("half-duplex négocié" if p['duplex'] == 2
-                           else f"{delta['late_coll']} late collisions"),
-                        {**base, 'duplex': p['duplex'], 'delta_late_coll': delta['late_coll'],
-                         'speed_mbps': p['speed_mbps']},
-                        ip, pi))
-
-                # CRC / alignement
-                if delta['fcs_err'] + delta['align_err'] >= seuil_err:
-                    findings.append(_finding(
-                        'port_crc',
-                        f"{libelle_port} sur {ip} : {delta['fcs_err'] + delta['align_err']} "
-                        f"erreurs CRC/alignement depuis le dernier relevé",
-                        {**base, 'delta_fcs': delta['fcs_err'], 'delta_align': delta['align_err']},
-                        ip, pi))
-
-                # Erreurs / rejets génériques
-                err_io = delta['in_err'] + delta['out_err']
-                disc_io = delta['in_disc'] + delta['out_disc']
-                if max(err_io, disc_io) >= seuil_err:
-                    findings.append(_finding(
-                        'port_erreurs',
-                        f"{libelle_port} sur {ip} : {err_io} erreurs / {disc_io} rejets de paquets",
-                        {**base, 'delta_erreurs': err_io, 'delta_rejets': disc_io}, ip, pi))
-
-                # Métriques temporelles (palier 5) : erreurs + débit par port
+            if pi in prec_par_port:
+                d = analyse.deltas_port(p, prec_par_port[pi], hc)
                 _cible_m = f"{ip}:{pi}"
                 _enregistrer_metrique(conn, client_id, 'port_erreurs', _cible_m,
-                                      err_io + disc_io + delta['fcs_err'] + delta['align_err'],
-                                      equipement['ts'])
-
-                # Saturation de lien
+                                      d['in_err'] + d['out_err'] + d['in_disc']
+                                      + d['out_disc'] + d['fcs_err'] + d['align_err'], ts)
                 if p['speed_mbps'] > 0:
-                    debit_mbps = max(delta['in_oct'], delta['out_oct']) * 8 / dt / 1_000_000
-                    taux = debit_mbps / p['speed_mbps'] * 100
+                    debit = max(d['in_oct'], d['out_oct']) * 8 / dt_par_port[pi] / 1_000_000
                     _enregistrer_metrique(conn, client_id, 'port_debit_pct', _cible_m,
-                                          round(taux, 1), equipement['ts'])
-                    if taux >= seuil_sat:
-                        findings.append(_finding(
-                            'port_sature',
-                            f"{libelle_port} sur {ip} : lien à {taux:.0f} % "
-                            f"({debit_mbps:.0f} / {p['speed_mbps']} Mb/s)",
-                            {**base, 'taux_pct': round(taux), 'debit_mbps': round(debit_mbps),
-                             'speed_mbps': p['speed_mbps']}, ip, pi))
-
-                # Flapping : oper_status a changé plusieurs fois récemment
-                changements = _compter_changements_oper(conn, client_id, ip, pi, p['oper'])
-                if changements >= 3:
-                    findings.append(_finding(
-                        'port_flapping',
-                        f"{libelle_port} sur {ip} : {changements} changements d'état récents",
-                        {**base, 'nb_changements': changements}, ip, pi))
-
-            # Vitesse réduite (indépendant de l'historique)
-            if p['oper'] == 1 and gigabit_present and 0 < p['speed_mbps'] < 1000:
-                findings.append(_finding(
-                    'vitesse_reduite',
-                    f"{libelle_port} sur {ip} : négocié à {p['speed_mbps']} Mb/s "
-                    f"sur un équipement gigabit",
-                    {**base, 'speed_mbps': p['speed_mbps']}, ip, pi))
-
+                                          round(debit / p['speed_mbps'] * 100, 1), ts)
             conn.execute(
                 "INSERT INTO diag_snmp_releves (client_id, appareil_id, equipement_ip, "
                 "port_index, port_nom, horodatage, epoch, compteurs_json, duplex, "
                 "speed_mbps, oper_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (client_id, appareil_id, ip, pi, libelle_port, now, equipement['ts'],
-                 json.dumps({k: p[k] for k in _COMPTEURS_PORT}), p['duplex'],
+                (client_id, appareil_id, ip, pi, libelle_port, now, ts,
+                 json.dumps({k: p[k] for k in analyse.COMPTEURS}), p['duplex'],
                  p['speed_mbps'], p['oper']))
+
+        _ecrire_etat_snmp(conn, client_id, ip, appareil_id, equipement.get('sysname', ''),
+                          lignes_etat, now, ts)
         conn.commit()
     except Exception:
         logger.exception('network_diag: analyse SNMP impossible')
@@ -1210,6 +1163,50 @@ def _analyser_snmp(client_id: int, ip: str, appareil_id, equipement: dict) -> li
         for f in findings:
             f['appareil_id'] = appareil_id
     return findings
+
+
+def _ecrire_etat_snmp(conn, client_id, ip, appareil_id, sysname, lignes_etat, now, ts):
+    """Écrit `diag_etat_equipement` + `diag_etat_port` (refonte Lot 2). Le
+    `depuis` d'un port en erreur est conservé tant que la classe ne change pas."""
+    anciens = {}
+    for r in conn.execute(
+            "SELECT port_index, classe_erreur, depuis FROM diag_etat_port "
+            "WHERE client_id=? AND equipement_ip=?", (client_id, ip)):
+        anciens[r[0]] = (r[1], r[2])
+    nb_err = 0
+    for L in lignes_etat:
+        pi = L['port_index']
+        anc_classe, anc_depuis = anciens.get(pi, ('', ''))
+        depuis = anc_depuis if (L['classe_erreur'] and L['classe_erreur'] == anc_classe
+                                and anc_depuis) else (now if L['classe_erreur'] else '')
+        if L['classe_erreur']:
+            nb_err += 1
+        conn.execute(
+            "INSERT INTO diag_etat_port (client_id, equipement_ip, port_index, appareil_id, "
+            "port_nom, port_alias, oper, admin, speed_mbps, duplex, err_min, disc_min, "
+            "crc_min, debit_pct, classe_erreur, classe_libelle, gravite, depuis, derniere_maj) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(client_id, equipement_ip, port_index) DO UPDATE SET "
+            "appareil_id=excluded.appareil_id, port_nom=excluded.port_nom, "
+            "port_alias=excluded.port_alias, oper=excluded.oper, admin=excluded.admin, "
+            "speed_mbps=excluded.speed_mbps, duplex=excluded.duplex, err_min=excluded.err_min, "
+            "disc_min=excluded.disc_min, crc_min=excluded.crc_min, debit_pct=excluded.debit_pct, "
+            "classe_erreur=excluded.classe_erreur, classe_libelle=excluded.classe_libelle, "
+            "gravite=excluded.gravite, depuis=excluded.depuis, derniere_maj=excluded.derniere_maj",
+            (client_id, ip, pi, appareil_id, L['port_nom'], L['port_alias'], L['oper'],
+             L['admin'], L['speed_mbps'], L['duplex'], L['err_min'], L['disc_min'],
+             L['crc_min'], L['debit_pct'], L['classe_erreur'], L['classe_libelle'],
+             L['gravite'], depuis, now))
+    nb_up = sum(1 for L in lignes_etat if L['oper'] == 1)
+    conn.execute(
+        "INSERT INTO diag_etat_equipement (client_id, equipement_ip, appareil_id, sysname, "
+        "joignable, snmp_ok, motif, nb_ports, nb_ports_up, nb_ports_erreur, derniere_maj, epoch) "
+        "VALUES (?,?,?,?,1,1,'',?,?,?,?,?) "
+        "ON CONFLICT(client_id, equipement_ip) DO UPDATE SET appareil_id=excluded.appareil_id, "
+        "sysname=excluded.sysname, joignable=1, snmp_ok=1, motif='', nb_ports=excluded.nb_ports, "
+        "nb_ports_up=excluded.nb_ports_up, nb_ports_erreur=excluded.nb_ports_erreur, "
+        "derniere_maj=excluded.derniere_maj, epoch=excluded.epoch",
+        (client_id, ip, appareil_id, sysname, len(lignes_etat), nb_up, nb_err, now, ts))
 
 
 def _compter_changements_oper(conn, client_id, ip, port_index, oper_actuel):
@@ -4273,6 +4270,11 @@ def _run_snapshot(client_id: int, plage: str, avec_capture, rapide=None):
 
         _maj_statut(progress=92, message='Enregistrement des évènements…')
         nb_nouveaux = _enregistrer_evenements(client_id, findings, 'capture' if capture_utilisee else 'actif')
+        try:
+            from netdiag import events as _events
+            _events.auto_resoudre_snmp(client_id)
+        except Exception:
+            logger.debug('network_diag: auto-résolution SNMP en échec', exc_info=True)
 
         run_id = _enregistrer_run(client_id, debut, _now_z(), int(time.time() - t0),
                                   'snapshot', plage, capture_utilisee,
@@ -4374,24 +4376,35 @@ def _enregistrer_evenements(client_id: int, findings: list, source: str) -> int:
             existant = conn.execute(
                 "SELECT id, resolu, nb_occurrences FROM diag_reseau_evenements "
                 "WHERE client_id=? AND signature=?", (client_id, sig)).fetchone()
-            details = json.dumps(f.get('details', {}), ensure_ascii=False)
-            appareil_id = f.get('appareil_id') or _appareil_pour_finding(conn, client_id, f.get('details', {}))
+            det = f.get('details', {})
+            details = json.dumps(det, ensure_ascii=False)
+            appareil_id = f.get('appareil_id') or _appareil_pour_finding(conn, client_id, det)
+            # Refonte Lot 2 : IP + port de l'équipement en colonnes (ils étaient
+            # noyés dans details_json) → auto-résolution des évènements de port.
+            eq_ip = str(det.get('equipement') or det.get('ip') or '')
+            try:
+                port_idx = int(det.get('port_index') or 0)
+            except (TypeError, ValueError):
+                port_idx = 0
             if existant:
                 conn.execute(
                     "UPDATE diag_reseau_evenements SET derniere_occurrence=?, "
                     "nb_occurrences=nb_occurrences+1, gravite=?, titre=?, details_json=?, "
-                    "source=?, appareil_id=COALESCE(appareil_id, ?), resolu=0, "
+                    "source=?, appareil_id=COALESCE(appareil_id, ?), "
+                    "equipement_ip=?, port_index=?, resolu=0, "
                     "date_resolu=CASE WHEN resolu=1 THEN NULL ELSE date_resolu END "
                     "WHERE id=?",
-                    (now, f['gravite'], f['titre'], details, source, appareil_id, existant[0]))
+                    (now, f['gravite'], f['titre'], details, source, appareil_id,
+                     eq_ip, port_idx, existant[0]))
             else:
                 conn.execute(
                     "INSERT INTO diag_reseau_evenements "
                     "(client_id, horodatage, gravite, categorie, titre, details_json, source, "
-                    " signature, appareil_id, resolu, premiere_occurrence, derniere_occurrence, nb_occurrences) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,0,?,?,1)",
+                    " signature, appareil_id, equipement_ip, port_index, resolu, "
+                    " premiere_occurrence, derniere_occurrence, nb_occurrences) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,1)",
                     (client_id, now, f['gravite'], f['categorie'], f['titre'], details,
-                     source, sig, appareil_id, now, now))
+                     source, sig, appareil_id, eq_ip, port_idx, now, now))
                 nouveaux += 1
                 if f['gravite'] == 'critique':
                     critiques_nouveaux.append(f)
@@ -4509,6 +4522,12 @@ def _moniteur_cycle():
                                             {'broadcast_pps': seuil_bc})
                 capture_faite, src = True, 'capture'
             _enregistrer_evenements(cid, findings, src if src == 'capture' else 'actif')
+            if avec_snmp:
+                try:
+                    from netdiag import events as _events
+                    _events.auto_resoudre_snmp(cid)
+                except Exception:
+                    logger.debug('network_diag: auto-résolution SNMP en échec', exc_info=True)
             conn = get_db()
             _purger_anciens(conn, cid)
             conn.commit()

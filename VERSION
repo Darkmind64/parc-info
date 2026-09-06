@@ -26,14 +26,27 @@ STATUS=STABLE
 #   (presence deja sondee, interfaces deja connues) au lieu de re-sonder.
 # - nouveau reglage diag_snmp_workers (defaut 8).
 #
-# Aucun changement d'interface. Lots suivants : modele d'etat + auto-resolution
-# (2), orchestrateur continu qui ne saute jamais le SNMP (3), refonte UI avec
-# ecran "Trafic & erreurs" dedie (4), integrations inventaire/baie/fiche (5),
-# package netdiag + doc (6).
+# Lot 2 : modele d'etat + analyse pure + auto-resolution.
+# - netdiag/analyse.py (fonctions PURES) : detection des erreurs de port
+#   extraite de _analyser_snmp ; classer_erreur() etiquette chaque port en
+#   langage clair (couche physique / duplex mismatch / saturation-buffer /
+#   cause indeterminee) + conseil. Fondation de l'ecran "Trafic & erreurs".
+# - tables diag_etat_equipement / diag_etat_port : etat courant persiste a
+#   chaque cycle (debit, taux d'erreur/min, classe, "depuis") -> l'UI lira une
+#   petite table au lieu de recalculer.
+# - auto-resolution : un evenement port_crc/duplex_mismatch/... se resout seul
+#   quand sa condition n'a pas repuru depuis diag_snmp_auto_resolution_s
+#   (defaut 30 min) sur un equipement TOUJOURS releve (jamais parce que le
+#   switch a disparu). netdiag/events.auto_resoudre_snmp, appele apres chaque
+#   cycle snapshot / surveillance.
+# - diag_reseau_evenements gagne equipement_ip / port_index / baie_slot_id.
 #
-# Tests : tests/test_netdiag_collect.py (8), bench_collecte.py reproductible.
-# Suite complete : 244 passants (+8), 10 echecs baie preexistants sans rapport
-# inchanges, 38/38 scripts racine.
+# Aucun changement d'interface. Lots suivants : orchestrateur continu (3),
+# refonte UI + ecran "Trafic & erreurs" (4), integrations (5), package (6).
+#
+# Tests : test_netdiag_collect.py (8), test_netdiag_analyse.py (11),
+# test_netdiag_events.py (5) ; bench_collecte.py. Suite : 260 passants (+24),
+# 10 echecs baie preexistants inchanges, 38/38 scripts racine.
 
 # Version 2.19.45 - Diagnostic reseau : test SNMP + voisinage IPv6 plus clairs
 # Retour terrain (utilisateur sur PC en administrateur) : "Tester SNMP" repondait

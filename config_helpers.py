@@ -183,6 +183,8 @@ CFG_DEFAULTS = {
     'diag_snmp_seuil_erreurs': '50',   # Δ erreurs/discards/CRC par fenêtre avant alerte
     'diag_snmp_seuil_saturation_pct': '90',  # seuil de saturation de lien (%)
     'diag_snmp_workers': '8',          # équipements SNMP balayés de front (collecteur unifié)
+    'diag_snmp_auto_resolution_s': '1800',  # un évènement de port SNMP se résout seul si
+                                            # sa condition n'a pas reparu depuis ce délai (0 = jamais)
     # Récepteur de traps SNMP, UDP 162 (audit réseau 2026-09-05, #27) : requiert
     # généralement des privilèges élevés pour se lier au port 162 (< 1024) —
     # OFF par défaut, à activer explicitement une fois l'app lancée avec les

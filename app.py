@@ -2276,6 +2276,67 @@ def init_db():
     c.execute('''CREATE INDEX IF NOT EXISTS idx_diag_metriques
         ON diag_metriques(client_id, categorie, cible, epoch)''')
 
+    # ── Refonte diagnostic réseau, Lot 2 : modèle d'état + auto-résolution ─────
+    # `diag_reseau_evenements` gagne l'IP + le port de l'équipement concerné (ils
+    # étaient noyés dans `details_json`) → auto-résolution d'un évènement de port
+    # SNMP dès que la condition a disparu depuis assez longtemps sur un
+    # équipement toujours joignable.
+    _evt_cols = {r[1] for r in c.execute('PRAGMA table_info(diag_reseau_evenements)')}
+    for _col, _typ in (('equipement_ip', "TEXT DEFAULT ''"),
+                       ('port_index', 'INTEGER DEFAULT 0'),
+                       ('baie_slot_id', 'INTEGER')):
+        if _col not in _evt_cols:
+            try:
+                c.execute(f"ALTER TABLE diag_reseau_evenements ADD COLUMN {_col} {_typ}")
+            except Exception:
+                pass
+    # État courant par équipement — la Vue d'ensemble lit cette petite table au
+    # lieu de recalculer depuis les relevés bruts.
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_etat_equipement (
+        client_id INTEGER NOT NULL,
+        equipement_ip TEXT NOT NULL,
+        appareil_id INTEGER,
+        sysname TEXT DEFAULT '',
+        modele TEXT DEFAULT '',
+        joignable INTEGER DEFAULT 0,
+        snmp_ok INTEGER DEFAULT 0,
+        motif TEXT DEFAULT '',
+        nb_ports INTEGER DEFAULT 0,
+        nb_ports_up INTEGER DEFAULT 0,
+        nb_ports_erreur INTEGER DEFAULT 0,
+        derniere_maj TEXT DEFAULT '',
+        epoch REAL DEFAULT 0,
+        PRIMARY KEY (client_id, equipement_ip),
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    # État courant par port — backe directement la vue « Trafic & erreurs ».
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_etat_port (
+        client_id INTEGER NOT NULL,
+        equipement_ip TEXT NOT NULL,
+        port_index INTEGER NOT NULL,
+        appareil_id INTEGER,
+        port_nom TEXT DEFAULT '',
+        port_alias TEXT DEFAULT '',
+        oper INTEGER DEFAULT 0,
+        admin INTEGER DEFAULT 0,
+        speed_mbps INTEGER DEFAULT 0,
+        duplex INTEGER DEFAULT 0,
+        appareil_vu_id INTEGER,
+        baie_slot_id INTEGER,
+        baie_port INTEGER,
+        err_min REAL DEFAULT 0,
+        disc_min REAL DEFAULT 0,
+        crc_min REAL DEFAULT 0,
+        debit_pct REAL DEFAULT 0,
+        classe_erreur TEXT DEFAULT '',
+        classe_libelle TEXT DEFAULT '',
+        gravite TEXT DEFAULT '',
+        depuis TEXT DEFAULT '',
+        derniere_maj TEXT DEFAULT '',
+        PRIMARY KEY (client_id, equipement_ip, port_index),
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    c.execute('''CREATE INDEX IF NOT EXISTS idx_diag_etat_port
+        ON diag_etat_port(client_id, classe_erreur)''')
+
     # Client par défaut si aucun
     if not c.execute('SELECT id FROM clients').fetchone():
         now = _utcnow().isoformat()
