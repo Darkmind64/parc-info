@@ -538,6 +538,22 @@ des switchs de la baie et calcule l'état à peindre par port.
     l'hypothèse retenue, « N/M appareils reconnus » et le menu déroulant.
   - Appliqué dans `analyser_brassage_baie` **et** le cycle d'activité live
     (journal). Une table MAC normale n'est jamais modifiée.
+  - **Préfixe parasite sur le chemin « valeur » (v2.21.1)** : `_mac_octets(brut)`
+    (table ARP, `ifPhysAddress`, MAC de base du bridge, voisins LLDP) exigeait
+    **exactement 6 octets** et jetait silencieusement une valeur de 7/8/10 octets.
+    Il garde désormais les **6 derniers** dès que `6 ≤ len ≤ 12` — un agent qui
+    préfixe la longueur BER ré-encodée, un id de VLAN ou (STP) les 2 octets de
+    priorité voit sa MAC **récupérée sans perte**. Le chemin « index de l'OID »
+    (`_mac_depuis_suffixe`, `parts[-6:]`) le faisait déjà. À distinguer du cas
+    ProCurve `prefixe2` où seuls **4 octets réels** subsistent (2 réellement
+    perdus) — là, seul le recoupement de préfixe est possible.
+  - **Bouton « 🔬 FDB brut »** sur `/baie` (`diagnostiquer_fdb_brute`, route
+    `GET /api/baie/brassage/fdb-brut`) : relevé **brut** de la table
+    d'apprentissage de chaque switch, **sans aucune correction ni écriture** —
+    dialecte bridge-MIB, liste complète des sous-identifiants de l'index FDB,
+    octets bruts de la table ARP, MAC obtenue en gardant les 6 derniers + si elle
+    est reconnue dans l'inventaire. Sert à décider, sur pièces, si l'agent
+    préfixe (récupérable) ou tronque (perdu).
 - **Capacités SNMP (compteurs 64 bits, PoE) non condamnées sur un seul échec**
   (v2.19.13) : `_activite_hc[ip]` / `_activite_poe[ip]` ne passent à `False`
   qu'après `_ACTIVITE_NEG_CONFIRME` (2) relevés négatifs consécutifs — un paquet

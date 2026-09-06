@@ -861,6 +861,7 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <span id="activite-bandeau" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--accent-green);align-self:center;"></span>
                 <button onclick="MoniteurModal.ouvrir()" class="btn btn-primary btn-sm" title="Moniteur réseau : compteurs bruts des ports, journal d'évènements, capture de trafic — pour comprendre ce que montrent les LEDs">📊 Moniteur</button>
                 <button onclick="BrassageModal.ouvrir()" class="btn btn-primary btn-sm" title="Deviner le brassage : à partir de toutes les MAC vues sur les switchs (SNMP), corrélées à l'inventaire, propose la machine de chaque prise/port, les cordons bandeau ⇄ switch et les liens switch ⇄ éléments. Aperçu avant application.">🧠 Deviner le brassage</button>
+                <button onclick="FdbBrut.ouvrir()" class="btn btn-secondary btn-sm" title="Relevé brut de la table d'apprentissage MAC de chaque switch — forme exacte des adresses renvoyées par l'agent SNMP. À utiliser si « Deviner le brassage » montre des MAC bizarres (00:01…, 8 octets).">🔬 FDB brut</button>
                 <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌</a>
                 <button onclick="changerU(-1)" class="btn btn-primary btn-sm" title="Réduire la baie d'1U">− U</button>
                 <button onclick="changerU(1)"  class="btn btn-primary btn-sm" title="Agrandir la baie d'1U">+ U</button>
@@ -1321,6 +1322,24 @@ table.mon-table td.mon-wrap select { max-width:100%; }
             <button class="btn btn-secondary btn-sm" onclick="BrassageModal.fermer()">Annuler</button>
             <button id="brassage-appliquer" class="btn btn-primary btn-sm" onclick="BrassageModal.appliquer()" disabled>Appliquer la sélection</button>
         </div>
+    </div>
+</div>
+
+<!-- RELEVÉ FDB BRUT — diagnostic d'un agent SNMP qui déforme ses adresses MAC. -->
+<div id="fdbraw-modal" class="modal-overlay" onclick="if(event.target===this)FdbBrut.fermer()">
+    <div class="mon-box">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;">
+            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">🔬 Relevé FDB brut</h3>
+            <button type="button" onclick="FdbBrut.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
+        </div>
+        <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.6rem;">
+            Ce que chaque switch renvoie vraiment, sans aucune correction. <b>MAC (6 derniers)</b> = adresse
+            obtenue en gardant les 6 derniers octets ; un ✓ = reconnue dans l'inventaire. Si les octets bruts
+            font plus de 6 et que les 6 derniers sont ✓, l'agent ajoute juste un préfixe (récupérable). Si
+            les 6 derniers ne matchent jamais et commencent par <code>00:01</code>/<code>00:0A</code>, l'agent
+            tronque la vraie MAC (2 octets perdus).
+        </div>
+        <div class="mon-pane actif" style="max-height:60vh;font-size:.72rem;"><div id="fdbraw-corps">Chargement…</div></div>
     </div>
 </div>
 
@@ -3841,6 +3860,53 @@ function fmtOctets(o) {
     if (o >= 1e3) return (o / 1e3).toFixed(0) + ' ko';
     return o + ' o';
 }
+
+// ── RELEVÉ FDB BRUT (diagnostic agent SNMP) ─────────────────────────────────
+const FdbBrut = {
+    ouvrir() {
+        document.getElementById('fdbraw-modal').classList.add('open');
+        this.charger();
+    },
+    fermer() { document.getElementById('fdbraw-modal').classList.remove('open'); },
+    async charger() {
+        const corps = document.getElementById('fdbraw-corps');
+        corps.innerHTML = 'Relevé SNMP en cours…';
+        let d;
+        try { d = await (await fetch('/api/baie/brassage/fdb-brut')).json(); }
+        catch (e) { corps.innerHTML = '<span style="color:var(--accent-red);">Erreur de communication.</span>'; return; }
+        const eq = d.equipements || [];
+        if (!eq.length) { corps.innerHTML = '<span style="color:var(--text-muted);">Aucun switch avec une IP dans la baie.</span>'; return; }
+        const hist = o => Object.entries(o || {}).sort((a, b) => a[0] - b[0])
+            .map(([k, v]) => `${k} oct.×${v}`).join(', ') || '—';
+        const ok = s => s ? ` <span style="color:var(--accent-green);">✓ ${escH(s)}</span>` : '';
+        let h = `<p style="color:var(--text-muted);">Inventaire : ${d.nb_inventaire_mac} MAC connues.</p>`;
+        for (const e of eq) {
+            h += `<div style="margin:.6rem 0;border:1px solid var(--border);border-radius:5px;padding:.5rem .6rem;">`
+               + `<b>${escH(e.nom)}</b> <span class="mono" style="color:var(--text-muted);">${escH(e.ip)}</span>`;
+            if (e.snmp !== 'ok') { h += ` — <span style="color:var(--accent-red);">${escH(e.snmp)}</span></div>`; continue; }
+            h += ` — dialecte <code>${escH(e.dialecte || '?')}</code>`;
+            // FDB
+            h += `<div style="margin-top:.4rem;"><u>Table d'apprentissage (FDB)</u> — ${e.fdb.nb} entrées · longueurs d'index : ${hist(e.fdb.longueurs)}`;
+            if ((e.fdb.exemples || []).length) {
+                h += `<table style="width:100%;margin-top:.3rem;border-collapse:collapse;font-size:.68rem;"><tr style="color:var(--text-muted);"><th style="text-align:left;">index (sous-identifiants)</th><th style="text-align:left;">MAC (6 derniers)</th></tr>`;
+                for (const x of e.fdb.exemples)
+                    h += `<tr><td class="mono">${x.sous_identifiants.join('.')}</td><td class="mono">${escH(x.mac_6_derniers || '—')}${ok(x.dans_inventaire)}</td></tr>`;
+                h += `</table>`;
+            }
+            h += `</div>`;
+            // ARP
+            h += `<div style="margin-top:.4rem;"><u>Table ARP</u> — ${e.arp.nb} entrées · tailles reçues : ${hist(e.arp.longueurs_octets)}`;
+            if ((e.arp.exemples || []).length) {
+                h += `<table style="width:100%;margin-top:.3rem;border-collapse:collapse;font-size:.68rem;"><tr style="color:var(--text-muted);"><th style="text-align:left;">octets bruts</th><th style="text-align:left;">MAC (6 derniers)</th></tr>`;
+                for (const x of e.arp.exemples)
+                    h += `<tr><td class="mono">${escH(x.octets_hex)} <span style="color:var(--text-muted);">(${x.nb_octets})</span></td><td class="mono">${escH(x.mac_6_derniers || '—')}${ok(x.dans_inventaire)}</td></tr>`;
+                h += `</table>`;
+            }
+            h += `</div></div>`;
+        }
+        corps.innerHTML = h;
+    },
+};
 
 // ── DEVINER LE BRASSAGE — « carte réseau proposée » (modale) ─────────────────
 // GET /api/baie/brassage/proposer : part de TOUTES les MAC apprises sur les
