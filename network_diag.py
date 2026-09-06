@@ -6000,17 +6000,25 @@ def _fdb_switch(ip, communautes):
             arp = _snmp_walk_octets(_OID_ARP_PHYS_2, ip, communautes, max_rows=arp_cap, stats=st_arp)
         if st_arp.get('tronque'):
             stats['tronque'] = True
+        arp_macs = set()
         for suf, brut in arp.items():
             mac = _mac_octets(brut)
             if not mac:
                 continue
+            arp_macs.add(_norm_mac(mac))
             try:
                 ifx = int(suf.split('.')[0])
             except (ValueError, IndexError):
                 continue
             par_if.setdefault(ifx, set()).add(mac)
 
-        info = {'vlans': vlans, 'pvid': pvid_par_ifx, 'tronque': bool(stats.get('tronque'))}
+        # `arp_macs` = MAC vues dans la table ARP, structurellement PROPRES (valeur
+        # OCTET STRING de 6 octets). Sur un routeur (OpenWrt, pfSense…) c'est la
+        # liste complète des vraies MAC du LAN — précieuse comme RÉFÉRENCE pour
+        # réparer la FDB tronquée d'un switch voisin (ProCurve : 2 octets perdus,
+        # mais les 4 premiers suffisent à retrouver la MAC entière dans l'ARP).
+        info = {'vlans': vlans, 'pvid': pvid_par_ifx, 'arp_macs': arp_macs,
+                'tronque': bool(stats.get('tronque'))}
         if par_if:
             _activite_fdb[ip] = (time.time(), par_if, info)
             _activite_fdb_echec.pop(ip, None)
@@ -6132,18 +6140,23 @@ def diagnostiquer_fdb_brute(client_id: int, max_exemples: int = 12) -> dict:
     return {'equipements': equipements, 'nb_inventaire_mac': len(inv)}
 
 
-def _releve_mac_switch(ip, communautes, inv_mac):
+def _releve_mac_switch(ip, communautes, inv_mac, reference=None):
     """Point d'entrée unique : `_fdb_switch` (bridge + ARP + VLAN) puis
     `_fdb_corriger` (hypothèses de forme, réglage `diag_fdb_mode:<ip>`).
     Retourne `(fdb, meta)` ; `meta` porte en plus `vlans` ({(ifIndex, mac): vid}),
-    `pvid` ({ifIndex: vid d'accès}) et `tronque_taille` (la table dépassait le
+    `pvid` ({ifIndex: vid d'accès}), `arp_macs` (MAC propres de la table ARP, à
+    réutiliser comme référence) et `tronque_taille` (la table dépassait le
     plafond de lecture — résultat incomplet, constat d'audit #05).
+    `reference` : MAC réelles supplémentaires (typiquement l'ARP d'un routeur du
+    parc) pour réparer une FDB tronquée même hors inventaire — voir `_fdb_corriger`.
     Utilisé par le cycle d'activité, `analyser_brassage_baie` ET la découverte
     de topologie (palier 4)."""
     par_if, info = _fdb_switch(ip, communautes)
-    fdb, meta = _fdb_corriger(par_if, inv_mac, str(_cfg(f'diag_fdb_mode:{ip}', '')))
+    fdb, meta = _fdb_corriger(par_if, inv_mac, str(_cfg(f'diag_fdb_mode:{ip}', '')),
+                              reference=reference)
     meta['vlans'] = info.get('vlans') or {}
     meta['pvid'] = info.get('pvid') or {}
+    meta['arp_macs'] = info.get('arp_macs') or set()
     meta['tronque_taille'] = bool(info.get('tronque'))
     if meta['tronque_taille']:
         meta['fiable'] = False
@@ -6163,14 +6176,21 @@ _FDB_HYPOTHESES = [
 _FDB_MODES = ('', 'auto', 'standard', 'prefixe', 'ignorer')
 
 
-def _fdb_corriger(par_if, inv_mac, mode=''):
+def _fdb_corriger(par_if, inv_mac, mode='', reference=None):
     """Certains agents SNMP renvoient une table d'apprentissage MAC déformée
     (préfixe parasite, MAC tronquée…). On essaie plusieurs **hypothèses de forme**
-    (`_FDB_HYPOTHESES`) et on garde celle qui recoupe le mieux l'inventaire
-    (`appareils.adresse_mac`). Une hypothèse non-« exact » n'est retenue que si
-    elle reconnaît au moins 3 appareils ET nettement plus que l'hypothèse
-    « exact ». Les MAC non rattachables sous l'hypothèse retenue sont écartées ;
-    une MAC réparée vue sur plusieurs ports (collision de préfixe) aussi.
+    (`_FDB_HYPOTHESES`) et on garde celle qui recoupe le mieux un jeu de MAC
+    connues (`appareils.adresse_mac` + `reference`). Une hypothèse non-« exact »
+    n'est retenue que si elle reconnaît au moins 3 MAC ET nettement plus que
+    l'hypothèse « exact ». Les MAC non rattachables sous l'hypothèse retenue sont
+    écartées ; une MAC réparée vue sur plusieurs ports (collision de préfixe) aussi.
+
+    `reference` : jeu de MAC réelles supplémentaires servant UNIQUEMENT à détecter
+    et réparer la déformation — typiquement la table ARP d'un routeur du parc, qui
+    porte la MAC ENTIÈRE d'un appareil dont le switch, lui, ne renvoie que les 4
+    premiers octets. Une MAC réparée depuis `reference` mais absente de l'inventaire
+    est conservée telle quelle (elle apparaîtra « hors inventaire » avec son vrai
+    fabricant, plus jamais sous la forme `00:01:…`).
 
     `mode` (réglage par switch) : `''`/`'auto'` = détection ; `'standard'` = ne
     jamais transformer ; `'prefixe'` = forcer l'hypothèse ProCurve ; `'ignorer'`
@@ -6178,6 +6198,7 @@ def _fdb_corriger(par_if, inv_mac, mode=''):
 
     Retourne `(par_if, meta)` avec meta = {transform, reconnues, total, tronquee,
     fiable}."""
+    connues = set(inv_mac) | (reference or set())
     toutes = {m for macs in par_if.values() for m in macs if m}
     meta = {'transform': 'exact', 'reconnues': sum(1 for m in toutes if m in inv_mac),
             'total': len(toutes), 'tronquee': False, 'fiable': True, 'ambigus': {}}
@@ -6186,11 +6207,11 @@ def _fdb_corriger(par_if, inv_mac, mode=''):
     if not toutes:
         return par_if, meta
 
-    # index inventaire par longueur de préfixe
+    # index des MAC connues (inventaire + référence ARP) par longueur de préfixe
     pref_par_lg = {}
     for lg in {h[2] for h in _FDB_HYPOTHESES}:
         d = {}
-        for m in inv_mac:
+        for m in connues:
             d.setdefault(':'.join(m.split(':')[:lg]), m)
         pref_par_lg[lg] = d
 
@@ -7200,6 +7221,31 @@ def analyser_brassage_baie(client_id: int, _progress=None, budget_s: float = 0) 
                 if _aid_sw:
                     mac_infra.setdefault(mm, _aid_sw)
         switchs_non_releves = sorted({nom_par_ip.get(ip, ip) for ip in ips_non_releves})
+
+        # ── 2e passe : réparer une FDB tronquée avec la table ARP des routeurs ──
+        # Un switch (ProCurve J9450A) ne renvoie que les 4 premiers octets de
+        # chaque MAC, préfixés `00:01`. La 1re passe, avec le seul inventaire
+        # (souvent < 20 MAC), ne détecte pas la déformation : tout passe en
+        # `00:01:…`. On réunit les MAC ENTIÈRES vues dans TOUTES les tables ARP
+        # (un routeur du parc les porte toutes) et on relance la correction —
+        # `_fdb_switch` est en cache, seule `_fdb_corriger` (pure) rejoue.
+        ref_arp = set()
+        for m in fdb_meta_par_ip.values():
+            ref_arp |= (m.get('arp_macs') or set())
+        if ref_arp:
+            for ip in list(fdb_par_ip):
+                mode_ip = str(_cfg(f'diag_fdb_mode:{ip}', ''))
+                if mode_ip == 'standard':
+                    continue
+                _raw, _rinfo = _fdb_switch(ip, communautes)   # cache
+                _fdb2, _meta2 = _fdb_corriger(_raw, inv_mac, mode_ip, reference=ref_arp)
+                if _meta2.get('transform') != 'exact' and _meta2.get('reconnues', 0) \
+                        > fdb_meta_par_ip[ip].get('reconnues', 0):
+                    _meta2['vlans'] = _rinfo.get('vlans') or {}
+                    _meta2['pvid'] = _rinfo.get('pvid') or {}
+                    _meta2['arp_macs'] = _rinfo.get('arp_macs') or set()
+                    _meta2['tronque_taille'] = bool(_rinfo.get('tronque'))
+                    fdb_par_ip[ip], fdb_meta_par_ip[ip] = _fdb2, _meta2
 
         # #7 : un switch qui n'a RIEN renvoyé — est-ce un refus SNMP (mauvaise
         # communauté, ACL, v3 exigé) ou un appareil qui ne fait pas de SNMP ?

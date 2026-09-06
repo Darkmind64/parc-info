@@ -544,9 +544,23 @@ des switchs de la baie et calcule l'état à peindre par port.
     Il garde désormais les **6 derniers** dès que `6 ≤ len ≤ 12` — un agent qui
     préfixe la longueur BER ré-encodée, un id de VLAN ou (STP) les 2 octets de
     priorité voit sa MAC **récupérée sans perte**. Le chemin « index de l'OID »
-    (`_mac_depuis_suffixe`, `parts[-6:]`) le faisait déjà. À distinguer du cas
-    ProCurve `prefixe2` où seuls **4 octets réels** subsistent (2 réellement
-    perdus) — là, seul le recoupement de préfixe est possible.
+    (`_mac_depuis_suffixe`, `parts[-6:]`) le faisait déjà.
+  - **Réparation par la table ARP d'un routeur (v2.21.2)** : le cas ProCurve
+    J9450A a été confirmé sur pièces — index dot1d = `<longueur 6>` + `00:01` +
+    **les 4 premiers octets** de la vraie MAC, les 2 derniers **réellement
+    perdus**. `_fdb_corriger` sait recouper ces 4 octets (`prefixe2`), mais avec
+    un inventaire pauvre (< 20 MAC) il n'atteignait pas le seuil de 3
+    reconnaissances → déformation ratée, tout restait en `00:01:…`. Corrigé :
+    `_fdb_switch` expose `info['arp_macs']` (les MAC de sa table ARP, entières et
+    propres) ; `_fdb_corriger(par_if, inv_mac, mode, reference=…)` accepte un jeu
+    de MAC réelles supplémentaires servant à **détecter ET réparer** — une MAC
+    réparée depuis la référence mais absente de l'inventaire est conservée
+    **entière** (« hors inventaire » avec son vrai fabricant, plus jamais
+    `00:01:…`) ; `analyser_brassage_baie` fait une **2ᵉ passe** en réunissant les
+    tables ARP de **tous** les équipements relevés (souvent un routeur du parc les
+    porte toutes) et relance la correction (relevé SNMP en cache). **Limite** :
+    sans routeur SNMP dans le parc, seuls les 4 premiers octets restent
+    exploitables — le bouton « 🔬 FDB brut » le rend visible.
   - **Bouton « 🔬 FDB brut »** sur `/baie` (`diagnostiquer_fdb_brute`, route
     `GET /api/baie/brassage/fdb-brut`) : relevé **brut** de la table
     d'apprentissage de chaque switch, **sans aucune correction ni écriture** —

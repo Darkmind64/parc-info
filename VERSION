@@ -1,8 +1,43 @@
-PARCINFO_VERSION=2.21.1
+PARCINFO_VERSION=2.21.2
 RELEASE_DATE=2026-09-06
-BUILD_NUMBER=2026090606
+BUILD_NUMBER=2026090607
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.21.2 - FDB tronquee reparee via la table ARP d'un routeur
+# Suite du relevé "FDB brut" (2.21.1). Sur pieces (HP ProCurve J9450A) :
+# l'agent renvoie un index dot1d de 7 sous-identifiants = <longueur 6> +
+# <00:01> + <4 premiers octets de la vraie MAC>. Les 2 derniers octets sont
+# REELLEMENT perdus. `_mac_depuis_suffixe([-6:])` en sort "00:01:00:23:24:53".
+# L'hypothese `prefixe2` de `_fdb_corriger` sait recouper ces 4 octets contre
+# un prefixe d'inventaire -- mais avec un inventaire pauvre (< 20 MAC) elle
+# n'atteignait pas le seuil de 3 reconnaissances et la deformation passait
+# inapercue : tout restait en "00:01:...".
+#
+# La table ARP du routeur du parc (OpenWrt : 47 entrees, MAC ENTIERES et
+# propres) est la reference qui manquait.
+#
+# - `_fdb_switch` expose `info['arp_macs']` : les MAC vues dans sa table ARP
+#   (valeur OCTET STRING, structurellement propre).
+# - `_fdb_corriger(par_if, inv_mac, mode, reference=None)` : `reference` = jeu
+#   de MAC reelles supplementaires servant a detecter ET reparer la
+#   deformation. Une MAC reparee depuis la reference mais absente de
+#   l'inventaire est conservee ENTIERE (elle apparait "hors inventaire" avec
+#   son vrai fabricant, plus jamais "00:01:...").
+# - `analyser_brassage_baie` : 2e passe -- reunit les `arp_macs` de TOUS les
+#   equipements releves et relance `_fdb_corriger` sur chaque switch (le
+#   relevé SNMP est en cache, seule la fonction pure rejoue). Adoptee
+#   uniquement si elle reconnait plus que la 1re passe.
+#
+# Limite inchangee : si AUCUN routeur du parc n'est interroge en SNMP (pas
+# d'ARP de reference) et que l'inventaire est trop pauvre, seuls les 4
+# premiers octets sont exploitables -- le bouton "FDB brut" le montre.
+#
+# Tests : tests/test_fdb_brut.py (+3 : reference ARP, arp_macs expose,
+# sans-reference inchange). Suite : 312 passants, 8-9 echecs preexistants de
+# test_diag_reseau.py inchanges (mocks + 1 test d'ordre fragile), 39/39
+# scripts racine. Correctif au passage : test_fdb_switch_expose_arp_macs
+# isole les dicts de cache globaux qu'il touchait.
 
 # Version 2.21.1 - MAC prefixees par un agent SNMP defectueux + relevé FDB brut
 # Retour terrain : un switch (HP ProCurve) renvoie ses adresses MAC prefixees
