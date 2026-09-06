@@ -231,14 +231,36 @@ def test_api_test_snmp(client, conn, deux_clients, make_appareil, monkeypatch):
     cid = deux_clients['cid_a']
     make_appareil(cid, nom_machine='SW-T', type_appareil='Switch', adresse_ip='10.0.0.5')
     import app as A
-    monkeypatch.setattr(A, '_snmp_get', lambda ip, oids, comm='public', timeout=1.5: {
+    monkeypatch.setattr(A, '_snmp_sysinfo', lambda ip, comm, timeout=1.0, port=161: {
         A._OID_SYS_NAME: 'SW-CORE', A._OID_SYS_DESCR: 'Test switch'} if comm == 'public' else {})
     login_session(client, deux_clients['proprio'], cid)
     d = client.post('/api/diag-reseau/test-snmp', json={}).get_json()
     assert d['ok'] is True and d['sysname'] == 'SW-CORE' and d['communaute'] == 'public'
+    assert d['hors_config'] is False
     # lecture seule -> 403
     login_session(client, deux_clients['lecteur'], cid)
     assert client.post('/api/diag-reseau/test-snmp', json={}).status_code == 403
+
+
+def test_api_test_snmp_essaie_tous_les_equipements_et_communautes_courantes(
+        client, conn, deux_clients, make_appareil, monkeypatch):
+    """Le premier équipement (box FAI muette) ne doit pas faire conclure « aucune
+    réponse » : le test passe au switch suivant, et essaie aussi les communautés
+    courantes absentes des réglages."""
+    cid = deux_clients['cid_a']
+    make_appareil(cid, nom_machine='BOX', type_appareil='Box internet (FAI)', adresse_ip='10.0.0.1')
+    make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
+    import app as A
+    # 'cisco' n'est PAS dans les communautés configurées
+    monkeypatch.setattr(A, 'cfg_get', lambda k, d=None, **kw: 'public'
+                        if k == 'diag_snmp_communautes' else (d if d is not None else ''))
+    monkeypatch.setattr(A, '_snmp_sysinfo', lambda ip, comm, timeout=1.0, port=161: {
+        A._OID_SYS_NAME: 'CORE', A._OID_SYS_DESCR: 'x'} if (ip == '10.0.0.2' and comm == 'cisco') else {})
+    monkeypatch.setattr(A, '_snmp_presence', lambda ip, comms: (False, False, 'aucune réponse SNMP'))
+    login_session(client, deux_clients['proprio'], cid)
+    d = client.post('/api/diag-reseau/test-snmp', json={}).get_json()
+    assert d['ok'] is True and d['ip'] == '10.0.0.2'
+    assert d['communaute'] == 'cisco' and d['hors_config'] is True
 
 
 def test_api_test_snmp_sans_equipement(client, deux_clients, monkeypatch):

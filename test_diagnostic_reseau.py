@@ -1493,5 +1493,28 @@ finally:
 verifier(_appels_ping2 == [], "rafraichir=False -> aucun ping multicast envoyé", str(_appels_ping2))
 verifier(_v6b['ping_multicast_ok'] is None, "ping_multicast_ok=None quand aucun ping n'a été tenté")
 
+print('\n=== 35quater. voisinage_ipv6() : les entrées mortes du cache NDP sont écartées ===')
+# Le cache NDP de Windows liste en permanence des adresses jamais résolues :
+# état « Unreachable » / « Incomplete », MAC nulle. Ce ne sont pas des voisins.
+_SORTIE_NDP_MORTES = """fe80::1 dev eth0 lladdr aa:bb:cc:00:04:10 router REACHABLE
+2001:db8::a dev eth0 lladdr 00:00:00:00:00:00 INCOMPLETE
+2001:db8::b dev eth0 lladdr aa:bb:cc:00:04:11 FAILED
+2001:db8::c dev eth0 lladdr aa:bb:cc:00:04:12 STALE
+"""
+N.IS_WINDOWS = False
+N.platform.system = lambda: 'Linux'
+N._run = lambda cmd, timeout=6: _FakeProc('') if cmd[0] == 'ping' else _FakeProc(_SORTIE_NDP_MORTES)
+try:
+    _v6c = N.voisinage_ipv6(rafraichir=True)
+finally:
+    N._run = _run_orig
+    N.IS_WINDOWS = _is_windows_orig
+    N.platform.system = _platform_system_orig
+_ips = sorted(v['ip'] for v in _v6c['voisins'])
+verifier(_ips == ['2001:db8::c', 'fe80::1'],
+         "seules les 2 entrées à MAC réelle et état vivant sont conservées", str(_ips))
+verifier(_v6c['ignores'] == 2, "les 2 entrées mortes (MAC nulle / FAILED) sont comptées dans 'ignores'",
+         str(_v6c['ignores']))
+
 print('\n  ' + ('TOUT OK' if not echecs else 'ÉCHECS : ' + ', '.join(echecs)))
 sys.exit(1 if echecs else 0)

@@ -1,24 +1,24 @@
 {
-  "version": "2.19.44",
-  "release_date": "2026-09-05",
+  "version": "2.19.45",
+  "release_date": "2026-09-06",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.19.44",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.44/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.45/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.45/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.45/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.19.45",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.45/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.45/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.45/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.45/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.19.45/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Audit réseau, lot 4 : granularité — sept techniques de détection alternatives ajoutées pour identifier des appareils jusque-là invisibles ou mal identifiés. Réveil à distance (Wake-on-LAN) à la demande depuis la fiche système ; inventaire logiciel gratuit via HOST-RESOURCES-MIB pour un NAS/serveur SNMP sans collecteur ; empreinte OS passive façon p0f sur le scan réseau ; récepteur de traps SNMP (UDP 162, opt-in) ; table de voisinage IPv6 (NDP) avec ping multicast de courtoisie ; alias d'interface (ifAlias) affiché dans la vue Topologie.",
+    "new_features": "Diagnostic réseau : clarté et fiabilité du test SNMP + du voisinage IPv6. Le bouton « Tester SNMP » interroge désormais TOUS les équipements réseau de l'inventaire (plus seulement le premier), essaie v2c puis v1, et teste une liste de communautés courantes en plus de celles configurées — en signalant celle qui a fonctionné si elle n'est pas dans les réglages. L'encart « Voisinage IPv6 » n'affiche plus les entrées mortes du cache NDP (MAC nulle, état « injoignable »/« incomplet »), qui le noyaient. Note d'aide ajoutée sur l'onglet Topologie pour expliquer pourquoi un équipement peut y manquer alors qu'il figure dans « Équipements ».",
     "improvements": [
-      "Le scan réseau croise désormais aussi l'empreinte TCP/IP passive (TTL, options du SYN initial) pour estimer la famille d'OS d'un appareil muet sur toute sonde active.",
-      "Un NAS ou un serveur Linux avec un agent SNMP standard, mais sans le collecteur ParcInfo, peut désormais fournir un inventaire logiciel gratuit (bouton dédié sur la fiche système).",
-      "Les traps SNMP poussés par les équipements (linkDown, coldStart, alarmes...) peuvent désormais être journalisés en temps réel dans les évènements du diagnostic réseau."
+      "Test SNMP : parcourt tous les switchs/routeurs/bornes/NAS/onduleurs, tente SNMP v2c puis v1, et une quinzaine de communautés par défaut répandues.",
+      "Voisinage IPv6 : les entrées du cache NDP sans MAC réelle ou en état d'échec sont écartées et comptées à part.",
+      "Onglet Topologie : rappel que la carte exige la table MAC (bridge-MIB) ou le LLDP, moins souvent exposées que les compteurs de ports."
     ]
   },
   "checksums": {
@@ -29,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.44"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.19.45"
 }

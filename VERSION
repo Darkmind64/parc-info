@@ -1,8 +1,57 @@
-PARCINFO_VERSION=2.19.44
-RELEASE_DATE=2026-09-05
-BUILD_NUMBER=2026090508
+PARCINFO_VERSION=2.19.45
+RELEASE_DATE=2026-09-06
+BUILD_NUMBER=2026090601
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.45 - Diagnostic reseau : test SNMP + voisinage IPv6 plus clairs
+# Retour terrain (utilisateur sur PC en administrateur) : "Tester SNMP" repondait
+# "aucune reponse" alors que l'onglet Equipements listait bien 3 switchs/routeurs
+# avec leurs ports ; le voisinage IPv6 n'affichait qu'une MAC reelle, tout le
+# reste a 00:00:00:00:00:00 / injoignable ; et la Topologie ne montrait que 2 des
+# 3 equipements sans expliquer pourquoi.
+#
+# 1. BOUTON "TESTER SNMP" (app.api_diag_test_snmp)
+#    - Ne testait QUE le premier appareil par id parmi une liste de types plus
+#      courte que celle du palier 3 (pas de Borne Wi-Fi / Box FAI / Pont Wi-Fi /
+#      Onduleur). Une box FAI muette en tete de liste faisait conclure "aucune
+#      reponse" alors que le switch juste derriere repondait. Le test parcourt
+#      desormais TOUS les equipements reseau de l'inventaire (meme liste que
+#      network_diag._TYPES_EQUIP_SNMP), s'arrete au premier qui repond, et liste
+#      les autres avec le motif exact (_snmp_presence) quand aucun ne repond.
+#    - Ne tentait qu'un GET SNMPv1 (timeout 1,5 s), la ou interroger_equipement
+#      (onglet Equipements) parle v2c GETBULK -> un switch v1-desactive echouait
+#      au test mais reussissait au diagnostic. Nouveau helper _snmp_sysinfo :
+#      essaie v2c PUIS v1.
+#    - Teste aussi une quinzaine de communautes par defaut repandues
+#      (_SNMP_COMMUNAUTES_COURANTES : public, private, community, cisco...) en
+#      plus de celles configurees, et signale ("hors_config") celle qui a
+#      fonctionne si elle n'est pas dans les reglages, pour inviter a l'ajouter.
+#      Uniquement sur clic explicite, en lecture seule (sysName/sysDescr), sur
+#      l'inventaire du client actif, sous un budget de 25 s.
+#
+# 2. VOISINAGE IPv6 (network_diag.voisinage_ipv6)
+#    Le cache NDP de Windows (netsh interface ipv6 show neighbors) liste en
+#    permanence toute adresse jamais resolue, a l'etat "Unreachable"/"Incomplete"
+#    avec une MAC nulle. Ces entrees mortes noyaient la seule ligne utile (la
+#    passerelle). Elles sont desormais ecartees (MAC nulle ou absente, ou etat
+#    dans _NDP_ETATS_MORTS) et comptees a part (champ "ignores", affiche dans
+#    l'encart). Le multicast (ff00::/8) restait deja filtre.
+#
+# 3. ONGLET TOPOLOGIE (templates/diag_reseau.html)
+#    Note d'aide permanente sous le titre de la carte : un equipement present
+#    dans "Equipements" (compteurs de ports, ifTable) peut manquer ici, car la
+#    carte exige en plus la table MAC (bridge-MIB) ou le LLDP, moins souvent
+#    exposees ; "Cartographier maintenant" liste les equipements joignables mais
+#    sans table MAC exploitable avec la raison.
+#
+# Tests : tests/test_diag_reseau.py (le test existant du bouton passe par
+# _snmp_sysinfo ; nouveau test : premier equipement muet -> passe au suivant +
+# communaute courante hors config detectee) ; test_diagnostic_reseau.py section
+# 35quater (voisinage_ipv6 : entrees mortes du cache ecartees et comptees). Suite
+# complete reverifiee (37 scripts + pytest), les 10 echecs pytest preexistants
+# sans rapport (test_diag_reseau.py, baie activite/brassage) subsistent a
+# l'identique, aucune regression.
 
 # Version 2.19.44 - Audit reseau, lot 4 : granularite - techniques alternatives
 # Suite des lots 1 a 3. Sept propositions de l'audit validees par l'utilisateur,

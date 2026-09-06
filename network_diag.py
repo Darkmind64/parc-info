@@ -1793,6 +1793,13 @@ def diag_wifi_apercu(client_id: int) -> dict:
 # segment à se manifester, avant de lire ce cache — jamais bloquant si
 # l'interface/l'outil manque.
 
+# États NDP qui ne désignent pas un voisin joignable : l'entrée est dans le
+# cache mais la résolution n'a jamais abouti (ou plus). `netsh` (Windows) et
+# `ip -6 neigh` (Linux) emploient ces libellés ; `ndp -an` (macOS) n'a pas
+# d'équivalent « échec » explicite.
+_NDP_ETATS_MORTS = frozenset({'unreachable', 'incomplete', 'probe', 'failed', 'none'})
+
+
 def _ping_multicast_ipv6() -> bool:
     """Envoie UN écho ICMPv6 à ff02::1 (tous les nœuds du lien) pour
     rafraîchir le cache de voisinage NDP avant de le lire. Best-effort :
@@ -1872,7 +1879,17 @@ def voisinage_ipv6(rafraichir: bool = True) -> dict:
     # le lien-local (fe80::) reste gardé, c'est la forme la plus courante
     # d'une VRAIE entrée de voisinage NDP.
     voisins = [v for v in voisins if v.get('ip') and not v['ip'].lower().startswith('ff')]
-    return {'voisins': voisins, 'ping_multicast_ok': ping_ok, 'nb': len(voisins)}
+    # Entrées mortes du cache : le NDP de Windows en particulier liste toute
+    # adresse que la pile a un jour tenté de joindre, souvent en permanence à
+    # l'état « Unreachable » / « Incomplete » avec une MAC nulle
+    # (00-00-00-00-00-00). Ce ne sont pas des voisins — on les compte à part.
+    total = len(voisins)
+    voisins = [v for v in voisins
+               if _norm_mac(v.get('mac')) not in _MAC_NULLES
+               and _MAC_RE.fullmatch(_norm_mac(v.get('mac')) or '')
+               and (v.get('etat') or '').strip().lower() not in _NDP_ETATS_MORTS]
+    return {'voisins': voisins, 'ping_multicast_ok': ping_ok, 'nb': len(voisins),
+            'ignores': total - len(voisins)}
 
 
 # ════════════════════════════════════════════════════════════════════════════

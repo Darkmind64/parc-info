@@ -708,6 +708,25 @@ d'un refus ou d'un appareil qui ne fait pas de SNMP.
   SNMP »** (`api_diag_test_snmp`) et par **« Deviner le brassage »**
   (`analyser_brassage_baie` → `switchs_snmp_refuse`, bannière 🔒 dans la modale).
 
+### Bouton « Tester SNMP » (v2.19.45)
+
+`api_diag_test_snmp` parcourt **tous** les appareils réseau de l'inventaire du
+client actif (`network_diag._TYPES_EQUIP_SNMP` : switch, routeur, borne Wi-Fi,
+box FAI, pont Wi-Fi, NAS, onduleur), pas seulement le premier — une box
+opérateur muette en tête de liste faisait sinon conclure « aucune réponse »
+alors qu'un switch derrière répondait. Il s'arrête au premier qui répond ;
+quand aucun ne répond, il liste chaque équipement avec le motif exact de
+`_snmp_presence`.
+
+Pour chaque équipement : SNMPv3 d'abord si configuré, puis `_snmp_sysinfo`
+(sysName + sysDescr, **v2c puis v1** — `interroger_equipement` de l'onglet
+Équipements parle v2c GETBULK, un test qui ne tentait que v1 GET pouvait donc
+échouer là où le diagnostic réussissait) sur les communautés configurées, puis
+sur `_SNMP_COMMUNAUTES_COURANTES` (`public`, `private`, `community`, `cisco`,
+`manager`… — une quinzaine de défauts répandus). La communauté qui a
+fonctionné est signalée `hors_config` si elle n'est pas dans les réglages, pour
+inviter à l'ajouter. Lecture seule, clic explicite, budget global 25 s.
+
 ---
 
 ## Tables de base de données (`app.py:init_db()`)
@@ -720,6 +739,27 @@ d'un refus ou d'un appareil qui ne fait pas de SNMP.
 | `diag_topologie` | instantané FDB/LLDP/STP par équipement (+ `nb_macs_port`, `est_uplink`, `vlan`, `stp_etat`, `stp_amont`, `voisin_ip`, `voisin_modele`) | remplacée à chaque poll |
 | `diag_topologie_mouvements` | transitions d'un relevé à l'autre : appareil apparu / disparu / déplacé de port | `diag_reseau_max_jours` |
 | `diag_metriques` | série temporelle (liaison, débit/erreurs port) pour la baseline | `diag_reseau_max_jours` |
+
+---
+
+## Voisinage IPv6 (NDP)
+
+Encart de l'onglet **Vue d'ensemble** (`GET /api/diag-reseau/ipv6-voisins` →
+`network_diag.voisinage_ipv6`). Le pendant IPv6 de l'ARP : la table de
+voisinage NDP du poste ParcInfo, lue depuis le cache du système
+(`_ndp_windows` / `_ndp_linux` / `_ndp_macos`, aucun privilège requis),
+précédée d'un ping multicast de courtoisie vers `ff02::1`
+(`_ping_multicast_ipv6`) pour réveiller les hôtes IPv6 du lien.
+
+Filtrage (v2.19.45) : les adresses multicast (`ff00::/8`) sont écartées, et
+surtout les **entrées mortes du cache** — le NDP de Windows liste en
+permanence toute adresse qu'il a un jour tenté de joindre, souvent bloquée à
+l'état `Unreachable` / `Incomplete` avec une MAC nulle. Une entrée n'est
+gardée que si elle a une **MAC réelle** (non nulle, bien formée) **et** un
+état hors `_NDP_ETATS_MORTS` (`unreachable`, `incomplete`, `probe`, `failed`).
+Le nombre d'entrées écartées est renvoyé (`ignores`) et affiché dans l'encart.
+Sur un LAN sans IPv6 (pas de RA), cet encart n'a normalement qu'une entrée —
+la passerelle — voire aucune.
 
 ---
 
@@ -744,6 +784,8 @@ d'un refus ou d'un appareil qui ne fait pas de SNMP.
 |--------|--------|
 | Détections palier 1/2 | `network_diag.py` : `detecter_*`, `mesurer_qualite_liaison`, `capture_passive` |
 | SNMP (palier 3) | `interroger_equipement`, `_analyser_snmp`, `interroger_equipements_client`, `etat_snmp` |
+| Bouton « Tester SNMP » | `app.api_diag_test_snmp` (tous les `network_diag._TYPES_EQUIP_SNMP`, v3 puis `app._snmp_sysinfo` v2c→v1, communautés config + `app._SNMP_COMMUNAUTES_COURANTES`) |
+| Voisinage IPv6 (NDP) | `network_diag.voisinage_ipv6` (+ `_ndp_windows`/`_ndp_linux`/`_ndp_macos`, `_ping_multicast_ipv6`, `_NDP_ETATS_MORTS`), route `GET /api/diag-reseau/ipv6-voisins` |
 | Topologie (palier 4) | `decouvrir_topologie` (récursive, parallèle, sous budget), `_topologie_equipement`, `_journaliser_mouvements`, `_stp_switch`, `_entite_physique`, `_sous_reseaux_equipement`, `etat_topologie`, `proposer_topologie_baie` / `appliquer_topologie_baie`, `lancer_cartographie` / `statut_cartographie` |
 | Sous-réseaux supplémentaires (page Scan réseau) | `network_diag.sous_reseaux_detectes` (sonde `_snmp_presence` + `_sous_reseaux_equipement` par équipement, agrégé), route `GET /api/scan/sous-reseaux`, `templates/scan_reseau.html` (`chargerSousReseaux`/`ajouterSousReseau`) ; `app._parse_cidrs` / `network_diag._parse_plages` (plage_ip_locale multi-valeur) ; `app._appareil_sur_reseau_courant` (confiance étendue à tout le site une fois une plage confirmée) |
 | MAC via SNMP/capture sur un sous-réseau routé (Scan réseau) | `network_diag.hotes_vus_snmp` (table ARP des routeurs/switchs SNMP, `_ip_depuis_suffixe_arp`) et `network_diag.capture_arp_sightings` (écoute ARP passive, scapy) ; `app._scan_host(..., snmp_arp_par_ip=, capture_arp_par_ip=)` en repli sur `_mac_from_arp` uniquement ; `app._run_scan` lance les 2 relevés en parallèle ; badges 🌐/📡 dans `templates/scan_reseau.html` |
