@@ -1220,42 +1220,61 @@ def _compter_changements_oper(conn, client_id, ip, port_index, oper_actuel):
     return sum(1 for i in range(1, len(suite)) if suite[i] != suite[i - 1])
 
 
-def interroger_equipements_client(client_id: int) -> list:
-    """Poll SNMP de tous les switchs/routeurs/NAS du client. Retourne les findings."""
+def interroger_equipements_client(client_id: int, budget_s: float = 0.0) -> list:
+    """Poll SNMP de tous les switchs/routeurs/NAS du client. Retourne les findings.
+
+    Refonte Lot 1 : les switchs/routeurs/NAS sont relevés en **une seule passe
+    parallèle** (`netdiag.collect.balayer`) au lieu d'une boucle séquentielle de
+    `interroger_equipement` (3 GETBULK + 1 GET chacun). Les onduleurs restent
+    traités à part (GET ciblé, peu nombreux). `budget_s` : plafond de la passe."""
     if str(_cfg('diag_snmp_actif', '0')) != '1':
         return []
-    communautes = [c.strip() for c in re.split(r'[,;\s]+',
-                   str(_cfg('diag_snmp_communautes', 'public') or 'public')) if c.strip()]
-    if not communautes:
-        communautes = ['public']
+    communautes = _communautes_snmp()
     try:
         from database import get_db
         conn = get_db()
         placeholders = ','.join('?' * len(_TYPES_EQUIP_SNMP))
         rows = conn.execute(
             f"SELECT id, adresse_ip, type_appareil FROM appareils WHERE client_id=? "
-            f"AND type_appareil IN ({placeholders}) AND adresse_ip!='' AND adresse_ip IS NOT NULL",
-            (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
+            f"AND type_appareil IN ({placeholders}) AND adresse_ip!='' AND adresse_ip IS NOT NULL "
+            f"ORDER BY id", (client_id, *_TYPES_EQUIP_SNMP)).fetchall()
         conn.close()
     except Exception:
         return []
+    equipements = [(r[0], str(r[1]).strip(), r[2]) for r in rows]
     ups_actif = str(_cfg('diag_ups_active', '1')) == '1'
     findings = []
-    for appareil_id, ip, type_app in rows:
+
+    # Onduleurs : GET ciblé (UPS-MIB), traités en séquence — ils sont rares et
+    # `collect.balayer` (walk ifTable) ne les concerne pas.
+    for appareil_id, ip, type_app in equipements:
+        if type_app != _TYPE_UPS:
+            continue
+        if not ups_actif:
+            continue
         try:
-            if type_app == _TYPE_UPS:
-                if not ups_actif:
-                    continue
-                ups = interroger_ups(ip, communautes)
-                if ups is not None:
-                    findings += _analyser_ups(client_id, ip, appareil_id, ups)
-                continue
-            equipement = interroger_equipement(ip, communautes)
-            if equipement is None:
-                continue
-            findings += _analyser_snmp(client_id, ip, appareil_id, equipement)
+            ups = interroger_ups(ip, communautes)
+            if ups is not None:
+                findings += _analyser_ups(client_id, ip, appareil_id, ups)
         except Exception:
-            logger.debug('network_diag: SNMP %s en échec', ip, exc_info=True)
+            logger.debug('network_diag: UPS %s en échec', ip, exc_info=True)
+
+    # Switchs / routeurs / NAS / bornes : UNE passe parallèle.
+    try:
+        from netdiag import collect
+        bal = collect.balayer(client_id, besoins=('compteurs', 'dot3'),
+                              budget_s=budget_s, communautes=communautes,
+                              equipements=equipements)
+    except Exception:
+        logger.exception('network_diag: balayage SNMP impossible')
+        return findings
+    for ip, rv in bal.releves.items():
+        if rv.equipement is None:
+            continue
+        try:
+            findings += _analyser_snmp(client_id, ip, rv.appareil_id, rv.equipement)
+        except Exception:
+            logger.debug('network_diag: analyse SNMP %s en échec', ip, exc_info=True)
     return findings
 
 
@@ -3021,24 +3040,45 @@ def _topologie_equipement(client_id, equip_id, ip, communautes, inventaire, now,
     def _reste():
         return (deadline - time.time()) if deadline else 1e9
 
-    # ── Sonde d'existence, EN PREMIER ────────────────────────────────────────
+    # ── Réutiliser le relevé du collecteur unifié si frais ────────────────────
+    # Refonte Lot 1 : quand `interroger_equipements_client` vient de balayer ce
+    # switch (phase SNMP juste avant la topologie dans un snapshot / cycle), on
+    # récupère son relevé — présence DÉJÀ sondée, interfaces DÉJÀ relevées :
+    # inutile de refaire la sonde `_snmp_presence` ni `_noms_interfaces`.
+    infos = None
+    try:
+        from netdiag import collect as _collect
+        _rv = _collect.releve_frais(ip, max_age=120.0)
+    except Exception:
+        _rv = None
+    if _rv is not None:
+        if not _rv.snmp_ok:
+            return [], [], [], [], True, _rv.motif or 'sans SNMP exploitable'
+        if _rv.interfaces:
+            infos = {ifx: {'nom': m['nom'], 'alias': m.get('alias', ''),
+                           'ethernet': m.get('ethernet', True),
+                           'speed_mbps': m.get('speed_mbps', 0)}
+                     for ifx, m in _rv.interfaces.items()}
+
+    # ── Sinon, sonde d'existence EN PREMIER ──────────────────────────────────
     # Un `GET sysDescr` (~1 s) répond à « y a-t-il un agent lisible ici ? ».
     # Sans elle, un équipement éteint ou dont la communauté est fausse coûtait
     # la vingtaine de parcours SNMP qui suivent, expirant chacun sur son propre
     # délai : près d'une minute par équipement, pendant laquelle la
     # cartographie paraissait figée.
-    try:
-        from app import _snmp_presence
-        present, exploitable, _detail = _snmp_presence(ip, communautes)
-        if not exploitable:
-            logger.info('network_diag: cartographie — %s sans SNMP exploitable (%s)',
-                        ip, _detail)
-            return [], [], [], [], True, _detail
-    except Exception:
-        logger.debug('network_diag: _snmp_presence %s indisponible', ip, exc_info=True)
+    if infos is None:
+        try:
+            from app import _snmp_presence
+            present, exploitable, _detail = _snmp_presence(ip, communautes)
+            if not exploitable:
+                logger.info('network_diag: cartographie — %s sans SNMP exploitable (%s)',
+                            ip, _detail)
+                return [], [], [], [], True, _detail
+        except Exception:
+            logger.debug('network_diag: _snmp_presence %s indisponible', ip, exc_info=True)
 
-    # #07 — cache partagé avec la vue d'activité, TTL 90 s, rafraîchi en fond.
-    infos = _noms_interfaces(ip, communautes) or {}
+        # #07 — cache partagé avec la vue d'activité, TTL 90 s, rafraîchi en fond.
+        infos = _noms_interfaces(ip, communautes) or {}
 
     # Table MAC : même relevé unifié que le cycle d'activité et « Deviner le
     # brassage » (bridge dot1q/dot1d + contexte VLAN + ARP + correction de forme

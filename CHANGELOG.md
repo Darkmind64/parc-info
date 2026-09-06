@@ -1,5 +1,22 @@
 # CHANGELOG - ParcInfo
 
+## [2.19.46] - 2026-09-06 ⚡
+
+### ⚡ Refonte du diagnostic réseau — Lot 1/6 : collecteur SNMP unifié
+
+Le diagnostic réseau frappait les mêmes switchs en **trois balayages SNMP indépendants** : le palier 3 (compteurs par port) le faisait dans une **boucle séquentielle**, le palier 4 (topologie) refaisait sa propre passe, et la vue d'activité de la baie une troisième. Sur un parc de 20 équipements, le palier 3 seul prenait une trentaine de secondes.
+
+Ce premier lot introduit `netdiag/collect.py`, un **collecteur unique** qui relève chaque équipement en **une seule passe GETBULK multi-colonnes**, en parallèle sur tout le parc, sous budget.
+
+- **Palier 3 (`interroger_equipements_client`)** : une passe parallèle remplace la boucle séquentielle de `interroger_equipement` (qui faisait 3 GETBULK + 1 GET par équipement). Sur un parc simulé de 20 équipements × 48 ports, le balayage passe de **~9,6 s à ~1,1 s** (×9). Les onduleurs restent traités à part (GET ciblé UPS-MIB).
+- **Palier 4 (topologie)** : `_topologie_equipement` réutilise le relevé du collecteur quand il est frais — présence SNMP déjà sondée, liste des interfaces déjà connue — au lieu de re-sonder chaque équipement.
+- **Budget** : un balayage borné dans le temps renvoie les équipements non terminés dans une liste `muets` avec le motif exact — jamais un balayage sauté en silence.
+- Nouveau réglage `diag_snmp_workers` (défaut 8) : nombre d'équipements balayés de front.
+
+Aucun changement visible d'interface à ce stade. Les lots suivants portent : modèle d'état + auto-résolution des évènements (Lot 2), orchestrateur continu qui ne saute jamais le SNMP (Lot 3), refonte de l'interface avec un écran **« Trafic & erreurs »** dédié et lisible (Lot 4), intégrations inventaire / baie / fiche système / dashboard (Lot 5), découpage en package et réécriture de la doc (Lot 6).
+
+**Tests** : `tests/test_netdiag_collect.py` (8 tests : forme compatible, une seule passe par équipement, parallélisme réel, budget → `muets`, agent muet coupe court, dédup par IP, exclusion UPS, `releve_frais`). Bench reproductible : `python bench_collecte.py`. Suite complète revérifiée (244 passants, +8 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
+
 ## [2.19.45] - 2026-09-06 🔎
 
 ### 🔎 Diagnostic réseau : test SNMP et voisinage IPv6 plus clairs

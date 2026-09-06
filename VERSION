@@ -1,8 +1,39 @@
-PARCINFO_VERSION=2.19.45
+PARCINFO_VERSION=2.19.46
 RELEASE_DATE=2026-09-06
-BUILD_NUMBER=2026090601
+BUILD_NUMBER=2026090602
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.19.46 - Refonte diagnostic reseau, Lot 1/6 : collecteur SNMP unifie
+# Le diagnostic reseau frappait les memes switchs en TROIS balayages SNMP
+# independants : palier 3 (compteurs par port) en boucle SEQUENTIELLE, palier 4
+# (topologie) refaisait sa propre passe, la vue d'activite baie une troisieme.
+# Sur un parc de 20 equipements, le palier 3 seul prenait ~30 s.
+#
+# Nouveau module netdiag/collect.py : un collecteur UNIQUE qui releve chaque
+# equipement en UNE passe GETBULK multi-colonnes (ifTable + ifXTable +
+# dot3StatsTable batchees), en parallele sur tout le parc (ThreadPoolExecutor,
+# _snmp_presence en tete pour couper court sur un agent muet, deadline propagee),
+# sous budget (equipements non termines -> liste `muets` avec motif, jamais un
+# balayage saute en silence). Cache memoire + `releve_frais(ip, max_age)` pour
+# un consommateur temps reel.
+#
+# - interroger_equipements_client : passe parallele au lieu de la boucle
+#   sequentielle de interroger_equipement (3 GETBULK + 1 GET chacun). Bench
+#   (parc simule 20 equip. x 48 ports, latence 120 ms) : ~9,6 s -> ~1,1 s (x9).
+#   Les onduleurs restent traites a part (GET cible UPS-MIB).
+# - _topologie_equipement : reutilise le releve du collecteur quand il est frais
+#   (presence deja sondee, interfaces deja connues) au lieu de re-sonder.
+# - nouveau reglage diag_snmp_workers (defaut 8).
+#
+# Aucun changement d'interface. Lots suivants : modele d'etat + auto-resolution
+# (2), orchestrateur continu qui ne saute jamais le SNMP (3), refonte UI avec
+# ecran "Trafic & erreurs" dedie (4), integrations inventaire/baie/fiche (5),
+# package netdiag + doc (6).
+#
+# Tests : tests/test_netdiag_collect.py (8), bench_collecte.py reproductible.
+# Suite complete : 244 passants (+8), 10 echecs baie preexistants sans rapport
+# inchanges, 38/38 scripts racine.
 
 # Version 2.19.45 - Diagnostic reseau : test SNMP + voisinage IPv6 plus clairs
 # Retour terrain (utilisateur sur PC en administrateur) : "Tester SNMP" repondait
