@@ -161,7 +161,13 @@ CFG_DEFAULTS = {
     # ── Diagnostic réseau (module network_diag) ───────────────────────────────
     'diag_surveillance_active': '0',   # thread de surveillance continue
     'diag_capture_active': '0',        # palier 2 : capture passive scapy (OFF par défaut)
-    'diag_intervalle_s': '300',        # période du moniteur continu
+    'diag_intervalle_s': '300',        # période des sondes hôte (ARP, ping, DNS, DHCP, Wi-Fi)
+    # Refonte Lot 3 : le SNMP et la topologie ont leur PROPRE cadence, jamais
+    # conditionnée par les sondes hôte qui les précédaient (et pouvaient les
+    # « sauter » sur budget). Le collecteur unifié étant rapide, on peut sonder
+    # plus souvent.
+    'diag_snmp_intervalle_s': '120',   # période du balayage SNMP (palier 3)
+    'diag_topo_intervalle_s': '900',   # période de la cartographie de topologie (palier 4)
     'diag_snapshot_duree_s': '20',     # fenêtre d'un snapshot / d'une capture
     'diag_seuil_broadcast_pps': '150', # seuil tempête de broadcast (paquets/s)
     'diag_seuil_perte_pct': '5',       # seuil perte de paquets (%)

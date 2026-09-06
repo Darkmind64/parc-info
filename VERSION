@@ -41,12 +41,27 @@ STATUS=STABLE
 #   cycle snapshot / surveillance.
 # - diag_reseau_evenements gagne equipement_ip / port_index / baie_slot_id.
 #
-# Aucun changement d'interface. Lots suivants : orchestrateur continu (3),
-# refonte UI + ecran "Trafic & erreurs" (4), integrations (5), package (6).
+# Lot 3 : orchestrateur a cadences INDEPENDANTES.
+# Avant : un cycle monolithique toutes les 5 min (sondes hote PUIS SNMP PUIS
+# topologie PUIS capture, en serie) -> un ping lent faisait manquer le SNMP.
+# Le thread de surveillance devient un ordonnanceur (tick 30 s) ; chaque
+# sous-tache a sa propre horloge :
+#  - sondes hote : diag_intervalle_s (300 s)
+#  - balayage SNMP : diag_snmp_intervalle_s (NOUVEAU, 120 s)
+#  - topologie : diag_topo_intervalle_s (NOUVEAU, 900 s)
+# Le SNMP n'est JAMAIS conditionne par les sondes hote. Un diagnostic ponctuel
+# ne met plus non plus le SNMP derriere un garde de budget (un balayage qui
+# deborde remonte ses equipements lents dans `muets`). etat_moniteur expose
+# les cadences. _moniteur_cycle decoupe en _cycle_sondes_hote / _cycle_snmp /
+# _cycle_topo / _cycle_capture ; _moniteur_tick porte l'ordonnancement.
+#
+# Aucun changement d'interface. Lots suivants : refonte UI + ecran
+# "Trafic & erreurs" (4), integrations (5), package netdiag + doc (6).
 #
 # Tests : test_netdiag_collect.py (8), test_netdiag_analyse.py (11),
-# test_netdiag_events.py (5) ; bench_collecte.py. Suite : 260 passants (+24),
-# 10 echecs baie preexistants inchanges, 38/38 scripts racine.
+# test_netdiag_events.py (5), test_netdiag_orchestrateur.py (2) ;
+# bench_collecte.py. Suite : 262 passants (+26), 10 echecs baie preexistants
+# inchanges, 38/38 scripts racine.
 
 # Version 2.19.45 - Diagnostic reseau : test SNMP + voisinage IPv6 plus clairs
 # Retour terrain (utilisateur sur PC en administrateur) : "Tester SNMP" repondait

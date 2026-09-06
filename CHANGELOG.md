@@ -20,9 +20,20 @@ Ce premier lot introduit `netdiag/collect.py`, un **collecteur unique** qui rel�
 - **Auto-résolution** : un évènement d'erreur de port (`port_crc`, `duplex_mismatch`…) se **résout tout seul** quand sa condition n'a pas reparu depuis `diag_snmp_auto_resolution_s` (défaut 30 min) sur un équipement **toujours relevé** — on ne clôt jamais un problème simplement parce que le switch est devenu injoignable. Avant, il fallait cliquer « résoudre » à la main même des jours après le remplacement du câble.
 - `diag_reseau_evenements` gagne les colonnes `equipement_ip` / `port_index` / `baie_slot_id` (elles étaient noyées dans `details_json`).
 
-Aucun changement visible d'interface. Les lots suivants portent : orchestrateur continu qui ne saute jamais le SNMP (Lot 3), refonte de l'interface avec un écran **« Trafic & erreurs »** dédié et lisible (Lot 4), intégrations inventaire / baie / fiche système / dashboard (Lot 5), découpage en package et réécriture de la doc (Lot 6).
+**Lot 3 — orchestrateur à cadences indépendantes.**
 
-**Tests** : `tests/test_netdiag_collect.py` (8), `tests/test_netdiag_analyse.py` (11 : chaque classe d'erreur, deltas robustes au bouclage, findings + lignes d'état), `tests/test_netdiag_events.py` (5 : auto-résolution, non-résolution si condition récente ou équipement injoignable). Bench reproductible : `python bench_collecte.py`. Suite complète revérifiée (260 passants, +24 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
+Avant, la surveillance continue faisait un cycle **monolithique** toutes les 5 min : sondes hôte (ping, DNS, DHCP, Wi-Fi) *puis* SNMP *puis* topologie *puis* capture, en série. Un ping lent ou un scan Wi-Fi qui traînait suffisait à faire manquer le SNMP.
+
+Le thread de surveillance devient un **ordonnanceur** (tick de 30 s) où chaque sous-tâche a **sa propre horloge** :
+- sondes hôte : `diag_intervalle_s` (défaut 300 s) ;
+- balayage SNMP : `diag_snmp_intervalle_s` (**nouveau**, défaut 120 s) — le collecteur unifié étant rapide, on peut sonder deux fois plus souvent ;
+- cartographie de topologie : `diag_topo_intervalle_s` (**nouveau**, défaut 900 s).
+
+Le **SNMP n'est jamais conditionné par les sondes hôte** — il tourne sur son propre créneau, quoi qu'il arrive. Un diagnostic ponctuel (« Lancer un diagnostic ») ne place plus non plus le SNMP derrière un garde de budget : un balayage qui dépasse quand même remonte ses équipements lents dans la liste `muets`, il n'est plus sauté en silence. `etat_moniteur` expose les cadences.
+
+Aucun changement visible d'interface. Les lots suivants portent : refonte de l'interface avec un écran **« Trafic & erreurs »** dédié et lisible (Lot 4), intégrations inventaire / baie / fiche système / dashboard (Lot 5), découpage en package et réécriture de la doc (Lot 6).
+
+**Tests** : `tests/test_netdiag_collect.py` (8), `tests/test_netdiag_analyse.py` (11 : chaque classe d'erreur, deltas robustes au bouclage, findings + lignes d'état), `tests/test_netdiag_events.py` (5 : auto-résolution, non-résolution si condition récente ou équipement injoignable), `tests/test_netdiag_orchestrateur.py` (2 : cadences indépendantes SNMP/topo/hôte, SNMP désactivé). Bench reproductible : `python bench_collecte.py`. Suite complète revérifiée (262 passants, +26 ; les 10 échecs baie préexistants sans rapport inchangés) + 38/38 scripts racine.
 
 ## [2.19.45] - 2026-09-06 🔎
 

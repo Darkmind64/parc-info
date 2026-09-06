@@ -4234,9 +4234,14 @@ def _run_snapshot(client_id: int, plage: str, avec_capture, rapide=None):
         findings += detecter_conflits_noms(client_id)
         _fin_phase('noms', tp)
 
-        if str(_cfg('diag_snmp_actif', '0')) == '1' and _budget_ok('Interrogation SNMP'):
+        # Le SNMP n'est plus derrière un garde de budget : le collecteur unifié
+        # (Lot 1) est rapide et parallèle, et « aucune donnée SNMP » sur du
+        # matériel qui répond était le principal reproche. Un balayage qui
+        # dépasse quand même remonte ses équipements lents dans `muets`.
+        if str(_cfg('diag_snmp_actif', '0')) == '1':
             tp = _phase('snmp', 76, 'Interrogation SNMP des équipements réseau')
-            findings += interroger_equipements_client(client_id)
+            findings += interroger_equipements_client(
+                client_id, budget_s=max(15, budget - (time.time() - t0)) if budget else 0)
             _fin_phase('snmp', tp)
             if str(_cfg('diag_topologie_active', '0')) == '1' and _budget_ok('Cartographie de topologie'):
                 tp = _phase('topologie', 84, 'Cartographie de topologie L2')
@@ -4459,9 +4464,9 @@ def _alerter_email(client_id: int, findings: list):
 #  Surveillance continue (thread démon, modèle _watchdog_loop)
 # ════════════════════════════════════════════════════════════════════════════
 
-def _moniteur_cycle():
-    if str(_cfg('diag_surveillance_active', '0')) != '1':
-        return
+def _moniteur_clients():
+    """Clients à surveiller : ceux qui ont un appareil avec IP ET dont le réseau
+    est joignable depuis ce poste."""
     try:
         from database import get_db
         conn = get_db()
@@ -4470,26 +4475,15 @@ def _moniteur_cycle():
         ).fetchall()]
         conn.close()
     except Exception:
-        return
-    if not clients:
-        return
-
-    # Ne surveiller que les clients dont le réseau est joignable depuis ce poste
+        return []
     try:
         from app import _reseaux_locaux_actuels, _appareil_sur_reseau_courant
         reseaux = _reseaux_locaux_actuels()
     except Exception:
-        reseaux, _appareil_sur_reseau_courant = set(), None
-
-    seuil_perte = _cfg_float('diag_seuil_perte_pct', 5)
-    seuil_gigue = _cfg_float('diag_seuil_jitter_ms', 30)
-    seuil_bc = _cfg_int('diag_seuil_broadcast_pps', 150)
-    avec_capture = str(_cfg('diag_capture_active', '0')) == '1'
-    avec_snmp = str(_cfg('diag_snmp_actif', '0')) == '1'
-    avec_topo = str(_cfg('diag_topologie_active', '0')) == '1'
-    passerelle = _passerelle_defaut()
-
-    capture_faite = False
+        return clients
+    if not reseaux:
+        return clients
+    joignables = []
     for cid in clients:
         try:
             from database import get_db
@@ -4498,62 +4492,154 @@ def _moniteur_cycle():
                                (cid,)).fetchone()
             conn.close()
             plage = (row[0] if row else '') or ''
-            if _appareil_sur_reseau_courant and reseaux and not _appareil_sur_reseau_courant('', plage, reseaux):
-                continue
+            if _appareil_sur_reseau_courant('', plage, reseaux):
+                joignables.append(cid)
+        except Exception:
+            joignables.append(cid)
+    return joignables
 
-            findings = detecter_conflits_ip(passerelle, releves=1)
-            cibles = _cibles_ping(cid, passerelle)
-            stats_liaison = []
-            _n = 8 if str(_cfg('diag_snapshot_rapide', '0')) == '1' else 10
-            findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, n=_n,
-                                                collecte=stats_liaison)
-            enregistrer_metriques_liaison(cid, stats_liaison)
-            findings += detecter_conflits_noms(cid)
-            if str(_cfg('diag_wifi_active', '1')) == '1':
-                findings += diagnostiquer_wifi(cid)
-            if avec_snmp:
-                findings += interroger_equipements_client(cid)
-                if avec_topo:
-                    findings += decouvrir_topologie(cid, budget_s=_TOPO_BUDGET_S)['findings']
-            findings += evaluer_baseline(cid)
-            src = 'actif'
-            if avec_capture and not capture_faite and etat_capture()['disponible']:
-                findings += capture_passive(_cfg_int('diag_snapshot_duree_s', 20),
-                                            {'broadcast_pps': seuil_bc})
-                capture_faite, src = True, 'capture'
-            _enregistrer_evenements(cid, findings, src if src == 'capture' else 'actif')
-            if avec_snmp:
+
+def _cycle_sondes_hote(cid: int) -> list:
+    """Palier 1 (+ Wi-Fi, baseline) : sondes menées depuis ce poste. Rapides,
+    cadence `diag_intervalle_s`."""
+    passerelle = _passerelle_defaut()
+    seuil_perte = _cfg_float('diag_seuil_perte_pct', 5)
+    seuil_gigue = _cfg_float('diag_seuil_jitter_ms', 30)
+    findings = detecter_conflits_ip(passerelle, releves=1)
+    cibles = _cibles_ping(cid, passerelle)
+    stats_liaison = []
+    _n = 8 if str(_cfg('diag_snapshot_rapide', '0')) == '1' else 10
+    findings += mesurer_qualite_liaison(cibles, seuil_perte, seuil_gigue, n=_n,
+                                        collecte=stats_liaison)
+    enregistrer_metriques_liaison(cid, stats_liaison)
+    findings += detecter_conflits_noms(cid)
+    if str(_cfg('diag_wifi_active', '1')) == '1':
+        findings += diagnostiquer_wifi(cid)
+    findings += evaluer_baseline(cid)
+    return findings
+
+
+def _cycle_snmp(cid: int) -> list:
+    """Palier 3 : balayage SNMP unifié. Cadence `diag_snmp_intervalle_s`,
+    INDÉPENDANTE des sondes hôte — le SNMP n'est plus « sauté » parce qu'un
+    ping ou un scan Wi-Fi a été lent."""
+    if str(_cfg('diag_snmp_actif', '0')) != '1':
+        return []
+    return interroger_equipements_client(cid)
+
+
+def _cycle_topo(cid: int) -> list:
+    """Palier 4 : cartographie de topologie L2. Cadence `diag_topo_intervalle_s`."""
+    if str(_cfg('diag_topologie_active', '0')) != '1' or str(_cfg('diag_snmp_actif', '0')) != '1':
+        return []
+    try:
+        return decouvrir_topologie(cid, budget_s=_TOPO_BUDGET_S).get('findings', [])
+    except Exception:
+        logger.debug('network_diag: cycle topologie — client %s en échec', cid, exc_info=True)
+        return []
+
+
+def _cycle_capture(cid: int) -> tuple[list, bool]:
+    """Palier 2 : capture passive (une seule fois, quel que soit le nb de
+    clients — la sonde est locale au poste). (findings, faite)."""
+    if str(_cfg('diag_capture_active', '0')) != '1' or not etat_capture().get('disponible'):
+        return [], False
+    seuil_bc = _cfg_int('diag_seuil_broadcast_pps', 150)
+    return capture_passive(_cfg_int('diag_snapshot_duree_s', 20),
+                           {'broadcast_pps': seuil_bc}), True
+
+
+def _moniteur_loop():
+    """Ordonnanceur de la surveillance continue (refonte Lot 3).
+
+    Chaque sous-tâche a sa PROPRE cadence — le balayage SNMP et la topologie ne
+    sont plus conditionnés par la lenteur des sondes hôte qui les précédaient
+    dans un cycle monolithique. Tick de 30 s ; à chaque tick, on exécute les
+    sous-tâches échues.
+    """
+    _diag_moniteur_state['running'] = True
+    time.sleep(15)  # laisser l'app finir de démarrer
+    prochains = {'hote': 0.0, 'snmp': 0.0, 'topo': 0.0}
+    while True:
+        try:
+            if str(_cfg('diag_surveillance_active', '0')) == '1':
+                _moniteur_tick(prochains)
+        except Exception:
+            logger.debug('network_diag: _moniteur_tick', exc_info=True)
+        time.sleep(30)
+
+
+def _moniteur_tick(prochains: dict):
+    now = time.time()
+    due = set()
+    if now >= prochains['hote']:
+        due.add('hote')
+        prochains['hote'] = now + max(60, _cfg_int('diag_intervalle_s', 300))
+    if now >= prochains['snmp'] and str(_cfg('diag_snmp_actif', '0')) == '1':
+        due.add('snmp')
+        prochains['snmp'] = now + max(30, _cfg_int('diag_snmp_intervalle_s', 120))
+    if now >= prochains['topo'] and str(_cfg('diag_topologie_active', '0')) == '1' \
+            and str(_cfg('diag_snmp_actif', '0')) == '1':
+        due.add('topo')
+        prochains['topo'] = now + max(120, _cfg_int('diag_topo_intervalle_s', 900))
+    if not due:
+        return
+    clients = _moniteur_clients()
+    if not clients:
+        return
+
+    capture_faite = False
+    for cid in clients:
+        try:
+            findings, src = [], 'actif'
+            if 'hote' in due:
+                findings += _cycle_sondes_hote(cid)
+                if not capture_faite:
+                    fc, faite = _cycle_capture(cid)
+                    if faite:
+                        findings += fc
+                        capture_faite, src = True, 'capture'
+            if 'snmp' in due:
+                findings += _cycle_snmp(cid)
+            if 'topo' in due:
+                findings += _cycle_topo(cid)
+            if findings:
+                _enregistrer_evenements(cid, findings, src)
+            if 'snmp' in due:
                 try:
                     from netdiag import events as _events
                     _events.auto_resoudre_snmp(cid)
                 except Exception:
                     logger.debug('network_diag: auto-résolution SNMP en échec', exc_info=True)
+            from database import get_db
             conn = get_db()
             _purger_anciens(conn, cid)
             conn.commit()
             conn.close()
         except Exception:
-            logger.debug('network_diag: cycle moniteur — client %s en échec', cid, exc_info=True)
+            logger.debug('network_diag: tick moniteur — client %s en échec', cid, exc_info=True)
 
-    _diag_moniteur_state['last_cycle'] = _now_z()
+    now_z = _now_z()
+    _diag_moniteur_state['last_cycle'] = now_z
     _diag_moniteur_state['cycle_count'] += 1
+    _diag_moniteur_state.setdefault('sous_taches', {})
+    for k in due:
+        _diag_moniteur_state['sous_taches'][k] = now_z
 
 
-def _moniteur_loop():
-    _diag_moniteur_state['running'] = True
-    time.sleep(15)  # laisser l'app finir de démarrer
-    while True:
-        try:
-            _moniteur_cycle()
-        except Exception:
-            logger.debug('network_diag: _moniteur_cycle', exc_info=True)
-        time.sleep(max(60, _cfg_int('diag_intervalle_s', 300)))
+# Compat : d'anciens tests / appels attendent `_moniteur_cycle()`.
+def _moniteur_cycle():
+    if str(_cfg('diag_surveillance_active', '0')) != '1':
+        return
+    _moniteur_tick({'hote': 0.0, 'snmp': 0.0, 'topo': 0.0})
 
 
 def etat_moniteur() -> dict:
     d = dict(_diag_moniteur_state)
     d['active'] = str(_cfg('diag_surveillance_active', '0')) == '1'
     d['intervalle_s'] = _cfg_int('diag_intervalle_s', 300)
+    d['snmp_intervalle_s'] = _cfg_int('diag_snmp_intervalle_s', 120)
+    d['topo_intervalle_s'] = _cfg_int('diag_topo_intervalle_s', 900)
     return d
 
 
