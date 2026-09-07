@@ -2196,6 +2196,21 @@ def init_db():
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
     c.execute('''CREATE INDEX IF NOT EXISTS idx_snmp_releves
         ON diag_snmp_releves(client_id, equipement_ip, port_index, epoch)''')
+    # Pré-chauffe de la vue d'activité de la baie : dernier relevé complet d'un
+    # switch (compteurs par port + noms d'interface + sysinfo + sysUpTime),
+    # écrasé à chaque passage. Sert d'amorce au 1er cycle d'activité pour que les
+    # LEDs s'animent DÈS l'ouverture de /baie (avant : il fallait 2 cycles pour
+    # calculer un débit, et tout était oublié 2 min après qu'on quitte la page).
+    c.execute('''CREATE TABLE IF NOT EXISTS diag_baie_snapshot (
+        client_id INTEGER NOT NULL,
+        equipement_ip TEXT NOT NULL,
+        epoch REAL DEFAULT 0,
+        sut INTEGER DEFAULT 0,
+        sysinfo_json TEXT DEFAULT '{}',
+        interfaces_json TEXT DEFAULT '{}',
+        ports_json TEXT DEFAULT '{}',
+        PRIMARY KEY (client_id, equipement_ip),
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
     # Palier 4 — topologie L2 découverte (instantané, remplacé à chaque poll).
     c.execute('''CREATE TABLE IF NOT EXISTS diag_topologie (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

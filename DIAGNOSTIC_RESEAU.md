@@ -308,9 +308,36 @@ Pas un palier : une **vue temps réel**, pas une détection. Tant que la page
 `/baie` (sélecteur « ⚡ activité ») **ou** le widget « Activité réseau » du
 tableau de bord est ouvert, le navigateur envoie un battement à
 `GET /api/baie/activite` toutes les 3 s. Un thread démon `_activite_loop`
-(`network_diag.py`, calqué sur `_moniteur_loop`, démarré à la première requête,
-se rendort dès qu'aucun battement < 20 s) interroge alors les compteurs SNMP
-des switchs de la baie et calcule l'état à peindre par port.
+(`network_diag.py`, calqué sur `_moniteur_loop`) interroge alors les compteurs
+SNMP des switchs de la baie et calcule l'état à peindre par port.
+
+### Pré-chauffe (v2.22.0)
+
+Sans elle, deux frottements : (a) un démarrage **à froid exige deux relevés**
+espacés de 3 s (le premier n'établit qu'une référence de compteurs, le second
+calcule enfin un débit) ; (b) le thread ne tourne **que pendant qu'on regarde**
+`/baie` et **oublie tout 2 min après** (`_ACTIVITE_PURGE`) — chaque visite un peu
+espacée repart à froid.
+
+- **`diag_baie_snapshot`** (une ligne par switch, écrasée) : le dernier relevé —
+  compteurs par port, noms d'interface, sysinfo, `sysUpTime` — écrit à chaque
+  passage de `_cycle_activite` (`_snapshot_baie_ecrire`).
+- **Amorçage** : au premier cycle à froid, `_amorcer_activite_depuis_snapshot`
+  pré-remplit `_activite_prev` / `_activite_sut` / `_activite_noms` depuis le
+  snapshot s'il a moins de `_SNAPSHOT_BAIE_MAX_AGE` (30 min) → `_etat_led`
+  calcule un débit **dès ce cycle-là**. Appelé **avant** le `ThreadPoolExecutor`
+  pour que `_relever_switch_activite` calcule le bon `dt_switch`.
+- **Relevé de fond** : `_prechauffe_baie_si_due`, dans la branche « personne ne
+  regarde » de `_activite_loop`, relance `_cycle_activite` pour tous les clients
+  ayant un switch en baie (`_clients_avec_switch_baie`) toutes les
+  `diag_baie_prechauffe_s` (300 s). Le thread démarre **dès le lancement de
+  l'app** si `diag_snmp_actif` et `diag_baie_prechauffe` (plus besoin d'une
+  première visite). Opt-in `diag_baie_prechauffe` (défaut on).
+- **Résultat** : `/baie` affiche l'instantané pré-chauffé immédiatement, puis
+  passe en live dès le premier cycle (~3 s) avec de vrais débits. Survit au
+  redémarrage et à une longue absence. *Limite* : un compteur d'octets 32 bits
+  (switch sans ifXTable) peut avoir bouclé entre deux passages → ce port montre
+  0 au premier cycle, corrigé au second.
 
 - **Quels équipements** : `_switchs_baie` — un slot de baie lié à un appareil
   doté d'une **adresse IP**, dont le `type_appareil` est réseau (`_TYPES_EQUIP_SNMP`)
@@ -760,6 +787,8 @@ corriger ? »), dans le rapport et dans l'e-mail d'alerte.
 | `diag_baie_activite_bps_mini` | `500` | vue d'activité baie : débit (bit/s) sous lequel un port up reste « calme » (l'autre voie). Baisser pour clignoter comme un vrai switch |
 | `diag_baie_capture_duree_s` | `20` | moniteur baie : durée de la capture de trafic à la demande |
 | `diag_baie_activite_repli_naif` | `0` | vue d'activité baie : dernier recours `numero de port == ifIndex` (souvent faux — désactivé) |
+| `diag_baie_prechauffe` | `1` | pré-chauffe : relève les switchs de la baie en tâche de fond pour que `/baie` s'anime dès l'ouverture (nécessite `diag_snmp_actif`) |
+| `diag_baie_prechauffe_s` | `300` | période de la pré-chauffe de fond (s) |
 
 SMTP : réutilise `smtp_server` / `smtp_port` / `smtp_login` / `smtp_password` /
 `from_email` (Réglages → e-mail).
@@ -883,6 +912,7 @@ inviter à l'ajouter. Lecture seule, clic explicite, budget global 25 s.
 | `diag_topologie` | instantané FDB/LLDP/STP par équipement (+ `nb_macs_port`, `est_uplink`, `vlan`, `stp_etat`, `stp_amont`, `voisin_ip`, `voisin_modele`) | remplacée à chaque poll |
 | `diag_topologie_mouvements` | transitions d'un relevé à l'autre : appareil apparu / disparu / déplacé de port | `diag_reseau_max_jours` |
 | `diag_metriques` | série temporelle (liaison, débit/erreurs port) pour la baseline + sparklines | `diag_reseau_max_jours` |
+| **`diag_baie_snapshot`** *(v2.22.0)* | dernier relevé complet d'un switch de la baie (compteurs/port + noms d'interface + sysinfo + `sysUpTime`) — **amorce le 1er cycle d'activité** (pré-chauffe) | 1 ligne / switch, écrasée à chaque passage |
 
 ---
 

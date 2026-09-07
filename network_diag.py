@@ -6523,6 +6523,132 @@ def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac, avec_f
         return muet
 
 
+_SNAPSHOT_BAIE_MAX_AGE = 1800.0   # s — au-delà, un snapshot est trop vieux pour amorcer un débit
+_PORT_CPT_KEYS = ('in_oct', 'out_oct', 'in_pkts', 'out_pkts',
+                  'in_npkts', 'out_npkts', 'in_err', 'out_err')
+_prechauffe_last = [0.0]
+
+
+def _snapshot_baie_charger(cid: int) -> dict:
+    """`{ip: {epoch, sut, sysinfo, interfaces, ports}}` — le dernier relevé
+    persisté de chaque switch de la baie du client. Sert d'amorce au 1er cycle
+    d'activité (pré-chauffe, prop. utilisateur)."""
+    from database import get_local_db
+    out = {}
+    try:
+        conn = get_local_db()
+        try:
+            for eip, ep, sut, sj, ij, pj in conn.execute(
+                    "SELECT equipement_ip, epoch, sut, sysinfo_json, interfaces_json, "
+                    "ports_json FROM diag_baie_snapshot WHERE client_id=?", (cid,)):
+                try:
+                    ports = {int(k): v for k, v in json.loads(pj or '{}').items()}
+                    interfaces = {int(k): v for k, v in json.loads(ij or '{}').items()}
+                except (ValueError, TypeError):
+                    continue
+                out[eip] = {'epoch': ep or 0, 'sut': sut or 0,
+                            'sysinfo': _json_charge(sj) or {},
+                            'interfaces': interfaces, 'ports': ports}
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug('network_diag: chargement snapshot baie', exc_info=True)
+    return out
+
+
+def _snapshot_baie_ecrire(cid, ip, infos, cur_ports, sysinfo, sut, epoch):
+    """Écrase le snapshot d'un switch (compteurs par port + noms d'interface +
+    sysinfo + sysUpTime). Best-effort, hors chemin critique."""
+    from database import get_local_db
+    try:
+        ports = {}
+        for ifx, p in (cur_ports or {}).items():
+            if not p.get('oper_ok', True):
+                continue
+            d = {k: p.get(k, 0) for k in _PORT_CPT_KEYS}
+            d['oper'] = p.get('oper', 0)
+            d['speed_mbps'] = p.get('speed_mbps', 0)
+            d['cpt_pegge'] = bool(p.get('cpt_pegge'))
+            ports[str(int(ifx))] = d
+        if not ports:
+            return
+        ifaces = {str(int(k)): {'nom': v.get('nom', ''), 'alias': v.get('alias', ''),
+                                'ethernet': v.get('ethernet', True),
+                                'speed_mbps': v.get('speed_mbps', 0)}
+                  for k, v in (infos or {}).items()}
+        conn = get_local_db()
+        try:
+            conn.execute(
+                "INSERT INTO diag_baie_snapshot (client_id, equipement_ip, epoch, sut, "
+                "sysinfo_json, interfaces_json, ports_json) VALUES (?,?,?,?,?,?,?) "
+                "ON CONFLICT(client_id, equipement_ip) DO UPDATE SET epoch=excluded.epoch, "
+                "sut=excluded.sut, sysinfo_json=excluded.sysinfo_json, "
+                "interfaces_json=excluded.interfaces_json, ports_json=excluded.ports_json",
+                (cid, ip, float(epoch or time.time()), int(sut or 0),
+                 json.dumps(sysinfo or {}, ensure_ascii=False),
+                 json.dumps(ifaces, ensure_ascii=False),
+                 json.dumps(ports, ensure_ascii=False)))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug('network_diag: écriture snapshot baie', exc_info=True)
+
+
+def _amorcer_activite_depuis_snapshot(cid, switchs):
+    """Avant le 1er relevé d'un cycle à froid : pré-remplit `_activite_prev` et
+    `_activite_sut` à partir du dernier snapshot persisté, pour que `_etat_led`
+    calcule un débit DÈS ce cycle-ci (sinon il faut 2 cycles). N'écrase jamais
+    une valeur déjà chaude en mémoire."""
+    if _activite_rechauffe[0] != 0:
+        return {}
+    snaps = _snapshot_baie_charger(cid)
+    if not snaps:
+        return {}
+    maintenant = time.time()
+    for sw in switchs:
+        ip = sw['ip']
+        sn = snaps.get(ip)
+        if not sn or (maintenant - sn['epoch']) > _SNAPSHOT_BAIE_MAX_AGE:
+            continue
+        if any((cid, ip, ifx) in _activite_prev for ifx in sn['ports']):
+            continue
+        for ifx, pc in sn['ports'].items():
+            _activite_prev.setdefault((cid, ip, int(ifx)), {
+                **{k: pc.get(k, 0) for k in _PORT_CPT_KEYS},
+                'bps_ema': 0.0, 'pps_ema': 0.0, 'etat': 'idle', 'manques': 0,
+                'ts': sn['epoch'], 'etat_pending': None, 'etat_pending_n': 0})
+        if sn.get('sut') and (cid, ip) not in _activite_sut:
+            _activite_sut[(cid, ip)] = (sn['sut'], sn['epoch'])
+        if sn.get('interfaces') and ip not in _activite_noms:
+            _activite_noms[ip] = {'ts': sn['epoch'], 'infos': sn['interfaces'],
+                                  'maj_en_cours': False}
+    return snaps
+
+
+def _clients_avec_switch_baie():
+    """Clients ayant au moins un switch/routeur SNMP monté dans une baie (avec
+    IP) — cibles de la pré-chauffe de fond."""
+    from database import get_local_db
+    try:
+        conn = get_local_db()
+        try:
+            ph = ','.join('?' * len(_TYPES_EQUIP_SNMP))
+            ph2 = ','.join('?' * len(_TYPES_EQUIP_BAIE_RESEAU))
+            rows = conn.execute(
+                f"SELECT DISTINCT s.client_id FROM baie_slots s "
+                f"JOIN appareils a ON a.id = s.appareil_id "
+                f"WHERE COALESCE(a.adresse_ip,'') <> '' "
+                f"AND (a.type_appareil IN ({ph}) OR s.type_equipement IN ({ph2}))",
+                (*_TYPES_EQUIP_SNMP, *_TYPES_EQUIP_BAIE_RESEAU)).fetchall()
+            return [r[0] for r in rows]
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug('network_diag: _clients_avec_switch_baie', exc_info=True)
+        return []
+
+
 def _cycle_activite(clients):
     from database import get_local_db
     communautes = _communautes_snmp()
@@ -6558,6 +6684,14 @@ def _cycle_activite(clients):
                         if _m not in inv_mac and _aid in _meta_aid:
                             inv_mac[_m] = (_aid, _meta_aid[_aid][0], _meta_aid[_aid][1])
 
+                # ── amorçage depuis le dernier snapshot persisté ──
+                # À froid (app relancée, ou retour sur /baie après > 2 min), la
+                # référence de compteurs est perdue et il faut DEUX cycles avant
+                # que les LEDs s'animent. Le snapshot (écrit à chaque passage, y
+                # compris par la pré-chauffe de fond) rend ce 1er cycle « chaud ».
+                if switchs:
+                    _amorcer_activite_depuis_snapshot(cid, switchs)
+
                 # ── relevés SNMP : UNE passe par IP, EN PARALLÈLE ──
                 # Avant : boucle séquentielle → N switchs = N× la chaîne
                 # (FDB + interfaces + ports + PoE + sysinfo), les LEDs mettaient
@@ -6583,6 +6717,13 @@ def _cycle_activite(clients):
                         if _r['calib']:
                             calib_a_appliquer.append(_r['calib'])
                         _poll_max_ms[0] = max(_poll_max_ms[0], _r['dms'])
+                        # persiste le relevé → amorce du prochain démarrage à froid
+                        (_i0, _cp0, _ok0, _hc0, _dt0, _rb0, _poe0, _si0, _up0) = _r['poll']
+                        if _ok0 and _cp0:
+                            _s0 = _activite_sut.get((cid, _r['ip']))
+                            _snapshot_baie_ecrire(cid, _r['ip'], _i0, _cp0, _si0,
+                                                  _s0[0] if _s0 else 0,
+                                                  _s0[1] if _s0 else time.time())
 
                 for sw in switchs:
                     ip, slot_id = sw['ip'], sw['slot_id']
@@ -6901,6 +7042,7 @@ def _activite_loop():
                     _activite_calib.pop(k, None)
             if not clients:
                 _activite_rechauffe[0] = 0
+                _prechauffe_baie_si_due()
                 time.sleep(5)
                 continue
             if str(_cfg('diag_snmp_actif', '0')) != '1':
@@ -6930,6 +7072,28 @@ def _activite_loop():
         time.sleep(_cadence[0])
 
 
+def _prechauffe_baie_si_due():
+    """Pré-chauffe de fond : relève les switchs de la baie même quand personne ne
+    regarde `/baie`, pour que la vue s'anime DÈS l'ouverture (au lieu d'après 2
+    cycles). Opt-in `diag_baie_prechauffe` (défaut on), nécessite `diag_snmp_actif`.
+    Cadence `diag_baie_prechauffe_s` (défaut 300 s). Réutilise `_cycle_activite`
+    tel quel — qui amorce depuis le snapshot persisté et le réécrit."""
+    try:
+        if str(_cfg('diag_snmp_actif', '0')) != '1' \
+                or str(_cfg('diag_baie_prechauffe', '1')) != '1':
+            return
+        periode = max(60, _cfg_int('diag_baie_prechauffe_s', 300))
+        if time.time() - _prechauffe_last[0] < periode:
+            return
+        _prechauffe_last[0] = time.time()
+        cl = _clients_avec_switch_baie()
+        if cl:
+            _poll_max_ms[0] = 0
+            _cycle_activite(cl)
+    except Exception:
+        logger.debug('network_diag: pré-chauffe baie', exc_info=True)
+
+
 def _demarrer_activite_thread():
     """Démarre le thread d'activité si besoin (idempotent, lazy). Sous verrou :
     la page et la modale peuvent appeler simultanément au chargement."""
@@ -6940,6 +7104,18 @@ def _demarrer_activite_thread():
         _activite_thread = threading.Thread(target=_activite_loop, daemon=True,
                                             name='DiagBaieActivite')
         _activite_thread.start()
+
+
+# Pré-chauffe : si le SNMP est actif, démarrer le thread dès l'import (sans
+# attendre une visite de /baie) pour que le snapshot soit déjà frais quand
+# l'utilisateur arrive. Best-effort — si la config n'est pas lisible à l'import,
+# le démarrage paresseux (1re requête) prend le relais.
+try:
+    if str(_cfg('diag_snmp_actif', '0')) == '1' \
+            and str(_cfg('diag_baie_prechauffe', '1')) == '1':
+        _demarrer_activite_thread()
+except Exception:
+    pass
 
 
 def activite_baie(client_id: int) -> dict:

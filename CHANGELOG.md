@@ -1,5 +1,28 @@
 # CHANGELOG - ParcInfo
 
+## [2.22.0] - 2026-09-07 ⚡
+
+### Pré-chauffe de la vue d'activité de la baie de brassage
+
+Retour de l'utilisateur : *« les LEDs de la baie prennent un bon moment avant de s'animer »*. La passe performance (2.20.1) avait parallélisé le cycle, mais deux limites de fond restaient :
+
+- un démarrage **à froid exige deux relevés** espacés de 3 s — le premier n'établit qu'une référence, le second calcule enfin un débit ;
+- le thread ne tourne **que pendant qu'on regarde `/baie`** et **oublie tout 2 min après** qu'on quitte la page. Chaque visite un peu espacée repart à froid.
+
+**Ce qui change :**
+
+1. **Snapshot persisté** (nouvelle table `diag_baie_snapshot`, une ligne par switch, écrasée) : compteurs par port + noms d'interface + sysinfo + `sysUpTime`, écrits à chaque passage.
+2. **Amorçage** : au premier cycle à froid, `_activite_prev` / `_activite_sut` / `_activite_noms` sont pré-remplis depuis le snapshot (s'il a moins de 30 min) → `_etat_led` calcule un débit **dès ce cycle-là**. Plus de « tout éteint » au démarrage.
+3. **Pré-chauffe de fond** : `_cycle_activite` est relancé pour tous les clients ayant un switch en baie **toutes les `diag_baie_prechauffe_s` (300 s)**, même quand personne ne regarde. Le thread démarre dès le lancement de l'app si le SNMP est actif. Opt-in `diag_baie_prechauffe` (défaut activé), nécessite `diag_snmp_actif`.
+
+**Résultat** : `/baie` affiche l'instantané pré-chauffé immédiatement, puis se rafraîchit en live dès le premier cycle (~3 s) avec de vrais débits — au lieu de ~10 s de LEDs éteintes. Survit au redémarrage de l'app et à une longue absence.
+
+*Limite* : sur un switch sans compteurs 64 bits, un compteur d'octets 32 bits peut avoir bouclé entre deux passages → ce port montre 0 au premier cycle et se corrige au second.
+
+Tests : `tests/test_baie_prechauffe.py` (5). Suite : 316 passants (+5), 9 échecs préexistants inchangés.
+
+---
+
 ## [2.21.2] - 2026-09-06 🔗
 
 ### FDB tronquée réparée via la table ARP d'un routeur du parc

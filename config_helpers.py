@@ -221,6 +221,8 @@ CFG_DEFAULTS = {
     'diag_baie_activite_bps_mini': '500',  # bit/s sous lesquels un port up reste « calme » (l'autre voie : le débit d'octets, tout trafic confondu). Baisser pour clignoter comme un vrai switch, monter pour ne garder que le trafic soutenu
     'diag_baie_capture_duree_s': '20',     # durée de la capture à la demande du moniteur réseau
     'diag_baie_activite_repli_naif': '0',  # dernier recours : mapper numero de port == ifIndex (souvent faux, désactivé)
+    'diag_baie_prechauffe': '1',           # relève les switchs de la baie en tâche de fond (même quand personne ne regarde) pour que /baie s'anime dès l'ouverture au lieu d'après 2 cycles ; nécessite diag_snmp_actif
+    'diag_baie_prechauffe_s': '300',       # période de la pré-chauffe de fond (s)
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',
