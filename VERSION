@@ -1,9 +1,43 @@
-PARCINFO_VERSION=2.24.2
+PARCINFO_VERSION=2.24.3
 RELEASE_DATE=2026-09-07
-BUILD_NUMBER=2026090706
+BUILD_NUMBER=2026090707
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.24.3 - Baie de brassage : le switch qui repond mais tres lentement
+#
+# Retour terrain (capture d'ecran du Moniteur) : HP ProCurve J9450A / 1810G-24,
+# « poll 127584 ms » (127 s pour UN releve), « Δt 144 s » entre deux cycles,
+# « compteurs 32 bits », l'agent bloque ses compteurs d'octets a 2 Go. Le switch
+# REPOND (la sonde de presence 2.24.2 passe) mais son agent SNMP est minimal :
+# pas d'ifXTable (HC 64 bits), pas de dot3, pas de PoE. `_snmp_bulk_cols`
+# relancait alors un GETNEXT complet (walk) sur CHACUNE de ces ~6-8 colonnes
+# absentes, a CHAQUE `_snmp_bulk` (donc ~5 fois par releve : noms, ports, PoE,
+# sysinfo), a CHAQUE cycle. D'ou les 2 minutes.
+#
+# CORRECTIFS :
+#  - `app._bulk_col_absente` (cache (ip, port, oid_base) -> monotonic, TTL 900 s) :
+#    une colonne restee vide au GETBULK ET au repli GETNEXT est memorisee
+#    « absente » ; le repli n'est plus retente pendant 15 min. Une colonne qui
+#    reapparait vide le cache. Benefice a tous les chemins SNMP (diag, topo).
+#  - `_relever_switch_activite` : le double releve du 1er cycle a froid
+#    (2.24.1) est SAUTE si le 1er poll a pris > `_ACTIVITE_DOUBLE_MAX_MS` (6 s)
+#    — inutile de doubler un agent lent.
+#  - `_activite_hc` (« ce switch a-t-il des compteurs 64 bits ? ») persiste dans
+#    le snapshot (`sysinfo._hc`) et est reamorce par
+#    `_amorcer_activite_depuis_snapshot` -> `_poll_switch_ports` ne redemande
+#    pas l'ifXTable au 1er cycle a froid d'un switch 32 bits connu.
+#
+# Banc (bench_baie_activite.py, nouveau cas « HP 1810G : repond mais lent +
+# agent minimal ») : cycle 1 ~= 1 releve complet (repli une fois), cycles
+# suivants ~= GETBULK des seules colonnes utiles (cache). Sur l'agent factice
+# (40 ms/paquet) : 4,0 s puis 0,9 / 0,1 / 0,1 s.
+#
+# Limite : le 1er cycle a froid d'un vrai 1810G reste lent (le repli GETNEXT
+# tourne une fois) — mais la pre-chauffe + le snapshot font que /baie affiche
+# tout de suite l'etat precedent, et les cycles suivants tombent a ~10-20 s.
+#
+# ----------------------------------------------------------------------------
 # Version 2.24.2 - Baie de brassage : la cause racine du demarrage tres lent
 #
 # Retour utilisateur apres 2.24.1 : "ca ne dure jamais quelques secondes, c'est

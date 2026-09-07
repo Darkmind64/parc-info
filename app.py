@@ -10208,6 +10208,16 @@ def _snmp_presence(ip, communautes=('public',), port=161, timeout=1.2):
     return False, False, 'aucune réponse SNMP'
 
 
+# Colonnes confirmées absentes d'un agent : (ip, port, oid_base) -> monotonic.
+# Un agent lent (HP ProCurve 1810G : un relevé complet ~2 min) répond au GETBULK
+# mais laisse certaines colonnes vides (ifXTable sur un switch 32 bits, dot3
+# non exposé…). Sans ce cache, `_snmp_bulk_cols` relançait un GETNEXT complet
+# (2 communautés × 2 méthodes) sur CHACUNE de ces colonnes à CHAQUE appel —
+# ~20-40 s gaspillées par relevé, à chaque cycle de la vue d'activité baie.
+_bulk_col_absente = {}
+_BULK_COL_ABSENTE_TTL = 900.0     # s — au-delà, on retente une fois (firmware maj, etc.)
+
+
 def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
                     max_rows=600, port=161):
     """Parcourt PLUSIEURS colonnes de table en parallèle par GETBULK (SNMPv2c).
@@ -10216,7 +10226,8 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
     hypothèse d'ordre, contrairement à _snmp_get_typed qui associe par
     position et se trompe sur les agents qui ne respectent pas la RFC 1157).
     Bien moins de paquets qu'un GETNEXT par colonne. Repli GETNEXT
-    (_snmp_walk) par colonne si l'agent ne répond pas au GETBULK."""
+    (_snmp_walk) par colonne si l'agent ne répond pas au GETBULK — sauf pour
+    les colonnes déjà confirmées absentes récemment (`_bulk_col_absente`)."""
     if isinstance(communautes, str):
         communautes = [communautes]
     oid_bases = list(oid_bases)
@@ -10318,10 +10329,25 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
                         break                            # aucun progrès possible
                     courant = suivant
             if ok and any(res.values()):
-                # colonnes restées vides : repli GETNEXT ciblé
+                # GETBULK a marché : les colonnes restées vides n'existent
+                # quasi sûrement pas sur cet agent. Un repli GETNEXT ciblé une
+                # fois (au cas où l'agent les DROP du GETBULK multi-colonnes),
+                # puis on mémorise « absente » pour ne pas le refaire à chaque
+                # cycle sur un agent lent.
+                _now = time.monotonic()
                 for b in oid_bases:
-                    if not res.get(b):
-                        res[b] = _snmp_walk(ip_str, b, communautes, timeout=timeout, port=port)
+                    if res.get(b):
+                        _bulk_col_absente.pop((ip_str, port, b), None)
+                        continue
+                    _ta = _bulk_col_absente.get((ip_str, port, b))
+                    if _ta and _now - _ta < _BULK_COL_ABSENTE_TTL:
+                        continue
+                    _w = _snmp_walk(ip_str, b, communautes, timeout=timeout, port=port)
+                    if _w:
+                        res[b] = _w
+                        _bulk_col_absente.pop((ip_str, port, b), None)
+                    else:
+                        _bulk_col_absente[(ip_str, port, b)] = _now
                 return res
         except Exception:
             continue

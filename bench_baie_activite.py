@@ -67,8 +67,10 @@ def _t(oid):
     return tuple(int(x) for x in oid.split('.'))
 
 
-def _build_mib(nports, tick0):
-    """Table triée [(oid_tuple, tag, valeur)] d'un switch nports ports."""
+def _build_mib(nports, tick0, sans_ifx=False):
+    """Table triée [(oid_tuple, tag, valeur)] d'un switch nports ports.
+    `sans_ifx` : pas d'ifXTable / HC / dot3 (cas HP ProCurve 1810G — compteurs
+    32 bits seulement, agent minimal)."""
     m = {}
     m['1.3.6.1.2.1.1.1.0'] = (OCTETS, 'FakeSwitch %dp bench' % nports)
     m['1.3.6.1.2.1.1.3.0'] = (TICKS, tick0)
@@ -78,7 +80,8 @@ def _build_mib(nports, tick0):
               N._OID_IF_IN_UCAST: CT32, N._OID_IF_OUT_UCAST: CT32,
               N._OID_IF_IN_NUCAST: CT32, N._OID_IF_OUT_NUCAST: CT32,
               N._OID_IF_IN_ERRORS: CT32, N._OID_IF_OUT_ERRORS: CT32}
-    colsx = {N._OID_IF_NAME: OCTETS, N._OID_IF_ALIAS: OCTETS,
+    colsx = {} if sans_ifx else {
+             N._OID_IF_NAME: OCTETS, N._OID_IF_ALIAS: OCTETS,
              N._OID_IF_HCIN: CT64, N._OID_IF_HCOUT: CT64,
              N._OID_IF_HCIN_UCAST: CT64, N._OID_IF_HCOUT_UCAST: CT64,
              N._OID_IF_HIGHSPEED: GAUGE}
@@ -111,8 +114,10 @@ def _build_mib(nports, tick0):
 
 
 class FauxSwitch:
-    def __init__(self, nports=48, delai=0.0, communaute='public', muet=False, bind_ip='127.0.0.1'):
+    def __init__(self, nports=48, delai=0.0, communaute='public', muet=False,
+                 bind_ip='127.0.0.1', sans_ifx=False):
         self.nports, self.delai, self.communaute, self.muet = nports, delai, communaute, muet
+        self.sans_ifx = sans_ifx
         self.t0 = time.time()
         self.polls = 0
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -132,7 +137,7 @@ class FauxSwitch:
     def _mib(self):
         ticks = int((time.time() - self.t0) * 100) + 100000
         # compteurs qui montent : +8 Mbit/s * index et par seconde écoulée
-        return _build_mib(self.nports, ticks)
+        return _build_mib(self.nports, ticks, sans_ifx=self.sans_ifx)
 
     def _succ(self, mib, oid_t):
         for entry in mib:
@@ -293,6 +298,7 @@ def _chrono(label, fn, repet=1):
         getattr(N, k).clear()
     try:
         A._v3_engine_cache.clear(); A._v3_engine_negatif.clear()
+        A._bulk_col_absente.clear()
     except Exception:
         pass
     ts = []
@@ -353,6 +359,13 @@ _cas('3 switchs 48 ports (+10 ms/paquet), relevés en parallèle',
 _cas('LE CAS RÉEL : 1 switch sain + 1 switch INJOIGNABLE dans la même baie',
      [{'nports': 48, 'delai': 0.005, '_nom': 'SW-SAIN'},
       {'nports': 48, 'muet': True, '_nom': 'SW-MORT'}])
+
+# Le cas du terrain : HP ProCurve 1810G — répond (présence OK) mais lent
+# (~40 ms/paquet) et agent minimal (pas d'ifXTable / HC / dot3). Sans le cache
+# de colonnes absentes, chaque cycle relançait un GETNEXT complet sur chaque
+# colonne manquante.
+_cas('HP 1810G : répond mais lent (40 ms/pqt) + agent minimal (32 bits, pas d\'ifX)',
+     [{'nports': 24, 'delai': 0.040, 'sans_ifx': True}], repet=4)
 
 conn.close()
 print('Fait.')
