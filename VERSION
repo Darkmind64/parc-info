@@ -1,9 +1,48 @@
-PARCINFO_VERSION=2.24.1
+PARCINFO_VERSION=2.24.2
 RELEASE_DATE=2026-09-07
-BUILD_NUMBER=2026090705
+BUILD_NUMBER=2026090706
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.24.2 - Baie de brassage : la cause racine du demarrage tres lent
+#
+# Retour utilisateur apres 2.24.1 : "ca ne dure jamais quelques secondes, c'est
+# toujours plusieurs minutes". Banc de mesure a SNMP reel construit pour chiffrer
+# (bench_baie_activite.py, faux agent SNMPv2c GET/GETNEXT/GETBULK) :
+#
+#   1 switch 48 ports sain, agent instantane .......... cycle 1  1,9 s / puis 0,1 s
+#   1 switch 48 ports sain, +30 ms par paquet ......... cycle 1  3,0 s / puis 0,7 s
+#   1 switch INJOIGNABLE (aucune reponse SNMP) ........ cycle 1 37,5 s / cycle 2 43,5 s  (!!)
+#   1 switch, MAUVAISE COMMUNAUTE ..................... cycle 1 37,5 s / cycle 2 51,9 s  (!!)
+#   1 switch sain + 1 switch mort dans la meme baie ... ~40 s A CHAQUE cycle
+#
+# CAUSE : la vue d'activite (_relever_switch_activite -> _noms_interfaces +
+# _poll_switch_ports + _poll_poe) n'avait AUCUNE sonde de presence. Quand un
+# switch ne repond pas, chaque `_snmp_bulk` echoue au GETBULK sur toutes les
+# communautes puis tombe dans le repli GETNEXT `_snmp_walk` COLONNE PAR COLONNE
+# (~10 colonnes pour _poll_switch_ports), chacune = 2 communautes x 2 methodes x
+# timeout ~= 5 s -> ~45 s pour un seul releve. Et comme les switchs d'une baie
+# sont releves dans un meme lot parallele dont on attend la fin (list(ex.map)),
+# les LED de TOUS les autres restaient gelees derriere le mort, cycle apres cycle.
+#
+# CORRECTIF : `_presence_baie_ok(cid, ip, communautes)` en tete de
+# `_relever_switch_activite` — 1 GET sysDescr (v3 si configure, sinon
+# communautes, timeout 1,5 s). Un switch qui ne repond pas -> relevé "muet"
+# immediat, `_poll_switch_ports` jamais appele pour lui. Cache : "vivant" 30 s
+# (on ne re-sonde pas un switch sain a chaque tick), "muet" 25 s. Purge avec les
+# autres registres `_activite_*` quand un client quitte /baie.
+#
+# APRES (meme banc) :
+#   1 switch INJOIGNABLE .............................. cycle 1  4,0 s / puis 0,0 s
+#   1 switch MAUVAISE COMMUNAUTE ...................... cycle 1  4,0 s / puis 0,0 s
+#   1 switch sain + 1 switch mort ..................... cycle 1  4,0 s / puis 0,2 s
+#   1 switch sain seul ............................... cycle 1  1,9 s / puis 0,1 s (inchange)
+#
+# bench_baie_activite.py ajoute au depot (comme bench_sondes / bench_collecte).
+# Tests : tests/test_baie_prechauffe.py (+1 : le switch mort n'est pas polle,
+# le cycle aboutit).
+#
+# ----------------------------------------------------------------------------
 # Version 2.24.1 - Baie de brassage : demarrage encore lent (suite + correctif)
 #
 # REGRESSION 2.24.0 corrigee : le mode terrain bridait `_prechauffe_baie_si_due`

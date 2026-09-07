@@ -1,23 +1,24 @@
 {
-  "version": "2.24.1",
+  "version": "2.24.2",
   "release_date": "2026-09-07",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.24.1",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.24.2",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif : la baie de brassage demarrait de nouveau lentement. Le mode terrain (2.24.0) coupait par erreur la pre-chauffe de fond de la baie sur une instance Docker (mode consultation par defaut) - elle n'ecrit pourtant qu'un cache de compteurs, sans toucher a l'inventaire : elle n'est plus bridee. En plus : la boucle de fond se reveille immediatement a l'ouverture de /baie (au lieu d'attendre jusqu'a 5 s), le tout premier passage a froid fait deux releves rapproches pour que les LED s'animent des ce cycle (au lieu du suivant), et les noms de ports s'affichent tout de suite meme depuis un ancien instantane.",
+    "new_features": "Correctif majeur du demarrage de la baie de brassage. Un banc de mesure a SNMP reel (bench_baie_activite.py) a chiffre le probleme : un switch injoignable ou avec une mauvaise communaute coutait ~40 secondes A CHAQUE cycle de relevé (replis GETNEXT colonne par colonne), et comme les switchs sont releves ensemble, les LED de TOUS les autres restaient gelees derriere lui pendant des minutes. La vue d'activite sonde maintenant d'abord la presence SNMP de chaque switch (1 requete, ~1,5 s) et ecarte immediatement ceux qui ne repondent pas, avec mise en cache. Resultat mesure : le cas 'un switch sain + un switch mort dans la meme baie' passe de plusieurs minutes par cycle a ~4 s au 1er passage puis instantane. Inclut aussi les correctifs 2.24.1 (pre-chauffe non bridee par le mode terrain, reveil immediat de la boucle, double releve a froid).",
     "improvements": [
+      "Baie : sonde de presence SNMP en tete de cycle -> un switch injoignable / mauvaise communaute n'aspire plus ~40 s par cycle (mesure : bench_baie_activite.py).",
       "Baie : pre-chauffe de fond non bridee par le mode terrain (regression 2.24.0).",
-      "Baie : la boucle d'activite se reveille des l'ouverture de /baie (attente supprimee).",
+      "Baie : la boucle d'activite se reveille des l'ouverture de /baie.",
       "Baie : 1er cycle a froid = 2 releves SNMP rapproches -> LED animees des ce cycle.",
       "Baie : etiquettes de ports amorcees depuis n'importe quel instantane, meme ancien."
     ]
@@ -30,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.24.1"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.24.2"
 }

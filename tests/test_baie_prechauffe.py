@@ -7,6 +7,7 @@ import network_diag as N
 
 
 def _mock_snmp_switch(monkeypatch, ports):
+    monkeypatch.setattr(N, '_presence_baie_ok', lambda *a, **k: True)
     monkeypatch.setattr(N, '_noms_interfaces',
                         lambda ip, c: {i: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True,
                                            'speed_mbps': ports[i].get('speed_mbps', 0)} for i in ports})
@@ -18,10 +19,12 @@ def _mock_snmp_switch(monkeypatch, ports):
 def _isoler_memoire(monkeypatch):
     for nom in ('_activite_prev', '_activite_sut', '_activite_switch_ok',
                 '_activite_etat_mappe', '_activite_noms', '_activite_resultat',
-                '_activite_detail', '_activite_heartbeat', '_activite_echecs'):
+                '_activite_detail', '_activite_heartbeat', '_activite_echecs',
+                '_presence_baie'):
         monkeypatch.setattr(N, nom, {})
     monkeypatch.setattr(N, '_activite_rechauffe', [0])
     monkeypatch.setattr(N, '_ACTIVITE_DOUBLE_ECART', 0.02)   # pas de vraie attente en test
+    monkeypatch.setattr(N, '_presence_baie_ok', lambda *a, **k: True)  # pas de vrai SNMP
 
 
 def test_snapshot_roundtrip(conn, make_client):
@@ -156,3 +159,40 @@ def test_activite_baie_reveille_la_boucle(monkeypatch):
     N._activite_wake.clear()
     N.activite_baie(4242)
     assert N._activite_wake.is_set()
+
+
+def test_switch_injoignable_ne_bloque_pas_le_cycle(conn, make_client, make_appareil, monkeypatch):
+    """Fast-fail : un switch qui ne répond pas en SNMP est écarté par la sonde de
+    présence — `_poll_switch_ports` (≈ 40 s de replis GETNEXT sur un mort) n'est
+    JAMAIS appelé pour lui, les autres switchs ne sont pas gelés derrière."""
+    _isoler_memoire(monkeypatch)
+    # présence : le 1er switch répond, le 2e non
+    monkeypatch.setattr(N, '_presence_baie_ok',
+                        lambda cid, ip, c: ip == '10.0.0.10')
+    poll_ips = []
+
+    def _poll(ip, c, infos=None):
+        poll_ips.append(ip)
+        return ({1: dict(oper=1, oper_ok=True, speed_mbps=1000, in_oct=5_000_000, out_oct=0,
+                         in_pkts=4000, out_pkts=0, in_err=0, out_err=0)}, True, True, 1234)
+
+    monkeypatch.setattr(N, '_noms_interfaces', lambda ip, c: {1: {'nom': 'Gi0/1', 'alias': '',
+                                                                  'ethernet': True, 'speed_mbps': 1000}})
+    monkeypatch.setattr(N, '_poll_switch_ports', _poll)
+    monkeypatch.setattr(N, '_fdb_switch', lambda ip, c: {})
+
+    cid = make_client()
+    for ip in ('10.0.0.10', '10.0.0.11'):
+        a = make_appareil(cid, nom_machine='SW-' + ip[-1], type_appareil='Switch', adresse_ip=ip)
+        conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,?,?)",
+                     (cid, int(ip[-1]), a))
+        sid = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (a,)).fetchone()[0]
+        conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1)", (sid,))
+    conn.commit()
+
+    N._cycle_activite([cid])
+    assert '10.0.0.11' not in poll_ips, f"le switch muet ne doit pas être pollé : {poll_ips}"
+    assert '10.0.0.10' in poll_ips
+    with N._activite_lock:
+        res = N._activite_resultat.get(cid)
+    assert res and res['actif'] is True          # le cycle aboutit malgré le switch mort
