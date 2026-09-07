@@ -1,7 +1,9 @@
 """
 client_helpers.py — Accès clients, pagination, audit, formatage.
 """
+import json
 import logging
+import re
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 from flask import session
@@ -273,6 +275,197 @@ def log_error(conn, client_id, url, exc, trace=''):
     }, ensure_ascii=False)
     log_history(conn, client_id, 'système', 0,
                 str(url)[:120] or 'Erreur système', 'Erreur', details)
+
+
+# ─── INSTANTANÉS & CHANGEMENTS ENTRE VISITES (v2.22.x) ─────────────────────────
+#
+# « Je scanne un client, quelques semaines plus tard je reviens : montre-moi ce
+# qui a changé. » Un instantané = photo compacte de l'inventaire du client à un
+# instant T (créée automatiquement à la fin de chaque scan). Le rapport
+# « Changements » diffe les deux derniers instantanés (ou la référence épinglée
+# et le dernier).
+
+_INSTANTANES_GARDES = 20        # par client, hors référence épinglée
+_MAC_RE = re.compile(r'^[0-9a-f]{2}(:[0-9a-f]{2}){5}$')
+
+
+def _norm_mac(m: str) -> str:
+    m = re.sub(r'[\s\-.]', ':', (m or '').strip().lower())
+    return m if _MAC_RE.match(m) else ''
+
+
+def _etat_inventaire(conn, client_id: int) -> list:
+    """Photo de l'inventaire d'un client pour un instantané : l'essentiel qui
+    peut bouger d'une visite à l'autre (nom, IP, MAC, type, ports ouverts,
+    statut) + les MAC secondaires."""
+    appareils = []
+    macs_sec = {}
+    try:
+        for aid, mac in conn.execute(
+                "SELECT appareil_id, adresse_mac FROM appareil_macs WHERE client_id=?",
+                (client_id,)):
+            m = _norm_mac(mac)
+            if m:
+                macs_sec.setdefault(aid, []).append(m)
+    except Exception:
+        pass
+    for r in conn.execute(
+            "SELECT id, nom_machine, adresse_ip, adresse_mac, type_appareil, "
+            "ports_ouverts, statut FROM appareils WHERE client_id=? ORDER BY id",
+            (client_id,)):
+        appareils.append({
+            'id': r[0], 'nom': r[1] or '', 'ip': (r[2] or '').strip(),
+            'mac': _norm_mac(r[3]), 'type': r[4] or '',
+            'ports': sorted(int(p) for p in re.split(r'[,\s]+', r[5] or '') if p.isdigit()),
+            'statut': r[6] or 'actif',
+            'macs_sec': sorted(macs_sec.get(r[0], [])),
+        })
+    return appareils
+
+
+def capturer_instantane(conn, client_id: int, origine: str = 'auto',
+                        libelle: str = '', reference: bool = False) -> int:
+    """Crée un instantané de l'inventaire du client. `origine` : 'scan' | 'manuel'
+    | 'auto'. Purge les plus anciens (garde `_INSTANTANES_GARDES` + la référence).
+    Retourne l'id créé (0 si échec)."""
+    try:
+        now = _utcnow()
+        cur = conn.execute(
+            "INSERT INTO client_instantane (client_id, horodatage, epoch, origine, "
+            "libelle, reference, donnees_json) VALUES (?,?,?,?,?,?,?)",
+            (client_id, now.isoformat(), now.timestamp(), origine, libelle,
+             1 if reference else 0,
+             json.dumps({'appareils': _etat_inventaire(conn, client_id)},
+                        ensure_ascii=False)))
+        nid = cur.lastrowid
+        garder = [r[0] for r in conn.execute(
+            "SELECT id FROM client_instantane WHERE client_id=? AND reference=0 "
+            "ORDER BY id DESC LIMIT ?", (client_id, _INSTANTANES_GARDES))]
+        if garder:
+            conn.execute(
+                f"DELETE FROM client_instantane WHERE client_id=? AND reference=0 "
+                f"AND id NOT IN ({','.join('?' * len(garder))})",
+                (client_id, *garder))
+        return nid
+    except Exception:
+        logger.error("capturer_instantane client %s", client_id, exc_info=True)
+        return 0
+
+
+def _charger_instantane(conn, iid: int):
+    r = conn.execute(
+        "SELECT id, horodatage, epoch, origine, libelle, reference, donnees_json "
+        "FROM client_instantane WHERE id=?", (iid,)).fetchone()
+    if not r:
+        return None
+    try:
+        d = json.loads(r[6] or '{}')
+    except (ValueError, TypeError):
+        d = {}
+    return {'id': r[0], 'horodatage': r[1], 'epoch': r[2], 'origine': r[3],
+            'libelle': r[4], 'reference': bool(r[5]),
+            'appareils': d.get('appareils', [])}
+
+
+def lister_instantanes(conn, client_id: int) -> list:
+    return [{'id': r[0], 'horodatage': r[1], 'origine': r[2], 'libelle': r[3],
+             'reference': bool(r[4]), 'nb_appareils': _nb_app(r[5])}
+            for r in conn.execute(
+                "SELECT id, horodatage, origine, libelle, reference, donnees_json "
+                "FROM client_instantane WHERE client_id=? ORDER BY id DESC", (client_id,))]
+
+
+def _nb_app(dj):
+    try:
+        return len(json.loads(dj or '{}').get('appareils', []))
+    except (ValueError, TypeError):
+        return 0
+
+
+def changements_client(conn, client_id: int, avant_id=None, apres_id=None) -> dict:
+    """Diff entre deux instantanés du client. Par défaut : la **référence
+    épinglée** (ou l'avant-dernier) → le **dernier**. Catégories (Lot 1) :
+    appareils nouveaux / disparus, IP changée, MAC principale changée, type
+    changé, ports ouverts changés, + le câblage réel observé en SNMP
+    (`diag_topologie_mouvements`) sur la période."""
+    ids = [r[0] for r in conn.execute(
+        "SELECT id FROM client_instantane WHERE client_id=? ORDER BY id DESC LIMIT 2",
+        (client_id,))]
+    ref = conn.execute(
+        "SELECT id FROM client_instantane WHERE client_id=? AND reference=1 "
+        "ORDER BY id DESC LIMIT 1", (client_id,)).fetchone()
+    apres_id = apres_id or (ids[0] if ids else None)
+    if avant_id is None:
+        avant_id = ref[0] if (ref and ref[0] != apres_id) else (ids[1] if len(ids) > 1 else None)
+    if not apres_id or not avant_id or avant_id == apres_id:
+        return {'disponible': False, 'nb_instantanes': len(lister_instantanes(conn, client_id))}
+    a = _charger_instantane(conn, avant_id)
+    b = _charger_instantane(conn, apres_id)
+    if not a or not b:
+        return {'disponible': False}
+
+    pa = {x['id']: x for x in a['appareils']}
+    pb = {x['id']: x for x in b['appareils']}
+    # index MAC → rattacher un "disparu" à un "nouveau" de même MAC (fiche recréée)
+    mac_a = {x['mac']: x for x in a['appareils'] if x['mac']}
+
+    nouveaux, disparus, ip_changees, mac_changees, type_changes, ports_changes = [], [], [], [], [], []
+    for i, x in pb.items():
+        if i in pa:
+            y = pa[i]
+            if x['ip'] and y['ip'] and x['ip'] != y['ip']:
+                ip_changees.append({'id': i, 'nom': x['nom'], 'avant': y['ip'], 'apres': x['ip']})
+            if x['mac'] and y['mac'] and x['mac'] != y['mac']:
+                mac_changees.append({'id': i, 'nom': x['nom'], 'avant': y['mac'], 'apres': x['mac']})
+            if x['type'] and y['type'] and x['type'] != y['type']:
+                type_changes.append({'id': i, 'nom': x['nom'], 'avant': y['type'], 'apres': x['type']})
+            if x['ports'] != y['ports']:
+                ouverts = sorted(set(x['ports']) - set(y['ports']))
+                fermes = sorted(set(y['ports']) - set(x['ports']))
+                if ouverts or fermes:
+                    ports_changes.append({'id': i, 'nom': x['nom'],
+                                          'ouverts': ouverts, 'fermes': fermes})
+        elif x['mac'] and x['mac'] in mac_a:
+            # même MAC qu'un appareil de l'ancien instantané → fiche recréée,
+            # pas un nouveau matériel
+            y = mac_a[x['mac']]
+            if x['ip'] and y['ip'] and x['ip'] != y['ip']:
+                ip_changees.append({'id': i, 'nom': x['nom'], 'avant': y['ip'], 'apres': x['ip']})
+        else:
+            nouveaux.append({'id': i, 'nom': x['nom'], 'ip': x['ip'], 'mac': x['mac'],
+                             'type': x['type']})
+    macs_b = {x['mac'] for x in b['appareils'] if x['mac']}
+    for i, x in pa.items():
+        if i not in pb and not (x['mac'] and x['mac'] in macs_b):
+            disparus.append({'id': i, 'nom': x['nom'], 'ip': x['ip'], 'mac': x['mac'],
+                             'type': x['type']})
+
+    # câblage réel (SNMP) sur la période
+    cablage = []
+    try:
+        for h, genre, anom, mac, eip, enom, pav, pap in conn.execute(
+                "SELECT horodatage, genre, appareil_nom, mac, equipement_ip, "
+                "equipement_nom, port_avant, port_apres FROM diag_topologie_mouvements "
+                "WHERE client_id=? AND horodatage > ? AND horodatage <= ? "
+                "ORDER BY horodatage DESC LIMIT 200",
+                (client_id, a['horodatage'], b['horodatage'])):
+            cablage.append({'horodatage': h, 'genre': genre, 'appareil': anom or mac,
+                            'equipement': enom or eip, 'port_avant': pav, 'port_apres': pap})
+    except Exception:
+        pass
+
+    nb = (len(nouveaux) + len(disparus) + len(ip_changees) + len(mac_changees)
+          + len(type_changes) + len(ports_changes) + len(cablage))
+    return {
+        'disponible': True, 'nb': nb,
+        'avant': {'id': a['id'], 'horodatage': a['horodatage'], 'libelle': a['libelle'],
+                  'reference': a['reference']},
+        'apres': {'id': b['id'], 'horodatage': b['horodatage'], 'libelle': b['libelle']},
+        'nouveaux': nouveaux, 'disparus': disparus,
+        'ip_changees': ip_changees, 'mac_changees': mac_changees,
+        'type_changes': type_changes, 'ports_changes': ports_changes,
+        'cablage_reel': cablage,
+    }
 
 
 # ─── FORMATAGE ────────────────────────────────────────────────────────────────

@@ -1,5 +1,24 @@
 # CHANGELOG - ParcInfo
 
+## [2.22.1] - 2026-09-07 🔄
+
+### Rapport « Changements depuis la dernière visite » (Lot 1/3)
+
+Sur demande : *« je scanne un client, je remplis le parc. Quelques semaines plus tard je reviens : montre-moi les différences de câblage, les IP qui ont changé, les nouveaux matériels. »*
+
+**Mécanisme — instantané + diff.** À la fin de chaque scan (`importer_scan`), ParcInfo capture une photo compacte de l'inventaire (nom / IP / MAC / type / ports par appareil, + MAC secondaires) dans la nouvelle table `client_instantane`. Le rapport diffe **les deux derniers instantanés** — ou la **référence épinglée** et le dernier.
+
+- `changements_client()` : appareils **nouveaux** / **disparus**, **IP changée**, **carte réseau remplacée** (MAC principale), **type requalifié**, **ports ouverts modifiés**, + le **câblage réel** vu en SNMP sur la période (`diag_topologie_mouvements`).
+- **Corrélation MAC au scan (bug de fond corrigé)** : `importer_scan` cherchait un appareil existant **uniquement par IP** → un poste qui avait changé d'adresse était créé en double, l'ancienne fiche gardait son IP morte. Il cherche maintenant **aussi par MAC** (principale et secondaire) ; si l'IP diffère, il met à jour la fiche et journalise « Changement d'IP détecté ».
+
+**Interface** : page **Changements** (nouvelle entrée de nav), cartes par catégorie, chaque ligne cliquable vers la fiche ; boutons « 📸 prendre un instantané » / « 📌 marquer comme référence » ; encart sur la page Scan réseau après un import (« N changement(s) détecté(s) depuis le dernier scan → voir le rapport »). Routes `GET /api/client/changements`, `POST /api/client/instantane`.
+
+*Lots suivants* : #2 câblage **déclaré** (baie) + champs `parc_general` + firmware du collecteur ; #3 bandeau tableau de bord + rapport imprimable.
+
+Tests : `tests/test_client_changements.py` (5). Suite : 321 passants (+5), 9 échecs préexistants inchangés.
+
+---
+
 ## [2.22.0] - 2026-09-07 ⚡
 
 ### Pré-chauffe de la vue d'activité de la baie de brassage

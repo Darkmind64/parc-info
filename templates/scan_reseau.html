@@ -208,6 +208,7 @@
         <div class="scan-card-title">📊 Résultats</div>
         <!-- Compteurs principaux -->
         <div id="scan-stats" style="font-size:.82rem;color:var(--text-muted);margin-bottom:.8rem;">Aucun scan lancé</div>
+        <div id="scan-changements" style="display:none;font-size:.8rem;margin-bottom:.8rem;padding:.5rem .7rem;border-radius:6px;background:rgba(107,163,255,.1);border:1px solid rgba(107,163,255,.3);"></div>
         <!-- Bargraph par type — mis à jour en temps réel -->
         <div id="scan-chart" style="flex:1;display:flex;flex-direction:column;gap:.35rem;"></div>
         <!-- Boutons -->
@@ -665,7 +666,17 @@ async function importerSelection() {
         body: JSON.stringify({appareils: toImport})
     });
     const d = await r.json();
-    const msgCourt = `Import terminé : ${d.importes} ajouté(s), ${d.mis_a_jour||0} mis à jour`;
+    let msgCourt = `Import terminé : ${d.importes} ajouté(s), ${d.mis_a_jour||0} mis à jour`;
+    // Rapport « Changements depuis la dernière visite » : un instantané a été pris
+    // en fin de scan et comparé au précédent.
+    if (d.changements && d.changements.disponible && d.changements.nb > 0) {
+        msgCourt += ` · ${d.changements.nb} changement(s) depuis la dernière visite`;
+        const bloc = document.getElementById('scan-changements');
+        if (bloc) {
+            bloc.innerHTML = `<a href="/changements">🔄 ${d.changements.nb} changement(s) détecté(s) depuis le dernier scan — voir le rapport →</a>`;
+            bloc.style.display = 'block';
+        }
+    }
     toImport.forEach(h => INVENTAIRE_IPS.add(h.ip));
     renderTable(scanResults);
 

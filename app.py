@@ -2211,6 +2211,21 @@ def init_db():
         ports_json TEXT DEFAULT '{}',
         PRIMARY KEY (client_id, equipement_ip),
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    # Instantané de l'inventaire d'un client (photo compacte : nom/IP/MAC/type/
+    # ports par appareil). Créé automatiquement en fin de scan ; le rapport
+    # « Changements » diffe les deux derniers. v2.22.x.
+    c.execute('''CREATE TABLE IF NOT EXISTS client_instantane (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        horodatage TEXT DEFAULT '',
+        epoch REAL DEFAULT 0,
+        origine TEXT DEFAULT '',
+        libelle TEXT DEFAULT '',
+        reference INTEGER DEFAULT 0,
+        donnees_json TEXT DEFAULT '{}',
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    c.execute('''CREATE INDEX IF NOT EXISTS idx_client_instantane
+        ON client_instantane(client_id, id)''')
     # Palier 4 — topologie L2 découverte (instantané, remplacé à chaque poll).
     c.execute('''CREATE TABLE IF NOT EXISTS diag_topologie (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3950,6 +3965,77 @@ def client_dashboard_view(cid):
 
     # Afficher le dashboard du client
     return single_client_dashboard(cid)
+
+
+@app.route('/changements')
+@login_required
+def page_changements():
+    """« Changements depuis la dernière visite » : diff entre les deux derniers
+    instantanés de l'inventaire du client actif (créés en fin de scan)."""
+    cid = get_client_id()
+    if not cid:
+        return redirect(url_for('nouveau_client'))
+    if not get_client_access(cid):
+        flash('Accès refusé', 'danger')
+        return redirect(url_for('index'))
+    conn = get_db()
+    from client_helpers import changements_client, lister_instantanes
+    chg = changements_client(conn, cid)
+    instantanes = lister_instantanes(conn, cid)
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    conn.close()
+    return render_template('client_changements.html', chg=chg, instantanes=instantanes,
+                           client=client, peut_ecrire=can_write(cid),
+                           clients=get_clients(), client_actif_id=cid)
+
+
+@app.route('/api/client/changements')
+@login_required
+def api_client_changements():
+    cid = get_client_id()
+    if not cid or not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    conn = get_db()
+    from client_helpers import changements_client
+    avant = request.args.get('avant', type=int)
+    apres = request.args.get('apres', type=int)
+    d = changements_client(conn, cid, avant, apres)
+    conn.close()
+    return jsonify(d)
+
+
+@app.route('/api/client/instantane', methods=['POST'])
+@login_required
+def api_client_instantane():
+    """Prend un instantané manuel de l'inventaire, ou (re)définit la référence."""
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Accès en lecture seule'}), 403
+    data = request.json or {}
+    conn = get_db()
+    from client_helpers import capturer_instantane
+    try:
+        if data.get('reference_id'):
+            conn.execute("UPDATE client_instantane SET reference=0 WHERE client_id=?", (cid,))
+            conn.execute("UPDATE client_instantane SET reference=1 WHERE id=? AND client_id=?",
+                         (int(data['reference_id']), cid))
+            nid = int(data['reference_id'])
+        else:
+            nid = capturer_instantane(conn, cid, origine='manuel',
+                                      libelle=(data.get('libelle') or '').strip()[:80],
+                                      reference=bool(data.get('comme_reference')))
+            if data.get('comme_reference'):
+                conn.execute("UPDATE client_instantane SET reference=0 "
+                             "WHERE client_id=? AND id<>?", (cid, nid))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.exception('instantané manuel')
+        return jsonify({'error': str(e)}), 500
+    finally:
+        conn.close()
+    return jsonify({'ok': True, 'id': nid})
+
 
 def _marque_modele_combos(rows):
     """Combine marque+modèle en une seule chaîne par ligne, dédoublonnée et
@@ -11129,9 +11215,35 @@ def importer_scan():
         cpu          = (item.get('cpu') or '').strip()
         ram          = _fmt_go(item.get('ram_gb'))
         stockage     = _fmt_go(item.get('disk_total_gb'))
-        existing  = conn.execute('SELECT id FROM appareils WHERE client_id=? AND adresse_ip=?', (cid, ip)).fetchone()
+        _m_scan = _norm_mac_pi(mac)
+        existing = conn.execute(
+            'SELECT id, adresse_ip FROM appareils WHERE client_id=? AND adresse_ip=?',
+            (cid, ip)).fetchone()
+        ip_changee_de = None
+        if not existing and _m_scan:
+            # Pas trouvé par IP — cherché par MAC (principale OU secondaire) :
+            # un appareil connu a peut-être simplement changé d'adresse. Avant,
+            # il était vu comme un « nouvel » appareil et l'ancienne fiche gardait
+            # son IP morte.
+            existing = conn.execute(
+                "SELECT id, adresse_ip FROM appareils WHERE client_id=? AND "
+                "lower(replace(replace(replace(adresse_mac,'-',':'),' ',''),'.',':'))=?",
+                (cid, _m_scan)).fetchone()
+            if not existing:
+                existing = conn.execute(
+                    "SELECT a.id, a.adresse_ip FROM appareils a "
+                    "JOIN appareil_macs m ON m.appareil_id=a.id "
+                    "WHERE a.client_id=? AND m.adresse_mac=? LIMIT 1",
+                    (cid, _m_scan)).fetchone()
+            if existing and (existing[1] or '').strip() and (existing[1] or '').strip() != ip:
+                ip_changee_de = (existing[1] or '').strip()
         if existing:
             app_id = existing[0]
+            if ip_changee_de is not None:
+                conn.execute("UPDATE appareils SET adresse_ip=? WHERE id=?", (ip, app_id))
+                log_history(conn, cid, 'appareil', app_id, nom,
+                            "Changement d'IP détecté (scan réseau)",
+                            {'avant': ip_changee_de, 'apres': ip, 'mac': _m_scan})
             # Une valeur déjà présente (saisie à la main, ou posée par une
             # collecte précédente) n'est jamais écrasée par une simple
             # détection de scan — même principe que adresse_mac ci-dessous,
@@ -11145,13 +11257,12 @@ def importer_scan():
                    cpu=COALESCE(NULLIF(cpu,""),?),
                    ram=COALESCE(NULLIF(ram,""),?),
                    stockage=COALESCE(NULLIF(stockage,""),?),
-                   date_maj=? WHERE client_id=? AND adresse_ip=?''',
+                   date_maj=? WHERE id=?''',
                 (now, ports_str, mac, marque, modele, numero_serie, cpu, ram, stockage,
-                 now, cid, ip))
+                 now, app_id))
             mis_a_jour += 1
             # MAC vue au scan différente de la principale déjà enregistrée
             # (appareil retrouvé par IP) -> carte réseau supplémentaire.
-            _m_scan = _norm_mac_pi(mac)
             _m_prim = _norm_mac_pi((conn.execute(
                 "SELECT adresse_mac FROM appareils WHERE id=?", (app_id,)).fetchone() or [''])[0])
             if _m_scan and _m_prim and _m_scan != _m_prim:
@@ -11182,8 +11293,23 @@ def importer_scan():
             if not deja_dans_baie:
                 suggestions_baie.append({'id': app_id, 'nom': nom, 'type': type_detecte,
                                          'marque': marque, 'modele': modele})
+    # Instantané de fin de scan : sert de base au rapport « Changements depuis
+    # la dernière visite » (comparé au scan précédent).
+    inst_id = 0
+    try:
+        from client_helpers import capturer_instantane, changements_client
+        inst_id = capturer_instantane(conn, cid, origine='scan')
+        conn.commit()
+        chg = changements_client(conn, cid)
+    except Exception:
+        logger.exception('instantané / changements post-scan (client %s)', cid)
+        chg = {'disponible': False}
     conn.commit(); conn.close()
-    return jsonify({"importes": importes, "total": len(items), "suggestions_baie": suggestions_baie})
+    return jsonify({"importes": importes, "total": len(items),
+                    "suggestions_baie": suggestions_baie,
+                    "instantane_id": inst_id,
+                    "changements": {'disponible': chg.get('disponible', False),
+                                    'nb': chg.get('nb', 0)}})
 
 
 def _sync_collector_macs(conn, cid, appareil_id, data):
