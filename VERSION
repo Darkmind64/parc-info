@@ -1,8 +1,43 @@
-PARCINFO_VERSION=2.22.0
+PARCINFO_VERSION=2.22.1
 RELEASE_DATE=2026-09-07
-BUILD_NUMBER=2026090701
+BUILD_NUMBER=2026090702
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.22.1 - Rapport "Changements depuis la derniere visite" (Lot 1/3)
+# Demande : "je scanne un client, je remplis le parc. Quelques semaines plus
+# tard je reviens : montre-moi les differences de cablage, les IP qui ont
+# change, les nouveaux materiels."
+#
+# Mecanisme : INSTANTANE + DIFF. A la fin de chaque scan (importer_scan),
+# ParcInfo capture une photo compacte de l'inventaire (nom/IP/MAC/type/ports
+# par appareil + MAC secondaires) dans `client_instantane` (garde les 20
+# derniers + la reference epinglee). Le rapport diffe les deux derniers
+# instantanes -- ou la reference epinglee et le dernier.
+#
+# `client_helpers.capturer_instantane` / `changements_client` (fonction de
+# diff pure : appareils nouveaux / disparus, IP changee, MAC principale
+# changee, type requalifie, ports ouverts modifies) + `diag_topologie_
+# mouvements` sur la periode pour le cablage REEL vu en SNMP.
+#
+# CORRELATION MAC AU SCAN (bug de fond corrige) : `importer_scan` cherchait
+# un appareil existant UNIQUEMENT par IP -> un poste qui avait change d'IP
+# etait cree en double, l'ancienne fiche gardait son IP morte. Il cherche
+# maintenant aussi par MAC (principale ET secondaire) ; si l'IP differe, il
+# met a jour la fiche et journalise "Changement d'IP detecte (scan reseau)".
+#
+# UI : page /changements (nav "Changements"), cartes par categorie, chaque
+# ligne cliquable vers la fiche ; bouton "prendre un instantane" / "marquer
+# comme reference" ; encart sur la page Scan reseau apres un import
+# ("N changement(s) detecte(s) depuis le dernier scan -> voir le rapport").
+# Route `GET /api/client/changements`, `POST /api/client/instantane`.
+#
+# Lots suivants : #2 cablage DECLARE (baie_slot_ports) + champs parc_general
+# + firmware/OS du collecteur ; #3 bandeau tableau de bord + rapport
+# imprimable.
+#
+# Tests : tests/test_client_changements.py (5). Suite : 321 passants (+5), 9
+# echecs preexistants de test_diag_reseau.py inchanges, 39/39 scripts racine.
 
 # Version 2.22.0 - Pre-chauffe de la vue d'activite de la baie de brassage
 # Retour utilisateur : "les LEDs de la baie prennent un bon moment avant de

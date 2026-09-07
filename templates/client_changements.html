@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Changements — {{ client.nom }}{% endblock %}
+
+{% block extra_styles %}
+<style>
+.chg-head { display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap; margin-bottom:.3rem; }
+.chg-sub { color:var(--text-muted); font-size:.8rem; margin-bottom:1.2rem; }
+.chg-sub b { color:var(--text-secondary); }
+.chg-card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px;
+    padding:.9rem 1.1rem; margin-bottom:1rem; }
+.chg-card h3 { margin:0 0 .5rem; font-size:.9rem; display:flex; align-items:center; gap:.4rem; }
+.chg-badge { font-size:.68rem; font-weight:700; padding:1px 7px; border-radius:9px;
+    background:var(--bg-secondary); color:var(--text-secondary); }
+.chg-list { list-style:none; margin:0; padding:0; font-size:.82rem; }
+.chg-list li { padding:.35rem 0; border-bottom:1px solid var(--border); display:flex;
+    gap:.5rem; align-items:baseline; flex-wrap:wrap; }
+.chg-list li:last-child { border-bottom:none; }
+.chg-list a { color:var(--accent); text-decoration:none; font-weight:600; }
+.chg-av { color:var(--text-muted); text-decoration:line-through; }
+.chg-ap { color:#1f9d55; font-weight:600; }
+.chg-none { color:var(--text-muted); font-size:.85rem; padding:2rem 0; text-align:center; }
+.chg-tag { font-size:.66rem; color:var(--text-muted); background:var(--bg-secondary);
+    padding:1px 6px; border-radius:6px; }
+.c-nouveau { border-left:3px solid #1f9d55; }
+.c-disparu { border-left:3px solid #ef4444; }
+.c-ip      { border-left:3px solid #6ba3ff; }
+.c-cablage { border-left:3px solid #c77700; }
+.chg-actions { display:flex; gap:.5rem; flex-wrap:wrap; margin:1rem 0; }
+.chg-actions button, .chg-actions select { font-size:.78rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <div class="chg-head"><h1 style="margin:0;">Changements</h1></div>
+    <div class="chg-sub">{{ client.nom }} · différences d'inventaire et de câblage entre deux passages</div>
+  </div>
+</div>
+
+{% if not chg.disponible %}
+  <div class="chg-card">
+    <p class="chg-none">
+      {% if chg.nb_instantanes and chg.nb_instantanes >= 1 %}
+        Un seul instantané pour l'instant. Lancez un <a href="{{ url_for('page_scan') }}">scan réseau</a>
+        (ou prenez un instantané manuel ci-dessous) : le prochain servira de point de comparaison.
+      {% else %}
+        Aucun instantané. Lancez un <a href="{{ url_for('page_scan') }}">scan réseau</a> chez ce client —
+        ParcInfo en capturera l'état, et au scan suivant vous verrez ici ce qui a changé.
+      {% endif %}
+    </p>
+  </div>
+{% else %}
+  <div class="chg-sub">
+    Comparaison : <b>{{ chg.avant.libelle or chg.avant.horodatage[:16]|replace('T',' ') }}</b>
+    {% if chg.avant.reference %}<span class="chg-tag">référence</span>{% endif %}
+    → <b>{{ chg.apres.libelle or chg.apres.horodatage[:16]|replace('T',' ') }}</b>
+    · <b>{{ chg.nb }}</b> changement(s)
+  </div>
+
+  {% macro carte(titre, items, cls, icone) %}
+    {% if items %}
+    <div class="chg-card {{ cls }}">
+      <h3>{{ icone }} {{ titre }} <span class="chg-badge">{{ items|length }}</span></h3>
+      <ul class="chg-list">{{ caller() }}</ul>
+    </div>
+    {% endif %}
+  {% endmacro %}
+
+  {% call carte("Nouveaux matériels", chg.nouveaux, "c-nouveau", "🟢") %}
+    {% for a in chg.nouveaux %}
+      <li><a href="/appareil/{{ a.id }}/fiche-systeme">{{ a.nom or a.ip or a.mac }}</a>
+        <span class="chg-tag">{{ a.type or '?' }}</span>
+        {% if a.ip %}<span>{{ a.ip }}</span>{% endif %}
+        {% if a.mac %}<span class="chg-tag">{{ a.mac }}</span>{% endif %}</li>
+    {% endfor %}
+  {% endcall %}
+
+  {% call carte("Matériels disparus", chg.disparus, "c-disparu", "🔴") %}
+    {% for a in chg.disparus %}
+      <li><a href="/appareil/{{ a.id }}/fiche-systeme">{{ a.nom or a.ip or a.mac }}</a>
+        <span class="chg-tag">{{ a.type or '?' }}</span>
+        {% if a.ip %}<span class="chg-av">{{ a.ip }}</span>{% endif %}
+        <span style="color:var(--text-muted);">— plus vu au dernier scan</span></li>
+    {% endfor %}
+  {% endcall %}
+
+  {% call carte("Adresses IP changées", chg.ip_changees, "c-ip", "🔵") %}
+    {% for c in chg.ip_changees %}
+      <li><a href="/appareil/{{ c.id }}/fiche-systeme">{{ c.nom }}</a>
+        <span class="chg-av">{{ c.avant }}</span> → <span class="chg-ap">{{ c.apres }}</span></li>
+    {% endfor %}
+  {% endcall %}
+
+  {% call carte("Cartes réseau remplacées", chg.mac_changees, "c-ip", "🔧") %}
+    {% for c in chg.mac_changees %}
+      <li><a href="/appareil/{{ c.id }}/fiche-systeme">{{ c.nom }}</a>
+        <span class="chg-av">{{ c.avant }}</span> → <span class="chg-ap">{{ c.apres }}</span></li>
+    {% endfor %}
+  {% endcall %}
+
+  {% call carte("Types requalifiés", chg.type_changes, "", "🏷️") %}
+    {% for c in chg.type_changes %}
+      <li><a href="/appareil/{{ c.id }}/fiche-systeme">{{ c.nom }}</a>
+        <span class="chg-av">{{ c.avant }}</span> → <span class="chg-ap">{{ c.apres }}</span></li>
+    {% endfor %}
+  {% endcall %}
+
+  {% call carte("Ports ouverts modifiés", chg.ports_changes, "", "🚪") %}
+    {% for c in chg.ports_changes %}
+      <li><a href="/appareil/{{ c.id }}/fiche-systeme">{{ c.nom }}</a>
+        {% if c.ouverts %}<span class="chg-ap">+ {{ c.ouverts|join(', ') }}</span>{% endif %}
+        {% if c.fermes %}<span class="chg-av">− {{ c.fermes|join(', ') }}</span>{% endif %}</li>
+    {% endfor %}
+  {% endcall %}
+
+  {% call carte("Câblage réel (vu en SNMP)", chg.cablage_reel, "c-cablage", "🔌") %}
+    {% for m in chg.cablage_reel %}
+      <li>
+        <span class="chg-tag">{{ {'apparu':'apparu','disparu':'disparu','deplace':'déplacé'}.get(m.genre, m.genre) }}</span>
+        <b>{{ m.appareil }}</b> sur {{ m.equipement }}
+        {% if m.genre == 'deplace' %}<span class="chg-av">port {{ m.port_avant }}</span> → <span class="chg-ap">port {{ m.port_apres }}</span>
+        {% elif m.genre == 'apparu' %}port {{ m.port_apres }}
+        {% else %}<span class="chg-av">port {{ m.port_avant }}</span>{% endif %}
+        <span style="color:var(--text-muted);font-size:.72rem;">{{ m.horodatage[:16]|replace('T',' ') }}</span>
+      </li>
+    {% endfor %}
+  {% endcall %}
+
+  {% if chg.nb == 0 %}
+    <div class="chg-card"><p class="chg-none">✅ Aucun changement détecté entre ces deux instantanés.</p></div>
+  {% endif %}
+{% endif %}
+
+{% if peut_ecrire %}
+<div class="chg-actions">
+  <button class="btn btn-secondary btn-sm" onclick="instantaneManuel(false)">📸 Prendre un instantané maintenant</button>
+  <button class="btn btn-secondary btn-sm" onclick="instantaneManuel(true)">📌 …et le marquer comme référence</button>
+</div>
+{% endif %}
+
+{% if instantanes %}
+<details style="margin-top:1rem;font-size:.8rem;">
+  <summary style="cursor:pointer;color:var(--text-secondary);">Instantanés ({{ instantanes|length }})</summary>
+  <ul class="chg-list" style="margin-top:.5rem;">
+    {% for s in instantanes %}
+    <li>
+      <span>{{ s.horodatage[:16]|replace('T',' ') }}</span>
+      <span class="chg-tag">{{ s.origine }}</span>
+      {% if s.libelle %}<b>{{ s.libelle }}</b>{% endif %}
+      <span style="color:var(--text-muted);">{{ s.nb_appareils }} appareils</span>
+      {% if s.reference %}<span class="chg-tag" style="color:#c77700;">référence</span>
+      {% elif peut_ecrire %}<button class="link-btn" style="font-size:.72rem;" onclick="definirReference({{ s.id }})">définir comme référence</button>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
+<script>
+function instantaneManuel(commeRef) {
+    fetch('/api/client/instantane', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({comme_reference: commeRef})})
+      .then(r => r.json()).then(d => { if (d.ok) location.reload(); else showToast(d.error || 'Erreur', 'error'); })
+      .catch(() => showToast('Erreur réseau', 'error'));
+}
+function definirReference(id) {
+    fetch('/api/client/instantane', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({reference_id: id})})
+      .then(r => r.json()).then(d => { if (d.ok) location.reload(); })
+      .catch(() => showToast('Erreur réseau', 'error'));
+}
+</script>
+{% endblock %}
