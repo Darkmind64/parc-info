@@ -295,6 +295,7 @@
         <div id="scan-client-hint" style="font-size:.72rem;color:var(--accent-green);margin:-.5rem 0 1rem;display:none;">
             ✓ Correspondance détectée avec le réseau actuel — présélectionnée.
         </div>
+        <div id="scan-site-banniere" style="font-size:.74rem;margin:-.5rem 0 1rem;display:none;line-height:1.4;"></div>
         <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
             <button type="button" class="btn btn-secondary btn-sm" onclick="fermerModaleClientScan()">Annuler</button>
             <button type="button" class="btn btn-success btn-sm" onclick="confirmerClientEtScanner()">▶ Lancer le scan</button>
@@ -394,6 +395,8 @@ async function mettreAJourOui() {
 
 // ── SCAN ─────────────────────────────────────────────────────────────────────
 let _scanClientActifId = null;
+let _scanSite = null;            // {mode, confiance, client_id, nom} — mode terrain
+let _scanClientNoms = {};        // id -> nom (pour les messages de confirmation)
 
 async function lancerScan() {
     const plages = getPlages();
@@ -402,6 +405,9 @@ async function lancerScan() {
     const r = await fetch('/api/scan/client-suggere');
     const d = await r.json();
     _scanClientActifId = d.client_actif;
+    _scanSite = d.site || null;
+    _scanClientNoms = {};
+    (d.clients || []).forEach(c => { _scanClientNoms[c.id] = c.nom; });
 
     const list = document.getElementById('scan-client-list');
     list.innerHTML = (d.clients || []).map(c => `
@@ -410,6 +416,22 @@ async function lancerScan() {
             <span>${escH(c.nom)}</span>
         </label>`).join('') || '<div style="color:var(--text-muted);font-size:.8rem;padding:.4rem;">Aucun client accessible.</div>';
     document.getElementById('scan-client-hint').style.display = d.suggestion ? '' : 'none';
+
+    // Mode terrain : bandeau d'information dans la modale
+    const banniere = document.getElementById('scan-site-banniere');
+    if (banniere) {
+        if (_scanSite && _scanSite.mode === 'consultation') {
+            banniere.style.display = '';
+            banniere.style.color = 'var(--accent-orange)';
+            banniere.textContent = '⚠️ Instance en mode « consultation » (hors site) : ne lancez un scan que si vous êtes réellement chez ce client. Sinon, votre réseau personnel serait importé dans son inventaire.';
+        } else if (_scanSite && _scanSite.confiance === 'sur_site' && _scanSite.nom) {
+            banniere.style.display = '';
+            banniere.style.color = 'var(--accent-green)';
+            banniere.textContent = '📍 Vous semblez être sur le site de « ' + _scanSite.nom + ' » (' + _scanSite.macs_reconnues + ' machine(s) reconnue(s)).';
+        } else {
+            banniere.style.display = 'none';
+        }
+    }
     document.getElementById('scan-client-modal').classList.add('open');
 }
 
@@ -421,8 +443,37 @@ async function confirmerClientEtScanner() {
     const sel = document.querySelector('input[name="scan-client-choice"]:checked');
     if (!sel) { showFlash('Choisissez un client', 'info'); return; }
     const clientId = sel.value;
-    fermerModaleClientScan();
 
+    // Mode terrain : présence sur le site du client choisi confirmée par la
+    // détection (ARP / passerelle) ? Si oui, on lance directement.
+    const confirme = _scanSite && _scanSite.confiance === 'sur_site'
+                     && String(_scanSite.client_id) === String(clientId);
+    if (_scanSite && _scanSite.mode !== 'terrain' && !confirme) {
+        const nomChoisi = _scanClientNoms[clientId] || 'ce client';
+        let msg;
+        if (_scanSite.mode === 'consultation') {
+            msg = 'Cette instance est en mode « consultation » (hors site).\n\n'
+                + 'Un scan lancé ici rattachera les appareils trouvés — potentiellement '
+                + 'ceux de votre réseau personnel — à « ' + nomChoisi + ' ». '
+                + 'À ne faire que si vous êtes réellement chez ce client. Continuer ?';
+        } else if (_scanSite.client_id && String(_scanSite.client_id) !== String(clientId)
+                   && _scanSite.nom) {
+            msg = 'Vous semblez être sur le site de « ' + _scanSite.nom + ' », '
+                + 'mais vous avez choisi « ' + nomChoisi + ' ».\n\n'
+                + 'Les appareils découverts seront rattachés à « ' + nomChoisi + ' ». Continuer ?';
+        } else {
+            msg = 'Impossible de confirmer que vous êtes sur le site de « ' + nomChoisi + ' ».\n\n'
+                + 'Les appareils découverts y seront rattachés. Poursuivre le scan ?';
+        }
+        appConfirm(msg, () => { _poursuivreScan(clientId); },
+                   { title: 'Confirmer le client', icon: '📍', ok: 'Lancer le scan', btnClass: 'btn-success' });
+        return;
+    }
+    _poursuivreScan(clientId);
+}
+
+async function _poursuivreScan(clientId) {
+    fermerModaleClientScan();
     if (String(clientId) !== String(_scanClientActifId)) {
         await fetch('/client/' + clientId + '/selectionner');
         // Les données rendues côté serveur (plage par défaut, inventaire pour

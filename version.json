@@ -1,26 +1,26 @@
 {
-  "version": "2.23.0",
+  "version": "2.24.0",
   "release_date": "2026-09-07",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.23.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.24.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Le rapport « Changements depuis la derniere visite » est complet. En plus des nouveaux/disparus/IP changees (2.22.1), il liste maintenant : le cablage DECLARE de la baie qui a bouge (cordons, affectations de ports), les champs de configuration du parc modifies (passerelle, DNS, plage IP, domaine, FAI, debits...), et les systemes d'exploitation mis a jour appareil par appareil. Un bandeau sur le tableau de bord du client annonce « il y a N jours depuis le dernier scan, M changements », et un bouton produit un rapport imprimable (ou a enregistrer en PDF).",
+    "new_features": "Mode terrain / detection de site. ParcInfo sert d'abord CHEZ le client (scan, baie, diagnostic) puis en consultation hors site (bureau, instance Docker a la maison). Il detecte maintenant s'il se trouve sur le site d'un client en croisant les machines vues sur le reseau (table ARP) avec l'inventaire de tous les clients, comme l'auto-detection du client dans le collecteur. Hors site, les fonctions de fond (pre-chauffe de la baie, surveillance SNMP) sont suspendues pour ne pas polluer l'inventaire ni donner de fausses infos, et le scan reseau demande une confirmation explicite du client. Une instance Docker est en mode consultation par defaut ; reglage dans Reglages -> Reseau & Scan -> Mode terrain (auto / consultation / terrain).",
     "improvements": [
-      "Rapport Changements : cablage declare de la baie + configuration du parc + OS des appareils ajoutes au diff.",
-      "Bandeau « changements depuis la derniere visite » sur le tableau de bord du client.",
-      "Rapport imprimable / PDF du rapport de changements.",
-      "Pre-chauffe de la baie de brassage : LEDs animees des l'ouverture (2.22.0).",
-      "Scan reseau : un appareil qui a change d'IP est retrouve par sa MAC, plus de doublon (2.22.1)."
+      "Detection de site : croisement de la table ARP locale avec l'inventaire (MAC des appareils + passerelle), renfort optionnel par IP publique.",
+      "Scan reseau : bandeau + confirmation explicite quand la presence sur le site du client n'est pas confirmee ; proposition de bascule si un autre client est detecte.",
+      "Tableau de bord : bandeau « vous semblez etre sur le site de X -> basculer » (jamais de bascule silencieuse).",
+      "Fonctions de fond suspendues hors site (pre-chauffe baie, surveillance continue).",
+      "Nouvelle route GET /api/site/detection (lecture seule)."
     ]
   },
   "checksums": {
@@ -31,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.20.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.24.0"
 }
