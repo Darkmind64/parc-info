@@ -10209,61 +10209,76 @@ def _snmp_presence(ip, communautes=('public',), port=161, timeout=1.2):
 
 
 # Colonnes confirmées absentes d'un agent : (ip, port, oid_base) -> monotonic.
-# Un agent lent (HP ProCurve 1810G : un relevé complet ~2 min) répond au GETBULK
-# mais laisse certaines colonnes vides (ifXTable sur un switch 32 bits, dot3
-# non exposé…). Sans ce cache, `_snmp_bulk_cols` relançait un GETNEXT complet
-# (2 communautés × 2 méthodes) sur CHACUNE de ces colonnes à CHAQUE appel —
-# ~20-40 s gaspillées par relevé, à chaque cycle de la vue d'activité baie.
+# Un agent minimal (HP ProCurve 1810G) laisse certaines colonnes vides
+# (ifXTable sur un switch 32 bits, dot3, PoE). Sans ce cache, `_snmp_bulk_cols`
+# relançait un GETNEXT complet sur CHACUNE à CHAQUE appel.
 _bulk_col_absente = {}
-_BULK_COL_ABSENTE_TTL = 900.0     # s — au-delà, on retente une fois (firmware maj, etc.)
+_BULK_COL_ABSENTE_TTL = 900.0
+
+# Mode SNMP qui marche pour un agent : (ip, port) -> ('bulk'|'next', monotonic).
+# CONSTAT TERRAIN (HP ProCurve 1810G, « poll 127584 ms ») : cet agent ne
+# répond PAS au GETBULK. `_snmp_bulk_cols` retombait alors sur un GETNEXT
+# **par colonne** (`_snmp_walk`) — 7 colonnes × 24 ports = ~170 aller-retours
+# UDP séquentiels par relevé, à chaque cycle. Corrigé : un GETNEXT
+# **multi-colonnes** (toutes les colonnes avancent d'une ligne par
+# aller-retour = ~24 au lieu de 170) + mémorisation du mode par agent + une
+# fois les lignes connues, un GET direct groupé (toutes les valeurs en 1-2
+# datagrammes au lieu de 24).
+_bulk_col_mode = {}
+_BULK_COL_MODE_TTL = 1800.0
+_bulk_row_suffixes = {}           # (ip, port, oid_base) -> (set(suffixes), monotonic)
+_BULK_ROW_SUFFIXES_TTL = 240.0    # s — au-delà, on refait un vrai walk (ports ajoutés ?)
+_BULK_GET_CHUNK = 20              # varbinds par GetRequest groupé (marge PDU / recvfrom 4 Ko)
 
 
 def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
                     max_rows=600, port=161):
-    """Parcourt PLUSIEURS colonnes de table en parallèle par GETBULK (SNMPv2c).
-    Retourne {oid_base: {suffixe: valeur}} — chaque varbind de la réponse porte
-    son OID, donc l'association est faite par comparaison de préfixe (aucune
-    hypothèse d'ordre, contrairement à _snmp_get_typed qui associe par
-    position et se trompe sur les agents qui ne respectent pas la RFC 1157).
-    Bien moins de paquets qu'un GETNEXT par colonne. Repli GETNEXT
-    (_snmp_walk) par colonne si l'agent ne répond pas au GETBULK — sauf pour
-    les colonnes déjà confirmées absentes récemment (`_bulk_col_absente`)."""
+    """Parcourt PLUSIEURS colonnes de table en un seul balayage — GETBULK si
+    l'agent le supporte, sinon **GETNEXT multi-colonnes** (toutes les colonnes
+    dans la même requête, une ligne par aller-retour). Retourne
+    {oid_base: {suffixe: valeur}}. Repli ultime GETNEXT par colonne seulement si
+    le multi-colonnes échoue aussi (agent qui refuse les requêtes multi-varbind).
+    Le mode qui marche est mémorisé par agent (`_bulk_col_mode`) ; les colonnes
+    constatées absentes le sont aussi (`_bulk_col_absente`)."""
     if isinstance(communautes, str):
         communautes = [communautes]
     oid_bases = list(oid_bases)
     prefs = [b if b.endswith('.') else b + '.' for b in oid_bases]
-    # SNMPv3 (authNoPriv) tenté en premier, colonne par colonne : `_v3_walk` fait
-    # lui-même du GETBULK, donc le coût reste raisonnable. Sans ça, un switch
-    # v3-only ne répondait ici que par le repli GETNEXT de fin de fonction
-    # (constat d'audit #04).
     _v3 = _snmp_v3_params()
     if _v3:
         res_v3 = {b: _v3_walk(ip_str, b, _v3, timeout, max_rows, port)
                   for b in oid_bases}
         if any(res_v3.values()):
             return res_v3
-    for communaute in communautes:
+
+    def _un_parcours(communaute, est_bulk, s_to):
+        """Un balayage multi-colonnes complet. Retourne (res, progres_fait)."""
         res = {b: {} for b in oid_bases}
-        courant = {b: b for b in oid_bases}     # base -> dernier OID interrogé
+        courant = {b: b for b in oid_bases}
         rows = 0
         ok = False
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.settimeout(timeout)
+                s.settimeout(s_to)
                 while courant and rows < max_rows:
                     actifs = list(courant.items())
                     vb = b''.join(_ber_sequence(0x30, _ber_oid(o) + b'\x05\x00')
                                   for _, o in actifs)
-                    max_rep = max(1, min(25, (max_rows - rows) // len(actifs) + 1))
                     reqid_env = _snmp_walk_reqid()
-                    pdu_corps = (_ber_entier(reqid_env) + _ber_entier(0)
-                                 + _ber_entier(max_rep) + _ber_sequence(0x30, vb))
-                    pdu = _ber_sequence(0xa5, pdu_corps)     # GetBulkRequest-PDU
+                    if est_bulk:
+                        max_rep = max(1, min(25, (max_rows - rows) // len(actifs) + 1))
+                        pdu_corps = (_ber_entier(reqid_env) + _ber_entier(0)
+                                     + _ber_entier(max_rep) + _ber_sequence(0x30, vb))
+                        pdu = _ber_sequence(0xa5, pdu_corps)     # GetBulkRequest-PDU
+                    else:
+                        pdu_corps = (_ber_entier(reqid_env) + _ber_entier(0)
+                                     + _ber_entier(0) + _ber_sequence(0x30, vb))
+                        pdu = _ber_sequence(0xa1, pdu_corps)     # GetNextRequest multi-varbind
                     message = _ber_sequence(
                         0x30, _ber_entier(1) + _ber_chaine(communaute) + pdu)
                     s.sendto(message, (ip_str, port))
 
-                    for _drain in range(4):     # ignorer une réponse tardive à la requête précédente
+                    for _drain in range(4):
                         data, _ = s.recvfrom(65535)
                         _, corps, _ = _ber_lire_tlv(data, 0)
                         p = 0
@@ -10283,10 +10298,10 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
                     _, err, q = _ber_lire_tlv(pdu_r, q)
                     _, _ei, q = _ber_lire_tlv(pdu_r, q)
                     if err and int.from_bytes(err, 'big', signed=True) != 0:
-                        break
+                        break               # genErr / noSuchName : mode non supporté
                     _, vblist, q = _ber_lire_tlv(pdu_r, q)
 
-                    progres, fini = {}, set()
+                    vbs = []
                     vp = 0
                     while vp < len(vblist):
                         tvb, vbc, vp = _ber_lire_tlv(vblist, vp)
@@ -10295,45 +10310,120 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
                         bp = 0
                         _, oid_brut, bp = _ber_lire_tlv(vbc, bp)
                         tval, vbrut, bp = _ber_lire_tlv(vbc, bp)
-                        oid_ret = _ber_decoder_oid(oid_brut)
-                        rows += 1
-                        for base, pref in zip(oid_bases, prefs):
-                            if base not in courant:
-                                continue
-                            if oid_ret.startswith(pref):
-                                if tval == 0x82:          # endOfMibView : colonne finie
+                        vbs.append((_ber_decoder_oid(oid_brut), tval, vbrut))
+
+                    progres, fini = {}, set()
+                    if est_bulk:
+                        # GETBULK : ordre non garanti → attribution par préfixe.
+                        for oid_ret, tval, vbrut in vbs:
+                            rows += 1
+                            for base, pref in zip(oid_bases, prefs):
+                                if base not in courant or not oid_ret.startswith(pref):
+                                    continue
+                                if tval == 0x82:
                                     fini.add(base)
                                 else:
                                     res[base][oid_ret[len(pref):]] = _ber_decoder_valeur(tval, vbrut)
                                     progres[base] = oid_ret
                                 break
-                    # Prochaine ronde : colonnes NON terminées. Une colonne qui a
-                    # progressé repart de son dernier OID ; une colonne muette ce
-                    # tour-ci (agent bas de gamme qui ne renvoie pas toutes les
-                    # colonnes) est CONSERVÉE et retentée depuis son OID courant.
+                    else:
+                        # GETNEXT multi-varbind : 1 successeur par varbind demandé,
+                        # DANS L'ORDRE → attribution par position (RFC 1157/1905).
+                        for (base, _oc), (oid_ret, tval, vbrut) in zip(actifs, vbs):
+                            rows += 1
+                            pref = prefs[oid_bases.index(base)]
+                            if tval in (0x80, 0x81, 0x82) or not oid_ret.startswith(pref):
+                                fini.add(base)        # sorti du sous-arbre : colonne finie
+                            else:
+                                res[base][oid_ret[len(pref):]] = _ber_decoder_valeur(tval, vbrut)
+                                progres[base] = oid_ret
+
                     suivant = {}
                     for base, oc in courant.items():
                         if base in fini:
                             continue
                         if base in progres:
                             suivant[base] = progres[base]
-                        elif base not in res or not res[base]:
-                            # jamais rien reçu : on abandonne cette colonne (évite
-                            # une boucle infinie si l'agent ne la supporte pas)
-                            continue
-                        else:
-                            suivant[base] = oc          # retente au même point
+                        elif est_bulk and res.get(base):
+                            suivant[base] = oc          # GETBULK : agent qui drop une colonne
+                        # (GETNEXT : pas de progrès + pas fini = agent qui bloque → abandon)
                     if progres:
                         ok = True
                     if suivant == courant and not progres:
-                        break                            # aucun progrès possible
+                        break
                     courant = suivant
+        except Exception:
+            pass
+        return res, ok
+
+    def _cle_table(b):
+        # OID parent (colonne -> table) : 1.3.6.1.2.1.2.2.1.8 -> 1.3.6.1.2.1.2.2.1
+        return b.rstrip('.').rsplit('.', 1)[0]
+
+    def _memoriser_suffixes(res, tnow):
+        for b in oid_bases:
+            sfx = set(res.get(b, {}))
+            if sfx:
+                _bulk_row_suffixes[(ip_str, port, b)] = (sfx, tnow)
+                # les autres colonnes de la même table partagent ces index
+                _bulk_row_suffixes[(ip_str, port, _cle_table(b))] = (sfx, tnow)
+
+    def _par_get_groupe(communaute, s_to, tnow):
+        """Agent GETNEXT-only + lignes déjà connues : GET direct de tous les
+        `base.suffixe` en paquets de `_BULK_GET_CHUNK` — 1-2 datagrammes au lieu
+        d'un walk de N lignes. Retourne (res, complet) ; `complet`=False si trop
+        de valeurs manquent (ports ajoutés → il faudra re-walker)."""
+        oids, appartient = [], {}
+        for b in oid_bases:
+            if _bulk_col_absente.get((ip_str, port, b), 0) and \
+                    tnow - _bulk_col_absente[(ip_str, port, b)] < _BULK_COL_ABSENTE_TTL:
+                continue                       # colonne connue absente : on saute
+            ent = (_bulk_row_suffixes.get((ip_str, port, b))
+                   or _bulk_row_suffixes.get((ip_str, port, _cle_table(b))))
+            if not ent or tnow - ent[1] > _BULK_ROW_SUFFIXES_TTL:
+                return None, False             # une colonne sans lignes connues → walk
+            pref = b if b.endswith('.') else b + '.'
+            for suf in ent[0]:
+                o = pref + str(suf)
+                oids.append(o)
+                appartient[o] = (b, suf)
+        if not oids:
+            return None, False
+        res = {b: {} for b in oid_bases}
+        vus = 0
+        for i in range(0, len(oids), _BULK_GET_CHUNK):
+            lot = oids[i:i + _BULK_GET_CHUNK]
+            got = _snmp_get_typed(ip_str, lot, communaute, timeout=s_to,
+                                  port=port, version=1, _essai_v3=False)
+            for o, v in (got or {}).items():
+                ba = appartient.get(o)
+                if ba and v is not None:
+                    res[ba[0]][str(ba[1])] = v
+                    vus += 1
+        if vus < 0.6 * len(oids):
+            return None, False
+        return res, True
+
+    _cle_mode = (ip_str, port)
+    _m = _bulk_col_mode.get(_cle_mode)
+    _now0 = time.monotonic()
+    _mode_fige = _m[0] if (_m and _now0 - _m[1] < _BULK_COL_MODE_TTL) else None
+
+    # Chemin rapide : agent GETNEXT-only dont on connaît déjà les lignes.
+    if _mode_fige == 'next':
+        for communaute in communautes:
+            _rg, _ok = _par_get_groupe(communaute, timeout * 1.6, _now0)
+            if _ok:
+                return _rg
+
+    essais = ([(_mode_fige, timeout if _mode_fige == 'bulk' else timeout * 1.6)]
+              if _mode_fige else [('bulk', timeout), ('next', timeout * 1.6)])
+
+    for communaute in communautes:
+        for _mode, _s_to in essais:
+            res, ok = _un_parcours(communaute, _mode == 'bulk', _s_to)
             if ok and any(res.values()):
-                # GETBULK a marché : les colonnes restées vides n'existent
-                # quasi sûrement pas sur cet agent. Un repli GETNEXT ciblé une
-                # fois (au cas où l'agent les DROP du GETBULK multi-colonnes),
-                # puis on mémorise « absente » pour ne pas le refaire à chaque
-                # cycle sur un agent lent.
+                _bulk_col_mode[_cle_mode] = (_mode, time.monotonic())
                 _now = time.monotonic()
                 for b in oid_bases:
                     if res.get(b):
@@ -10342,15 +10432,14 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
                     _ta = _bulk_col_absente.get((ip_str, port, b))
                     if _ta and _now - _ta < _BULK_COL_ABSENTE_TTL:
                         continue
-                    _w = _snmp_walk(ip_str, b, communautes, timeout=timeout, port=port)
+                    _w = _snmp_walk(ip_str, b, [communaute], timeout=_s_to, port=port)
                     if _w:
                         res[b] = _w
                         _bulk_col_absente.pop((ip_str, port, b), None)
                     else:
                         _bulk_col_absente[(ip_str, port, b)] = _now
+                _memoriser_suffixes(res, time.monotonic())
                 return res
-        except Exception:
-            continue
     return {b: _snmp_walk(ip_str, b, communautes, timeout=timeout, port=port)
             for b in oid_bases}
 
