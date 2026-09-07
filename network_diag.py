@@ -5083,6 +5083,7 @@ _OID_IF_OUT_NUCAST  = '1.3.6.1.2.1.2.2.1.18'
 
 _activite_lock       = threading.Lock()
 _activite_thread_lock = threading.Lock()   # démarrage idempotent du thread (course page+modale)
+_activite_wake       = threading.Event()   # réveille la boucle quand un nouveau client est regardé
 # Écrits SOUS _activite_lock (lus par les threads de requête Flask) :
 _activite_heartbeat  = {}   # client_id -> epoch du dernier battement
 _activite_resultat   = {}   # client_id -> dict prêt pour l'UI (LEDs)
@@ -6461,11 +6462,20 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
     return ports_ui, journal_ops
 
 
-def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac, avec_fdb=True):
+_ACTIVITE_DOUBLE_ECART = 1.8   # s — écart entre les 2 relevés du 1er cycle à froid
+
+
+def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
+                             avec_fdb=True, double_froid=False):
     """Relevé SNMP complet d'un switch pour le cycle d'activité de la baie
     (FDB + interfaces + ports + PoE + sysinfo). Thread-safe : chaque helper SNMP
     est verrouillé par IP (`_fdb_lock`, verrou d'interfaces, cache sysinfo…), donc
-    plusieurs switchs peuvent être relevés en parallèle. N'écrit PAS en base.
+    plusieurs switchs peuvent être relevés en parallèle. N'écrit PAS en base
+    (hors `_activite_prev`/`_activite_sut` en amorçage `double_froid`).
+
+    `double_froid` : au tout 1er cycle et sans aucune référence de compteurs
+    (ni snapshot, ni mémoire), fait DEUX relevés espacés de ~2 s pour que les
+    LEDs s'animent dès ce cycle au lieu d'attendre le suivant.
 
     Retourne le dict consommé par `_cycle_activite`, ou un relevé « muet » si le
     switch ne répond pas."""
@@ -6489,6 +6499,33 @@ def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac, avec_f
         t0 = time.time()
         infos = _noms_interfaces(ip, communautes)
         cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos)
+
+        # 1er cycle à froid, aucune référence : 2 relevés rapprochés → débit
+        # calculable dès maintenant (sinon il faut attendre le cycle suivant).
+        if double_froid and ok and cur_ports:
+            try:
+                time.sleep(_ACTIVITE_DOUBLE_ECART)
+                cur2, ok2, hc2, sut2 = _poll_switch_ports(ip, communautes, infos)
+                if ok2 and cur2:
+                    t_ref = time.time() - _ACTIVITE_DOUBLE_ECART
+                    with _activite_lock:
+                        for _ifx, _p in cur_ports.items():
+                            if not _p.get('oper_ok', True):
+                                continue
+                            _cle = (cid, ip, _ifx)
+                            if _cle in _activite_prev:
+                                continue
+                            _activite_prev[_cle] = {
+                                **{k: _p.get(k, 0) for k in _PORT_CPT_KEYS},
+                                'bps_ema': 0.0, 'pps_ema': 0.0, 'etat': 'idle',
+                                'manques': 0, 'ts': t_ref,
+                                'etat_pending': None, 'etat_pending_n': 0}
+                        if sut:
+                            _activite_sut[(cid, ip)] = (sut, t_ref)
+                    cur_ports, ok, hc, sut = cur2, ok2, hc2, sut2
+            except Exception:
+                logger.debug('network_diag: double relevé froid %s', ip, exc_info=True)
+
         poe = _poll_poe(ip, communautes) if ok else {}
         sysinfo = _lire_sysinfo(ip, communautes) if ok else {'sysname': '', 'sysdescr': ''}
         dms = int((time.time() - t0) * 1000)
@@ -6614,7 +6651,15 @@ def _amorcer_activite_depuis_snapshot(cid, switchs):
     for sw in switchs:
         ip = sw['ip']
         sn = snaps.get(ip)
-        if not sn or (maintenant - sn['epoch']) > _SNAPSHOT_BAIE_MAX_AGE:
+        if not sn:
+            continue
+        # Les noms/alias d'interface sont quasi statiques : on les amorce même
+        # depuis un snapshot ancien, pour que le rack s'affiche étiqueté tout de
+        # suite (le débit, lui, exige un snapshot frais — plus bas).
+        if sn.get('interfaces') and ip not in _activite_noms:
+            _activite_noms[ip] = {'ts': sn['epoch'], 'infos': sn['interfaces'],
+                                  'maj_en_cours': False}
+        if (maintenant - sn['epoch']) > _SNAPSHOT_BAIE_MAX_AGE:
             continue
         if any((cid, ip, ifx) in _activite_prev for ifx in sn['ports']):
             continue
@@ -6625,9 +6670,6 @@ def _amorcer_activite_depuis_snapshot(cid, switchs):
                 'ts': sn['epoch'], 'etat_pending': None, 'etat_pending_n': 0})
         if sn.get('sut') and (cid, ip) not in _activite_sut:
             _activite_sut[(cid, ip)] = (sn['sut'], sn['epoch'])
-        if sn.get('interfaces') and ip not in _activite_noms:
-            _activite_noms[ip] = {'ts': sn['epoch'], 'infos': sn['interfaces'],
-                                  'maj_en_cours': False}
     return snaps
 
 
@@ -6703,6 +6745,7 @@ def _cycle_activite(clients):
                 # « un bon moment » à démarrer. Les helpers SNMP sont verrouillés
                 # par IP, sûrs à appeler de plusieurs threads.
                 avec_fdb = _activite_rechauffe[0] >= 1   # 1er cycle : LEDs d'abord, FDB au suivant
+                froid = _activite_rechauffe[0] == 0      # aucun cycle encore fait ce visionnage
                 premier_slot = {}
                 for _sw in switchs:
                     premier_slot.setdefault(_sw['ip'], _sw)
@@ -6713,7 +6756,8 @@ def _cycle_activite(clients):
                         _releves = list(_ex.map(
                             lambda kv: _relever_switch_activite(
                                 cid, kv[0], kv[1]['slot_id'], kv[1]['nom'],
-                                communautes, inv_mac, avec_fdb),
+                                communautes, inv_mac, avec_fdb,
+                                double_froid=(froid and (cid, kv[0]) not in _activite_sut)),
                             list(premier_slot.items())))
                     for _r in _releves:
                         poll_par_ip[_r['ip']] = _r['poll']
@@ -7048,14 +7092,19 @@ def _activite_loop():
             if not clients:
                 _activite_rechauffe[0] = 0
                 _prechauffe_baie_si_due()
-                time.sleep(5)
+                # attente interruptible : dès qu'un onglet /baie s'ouvre,
+                # `activite_baie()` fait `_activite_wake.set()` et on relève
+                # tout de suite au lieu d'attendre la fin de ce sommeil.
+                if _activite_wake.wait(5):
+                    _activite_wake.clear()
                 continue
             if str(_cfg('diag_snmp_actif', '0')) != '1':
                 with _activite_lock:
                     for c in clients:
                         _activite_resultat[c] = {'actif': False}
                         _activite_detail[c] = {'ts': _now_z(), 'switchs': [], 'ports': []}
-                time.sleep(5)
+                if _activite_wake.wait(5):
+                    _activite_wake.clear()
                 continue
             _poll_max_ms[0] = 0
             _cycle_activite(clients)
@@ -7074,7 +7123,8 @@ def _activite_loop():
         # 30 s d'écart le rendraient inutilisable).
         if _activite_rechauffe[0] < _ACTIVITE_RECHAUFFE_CYCLES or _activite_calib:
             _cadence[0] = _ACTIVITE_INTERVAL
-        time.sleep(_cadence[0])
+        if _activite_wake.wait(_cadence[0]):
+            _activite_wake.clear()
 
 
 def _filtrer_clients_sur_site(clients):
@@ -7115,11 +7165,12 @@ def _prechauffe_baie_si_due():
             return
         _prechauffe_last[0] = time.time()
         cl = _clients_avec_switch_baie()
-        # Mode terrain : ne rien relever pour un client sur le site duquel on
-        # n'est pas (instance de consultation, ou détection « pas ici »). En
-        # 'auto' sans détection franche, `_filtrer_clients_sur_site` renvoie la
-        # liste inchangée (comportement historique préservé).
-        cl = _filtrer_clients_sur_site(cl)
+        # NB : la pré-chauffe n'est PAS bridée par le mode terrain. Elle n'écrit
+        # que `diag_baie_snapshot` (un cache de compteurs SNMP pour animer les
+        # LED dès l'ouverture de /baie) — aucune écriture d'inventaire, aucun
+        # évènement journalisé. Hors site, `_snmp_presence` échoue vite et le
+        # cycle est un quasi no-op ; la brider casserait la pré-chauffe sur une
+        # instance Docker (défaut « consultation ») sans bénéfice réel.
         if cl:
             _poll_max_ms[0] = 0
             _cycle_activite(cl)
@@ -7156,9 +7207,14 @@ def activite_baie(client_id: int) -> dict:
     Réponse instantanée (aucun SNMP synchrone). `actif` : True = données
     présentes, False = SNMP désactivé, None = premier passage pas encore fait."""
     with _activite_lock:
+        nouveau = client_id not in _activite_heartbeat
         _activite_heartbeat[client_id] = time.time()
         res = dict(_activite_resultat.get(client_id, {'actif': None}))
     _demarrer_activite_thread()
+    if nouveau or res.get('actif') is None:
+        # onglet /baie qui vient de s'ouvrir (ou relevé pas encore fait) :
+        # sortir la boucle de son sommeil pour relever immédiatement.
+        _activite_wake.set()
     return res
 
 
@@ -7169,10 +7225,13 @@ def moniteur_baie(client_id: int) -> dict:
     interfaces (pour la calibration), ports de baie à calibrer, état de la
     capture. Enregistre aussi un battement (comme activite_baie)."""
     with _activite_lock:
+        nouveau = client_id not in _activite_heartbeat
         _activite_heartbeat[client_id] = time.time()
         detail = dict(_activite_detail.get(client_id, {}))
         journal = [dict(x) for x in _activite_journal]
     _demarrer_activite_thread()
+    if nouveau:
+        _activite_wake.set()
     cap = statut_capture_baie()
     etat = etat_capture()
 

@@ -1,26 +1,25 @@
 {
-  "version": "2.24.0",
+  "version": "2.24.1",
   "release_date": "2026-09-07",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.24.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.24.1",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.1/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Mode terrain / detection de site. ParcInfo sert d'abord CHEZ le client (scan, baie, diagnostic) puis en consultation hors site (bureau, instance Docker a la maison). Il detecte maintenant s'il se trouve sur le site d'un client en croisant les machines vues sur le reseau (table ARP) avec l'inventaire de tous les clients, comme l'auto-detection du client dans le collecteur. Hors site, les fonctions de fond (pre-chauffe de la baie, surveillance SNMP) sont suspendues pour ne pas polluer l'inventaire ni donner de fausses infos, et le scan reseau demande une confirmation explicite du client. Une instance Docker est en mode consultation par defaut ; reglage dans Reglages -> Reseau & Scan -> Mode terrain (auto / consultation / terrain).",
+    "new_features": "Correctif : la baie de brassage demarrait de nouveau lentement. Le mode terrain (2.24.0) coupait par erreur la pre-chauffe de fond de la baie sur une instance Docker (mode consultation par defaut) - elle n'ecrit pourtant qu'un cache de compteurs, sans toucher a l'inventaire : elle n'est plus bridee. En plus : la boucle de fond se reveille immediatement a l'ouverture de /baie (au lieu d'attendre jusqu'a 5 s), le tout premier passage a froid fait deux releves rapproches pour que les LED s'animent des ce cycle (au lieu du suivant), et les noms de ports s'affichent tout de suite meme depuis un ancien instantane.",
     "improvements": [
-      "Detection de site : croisement de la table ARP locale avec l'inventaire (MAC des appareils + passerelle), renfort optionnel par IP publique.",
-      "Scan reseau : bandeau + confirmation explicite quand la presence sur le site du client n'est pas confirmee ; proposition de bascule si un autre client est detecte.",
-      "Tableau de bord : bandeau « vous semblez etre sur le site de X -> basculer » (jamais de bascule silencieuse).",
-      "Fonctions de fond suspendues hors site (pre-chauffe baie, surveillance continue).",
-      "Nouvelle route GET /api/site/detection (lecture seule)."
+      "Baie : pre-chauffe de fond non bridee par le mode terrain (regression 2.24.0).",
+      "Baie : la boucle d'activite se reveille des l'ouverture de /baie (attente supprimee).",
+      "Baie : 1er cycle a froid = 2 releves SNMP rapproches -> LED animees des ce cycle.",
+      "Baie : etiquettes de ports amorcees depuis n'importe quel instantane, meme ancien."
     ]
   },
   "checksums": {
@@ -31,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.24.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.24.1"
 }
