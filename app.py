@@ -3756,12 +3756,22 @@ def single_client_dashboard(cid):
         except Exception:
             diag_reseau_verdict = None
 
+        # Bandeau « Changements depuis la dernière visite » (Lot 3)
+        try:
+            from client_helpers import changements_client
+            _chg = changements_client(conn, cid)
+            chg_resume = ({'nb': _chg['nb'], 'jours': _chg.get('jours_ecoules')}
+                          if _chg.get('disponible') and _chg['nb'] > 0 else None)
+        except Exception:
+            chg_resume = None
+
         # Combine all data for template
         template_data = {
             'parc': parc,
             'client': client,
             'a_switchs_baie': a_switchs_baie,
             'diag_reseau_verdict': diag_reseau_verdict,
+            'chg_resume': chg_resume,
             'appareils': stats['appareils'],
             'nb_en_ligne': stats['nb_en_ligne'],
             'nb_hors_ligne': stats['nb_hors_ligne'],
@@ -3987,6 +3997,23 @@ def page_changements():
     return render_template('client_changements.html', chg=chg, instantanes=instantanes,
                            client=client, peut_ecrire=can_write(cid),
                            clients=get_clients(), client_actif_id=cid)
+
+
+@app.route('/changements/rapport')
+@login_required
+def changements_rapport():
+    """Version imprimable / PDF (via l'impression du navigateur) du rapport."""
+    cid = get_client_id()
+    if not cid or not get_client_access(cid):
+        flash('Accès refusé', 'danger')
+        return redirect(url_for('index'))
+    conn = get_db()
+    from client_helpers import changements_client
+    chg = changements_client(conn, cid)
+    client = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
+    conn.close()
+    return render_template('changements_rapport.html', chg=chg, client=client,
+                           genere_le=datetime.now(timezone.utc).isoformat())
 
 
 @app.route('/api/client/changements')

@@ -1,8 +1,40 @@
-PARCINFO_VERSION=2.22.1
+PARCINFO_VERSION=2.23.0
 RELEASE_DATE=2026-09-07
-BUILD_NUMBER=2026090702
+BUILD_NUMBER=2026090703
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.23.0 - Rapport "Changements depuis la derniere visite" (Lots 2 et 3)
+# Termine la fonctionnalite ouverte en 2.22.1.
+#
+# LOT 2 -- nouvelles categories dans le diff :
+#  - CABLAGE DECLARE de la baie (`baie_slot_ports`) : par (emplacement, port de
+#    facade), ce qui est branche (cordon vers un autre port, appareil,
+#    peripherique, libre). Ajout / retrait / modification entre deux
+#    instantanes ; les "#id" sont remplaces par le nom de l'appareil.
+#  - CONFIGURATION DU PARC (`parc_general`) : type de connexion, debits, FAI,
+#    IP publique, plage IP, nb machines/utilisateurs, domaine, DNS, passerelle,
+#    OS principal, antivirus, suite bureautique -> "champ X : avant -> apres".
+#  - SYSTEME D'EXPLOITATION par appareil (`appareils.os` + `version_os`) :
+#    "Windows 10 22H2 -> Windows 10 23H2".
+#  L'instantane (`client_instantane.donnees_json`) porte maintenant
+#  `{appareils, parc, cablage}`. `_etat_parc` / `_etat_cablage` +
+#  `changements_client` etendu (`os_changes`, `cablage_declare`, `parc_changes`,
+#  `jours_ecoules`).
+#
+# LOT 3 -- restitution :
+#  - BANDEAU sur le tableau de bord du client : "Il y a N jour(s) depuis le
+#    dernier scan -- M changement(s) -> voir le rapport" (via
+#    `single_client_dashboard`, `chg_resume`).
+#  - RAPPORT IMPRIMABLE : route `/changements/rapport`, page autonome
+#    (templates/changements_rapport.html) en tableaux, bouton "Imprimer /
+#    enregistrer en PDF" (impression navigateur), `@media print` propre.
+#    Bouton "Rapport imprimable" sur /changements.
+#
+# Tests : tests/test_client_changements.py (+2 : diff Lot 2 parc/cablage/os,
+# route rapport imprimable). Suite : 323 passants (+2), 9 echecs preexistants
+# de test_diag_reseau.py inchanges (2 tests d'ordre fragiles alternent), 39/39
+# scripts racine.
 
 # Version 2.22.1 - Rapport "Changements depuis la derniere visite" (Lot 1/3)
 # Demande : "je scanne un client, je remplis le parc. Quelques semaines plus

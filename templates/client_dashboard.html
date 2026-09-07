@@ -768,6 +768,19 @@
     </div>
 </div>
 
+{% if chg_resume %}
+<a href="/changements" style="display:flex;align-items:center;gap:.6rem;margin-bottom:1rem;
+   padding:.55rem .8rem;border-radius:8px;text-decoration:none;font-size:.82rem;font-weight:600;
+   color:#c77700;background:rgba(224,149,42,.12);border:1px solid rgba(224,149,42,.3);">
+  <span style="font-size:1.1rem;">🔄</span>
+  <span style="flex:1;">
+    {% if chg_resume.jours is not none %}Il y a {{ chg_resume.jours }} jour(s) depuis le dernier scan — {% endif %}
+    <b>{{ chg_resume.nb }}</b> changement(s) dans l'inventaire / le câblage
+  </span>
+  <span>voir le rapport →</span>
+</a>
+{% endif %}
+
 <!-- ═══════════════════════════════════════════════════════════════════════════════════
      PHASE 8.6: DYNAMIC WIDGET RENDERING
      Renders widgets in user-preferred order, conditionally based on enabled_widgets

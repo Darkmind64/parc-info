@@ -311,16 +311,72 @@ def _etat_inventaire(conn, client_id: int) -> list:
         pass
     for r in conn.execute(
             "SELECT id, nom_machine, adresse_ip, adresse_mac, type_appareil, "
-            "ports_ouverts, statut FROM appareils WHERE client_id=? ORDER BY id",
-            (client_id,)):
+            "ports_ouverts, statut, COALESCE(os,''), COALESCE(version_os,'') "
+            "FROM appareils WHERE client_id=? ORDER BY id", (client_id,)):
         appareils.append({
             'id': r[0], 'nom': r[1] or '', 'ip': (r[2] or '').strip(),
             'mac': _norm_mac(r[3]), 'type': r[4] or '',
             'ports': sorted(int(p) for p in re.split(r'[,\s]+', r[5] or '') if p.isdigit()),
             'statut': r[6] or 'actif',
+            'os': (r[7] or '').strip(), 'version_os': (r[8] or '').strip(),
             'macs_sec': sorted(macs_sec.get(r[0], [])),
         })
     return appareils
+
+
+# Champs de parc_general suivis d'une visite à l'autre (libellé lisible).
+_PARC_CHAMPS = [
+    ('type_connexion', 'Type de connexion'), ('debit_descendant', 'Débit descendant'),
+    ('debit_montant', 'Débit montant'), ('fournisseur_internet', 'Fournisseur (FAI)'),
+    ('ip_publique', 'IP publique'), ('plage_ip_locale', 'Plage(s) IP locale(s)'),
+    ('nb_machines', 'Nb de machines'), ('nb_utilisateurs', 'Nb d\'utilisateurs'),
+    ('domaine', 'Domaine'), ('serveur_dns', 'Serveur(s) DNS'), ('passerelle', 'Passerelle'),
+    ('os_principal', 'OS principal'), ('antivirus', 'Antivirus'),
+    ('suite_bureautique', 'Suite bureautique'),
+]
+
+
+def _etat_parc(conn, client_id: int) -> dict:
+    r = conn.execute(
+        "SELECT %s FROM parc_general WHERE client_id=?" % ','.join(k for k, _ in _PARC_CHAMPS),
+        (client_id,)).fetchone()
+    if not r:
+        return {}
+    return {k: ('' if v is None else str(v).strip()) for (k, _), v in zip(_PARC_CHAMPS, r)}
+
+
+def _etat_cablage(conn, client_id: int) -> list:
+    """Câblage DÉCLARÉ de la baie : par (emplacement, port de façade), ce qui est
+    branché — un cordon vers un autre port, un appareil/périphérique direct, ou
+    « libre »."""
+    slot_nom = {}
+    try:
+        for sid, pos, nomc in conn.execute(
+                "SELECT id, position, nom_custom FROM baie_slots WHERE client_id=?",
+                (client_id,)):
+            slot_nom[sid] = (nomc or '').strip() or f"U{pos}"
+    except Exception:
+        return []
+    out = []
+    try:
+        for sid, num, aid, pid, libre, lsid, lnum in conn.execute(
+                "SELECT p.slot_id, p.numero, p.appareil_id, p.peripherique_id, "
+                "p.usage_libre, p.lie_slot_id, p.lie_port_numero FROM baie_slot_ports p "
+                "JOIN baie_slots s ON s.id = p.slot_id WHERE s.client_id=?", (client_id,)):
+            if lsid:
+                cible = f"cordon → {slot_nom.get(lsid, '?')} port {lnum}"
+            elif aid:
+                cible = f"appareil #{aid}"
+            elif pid:
+                cible = f"périphérique #{pid}"
+            elif libre:
+                cible = 'libre'
+            else:
+                continue
+            out.append({'emplacement': slot_nom.get(sid, '?'), 'port': num, 'cible': cible})
+    except Exception:
+        pass
+    return sorted(out, key=lambda x: (x['emplacement'], x['port']))
 
 
 def capturer_instantane(conn, client_id: int, origine: str = 'auto',
@@ -335,7 +391,9 @@ def capturer_instantane(conn, client_id: int, origine: str = 'auto',
             "libelle, reference, donnees_json) VALUES (?,?,?,?,?,?,?)",
             (client_id, now.isoformat(), now.timestamp(), origine, libelle,
              1 if reference else 0,
-             json.dumps({'appareils': _etat_inventaire(conn, client_id)},
+             json.dumps({'appareils': _etat_inventaire(conn, client_id),
+                         'parc': _etat_parc(conn, client_id),
+                         'cablage': _etat_cablage(conn, client_id)},
                         ensure_ascii=False)))
         nid = cur.lastrowid
         garder = [r[0] for r in conn.execute(
@@ -364,7 +422,8 @@ def _charger_instantane(conn, iid: int):
         d = {}
     return {'id': r[0], 'horodatage': r[1], 'epoch': r[2], 'origine': r[3],
             'libelle': r[4], 'reference': bool(r[5]),
-            'appareils': d.get('appareils', [])}
+            'appareils': d.get('appareils', []),
+            'parc': d.get('parc', {}), 'cablage': d.get('cablage', [])}
 
 
 def lister_instantanes(conn, client_id: int) -> list:
@@ -384,10 +443,11 @@ def _nb_app(dj):
 
 def changements_client(conn, client_id: int, avant_id=None, apres_id=None) -> dict:
     """Diff entre deux instantanés du client. Par défaut : la **référence
-    épinglée** (ou l'avant-dernier) → le **dernier**. Catégories (Lot 1) :
+    épinglée** (ou l'avant-dernier) → le **dernier**. Catégories :
     appareils nouveaux / disparus, IP changée, MAC principale changée, type
-    changé, ports ouverts changés, + le câblage réel observé en SNMP
-    (`diag_topologie_mouvements`) sur la période."""
+    changé, ports ouverts changés, OS/version changés (Lot 2), câblage DÉCLARÉ
+    de la baie modifié (Lot 2), champs `parc_general` modifiés (Lot 2), + le
+    câblage RÉEL observé en SNMP (`diag_topologie_mouvements`) sur la période."""
     ids = [r[0] for r in conn.execute(
         "SELECT id FROM client_instantane WHERE client_id=? ORDER BY id DESC LIMIT 2",
         (client_id,))]
@@ -410,6 +470,11 @@ def changements_client(conn, client_id: int, avant_id=None, apres_id=None) -> di
     mac_a = {x['mac']: x for x in a['appareils'] if x['mac']}
 
     nouveaux, disparus, ip_changees, mac_changees, type_changes, ports_changes = [], [], [], [], [], []
+    os_changes = []
+
+    def _os(z):
+        return ' '.join(p for p in (z.get('os', ''), z.get('version_os', '')) if p).strip()
+
     for i, x in pb.items():
         if i in pa:
             y = pa[i]
@@ -419,6 +484,8 @@ def changements_client(conn, client_id: int, avant_id=None, apres_id=None) -> di
                 mac_changees.append({'id': i, 'nom': x['nom'], 'avant': y['mac'], 'apres': x['mac']})
             if x['type'] and y['type'] and x['type'] != y['type']:
                 type_changes.append({'id': i, 'nom': x['nom'], 'avant': y['type'], 'apres': x['type']})
+            if _os(x) and _os(y) and _os(x) != _os(y):
+                os_changes.append({'id': i, 'nom': x['nom'], 'avant': _os(y), 'apres': _os(x)})
             if x['ports'] != y['ports']:
                 ouverts = sorted(set(x['ports']) - set(y['ports']))
                 fermes = sorted(set(y['ports']) - set(x['ports']))
@@ -440,6 +507,37 @@ def changements_client(conn, client_id: int, avant_id=None, apres_id=None) -> di
             disparus.append({'id': i, 'nom': x['nom'], 'ip': x['ip'], 'mac': x['mac'],
                              'type': x['type']})
 
+    # nom de chaque appareil connu (pour rendre lisibles les "#id" du câblage)
+    nom_par_id = {x['id']: x['nom'] for x in b['appareils']}
+    nom_par_id.update({x['id']: x['nom'] for x in a['appareils'] if x['id'] not in nom_par_id})
+
+    def _lisible(cible):
+        m = re.match(r'^(appareil|périphérique) #(\d+)$', cible)
+        if m and m.group(1) == 'appareil' and int(m.group(2)) in nom_par_id:
+            return f"appareil {nom_par_id[int(m.group(2))]}"
+        return cible
+
+    # câblage DÉCLARÉ de la baie (baie_slot_ports) : ajouté / retiré / modifié
+    cablage_declare = []
+    ca = {(c['emplacement'], c['port']): c['cible'] for c in a.get('cablage', [])}
+    cb = {(c['emplacement'], c['port']): c['cible'] for c in b.get('cablage', [])}
+    for k in sorted(set(ca) | set(cb)):
+        av, ap = ca.get(k), cb.get(k)
+        if av == ap:
+            continue
+        cablage_declare.append({
+            'emplacement': k[0], 'port': k[1],
+            'avant': _lisible(av) if av else '', 'apres': _lisible(ap) if ap else '',
+            'genre': 'ajout' if not av else 'retrait' if not ap else 'modif'})
+
+    # champs parc_general modifiés
+    parc_changes = []
+    pca, pcb = a.get('parc', {}), b.get('parc', {})
+    for cle, libelle in _PARC_CHAMPS:
+        av, ap = pca.get(cle, ''), pcb.get(cle, '')
+        if av != ap and (av or ap):
+            parc_changes.append({'champ': libelle, 'avant': av, 'apres': ap})
+
     # câblage réel (SNMP) sur la période
     cablage = []
     try:
@@ -455,16 +553,23 @@ def changements_client(conn, client_id: int, avant_id=None, apres_id=None) -> di
         pass
 
     nb = (len(nouveaux) + len(disparus) + len(ip_changees) + len(mac_changees)
-          + len(type_changes) + len(ports_changes) + len(cablage))
+          + len(type_changes) + len(ports_changes) + len(os_changes)
+          + len(cablage_declare) + len(parc_changes) + len(cablage))
+    jours = None
+    try:
+        jours = max(0, round((b['epoch'] - a['epoch']) / 86400))
+    except (TypeError, KeyError):
+        pass
     return {
-        'disponible': True, 'nb': nb,
+        'disponible': True, 'nb': nb, 'jours_ecoules': jours,
         'avant': {'id': a['id'], 'horodatage': a['horodatage'], 'libelle': a['libelle'],
                   'reference': a['reference']},
         'apres': {'id': b['id'], 'horodatage': b['horodatage'], 'libelle': b['libelle']},
         'nouveaux': nouveaux, 'disparus': disparus,
         'ip_changees': ip_changees, 'mac_changees': mac_changees,
         'type_changes': type_changes, 'ports_changes': ports_changes,
-        'cablage_reel': cablage,
+        'os_changes': os_changes, 'cablage_declare': cablage_declare,
+        'parc_changes': parc_changes, 'cablage_reel': cablage,
     }
 
 
