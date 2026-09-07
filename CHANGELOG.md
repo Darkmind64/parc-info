@@ -1,5 +1,27 @@
 # CHANGELOG - ParcInfo
 
+## [2.24.3] - 2026-09-07 🐌
+
+### Baie de brassage : le switch qui **répond** mais très lentement (HP 1810G)
+
+Retour terrain (capture du **📊 Moniteur**) : *HP ProCurve J9450A / 1810G-24* — `poll 127584 ms` (**127 s pour un seul relevé**), `Δt 144 s` entre deux cycles, « compteurs 32 bits », agent qui bloque ses compteurs d'octets à 2 Go.
+
+**Cause.** Le switch **répond** (la sonde de présence 2.24.2 passe), mais son agent SNMP est minimal : pas d'ifXTable (compteurs 64 bits), pas de dot3, pas de PoE. `_snmp_bulk_cols` relançait alors un **walk GETNEXT complet sur chacune de ces ~6-8 colonnes absentes**, à chaque `_snmp_bulk` (≈ 5 par relevé : noms d'interface, ports, PoE, sysinfo), **à chaque cycle**. D'où les 2 minutes.
+
+**Correctifs :**
+
+- **Cache des colonnes absentes** (`app._bulk_col_absente`, clé `(ip, port, oid_base)`, TTL 15 min) : une colonne restée vide au GETBULK **et** au repli GETNEXT est mémorisée « absente » — le repli lent n'est plus retenté pendant 15 min. Une colonne qui réapparaît vide le cache. Bénéficie à **tous** les chemins SNMP (diagnostic, topologie).
+- **Pas de double relevé sur un agent lent** : le double relevé du 1er cycle à froid (2.24.1) est sauté si le premier poll a pris plus de 6 s.
+- **Capacité 64 bits persistée** : `_activite_hc` (« ce switch a-t-il des compteurs 64 bits ? ») est écrit dans le snapshot et ré-amorcé au démarrage à froid → `_poll_switch_ports` ne redemande pas l'ifXTable pour un switch 32 bits déjà connu.
+
+Banc (`bench_baie_activite.py`, nouveau cas « HP 1810G : répond mais lent + agent minimal ») : sur l'agent factice à 40 ms/paquet, **4,0 s puis 0,9 / 0,1 / 0,1 s** au lieu de ré-explorer les colonnes manquantes à chaque cycle.
+
+**Limite assumée** : le tout premier cycle à froid d'un vrai 1810G reste lent (le repli GETNEXT tourne une fois) — mais la pré-chauffe + le snapshot affichent l'état précédent tout de suite, et les cycles suivants tombent à ~10-20 s.
+
+Suite : 338 passants, 8 échecs préexistants inchangés.
+
+---
+
 ## [2.24.2] - 2026-09-07 ⚡
 
 ### Baie de brassage : la cause racine du démarrage « plusieurs minutes »

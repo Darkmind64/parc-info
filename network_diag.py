@@ -6462,7 +6462,8 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
     return ports_ui, journal_ops
 
 
-_ACTIVITE_DOUBLE_ECART = 1.8   # s — écart entre les 2 relevés du 1er cycle à froid
+_ACTIVITE_DOUBLE_ECART = 1.8      # s — écart entre les 2 relevés du 1er cycle à froid
+_ACTIVITE_DOUBLE_MAX_MS = 6000    # au-delà, le switch est trop lent pour un double relevé
 
 # Sonde de présence SNMP en tête de cycle. SANS elle, un switch injoignable ou
 # une mauvaise communauté coûte ~40 s de replis GETNEXT colonne par colonne à
@@ -6538,11 +6539,15 @@ def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
                                 f"(hypothèse « {fdb_meta['transform']} »)", 'warn', ip))
         t0 = time.time()
         infos = _noms_interfaces(ip, communautes)
+        _t_poll = time.time()
         cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos)
+        _poll1_ms = (time.time() - _t_poll) * 1000
 
         # 1er cycle à froid, aucune référence : 2 relevés rapprochés → débit
         # calculable dès maintenant (sinon il faut attendre le cycle suivant).
-        if double_froid and ok and cur_ports:
+        # MAIS seulement si le 1er relevé a été rapide — sur un agent lent
+        # (HP 1810G : un poll = ~2 min) le doubler ne ferait qu'aggraver.
+        if double_froid and ok and cur_ports and _poll1_ms < _ACTIVITE_DOUBLE_MAX_MS:
             try:
                 time.sleep(_ACTIVITE_DOUBLE_ECART)
                 cur2, ok2, hc2, sut2 = _poll_switch_ports(ip, communautes, infos)
@@ -6699,6 +6704,17 @@ def _amorcer_activite_depuis_snapshot(cid, switchs):
         if sn.get('interfaces') and ip not in _activite_noms:
             _activite_noms[ip] = {'ts': sn['epoch'], 'infos': sn['interfaces'],
                                   'maj_en_cours': False}
+        # Capacité compteurs 64 bits déjà connue → `_poll_switch_ports` ne
+        # sondera pas l'ifXTable pour rien au 1er cycle (switch minimal 32 bits
+        # type HP 1810G : ça évite ~6 colonnes en repli GETNEXT lent).
+        _hc_snap = (sn.get('sysinfo') or {}).get('_hc')
+        if _hc_snap is not None and ip not in _activite_hc:
+            _activite_hc[ip] = bool(_hc_snap)
+            if _hc_snap is False:
+                # décale le re-test ifXTable (sinon `reprobe` refire au 1er cycle
+                # faute d'entrée _activite_capa_reprobe et redemande l'ifXTable).
+                _activite_capa_reprobe.setdefault(ip, {})['hc'] = \
+                    _activite_cyc[0] + _ACTIVITE_REPROBE_CYCLES
         if (maintenant - sn['epoch']) > _SNAPSHOT_BAIE_MAX_AGE:
             continue
         if any((cid, ip, ifx) in _activite_prev for ifx in sn['ports']):
@@ -6810,7 +6826,13 @@ def _cycle_activite(clients):
                         (_i0, _cp0, _ok0, _hc0, _dt0, _rb0, _poe0, _si0, _up0) = _r['poll']
                         if _ok0 and _cp0:
                             _s0 = _activite_sut.get((cid, _r['ip']))
-                            _snapshot_baie_ecrire(cid, _r['ip'], _i0, _cp0, _si0,
+                            # `_hc` mémorisé dans le sysinfo persisté : au prochain
+                            # démarrage à froid, `_poll_switch_ports` saura tout de
+                            # suite si ce switch a des compteurs 64 bits et ne
+                            # demandera pas les colonnes ifXTable pour rien.
+                            _si_persist = dict(_si0 or {})
+                            _si_persist['_hc'] = _activite_hc.get(_r['ip'])
+                            _snapshot_baie_ecrire(cid, _r['ip'], _i0, _cp0, _si_persist,
                                                   _s0[0] if _s0 else 0,
                                                   _s0[1] if _s0 else time.time())
 

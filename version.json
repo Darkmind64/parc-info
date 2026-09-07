@@ -1,26 +1,26 @@
 {
-  "version": "2.24.2",
+  "version": "2.24.3",
   "release_date": "2026-09-07",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.24.2",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.2/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.3/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.3/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.3/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.24.3",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.3/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.3/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.3/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.3/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.3/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif majeur du demarrage de la baie de brassage. Un banc de mesure a SNMP reel (bench_baie_activite.py) a chiffre le probleme : un switch injoignable ou avec une mauvaise communaute coutait ~40 secondes A CHAQUE cycle de relevé (replis GETNEXT colonne par colonne), et comme les switchs sont releves ensemble, les LED de TOUS les autres restaient gelees derriere lui pendant des minutes. La vue d'activite sonde maintenant d'abord la presence SNMP de chaque switch (1 requete, ~1,5 s) et ecarte immediatement ceux qui ne repondent pas, avec mise en cache. Resultat mesure : le cas 'un switch sain + un switch mort dans la meme baie' passe de plusieurs minutes par cycle a ~4 s au 1er passage puis instantane. Inclut aussi les correctifs 2.24.1 (pre-chauffe non bridee par le mode terrain, reveil immediat de la boucle, double releve a froid).",
+    "new_features": "Suite des correctifs de la baie de brassage. Retour terrain : un HP ProCurve 1810G repondait au SNMP mais son agent minimal (compteurs 32 bits seulement, pas d'ifXTable/dot3/PoE) faisait relancer un balayage GETNEXT lent sur chaque colonne absente, a chaque relevé, a chaque cycle -> 2 minutes par passage. ParcInfo memorise maintenant les colonnes qu'un agent n'expose pas (15 min) et ne les re-explore plus ; il ne double plus le 1er relevé sur un switch lent ; il retient d'un demarrage a l'autre qu'un switch est en 32 bits. Inclut les correctifs 2.24.1 (pre-chauffe non bridee par le mode terrain, reveil immediat) et 2.24.2 (sonde de presence : un switch injoignable ou mal configure n'aspire plus ~40 s par cycle).",
     "improvements": [
-      "Baie : sonde de presence SNMP en tete de cycle -> un switch injoignable / mauvaise communaute n'aspire plus ~40 s par cycle (mesure : bench_baie_activite.py).",
-      "Baie : pre-chauffe de fond non bridee par le mode terrain (regression 2.24.0).",
-      "Baie : la boucle d'activite se reveille des l'ouverture de /baie.",
-      "Baie : 1er cycle a froid = 2 releves SNMP rapproches -> LED animees des ce cycle.",
-      "Baie : etiquettes de ports amorcees depuis n'importe quel instantane, meme ancien."
+      "Baie : cache des colonnes SNMP absentes d'un agent (HP 1810G et similaires) -> plus de re-balayage GETNEXT lent a chaque cycle.",
+      "Baie : pas de double relevé du 1er cycle sur un agent lent (> 6 s).",
+      "Baie : capacite compteurs 64 bits d'un switch persistee entre deux demarrages.",
+      "Baie : sonde de presence SNMP -> un switch injoignable ne gele plus les autres (2.24.2).",
+      "Baie : pre-chauffe non bridee par le mode terrain, reveil immediat de la boucle (2.24.1)."
     ]
   },
   "checksums": {
@@ -31,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.24.2"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.24.3"
 }
