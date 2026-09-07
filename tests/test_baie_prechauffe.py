@@ -21,6 +21,7 @@ def _isoler_memoire(monkeypatch):
                 '_activite_detail', '_activite_heartbeat', '_activite_echecs'):
         monkeypatch.setattr(N, nom, {})
     monkeypatch.setattr(N, '_activite_rechauffe', [0])
+    monkeypatch.setattr(N, '_ACTIVITE_DOUBLE_ECART', 0.02)   # pas de vraie attente en test
 
 
 def test_snapshot_roundtrip(conn, make_client):
@@ -94,3 +95,64 @@ def test_prechauffe_no_op_si_snmp_inactif(conn, monkeypatch):
     N._prechauffe_last[0] = 0
     N._prechauffe_baie_si_due()
     assert appels == []
+
+
+def test_prechauffe_pas_bridee_par_mode_terrain(conn, make_client, monkeypatch):
+    """Régression : la pré-chauffe (simple cache de compteurs) ne doit PAS être
+    coupée par le mode terrain — sinon elle meurt sur une instance Docker
+    (défaut « consultation »)."""
+    import config_helpers as C
+    _isoler_memoire(monkeypatch)
+    monkeypatch.setattr(N, '_cfg', lambda k, d=None: '1' if k in ('diag_snmp_actif', 'diag_baie_prechauffe') else d)
+    monkeypatch.setattr(N, '_cfg_int', lambda k, d=0: 0 if k == 'diag_baie_prechauffe_s' else d)
+    monkeypatch.setattr(N, '_clients_avec_switch_baie', lambda: [1, 2])
+    C.cfg_set('mode_terrain', 'consultation')
+    try:
+        appels = []
+        monkeypatch.setattr(N, '_cycle_activite', lambda cl: appels.append(list(cl)))
+        N._prechauffe_last[0] = 0
+        N._prechauffe_baie_si_due()
+        assert appels == [[1, 2]]
+    finally:
+        C.cfg_set('mode_terrain', 'auto')
+
+
+def test_double_releve_a_froid_anime_sans_snapshot(conn, make_client, make_appareil, monkeypatch):
+    """Sans aucun snapshot : le 1er cycle à froid fait DEUX relevés rapprochés
+    (au lieu d'attendre le cycle suivant) → LED animée dès l'ouverture."""
+    _isoler_memoire(monkeypatch)
+    cid = make_client()
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.8')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1)", (slot_id,))
+    conn.commit()
+
+    # 2 relevés successifs : +2 Mo entre les deux → ~... Mbit/s sur l'écart
+    etat_appels = {'n': 0}
+
+    def _poll(ip, c, infos=None):
+        etat_appels['n'] += 1
+        base = 1_000_000 if etat_appels['n'] == 1 else 3_000_000
+        return ({1: dict(oper=1, oper_ok=True, speed_mbps=1000, in_oct=base, out_oct=0,
+                         in_pkts=base // 100, out_pkts=0, in_err=0, out_err=0)},
+                True, True, 1000 + etat_appels['n'] * 5)
+
+    monkeypatch.setattr(N, '_noms_interfaces', lambda ip, c: {1: {'nom': 'Gi0/1', 'alias': '',
+                                                                  'ethernet': True, 'speed_mbps': 1000}})
+    monkeypatch.setattr(N, '_poll_switch_ports', _poll)
+    monkeypatch.setattr(N, '_fdb_switch', lambda ip, c: {})
+    N._cycle_activite([cid])
+    assert etat_appels['n'] == 2, "le 1er cycle à froid doit poller 2 fois"
+    with N._activite_lock:
+        res = N._activite_resultat.get(cid)
+    etat = next(p['etat'] for p in res['ports'] if p['numero'] == 1)
+    assert etat in ('traffic', 'sature'), f"LED animée attendue dès le 1er cycle, obtenu {etat!r}"
+
+
+def test_activite_baie_reveille_la_boucle(monkeypatch):
+    _isoler_memoire(monkeypatch)
+    monkeypatch.setattr(N, '_demarrer_activite_thread', lambda: None)
+    N._activite_wake.clear()
+    N.activite_baie(4242)
+    assert N._activite_wake.is_set()

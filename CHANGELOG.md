@@ -1,5 +1,25 @@
 # CHANGELOG - ParcInfo
 
+## [2.24.1] - 2026-09-07 🩹
+
+### Baie de brassage : démarrage encore lent — régression 2.24.0 + accélérations
+
+Retour utilisateur : *« Malgré les modifications, la baie de brassage est toujours très longue à démarrer. »*
+
+**Régression 2.24.0 corrigée.** Le mode terrain bridait la pré-chauffe de fond de la baie (`_prechauffe_baie_si_due` → `_filtrer_clients_sur_site`). Sur une instance **Docker**, `mode_terrain` vaut `consultation` par défaut → `clients_sur_site()` renvoie l'ensemble vide → la pré-chauffe ne relevait plus rien, le snapshot `diag_baie_snapshot` devenait périmé, et **chaque ouverture de `/baie` repartait à froid** (2 cycles avant que les LED s'animent). La pré-chauffe n'écrit qu'un **cache de compteurs SNMP** (aucune écriture d'inventaire, aucun évènement journalisé) — elle n'est plus bridée par le mode terrain. `_moniteur_clients` (surveillance continue, qui journalise de vrais évènements) reste filtré.
+
+**Accélérations supplémentaires du premier affichage :**
+
+- **Réveil immédiat de la boucle** (`_activite_wake`, `threading.Event`) : à l'ouverture de `/baie`, `activite_baie()` / `moniteur_baie()` sortent la boucle de fond de son sommeil au lieu d'attendre la fin du tick courant (jusqu'à 5 s en veille).
+- **Double relevé au tout premier cycle à froid** : quand il n'existe **aucune** référence de compteurs (ni snapshot, ni mémoire), `_relever_switch_activite` fait deux relevés SNMP espacés de ~1,8 s → `_etat_led` calcule un débit **dès ce cycle** au lieu d'attendre le suivant.
+- **Étiquettes de ports immédiates** : les noms / alias d'interface (quasi statiques) sont amorcés depuis **n'importe quel** snapshot, même ancien → le rack s'affiche étiqueté tout de suite ; seul le débit exige encore un snapshot frais.
+
+Limite inhérente conservée : à la **toute première** ouverture chez un client (ou après un long arrêt du conteneur), un débit SNMP demande deux échantillons espacés — le double relevé ramène ce délai de « 2 cycles » à « 1 cycle + ~2 s ».
+
+Tests : `tests/test_baie_prechauffe.py` (+4). Suite : 337 passants, 9 échecs préexistants inchangés.
+
+---
+
 ## [2.24.0] - 2026-09-07 📍
 
 ### Mode terrain / détection de site

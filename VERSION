@@ -1,9 +1,37 @@
-PARCINFO_VERSION=2.24.0
+PARCINFO_VERSION=2.24.1
 RELEASE_DATE=2026-09-07
-BUILD_NUMBER=2026090704
+BUILD_NUMBER=2026090705
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.24.1 - Baie de brassage : demarrage encore lent (suite + correctif)
+#
+# REGRESSION 2.24.0 corrigee : le mode terrain bridait `_prechauffe_baie_si_due`
+# via `_filtrer_clients_sur_site`. Sur une instance Docker (mode_terrain defaut
+# = 'consultation'), `clients_sur_site` renvoie set() -> la pre-chauffe de fond
+# ne relevait plus rien, le snapshot `diag_baie_snapshot` devenait perime, et
+# chaque ouverture de /baie repartait a froid (2 cycles). La pre-chauffe n'ecrit
+# qu'un cache de compteurs SNMP (aucune ecriture d'inventaire, aucun evenement)
+# -> elle n'est plus bridee par le mode terrain. `_moniteur_clients` (qui, lui,
+# journalise des evenements) reste filtre.
+#
+# ACCELERATIONS SUPPLEMENTAIRES du 1er affichage :
+#  - `_activite_wake` (threading.Event) : `activite_baie()` / `moniteur_baie()`
+#    reveillent la boucle des l'ouverture de /baie au lieu d'attendre la fin du
+#    sommeil courant (jusqu'a 5 s en idle).
+#  - `_relever_switch_activite(..., double_froid=)` : au tout 1er cycle et sans
+#    aucune reference de compteurs (ni snapshot, ni memoire), fait DEUX releves
+#    espaces de ~1,8 s -> `_etat_led` calcule un debit des ce cycle (avant : il
+#    fallait attendre le 2e cycle). `_cycle_activite` passe
+#    `double_froid=(froid and (cid, ip) not in _activite_sut)`.
+#  - `_amorcer_activite_depuis_snapshot` amorce les noms/alias d'interface
+#    (quasi statiques) meme depuis un snapshot ancien -> le rack s'affiche
+#    etiquete tout de suite ; seul le debit exige un snapshot frais.
+#
+# Tests : tests/test_baie_prechauffe.py (+4 : regression mode terrain, double
+# releve a froid, reveil de boucle).
+#
+# ----------------------------------------------------------------------------
 # Version 2.24.0 - Mode terrain / detection de site
 # ParcInfo sert sur le terrain (scan, baie, diagnostic CHEZ le client) PUIS en
 # consultation hors site (retour au bureau, instance Docker a la maison). Les
