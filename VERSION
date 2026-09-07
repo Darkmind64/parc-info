@@ -1,9 +1,46 @@
-PARCINFO_VERSION=2.23.0
+PARCINFO_VERSION=2.24.0
 RELEASE_DATE=2026-09-07
-BUILD_NUMBER=2026090703
+BUILD_NUMBER=2026090704
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.24.0 - Mode terrain / detection de site
+# ParcInfo sert sur le terrain (scan, baie, diagnostic CHEZ le client) PUIS en
+# consultation hors site (retour au bureau, instance Docker a la maison). Les
+# fonctions "live" ne doivent alors ni importer le reseau perso du prestataire
+# dans l'inventaire du client, ni donner de fausses infos.
+#
+# NOUVEAU MODULE site_terrain.py :
+#  - mode_terrain() : 'auto' (detection) / 'consultation' (live coupe) /
+#    'terrain' (force "sur site"). Defaut : 'consultation' en Docker, 'auto'
+#    sinon. Config `mode_terrain` (Reglages -> Reseau & Scan -> Mode terrain).
+#  - detecter_site(conn) : croise la table ARP/voisins de CE poste avec
+#    l'inventaire de TOUS les clients (MAC globalement unique, meme principe
+#    que l'auto-detection du client dans le collecteur). La MAC de la
+#    passerelle par defaut pese +3. Renfort optionnel par IP publique de
+#    sortie comparee a parc_general.ip_publique (`mode_terrain_ip_publique`).
+#    -> {confiance: sur_site | probable | indetermine, client_id, nom, ...}
+#  - site_actif(conn, cid) / clients_sur_site(conn) : fenetre de grace de 2 h
+#    apres une confirmation ; 'indetermine' (rien d'affirmable) ne bride RIEN
+#    (comportement historique preserve) ; 'consultation' coupe tout.
+#
+# INTEGRATIONS :
+#  - Scan : /api/scan/client-suggere expose un bloc `site`. La modale "Pour
+#    quel client ?" affiche un bandeau (sur site de X / instance consultation)
+#    et, si la presence n'est PAS confirmee, une confirmation explicite avant
+#    le lancement ("impossible de confirmer que vous etes chez X" / "vous
+#    semblez etre chez Y"). Le scan reste TOUJOURS possible - l'utilisateur
+#    garde le controle (VLAN isole, premiere visite, client sans MAC en base).
+#  - Fonctions de fond : la pre-chauffe de la baie (network_diag.
+#    _prechauffe_baie_si_due) et la surveillance continue (_moniteur_clients)
+#    ne tournent que pour les clients sur site (_filtrer_clients_sur_site).
+#  - Tableau de bord : bandeau "Vous semblez etre sur le site de X -> basculer"
+#    (jamais de bascule silencieuse, l'utilisateur confirme d'un clic).
+#  - Route GET /api/site/detection (lecture seule).
+#
+# Tests : tests/test_site_terrain.py (10), test_mode_terrain.py (8 sections).
+#
+# ----------------------------------------------------------------------------
 # Version 2.23.0 - Rapport "Changements depuis la derniere visite" (Lots 2 et 3)
 # Termine la fonctionnalite ouverte en 2.22.1.
 #

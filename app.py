@@ -3765,6 +3765,20 @@ def single_client_dashboard(cid):
         except Exception:
             chg_resume = None
 
+        # Mode terrain : « vous semblez être sur le site d'un AUTRE client »
+        # (jamais de bascule silencieuse — un bandeau, l'utilisateur confirme).
+        site_terrain_info = None
+        try:
+            import site_terrain as _st
+            _sd = _st.detecter_site(conn)
+            _sc = _sd.get('client_id')
+            if (_sd.get('confiance') == 'sur_site' and _sc and _sc != cid
+                    and get_client_access(_sc)):
+                site_terrain_info = {'client_id': _sc, 'nom': _sd.get('nom') or '',
+                                     'macs': _sd.get('macs_reconnues', 0)}
+        except Exception:
+            site_terrain_info = None
+
         # Combine all data for template
         template_data = {
             'parc': parc,
@@ -3772,6 +3786,7 @@ def single_client_dashboard(cid):
             'a_switchs_baie': a_switchs_baie,
             'diag_reseau_verdict': diag_reseau_verdict,
             'chg_resume': chg_resume,
+            'site_terrain_info': site_terrain_info,
             'appareils': stats['appareils'],
             'nb_en_ligne': stats['nb_en_ligne'],
             'nb_hors_ligne': stats['nb_hors_ligne'],
@@ -4062,6 +4077,31 @@ def api_client_instantane():
     finally:
         conn.close()
     return jsonify({'ok': True, 'id': nid})
+
+
+@app.route('/api/site/detection')
+@login_required
+def api_site_detection():
+    """« Suis-je sur le site du client ? » — compare la table ARP/voisins de ce
+    poste à l'inventaire de tous les clients accessibles (comme l'auto-détection
+    du client dans le collecteur). Sert le bandeau de la barre client et
+    l'avertissement avant un scan. Lecture seule, aucun effet de bord."""
+    conn = get_db()
+    try:
+        import site_terrain
+        d = site_terrain.detecter_site(conn, force=bool(request.args.get('forcer')))
+    except Exception:
+        logger.debug('site_terrain: /api/site/detection', exc_info=True)
+        d = {'mode': 'auto', 'client_id': None, 'nom': '', 'confiance': 'indetermine',
+             'macs_reconnues': 0, 'total_arp': 0, 'passerelle_ok': False, 'ip_publique_ok': False}
+    # N'expose un client suggéré que si l'utilisateur y a accès (pas de fuite de
+    # nom de client entre comptes).
+    cid_sugg = d.get('client_id')
+    if cid_sugg and not get_client_access(cid_sugg):
+        d = dict(d, client_id=None, nom='')
+    d['client_actif'] = get_client_id()
+    conn.close()
+    return jsonify(d)
 
 
 def _marque_modele_combos(rows):
@@ -10713,11 +10753,26 @@ def api_scan_client_suggere():
         plage = ((row[0] if row else '') or '').strip()
         if plage and _appareil_sur_reseau_courant('', plage, reseaux_locaux):
             matches.append(cl['id'])
+    # Mode terrain : détection de site (ARP + passerelle + IP publique) — sert
+    # l'avertissement « êtes-vous bien chez ce client ? » de la modale de scan.
+    site = None
+    try:
+        import site_terrain
+        s = site_terrain.detecter_site(conn)
+        sc = s.get('client_id')
+        if sc and not get_client_access(sc):
+            s = dict(s, client_id=None, nom='')
+        site = {'mode': s['mode'], 'confiance': s['confiance'],
+                'client_id': s.get('client_id'), 'nom': s.get('nom') or '',
+                'macs_reconnues': s.get('macs_reconnues', 0)}
+    except Exception:
+        logger.debug('site_terrain: client-suggere', exc_info=True)
     conn.close()
     return jsonify({
         'clients': [{'id': cl['id'], 'nom': cl['nom']} for cl in clients],
         'client_actif': get_client_id(),
         'suggestion': matches[0] if len(matches) == 1 else None,
+        'site': site,
     })
 
 @app.route('/api/scan/sous-reseaux')
@@ -11221,6 +11276,12 @@ _TYPES_SUGGESTION_BAIE = {'Switch', 'Routeur/Pare-feu', 'Switch/AP', 'NAS'}
 @login_required
 def importer_scan():
     cid = get_client_id()
+    # Mode terrain : le scan reste possible partout (l'utilisateur garde le
+    # contrôle — VLAN isolé, première visite, client sans MAC en base). La
+    # confirmation « êtes-vous bien chez ce client ? » et l'avertissement de
+    # consultation sont présentés côté page AVANT le lancement du scan
+    # (scan_reseau.html). Les fonctions de FOND (pré-chauffe baie, surveillance
+    # SNMP), elles, sont bien coupées en mode consultation — voir site_terrain.
     items = request.json.get('appareils', [])
     conn = get_db(); now = _utcnow().isoformat()
     importes = 0; mis_a_jour = 0

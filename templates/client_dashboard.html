@@ -768,6 +768,20 @@
     </div>
 </div>
 
+{% if site_terrain_info %}
+<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:1rem;
+   padding:.55rem .8rem;border-radius:8px;font-size:.82rem;font-weight:600;
+   color:#1f9d55;background:rgba(31,157,85,.12);border:1px solid rgba(31,157,85,.3);">
+  <span style="font-size:1.1rem;">📍</span>
+  <span style="flex:1;">
+    Vous semblez être sur le site de <b>{{ site_terrain_info.nom }}</b>
+    ({{ site_terrain_info.macs }} machine(s) reconnue(s)) — client actif : {{ client.nom }}.
+  </span>
+  <a href="/client/{{ site_terrain_info.client_id }}/selectionner"
+     class="btn btn-success btn-sm" style="white-space:nowrap;">Basculer vers {{ site_terrain_info.nom }}</a>
+</div>
+{% endif %}
+
 {% if chg_resume %}
 <a href="/changements" style="display:flex;align-items:center;gap:.6rem;margin-bottom:1rem;
    padding:.55rem .8rem;border-radius:8px;text-decoration:none;font-size:.82rem;font-weight:600;

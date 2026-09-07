@@ -3529,6 +3529,25 @@ function rendreConfig() {
         <label class="cfg-label">Timeout par ping (s)</label>
         <input type="number" data-cfg="ping_timeout" value="${g('ping_timeout')||'1.0'}" min="0.3" max="5" step="0.1" class="cfg-input cfg-input-sm">
     </div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:.6rem 0 .2rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Mode terrain</div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:0 0 .4rem;line-height:1.4;">
+        Les fonctions « live » (scan réseau, pré-chauffe de la baie, surveillance SNMP,
+        cartographie) ne sont utiles que sur le site du client. Hors site, elles risquent
+        d'importer votre réseau personnel ou de donner de fausses informations.
+        <b>Auto</b> : détection basée sur les machines vues sur le réseau (comme le collecteur).
+        <b>Consultation</b> : toutes les fonctions live sont coupées (recommandé pour une
+        instance Docker à la maison). <b>Terrain</b> : force « sur site », aucune détection.
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Mode</label>
+        <select data-cfg="mode_terrain" class="cfg-input cfg-input-sm">
+            ${[['','Auto (détection)'],['consultation','Consultation (live coupé)'],['terrain','Terrain (forcé)']].map(o=>`<option value="${o[0]}" ${(g('mode_terrain')||'')===o[0]?'selected':''}>${o[1]}</option>`).join('')}
+        </select>
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Renfort de détection par IP publique</label>
+        <input type="checkbox" data-cfg="mode_terrain_ip_publique" ${g('mode_terrain_ip_publique')!=='0'?'checked':''} class="cfg-check">
+    </div>
 </div>
 
 <!-- ══ 4b. DIAGNOSTIC RÉSEAU ══ -->

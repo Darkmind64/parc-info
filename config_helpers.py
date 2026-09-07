@@ -223,6 +223,13 @@ CFG_DEFAULTS = {
     'diag_baie_activite_repli_naif': '0',  # dernier recours : mapper numero de port == ifIndex (souvent faux, désactivé)
     'diag_baie_prechauffe': '1',           # relève les switchs de la baie en tâche de fond (même quand personne ne regarde) pour que /baie s'anime dès l'ouverture au lieu d'après 2 cycles ; nécessite diag_snmp_actif
     'diag_baie_prechauffe_s': '300',       # période de la pré-chauffe de fond (s)
+    # ── Mode terrain / détection de site ─────────────────────────────────────
+    # Le prestataire opère CHEZ le client (scan, baie, diag) puis consulte HORS
+    # site. '' = auto (détection ARP/passerelle), sauf en Docker → 'consultation'.
+    # 'terrain' force « sur site » (aucune détection) ; 'consultation' coupe
+    # toutes les fonctions live (scan bloqué, pas de pré-chauffe/surveillance).
+    'mode_terrain': '',
+    'mode_terrain_ip_publique': '1',       # renfort de détection : compare l'IP publique de sortie à parc_general.ip_publique
     'port_color_ssh': '#00ff88',
     'port_icon_ssh': '⌨',
     'port_color_http': '#00c9ff',

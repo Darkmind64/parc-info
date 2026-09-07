@@ -30,6 +30,12 @@ flask_app_module.app.config.update(TESTING=True)
 @pytest.fixture(scope='session', autouse=True)
 def _init_database():
     flask_app_module.init_db()
+    # RUNNING_IN_DOCKER=1 est mis par ce conftest comme convention de test (il
+    # court-circuite la détection de réseau et le vérificateur de MAJ) — ce
+    # n'est pas un déploiement « consultation ». Sans ça, mode_terrain() vaudrait
+    # 'consultation' et bloquerait /api/scan/importer pour toute la suite.
+    from config_helpers import cfg_set
+    cfg_set('mode_terrain', 'auto')
     yield
 
 

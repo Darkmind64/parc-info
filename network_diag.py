@@ -4757,6 +4757,11 @@ def _moniteur_clients():
         conn.close()
     except Exception:
         return []
+    # Mode terrain : la surveillance continue (SNMP, topologie) ne tourne que
+    # pour les clients sur le site desquels on se trouve — sinon une instance de
+    # consultation à la maison sonderait en permanence des réseaux distants et
+    # journaliserait de faux évènements.
+    clients = _filtrer_clients_sur_site(clients)
     try:
         from app import _reseaux_locaux_actuels, _appareil_sur_reseau_courant
         reseaux = _reseaux_locaux_actuels()
@@ -7072,6 +7077,29 @@ def _activite_loop():
         time.sleep(_cadence[0])
 
 
+def _filtrer_clients_sur_site(clients):
+    """Restreint une liste de client_id à ceux sur le site desquels on opère
+    (mode terrain). `None` renvoyé par `site_terrain.clients_sur_site` = « rien
+    d'affirmable » → on ne filtre pas (comportement historique). En cas d'erreur
+    du module, on laisse passer (fonctionnalité optionnelle, jamais bloquante)."""
+    if not clients:
+        return clients
+    try:
+        import site_terrain
+        from database import get_local_db
+        conn = get_local_db()
+        try:
+            autorises = site_terrain.clients_sur_site(conn)
+        finally:
+            conn.close()
+        if autorises is None:
+            return clients
+        return [c for c in clients if c in autorises]
+    except Exception:
+        logger.debug('network_diag: _filtrer_clients_sur_site', exc_info=True)
+        return clients
+
+
 def _prechauffe_baie_si_due():
     """Pré-chauffe de fond : relève les switchs de la baie même quand personne ne
     regarde `/baie`, pour que la vue s'anime DÈS l'ouverture (au lieu d'après 2
@@ -7087,6 +7115,11 @@ def _prechauffe_baie_si_due():
             return
         _prechauffe_last[0] = time.time()
         cl = _clients_avec_switch_baie()
+        # Mode terrain : ne rien relever pour un client sur le site duquel on
+        # n'est pas (instance de consultation, ou détection « pas ici »). En
+        # 'auto' sans détection franche, `_filtrer_clients_sur_site` renvoie la
+        # liste inchangée (comportement historique préservé).
+        cl = _filtrer_clients_sur_site(cl)
         if cl:
             _poll_max_ms[0] = 0
             _cycle_activite(cl)
