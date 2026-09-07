@@ -6485,28 +6485,14 @@ def _presence_baie_ok(cid, ip, communautes):
             return True
         if not ok and age < _PRESENCE_BAIE_TTL_KO:
             return False
-    ok = False
     try:
-        from app import (_snmp_get_typed, _OID_SYS_DESCR, _snmp_v3_params,
-                         _snmp_v3_exchange, _ber_sequence, _ber_entier, _ber_oid)
-        v3 = _snmp_v3_params()
-        if v3:
-            _pdu = _ber_sequence(0xa0, _ber_entier(1) + _ber_entier(0) + _ber_entier(0)
-                                 + _ber_sequence(0x30, _ber_sequence(
-                                     0x30, _ber_oid(_OID_SYS_DESCR) + b'\x05\x00')))
-            _b, _st = _snmp_v3_exchange(ip, _pdu, 161, 1.5, v3)
-            ok = (_st == 'ok')
-        if not ok:
-            for comm in (communautes or ['public']):
-                if _snmp_get_typed(ip, [_OID_SYS_DESCR], comm, timeout=1.5,
-                                   version=0, _essai_v3=False):
-                    ok = True
-                    break
+        from app import _snmp_presence
+        _present, exploitable, _detail = _snmp_presence(ip, communautes, timeout=1.5)
     except Exception:
         logger.debug('network_diag: _presence_baie_ok %s', ip, exc_info=True)
         return True                # bug de la sonde : ne pas bloquer le relevé
-    _presence_baie[(cid, ip)] = (now, ok)
-    return ok
+    _presence_baie[(cid, ip)] = (now, bool(exploitable))
+    return bool(exploitable)
 
 
 def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
