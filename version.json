@@ -1,26 +1,26 @@
 {
-  "version": "2.22.1",
+  "version": "2.23.0",
   "release_date": "2026-09-07",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.1/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.1/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.1/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.22.1",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.1/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.1/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.1/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.1/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.1/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.23.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.23.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Nouveau rapport « Changements depuis la derniere visite ». A chaque scan reseau, ParcInfo capture l'etat de l'inventaire du client ; le rapport (page Changements) compare au scan precedent et liste : nouveaux materiels, materiels disparus, adresses IP qui ont change (retrouvees par adresse MAC), cartes reseau remplacees, ports ouverts modifies, et le cablage reel modifie vu en SNMP. Au passage : un appareil qui a change d'IP n'est plus cree en double -- le scan le retrouve par sa MAC et met sa fiche a jour en journalisant le changement.",
+    "new_features": "Le rapport « Changements depuis la derniere visite » est complet. En plus des nouveaux/disparus/IP changees (2.22.1), il liste maintenant : le cablage DECLARE de la baie qui a bouge (cordons, affectations de ports), les champs de configuration du parc modifies (passerelle, DNS, plage IP, domaine, FAI, debits...), et les systemes d'exploitation mis a jour appareil par appareil. Un bandeau sur le tableau de bord du client annonce « il y a N jours depuis le dernier scan, M changements », et un bouton produit un rapport imprimable (ou a enregistrer en PDF).",
     "improvements": [
-      "Page Changements : diff d'inventaire entre deux scans (nouveaux / disparus / IP changee / cablage reel).",
-      "Scan reseau : corrélation par MAC -- un appareil qui a change d'IP est retrouve et mis a jour, plus de doublon.",
-      "Bouton « instantane manuel » / « marquer comme reference » pour figer un etat.",
-      "Pre-chauffe de la baie de brassage : LEDs animees des l'ouverture de la page (2.22.0).",
-      "Switch qui tronque ses MAC (ProCurve) : repare via la table ARP d'un routeur du parc (2.21.2)."
+      "Rapport Changements : cablage declare de la baie + configuration du parc + OS des appareils ajoutes au diff.",
+      "Bandeau « changements depuis la derniere visite » sur le tableau de bord du client.",
+      "Rapport imprimable / PDF du rapport de changements.",
+      "Pre-chauffe de la baie de brassage : LEDs animees des l'ouverture (2.22.0).",
+      "Scan reseau : un appareil qui a change d'IP est retrouve par sa MAC, plus de doublon (2.22.1)."
     ]
   },
   "checksums": {

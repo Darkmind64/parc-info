@@ -1,5 +1,26 @@
 # CHANGELOG - ParcInfo
 
+## [2.23.0] - 2026-09-07 🔄
+
+### Rapport « Changements depuis la dernière visite » — Lots 2 et 3
+
+Termine la fonctionnalité ouverte en 2.22.1.
+
+**Lot 2 — nouvelles catégories dans le diff :**
+
+- **Câblage déclaré de la baie** (`baie_slot_ports`) : par (emplacement, port de façade), ce qui est branché — un cordon vers un autre port, un appareil, un périphérique, « libre ». Ajout / retrait / modification entre deux instantanés ; les identifiants internes sont remplacés par le nom de l'appareil.
+- **Configuration du parc** (`parc_general`) : type de connexion, débits, FAI, IP publique, plage IP, nb machines/utilisateurs, domaine, DNS, passerelle, OS principal, antivirus, suite bureautique → « champ X : avant → après ».
+- **Système d'exploitation** par appareil (`os` + `version_os`) : *« Windows 10 22H2 → Windows 10 23H2 »*.
+
+**Lot 3 — restitution :**
+
+- **Bandeau sur le tableau de bord** du client : *« Il y a N jour(s) depuis le dernier scan — M changement(s) → voir le rapport »*.
+- **Rapport imprimable** : `/changements/rapport`, page autonome en tableaux avec bouton « Imprimer / enregistrer en PDF » (impression navigateur, `@media print` propre). Bouton « 🖨️ Rapport imprimable » sur la page Changements.
+
+Tests : `tests/test_client_changements.py` (+2). Suite : 323 passants, 9 échecs préexistants inchangés.
+
+---
+
 ## [2.22.1] - 2026-09-07 🔄
 
 ### Rapport « Changements depuis la dernière visite » (Lot 1/3)

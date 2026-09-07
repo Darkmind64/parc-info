@@ -65,6 +65,52 @@ def test_reference_epinglee_sert_de_base(conn, make_client, make_appareil):
     assert d['avant']['id'] == ref and len(d['nouveaux']) == 2
 
 
+def test_diff_lot2_parc_cablage_os(conn, make_client, make_appareil):
+    cid = make_client()
+    a = make_appareil(cid, nom_machine='PC', adresse_ip='10.0.0.5', adresse_mac='aa:bb:cc:dd:ee:01',
+                      os='Windows 10', version_os='22H2')
+    sw = make_appareil(cid, nom_machine='SW', adresse_ip='10.0.0.2', type_appareil='Switch',
+                       adresse_mac='aa:bb:cc:dd:ee:02')
+    conn.execute("INSERT INTO parc_general (client_id, passerelle, serveur_dns, domaine) VALUES (?,?,?,?)",
+                 (cid, '10.0.0.1', '10.0.0.1', 'ancien.local'))
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id, nom_custom) VALUES (?,1,?,'Switch central')", (cid, sw))
+    sid = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero, appareil_id) VALUES (?,3,?)", (sid, a))
+    conn.commit()
+    CH.capturer_instantane(conn, cid, 'scan'); conn.commit()
+
+    conn.execute("UPDATE parc_general SET passerelle='10.0.0.254', domaine='nouveau.local' WHERE client_id=?", (cid,))
+    conn.execute("UPDATE appareils SET version_os='23H2' WHERE id=?", (a,))
+    conn.execute("UPDATE baie_slot_ports SET numero=5 WHERE slot_id=? AND appareil_id=?", (sid, a))
+    conn.commit()
+    CH.capturer_instantane(conn, cid, 'scan'); conn.commit()
+
+    d = CH.changements_client(conn, cid)
+    champs = {c['champ']: (c['avant'], c['apres']) for c in d['parc_changes']}
+    assert champs['Passerelle'] == ('10.0.0.1', '10.0.0.254')
+    assert champs['Domaine'] == ('ancien.local', 'nouveau.local')
+    assert d['os_changes'] == [{'id': a, 'nom': 'PC', 'avant': 'Windows 10 22H2', 'apres': 'Windows 10 23H2'}]
+    genres = {c['genre'] for c in d['cablage_declare']}
+    assert 'retrait' in genres and 'ajout' in genres   # port 3 vidé, port 5 rempli
+    # le câblage nomme l'appareil, pas "#id"
+    assert any('appareil PC' in (c['avant'] + c['apres']) for c in d['cablage_declare'])
+    assert d['jours_ecoules'] == 0
+
+
+def test_rapport_imprimable_route(client, conn, make_user, make_client, make_appareil):
+    uid, _l, _p = make_user()
+    cid = make_client(auth_user_id=uid)
+    make_appareil(cid, nom_machine='A', adresse_ip='10.0.0.1')
+    CH.capturer_instantane(conn, cid, 'scan'); conn.commit()
+    make_appareil(cid, nom_machine='B', adresse_ip='10.0.0.2')
+    CH.capturer_instantane(conn, cid, 'scan'); conn.commit()
+    login_session(client, uid, cid)
+    r = client.get('/changements/rapport')
+    assert r.status_code == 200
+    t = r.get_data(as_text=True)
+    assert 'Rapport de changements' in t and 'Nouveaux matériels' in t and 'window.print()' in t
+
+
 def test_scan_correlation_mac_detecte_changement_ip(client, conn, make_user, make_client, make_appareil):
     uid, _l, _p = make_user()
     cid = make_client(auth_user_id=uid)

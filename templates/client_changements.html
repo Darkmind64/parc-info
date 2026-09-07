@@ -36,6 +36,9 @@
     <div class="chg-head"><h1 style="margin:0;">Changements</h1></div>
     <div class="chg-sub">{{ client.nom }} · différences d'inventaire et de câblage entre deux passages</div>
   </div>
+  {% if chg.disponible %}
+  <a class="btn btn-secondary btn-sm" href="{{ url_for('changements_rapport') }}" target="_blank" rel="noopener">🖨️ Rapport imprimable</a>
+  {% endif %}
 </div>
 
 {% if not chg.disponible %}
@@ -103,6 +106,32 @@
     {% for c in chg.type_changes %}
       <li><a href="/appareil/{{ c.id }}/fiche-systeme">{{ c.nom }}</a>
         <span class="chg-av">{{ c.avant }}</span> → <span class="chg-ap">{{ c.apres }}</span></li>
+    {% endfor %}
+  {% endcall %}
+
+  {% call carte("Système d'exploitation", chg.os_changes, "", "💻") %}
+    {% for c in chg.os_changes %}
+      <li><a href="/appareil/{{ c.id }}/fiche-systeme">{{ c.nom }}</a>
+        <span class="chg-av">{{ c.avant }}</span> → <span class="chg-ap">{{ c.apres }}</span></li>
+    {% endfor %}
+  {% endcall %}
+
+  {% call carte("Câblage de la baie (déclaré)", chg.cablage_declare, "c-cablage", "🧵") %}
+    {% for c in chg.cablage_declare %}
+      <li>
+        <span class="chg-tag">{{ {'ajout':'branché','retrait':'débranché','modif':'modifié'}[c.genre] }}</span>
+        <b>{{ c.emplacement }}</b> port {{ c.port }} :
+        {% if c.avant %}<span class="chg-av">{{ c.avant }}</span>{% endif %}
+        {% if c.avant and c.apres %} → {% endif %}
+        {% if c.apres %}<span class="chg-ap">{{ c.apres }}</span>{% endif %}
+      </li>
+    {% endfor %}
+  {% endcall %}
+
+  {% call carte("Configuration du parc", chg.parc_changes, "c-ip", "⚙️") %}
+    {% for c in chg.parc_changes %}
+      <li><b>{{ c.champ }}</b> :
+        <span class="chg-av">{{ c.avant or '(vide)' }}</span> → <span class="chg-ap">{{ c.apres or '(vide)' }}</span></li>
     {% endfor %}
   {% endcall %}
 
