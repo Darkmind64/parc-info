@@ -6464,6 +6464,50 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
 
 _ACTIVITE_DOUBLE_ECART = 1.8   # s — écart entre les 2 relevés du 1er cycle à froid
 
+# Sonde de présence SNMP en tête de cycle. SANS elle, un switch injoignable ou
+# une mauvaise communauté coûte ~40 s de replis GETNEXT colonne par colonne à
+# CHAQUE cycle (mesuré : bench_baie_activite.py) — et comme les switchs sont
+# relevés dans un même lot parallèle dont on attend la fin, les LED de TOUS les
+# autres restent gelées derrière lui. On sonde donc d'abord (1 GET, ~2 s max) et
+# on met en cache : « vivant » 30 s (on ne re-sonde pas un switch sain à chaque
+# tick), « muet » 25 s (on n'insiste pas sur un switch qui ne répond pas).
+_presence_baie = {}            # (cid, ip) -> (time.monotonic(), exploitable: bool)
+_PRESENCE_BAIE_TTL_OK = 30.0
+_PRESENCE_BAIE_TTL_KO = 25.0
+
+
+def _presence_baie_ok(cid, ip, communautes):
+    now = time.monotonic()
+    ent = _presence_baie.get((cid, ip))
+    if ent:
+        age, ok = now - ent[0], ent[1]
+        if ok and age < _PRESENCE_BAIE_TTL_OK:
+            return True
+        if not ok and age < _PRESENCE_BAIE_TTL_KO:
+            return False
+    ok = False
+    try:
+        from app import (_snmp_get_typed, _OID_SYS_DESCR, _snmp_v3_params,
+                         _snmp_v3_exchange, _ber_sequence, _ber_entier, _ber_oid)
+        v3 = _snmp_v3_params()
+        if v3:
+            _pdu = _ber_sequence(0xa0, _ber_entier(1) + _ber_entier(0) + _ber_entier(0)
+                                 + _ber_sequence(0x30, _ber_sequence(
+                                     0x30, _ber_oid(_OID_SYS_DESCR) + b'\x05\x00')))
+            _b, _st = _snmp_v3_exchange(ip, _pdu, 161, 1.5, v3)
+            ok = (_st == 'ok')
+        if not ok:
+            for comm in (communautes or ['public']):
+                if _snmp_get_typed(ip, [_OID_SYS_DESCR], comm, timeout=1.5,
+                                   version=0, _essai_v3=False):
+                    ok = True
+                    break
+    except Exception:
+        logger.debug('network_diag: _presence_baie_ok %s', ip, exc_info=True)
+        return True                # bug de la sonde : ne pas bloquer le relevé
+    _presence_baie[(cid, ip)] = (now, ok)
+    return ok
+
 
 def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
                              avec_fdb=True, double_froid=False):
@@ -6484,6 +6528,16 @@ def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
             'poll': ({}, {}, False, False, None, False, {},
                      {'sysname': '', 'sysdescr': ''}, None),
             'journal': journal, 'calib': None, 'dms': 0}
+
+    # Fast-fail : ce switch répond-il seulement en SNMP ? (voir _presence_baie_ok)
+    if not _presence_baie_ok(cid, ip, communautes):
+        if _activite_switch_ok.get((cid, ip), True):
+            journal.append((f"{nom} ({ip}) — pas de réponse SNMP "
+                            f"(communauté ? pare-feu ? SNMP coupé sur l'équipement ?)",
+                            'warn', ip))
+        _activite_switch_ok[(cid, ip)] = False
+        return muet
+
     try:
         fdb, fdb_meta = {}, {}
         if avec_fdb:
@@ -7058,7 +7112,7 @@ def _activite_loop():
                 if partis:      # structures par (client, …) d'un client qui ne regarde plus
                     pset = set(partis)
                     for reg in (_activite_switch_ok, _activite_etat_mappe, _activite_calib,
-                                _activite_hist, _activite_sut):
+                                _activite_hist, _activite_sut, _presence_baie):
                         for k in [k for k in reg if k[0] in pset]:
                             reg.pop(k, None)
                     for c in pset:

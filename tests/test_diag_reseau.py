@@ -704,6 +704,7 @@ def test_api_baie_activite_route_sans_snmp_synchrone(client, conn, deux_clients,
 def _mock_snmp_switch(monkeypatch, ports, fdb=None):
     """ports = {ifindex: dict(oper,speed_mbps,in_oct,out_oct,in_pkts,out_pkts,in_err,out_err)}
     fdb   = {ifindex: set(mac)} appris (FDB live) — vide par défaut."""
+    monkeypatch.setattr(network_diag, '_presence_baie_ok', lambda *a, **k: True)
     monkeypatch.setattr(network_diag, '_noms_interfaces',
                         lambda ip, c: {i: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True,
                                            'speed_mbps': ports[i].get('speed_mbps', 0)} for i in ports})

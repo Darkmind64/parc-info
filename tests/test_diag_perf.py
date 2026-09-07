@@ -102,6 +102,7 @@ def test_sondes_hote_agrege_et_respecte_les_bascules(monkeypatch):
 
 
 def test_relever_switch_activite_muet_si_le_switch_leve(monkeypatch):
+    monkeypatch.setattr(N, '_presence_baie_ok', lambda *a, **k: True)
     monkeypatch.setattr(N, '_releve_mac_switch',
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError('agent muet')))
     r = N._relever_switch_activite(1, '10.0.0.9', 42, 'SW', ['public'], {})
@@ -112,6 +113,7 @@ def test_relever_switch_activite_muet_si_le_switch_leve(monkeypatch):
 
 def test_relever_switch_activite_sans_fdb_saute_le_walk(monkeypatch):
     appels = {'fdb': 0}
+    monkeypatch.setattr(N, '_presence_baie_ok', lambda *a, **k: True)
     monkeypatch.setattr(N, '_releve_mac_switch',
                         lambda *a, **k: appels.__setitem__('fdb', appels['fdb'] + 1) or ({}, {}))
     monkeypatch.setattr(N, '_noms_interfaces', lambda ip, c: {})

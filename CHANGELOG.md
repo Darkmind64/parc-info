@@ -1,5 +1,36 @@
 # CHANGELOG - ParcInfo
 
+## [2.24.2] - 2026-09-07 ⚡
+
+### Baie de brassage : la cause racine du démarrage « plusieurs minutes »
+
+Retour utilisateur après la 2.24.1 : *« Quand tu parles de cycles SNMP tu me parles de quelques secondes. Dans mon cas c'est toujours plusieurs minutes. »*
+
+**Banc de mesure à SNMP réel** (`bench_baie_activite.py`, faux agent SNMPv2c GET/GETNEXT/GETBULK multi-colonnes) :
+
+| Scénario | avant — cycle 1 | avant — cycle 2 |
+|---|---|---|
+| 1 switch 48 ports sain, agent instantané | 1,9 s | 0,1 s |
+| 1 switch sain, +30 ms/paquet | 3,0 s | 0,7 s |
+| **1 switch injoignable** | **37,5 s** | **43,5 s** |
+| **1 switch, mauvaise communauté** | **37,5 s** | **51,9 s** |
+| **1 switch sain + 1 switch mort dans la même baie** | **~40 s à chaque cycle** | |
+
+**Cause.** La vue d'activité (`_relever_switch_activite` → `_noms_interfaces` + `_poll_switch_ports` + `_poll_poe`) n'avait **aucune sonde de présence**. Un switch qui ne répond pas fait échouer chaque `_snmp_bulk` au GETBULK sur toutes les communautés, puis tomber dans le **repli GETNEXT colonne par colonne** (~10 colonnes pour `_poll_switch_ports`), chacune = 2 communautés × 2 méthodes × timeout ≈ 5 s → **~45 s pour un seul relevé**. Et comme les switchs d'une baie sont relevés dans un même lot parallèle dont on attend la fin, **les LED de tous les autres restaient gelées derrière le mort, cycle après cycle**.
+
+**Correctif.** `_presence_baie_ok(cid, ip, communautés)` en tête de `_relever_switch_activite` — un seul GET `sysDescr` (SNMPv3 si configuré, sinon communautés, timeout 1,5 s). Un switch qui ne répond pas → relevé « muet » immédiat, `_poll_switch_ports` n'est **jamais** appelé pour lui. Cache : « vivant » 30 s (on ne re-sonde pas un switch sain à chaque tick), « muet » 25 s.
+
+| Scénario | après — cycle 1 | après — cycles suivants |
+|---|---|---|
+| 1 switch injoignable | 4,0 s | **0,0 s** |
+| 1 switch, mauvaise communauté | 4,0 s | **0,0 s** |
+| 1 switch sain + 1 switch mort | 4,0 s | **0,2 s** |
+| 1 switch sain seul | 1,9 s | 0,1 s *(inchangé)* |
+
+`bench_baie_activite.py` ajouté au dépôt. Tests : `tests/test_baie_prechauffe.py` (+1). Suite : 338 passants, 8–9 échecs préexistants inchangés.
+
+---
+
 ## [2.24.1] - 2026-09-07 🩹
 
 ### Baie de brassage : démarrage encore lent — régression 2.24.0 + accélérations
