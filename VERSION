@@ -1,8 +1,44 @@
-PARCINFO_VERSION=2.21.2
-RELEASE_DATE=2026-09-06
-BUILD_NUMBER=2026090607
+PARCINFO_VERSION=2.22.0
+RELEASE_DATE=2026-09-07
+BUILD_NUMBER=2026090701
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.22.0 - Pre-chauffe de la vue d'activite de la baie de brassage
+# Retour utilisateur : "les LEDs de la baie prennent un bon moment avant de
+# s'animer". Le Lot 7 (2.20.1) avait parallelise le cycle, mais deux limites
+# de fond subsistaient : (a) un demarrage a froid exige DEUX releves espaces
+# de 3 s -- le 1er n'etablit qu'une reference, le 2e calcule enfin un debit ;
+# (b) le thread ne tourne que pendant qu'on regarde /baie et OUBLIE tout 2 min
+# apres (_ACTIVITE_PURGE). Chaque visite espacee = froid = re-attente.
+#
+# 1. SNAPSHOT PERSISTE (`diag_baie_snapshot`, 1 ligne / switch, ecrasee) :
+#    compteurs par port + noms d'interface + sysinfo + sysUpTime, ecrits a
+#    chaque passage de `_cycle_activite`.
+# 2. AMORCAGE : au 1er cycle a froid, `_amorcer_activite_depuis_snapshot`
+#    pre-remplit `_activite_prev` / `_activite_sut` / `_activite_noms` depuis
+#    le snapshot (s'il a moins de _SNAPSHOT_BAIE_MAX_AGE = 30 min) -> `_etat_led`
+#    calcule un debit DES ce cycle-ci. Plus de "tout idle" au demarrage.
+# 3. PRE-CHAUFFE DE FOND : `_prechauffe_baie_si_due` (branche idle de
+#    `_activite_loop`) relance `_cycle_activite` sur tous les clients ayant un
+#    switch en baie, toutes les `diag_baie_prechauffe_s` (300 s), meme quand
+#    personne ne regarde. Le thread demarre des l'import si le SNMP est actif
+#    (plus besoin d'une 1re visite). Opt-in `diag_baie_prechauffe` (defaut on),
+#    necessite `diag_snmp_actif`.
+#
+# Resultat : /baie affiche l'instantane pre-chauffe immediatement, puis se
+# rafraichit en live des le 1er cycle (~3 s) avec de vrais debits -- au lieu
+# de ~10 s de LEDs eteintes. Survit au redemarrage de l'app et a une longue
+# absence.
+#
+# Limite : sur un switch sans compteurs 64 bits (ifXTable), un compteur
+# d'octets 32 bits peut avoir boucle entre deux passages -> ce port montre 0
+# au 1er cycle et se corrige au 2e (3 s apres). Les gardes de `_etat_led`
+# (plafond de debit) evitent tout pic fantaisiste.
+#
+# Tests : tests/test_baie_prechauffe.py (5). Suite : 316 passants (+5), 9
+# echecs preexistants de test_diag_reseau.py inchanges (mocks + 1 test d'ordre
+# fragile), 39/39 scripts racine.
 
 # Version 2.21.2 - FDB tronquee reparee via la table ARP d'un routeur
 # Suite du relevé "FDB brut" (2.21.1). Sur pieces (HP ProCurve J9450A) :

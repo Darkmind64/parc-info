@@ -1,30 +1,26 @@
 {
-  "version": "2.21.2",
-  "release_date": "2026-09-06",
+  "version": "2.22.0",
+  "release_date": "2026-09-07",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.2/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.2/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.2/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.21.2",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.2/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.2/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.2/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.2/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.21.2/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.22.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.22.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Suite du releve « FDB brut » (2.21.1) : certains switchs (constate sur HP ProCurve) ne renvoient que les 4 premiers octets de chaque adresse MAC apprise, prefixes de 00:01 -- les 2 derniers octets sont perdus. ParcInfo repare desormais ces adresses en les corrélant avec la table ARP d un routeur du parc (interroge en SNMP), qui elle porte les MAC entieres : la carte reseau proposee par « Deviner le brassage » affiche des adresses completes et des fabricants reels au lieu d une liste de 00:01. Sans routeur SNMP de reference, seul le debut de chaque MAC reste exploitable (le bouton « FDB brut » le montre).",
+    "new_features": "Pre-chauffe de la vue d'activite de la baie de brassage. ParcInfo releve les switchs de la baie en tache de fond (toutes les 5 min par defaut, meme quand personne ne regarde) et memorise un instantane des compteurs. Resultat : en ouvrant /baie, les LEDs d'activite s'animent tout de suite avec de vrais debits, au lieu d'attendre deux cycles de relevé (~10 s de LEDs eteintes auparavant). L'instantane survit au redemarrage de l'application et a une longue absence. Reglages : diag_baie_prechauffe (defaut on), diag_baie_prechauffe_s (300). Necessite le SNMP actif.",
     "improvements": [
-      "Switch qui tronque ses MAC (ProCurve : 00:01 + 4 octets) : réparé en corrélant avec la table ARP d'un routeur du parc — adresses entières et vrais fabricants dans « Deviner le brassage ».",
-      "MAC préfixée par un agent SNMP défectueux sur la table ARP / ifPhysAddress : on garde les 6 derniers octets au lieu de jeter l'adresse (2.21.1).",
-      "Bouton « FDB brut » sur la page Baie : relevé brut de la table d'apprentissage MAC de chaque switch, sans correction (2.21.1).",
-      "Tableau de bord : verdict « Santé réseau » (diagnostic SNMP) dans la tuile État réseau (2.21.0).",
-      "Baie de brassage : pastille de santé par équipement relevé en SNMP (2.21.0).",
-      "Fiche appareil : recoupement SNMP ↔ collecteur-agent (lien bridé, half-duplex) (2.21.0).",
-      "Parc : badges « confirmé / divergent / non vérifié » sur passerelle, DNS, plage IP, domaine (2.21.0).",
-      "Topologie : « + Ajouter à l'inventaire » pour un équipement vu en LLDP mais absent (2.21.0).",
-      "Historique : les bascules d'état du diagnostic réseau y sont tracées ; un équipement qui cesse de répondre est enfin compté « muet » (2.21.0)."
+      "Baie de brassage : relevé de fond + instantane persiste (diag_baie_snapshot) -> LEDs animees des l'ouverture de la page.",
+      "La vue d'activite survit au redemarrage de l'app et a une absence prolongee (avant : tout oublie 2 min apres avoir quitte /baie).",
+      "Switch qui tronque ses MAC (ProCurve) : repare via la table ARP d'un routeur du parc (2.21.2).",
+      "Bouton FDB brut sur la page Baie : forme exacte des adresses renvoyees par chaque switch (2.21.1).",
+      "Le diagnostic reseau irrigue les autres ecrans : verdict Sante reseau, pastille baie, recoupement fiche, badges parc, promouvoir en inventaire, transitions historique (2.21.0)."
     ]
   },
   "checksums": {
