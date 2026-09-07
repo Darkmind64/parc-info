@@ -1,5 +1,30 @@
 # CHANGELOG - ParcInfo
 
+## [2.24.4] - 2026-09-07 🎯
+
+### Baie de brassage : **LA** cause racine — le HP 1810G ne fait pas de GETBULK
+
+Après 2.24.1/2/3, l'utilisateur : *« C'est toujours aussi long. Je te signale ce problème depuis longtemps. Trouve vraiment d'où ça vient. »*
+
+Banc de mesure étendu avec un **faux agent fidèle au HP ProCurve 1810G** : répond au GET (présence OK), compteurs 32 bits, pas d'ifXTable/dot3/PoE, **et renvoie `genErr` sur tout GetBulkRequest**.
+
+**Cause racine.** `_snmp_bulk_cols`, quand le GETBULK échoue, retombait sur `_snmp_walk` **une colonne à la fois** : `return {b: _snmp_walk(...) for b in oid_bases}`. Pour `_poll_switch_ports` : 7 colonnes utiles × 24 ports = **~170 aller-retours UDP séquentiels par relevé**, à chaque cycle. Sur le CPU de management minuscule du 1810G (~0,7 s/aller-retour) : **~2 minutes**. Exactement le `poll 127584 ms` de la capture d'écran du Moniteur.
+
+**Correctif** (`_snmp_bulk_cols` réécrit) :
+
+1. **GETNEXT multi-colonnes** — une seule requête porte toutes les colonnes ; le GetNextResponse porte un successeur par colonne → toutes avancent d'une ligne par aller-retour. **24 ports = ~24 aller-retours au lieu de ~170.** Attribution par position (l'ordre est garanti en GETNEXT, RFC 1157/1905).
+2. **Mode mémorisé par équipement** (`_bulk_col_mode`, TTL 30 min) → plus de GETBULK voué à l'échec à chaque appel.
+3. **GET groupé** une fois les index de lignes connus (`_bulk_row_suffixes`) : un agent GETNEXT-only est ensuite interrogé par `GetRequest` de 20 varbinds → **~6 aller-retours** pour toutes les valeurs de tous les ports. Partagé par table (ifTable) pour que les colonnes d'erreurs (1 cycle/8) n'aient pas à re-walker.
+4. Le cache des colonnes absentes (2.24.3) alimente aussi le chemin GETNEXT.
+
+Banc (`bench_baie_activite.py`, cas « HP 1810G : PAS DE GETBULK », agent factice à 40 ms/aller-retour) : cycle 1 ~6 s (walk + apprentissage), **cycles suivants 0,4-0,5 s**. GETNEXT reçus par l'agent : 196 → 94.
+
+**Extrapolé au vrai 1810G** (~0,7 s/aller-retour) : **~127 s → ~5 s par cycle** en régime établi ; ~30 s au tout premier cycle à froid (masqué par la pré-chauffe qui affiche l'instantané précédent).
+
+Aucune régression sur les agents qui font du GETBULK (tenté en premier, inchangé). Suite : 337 passants, 9 échecs préexistants inchangés.
+
+---
+
 ## [2.24.3] - 2026-09-07 🐌
 
 ### Baie de brassage : le switch qui **répond** mais très lentement (HP 1810G)

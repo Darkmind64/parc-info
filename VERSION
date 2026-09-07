@@ -1,9 +1,43 @@
-PARCINFO_VERSION=2.24.3
+PARCINFO_VERSION=2.24.4
 RELEASE_DATE=2026-09-07
-BUILD_NUMBER=2026090707
+BUILD_NUMBER=2026090708
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.24.4 - Baie : LA cause racine (le HP 1810G ne fait pas de GETBULK)
+#
+# Apres 2.24.1/2/3 l'utilisateur signale : « c'est TOUJOURS plusieurs minutes ».
+# Banc de mesure a SNMP reel etendu avec un faux agent fidele au HP 1810G :
+# repond au GET (presence OK), 32 bits, pas d'ifXTable/dot3/PoE, ET renvoie
+# genErr(5) sur tout GetBulkRequest.
+#
+# CAUSE RACINE : `_snmp_bulk_cols`, quand le GETBULK echoue, retombait sur
+# `_snmp_walk` **par colonne** (`return {b: _snmp_walk(...) for b in oid_bases}`).
+# 7 colonnes utiles × 24 ports = ~170 aller-retours UDP SEQUENTIELS par relevé
+# (_poll_switch_ports), a CHAQUE cycle. Sur le CPU de management minuscule du
+# 1810G (~0,7 s/aller-retour) : ~2 minutes. Le `poll 127584 ms` de la capture.
+#
+# CORRECTIF (`app._snmp_bulk_cols` reecrit) :
+#  1. GETNEXT **multi-colonnes** : une seule requete porte toutes les colonnes,
+#     le GetNextResponse porte un successeur par colonne -> toutes avancent
+#     d'une ligne par aller-retour. 24 ports = ~24 aller-retours au lieu de 170.
+#     Attribution par position (RFC 1157/1905, ordre garanti en GETNEXT).
+#  2. `_bulk_col_mode[(ip, port)]` : le mode (bulk / next) qui a marche est
+#     memorise 30 min -> plus de GETBULK voue a l'echec a chaque appel.
+#  3. `_bulk_row_suffixes[(ip, port, oid_base|table)]` : une fois les index de
+#     lignes connus, un agent GETNEXT-only est interroge par **GetRequest
+#     groupe** (`_BULK_GET_CHUNK`=20 varbinds/paquet) : ~6 aller-retours pour
+#     toutes les valeurs de tous les ports. Partage par table (ifTable) pour que
+#     les colonnes d'erreurs (1 cycle/8) n'aient pas a re-walker.
+#  4. `_bulk_col_absente` (2.24.3) alimente aussi le chemin GETNEXT.
+#
+# Banc (bench_baie_activite.py, cas « HP 1810G : PAS DE GETBULK », agent
+# factice 40 ms/aller-retour) : cycle 1 ~6 s (walk + apprentissage), cycles
+# suivants 0,4-0,5 s. GETNEXT recus par l'agent : 196 -> 94. Extrapole au vrai
+# 1810G (~0,7 s/aller-retour) : ~127 s -> ~5 s par cycle en regime etabli, ~30 s
+# au 1er cycle a froid (masque par la pre-chauffe qui affiche l'instantane).
+#
+# ----------------------------------------------------------------------------
 # Version 2.24.3 - Baie de brassage : le switch qui repond mais tres lentement
 #
 # Retour terrain (capture d'ecran du Moniteur) : HP ProCurve J9450A / 1810G-24,

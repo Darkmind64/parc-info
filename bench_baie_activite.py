@@ -115,9 +115,12 @@ def _build_mib(nports, tick0, sans_ifx=False):
 
 class FauxSwitch:
     def __init__(self, nports=48, delai=0.0, communaute='public', muet=False,
-                 bind_ip='127.0.0.1', sans_ifx=False):
+                 bind_ip='127.0.0.1', sans_ifx=False, pas_de_getbulk=False):
         self.nports, self.delai, self.communaute, self.muet = nports, delai, communaute, muet
         self.sans_ifx = sans_ifx
+        self.pas_de_getbulk = pas_de_getbulk      # cas HP 1810G : GETBULK -> genErr
+        self.getbulk_recus = 0
+        self.getnext_recus = 0
         self.t0 = time.time()
         self.polls = 0
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -190,6 +193,16 @@ class FauxSwitch:
             oids.append(_ber_decoder_oid(ob))
         mib = self._mib()
         out = []
+        if tag_pdu == 0xa5:
+            self.getbulk_recus += 1
+        elif tag_pdu == 0xa1:
+            self.getnext_recus += 1
+        if tag_pdu == 0xa5 and self.pas_de_getbulk:
+            # HP 1810G : renvoie genErr(5) sur un GetBulkRequest
+            resp_pdu = _ber_sequence(0xa2, _ber_entier(int.from_bytes(rid, 'big', signed=True))
+                                     + _ber_entier(5) + _ber_entier(0)
+                                     + _ber_sequence(0x30, b''))
+            return _ber_sequence(0x30, _ber_entier(1) + _ber_chaine(self.communaute) + resp_pdu)
         if tag_pdu == 0xa0:                    # GET
             table = {'.'.join(map(str, e[0])): e for e in mib}
             for o in oids:
@@ -298,7 +311,8 @@ def _chrono(label, fn, repet=1):
         getattr(N, k).clear()
     try:
         A._v3_engine_cache.clear(); A._v3_engine_negatif.clear()
-        A._bulk_col_absente.clear()
+        A._bulk_col_absente.clear(); A._bulk_col_mode.clear()
+        A._bulk_row_suffixes.clear()
     except Exception:
         pass
     ts = []
@@ -360,12 +374,21 @@ _cas('LE CAS RÉEL : 1 switch sain + 1 switch INJOIGNABLE dans la même baie',
      [{'nports': 48, 'delai': 0.005, '_nom': 'SW-SAIN'},
       {'nports': 48, 'muet': True, '_nom': 'SW-MORT'}])
 
-# Le cas du terrain : HP ProCurve 1810G — répond (présence OK) mais lent
-# (~40 ms/paquet) et agent minimal (pas d'ifXTable / HC / dot3). Sans le cache
-# de colonnes absentes, chaque cycle relançait un GETNEXT complet sur chaque
-# colonne manquante.
-_cas('HP 1810G : répond mais lent (40 ms/pqt) + agent minimal (32 bits, pas d\'ifX)',
-     [{'nports': 24, 'delai': 0.040, 'sans_ifx': True}], repet=4)
+# Le cas du terrain : HP ProCurve 1810G — répond (présence OK), agent minimal
+# (32 bits, pas d'ifXTable/dot3/PoE), lent (~40 ms/paquet) ET NE RÉPOND PAS AU
+# GETBULK (genErr). Avant : GETNEXT par colonne = 7×24 = ~170 aller-retours par
+# relevé. Après : GETNEXT multi-colonnes = ~24, mémorisé.
+sw = FauxSwitch(bind_ip='127.0.9.9', nports=24, delai=0.040, sans_ifx=True,
+                pas_de_getbulk=True)
+_PORTS['127.0.9.9'] = sw.port
+_monter_switch('127.0.9.9', sw.port, 'HP-1810G')
+print('--- HP 1810G : lent + agent minimal + PAS DE GETBULK ---')
+_chrono('cycle 1 (froid) puis suivants', lambda: N._cycle_activite([CID]), repet=4)
+print('    (agent : %d GETBULK reçus, %d GETNEXT reçus)' % (sw.getbulk_recus, sw.getnext_recus))
+sw.stop()
+conn.execute("DELETE FROM baie_slots WHERE client_id=?", (CID,))
+conn.execute("DELETE FROM appareils WHERE client_id=?", (CID,)); conn.commit()
+print()
 
 conn.close()
 print('Fait.')
