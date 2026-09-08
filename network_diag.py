@@ -2910,6 +2910,187 @@ def decouvrir_reseaux(client_id: int) -> dict:
     return {'ok': True, 'configurees': [str(c) for c in configurees], 'detectes': ordonnes}
 
 
+# ── Découverte L3 ACTIVE (Lot B) : traceroute, passerelles, SNMP hors inventaire
+# Plus lent (~15-25 s) que `decouvrir_reseaux` — déclenché par un bouton, jamais
+# au chargement de la page.
+_TRACE_HOPS_MAX = 6
+_TRACE_CIBLES_PUB = ('8.8.8.8', '1.1.1.1')
+# Sondage des passerelles voisines : 3e octet plausible autour d'un /24 connu +
+# quelques classiques, hôte .1 ou .254. Volontairement COURT — chaque IP est
+# validée par un vrai echo-reply ICMP (`_echo_reply_ok`, pas `_ping` qui
+# accepte à tort les réponses « Destination host unreachable » sous Windows).
+_GW_VOISINES_3E = (0, 1, 2, 3, 4, 5, 10, 20, 30, 50, 100, 200, 254)
+_GW_VOISINES_HOTE = (1, 254)
+_GW_HORS_SITE = ('10.0.0.1', '10.0.0.254', '10.1.1.1', '10.10.10.1',
+                 '172.16.0.1', '172.16.1.1', '192.168.0.1', '192.168.1.1',
+                 '192.168.2.1', '192.168.10.1', '192.168.100.1', '192.168.88.1')
+_ACTIF_BUDGET_S = 25.0
+
+
+def _echo_reply_ok(ip: str) -> bool:
+    """Vrai UNIQUEMENT si `ip` renvoie un echo-reply ICMP. Contrairement à
+    `app._ping`, rejette les réponses « Destination host unreachable » (que
+    `ping` renvoie sous Windows avec un code retour 0 quand un routeur répond
+    à sa place) et les repli TCP — indispensable pour ne pas prendre une IP de
+    passerelle fantôme sur une interface virtuelle pour un réseau réel."""
+    try:
+        if IS_WINDOWS:
+            out = (_run(['ping', '-n', '1', '-w', '700', ip], timeout=2).stdout or '')
+            m = re.search(r'Reply from\s+(\d{1,3}(?:\.\d{1,3}){3})\s*:\s*bytes=', out)
+            return bool(m and m.group(1) == ip) and 'unreachable' not in out.lower()
+        out = (_run(['ping', '-c', '1', '-W', '1', ip], timeout=2).stdout or '')
+        return bool(re.search(r'\b1 (?:packets? )?received\b', out)) \
+            and 'unreachable' not in out.lower()
+    except Exception:
+        return False
+
+
+def _traceroute(cible, max_hops=_TRACE_HOPS_MAX, timeout_ms=800):
+    """IP des sauts vers `cible` (best-effort, via `tracert`/`traceroute`). Chaque
+    saut à IP PRIVÉE est une interface de routeur — donc un sous-réseau en
+    service. Les sauts publics (infrastructure du FAI) sont ignorés par
+    l'appelant."""
+    ips = []
+    try:
+        if IS_WINDOWS:
+            cmd = ['tracert', '-d', '-h', str(max_hops), '-w', str(timeout_ms), cible]
+        else:
+            cmd = ['traceroute', '-n', '-m', str(max_hops), '-w', '1', '-q', '1', cible]
+        out = _run(cmd, timeout=max_hops * 2 + 5).stdout or ''
+        vus = set()
+        for ligne in out.splitlines():
+            if cible in ligne:          # ligne d'en-tête « Tracing route to … »
+                continue
+            for m in re.finditer(r'(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.])', ligne):
+                ip = m.group(1)
+                if ip in vus or ip == cible:
+                    continue
+                try:
+                    a = ipaddress.ip_address(ip)
+                except ValueError:
+                    continue
+                if a.is_loopback or a.is_unspecified:
+                    continue
+                vus.add(ip)
+                ips.append(ip)
+    except Exception:
+        logger.debug('network_diag: traceroute %s en échec', cible, exc_info=True)
+    return ips
+
+
+def decouvrir_reseaux_actif(client_id: int, budget_s: float = _ACTIF_BUDGET_S) -> dict:
+    """`decouvrir_reseaux` (passif) PLUS une découverte L3 active : traceroute
+    vers la passerelle / une cible publique / les DNS déclarés, sondage des
+    passerelles voisines, et SNMP sur la passerelle par défaut même si elle
+    n'est pas dans l'inventaire. Lecture seule (aucune écriture), ~15-25 s —
+    déclenché par un bouton. Même forme de retour que `decouvrir_reseaux`."""
+    t0 = time.monotonic()
+    base = decouvrir_reseaux(client_id)
+    configurees = _parse_plages(','.join(base.get('configurees') or []))
+    detectes = {d['cidr']: d for d in base.get('detectes', [])}
+
+    from database import get_db
+    try:
+        conn = get_db()
+        pg = conn.execute("SELECT serveur_dns, ip_publique FROM parc_general WHERE client_id=?",
+                          (client_id,)).fetchone()
+        ips_inv = {r[0] for r in conn.execute(
+            "SELECT adresse_ip FROM appareils WHERE client_id=? AND COALESCE(adresse_ip,'')<>''",
+            (client_id,))}
+        conn.close()
+    except Exception:
+        pg, ips_inv = None, set()
+    dns_declares = [d for d in re.split(r'[,;\s]+', (pg[0] if pg else '') or '') if d]
+    ip_pub_declaree = ((pg[1] if pg else '') or '').strip()
+
+    def _add(cidr_str, via, label, hint=0, forte=False):
+        try:
+            net = ipaddress.ip_network(cidr_str, strict=False)
+        except (ValueError, TypeError):
+            return
+        if not _cidr_scannable(net) or any(net == c or net.subnet_of(c) for c in configurees):
+            return
+        e = detectes.setdefault(str(net), {'cidr': str(net), 'sources': [], 'hint_hotes': 0,
+                                           'confiance': 'faible'})
+        if not any(s['via'] == via and s['label'] == label for s in e['sources']):
+            e['sources'].append({'via': via, 'label': label})
+        e['hint_hotes'] = max(e['hint_hotes'], int(hint or 0))
+        if forte:
+            e['confiance'] = 'forte'
+
+    if os.environ.get('RUNNING_IN_DOCKER'):
+        # traceroute / ping local n'ont pas de sens depuis le bridge — on rend
+        # juste le passif (le SNMP passerelle reste tenté, il traverse le NAT).
+        gw = ''
+    else:
+        gw = _passerelle_defaut()
+
+    # ── 1. traceroute ──
+    cibles = list(_TRACE_CIBLES_PUB[:1])
+    if ip_pub_declaree:
+        cibles.append(ip_pub_declaree)
+    cibles += [d for d in dns_declares if d not in _RESOLVEURS_PUBLICS][:3]
+    if not os.environ.get('RUNNING_IN_DOCKER'):
+        for cible in cibles:
+            if time.monotonic() - t0 > budget_s * 0.55:
+                break
+            for hop in _traceroute(cible):
+                try:
+                    a = ipaddress.ip_address(hop)
+                except ValueError:
+                    continue
+                if a.is_private and not a.is_link_local:
+                    _add(str(ipaddress.ip_network(hop + '/24', strict=False)),
+                         'traceroute', 'routeur sur le chemin vers %s' % cible, forte=True)
+
+    # ── 2. SNMP sur la passerelle par défaut, même hors inventaire ──
+    if gw and gw not in ips_inv:
+        try:
+            from app import _snmp_presence, _SNMP_COMMUNAUTES_COURANTES
+            comms = list(dict.fromkeys(list(_communautes_snmp())
+                                       + ['public', 'private', 'community']))
+            present, exploitable, _d = _snmp_presence(gw, comms, timeout=1.0)
+            if exploitable:
+                for comm in comms:
+                    rs = _sous_reseaux_equipement(gw, [comm])
+                    if rs:
+                        for r in rs:
+                            _add(r, 'passerelle_snmp',
+                                 'passerelle %s (SNMP)' % gw, forte=True)
+                        break
+        except Exception:
+            logger.debug('network_diag: SNMP passerelle hors inventaire', exc_info=True)
+
+    # ── 3. sondage des passerelles voisines (echo-reply STRICT) ──
+    if not os.environ.get('RUNNING_IN_DOCKER') and time.monotonic() - t0 < budget_s:
+        a_sonder = set(_GW_HORS_SITE)
+        refs = list(configurees) + [ipaddress.ip_network(c) for c in detectes
+                                    if detectes[c]['confiance'] == 'forte'
+                                    and detectes[c]['sources']
+                                    and detectes[c]['sources'][0]['via'] != 'passerelle_voisine']
+        for c in refs:
+            if c.version != 4 or c.prefixlen < 22:
+                continue
+            base16 = str(c.network_address).rsplit('.', 2)[0]      # 192.168
+            for n in _GW_VOISINES_3E:
+                for hote in _GW_VOISINES_HOTE:
+                    a_sonder.add('%s.%d.%d' % (base16, n, hote))
+        a_sonder -= {str(ipaddress.ip_address(g)) for g in [gw] if g}
+        a_sonder = [ip for ip in a_sonder
+                    if not any(ipaddress.ip_address(ip) in c for c in configurees)]
+        vivantes = _executer_sondes({ip: (lambda _ip=ip: _echo_reply_ok(_ip))
+                                     for ip in a_sonder}, max_workers=40)
+        for ip, (ok, _dur) in vivantes.items():
+            if ok:
+                _add(str(ipaddress.ip_network(ip + '/24', strict=False)),
+                     'passerelle_voisine', '%s répond' % ip, hint=1, forte=True)
+
+    ordonnes = sorted(detectes.values(), key=lambda d: (
+        0 if d['confiance'] == 'forte' else 1, -d['hint_hotes'],
+        ipaddress.ip_network(d['cidr']).prefixlen, d['cidr']))
+    return {'ok': True, 'configurees': base.get('configurees', []), 'detectes': ordonnes}
+
+
 def reseaux_hors_plage(plages, *sources_ip) -> list:
     """À partir des IP découvertes pendant un scan (UPnP/mDNS/ONVIF, ARP SNMP…),
     renvoie les /24 qui ne sont dans AUCUNE des `plages` scannées, avec le nb

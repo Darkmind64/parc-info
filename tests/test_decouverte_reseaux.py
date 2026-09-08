@@ -77,6 +77,54 @@ def test_docker_court_circuite_les_sondes_locales(monkeypatch):
     assert N._dns_configures_poste() == set()
 
 
+def test_decouvrir_reseaux_actif_lot_b(conn, make_client, monkeypatch):
+    """Lot B : traceroute + SNMP passerelle hors inventaire + passerelles
+    voisines s'ajoutent au passif, en confiance forte."""
+    import app as A
+    cid = make_client()
+    conn.execute("INSERT INTO parc_general (client_id, plage_ip_locale, serveur_dns) "
+                 "VALUES (?, '192.168.1.0/24', '192.168.1.53')", (cid,))
+    conn.commit()
+    monkeypatch.delenv('RUNNING_IN_DOCKER', raising=False)
+    # passif : rien
+    monkeypatch.setattr(N, '_routes_locales_poste', lambda: set())
+    monkeypatch.setattr(N, '_dns_configures_poste', lambda: set())
+    monkeypatch.setattr(N, '_table_arp', lambda: {})
+    # actif
+    monkeypatch.setattr(N, '_passerelle_defaut', lambda: '192.168.1.1')
+    monkeypatch.setattr(N, '_traceroute',
+                        lambda cible, **k: ['192.168.1.1', '62.4.16.1', '8.8.8.8']
+                        if cible == '8.8.8.8' else ['192.168.1.1', '192.168.50.1'])
+    monkeypatch.setattr(A, '_snmp_presence', lambda ip, c, **k: (True, True, 'ok'))
+    monkeypatch.setattr(N, '_sous_reseaux_equipement',
+                        lambda ip, c: ['192.168.99.0/24'] if ip == '192.168.1.1' else [])
+    monkeypatch.setattr(N, '_echo_reply_ok', lambda ip: ip in ('192.168.5.1', '10.0.0.1'))
+
+    d = N.decouvrir_reseaux_actif(cid, budget_s=10)
+    par = {x['cidr']: x for x in d['detectes']}
+    assert '192.168.50.0/24' in par                       # saut privé du traceroute vers le DNS
+    assert par['192.168.50.0/24']['confiance'] == 'forte'
+    assert not any(c.startswith('8.8.8') or c.startswith('62.4') for c in par)  # sauts publics ignorés
+    assert '192.168.99.0/24' in par                       # SNMP sur la passerelle hors inventaire
+    assert '192.168.5.0/24' in par and '10.0.0.0/24' in par  # passerelles voisines (echo-reply strict)
+    assert par['192.168.5.0/24']['confiance'] == 'forte'
+
+
+def test_echo_reply_ok_rejette_unreachable(monkeypatch):
+    """`_echo_reply_ok` doit rejeter une réponse « Destination host unreachable »
+    (Windows renvoie ça avec un code retour 0)."""
+    class _R:
+        def __init__(self, s): self.stdout = s
+    monkeypatch.setattr(N, 'IS_WINDOWS', True)
+    monkeypatch.setattr(N, '_run', lambda *a, **k: _R(
+        "Pinging 192.168.9.1 with 32 bytes of data:\n"
+        "Reply from 192.168.1.1: Destination host unreachable.\n"))
+    assert N._echo_reply_ok('192.168.9.1') is False
+    monkeypatch.setattr(N, '_run', lambda *a, **k: _R(
+        "Reply from 192.168.9.1: bytes=32 time=1ms TTL=64\n"))
+    assert N._echo_reply_ok('192.168.9.1') is True
+
+
 def test_api_scan_sous_reseaux_route(client, conn, make_user, make_client, monkeypatch):
     uid, _l, _p = make_user()
     cid = make_client(auth_user_id=uid)

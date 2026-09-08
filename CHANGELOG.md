@@ -1,5 +1,25 @@
 # CHANGELOG - ParcInfo
 
+## [2.26.0] - 2026-09-08 🛰️
+
+### Scan réseau : découverte L3 **active** (Lot B)
+
+Suite du Lot A (2.25.0). Nouveau bouton **« 🔍 Sonder plus loin »** dans l'encart « Sous-réseaux candidats » → `network_diag.decouvrir_reseaux_actif(client_id)` = le passif **plus** :
+
+1. **Traceroute** (`_traceroute`, `tracert` / `traceroute`) vers `8.8.8.8`, l'IP publique déclarée et les DNS déclarés. Chaque saut à **IP privée** = une interface de routeur → son `/24`. Les sauts publics (infra du FAI) sont ignorés.
+2. **SNMP sur la passerelle par défaut** — même si elle n'est **pas** dans l'inventaire (communautés configurées + `public`/`private`/`community`) → `_sous_reseaux_equipement` (table IP/routes du routeur).
+3. **Sondage des passerelles voisines** : autour d'un `/24` connu, teste `<base>.<0,1,2,3,4,5,10,20,30,50,100,200,254>.<1|254>` + une courte liste hors site (`10.0.0.1`, `172.16.0.1`…). **Chaque IP est validée par un vrai echo-reply ICMP** (`_echo_reply_ok`) — **pas** `app._ping`, qui accepte à tort les réponses *« Destination host unreachable »* qu'un routeur renvoie sous Windows (code retour 0) pour une passerelle fantôme d'interface Hyper-V/WSL. Sans ce contrôle strict, le sondage remontait **~50 faux `/24`** ; après, il en remonte 5 corrects (vérifié navigateur sur un vrai portable Windows).
+
+Route `POST /api/scan/decouvrir-actif` (lecture seule, ~10-25 s). L'encart se re-rend avec le résultat **fusionné** (passif + actif) après le sondage.
+
+> Court-circuité en Docker (traceroute/ping local sans objet ; le SNMP passerelle reste tenté, il traverse le NAT sortant).
+
+*Lot C (non livré) : écoute passive élargie — LLDP/CDP, RA IPv6, hellos OSPF/HSRP/VRRP.*
+
+Tests : `tests/test_decouverte_reseaux.py` (+2), `test_decouverte_reseaux.py` (+1 section). Suite : 346 passants, 8 échecs préexistants inchangés.
+
+---
+
 ## [2.25.0] - 2026-09-08 🔭
 
 ### Scan réseau : découvrir les appareils **hors des plages saisies**

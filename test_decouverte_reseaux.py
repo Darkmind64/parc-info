@@ -108,6 +108,29 @@ verifier('192.168.1.0/24' not in nets, 'IP dans la plage scannée -> pas remont�
 verifier(nets.get('192.168.77.0/24') == 2, '2 IP hors plage sur le même /24 -> compte=2')
 verifier('10.9.9.0/24' in nets, 'autre /24 hors plage -> remonté')
 
+print('\n=== 5. decouvrir_reseaux_actif (Lot B) : traceroute + passerelle SNMP + voisines ===')
+_docker2 = os.environ.pop('RUNNING_IN_DOCKER', None)
+conn.execute("UPDATE parc_general SET plage_ip_locale='192.168.1.0/24', serveur_dns='192.168.1.53' "
+             "WHERE client_id=?", (CID,)); conn.commit()
+N._routes_locales_poste = lambda: set()
+N._dns_configures_poste = lambda: set()
+N._table_arp = lambda: {}
+N._passerelle_defaut = lambda: '192.168.1.1'
+N._traceroute = lambda cible, **k: (['192.168.1.1', '62.4.16.1', '8.8.8.8'] if cible == '8.8.8.8'
+                                    else ['192.168.1.1', '192.168.50.1'])
+A._snmp_presence = lambda ip, c, **k: (True, True, 'ok')
+N._sous_reseaux_equipement = lambda ip, c: (['192.168.99.0/24'] if ip == '192.168.1.1' else [])
+N._echo_reply_ok = lambda ip: ip in ('192.168.5.1', '10.0.0.1')
+da = N.decouvrir_reseaux_actif(CID, budget_s=10)
+if _docker2 is not None:
+    os.environ['RUNNING_IN_DOCKER'] = _docker2
+pa = {x['cidr']: x for x in da['detectes']}
+verifier('192.168.50.0/24' in pa, 'saut privé du traceroute vers le DNS -> proposé')
+verifier(pa.get('192.168.50.0/24', {}).get('confiance') == 'forte', '  -> confiance forte')
+verifier(not any(c.startswith(('8.8.8', '62.4')) for c in pa), 'sauts publics ignorés')
+verifier('192.168.99.0/24' in pa, 'SNMP sur la passerelle hors inventaire -> sous-réseau proposé')
+verifier('192.168.5.0/24' in pa and '10.0.0.0/24' in pa, 'passerelles voisines qui répondent -> proposées')
+
 conn.close()
 print()
 if echecs:
