@@ -1,25 +1,25 @@
 {
-  "version": "2.29.0",
+  "version": "2.30.0",
   "release_date": "2026-09-09",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.29.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.29.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.29.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.29.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.29.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.29.0/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.29.0/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.29.0/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.29.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.30.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Score de sante : la fiche appareil, l'application mobile et le tableau de bord (Plan 2, lots 3-4). Suite de 2.28.0. La fiche appareil affiche un encart 'Sante' en tete, hors du garde 'rapport systeme' (un switch/routeur sans collecteur a quand meme une sante : garantie, reseau). L'ecran mobile de l'appareil montre un bandeau rouge/orange avec les raisons quand l'appareil n'est pas au vert. Le tableau de bord du client gagne une tuile 'Sante du parc' (compteurs + les appareils a traiter en priorite, lien direct vers la liste filtree). L'historique trace 'Sante degradee' / 'Sante retablie' au franchissement du seuil ok <-> non-ok. Recalcul aussi declenche a l'edition d'une fiche.",
+    "new_features": "Recherche globale (palette Ctrl+K). La barre de recherche du bandeau cherche en une frappe dans appareils, peripheriques, contrats, services, utilisateurs finaux, identifiants et clients -- par nom, numero de serie, IP, adresse MAC (avec ou sans separateurs), login, numero de contrat, localisation. Raccourci Ctrl/Cmd+K depuis n'importe ou, navigation clavier (fleches / Entree / Echap), bascule 'tous mes clients' pour un MSP qui recoit un appel sans savoir quel client est actif. Une IP exacte, un numero de serie ou un numero de contrat remontent la fiche directement. Les identifiants n'exposent jamais le mot de passe. Toujours borne aux clients auxquels l'utilisateur a acces.",
     "improvements": [
-      "Fiche appareil : encart Sante en tete, visible meme sans collecte systeme.",
-      "Mobile : bandeau Sante avec les raisons sur la fiche d'un appareil.",
-      "Tableau de bord : tuile 'Sante du parc' (compteurs + top a traiter), lien vers /appareils?sante=probleme.",
-      "Historique : les bascules ok <-> non-ok sont journalisees (Sante degradee / Sante retablie)."
+      "Recherche : Ctrl+K, navigation clavier, AbortController (pas de reponse en retard).",
+      "Recherche : IP exacte / MAC normalisee (aa:bb.. == aabb.. == AA-BB..) / numero de serie ou de contrat.",
+      "Recherche : bascule 'tous mes clients', chaque resultat etiquete par son client.",
+      "Recherche : nouvelle entite 'clients' (par nom / contact / email) ; classement exact > prefixe > sous-chaine."
     ]
   },
   "checksums": {
@@ -30,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.29.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.30.0"
 }

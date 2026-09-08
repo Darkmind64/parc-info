@@ -17685,29 +17685,33 @@ def cache_invalidate():
 @app.route('/api/search')
 @login_required
 def api_search():
-    """Recherche globale multi-entités."""
-    query = request.args.get('q', '').strip()
-    client_id = get_client_id()
-    limit = min(int(request.args.get('limit', 20)), 100)
+    """Recherche globale multi-entités (palette Ctrl+K).
 
-    if not query or len(query) < 2:
-        return jsonify({
-            'appareils': [],
-            'contrats': [],
-            'utilisateurs': [],
-            'services': [],
-            'peripheriques': [],
-            'identifiants': [],
-            'total': 0,
-            'query': query
-        })
+    `scope=actif` (défaut) : le client actif. `scope=tous` : tous les clients
+    **accessibles** à l'utilisateur (l'ACL est ici, `search_global` ne l'élargit
+    jamais). Les identifiants ne renvoient jamais le mot de passe."""
+    import time as _t
+    _t0 = _t.perf_counter()
+    query = request.args.get('q', '').strip()
+    scope = request.args.get('scope', 'actif')
+    limit = min(int(request.args.get('limit', 8) or 8), 25)
+    actif = get_client_id()
+    if scope == 'tous':
+        client_ids = [c['id'] for c in get_clients()]
+    else:
+        client_ids = [actif] if actif else []
+
+    if not query or len(query) < 2 or not client_ids:
+        return jsonify({'total': 0, 'query': query, 'scope': scope})
 
     try:
-        results = search_global(query, client_id, limit)
+        results = search_global(query, client_ids, actif_id=actif, limit=limit)
+        results['scope'] = scope
+        results['ms'] = round((_t.perf_counter() - _t0) * 1000)
         return jsonify(results)
-    except Exception as e:
-        logger.exception(f"Search error for query='{query}'")
-        return jsonify({'error': str(e)}), 500
+    except Exception:
+        logger.exception("Search error for query=%r", query)
+        return jsonify({'error': 'recherche indisponible'}), 500
 
 
 @app.route('/api/autocomplete/<entity_type>')
