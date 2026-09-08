@@ -200,6 +200,10 @@ CFG_DEFAULTS = {
     'diag_snmp_seuil_erreurs': '50',   # Δ erreurs/discards/CRC par fenêtre avant alerte
     'diag_snmp_seuil_saturation_pct': '90',  # seuil de saturation de lien (%)
     'diag_snmp_workers': '8',          # équipements SNMP balayés de front (collecteur unifié)
+    'diag_snmp_meta_ttl_s': '900',     # durée de cache des métadonnées d'interface quasi
+                                       # statiques (nom/description/alias/vitesse) — au-delà,
+                                       # elles sont re-parcourues ; un port ajouté est détecté
+                                       # sans attendre. Baisser si le câblage bouge souvent.
     'diag_snmp_auto_resolution_s': '1800',  # un évènement de port SNMP se résout seul si
                                             # sa condition n'a pas reparu depuis ce délai (0 = jamais)
     # Récepteur de traps SNMP, UDP 162 (audit réseau 2026-09-05, #27) : requiert

@@ -1,25 +1,24 @@
 {
-  "version": "2.32.3",
+  "version": "2.32.4",
   "release_date": "2026-09-09",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.3",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.4/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.4/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.4/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.32.4",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.4/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.4/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.4/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.4/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.4/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Audit approfondi des fonctionnalites reseau -> 4 correctifs. (1) IMPORTANT : `_snmp_bulk_cols` plafonnait le releve SNMP a ~600 VARBINDS et non 600 lignes -- un switch 48 ports interroge sur ~20 colonnes (diagnostic palier 3, topologie, ecran Trafic & erreurs) voyait sa table amputee a ~30 ports, EN SILENCE : la moitie des ports absents du diagnostic et de la topologie. Le plafond est maintenant en LIGNES (max_rows x nb_colonnes en interne). (2) `_port_physique_depuis_nom` faisait collisionner les membres d'un stack (`Gi1/0/12` et `Gi2/0/12` donnaient tous deux « 12 ») -> LED sur le mauvais port ; et `_RE_SFP` ne reconnaissait pas les formes courtes Cisco (`Te1/1/1`, `Fo1/0/1`) -> port fibre 10/40 G confondu avec le RJ de meme rang. Une collision de nom desactive maintenant le mapping par nom pour ce port (mieux non calibre que mal calibre). (3) `diag_etat_port` / `diag_etat_equipement` ne purgeaient jamais : un port disparu ou un equipement supprime gardait son `classe_erreur` fige et gonflait le verdict « N ports en erreur » / « N equipements muets » indefiniment. (4) Double-clic sur « lancer maintenant » du scan planifie -> deux scans concurrents sur le meme moteur mono-instance ; verrou ajoute.",
+    "new_features": "Collecte SNMP -- deux optimisations de performance issues de l'audit reseau. (1) Cache des metadonnees d'interface quasi statiques : `netdiag.collect.balayer` re-parcourait a chaque cycle SNMP (120 s) les colonnes ifDescr / ifName / ifAlias / ifType / vitesses, alors que seuls les compteurs changent. Elles sont desormais servies d'un cache memoire (`_meta_cache`, TTL `diag_snmp_meta_ttl_s` = 900 s), rafraichi a l'expiration OU des qu'un port encore inconnu apparait dans les compteurs (module insere, membre de stack ajoute) -- ~40 % de varbinds en moins par cycle sur un switch 48 ports. Un port retire ne ressurgit pas en fantome. (2) Retransmission unique sur reponse SNMP perdue : dans `_snmp_walk` et `_snmp_bulk_cols`, une reponse GETBULK perdue sur un lien charge faisait abandonner le balayage et repartir de zero sur le repli GETNEXT (~25x plus de paquets). Un silence declenche maintenant UNE retransmission de la meme requete avant de basculer sur le repli ; les reponses tardives a la requete precedente restent drainees (pas de decalage du walk).",
     "improvements": [
-      "SNMP : `_snmp_bulk_cols` -- `max_rows` compte des LIGNES (ports), plus des varbinds ; les gros switchs / stacks ne sont plus amputes en silence.",
-      "Baie : `_port_physique_depuis_nom` -- collision de membres de stack detectee (port non mappe plutot que mal mappe) ; `_RE_SFP` reconnait `Te`/`Fo`/`Twe`/`Hu` courts (Cisco).",
-      "Diagnostic : `diag_etat_port` purge les ports disparus (garde-fou : pas sur un releve partiel) ; `diag_etat_equipement` purge les equipements sortis de l'inventaire.",
-      "Scan planifie : verrou `_scan_planifie_run_lock` -- un seul scan planifie a la fois."
+      "SNMP : metadonnees d'interface (nom/description/alias/vitesse) mises en cache entre cycles (`diag_snmp_meta_ttl_s`, defaut 900 s) -- ~40 % de trafic SNMP en moins par cycle de diagnostic.",
+      "SNMP : `_snmp_walk` / `_snmp_bulk_cols` retransmettent une fois sur reponse perdue avant de basculer sur le repli lent -- plus d'effet de falaise sur un lien charge.",
+      "SNMP : un port retire d'un switch ne reapparait plus en fantome depuis le cache de metadonnees."
     ]
   },
   "checksums": {
@@ -30,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.3"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.4"
 }

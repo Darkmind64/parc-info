@@ -1,5 +1,24 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.4] - 2026-09-09 ⚡
+
+### Collecte SNMP — cache des métadonnées + retransmission
+
+Deux optimisations de performance dans la couche SNMP, sans changement de comportement fonctionnel (suite de l'audit réseau 2.32.3).
+
+**1. Cache des métadonnées d'interface quasi statiques.** `netdiag.collect.balayer` re‑parcourait à **chaque** cycle SNMP (120 s) les colonnes `ifDescr` / `ifName` / `ifAlias` / `ifType` / `ifSpeed` / `ifHighSpeed` en plus des compteurs — alors que seuls les compteurs et l'état `oper`/`admin` changent d'un cycle à l'autre. Elles sont désormais servies d'un cache mémoire (`collect._meta_cache`, TTL `diag_snmp_meta_ttl_s` = 900 s ≈ 7 cycles, aligné sur la cadence topo), rafraîchi :
+- à l'expiration du TTL ;
+- **immédiatement** si un port encore inconnu apparaît dans les compteurs (module inséré, membre de stack ajouté) — un 2ᵉ GETBULK ciblé sur les seules colonnes métadonnées, dans le même cycle ;
+- sur demande (`balayer(rafraichir_meta=True)`).
+
+Un port **retiré** ne ressurgit pas en fantôme : le cache n'est réinjecté que pour les ports encore vus ce cycle. Un agent muet ce cycle → relevé muet, jamais un faux relevé bâti sur le seul cache. **Gain : ~40 % de varbinds en moins par cycle** sur un switch 48 ports interrogé sur ~20 colonnes.
+
+**2. Retransmission unique sur réponse SNMP perdue.** `app._snmp_walk` et `app._snmp_bulk_cols` : une réponse GETBULK perdue en cours de balayage (lien chargé, switch qui *rate‑limite* le SNMP) faisait **abandonner** la méthode et repartir de **zéro** sur le repli — GETNEXT par ligne, puis walk par colonne : ~25× plus de paquets. Un silence déclenche maintenant **une** retransmission de la même requête (même request‑id) avant de basculer sur le repli. Les réponses tardives à la requête **précédente** restent drainées (les associer décalerait le walk). Silence total malgré la retransmission → abandon propre, comme avant.
+
+Nouvelle clé de config : `diag_snmp_meta_ttl_s` (900). Tests : `tests/test_netdiag_collect.py` (+6), `test_diagnostic_reseau.py` §19bis.
+
+---
+
 ## [2.32.3] - 2026-09-09 🔍
 
 ### Audit approfondi des fonctionnalités réseau → 4 correctifs

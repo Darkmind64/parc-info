@@ -9810,24 +9810,37 @@ def _snmp_walk(ip_str, oid_base, communautes=('public',), timeout=1.2,
                 # version 1 = SNMPv2c (requis par GETBULK, accepté en GETNEXT)
                 message = _ber_sequence(
                     0x30, _ber_entier(1) + _ber_chaine(communaute) + pdu)
-                s.sendto(message, (ip_str, port))
 
-                # Lire jusqu'à la réponse qui porte NOTRE request-id : un
-                # switch bas de gamme, lent, renvoie parfois une réponse
-                # tardive à la requête précédente — l'associer à celle-ci
-                # décalerait tout le walk (ports fantômes, valeurs répétées).
-                for _drain in range(4):
-                    data, _ = s.recvfrom(65535)
-                    _, corps, _ = _ber_lire_tlv(data, 0)
-                    pos = 0
-                    _, _v, pos = _ber_lire_tlv(corps, pos)
-                    _, _c, pos = _ber_lire_tlv(corps, pos)
-                    tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
-                    _p0 = 0
-                    _, _rid_b, _p0 = _ber_lire_tlv(pdu_corps_r, _p0)
-                    if int.from_bytes(_rid_b, 'big', signed=True) == reqid_env:
+                # Envoi + attente de la réponse à NOTRE request-id, avec UNE
+                # retransmission sur silence avant d'abandonner : sur un lien
+                # chargé, une réponse perdue faisait tomber tout le walk sur le
+                # repli (GETNEXT par ligne, ~25× plus de paquets) alors que
+                # l'agent répond très bien. On draine aussi les réponses
+                # tardives à la requête précédente — un switch bas de gamme,
+                # lent, en renvoie ; les associer ici décalerait le walk
+                # (ports fantômes, valeurs répétées).
+                tag_pdu = pdu_corps_r = None
+                for _essai in range(2):
+                    s.sendto(message, (ip_str, port))
+                    try:
+                        for _drain in range(4):
+                            data, _ = s.recvfrom(65535)
+                            _, corps, _ = _ber_lire_tlv(data, 0)
+                            pos = 0
+                            _, _v, pos = _ber_lire_tlv(corps, pos)
+                            _, _c, pos = _ber_lire_tlv(corps, pos)
+                            tag_pdu, pdu_corps_r, _ = _ber_lire_tlv(corps, pos)
+                            _p0 = 0
+                            _, _rid_b, _p0 = _ber_lire_tlv(pdu_corps_r, _p0)
+                            if int.from_bytes(_rid_b, 'big', signed=True) == reqid_env:
+                                break
+                        else:
+                            tag_pdu = None        # 4 datagrammes, rien pour nous
+                    except socket.timeout:
+                        tag_pdu = None             # silence → retransmission
+                    if tag_pdu is not None:
                         break
-                else:
+                if tag_pdu is None:
                     return resultats, False, False       # aucune réponse
                 if tag_pdu != 0xa2:
                     return resultats, False, False
@@ -10371,20 +10384,33 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
                         pdu = _ber_sequence(0xa1, pdu_corps)     # GetNextRequest multi-varbind
                     message = _ber_sequence(
                         0x30, _ber_entier(1) + _ber_chaine(communaute) + pdu)
-                    s.sendto(message, (ip_str, port))
 
-                    for _drain in range(4):
-                        data, _ = s.recvfrom(65535)
-                        _, corps, _ = _ber_lire_tlv(data, 0)
-                        p = 0
-                        _, _v, p = _ber_lire_tlv(corps, p)
-                        _, _c, p = _ber_lire_tlv(corps, p)
-                        tag_pdu, pdu_r, _ = _ber_lire_tlv(corps, p)
-                        _q0 = 0
-                        _, _rid_b, _q0 = _ber_lire_tlv(pdu_r, _q0)
-                        if int.from_bytes(_rid_b, 'big', signed=True) == reqid_env:
+                    # UNE retransmission sur silence avant d'abandonner : une
+                    # réponse perdue en cours de balayage multi-colonnes faisait
+                    # sinon abandonner le GETBULK et repartir de zéro (GETNEXT,
+                    # puis walk par colonne).
+                    tag_pdu = pdu_r = None
+                    for _essai in range(2):
+                        s.sendto(message, (ip_str, port))
+                        try:
+                            for _drain in range(4):
+                                data, _ = s.recvfrom(65535)
+                                _, corps, _ = _ber_lire_tlv(data, 0)
+                                p = 0
+                                _, _v, p = _ber_lire_tlv(corps, p)
+                                _, _c, p = _ber_lire_tlv(corps, p)
+                                tag_pdu, pdu_r, _ = _ber_lire_tlv(corps, p)
+                                _q0 = 0
+                                _, _rid_b, _q0 = _ber_lire_tlv(pdu_r, _q0)
+                                if int.from_bytes(_rid_b, 'big', signed=True) == reqid_env:
+                                    break
+                            else:
+                                tag_pdu = None
+                        except socket.timeout:
+                            tag_pdu = None
+                        if tag_pdu is not None:
                             break
-                    else:
+                    if tag_pdu is None:
                         break
                     if tag_pdu != 0xa2:
                         break
