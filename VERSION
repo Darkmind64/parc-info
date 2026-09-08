@@ -1,9 +1,32 @@
-PARCINFO_VERSION=2.28.0
+PARCINFO_VERSION=2.29.0
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090901
+BUILD_NUMBER=2026090902
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.29.0 - Score de sante : fiche, mobile, tableau de bord (Plan 2, lots 3-4)
+#
+# Suite de 2.28.0 (calcul + colonne dans la liste). Le score de sante est
+# maintenant visible partout :
+#  - Fiche appareil (`fiche_systeme.html`) : encart « Sante » en tete, HORS
+#    du garde `{% if rapport %}` (un switch/routeur sans collecte a quand
+#    meme une sante : garantie, reseau...). Calcule frais a l'ouverture.
+#  - Mobile (`mobile/appareil_detail.html`) : bandeau rouge/orange en tete
+#    quand l'appareil n'est pas `ok`, avec la liste des raisons.
+#  - Tableau de bord client : tuile « Sante du parc » (compteurs +
+#    3 appareils a traiter), lien vers `/appareils?sante=probleme`. Lit le
+#    cache, aucun recalcul. `sante.resume_cache(conn, cid)`.
+#  - Historique : `sante._journaliser_bascule` trace « Sante degradee » /
+#    « Sante retablie » dans `historique` UNIQUEMENT au franchissement du
+#    seuil ok <-> non-ok (une oscillation attention<->critique ne cree pas
+#    de ligne).
+#
+# Recalcul aussi declenche a l'edition d'une fiche appareil.
+#
+# Tests : tests/test_sante_appareil.py (20), test_sante_appareil.py
+# (racine, 7 sections).
+#
+# ----------------------------------------------------------------------------
 # Version 2.28.0 - Score de sante synthetique par appareil (croisement, lots 1-2)
 #
 # Un feu tricolore (ok / attention / critique) + une liste de raisons

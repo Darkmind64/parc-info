@@ -217,6 +217,35 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
     <a href="/appareil/{{ appareil.id }}/documents" class="btn btn-sm">📎 Documents</a>
 </div>
 
+{# ── SANTÉ (sante.py) — hors du garde "rapport" : un équipement réseau sans
+   collecte a quand même une santé (garantie, réseau…). ────────────────────── #}
+{% set _sn = sante.niveau if sante else 'ok' %}
+{% set _scol = {'critique':'#ff3355','attention':'#ff9800','ok':'#00c97a'}[_sn] %}
+<div class="fs-section" style="border-left:3px solid {{ _scol }};">
+    <h3 style="display:flex;align-items:center;gap:.5rem;">
+        <span style="width:13px;height:13px;border-radius:50%;background:{{ _scol }};
+                     box-shadow:0 0 0 3px {{ _scol }}22;display:inline-block;"></span>
+        Santé —
+        {% if _sn == 'critique' %}<span style="color:{{ _scol }};">à traiter en priorité</span>
+        {% elif _sn == 'attention' %}<span style="color:{{ _scol }};">points d'attention</span>
+        {% else %}<span style="color:{{ _scol }};">rien de bloquant</span>{% endif %}
+    </h3>
+    {% if sante and sante.raisons %}
+    <ul style="margin:.3rem 0 0;padding-left:1.2rem;font-size:.86rem;line-height:1.6;">
+        {% for r in sante.raisons %}
+        <li style="color:{% if r.gravite=='critique' %}#ff6b81{% elif r.gravite=='attention' %}#ffb454{% else %}var(--text-muted){% endif %};">
+            {{ r.texte }}
+            {%- if r.lien == 'garantie' %} <a href="/appareil/{{ appareil.id }}/editer" style="font-size:.8rem;">→ modifier</a>
+            {%- elif r.lien == 'diag-reseau' %} <a href="/diag-reseau" style="font-size:.8rem;">→ diagnostic</a>
+            {%- elif r.lien == 'fiche-systeme' %} <a href="#fs-alertes" style="font-size:.8rem;">→ détail</a>{% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <div style="font-size:.85rem;color:var(--text-muted);">Aucun point d'attention détecté sur cet appareil.</div>
+    {% endif %}
+</div>
+
 {# ── ÉVOLUTION ENTRE COLLECTES ─────────────────────────────────────────── #}
 {% if historique and historique.nombre > 1 %}
 <div class="fs-section">
@@ -403,7 +432,7 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 
 {# ── POINTS D'ATTENTION ────────────────────────────────────────────────── #}
 {% if rapport %}
-<div class="fs-section">
+<div class="fs-section" id="fs-alertes">
     <h3>■ Points d'attention</h3>
     {% if alertes %}
         {% for a in alertes %}

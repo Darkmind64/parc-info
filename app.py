@@ -3766,6 +3766,14 @@ def single_client_dashboard(cid):
         except Exception:
             diag_reseau_verdict = None
 
+        # Tuile « Santé du parc » (Plan 2, lot 4) — lit le cache
+        # `appareils.sante_*`, aucun recalcul.
+        try:
+            import sante as _sante_mod
+            sante_parc = _sante_mod.resume_cache(conn, cid)
+        except Exception:
+            sante_parc = None
+
         # Bandeau « Changements depuis la dernière visite » (Lot 3)
         try:
             from client_helpers import changements_client
@@ -3795,6 +3803,7 @@ def single_client_dashboard(cid):
             'client': client,
             'a_switchs_baie': a_switchs_baie,
             'diag_reseau_verdict': diag_reseau_verdict,
+            'sante_parc': sante_parc,
             'chg_resume': chg_resume,
             'site_terrain_info': site_terrain_info,
             'appareils': stats['appareils'],
@@ -5898,8 +5907,16 @@ def fiche_systeme_appareil(id):
     except Exception:
         logger.exception("Historique des collectes de l'appareil %s", id)
         historique = None
-    finally:
-        conn.close()
+    # Score de santé — calculé frais ici pour l'affichage (une seule fiche,
+    # coût négligeable). Lecture seule : le cache `appareils.sante_*` est tenu à
+    # jour par la collecte, l'édition de fiche et le balayage périodique.
+    sante = {'niveau': 'ok', 'score': 0, 'raisons': []}
+    try:
+        import sante as _sante_mod
+        sante = _sante_mod.sante_appareil(a, _sante_mod.charger_contexte_sante(conn, cid))
+    except Exception:
+        logger.debug("Score de santé (fiche appareil %s)", id, exc_info=True)
+    conn.close()
 
     return render_template('fiche_systeme.html', appareil=a, rapport=rapport,
                            logiciels=logiciels, client=client, clients=get_clients(),
@@ -5908,7 +5925,7 @@ def fiche_systeme_appareil(id):
                            disque_layout=disque_layout,
                            ports_cartes=ports_cartes,
                            ports_masques=ports_masques, age_materiel=age_materiel,
-                           historique=historique)
+                           historique=historique, sante=sante)
 
 
 @app.route('/appareil/<int:id>/documents')

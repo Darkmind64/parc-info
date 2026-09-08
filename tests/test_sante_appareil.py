@@ -218,3 +218,62 @@ def make_appareil_row(conn, client_id, nom, **extra):
         [client_id, nom] + list(extra.values()))
     conn.commit()
     return cur.lastrowid
+
+
+def test_resume_cache(conn, make_client):
+    cid = make_client()
+    for niv, sc, n in (('critique', 60, 2), ('attention', 12, 3), ('ok', 0, 5)):
+        for i in range(n):
+            make_appareil_row(conn, cid, f'{niv}-{i}', type_appareil='PC', statut='actif',
+                              sante_niveau=niv, sante_score=sc,
+                              sante_raisons='[{"texte":"x","gravite":"attention"}]')
+    make_appareil_row(conn, cid, 'retire-ko', statut='retire', sante_niveau='critique')
+    r = sante.resume_cache(conn, cid)
+    assert r['compte'] == {'ok': 5, 'attention': 3, 'critique': 2}   # 'retire' exclu
+    assert r['total'] == 10
+    assert r['a_traiter'][0]['niveau'] == 'critique'          # critique en tête
+    assert all(x['niveau'] != 'ok' for x in r['a_traiter'])
+
+
+def test_journalise_les_bascules_du_seuil(conn, make_client, make_appareil):
+    cid = make_client()
+    aid = make_appareil(cid, type_appareil='PC', date_creation=_il_y_a(2))
+    sante.recalculer(conn, cid)          # 1er calcul : ok, pas de bascule journalisée
+    _nb = lambda act: conn.execute(
+        "SELECT COUNT(*) FROM historique WHERE client_id=? AND entite_id=? AND action=?",
+        (cid, aid, act)).fetchone()[0]
+    assert _nb('Santé dégradée') == 0
+    # ok -> critique
+    conn.execute("UPDATE appareils SET rapport_systeme_json=? WHERE id=?",
+                 ('{"disk_total_gb":500,"disk_used_gb":495}', aid))
+    conn.commit()
+    sante.recalculer(conn, cid)
+    assert _nb('Santé dégradée') == 1
+    # critique -> ok
+    conn.execute("UPDATE appareils SET rapport_systeme_json='{}' WHERE id=?", (aid,))
+    conn.commit()
+    sante.recalculer(conn, cid)
+    assert _nb('Santé rétablie') == 1
+
+
+def test_fiche_systeme_encart_sante(client, conn, make_user, make_client):
+    import json as _j
+    uid, _l, _p = make_user()
+    cid = make_client(auth_user_id=uid)
+    aid = make_appareil_row(conn, cid, 'FICHE-KO', type_appareil='PC', date_creation=_il_y_a(2),
+                            rapport_systeme_json=_j.dumps({'disk_total_gb': 500,
+                                                           'disk_used_gb': 490}))
+    login_session(client, uid, cid)
+    html = client.get(f'/appareil/{aid}/fiche-systeme').get_data(as_text=True)
+    assert 'Santé —' in html and 'à traiter en priorité' in html
+
+
+def test_mobile_appareil_bandeau_sante(client, conn, make_user, make_client):
+    uid, _l, _p = make_user()
+    cid = make_client(auth_user_id=uid)
+    aid = make_appareil_row(conn, cid, 'MOB-KO', type_appareil='PC', statut='actif',
+                            sante_niveau='critique', sante_score=60,
+                            sante_raisons='[{"texte":"Disque saturé","gravite":"critique"}]')
+    login_session(client, uid, cid)
+    html = client.get(f'/m/appareil/{aid}').get_data(as_text=True)
+    assert 'À traiter en priorité' in html and 'Disque saturé' in html
