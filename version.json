@@ -1,25 +1,26 @@
 {
-  "version": "2.30.0",
+  "version": "2.31.0",
   "release_date": "2026-09-09",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.30.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.30.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.31.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.31.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.31.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.31.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.31.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.31.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.31.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.31.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.31.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Recherche globale (palette Ctrl+K). La barre de recherche du bandeau cherche en une frappe dans appareils, peripheriques, contrats, services, utilisateurs finaux, identifiants et clients -- par nom, numero de serie, IP, adresse MAC (avec ou sans separateurs), login, numero de contrat, localisation. Raccourci Ctrl/Cmd+K depuis n'importe ou, navigation clavier (fleches / Entree / Echap), bascule 'tous mes clients' pour un MSP qui recoit un appel sans savoir quel client est actif. Une IP exacte, un numero de serie ou un numero de contrat remontent la fiche directement. Les identifiants n'exposent jamais le mot de passe. Toujours borne aux clients auxquels l'utilisateur a acces.",
+    "new_features": "Scan reseau recurrent planifie. Un scan complet se declenche seul, a une cadence choisie PAR CLIENT (quotidien / hebdo / mensuel / toutes les n heures), met a jour l'inventaire et alimente le rapport 'Changements depuis la derniere visite'. Une alerte (e-mail + historique + webhook optionnel) est levee si un appareil apparait ou si plusieurs disparaissent -- les MAC aleatoires (smartphones de passage) sont minorees. Opt-in strict (interrupteur global + une cadence par client), fenetre horaire configurable (defaut 02:00-05:00), respect du mode terrain (aucun scan si le site du client n'est pas joignable). Nouvelle page Reglages -> Scan planifie : cadence par client, dernier / prochain run, 'lancer maintenant'.",
     "improvements": [
-      "Recherche : Ctrl+K, navigation clavier, AbortController (pas de reponse en retard).",
-      "Recherche : IP exacte / MAC normalisee (aa:bb.. == aabb.. == AA-BB..) / numero de serie ou de contrat.",
-      "Recherche : bascule 'tous mes clients', chaque resultat etiquete par son client.",
-      "Recherche : nouvelle entite 'clients' (par nom / contact / email) ; classement exact > prefixe > sous-chaine."
+      "Scan planifie : cadence par client, fenetre horaire, un seul scan a la fois.",
+      "Scan planifie : alerte e-mail + entree historique (SCAN_AUTO_CHANGEMENTS) + webhook JSON optionnel ; anti-bruit (1 alerte/run, rien si le diff est vide, MAC aleatoires minorees).",
+      "Scan planifie : integre automatiquement les sous-reseaux candidats a confiance forte (Lots A/B/C).",
+      "Tableau de bord client : le bandeau 'Changements' indique le prochain scan automatique.",
+      "Import de scan factorise (_importer_appareils_scan) : meme chemin pour l'import manuel et l'import planifie."
     ]
   },
   "checksums": {
@@ -30,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.30.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.31.0"
 }

@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}Scan réseau planifié{% endblock %}
+
+{% block extra_styles %}
+<style>
+.sp-sub { color:var(--text-muted); font-size:.82rem; margin-bottom:1rem; max-width:60rem; line-height:1.5; }
+.sp-card { background:var(--bg-card); border:1px solid var(--border); border-radius:8px;
+    padding:1rem 1.1rem; margin-bottom:1rem; }
+.sp-card h3 { margin:0 0 .7rem; font-size:.9rem; }
+.sp-global { display:grid; grid-template-columns:repeat(auto-fit,minmax(15rem,1fr)); gap:.7rem 1.2rem; }
+.sp-field { display:flex; flex-direction:column; gap:.25rem; font-size:.78rem; }
+.sp-field label { color:var(--text-secondary); font-weight:600; }
+.sp-field input[type=text], .sp-field input[type=number] { width:100%; }
+.sp-table { width:100%; border-collapse:collapse; font-size:.82rem; }
+.sp-table th, .sp-table td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--border); vertical-align:middle; }
+.sp-table th { color:var(--text-muted); font-weight:600; font-size:.72rem; text-transform:uppercase; letter-spacing:.5px; }
+.sp-due { color:#c77700; font-weight:700; }
+.sp-muted { color:var(--text-muted); }
+.sp-pill { font-size:.68rem; font-weight:700; padding:1px 7px; border-radius:9px;
+    background:var(--bg-secondary); color:var(--text-secondary); }
+.sp-on { background:#1f9d5522; color:#1f9d55; }
+.sp-off { background:#ef444422; color:#ef4444; }
+.sp-warn { background:#c7770022; color:#c77700; }
+.sp-reportes { font-size:.78rem; color:var(--text-muted); }
+.sp-reportes li { margin:.2rem 0; }
+#sp-flash { font-size:.8rem; margin:.4rem 0; min-height:1.1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 style="margin:0;">Scan réseau planifié</h1>
+  </div>
+  <a class="btn btn-secondary btn-sm" href="{{ url_for('page_scan') }}">← Scan réseau</a>
+</div>
+
+<p class="sp-sub">
+  Un scan réseau complet se déclenche seul, à la cadence choisie <b>par client</b>, met à jour
+  l'inventaire et alimente le rapport <a href="{{ url_for('page_changements') }}">« Changements depuis la dernière visite »</a>.
+  Une alerte (e-mail + historique) est levée si un appareil apparaît ou si plusieurs disparaissent.
+  Le scan est en <b>lecture seule</b>. Il ne tourne que dans la fenêtre horaire indiquée et seulement
+  quand le site du client est joignable (mode terrain).
+</p>
+
+<div id="sp-flash"></div>
+
+<div class="sp-card" id="sp-global-card" hidden>
+  <h3>Réglages généraux
+    <span id="sp-actif-pill" class="sp-pill">…</span>
+  </h3>
+  <div class="sp-global">
+    <div class="sp-field">
+      <label><input type="checkbox" id="sp-actif"> Activer le scan planifié</label>
+      <span class="sp-muted">Garde-fou global : rien ne tourne sans cette case <i>et</i> une cadence par client.</span>
+    </div>
+    <div class="sp-field">
+      <label for="sp-fenetre">Fenêtre horaire (heure locale)</label>
+      <input type="text" id="sp-fenetre" placeholder="02:00-05:00">
+      <span class="sp-muted">Vide = sans restriction. Gère le passage de minuit (22:00-06:00).</span>
+    </div>
+    <div class="sp-field">
+      <label for="sp-seuil">Seuil « appareils disparus » pour alerter</label>
+      <input type="number" id="sp-seuil" min="1" max="99">
+    </div>
+    <div class="sp-field">
+      <label><input type="checkbox" id="sp-candidats"> Inclure les sous-réseaux candidats (confiance forte)</label>
+    </div>
+    <div class="sp-field" style="grid-column:1/-1;">
+      <label for="sp-webhook">Webhook (POST JSON du résumé d'alerte) — facultatif</label>
+      <input type="text" id="sp-webhook" placeholder="https://…">
+    </div>
+  </div>
+  <div style="margin-top:.8rem;">
+    <button class="btn btn-primary btn-sm" id="sp-save-global">Enregistrer les réglages généraux</button>
+  </div>
+</div>
+
+<div class="sp-card">
+  <h3>Cadence par client</h3>
+  <table class="sp-table">
+    <thead><tr>
+      <th>Client</th><th>Cadence</th><th>Plages</th>
+      <th>Dernier scan auto</th><th>Prochain (estimé)</th><th></th>
+    </tr></thead>
+    <tbody id="sp-rows"><tr><td colspan="6" class="sp-muted">Chargement…</td></tr></tbody>
+  </table>
+</div>
+
+<div class="sp-card" id="sp-etat-card" hidden>
+  <h3>État de l'ordonnanceur</h3>
+  <div id="sp-etat" class="sp-reportes"></div>
+</div>
+
+<script>
+const SP_CADENCES = [['', '— désactivé —'], ['quotidien','Quotidien'], ['hebdo','Hebdomadaire'],
+                     ['mensuel','Mensuel'], ['12h','Toutes les 12 h'], ['48h','Tous les 2 jours']];
+let spData = null;
+
+function spFlash(msg, ok) {
+  const el = document.getElementById('sp-flash');
+  el.textContent = msg;
+  el.style.color = ok ? '#1f9d55' : 'var(--accent-red, #ef4444)';
+  if (msg) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000);
+}
+
+function spFmtDate(iso) {
+  if (!iso) return '<span class="sp-muted">jamais</span>';
+  return iso.slice(0, 16).replace('T', ' ');
+}
+
+function spRender() {
+  const d = spData;
+  // réglages généraux (admin uniquement en écriture ; visible sinon en lecture)
+  const gc = document.getElementById('sp-global-card');
+  gc.hidden = false;
+  document.getElementById('sp-actif').checked = !!d.actif;
+  document.getElementById('sp-fenetre').value = d.fenetre || '';
+  document.getElementById('sp-seuil').value = d.seuil_disparus;
+  document.getElementById('sp-candidats').checked = !!d.inclure_candidats;
+  document.getElementById('sp-webhook').value = d.webhook || '';
+  const pill = document.getElementById('sp-actif-pill');
+  pill.textContent = d.actif ? 'ACTIF' : 'INACTIF';
+  pill.className = 'sp-pill ' + (d.actif ? 'sp-on' : 'sp-off');
+
+  // lignes clients
+  const tb = document.getElementById('sp-rows');
+  tb.innerHTML = '';
+  if (!d.clients.length) {
+    tb.innerHTML = '<tr><td colspan="6" class="sp-muted">Aucun client accessible.</td></tr>';
+  }
+  for (const c of d.clients) {
+    const tr = document.createElement('tr');
+    const opts = SP_CADENCES.map(o =>
+      `<option value="${o[0]}" ${o[0] === c.cadence ? 'selected' : ''}>${o[1]}</option>`).join('');
+    const sel = c.peut_ecrire
+      ? `<select data-cid="${c.client_id}" onchange="spSetCadence(this)">${opts}</select>`
+      : `<span class="sp-muted">${c.cadence || '—'}</span>`;
+    const plages = c.plages.length
+      ? c.plages.join(', ')
+      : '<span class="sp-off">aucune (fiche parc)</span>';
+    const prochain = c.planifie
+      ? (c.du ? '<span class="sp-due">maintenant</span>' : spFmtDate(c.prochain_estime))
+      : '<span class="sp-muted">—</span>';
+    const btn = (c.peut_ecrire && c.plages.length)
+      ? `<button class="btn btn-secondary btn-sm" onclick="spExecuter(${c.client_id}, this)">Lancer maintenant</button>`
+      : '';
+    tr.innerHTML = `<td>${c.nom}</td><td>${sel}</td><td>${plages}</td>` +
+      `<td>${spFmtDate(c.dernier_scan_auto)}</td><td>${prochain}</td><td>${btn}</td>`;
+    tb.appendChild(tr);
+  }
+
+  // état ordonnanceur
+  const m = d.moniteur || {};
+  const ec = document.getElementById('sp-etat-card');
+  const parts = [];
+  if (m.dernier_tick) parts.push(`Dernière vérification : ${spFmtDate(m.dernier_tick)}`);
+  if (m.en_cours) parts.push(`<b>Scan en cours</b> (client ${m.en_cours.client_id})`);
+  if (m.dernier_run) {
+    const r = m.dernier_run;
+    parts.push(`Dernier run : client ${r.client_id} — ${r.trouves} trouvé(s), ${r.importes} nouveau(x), ` +
+      `${r.mis_a_jour} mis à jour, ${r.changements_nb} changement(s)` +
+      (r.alerte ? ' <span class="sp-pill sp-warn">ALERTE</span>' : '') +
+      (r.erreur ? ` <span class="sp-off">erreur : ${r.erreur}</span>` : ''));
+  }
+  if ((m.reportes || []).length)
+    parts.push('Reportés : ' + m.reportes.map(x => `${x.nom} (${x.raison})`).join(' · '));
+  if (parts.length) {
+    ec.hidden = false;
+    document.getElementById('sp-etat').innerHTML = '<ul>' + parts.map(p => `<li>${p}</li>`).join('') + '</ul>';
+  } else {
+    ec.hidden = true;
+  }
+}
+
+async function spCharger() {
+  try {
+    const r = await fetch('{{ url_for("api_scan_planifie_get") }}');
+    spData = await r.json();
+    spRender();
+  } catch (e) {
+    spFlash('Chargement impossible.', false);
+  }
+}
+
+async function spSetCadence(sel) {
+  const cid = parseInt(sel.dataset.cid, 10);
+  try {
+    const r = await fetch('{{ url_for("api_scan_planifie_post") }}', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: cid, cadence: sel.value }),
+    });
+    const j = await r.json();
+    if (!r.ok) { spFlash(j.error || 'Refusé', false); spCharger(); return; }
+    spFlash('Cadence enregistrée.', true);
+    spCharger();
+  } catch (e) { spFlash('Erreur réseau.', false); }
+}
+
+async function spSaveGlobal() {
+  const body = {
+    scan_auto_actif: document.getElementById('sp-actif').checked ? '1' : '0',
+    scan_auto_fenetre: document.getElementById('sp-fenetre').value.trim(),
+    scan_auto_seuil_disparus: document.getElementById('sp-seuil').value || '3',
+    scan_auto_inclure_candidats: document.getElementById('sp-candidats').checked ? '1' : '0',
+    scan_auto_webhook: document.getElementById('sp-webhook').value.trim(),
+  };
+  try {
+    const r = await fetch('{{ url_for("api_scan_planifie_post") }}', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json();
+    spFlash(r.ok ? 'Réglages enregistrés.' : (j.error || 'Refusé'), r.ok);
+    spCharger();
+  } catch (e) { spFlash('Erreur réseau.', false); }
+}
+
+async function spExecuter(cid, btn) {
+  btn.disabled = true; btn.textContent = 'Lancement…';
+  try {
+    const r = await fetch('{{ url_for("api_scan_planifie_executer") }}', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: cid }),
+    });
+    const j = await r.json();
+    if (!r.ok) { spFlash(j.error || 'Refusé', false); btn.disabled = false; btn.textContent = 'Lancer maintenant'; return; }
+    spFlash('Scan lancé — le résultat apparaîtra dans « État de l\'ordonnanceur » d\'ici quelques minutes.', true);
+    setTimeout(spCharger, 4000);
+  } catch (e) { spFlash('Erreur réseau.', false); btn.disabled = false; btn.textContent = 'Lancer maintenant'; }
+}
+
+document.getElementById('sp-save-global').addEventListener('click', spSaveGlobal);
+spCharger();
+setInterval(spCharger, 30000);
+</script>
+{% endblock %}

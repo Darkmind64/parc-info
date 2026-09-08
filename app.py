@@ -3780,6 +3780,20 @@ def single_client_dashboard(cid):
             _chg = changements_client(conn, cid)
             chg_resume = ({'nb': _chg['nb'], 'jours': _chg.get('jours_ecoules')}
                           if _chg.get('disponible') and _chg['nb'] > 0 else None)
+            # Scan planifié : prochaine échéance pour ce client (greffée au
+            # bandeau existant, jamais un bandeau créé pour ça seul).
+            if chg_resume is not None:
+                try:
+                    import scan_planifie as _sp
+                    _cad = _sp._cadence_client(cid)
+                    _inter = _sp.intervalle_secondes(_cad)
+                    if _inter:
+                        _last = _sp._dernier_scan_auto_epoch(conn, cid)
+                        _proch = (float(_last) + _inter) if _last else _sp._now_epoch()
+                        chg_resume['scan_auto_jours'] = max(
+                            0, round((_proch - _sp._now_epoch()) / 86400))
+                except Exception:
+                    pass
         except Exception:
             chg_resume = None
 
@@ -11455,18 +11469,18 @@ def _fmt_go(valeur):
 _TYPES_SUGGESTION_BAIE = {'Switch', 'Routeur/Pare-feu', 'Switch/AP', 'NAS'}
 
 
-@app.route('/api/scan/importer', methods=['POST'])
-@login_required
-def importer_scan():
-    cid = get_client_id()
-    # Mode terrain : le scan reste possible partout (l'utilisateur garde le
-    # contrôle — VLAN isolé, première visite, client sans MAC en base). La
-    # confirmation « êtes-vous bien chez ce client ? » et l'avertissement de
-    # consultation sont présentés côté page AVANT le lancement du scan
-    # (scan_reseau.html). Les fonctions de FOND (pré-chauffe baie, surveillance
-    # SNMP), elles, sont bien coupées en mode consultation — voir site_terrain.
-    items = request.json.get('appareils', [])
-    conn = get_db(); now = _utcnow().isoformat()
+def _importer_appareils_scan(conn, cid, items, origine='scan', libelle=''):
+    """Cœur de l'import d'un scan réseau — partagé par la route
+    ``/api/scan/importer`` (import manuel) et l'ordonnanceur du scan planifié
+    (`_executer_scan_planifie`, origine ``'scan_auto'``).
+
+    Écrit / met à jour les appareils (corrélation par IP puis MAC principale ou
+    secondaire, `log_history`), capture un instantané de l'inventaire avec
+    l'`origine` passée, puis renvoie le diff `changements_client`. **Ne ferme
+    pas `conn`** et laisse un `commit` final à l'appelant si besoin (un commit
+    intermédiaire est fait avant `changements_client`, comme la route d'origine).
+    """
+    now = _utcnow().isoformat()
     importes = 0; mis_a_jour = 0
     suggestions_baie = []
     for item in items:
@@ -11567,18 +11581,40 @@ def importer_scan():
     # Instantané de fin de scan : sert de base au rapport « Changements depuis
     # la dernière visite » (comparé au scan précédent).
     inst_id = 0
+    chg = {'disponible': False}
     try:
         from client_helpers import capturer_instantane, changements_client
-        inst_id = capturer_instantane(conn, cid, origine='scan')
+        inst_id = capturer_instantane(conn, cid, origine=origine, libelle=libelle)
         conn.commit()
         chg = changements_client(conn, cid)
     except Exception:
         logger.exception('instantané / changements post-scan (client %s)', cid)
-        chg = {'disponible': False}
-    conn.commit(); conn.close()
-    return jsonify({"importes": importes, "total": len(items),
-                    "suggestions_baie": suggestions_baie,
-                    "instantane_id": inst_id,
+    conn.commit()
+    return {"importes": importes, "mis_a_jour": mis_a_jour, "total": len(items),
+            "suggestions_baie": suggestions_baie, "instantane_id": inst_id,
+            "changements": chg}
+
+
+@app.route('/api/scan/importer', methods=['POST'])
+@login_required
+def importer_scan():
+    cid = get_client_id()
+    # Mode terrain : le scan reste possible partout (l'utilisateur garde le
+    # contrôle — VLAN isolé, première visite, client sans MAC en base). La
+    # confirmation « êtes-vous bien chez ce client ? » et l'avertissement de
+    # consultation sont présentés côté page AVANT le lancement du scan
+    # (scan_reseau.html). Les fonctions de FOND (pré-chauffe baie, surveillance
+    # SNMP), elles, sont bien coupées en mode consultation — voir site_terrain.
+    items = request.json.get('appareils', [])
+    conn = get_db()
+    try:
+        r = _importer_appareils_scan(conn, cid, items, origine='scan')
+    finally:
+        conn.close()
+    chg = r["changements"]
+    return jsonify({"importes": r["importes"], "total": r["total"],
+                    "suggestions_baie": r["suggestions_baie"],
+                    "instantane_id": r["instantane_id"],
                     "changements": {'disponible': chg.get('disponible', False),
                                     'nb': chg.get('nb', 0)}})
 
@@ -14006,6 +14042,275 @@ def _sante_balayage_periodique():
             conn.close()
     except Exception:
         logger.exception('Balayage santé périodique')
+
+
+# ─── SCAN RÉSEAU RÉCURRENT PLANIFIÉ (module scan_planifie) ────────────────────
+#
+# Un scan complet se déclenche seul, à une cadence par client, remplit
+# `client_instantane` et alerte si quelque chose de notable a changé. Opt-in
+# strict (`scan_auto_actif=1` + une cadence par client), fenêtre horaire, mode
+# terrain respectés. Voir scan_planifie.py pour la logique de sélection.
+
+_INSTANCE_ID = secrets.token_hex(4)
+_scan_planifie_lock = threading.Lock()
+_scan_planifie_etat = {
+    'dernier_tick': None, 'en_cours': None, 'dernier_run': None,
+    'reportes': [], 'derniers_resultats': [],
+}
+
+
+def _scan_planifie_corps_html(nom_client, resume):
+    from html import escape as _esc
+    lignes = ''.join('<li>%s</li>' % _esc(l) for l in resume.get('lignes', []))
+    j = resume.get('jours_ecoules')
+    intro = ('depuis le dernier scan automatique il y a %d jour(s)' % j) if j else \
+            'depuis le dernier scan automatique'
+    return ("<html><body style=\"font-family:Arial\">"
+            "<h2>Changements réseau — %s</h2>"
+            "<p>Le scan planifié a relevé %d changement(s) %s :</p>"
+            "<ul>%s</ul>"
+            "<p><em>Détail : ParcInfo → Changements depuis la dernière visite.</em></p>"
+            "</body></html>" % (_esc(nom_client), resume.get('nb', 0), _esc(intro), lignes))
+
+
+def _scan_planifie_alerter(conn, cid, changements):
+    """Journalise + notifie (e-mail, webhook) si `changements` mérite une
+    alerte. Renvoie le résumé, ou None. Anti-bruit : au plus une alerte par
+    run, rien si le diff est vide, MAC aléatoires minorées (dans
+    `scan_planifie.resume_alerte`)."""
+    import scan_planifie
+    seuil = int(cfg_get('scan_auto_seuil_disparus', '3') or 3)
+    resume = scan_planifie.resume_alerte(changements, seuil)
+    if not resume:
+        return None
+    row = conn.execute("SELECT nom FROM clients WHERE id=?", (cid,)).fetchone()
+    nom_client = row[0] if row else ('client %d' % cid)
+    try:
+        log_history(conn, cid, 'client', cid, nom_client, 'SCAN_AUTO_CHANGEMENTS',
+                    json.dumps(resume, ensure_ascii=False)[:1500])
+    except Exception:
+        logger.debug('scan planifié: log_history', exc_info=True)
+    dest = (cfg_get('diag_alerte_destinataire', '') or '').strip()
+    if '@' in dest:
+        try:
+            _send_email(dest, '🛰️ ParcInfo — changements réseau (%s)' % nom_client,
+                        _scan_planifie_corps_html(nom_client, resume))
+        except Exception:
+            logger.debug('scan planifié: e-mail', exc_info=True)
+    hook = (cfg_get('scan_auto_webhook', '') or '').strip()
+    if hook[:4] == 'http':
+        try:
+            import urllib.request
+            payload = json.dumps({'client_id': cid, 'client': nom_client,
+                                  'resume': resume}, ensure_ascii=False).encode('utf-8')
+            req = urllib.request.Request(
+                hook, data=payload, headers={'Content-Type': 'application/json'})
+            urllib.request.urlopen(req, timeout=8).close()
+        except Exception:
+            logger.debug('scan planifié: webhook', exc_info=True)
+    return resume
+
+
+def _executer_scan_planifie(cid, plages, libelle, declencheur='auto'):
+    """Lance un scan complet pour un client, l'importe (origine ``scan_auto``),
+    déclenche l'alerte si nécessaire. **Bloquant** — à appeler depuis un thread
+    de fond (scheduler ou route ``/executer``). Renvoie un dict résumé."""
+    global scan_status
+    debut = _utcnow().isoformat()
+    _scan_planifie_etat['en_cours'] = {'client_id': cid, 'debut': debut,
+                                       'declencheur': declencheur}
+    res = {'client_id': cid, 'declencheur': declencheur, 'horodatage': debut,
+           'importes': 0, 'mis_a_jour': 0, 'trouves': 0, 'changements_nb': 0,
+           'alerte': False, 'erreur': None}
+    try:
+        plages = list(plages)
+        if str(cfg_get('scan_auto_inclure_candidats', '1')) == '1':
+            try:
+                dec = network_diag.decouvrir_reseaux(cid)
+                connus = set(plages)
+                for d in (dec.get('detectes') or []):
+                    c = (d.get('cidr') or '').strip()
+                    if c and d.get('confiance') == 'forte' and c not in connus:
+                        plages.append(c); connus.add(c)
+            except Exception:
+                logger.debug('scan planifié: sous-réseaux candidats', exc_info=True)
+
+        nb_threads = min(int(cfg_get('scan_workers', '50') or 50), 200)
+        _run_scan(plages, nb_threads, enrich_wmi=False, client_id=cid)   # bloquant
+        with scan_lock:
+            resultats = list(scan_status.get('results') or [])
+        res['trouves'] = len(resultats)
+
+        conn = get_db()
+        try:
+            imp = _importer_appareils_scan(conn, cid, resultats,
+                                           origine='scan_auto', libelle=libelle)
+            conn.commit()
+            res['importes'] = imp['importes']
+            res['mis_a_jour'] = imp['mis_a_jour']
+            chg = imp['changements']
+            res['changements_nb'] = chg.get('nb', 0) if chg.get('disponible') else 0
+            if _scan_planifie_alerter(conn, cid, chg):
+                res['alerte'] = True
+            conn.commit()
+        finally:
+            conn.close()
+        logger.info('Scan planifié client %s (%s) : %d trouvé(s), %d nouveau(x), '
+                    '%d màj, %d changement(s)%s', cid, declencheur, res['trouves'],
+                    res['importes'], res['mis_a_jour'], res['changements_nb'],
+                    ' — ALERTE' if res['alerte'] else '')
+    except Exception as e:
+        logger.exception('Scan planifié — client %s', cid)
+        res['erreur'] = str(e)
+    finally:
+        _scan_planifie_etat['en_cours'] = None
+        _scan_planifie_etat['dernier_run'] = res
+        _scan_planifie_etat['derniers_resultats'] = (
+            [res] + list(_scan_planifie_etat['derniers_resultats']))[:20]
+    return res
+
+
+def _scan_planifie_periodique():
+    """Job scheduler (toutes les 15 min). Sélectionne les clients dus et lance
+    leur scan un par un. Ne fait rien sans `scan_auto_actif=1`."""
+    if str(cfg_get('scan_auto_actif', '0')) != '1':
+        return
+    if not _scan_planifie_lock.acquire(blocking=False):
+        return
+    try:
+        _scan_planifie_etat['dernier_tick'] = _utcnow().isoformat()
+        # Verrou coopératif best-effort entre instances : `config` est
+        # synchronisée via Turso, donc une autre instance qui a pris le relais
+        # récemment nous fait passer notre tour (latence = intervalle de sync ;
+        # sans gravité, un double scan ne produit qu'un instantané quasi
+        # identique donc un diff vide). Lu en direct (hors cache cfg, qui ne
+        # verrait jamais l'écriture d'une autre instance) ; jamais via
+        # cfg_invalidate() qui viderait tout le cache toutes les 15 min.
+        lease = ''
+        try:
+            from database import get_local_db
+            _lc = get_local_db()
+            _lr = _lc.execute("SELECT valeur FROM config WHERE cle='_scan_auto_lease'").fetchone()
+            _lc.close()
+            lease = (_lr[0] if _lr else '') or ''
+        except Exception:
+            pass
+        try:
+            who, ts = lease.split('|'); ts = float(ts)
+        except (ValueError, AttributeError):
+            who, ts = '', 0.0
+        if who and who != _INSTANCE_ID and (time.time() - ts) < 1800:
+            return
+        cfg_set('_scan_auto_lease', '%s|%f' % (_INSTANCE_ID, time.time()))
+
+        conn = get_db()
+        try:
+            clients = [{'id': r[0], 'nom': r[1], 'acces': 'proprietaire'}
+                       for r in conn.execute("SELECT id, nom FROM clients")]
+            import scan_planifie
+            plan = scan_planifie.clients_a_scanner(conn, clients, datetime.now())
+        finally:
+            conn.close()
+        _scan_planifie_etat['reportes'] = plan['reportes']
+        for item in plan['dus']:
+            with scan_lock:
+                if scan_status.get('running'):
+                    break        # un scan manuel tourne — on réessaiera au tick suivant
+            _executer_scan_planifie(item['client_id'], item['plages'],
+                                    item['libelle'], declencheur='auto')
+    except Exception:
+        logger.exception('Scan planifié périodique')
+    finally:
+        _scan_planifie_lock.release()
+
+
+@app.route('/api/scan/planifie', methods=['GET'])
+@login_required
+def api_scan_planifie_get():
+    conn = get_db()
+    try:
+        import scan_planifie
+        etat = scan_planifie.etat_scan_planifie(conn, get_clients())
+    finally:
+        conn.close()
+    etat['moniteur'] = {
+        'dernier_tick': _scan_planifie_etat['dernier_tick'],
+        'en_cours': _scan_planifie_etat['en_cours'],
+        'dernier_run': _scan_planifie_etat['dernier_run'],
+        'reportes': _scan_planifie_etat['reportes'],
+        'derniers_resultats': _scan_planifie_etat['derniers_resultats'][:10],
+    }
+    etat['est_admin'] = (get_auth_user() or {}).get('role') == 'admin'
+    return jsonify(etat)
+
+
+@app.route('/api/scan/planifie', methods=['POST'])
+@login_required
+def api_scan_planifie_post():
+    data = request.json or {}
+    import scan_planifie
+    # (a) cadence d'un client — can_write sur CE client
+    if 'client_id' in data and 'cadence' in data:
+        try:
+            pcid = int(data['client_id'])
+        except (TypeError, ValueError):
+            return jsonify({'error': 'client_id invalide'}), 400
+        if not can_write(pcid):
+            return jsonify({'error': 'Forbidden'}), 403
+        cadence = (data.get('cadence') or '').strip()
+        if cadence and scan_planifie.intervalle_secondes(cadence) is None:
+            return jsonify({'error': 'Cadence invalide (quotidien|hebdo|mensuel|<n>h)'}), 400
+        cfg_set('scan_auto:%d' % pcid, cadence)
+        return jsonify({'ok': True, 'client_id': pcid, 'cadence': cadence})
+    # (b) config globale — même niveau d'accès que le panneau Réglages (tout
+    # utilisateur connecté ; cohérent avec `api_config_save`).
+    maj = {}
+    for k in ('scan_auto_actif', 'scan_auto_fenetre', 'scan_auto_seuil_disparus',
+              'scan_auto_inclure_candidats', 'scan_auto_webhook'):
+        if k in data:
+            cfg_set(k, str(data[k]).strip())
+            maj[k] = cfg_get(k)
+    return jsonify({'ok': True, 'config': maj})
+
+
+@app.route('/api/scan/planifie/executer', methods=['POST'])
+@login_required
+def api_scan_planifie_executer():
+    data = request.json or {}
+    try:
+        pcid = int(data.get('client_id') or get_client_id() or 0)
+    except (TypeError, ValueError):
+        pcid = 0
+    if not pcid or not can_write(pcid):
+        return jsonify({'error': 'Forbidden'}), 403
+    with scan_lock:
+        if scan_status.get('running'):
+            return jsonify({'error': 'Un scan est déjà en cours'}), 409
+    if _scan_planifie_etat['en_cours']:
+        return jsonify({'error': 'Un scan planifié est déjà en cours'}), 409
+    conn = get_db()
+    try:
+        import scan_planifie
+        plages = scan_planifie._plages_client(conn, pcid)
+    finally:
+        conn.close()
+    if not plages:
+        return jsonify({'error': 'Aucune plage IP dans la fiche parc de ce client'}), 400
+    threading.Thread(
+        target=_executer_scan_planifie,
+        args=(pcid, plages, 'Scan planifié (manuel)'),
+        kwargs={'declencheur': 'manuel'},
+        daemon=True, name='ScanPlanifieManuel').start()
+    return jsonify({'status': 'started', 'plages': plages})
+
+
+@app.route('/scan-planifie')
+@login_required
+def page_scan_planifie():
+    cid = get_client_id()
+    return render_template('scan_planifie.html',
+                           clients=get_clients(), client_actif_id=cid,
+                           est_admin=(get_auth_user() or {}).get('role') == 'admin')
 
 
 def _notify_upcoming_maintenances():
@@ -18560,6 +18865,11 @@ if __name__ == '__main__':
     # temps). N'écrit que ce qui a changé.
     scheduler.add_job(_sante_balayage_periodique, 'interval', minutes=30,
                       next_run_time=_utcnow() + timedelta(seconds=90))
+    # Scan réseau récurrent planifié : sélectionne les clients dus (cadence par
+    # client, fenêtre horaire, mode terrain) et lance leur scan. No-op sans
+    # scan_auto_actif=1 ET une cadence par client.
+    scheduler.add_job(_scan_planifie_periodique, 'interval', minutes=15,
+                      next_run_time=_utcnow() + timedelta(seconds=150))
     # Cron job optionnel : rapport de diagnostic réseau par e-mail
     _diag_cron = network_diag.parse_rapport_cron(cfg_get('diag_rapport_cron', ''))
     if _diag_cron:

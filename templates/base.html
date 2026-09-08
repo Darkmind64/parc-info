@@ -3599,6 +3599,23 @@ function rendreConfig() {
         <label class="cfg-label">Renfort de détection par IP publique</label>
         <input type="checkbox" data-cfg="mode_terrain_ip_publique" ${g('mode_terrain_ip_publique')!=='0'?'checked':''} class="cfg-check">
     </div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:.6rem 0 .2rem;font-weight:700;letter-spacing:1px;text-transform:uppercase;">Scan planifié</div>
+    <div style="font-size:.7rem;color:var(--text-secondary);padding:0 0 .4rem;line-height:1.4;">
+        Déclenche seul un scan complet à une cadence <b>par client</b>, met à jour l'inventaire et
+        alerte si un appareil apparaît / plusieurs disparaissent. Opt-in strict, fenêtre horaire,
+        mode terrain respectés.
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Activer (garde-fou global)</label>
+        <input type="checkbox" data-cfg="scan_auto_actif" ${g('scan_auto_actif')==='1'?'checked':''} class="cfg-check">
+    </div>
+    <div class="cfg-row">
+        <label class="cfg-label">Fenêtre horaire (heure locale)</label>
+        <input type="text" data-cfg="scan_auto_fenetre" value="${g('scan_auto_fenetre')||'02:00-05:00'}" placeholder="02:00-05:00" class="cfg-input cfg-input-sm">
+    </div>
+    <div class="cfg-row">
+        <a href="/scan-planifie" style="font-size:.78rem;">→ Cadence par client, réglages et « lancer maintenant »</a>
+    </div>
 </div>
 
 <!-- ══ 4b. DIAGNOSTIC RÉSEAU ══ -->

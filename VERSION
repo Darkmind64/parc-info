@@ -1,9 +1,60 @@
-PARCINFO_VERSION=2.30.0
+PARCINFO_VERSION=2.31.0
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090903
+BUILD_NUMBER=2026090904
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.31.0 - Scan reseau recurrent planifie (Plan 3)
+#
+# Un scan reseau complet se declenche seul, a une cadence choisie PAR CLIENT
+# (quotidien / hebdo / mensuel / <n>h), met a jour l'inventaire et alimente le
+# rapport « Changements depuis la derniere visite ». Une alerte est levee si
+# quelque chose de notable a change -- sans intervention.
+#
+# Opt-in STRICT : rien ne tourne sans `scan_auto_actif=1` ET une cadence
+# `scan_auto:<client_id>` non vide pour le client.
+#
+# Prudence :
+#  - fenetre horaire (`scan_auto_fenetre`, defaut 02:00-05:00, gere le passage
+#    de minuit) -- pas de charge surprise en journee ;
+#  - mode terrain : aucun scan si le site du client n'est pas joignable (evite
+#    de scanner le LAN perso d'un technicien en teletravail sous Docker) ;
+#  - un seul scan planifie a la fois (verrou memoire + bail cooperatif via
+#    `config`, synchronise Turso) ;
+#  - scan LECTURE SEULE reseau (moteur `_run_scan` inchange).
+#
+# Detection & alerte (module scan_planifie.py, pur + lectures) :
+#  - `resume_alerte(changements, seuil)` : au moins un appareil NOUVEAU (hors
+#    MAC aleatoire -- smartphone de passage) OU `disparus` >= seuil (defaut 3).
+#  - canaux : e-mail (config SMTP + `diag_alerte_destinataire` existants) +
+#    entree `historique` (action SCAN_AUTO_CHANGEMENTS) + webhook JSON optionnel
+#    (`scan_auto_webhook`). Anti-bruit : 1 alerte/run, rien si le diff est vide.
+#
+# Integration : `scan_auto_inclure_candidats` (defaut on) ajoute au scan les
+# sous-reseaux candidats a confiance forte (`network_diag.decouvrir_reseaux`).
+#
+# UI : page « Scan planifie » (Reglages -> Reseau & Scan, ou bouton sur la page
+# Scan reseau) -- cadence par client, dernier / prochain run, « lancer
+# maintenant », etat de l'ordonnanceur. Bandeau « Changements » du tableau de
+# bord enrichi (« prochain scan auto dans N j »).
+#
+# L'import d'un scan est factorise dans `app._importer_appareils_scan(conn, cid,
+# items, origine=, libelle=)` -- meme chemin pour l'import manuel
+# (`/api/scan/importer`, origine 'scan') et l'import planifie (origine
+# 'scan_auto').
+#
+# Routes : GET/POST `/api/scan/planifie`, POST `/api/scan/planifie/executer`,
+# page `/scan-planifie`. Job scheduler toutes les 15 min
+# (`_scan_planifie_periodique`).
+#
+# Config (CFG_DEFAULTS) : scan_auto_actif (0), scan_auto_fenetre (02:00-05:00),
+# scan_auto_seuil_disparus (3), scan_auto_inclure_candidats (1),
+# scan_auto_webhook (''). Par client : scan_auto:<client_id>.
+#
+# Tests : tests/test_scan_planifie.py (14), test_scan_planifie.py (racine,
+# 4 sections). 400 tests pytest.
+#
+# ----------------------------------------------------------------------------
 # Version 2.30.0 - Recherche globale (palette Ctrl+K) (Plan 4)
 #
 # La barre de recherche du bandeau devient une vraie palette : Ctrl/Cmd+K
