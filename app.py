@@ -10327,11 +10327,18 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
     {oid_base: {suffixe: valeur}}. Repli ultime GETNEXT par colonne seulement si
     le multi-colonnes échoue aussi (agent qui refuse les requêtes multi-varbind).
     Le mode qui marche est mémorisé par agent (`_bulk_col_mode`) ; les colonnes
-    constatées absentes le sont aussi (`_bulk_col_absente`)."""
+    constatées absentes le sont aussi (`_bulk_col_absente`).
+
+    `max_rows` = nombre de LIGNES de table (ports, entrées...). Le plafond interne
+    de varbinds est `max_rows * nb_colonnes` : sans cela, un switch 48 ports
+    interrogé sur ~20 colonnes voyait sa table amputée à ~30 ports (600 varbinds
+    / 20 colonnes) — la moitié des ports absents du diagnostic, de la topologie
+    et des LEDs, en silence."""
     if isinstance(communautes, str):
         communautes = [communautes]
     oid_bases = list(oid_bases)
     prefs = [b if b.endswith('.') else b + '.' for b in oid_bases]
+    max_vb = max(1, max_rows) * max(1, len(oid_bases))   # budget en VARBINDS
     _v3 = _snmp_v3_params()
     if _v3:
         res_v3 = {b: _v3_walk(ip_str, b, _v3, timeout, max_rows, port)
@@ -10348,13 +10355,13 @@ def _snmp_bulk_cols(ip_str, oid_bases, communautes=('public',), timeout=1.5,
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.settimeout(s_to)
-                while courant and rows < max_rows:
+                while courant and rows < max_vb:
                     actifs = list(courant.items())
                     vb = b''.join(_ber_sequence(0x30, _ber_oid(o) + b'\x05\x00')
                                   for _, o in actifs)
                     reqid_env = _snmp_walk_reqid()
                     if est_bulk:
-                        max_rep = max(1, min(25, (max_rows - rows) // len(actifs) + 1))
+                        max_rep = max(1, min(25, (max_vb - rows) // len(actifs) + 1))
                         pdu_corps = (_ber_entier(reqid_env) + _ber_entier(0)
                                      + _ber_entier(max_rep) + _ber_sequence(0x30, vb))
                         pdu = _ber_sequence(0xa5, pdu_corps)     # GetBulkRequest-PDU
@@ -14163,11 +14170,21 @@ def _scan_planifie_alerter(conn, cid, changements):
     return resume
 
 
+_scan_planifie_run_lock = threading.Lock()
+
+
 def _executer_scan_planifie(cid, plages, libelle, declencheur='auto'):
     """Lance un scan complet pour un client, l'importe (origine ``scan_auto``),
     déclenche l'alerte si nécessaire. **Bloquant** — à appeler depuis un thread
     de fond (scheduler ou route ``/executer``). Renvoie un dict résumé."""
     global scan_status
+    if not _scan_planifie_run_lock.acquire(blocking=False):
+        # un autre scan planifié tourne déjà (double-clic « lancer maintenant »,
+        # ou scheduler + manuel en même temps) — le moteur `_run_scan` est
+        # mono-instance (`scan_status` global), on ne peut pas en lancer deux.
+        return {'client_id': cid, 'declencheur': declencheur,
+                'horodatage': _utcnow().isoformat(), 'erreur': 'un scan planifié tourne déjà',
+                'importes': 0, 'mis_a_jour': 0, 'trouves': 0, 'changements_nb': 0, 'alerte': False}
     debut = _utcnow().isoformat()
     _scan_planifie_etat['en_cours'] = {'client_id': cid, 'debut': debut,
                                        'declencheur': declencheur}
@@ -14219,6 +14236,7 @@ def _executer_scan_planifie(cid, plages, libelle, declencheur='auto'):
         _scan_planifie_etat['dernier_run'] = res
         _scan_planifie_etat['derniers_resultats'] = (
             [res] + list(_scan_planifie_etat['derniers_resultats']))[:20]
+        _scan_planifie_run_lock.release()
     return res
 
 

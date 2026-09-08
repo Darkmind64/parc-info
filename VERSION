@@ -1,9 +1,62 @@
-PARCINFO_VERSION=2.32.2
+PARCINFO_VERSION=2.32.3
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090907
+BUILD_NUMBER=2026090908
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.3 - Audit approfondi des fonctionnalites reseau -> 4 correctifs
+#
+# Demande : verification poussee des fonctionnalites reseau apres les correctifs
+# de la baie. Revue systematique de la chaine scan / diagnostic / baie / SNMP /
+# topologie -> 4 bugs debusques et corriges.
+#
+# 1. IMPORTANT -- `app._snmp_bulk_cols` : le plafond `max_rows` (600) comptait
+#    des VARBINDS, pas des lignes de table. Un switch 48 ports interroge sur
+#    ~20 colonnes (diagnostic palier 3 via `netdiag.collect.balayer`, topologie,
+#    ecran « Trafic & erreurs », `_poll_switch_ports` des LEDs) voyait sa table
+#    amputee a ~30 ports (600 / 20), EN SILENCE. La moitie des ports absents du
+#    diagnostic, de la topologie, et donc du filet de repli de la vue baie.
+#    Corrige : plafond interne = `max_rows * nb_colonnes` (varbinds), `max_rows`
+#    compte desormais des LIGNES.
+#
+# 2. `network_diag._port_physique_depuis_nom` / `_RE_SFP` :
+#    - stack : `Gi1/0/12` et `Gi2/0/12` donnaient tous deux « 12 » -> le 2e
+#      membre du stack etait ombre, les LEDs de ses ports se retrouvaient sur
+#      les ports du 1er membre. Une collision de n° physique desactive
+#      maintenant le mapping par nom pour ce port (`_collision` dans
+#      `_mapping_baie_ifindex`) -- mieux non calibre que mal calibre.
+#    - `_RE_SFP` ne reconnaissait pas les formes COURTES Cisco (`Te1/1/1`,
+#      `Fo1/0/1`, `Twe1/1/1`, `Hu1/0/1`) faute de frontiere de mot avant le
+#      chiffre -> un port fibre 10/25/40/100 G collisionnait avec le RJ de meme
+#      rang. Regex elargie.
+#
+# 3. `diag_etat_port` / `diag_etat_equipement` (tables d'etat courant) :
+#    aucune purge. Un port disparu (SFP debranche, ifIndex change) ou un
+#    equipement supprime de l'inventaire gardait sa derniere ligne -- avec son
+#    `classe_erreur` fige -> le verdict comptait « N ports en erreur » /
+#    « N equipements muets » a vie. Corrige : `_ecrire_etat_snmp` efface les
+#    ports absents du releve (garde-fou : seulement si le releve couvre >= 75 %
+#    du nombre de ports precedent -- un releve partiel ne purge rien) ;
+#    `_marquer_equipements_muets(inventaire_ips=...)` efface les lignes d'une IP
+#    sortie de l'inventaire.
+#
+# 4. `_scan_planifie_executer` : double-clic « lancer maintenant » (ou
+#    scheduler + manuel) -> deux `_run_scan` concurrents sur le `scan_status`
+#    global mono-instance -> resultats melanges. Verrou `_scan_planifie_run_lock`
+#    (non bloquant) : le 2e appel renvoie « un scan planifie tourne deja ».
+#
+# NON corrige (limites connues, documentees) :
+#  - err_delta (compteur d'erreurs de port) accumule sur 8 cycles compare a un
+#    seuil calibre pour 1 cycle -> une LED peut clignoter « err » une fois sur 8
+#    sur un port a CRC legere. Marginal.
+#  - Cle bridge-port vs ifIndex de la FDB quand `dot1dBasePortIfIndex` n'est
+#    jamais expose complet (mitige en v2.32.1/.2 : fusion, repli topologie,
+#    liste des orphelins ; impossible a resoudre a 100 % sans le materiel).
+#
+# Tests : tests/test_diag_reseau.py (mapping stack/SFP), tests/test_netdiag_transitions.py
+# (purge des ports disparus + equipements orphelins). 423 tests pytest.
+#
+# ----------------------------------------------------------------------------
 # Version 2.32.2 - Suite du correctif « appareils qui disparaissent des ports de la baie »
 #
 # v2.32.1 traitait la troncature du walk FDB par un agent lent. Retour terrain :
