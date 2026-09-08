@@ -187,6 +187,37 @@ conn.commit()
 verifier(sante.recalculer(conn, CID2) == 1, 'garantie de nouveau valide -> 1 réécriture')
 verifier(conn.execute("SELECT sante_niveau FROM appareils WHERE id=?", (aid,)).fetchone()[0] == 'ok',
          '  -> pastille repasse à ok')
+
+print('\n=== 7. bascules du seuil journalisées + resume_cache (lots 3-4) ===')
+bid = conn.execute("INSERT INTO appareils (client_id, nom_machine, type_appareil, date_creation) "
+                   "VALUES (?, 'BASCULE', 'PC', ?)", (CID2, il_y_a(2))).lastrowid
+conn.commit()
+_nb = lambda act: conn.execute(
+    "SELECT COUNT(*) FROM historique WHERE client_id=? AND entite_id=? AND action=?",
+    (CID2, bid, act)).fetchone()[0]
+sante.recalculer(conn, CID2)          # 1er calcul : ok, aucune bascule journalisée
+verifier(_nb('Santé dégradée') == 0, '1er calcul -> aucune bascule journalisée')
+conn.execute("UPDATE appareils SET rapport_systeme_json=? WHERE id=?",
+             ('{"disk_total_gb":500,"disk_used_gb":496}', bid))
+conn.commit()
+sante.recalculer(conn, CID2)
+verifier(_nb('Santé dégradée') == 1, 'ok -> critique -> ligne « Santé dégradée » dans historique')
+conn.execute("UPDATE appareils SET rapport_systeme_json='{}' WHERE id=?", (bid,))
+conn.commit()
+sante.recalculer(conn, CID2)
+verifier(_nb('Santé rétablie') == 1, 'critique -> ok -> ligne « Santé rétablie »')
+
+conn.execute("INSERT INTO appareils (client_id, nom_machine, type_appareil, statut, sante_niveau, "
+             "sante_score, sante_raisons) VALUES (?, 'C1', 'PC', 'actif', 'critique', 55, ?)",
+             (CID2, '[{"texte":"Disque saturé","gravite":"critique"}]'))
+conn.execute("INSERT INTO appareils (client_id, nom_machine, type_appareil, statut, sante_niveau) "
+             "VALUES (?, 'A1', 'PC', 'actif', 'attention')", (CID2,))
+conn.commit()
+rc = sante.resume_cache(conn, CID2)
+verifier(rc['compte']['critique'] >= 1 and rc['compte']['attention'] >= 1,
+         'resume_cache compte les niveaux depuis le cache')
+verifier(rc['a_traiter'] and rc['a_traiter'][0]['niveau'] == 'critique',
+         '  -> a_traiter : critique en tête')
 conn.close()
 
 print()

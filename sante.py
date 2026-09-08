@@ -333,7 +333,8 @@ def recalculer(conn, client_id, appareil_ids=None):
         anc = conn.execute(
             "SELECT COALESCE(sante_niveau,''), COALESCE(sante_score,0) "
             "FROM appareils WHERE id=?", (ap['id'],)).fetchone()
-        if anc and anc[0] == s['niveau'] and anc[1] == s['score']:
+        anc_niv = anc[0] if anc else ''
+        if anc and anc_niv == s['niveau'] and anc[1] == s['score']:
             continue          # inchangé : aucune écriture (pas de bruit de sync)
         conn.execute(
             "UPDATE appareils SET sante_niveau=?, sante_score=?, sante_raisons=?, sante_maj=? "
@@ -341,6 +342,10 @@ def recalculer(conn, client_id, appareil_ids=None):
             (s['niveau'], s['score'], json.dumps(s['raisons'], ensure_ascii=False),
              maj, ap['id']))
         ecrits += 1
+        _journaliser_bascule(conn, client_id, ap, anc_niv, s)
+    conn.commit()          # libère le verrou d'écriture AVANT tout appel qui
+                           # ouvre sa propre connexion (cfg_set) — sinon les
+                           # deux se bloquent mutuellement.
     # horodatage du balayage : par client, dans `config` — ne touche pas les
     # lignes `appareils` stables.
     if not appareil_ids:
@@ -349,7 +354,6 @@ def recalculer(conn, client_id, appareil_ids=None):
             cfg_set('_sante_balayage:%s' % client_id, maj)
         except Exception:
             pass
-    conn.commit()
     return ecrits
 
 
@@ -359,6 +363,60 @@ def _now_iso():
         return _utcnow().isoformat()
     except Exception:
         return datetime.utcnow().isoformat()
+
+
+_RANG = {'ok': 0, 'attention': 1, 'critique': 2}
+
+
+def _journaliser_bascule(conn, client_id, ap, anc_niveau, s):
+    """Trace dans `historique` une bascule notable de santé — pour qu'un client
+    voie « le poste X est passé au rouge le 12/09 ». On ne journalise QUE les
+    franchissements du seuil `ok` ↔ non-`ok` (une oscillation
+    attention↔critique ne mérite pas une ligne)."""
+    if anc_niveau not in _RANG:          # premier calcul : pas une « bascule »
+        return
+    av, ap_ = _RANG[anc_niveau], _RANG[s['niveau']]
+    if (av == 0) == (ap_ == 0):          # reste du même côté du seuil
+        return
+    try:
+        from client_helpers import log_history
+        if ap_ == 0:
+            action, det = 'Santé rétablie', 'Plus aucun point d\'attention bloquant.'
+        else:
+            action = 'Santé dégradée'
+            det = ' · '.join(r['texte'] for r in s['raisons']
+                             if r['gravite'] != 'info')[:300]
+        log_history(conn, client_id, 'appareil', ap['id'],
+                    ap.get('nom_machine') or '', action, det)
+    except Exception:
+        logger.debug('sante: journalisation bascule', exc_info=True)
+
+
+def resume_cache(conn, client_id):
+    """Compteurs + top des appareils à traiter, **lus depuis le cache**
+    (`appareils.sante_*`) — pour la tuile « Santé du parc » du tableau de bord.
+    Aucun recalcul."""
+    compte = {'ok': 0, 'attention': 0, 'critique': 0}
+    for niv, n in conn.execute(
+            "SELECT COALESCE(NULLIF(sante_niveau,''),'ok'), COUNT(*) FROM appareils "
+            "WHERE client_id=? AND COALESCE(statut,'actif')='actif' "
+            "GROUP BY COALESCE(NULLIF(sante_niveau,''),'ok')", (client_id,)):
+        compte[niv] = compte.get(niv, 0) + n
+    a_traiter = []
+    for aid, nom, niv, sc, raisons in conn.execute(
+            "SELECT id, nom_machine, sante_niveau, sante_score, sante_raisons "
+            "FROM appareils WHERE client_id=? AND COALESCE(statut,'actif')='actif' "
+            "AND sante_niveau IN ('attention','critique') "
+            "ORDER BY CASE sante_niveau WHEN 'critique' THEN 0 ELSE 1 END, "
+            "sante_score DESC, nom_machine LIMIT 6", (client_id,)):
+        try:
+            rs = json.loads(raisons or '[]')
+        except (ValueError, TypeError):
+            rs = []
+        a_traiter.append({'id': aid, 'nom': nom or '', 'niveau': niv,
+                          'score': sc or 0,
+                          'raison': rs[0]['texte'] if rs else ''})
+    return {'compte': compte, 'total': sum(compte.values()), 'a_traiter': a_traiter}
 
 
 def resume_client(appareils_sante):

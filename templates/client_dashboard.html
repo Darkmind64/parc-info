@@ -795,6 +795,30 @@
 </a>
 {% endif %}
 
+{% if sante_parc and (sante_parc.compte.critique or sante_parc.compte.attention) %}
+{% set _crit = sante_parc.compte.critique %}
+{% set _c = '#ef4444' if _crit else '#c77700' %}
+{% set _bg = 'rgba(239,68,68,.12)' if _crit else 'rgba(224,149,42,.12)' %}
+<a href="/appareils?sante=probleme" style="display:block;margin-bottom:1rem;padding:.6rem .8rem;
+   border-radius:8px;text-decoration:none;font-size:.82rem;
+   color:{{ _c }};background:{{ _bg }};border:1px solid {{ _c }}44;">
+  <div style="display:flex;align-items:center;gap:.5rem;font-weight:700;">
+    <span style="font-size:1.05rem;">🩺</span>
+    <span style="flex:1;">Santé du parc —
+      {% if _crit %}<b>{{ _crit }}</b> appareil(s) à traiter en priorité{% if sante_parc.compte.attention %}, {{ sante_parc.compte.attention }} en attention{% endif %}
+      {% else %}<b>{{ sante_parc.compte.attention }}</b> appareil(s) en attention{% endif %}
+    </span>
+    <span style="font-weight:600;">voir →</span>
+  </div>
+  {% if sante_parc.a_traiter %}
+  <div style="margin-top:.35rem;font-weight:600;color:var(--text-secondary);font-size:.78rem;">
+    {% for x in sante_parc.a_traiter[:3] %}{{ x.nom }} <span style="opacity:.7;">({{ x.raison }})</span>{% if not loop.last %} · {% endif %}{% endfor %}
+    {% if sante_parc.a_traiter|length > 3 %} · +{{ sante_parc.a_traiter|length - 3 }}{% endif %}
+  </div>
+  {% endif %}
+</a>
+{% endif %}
+
 <!-- ═══════════════════════════════════════════════════════════════════════════════════
      PHASE 8.6: DYNAMIC WIDGET RENDERING
      Renders widgets in user-preferred order, conditionally based on enabled_widgets

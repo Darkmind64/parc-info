@@ -1,5 +1,22 @@
 # CHANGELOG - ParcInfo
 
+## [2.29.0] - 2026-09-09 🩺
+
+### Score de santé : fiche, mobile, tableau de bord (Plan 2, lots 3-4)
+
+Suite de 2.28.0 (calcul + colonne dans la liste). Le score de santé est maintenant **visible partout** :
+
+- **Fiche appareil** (`fiche_systeme.html`) — encart « Santé » en tête, **hors** du garde `{% if rapport %}` : un switch ou un routeur sans collecte système a quand même une santé (garantie, réseau, doublon…). Recalculé frais à l'ouverture, avec des liens vers la section concernée (garantie → édition, réseau → diagnostic, sécurité → « Points d'attention »).
+- **Mobile** (`mobile/appareil_detail.html`) — bandeau rouge / orange en tête quand l'appareil n'est pas `ok`, avec la liste des raisons.
+- **Tableau de bord client** — tuile **« Santé du parc »** (compteurs `attention` / `critique` + les 3 appareils à traiter en priorité), lien direct vers `/appareils?sante=probleme`. Lit le cache (`sante.resume_cache`), aucun recalcul.
+- **Historique** — `sante._journaliser_bascule` trace **« Santé dégradée »** / **« Santé rétablie »** dans `historique`, **uniquement** au franchissement du seuil `ok` ↔ non-`ok` (une oscillation `attention` ↔ `critique` ne crée pas de ligne).
+
+Le recalcul est aussi déclenché à l'**édition d'une fiche appareil** (une date de garantie ou un type modifié peut changer la pastille).
+
+Tests : `tests/test_sante_appareil.py` (20), `test_sante_appareil.py` (racine, 7 sections).
+
+---
+
 ## [2.28.0] - 2026-09-09 🩺
 
 ### Score de santé synthétique par appareil (optimisation « croisement des données », lots 1-2)

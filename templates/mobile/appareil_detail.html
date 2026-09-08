@@ -14,6 +14,18 @@
     </div>
 </div>
 
+{% if appareil.sante_niveau and appareil.sante_niveau != 'ok' %}
+{% set _c = '#ff3355' if appareil.sante_niveau == 'critique' else '#ff9800' %}
+<div class="card" style="border-left:3px solid {{ _c }};margin-bottom:.6rem;">
+    <div style="font-weight:700;color:{{ _c }};">
+        {% if appareil.sante_niveau == 'critique' %}🔴 À traiter en priorité{% else %}🟠 Points d'attention{% endif %}
+    </div>
+    <ul style="margin:.3rem 0 0;padding-left:1.1rem;font-size:.86rem;line-height:1.5;">
+        {% for r in appareil.sante_raisons_list %}<li>{{ r.texte }}</li>{% endfor %}
+    </ul>
+</div>
+{% endif %}
+
 <div class="section-title">Identification</div>
 <div class="card kv-list">
     <div class="kv-row"><span class="k">Marque / Modèle</span><span class="v">{{ appareil.marque or '—' }} {{ appareil.modele or '' }}</span></div>
