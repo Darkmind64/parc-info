@@ -1,5 +1,28 @@
 # CHANGELOG - ParcInfo
 
+## [2.27.1] - 2026-09-08 🎲
+
+### Fix : `_fdb_corriger` déterministe sur collision de préfixe
+
+`_fdb_corriger` (réparation d'une table d'apprentissage MAC déformée par un agent SNMP bogué — préfixe parasite, MAC tronquée) construisait son index *« préfixe tronqué → MAC connue »* en **itérant un `set`**. Quand deux MAC de l'inventaire partagent le même préfixe tronqué (collision réelle : `00:11:32:43:97:9d` et `…:9e` → `00:11:32:43`), `dict.setdefault` garde la **première vue** — or l'ordre d'itération d'un `set` de chaînes dépend de `PYTHONHASHSEED`.
+
+Conséquence : `meta['ambigus']` (les MAC en collision de préfixe, signalées à `analyser_brassage_baie` pour une proposition de câblage « confiance faible ») changeait de représentant d'un lancement à l'autre → `tests/test_diag_reseau.py::test_fdb_corriger` flaky (le 9ᵉ échec apparu au build 2.27.0).
+
+**Corrigé** : index construit sur `sorted(connues)` → le représentant d'une collision est la plus petite MAC lexicalement, déterministe. Le **nombre** d'entrées de l'index (donc les scores d'hypothèse et le choix de transformation) était déjà indépendant de l'ordre — aucun autre effet.
+
+Vérifié : `test_fdb_corriger` passe sur `PYTHONHASHSEED` 1 / 7 / 42.
+
+### Au passage : `tests/test_diag_reseau.py` remis au vert (8 mocks périmés)
+
+Ces 8 tests échouaient depuis que le code de production a évolué sans que leurs *mocks* suivent — **pas** un bug de `network_diag`, juste des doublures désynchronisées :
+
+- `_fdb_switch` renvoie `({ifIndex: set(mac)}, info)` (un 2-uplet) depuis l'ajout du contexte VLAN / ARP ; 7 tests le *mockaient* en renvoyant le dict nu → `ValueError: too many values to unpack` dans `_releve_mac_switch`. Mocks corrigés en `lambda ip, c: ({...}, {})`.
+- `_snmp_walk` a gagné `max_vars=` ; `test_fdb_switch_et_voisins` le *mockait* en `lambda oid, ip, c` → `TypeError`. Corrigé en `lambda oid, ip, c, **kw`, et l'appel déballe désormais le 2-uplet.
+
+`tests/test_diag_reseau.py` : **72 passed** (était 64 passed / 8 failed).
+
+---
+
 ## [2.27.0] - 2026-09-08 👂
 
 ### Scan réseau : écoute passive multi-protocoles (Lot C)

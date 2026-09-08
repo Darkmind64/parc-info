@@ -710,7 +710,7 @@ def _mock_snmp_switch(monkeypatch, ports, fdb=None):
                                            'speed_mbps': ports[i].get('speed_mbps', 0)} for i in ports})
     monkeypatch.setattr(network_diag, '_poll_switch_ports',
                         lambda ip, c, infos=None: (dict(ports), bool(ports), True, None))
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: dict(fdb or {}))
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: (dict(fdb or {}), {}))
 
 
 def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, monkeypatch):
@@ -799,9 +799,9 @@ def test_fdb_switch_et_voisins(monkeypatch):
                                            '1.170.187.204.0.0.9': '2'},
         network_diag._OID_FDB_DOT1D_PORT: {},
     }
-    monkeypatch.setattr(network_diag, '_snmp_walk', lambda oid, ip, c: walks.get(oid, {}))
+    monkeypatch.setattr(network_diag, '_snmp_walk', lambda oid, ip, c, **kw: walks.get(oid, {}))
     monkeypatch.setattr(network_diag, '_snmp_walk_octets', lambda *a, **k: {})   # table ARP : vide
-    fdb = network_diag._fdb_switch('10.0.0.2', ['public'])
+    fdb, _info = network_diag._fdb_switch('10.0.0.2', ['public'])   # ({ifIndex: set(mac)}, info)
     assert fdb[10] == {'aa:bb:cc:00:00:01', 'aa:bb:cc:00:00:02'}
     assert fdb[20] == {'aa:bb:cc:00:00:09'}
 
@@ -848,7 +848,10 @@ def test_fdb_corriger():
     assert rep5 == {12: {'1c:1b:0d:95:99:21'}, 13: {'0c:8f:ff:59:db:3b'},
                     14: {'20:7b:d2:a3:1f:b7'}}   # ports 10/11 ambigus, écartés
     # #19 : les MAC ambiguës ne sont plus jetées en silence, meta['ambigus']
-    # liste les ports candidats.
+    # liste les ports candidats. Sur collision de préfixe (9d et 9e partagent
+    # 00:11:32:43), le représentant retenu est déterministe = la plus petite
+    # MAC lexicalement (index construit sur `sorted(connues)`, pas l'ordre d'un
+    # set — sinon flaky selon PYTHONHASHSEED).
     assert meta5['ambigus'] == {'00:11:32:43:97:9d': [10, 11]}
 
 
@@ -912,13 +915,13 @@ def test_analyser_brassage_baie(conn, deux_clients, make_appareil, monkeypatch):
     monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
     monkeypatch.setattr(network_diag, '_noms_interfaces',
         lambda ip, c: {i * 11: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True} for i in (2, 3, 4, 5, 6)})
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: ({
         22: {'aa:00:00:00:00:01'},                                  # port 2 : SRV-1 direct
         33: {'aa:00:00:00:00:02'},                                  # port 3 : PC-PRISE (au bout du cordon de la prise 1)
         44: {'aa:00:00:00:00:03'},                                  # port 4 : PC-CORDON -> cordon à créer vers prise 2
         55: {'de:ad:be:ef:00:01'},                                  # port 5 : un appareil hors inventaire
         66: {'00:11:22:33:44:55', '02:99:88:77:66:55'},             # port 6 : cascade (une MAC aléatoire)
-    })
+    }, {}))
 
     d = network_diag.analyser_brassage_baie(cid)
     assert d['ok'] is True
@@ -950,7 +953,7 @@ def test_analyser_brassage_mac_secondaire(conn, deux_clients, make_appareil, mon
     monkeypatch.setattr(network_diag, '_noms_interfaces',
         lambda ip, c: {i * 11: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True} for i in (2, 3)})
     # la 2e carte (bb:...) est vue sur le port 3, pas la MAC principale
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {33: {'bb:00:00:00:00:02'}})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: ({33: {'bb:00:00:00:00:02'}}, {}))
 
     d = network_diag.analyser_brassage_baie(cid)
     assert d['ok'] is True
@@ -989,10 +992,10 @@ def test_analyser_brassage_element_baie_sur_port_switch(conn, deux_clients, make
     monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
     monkeypatch.setattr(network_diag, '_noms_interfaces',
         lambda ip, c: {i * 11: {'nom': str(i), 'alias': '', 'ethernet': True} for i in (2, 3, 8, 9)})
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: ({
         88: {'00:11:32:43:97:9d'},   # port 8 : DS415 (élément de baie, 2 ports)
         99: {'00:21:b7:39:4e:07'},   # port 9 : imprimante (élément de baie, 1 port)
-    })
+    }, {}))
 
     d = network_diag.analyser_brassage_baie(cid)
     assert d['ok'] is True
@@ -1030,7 +1033,7 @@ def test_analyser_brassage_retypage_lldp(conn, deux_clients, make_appareil, monk
     monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
     monkeypatch.setattr(network_diag, '_noms_interfaces',
         lambda ip, c: {i * 11: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True} for i in (2, 3)})
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {22: {'aa:00:00:00:00:aa'}})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: ({22: {'aa:00:00:00:00:aa'}}, {}))
 
     d = network_diag.analyser_brassage_baie(cid)
     assert d['ok'] is True
@@ -1106,7 +1109,7 @@ def test_analyser_brassage_budget(conn, deux_clients, make_appareil, monkeypatch
         return {11: {'nom': 'Gi0/1', 'alias': '', 'ethernet': True}}
 
     monkeypatch.setattr(network_diag, '_noms_interfaces', _lent)
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {11: {'aa:bb:cc:dd:ee:ff'}})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: ({11: {'aa:bb:cc:dd:ee:ff'}}, {}))
     import app as _app
     monkeypatch.setattr(_app, '_snmp_presence', lambda *a, **k: (False, False, ''))
 
@@ -1126,7 +1129,7 @@ def test_analyser_brassage_snmp_refuse(conn, deux_clients, make_appareil, monkey
     monkeypatch.setattr(network_diag, '_communautes_snmp', lambda: ['public'])
     monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
     monkeypatch.setattr(network_diag, '_noms_interfaces', lambda ip, c: {})
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: ({}, {}))
     import app as _app
     monkeypatch.setattr(_app, '_snmp_presence',
                         lambda ip, comm, **k: (True, False, 'SNMPv3 : authentification refusée'))
@@ -1150,7 +1153,7 @@ def test_analyser_brassage_capture(conn, deux_clients, make_appareil, monkeypatc
     monkeypatch.setattr(network_diag, '_macs_infra_switch', lambda ip, c: set())
     monkeypatch.setattr(network_diag, '_noms_interfaces',
                         lambda ip, c: {22: {'nom': 'Gi0/2', 'alias': '', 'ethernet': True}})
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: {})
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: ({}, {}))
     monkeypatch.setattr(network_diag, 'statut_capture_baie', lambda: {
         'client_id': cid, 'resultat': {'disponible': True, 'talkers': [
             {'mac': 'd4:d4:d4:d4:d4:d4', 'vendor': 'Acme', 'appareil_id': None},
