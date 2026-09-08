@@ -158,6 +158,14 @@ CFG_DEFAULTS = {
     'ping_timeout': '1.0',
     'scan_workers': '50',
     'scan_ports': '21,22,23,25,53,80,110,135,139,143,443,445,554,631,3389,3702,5060,5900,8000,8080,8443,9100,37777',
+    # ── Scan réseau récurrent planifié (module scan_planifie) ─────────────────
+    # Opt-in STRICT : rien ne tourne sans `scan_auto_actif=1` ET une cadence
+    # `scan_auto:<client_id>` non vide pour le client. Voir scan_planifie.py.
+    'scan_auto_actif': '0',                 # garde-fou global
+    'scan_auto_fenetre': '02:00-05:00',     # créneau autorisé (heure locale ; '' = sans restriction)
+    'scan_auto_seuil_disparus': '3',        # nb d'appareils disparus déclenchant une alerte
+    'scan_auto_inclure_candidats': '1',     # ajoute au scan les sous-réseaux candidats à confiance forte
+    'scan_auto_webhook': '',                # URL POST JSON du résumé d'alerte (vide = off)
     # ── Diagnostic réseau (module network_diag) ───────────────────────────────
     'diag_surveillance_active': '0',   # thread de surveillance continue
     'diag_capture_active': '0',        # palier 2 : capture passive scapy (OFF par défaut)

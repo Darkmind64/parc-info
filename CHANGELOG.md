@@ -1,5 +1,40 @@
 # CHANGELOG - ParcInfo
 
+## [2.31.0] - 2026-09-09 🛰️
+
+### Scan réseau récurrent planifié (Plan 3)
+
+Un scan réseau complet se déclenche **seul**, à une cadence choisie **par client**, met à jour l'inventaire et alimente le rapport « Changements depuis la dernière visite » — puis lève une **alerte** si quelque chose de notable a changé. Le cas d'usage : « je scanne un client, je reviens quelques semaines plus tard, dis-moi ce qui a bougé » — sans avoir à y penser.
+
+**Opt-in strict.** Rien ne tourne sans **`scan_auto_actif = 1`** (garde-fou global) **et** une cadence non vide pour le client (`quotidien` / `hebdo` / `mensuel` / `<n>h`).
+
+**Prudence :**
+
+- **fenêtre horaire** (`scan_auto_fenetre`, défaut `02:00-05:00`, gère le passage de minuit) — pas de charge en journée ;
+- **mode terrain** : aucun scan si le site du client n'est pas joignable (jamais le LAN perso d'un technicien en télétravail sous Docker) ;
+- **un seul scan planifié à la fois** (verrou mémoire + bail coopératif via `config`, synchronisé Turso) ;
+- scan **lecture seule** réseau — le moteur `_run_scan` est inchangé.
+
+**Détection & alerte** — nouveau module `scan_planifie.py` (fonctions **pures** + lectures) :
+
+- `resume_alerte(changements, seuil)` : déclenche sur au moins un appareil **nouveau** (hors **MAC aléatoire** — smartphone de passage, minoré) **ou** `disparus` ≥ `scan_auto_seuil_disparus` (défaut 3) ;
+- canaux : **e-mail** (config SMTP + `diag_alerte_destinataire` déjà en place) + entrée **`historique`** (action `SCAN_AUTO_CHANGEMENTS`) + **webhook** JSON optionnel (`scan_auto_webhook`) ;
+- anti-bruit : au plus **une alerte par run**, rien si le diff est vide.
+
+**Intégration** — `scan_auto_inclure_candidats` (défaut on) ajoute au scan les **sous-réseaux candidats à confiance forte** (`network_diag.decouvrir_reseaux`, Lots A/B/C) : le scan planifié en profite automatiquement.
+
+**UI** — page **« Scan planifié »** (`Réglages → Réseau & Scan`, ou bouton sur la page Scan réseau) : cadence par client, dernier / prochain run, **« lancer maintenant »**, état de l'ordonnanceur. Le bandeau « Changements » du tableau de bord client indique le **prochain scan auto**.
+
+**Refactor** — l'import d'un scan est extrait dans `app._importer_appareils_scan(conn, cid, items, origine=, libelle=)` : même chemin pour l'import manuel (`/api/scan/importer`, origine `scan`) et l'import planifié (origine `scan_auto`).
+
+Routes : `GET`/`POST /api/scan/planifie`, `POST /api/scan/planifie/executer`, page `/scan-planifie`. Job scheduler toutes les 15 min (`_scan_planifie_periodique`).
+
+Config (`CFG_DEFAULTS`) : `scan_auto_actif` (0), `scan_auto_fenetre` (`02:00-05:00`), `scan_auto_seuil_disparus` (3), `scan_auto_inclure_candidats` (1), `scan_auto_webhook` (''). Par client : `scan_auto:<client_id>`.
+
+Tests : `tests/test_scan_planifie.py` (14 — cadences, fenêtre horaire à cheval sur minuit, « est dû ? », `resume_alerte` avec MAC aléatoire minorée, sélection + report hors site / hors fenêtre / sans plage, ACL des routes), `test_scan_planifie.py` (racine, 4 sections bout-en-bout, `_run_scan` mocké). **400 tests pytest.**
+
+---
+
 ## [2.30.0] - 2026-09-09 🔍
 
 ### Recherche globale — palette `Ctrl+K` (Plan 4)
