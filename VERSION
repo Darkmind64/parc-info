@@ -1,9 +1,32 @@
-PARCINFO_VERSION=2.27.0
+PARCINFO_VERSION=2.27.1
 RELEASE_DATE=2026-09-08
-BUILD_NUMBER=2026090803
+BUILD_NUMBER=2026090804
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.27.1 - Fix : _fdb_corriger deterministe sur collision de prefixe
+#
+# `_fdb_corriger` (reparation d'une table MAC deformee par un agent SNMP
+# buggue) construisait son index « prefixe tronque -> MAC connue » en
+# iterant un `set`. Quand deux MAC de l'inventaire partagent le meme
+# prefixe tronque (collision reelle), `setdefault` garde la premiere vue
+# -- or l'ordre d'un `set` de chaines depend de PYTHONHASHSEED. Resultat :
+# `meta['ambigus']` (les MAC en collision signalees a analyser_brassage_
+# baie pour une proposition « confiance faible ») changeait de
+# representant d'un lancement a l'autre, rendant test_fdb_corriger flaky.
+# Corrige : index construit sur `sorted(connues)` -> le representant est la
+# plus petite MAC lexicalement, deterministe. Aucun autre effet (le NOMBRE
+# d'entrees de l'index, donc les scores d'hypothese, etait deja
+# independant de l'ordre).
+#
+# Au passage : tests/test_diag_reseau.py remis au vert (72 passed). 8 tests
+# echouaient sur des mocks perimes -- pas un bug de network_diag :
+#  - `_fdb_switch` renvoie ({ifIndex: set(mac)}, info) depuis l'ajout du
+#    contexte VLAN/ARP ; 7 tests le mockaient en renvoyant le dict nu.
+#  - `_snmp_walk` a gagne max_vars= ; un mock en `lambda oid, ip, c` levait
+#    un TypeError.
+#
+# ----------------------------------------------------------------------------
 # Version 2.27.0 - Scan reseau : ecoute passive multi-protocoles (Lot C)
 #
 # Suite des Lots A (2.25.0) et B (2.26.0). Pendant que « Sonder plus loin »

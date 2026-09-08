@@ -1,25 +1,23 @@
 {
-  "version": "2.27.0",
+  "version": "2.27.1",
   "release_date": "2026-09-08",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.27.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.0/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.0/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.0/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.27.1",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Scan reseau : ecoute passive multi-protocoles (Lot C). Pendant que le bouton 'Sonder plus loin' execute sa decouverte L3 active, un sniffer ecoute en parallele (cout en temps nul, zero paquet emis) les protocoles qui revelent un sous-reseau sans le scanner : LLDP et CDP (adresse de gestion d'un switch voisin), OSPF Hello (masque reseau exact d'une interface de routeur), HSRP / VRRP / EIGRP (passerelles), mDNS / SSDP / NetBIOS / LLMNR et tout paquet multicast (IP source d'un appareil d'un autre VLAN). Les TLV LLDP/CDP et l'en-tete OSPF sont decodes a la main, sans dependance supplementaire. Chaque candidat est filtre (IPv4 privee uniquement) et note forte/faible ; rien n'est jamais scanne d'office. Actif seulement si la capture est disponible (Npcap / root) et hors Docker.",
+    "new_features": "Correctif : _fdb_corriger (reparation d'une table MAC deformee par un agent SNMP buggue) est desormais deterministe quand deux MAC de l'inventaire partagent le meme prefixe tronque. L'index de correspondance etait construit en iterant un set, dont l'ordre depend de PYTHONHASHSEED ; le representant de la collision signale a la vue baie (meta['ambigus']) pouvait donc changer d'un lancement a l'autre. Index construit sur sorted() : le representant est la plus petite MAC lexicalement. Aucun autre effet. Au passage, tests/test_diag_reseau.py est remis au vert (8 mocks perimes : _fdb_switch renvoie un 2-uplet, _snmp_walk a gagne max_vars=).",
     "improvements": [
-      "Scan : 'Sonder plus loin' ecoute aussi LLDP/CDP, OSPF, HSRP/VRRP/EIGRP, mDNS/SSDP/NBNS/LLMNR.",
-      "Scan : OSPF Hello -> sous-reseau au prefixe exact (pas un /24 suppose).",
-      "Scan : adresse de gestion d'un switch vue en LLDP/CDP -> son /24 propose en candidat fort.",
-      "Scan : ecoute passive limitee aux IPv4 privees (RFC 1918), comme le filtrage des sauts traceroute."
+      "Fix : _fdb_corriger deterministe sur collision de prefixe (index sur sorted(), plus l'ordre d'un set).",
+      "Tests : tests/test_diag_reseau.py remis au vert (mocks _fdb_switch / _snmp_walk resynchronises)."
     ]
   },
   "checksums": {
@@ -30,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.27.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.27.1"
 }

@@ -6823,11 +6823,15 @@ def _fdb_corriger(par_if, inv_mac, mode='', reference=None):
     if not toutes:
         return par_if, meta
 
-    # index des MAC connues (inventaire + référence ARP) par longueur de préfixe
+    # index des MAC connues (inventaire + référence ARP) par longueur de préfixe.
+    # `sorted()` : quand deux MAC connues partagent le même préfixe tronqué
+    # (collision réelle), `setdefault` garde la PREMIÈRE — on veut que « la
+    # première » soit déterministe (la plus petite lexicalement) et non
+    # tributaire de l'ordre d'itération d'un `set` (PYTHONHASHSEED).
     pref_par_lg = {}
     for lg in {h[2] for h in _FDB_HYPOTHESES}:
         d = {}
-        for m in connues:
+        for m in sorted(connues):
             d.setdefault(':'.join(m.split(':')[:lg]), m)
         pref_par_lg[lg] = d
 
