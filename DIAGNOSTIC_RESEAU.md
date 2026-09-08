@@ -441,7 +441,14 @@ espacée repart à froid.
   face à un agent SNMP lent : relevé **en tête de cycle** (avant les GETBULK qui le
   saturent), mémorisation du dialecte qui répond (`_activite_fdb_dialecte`),
   backoff `_ACTIVITE_FDB_BACKOFF` 45 s après échec, service de la dernière valeur
-  connue jusqu'à `_ACTIVITE_FDB_PERIME` 15 min.
+  connue jusqu'à `_ACTIVITE_FDB_PERIME` 15 min. Depuis **v2.32.1** : timeout par
+  datagramme porté à `_ACTIVITE_FDB_TIMEOUT` 3 s (une réponse GETBULK > 1,2 s
+  tronquait le parcours au hasard d'un cycle → des ports « perdaient » leurs
+  appareils 150 s durant), et un relevé **incomplet fusionne** avec le dernier
+  relevé complet (`_fusion_fdb`) au lieu de le remplacer — de même pour la table
+  des interfaces, et au 1er cycle d'un visionnage on sert la dernière FDB connue
+  plutôt qu'une table vide. Le Moniteur affiche « table MAC N (INCOMPLÈTE /
+  fusionnée) ».
 - **Appareils vus par port** (v2.19.19, `_voisins_port`) : la même FDB « live »
   alimente, dans l'infobulle de chaque port (switch **et** prise murale) et dans
   le détail du moniteur, la liste des appareils dont une MAC transite réellement
