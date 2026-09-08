@@ -3132,8 +3132,10 @@ function rowsActivitePort(slotId, numero) {
                      && ((a.voisins_detail || a.voisins || []).length >= 2);
     if (a.voisins && a.voisins.length && !_aSchema) {
         const plus = a.voisins_restants ? ` <span style="color:var(--text-muted);">+${a.voisins_restants}</span>` : '';
+        const via = a.voisins_source === 'topologie'
+            ? ' <span style="color:var(--text-muted);" title="vu par la cartographie de topologie (palier 4), pas par la table MAC live">(topologie)</span>' : '';
         h += `<div class="tip-row"><span class="tip-key">Trafic vu</span>`
-           + `<span class="tip-val">${a.voisins.map(escH).join(', ')}${plus}</span></div>`;
+           + `<span class="tip-val">${a.voisins.map(escH).join(', ')}${plus}${via}</span></div>`;
     }
     if (a.cable === 'incoherent') {
         h += `<div class="tip-row"><span class="tip-key">Câblage</span>`
@@ -3713,6 +3715,7 @@ const MoniteurModal = {
                     : '';
                 return `<div class="mon-sw-head">${escH(sw.sysname || sw.nom)} — ${escH(sw.ip)}${ctxHead} · poll ${sw.duree_poll_ms} ms${sw.dt_s ? ' · Δt ' + sw.dt_s + ' s' : ''} · comm. « ${escH(sw.communaute || '?')} » · compteurs ${sw.compteurs_64bits ? '64' : '32'} bits · ${sw.nb_ifindex_ethernet} interface(s) · ${sw.nb_ports_calibres}/${sw.nb_ports_mappes} calibré(s)${fdbTxt}${sw.nb_manques ? ' · ' + sw.nb_manques + ' manque(s)' : ''}${poeHead}</div>
                     ${sw.fdb_incomplet && !sw.fdb_fusionne ? '<div style="font-size:.66rem;color:var(--accent-orange,#f59e0b);margin:.2rem 0;">⚠ Relevé de la table d’apprentissage MAC incomplet ce cycle (agent SNMP lent) — certains ports peuvent temporairement ne pas montrer leurs appareils. Se corrige au relevé suivant.</div>' : ''}
+                    ${(sw.fdb_orphelins || []).length ? '<div style="font-size:.66rem;color:var(--accent-orange,#f59e0b);margin:.2rem 0;">⚠ ' + sw.fdb_orphelins.reduce((n, o) => n + (o.noms.length || 1), 0) + ' appareil(s) vus sur ce switch mais sur un port non identifié — l’agent n’expose pas <code>dot1dBasePortIfIndex</code> (numéro de bridge-port → ifIndex). ' + escH(sw.fdb_orphelins.flatMap(o => o.noms).slice(0, 8).join(', ')) + '</div>' : ''}
                     ${pegge ? '<div style="font-size:.66rem;color:var(--accent-orange,#f59e0b);margin:.2rem 0;">⚠ Cet équipement bloque ses compteurs d’octets à 2 Go (agent SNMP défectueux) — l’activité est estimée sur les paquets/s seulement.</div>' : ''}
                     ${sw.nb_divergences ? '<div style="font-size:.66rem;color:var(--accent-orange,#f59e0b);margin:.2rem 0;">⚠ ' + sw.nb_divergences + ' port(s) où la topologie et le nom d’interface divergent — calibration à vérifier (marqués ⚠ ci-dessous).</div>' : ''}
                     <div style="font-size:.66rem;color:var(--text-muted);margin:.2rem 0;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">

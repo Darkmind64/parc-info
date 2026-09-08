@@ -1,9 +1,42 @@
-PARCINFO_VERSION=2.32.1
+PARCINFO_VERSION=2.32.2
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090906
+BUILD_NUMBER=2026090907
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.2 - Suite du correctif « appareils qui disparaissent des ports de la baie »
+#
+# v2.32.1 traitait la troncature du walk FDB par un agent lent. Retour terrain :
+# le probleme persiste sur certains ports, tous switchs/routeurs confondus.
+# Analyse complete de la chaine « appareil branche -> infobulle » -> 3 causes
+# supplementaires, toutes corrigees (network_diag.py) :
+#
+# 1. dot1dBasePortIfIndex (n° de bridge-port -> ifIndex) incomplet : la FDB se
+#    retrouve indexee par n° de bridge-port pour une partie des ports, alors que
+#    la LED (via l'ifTable) et le mapping utilisent l'ifIndex reel -> l'infobulle
+#    est vide MAIS la LED marche. Cette table est STATIQUE : un releve plus court
+#    que le precedent est desormais fusionne (union) avec le cache.
+#
+# 2. FDB relevee VLAN par VLAN (Cisco/HP en contexte `public@<vlan>`) : les VLAN
+#    sont sondes du plus charge au moins charge sous un budget de 45 s -> les
+#    VLAN les plus calmes etaient sautes en silence, et leurs ports « perdaient »
+#    leurs appareils. `_fdb_par_vlan` pose maintenant `stats['tronque']` quand
+#    tous les VLAN n'ont pas ete sondes -> declenche la fusion avec le cache.
+#
+# 3. Aucun repli quand la FDB live ne montre rien : la boucle des prises murales
+#    avait deja un repli sur `diag_topologie` (palier 4, plus lent mais complet),
+#    pas la boucle des ports de switch. Ajoute : si la FDB live est vide pour un
+#    port mappe, on prend l'appareil vu par la topologie (`voisins_source =
+#    'topologie'`, marque « (topologie) » dans l'infobulle).
+#
+# + Observabilite : `detail_sw.fdb_orphelins` liste les appareils vus sur le
+#   switch mais sur un port non identifiable (dot1dBasePortIfIndex absent) ; le
+#   Moniteur les affiche ; le journal signale les VLAN sautes.
+#
+# Tests : tests/test_baie_fdb_fusion.py (+1 : _fdb_par_vlan flague tronque),
+# tests/test_diag_reseau.py (+1 : repli topologie quand FDB vide).
+#
+# ----------------------------------------------------------------------------
 # Version 2.32.1 - Correctif : appareils qui disparaissent des ports de la baie au hasard
 #
 # Retour terrain : dans la vue d'activite de la baie, certains ports de switch
