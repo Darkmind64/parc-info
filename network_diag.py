@@ -2978,6 +2978,188 @@ def _traceroute(cible, max_hops=_TRACE_HOPS_MAX, timeout_ms=800):
     return ips
 
 
+# ── Écoute passive multi-protocoles (Lot C) ────────────────────────────────
+# Pendant que la découverte active tourne (~15-25 s), un sniffer écoute EN
+# PARALLÈLE les protocoles qui trahissent un sous-réseau sans qu'on ait à le
+# scanner — zéro paquet émis, coût en temps nul (il tourne pendant que le
+# traceroute et les sondes de passerelle se déroulent) :
+#   • LLDP / CDP  → l'adresse de gestion d'un switch voisin
+#   • OSPF Hello  → le masque réseau EXACT de l'interface d'un routeur
+#   • HSRP/VRRP/EIGRP → une passerelle (redondance de premier saut, routage)
+#   • mDNS/SSDP/NBNS/LLMNR → l'IP source d'un appareil bavard sur un autre VLAN
+# Les TLV LLDP/CDP et l'en-tête OSPF sont décodés à la main (aucune dépendance
+# à scapy.contrib, souvent absent des paquets PyInstaller).
+_ECOUTE_PORTS_UDP = {5353: 'mDNS', 5355: 'LLMNR', 1900: 'SSDP', 137: 'NBNS', 1985: 'HSRP'}
+_ECOUTE_PROTO_IP = {88: 'EIGRP', 89: 'OSPF', 112: 'VRRP'}
+_ECOUTE_VIA_FORTE = {'lldp', 'cdp', 'ospf', 'vrrp', 'hsrp', 'eigrp'}
+
+
+def _lldp_mgmt_ipv4(donnees: bytes) -> list:
+    """IPv4 des TLV « Management Address » (type 8) d'une LLDPDU. Chaque TLV =
+    7 bits de type + 9 bits de longueur, puis la valeur ; le TLV 8 commence par
+    [1 octet longueur de la chaîne d'adresse][1 octet sous-type : 1=IPv4]."""
+    ips, i, n = [], 0, len(donnees)
+    while i + 2 <= n:
+        entete = (donnees[i] << 8) | donnees[i + 1]
+        t, lg = entete >> 9, entete & 0x1FF
+        i += 2
+        if t == 0 or i + lg > n:            # 0 = fin de LLDPDU
+            break
+        if t == 8 and lg >= 6:
+            val = donnees[i:i + lg]
+            if val and val[0] == 5 and val[1] == 1:      # 1 (sous-type) + 4 (IPv4)
+                _ip_valide('.'.join(str(b) for b in val[2:6]), ips)
+        i += lg
+    return ips
+
+
+def _cdp_addr_ipv4(donnees: bytes) -> list:
+    """IPv4 des TLV « Addresses » (0x0002) et « Management Address » (0x0016) d'une
+    trame CDP. En-tête CDP de 4 octets, puis des TLV [type u16][len u16 incluant
+    les 4 octets d'en-tête][valeur]."""
+    if donnees[:8] == b'\xaa\xaa\x03\x00\x00\x0c\x20\x00':   # LLC/SNAP parfois inclus par scapy
+        donnees = donnees[8:]
+    ips, i, n = [], 4, len(donnees)
+    while i + 4 <= n:
+        t = (donnees[i] << 8) | donnees[i + 1]
+        lg = (donnees[i + 2] << 8) | donnees[i + 3]
+        if lg < 4 or i + lg > n:
+            break
+        val = donnees[i + 4:i + lg]
+        if t in (0x0002, 0x0016):
+            j = 4 if t == 0x0002 else 0     # 0x0002 : u32 « nombre d'adresses » en tête
+            while j + 5 <= len(val):
+                plen = val[j + 1]
+                k = j + 2 + plen
+                if k + 2 > len(val):
+                    break
+                alen = (val[k] << 8) | val[k + 1]
+                k += 2
+                if alen == 4 and k + 4 <= len(val):
+                    _ip_valide('.'.join(str(b) for b in val[k:k + 4]), ips)
+                j = k + alen
+        i += lg
+    return ips
+
+
+def _ip_valide(ip: str, acc: list):
+    """N'accepte qu'une IPv4 privée (RFC 1918) exploitable — même philosophie
+    que le filtrage des sauts de traceroute du Lot B : un routeur/switch à
+    adresse de gestion publique n'a pas à être proposé au scan."""
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return
+    if (a.version == 4 and a.is_private and not a.is_loopback
+            and not a.is_unspecified and not a.is_link_local
+            and not a.is_multicast and not a.is_reserved):
+        acc.append(ip)
+
+
+def _ospf_hello_reseau(charge: bytes, src: str):
+    """CIDR EXACT porté par un OSPF Hello : en-tête OSPFv2 de 24 octets (version
+    2, type 1), puis 4 octets de masque réseau. `None` si ce n'est pas un
+    Hello ou si le masque est incohérent avec `src`."""
+    try:
+        if len(charge) < 28 or charge[0] != 2 or charge[1] != 1:
+            return None
+        masque = '.'.join(str(b) for b in charge[24:28])
+        return str(ipaddress.ip_network('%s/%s' % (src, masque), strict=False))
+    except ValueError:
+        return None
+
+
+class _EcouteReseaux:
+    """Sniffer passif à démarrer avant la découverte active et à arrêter après.
+    `arreter()` rend `[{'cidr', 'via', 'label', 'exact': bool}]`."""
+
+    def __init__(self):
+        self._s = _charger_scapy()
+        self._sniffer = None
+        self._cand = {}
+
+    def _ajouter(self, cidr, via, label, exact=False):
+        if not cidr:
+            return
+        try:
+            if not _cidr_scannable(ipaddress.ip_network(cidr)):
+                return
+        except ValueError:
+            return
+        self._cand.setdefault(cidr, {'cidr': cidr, 'via': via, 'label': label, 'exact': exact})
+
+    def _depuis_ip(self, ip, via, label):
+        acc = []
+        _ip_valide(ip, acc)
+        if acc:
+            self._ajouter(str(ipaddress.ip_network(ip + '/24', strict=False)), via, label)
+
+    def _on(self, pkt):
+        s = self._s
+        try:
+            if pkt.haslayer(s.Ether):
+                eth = pkt[s.Ether]
+                if int(getattr(eth, 'type', 0)) == 0x88cc:              # LLDP
+                    for ip in _lldp_mgmt_ipv4(bytes(eth.payload)):
+                        self._depuis_ip(ip, 'lldp', 'adresse de gestion LLDP %s' % ip)
+                    return
+                if str(eth.dst).lower() == '01:00:0c:cc:cc:cc' and pkt.haslayer(s.Raw):
+                    for ip in _cdp_addr_ipv4(bytes(pkt[s.Raw].load)):
+                        self._depuis_ip(ip, 'cdp', 'adresse CDP %s' % ip)
+                    return
+            if pkt.haslayer(s.IP):
+                ip4 = pkt[s.IP]
+                src, dst, proto = str(ip4.src), str(ip4.dst), int(ip4.proto)
+                if proto == 89 and pkt.haslayer(s.Raw):                 # OSPF
+                    rez = _ospf_hello_reseau(bytes(pkt[s.Raw].load), src)
+                    if rez:
+                        self._ajouter(rez, 'ospf',
+                                      'OSPF Hello de %s (masque exact)' % src, exact=True)
+                    else:
+                        self._depuis_ip(src, 'ospf', 'routeur OSPF %s' % src)
+                    return
+                fam = _ECOUTE_PROTO_IP.get(proto)
+                if fam:
+                    self._depuis_ip(src, fam.lower(), 'trafic %s de %s' % (fam, src))
+                    return
+                if pkt.haslayer(s.UDP):
+                    u = pkt[s.UDP]
+                    fam = (_ECOUTE_PORTS_UDP.get(int(u.dport))
+                           or _ECOUTE_PORTS_UDP.get(int(u.sport)))
+                    if fam:
+                        self._depuis_ip(src, fam.lower(), '%s émis par %s' % (fam, src))
+                        return
+                try:
+                    da = ipaddress.ip_address(dst)
+                except ValueError:
+                    return
+                if da.is_multicast or dst.endswith('.255'):
+                    self._depuis_ip(src, 'ecoute_passive', 'trafic multicast/broadcast de %s' % src)
+        except Exception:
+            pass
+
+    def demarrer(self) -> bool:
+        if self._s is None:
+            return False
+        try:
+            self._sniffer = self._s.AsyncSniffer(prn=self._on, store=False)
+            self._sniffer.start()
+            return True
+        except Exception:
+            logger.debug('network_diag: écoute passive des réseaux impossible', exc_info=True)
+            self._sniffer = None
+            return False
+
+    def arreter(self) -> list:
+        if self._sniffer is not None:
+            try:
+                self._sniffer.stop()
+            except Exception:
+                pass
+            self._sniffer = None
+        return list(self._cand.values())
+
+
 def decouvrir_reseaux_actif(client_id: int, budget_s: float = _ACTIF_BUDGET_S) -> dict:
     """`decouvrir_reseaux` (passif) PLUS une découverte L3 active : traceroute
     vers la passerelle / une cible publique / les DNS déclarés, sondage des
@@ -3024,6 +3206,14 @@ def decouvrir_reseaux_actif(client_id: int, budget_s: float = _ACTIF_BUDGET_S) -
         gw = ''
     else:
         gw = _passerelle_defaut()
+
+    # ── écoute passive (Lot C) : démarrée maintenant, moissonnée à la fin —
+    # elle tourne « gratuitement » pendant les étapes 1 à 3.
+    ecoute = None
+    if not os.environ.get('RUNNING_IN_DOCKER') and etat_capture().get('disponible'):
+        ec = _EcouteReseaux()
+        if ec.demarrer():
+            ecoute = ec
 
     # ── 1. traceroute ──
     cibles = list(_TRACE_CIBLES_PUB[:1])
@@ -3084,6 +3274,13 @@ def decouvrir_reseaux_actif(client_id: int, budget_s: float = _ACTIF_BUDGET_S) -
             if ok:
                 _add(str(ipaddress.ip_network(ip + '/24', strict=False)),
                      'passerelle_voisine', '%s répond' % ip, hint=1, forte=True)
+
+    # ── 4. moisson de l'écoute passive (Lot C) ──
+    if ecoute is not None:
+        for c in ecoute.arreter():
+            fort = c['via'] in _ECOUTE_VIA_FORTE
+            _add(c['cidr'], c['via'], c['label'],
+                 hint=0 if fort else 1, forte=fort)
 
     ordonnes = sorted(detectes.values(), key=lambda d: (
         0 if d['confiance'] == 'forte' else 1, -d['hint_hotes'],

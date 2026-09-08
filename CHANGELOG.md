@@ -1,5 +1,26 @@
 # CHANGELOG - ParcInfo
 
+## [2.27.0] - 2026-09-08 👂
+
+### Scan réseau : écoute passive multi-protocoles (Lot C)
+
+Suite des Lots A (2.25.0) et B (2.26.0). Pendant que **« 🔍 Sonder plus loin »** exécute sa découverte L3 active (~15-25 s), un sniffer scapy écoute **en parallèle** — coût en temps nul, **zéro paquet émis** — les protocoles qui trahissent un sous-réseau sans qu'on ait à le scanner :
+
+| Protocole | Ce qu'on en tire | Décodage |
+|---|---|---|
+| **LLDP** (ethertype `0x88cc`) / **CDP** (`01:00:0c:cc:cc:cc`) | l'**adresse de gestion** d'un switch voisin → son `/24` | TLV décodés à la main (`_lldp_mgmt_ipv4`, `_cdp_addr_ipv4`), aucune dépendance à `scapy.contrib` |
+| **OSPF Hello** (IP proto 89) | le **masque réseau exact** de l'interface du routeur → sous-réseau au bon préfixe, pas un `/24` supposé | `_ospf_hello_reseau` (en-tête OSPFv2 24 o + 4 o de masque) |
+| **HSRP** (UDP 1985) / **VRRP** (proto 112) / **EIGRP** (proto 88) | une passerelle (redondance de premier saut, routage) | IP source |
+| **mDNS** (5353) / **SSDP** (1900) / **NBNS** (137) / **LLMNR** (5355) + repli tout paquet multicast/broadcast | l'IP source d'un appareil bavard d'un **autre VLAN** | IP source |
+
+`_EcouteReseaux` : `demarrer()` avant l'étape 1, `arreter()` après l'étape 3. Chaque candidat passe par `_ip_valide` (**IPv4 privée RFC 1918 uniquement**, même règle que le filtrage des sauts de traceroute du Lot B) puis `_cidr_scannable`. LLDP/CDP/OSPF/VRRP/HSRP/EIGRP → **confiance forte** ; mDNS/SSDP/NBNS/LLMNR/multicast → **faible**. Actif seulement si la capture est disponible (`etat_capture().disponible` — Npcap / root) et **hors Docker**.
+
+Aucune nouvelle route ni clé de config — l'écoute est repliée dans `decouvrir_reseaux_actif`, l'encart affiche les nouvelles sources (`lldp`, `ospf`, `mdns`…).
+
+Tests : `tests/test_decouverte_reseaux.py` (+4 : parseurs LLDP/CDP/OSPF + agrégation `_EcouteReseaux`), `test_decouverte_reseaux.py` (+1 section). Suite : **349 passants**, 9 échecs `test_diag_reseau.py` (brassage — `_fdb_switch`/`_fdb_corriger`/`analyser_brassage_baie`, code **non modifié par ce lot** ; `test_fdb_corriger` est instable selon l'ordre de hachage). Un bug d'implémentation trouvé et corrigé par les tests avant livraison : `_cdp_addr_ipv4` bouclait à l'infini (curseur de TLV non avancé).
+
+---
+
 ## [2.26.0] - 2026-09-08 🛰️
 
 ### Scan réseau : découverte L3 **active** (Lot B)
