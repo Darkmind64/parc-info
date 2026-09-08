@@ -349,15 +349,22 @@ const VIA_LABEL = {
     dns: 'serveur DNS du poste',
     arp_local: 'cache ARP du poste',
     snmp: 'SNMP',
+    traceroute: 'traceroute',
+    passerelle_snmp: 'passerelle (SNMP)',
+    passerelle_voisine: 'passerelle voisine qui répond',
 };
-async function chargerSousReseaux() {
+function _rendreSousReseaux(d, actifFait) {
     const wrap = document.getElementById('sous-reseaux-wrap');
     if (!wrap) return;
-    let d;
-    try {
-        d = await fetch('/api/scan/sous-reseaux').then(r => r.json());
-    } catch (e) { return; }
-    if (!d.ok || !(d.detectes || []).length) { wrap.innerHTML = ''; return; }
+    const boutonActif = actifFait
+        ? '<span style="font-size:.7rem;color:var(--text-muted);">sondage étendu effectué</span>'
+        : `<button type="button" class="btn btn-secondary btn-sm" id="btn-sonder-loin" onclick="sonderPlusLoin()">🔍 Sonder plus loin (traceroute, passerelles…)</button>`;
+    if (!d.ok || !(d.detectes || []).length) {
+        wrap.innerHTML = `<div class="sous-reseaux-box"><div class="titre">🔎 Sous-réseaux candidats</div>`
+            + `<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem;">Aucun détecté automatiquement.</div>`
+            + `<div style="text-align:right;">${boutonActif}</div></div>`;
+        return;
+    }
     const ligne = (s, i) => {
         const vias = [...new Set((s.sources || []).map(x => VIA_LABEL[x.via] || x.via))].join(', ');
         const detail = (s.sources || []).map(x => escH(x.label)).filter(Boolean).join(' · ');
@@ -378,7 +385,24 @@ async function chargerSousReseaux() {
             + `${faibles.length} réseau(x) vus dans la config du poste, sans appareil détecté</summary>`
             + faibles.map((s, i) => ligne(s, i + forts.length)).join('') + '</details>';
     }
+    html += `<div style="text-align:right;margin-top:.5rem;">${boutonActif}</div>`;
     wrap.innerHTML = html + '</div>';
+}
+async function chargerSousReseaux() {
+    try {
+        _rendreSousReseaux(await fetch('/api/scan/sous-reseaux').then(r => r.json()), false);
+    } catch (e) { /* silencieux : encart optionnel */ }
+}
+async function sonderPlusLoin() {
+    const b = document.getElementById('btn-sonder-loin');
+    if (b) { b.disabled = true; b.textContent = '⏳ Sondage en cours (~20 s)…'; }
+    try {
+        const d = await fetch('/api/scan/decouvrir-actif', { method: 'POST' }).then(r => r.json());
+        _rendreSousReseaux(d, true);
+    } catch (e) {
+        if (b) { b.disabled = false; b.textContent = '🔍 Sonder plus loin — réessayer'; }
+        showFlash('Le sondage étendu a échoué', 'danger');
+    }
 }
 function ajouterSousReseau(i, cidr) {
     ajouterPlage(cidr);

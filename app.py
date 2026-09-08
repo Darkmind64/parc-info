@@ -10916,6 +10916,19 @@ def api_scan_sous_reseaux():
         return jsonify({'ok': False, 'configurees': [], 'detectes': []}), 403
     return jsonify(network_diag.decouvrir_reseaux(cid))
 
+
+@app.route('/api/scan/decouvrir-actif', methods=['POST'])
+@login_required
+def api_scan_decouvrir_actif():
+    """Découverte L3 ACTIVE, en plus du passif : traceroute vers la passerelle /
+    une cible publique / les DNS déclarés, sondage des passerelles voisines,
+    SNMP sur la passerelle même hors inventaire. ~15-25 s, déclenchée par le
+    bouton « Sonder plus loin ». Lecture seule (aucune écriture en base)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'ok': False, 'configurees': [], 'detectes': []}), 403
+    return jsonify(network_diag.decouvrir_reseaux_actif(cid))
+
 @app.route('/api/scan/lancer', methods=['POST'])
 @login_required
 def lancer_scan():
