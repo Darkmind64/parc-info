@@ -1,5 +1,25 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.1] - 2026-09-09 🔧
+
+### Correctif — appareils qui disparaissent des ports de la baie « au hasard »
+
+Retour terrain : dans la **vue d'activité de la baie**, certains ports de switch ou de routeur **n'affichaient plus les appareils détectés** — pas toujours les mêmes, un cycle sur deux, « lié au rafraîchissement ».
+
+**Cause.** La table d'apprentissage MAC (FDB) est relevée en tâche de fond et mise en cache 150 s. Sur un agent SNMP un peu lent (fréquent en PME), une réponse GETBULK qui dépasse le **timeout de 1,2 s par datagramme** coupe le parcours **au milieu de la table** — à un endroit différent à chaque fois. Ce relevé tronqué **remplaçait quand même** le cache complet : pendant les 150 s suivantes, tous les ports dont les MAC étaient dans la partie non lue perdaient leurs appareils. Second cas : au **retour sur l'onglet Baie**, le premier cycle relevait les LEDs mais pas la FDB → un cycle avec toutes les infobulles vides.
+
+**Correctif (`network_diag.py`).**
+
+- **Timeout du walk FDB / ARP de fond : 1,2 s → 3 s** (`_ACTIVITE_FDB_TIMEOUT`). Le relevé est fait toutes les 150 s — on peut être patient. `network_diag._snmp_walk` transmet désormais un `timeout` à `app._snmp_walk`.
+- **`_fusion_fdb(cache, frais)`** (pur) : un relevé **incomplet fusionne** avec le dernier relevé complet au lieu de le remplacer. Une MAC vue **maintenant** fait autorité pour **son** port (elle a pu bouger) ; une MAC connue seulement du cache est conservée (elle bouge peu — même principe que `_ACTIVITE_FDB_PERIME`).
+- **`_maj_noms_interfaces`** : un relevé d'interfaces nettement plus court que le précédent (< 80 %) est **fusionné**, pas substitué (sinon des ports sortaient du mapping → « appareils vus » vides).
+- **`_relever_switch_activite`** : au 1er cycle d'un visionnage (`avec_fdb=False`), sert la **dernière FDB connue** si elle a moins de 15 min, au lieu d'une table vide.
+- **Observabilité** : `detail_sw` porte `fdb_nb_macs` / `fdb_incomplet` / `fdb_fusionne` ; le **Moniteur** affiche « table MAC N » (+ « INCOMPLÈTE » / « fusionnée ») ; une ligne de journal signale un relevé incomplet.
+
+Tests : `tests/test_baie_fdb_fusion.py` (5 — fusion conserve les ports absents du relevé tronqué, une MAC qui a bougé suit le relevé frais, relevé d'interfaces court fusionné, passthrough du `timeout`). **418 tests pytest.**
+
+---
+
 ## [2.32.0] - 2026-09-09 📇
 
 ### Baux DHCP relevés à la source (Plan 1)
