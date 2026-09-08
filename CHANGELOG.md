@@ -1,5 +1,35 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.0] - 2026-09-09 📇
+
+### Baux DHCP relevés à la source (Plan 1)
+
+ParcInfo lit la table des baux DHCP **directement depuis le routeur / serveur DHCP** du client — source autoritaire de l'association **IP ↔ MAC ↔ hostname** (option 12 annoncée par le client), des sous-réseaux routés, et surtout de la distinction **réservation (statique) / bail dynamique** : une imprimante ou un serveur en bail dynamique alors qu'il devrait être réservé est un signal utile.
+
+**Sources** (best-effort, on garde tout ce qui répond) :
+
+- **SNMP** — Mikrotik `mtxrDHCPLeaseTable` (`.1.3.6.1.4.1.14988.1.1.6`), très répandu en PME. On ne s'appuie que sur les deux colonnes stables entre versions de RouterOS (adresse `.2`, MAC `.3`), les autres sont lues en best-effort.
+- **Fichier importé** (format **auto-détecté**) — `dhcpd.leases` ISC (pfSense, OPNsense, ISC dhcpd), `dhcp.leases` dnsmasq (OpenWrt), export CSV Windows Server (`Get-DhcpServerv4Lease | Export-Csv`). Parseurs **purs**.
+
+**Nouveau module `netdiag/dhcp.py`** : `_parse_isc_leases` / `_parse_dnsmasq_leases` / `_parse_windows_dhcp_csv` / `parser_auto` (purs) ; `_baux_snmp_mikrotik` + `relever_baux` ; `importer_baux` (l'`ON CONFLICT` ne remplace un champ que par une valeur **plus informative** — un relevé SNMP sans hostname n'écrase pas un hostname venu d'un fichier), `lister_baux`, `bail_pour_mac`, `baux_hors_inventaire`. Table `dhcp_baux` (`UNIQUE(client_id, adresse_ip, adresse_mac)`, synchronisée entre instances).
+
+**Croisements (la valeur) :**
+
+- **`_importer_appareils_scan`** — le hostname annoncé au DHCP devient le **nom candidat prioritaire** (avant NetBIOS) ; une IP scannée ≠ IP du bail → `log_history('Conflit IP / bail DHCP')`.
+- **Appareils fantômes** — `baux_hors_inventaire` : une réservation dont la MAC n'est dans aucune fiche (`appareils` / `appareil_macs`) → « hors inventaire » à forte confiance.
+- **Fiche appareil** — encart **« DHCP »** (type de bail, hostname annoncé vs `nom`, expiration, alerte si un équipement d'infrastructure est en bail dynamique). Route `GET /api/appareil/<id>/dhcp`.
+- **`parc_general`** — nouveau champ **`serveur_dhcp`** + contrôle « déclaré ≠ relevé » dans `verifier_parc_general` (badge confirmé / divergent / non vérifié).
+
+Routes `GET /api/dhcp/baux` (+ `?relever=1` pour un relevé SNMP à la demande), `POST /api/dhcp/importer` (fichier **ou** texte collé). Job scheduler `_dhcp_releve_periodique` (opt-in `dhcp_actif`, cadence `dhcp_intervalle_s` = 3600 s, respecte le mode terrain). Panneau **« Baux DHCP »** sur la page Scan réseau.
+
+**Non fait dans ce lot** (suite possible) : relevé **SSH** direct (Mikrotik / OpenWrt / pfSense) — demande une dépendance SSH (`paramiko`), décision à trancher ; SNMP **Cisco IOS** ; catégorie DHCP dans `changements_client`.
+
+Config : `dhcp_actif` (0), `dhcp_intervalle_s` (3600).
+
+Tests : `tests/test_netdiag_dhcp.py` (13 — les 3 parseurs, auto-détection, `_norm_mac`, relevé SNMP avec faux agent, `importer_baux`/`lister_baux`/`bail_pour_mac`, fantômes, croisement à l'import, routes + ACL lecture seule), `test_dhcp_baux.py` (racine, 5 sections bout-en-bout). **413 tests pytest.**
+
+---
+
 ## [2.31.0] - 2026-09-09 🛰️
 
 ### Scan réseau récurrent planifié (Plan 3)

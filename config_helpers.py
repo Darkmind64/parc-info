@@ -166,6 +166,9 @@ CFG_DEFAULTS = {
     'scan_auto_seuil_disparus': '3',        # nb d'appareils disparus déclenchant une alerte
     'scan_auto_inclure_candidats': '1',     # ajoute au scan les sous-réseaux candidats à confiance forte
     'scan_auto_webhook': '',                # URL POST JSON du résumé d'alerte (vide = off)
+    # ── Baux DHCP relevés à la source (module netdiag.dhcp) ───────────────────
+    'dhcp_actif': '0',                      # relevé SNMP périodique des baux (opt-in ; l'import de fichier reste toujours possible)
+    'dhcp_intervalle_s': '3600',            # période du relevé SNMP des baux (s)
     # ── Diagnostic réseau (module network_diag) ───────────────────────────────
     'diag_surveillance_active': '0',   # thread de surveillance continue
     'diag_capture_active': '0',        # palier 2 : capture passive scapy (OFF par défaut)
