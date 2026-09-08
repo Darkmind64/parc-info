@@ -448,7 +448,17 @@ espacée repart à froid.
   relevé complet (`_fusion_fdb`) au lieu de le remplacer — de même pour la table
   des interfaces, et au 1er cycle d'un visionnage on sert la dernière FDB connue
   plutôt qu'une table vide. Le Moniteur affiche « table MAC N (INCOMPLÈTE /
-  fusionnée) ».
+  fusionnée) ». **v2.32.2** : trois causes de plus du même symptôme —
+  (a) `dot1dBasePortIfIndex` (n° de bridge-port → ifIndex) incomplet fait que la
+  FDB reste indexée par bridge-port pour une partie des ports (la LED marche,
+  l'infobulle est vide) → cette table étant statique, un relevé plus court que le
+  précédent est fusionné ; (b) FDB relevée VLAN par VLAN (`_fdb_par_vlan`,
+  contexte `public@<vlan>`) : les VLAN les plus calmes étaient sautés en silence
+  sous le budget `_FDB_VLAN_BUDGET_S` (45 s) → `stats['tronque']` posé →
+  fusion ; (c) repli sur `diag_topologie` (palier 4) pour l'infobulle d'un port
+  de switch quand la FDB live est vide (les prises murales l'avaient déjà) —
+  `voisins_source='topologie'`. `detail_sw.fdb_orphelins` liste les appareils
+  vus sur le switch mais sur un port non identifiable.
 - **Appareils vus par port** (v2.19.19, `_voisins_port`) : la même FDB « live »
   alimente, dans l'infobulle de chaque port (switch **et** prise murale) et dans
   le détail du moniteur, la liste des appareils dont une MAC transite réellement

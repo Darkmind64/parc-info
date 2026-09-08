@@ -6582,28 +6582,33 @@ def _bridge_fdb_brute(ip, communautes, baseport_if, stats=None):
         if f:
             return _agrege(f, dialecte == 'dot1q')
     elif dialecte == 'dot1q-vlan':
-        return _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb)
+        return _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb, stats)
     else:
         for nom, oid in (('dot1q', _OID_FDB_DOT1Q_PORT), ('dot1d', _OID_FDB_DOT1D_PORT)):
             f = _walk_fdb(oid, communautes)
             if f:
                 _activite_fdb_dialecte[ip] = nom
                 return _agrege(f, nom == 'dot1q')
-        par_if, vlans = _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb)
+        par_if, vlans = _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb, stats)
         if par_if:
             _activite_fdb_dialecte[ip] = 'dot1q-vlan'
         return par_if, vlans
     return {}, {}
 
 
-def _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb):
+def _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb, stats=None):
     """FDB dot1q relevée VLAN par VLAN avec le contexte de communauté
     `communaute@<vlan>` (indispensable sur beaucoup de switches Cisco / HP).
 
     Les VLAN sondés viennent en priorité de `dot1qPvid` (ceux réellement portés
     par un port), du plus chargé au moins chargé, et non de la liste statique
     des VLAN déclarés dont beaucoup sont vides — constat d'audit #09. Repli sur
-    `dot1qVlanStaticName` si l'agent n'expose pas `dot1qPvid`."""
+    `dot1qVlanStaticName` si l'agent n'expose pas `dot1qPvid`.
+
+    `stats['tronque']` est posé si tous les VLAN n'ont pas pu être sondés
+    (budget `_FDB_VLAN_BUDGET_S` ou plafond `_FDB_VLAN_MAX`) : le relevé est
+    partiel → l'appelant fusionnera avec le cache plutôt que de perdre les MAC
+    des VLAN restants."""
     vids, _par_bp = _vlans_actifs(ip, communautes)
     if not vids:
         compte = []
@@ -6615,11 +6620,16 @@ def _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb):
         vids = sorted(set(compte))
     out, vlans = {}, {}
     t0 = time.time()
-    for vid in vids[:_FDB_VLAN_MAX]:
+    a_sonder = vids[:_FDB_VLAN_MAX]
+    sondes = 0
+    for vid in a_sonder:
         if time.time() - t0 > _FDB_VLAN_BUDGET_S:
             break                      # budget : les VLAN restants sont les moins chargés
         f = _walk_fdb(_OID_FDB_DOT1Q_PORT, [f'{c}@{vid}' for c in communautes])
         _agrege(f, False, vid_force=vid, out=out, vlans=vlans)
+        sondes += 1
+    if stats is not None and (sondes < len(vids)):
+        stats['tronque'] = True
     return out, vlans
 
 
@@ -6664,6 +6674,14 @@ def _fdb_switch(ip, communautes):
         else:
             baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes, max_vars=600,
                                      timeout=_ACTIVITE_FDB_TIMEOUT)
+            # dot1dBasePortIfIndex (bridge port → ifIndex) est STRICTEMENT statique
+            # sur un switch qui tourne : un relevé plus court que le précédent =
+            # walk tronqué. On garde l'union — sans quoi une partie de la FDB se
+            # retrouve indexée par n° de bridge-port au lieu de l'ifIndex, et ces
+            # ports « perdent » leurs appareils dans l'infobulle alors que la LED,
+            # elle (indexée par ifIndex via l'ifTable), fonctionne (retour terrain).
+            if bp_hit and baseport_if and len(baseport_if) < len(bp_hit[1]):
+                baseport_if = {**bp_hit[1], **baseport_if}
             if baseport_if:
                 _activite_fdb_baseport[ip] = (time.time(), baseport_if)
             elif bp_hit:
@@ -7557,6 +7575,26 @@ def _cycle_activite(clients):
                                                   _s0[0] if _s0 else 0,
                                                   _s0[1] if _s0 else time.time())
 
+                # ── Topologie L2 (palier 4) : repli quand la FDB « live » ne
+                #    montre rien sur un port pourtant occupé (agent lent, table
+                #    par n° de bridge-port faute de dot1dBasePortIfIndex, VLAN non
+                #    sondé…). `diag_topologie` est plus lente mais plus complète
+                #    (relevé sous budget large + réparation via l'ARP d'un routeur).
+                topo_par_ip = {}         # ip -> {ifindex: set(appareil_id)}
+                topo_noms_par_ip = {}    # ip -> {ifindex: [(appareil_id, nom)]}
+                for eip, pidx, vaid, vnom in conn.execute(
+                        "SELECT equipement_ip, port_index, appareil_vu_id, appareil_vu_nom "
+                        "FROM diag_topologie WHERE client_id=? AND appareil_vu_id IS NOT NULL "
+                        "AND COALESCE(est_uplink,0)=0", (cid,)):
+                    try:
+                        pidx, vaid = int(pidx), int(vaid)
+                    except (TypeError, ValueError):
+                        continue
+                    topo_par_ip.setdefault(eip, {}).setdefault(pidx, set()).add(vaid)
+                    _l = topo_noms_par_ip.setdefault(eip, {}).setdefault(pidx, [])
+                    if vaid not in {x[0] for x in _l}:
+                        _l.append((vaid, vnom or ''))
+
                 for sw in switchs:
                     ip, slot_id = sw['ip'], sw['slot_id']
                     if ip not in poll_par_ip:
@@ -7679,6 +7717,23 @@ def _cycle_activite(clients):
                         # appareils dont une MAC est apprise sur ce port (FDB live)
                         _macs_port = (fdb_par_ip.get(ip) or {}).get(ifindex, set())
                         _vois = _voisins_port(_macs_port, inv_mac) if _macs_port else None
+                        # Repli topologie L2 (palier 4) : la FDB « live » peut
+                        # rater un port pourtant occupé (agent lent, table indexée
+                        # par n° de bridge-port faute de dot1dBasePortIfIndex, VLAN
+                        # non sondé…). `diag_topologie` est plus lente mais
+                        # indépendante de ces aléas et porte le nom de l'appareil.
+                        if not _vois:
+                            _tn = (topo_noms_par_ip.get(ip) or {}).get(ifindex) or []
+                            _tn = [(a, n) for a, n in _tn if n]
+                            if _tn:
+                                _lim = _tn[:_ACTIVITE_VOISINS_MAX]
+                                _vois = {
+                                    'noms': [n for _a, n in _lim], 'n': len(_tn),
+                                    'ids': {a for a, _n in _tn},
+                                    'detail': [{'nom': n, 'type': '', 'id': a, 'mac': '',
+                                                'connu': True} for a, n in _lim],
+                                    'restants': max(0, len(_tn) - _ACTIVITE_VOISINS_MAX),
+                                    'source': 'topologie'}
                         # Plusieurs MAC sur un port d'accès = un équipement
                         # intermédiaire non géré. On le classe ici aussi (ce
                         # n'était fait que pour les prises murales) pour que
@@ -7697,6 +7752,7 @@ def _cycle_activite(clients):
                                          'voisins': (_vois or {}).get('noms', []),
                                          'voisins_restants': (_vois or {}).get('restants', 0),
                                          'voisins_detail': (_vois or {}).get('detail', []),
+                                         'voisins_source': (_vois or {}).get('source', 'fdb'),
                                          'cascade': _casc,
                                          'cpt_pegge': (p or {}).get('cpt_pegge', False)})
                         if led['etat'] not in ('down', 'stale'):
@@ -7774,19 +7830,18 @@ def _cycle_activite(clients):
                         'fdb_nb_macs': sum(len(v) for v in (fdb_par_ip.get(ip) or {}).values()),
                         'fdb_incomplet': bool(fdb_meta_par_ip.get(ip, {}).get('tronque_taille')),
                         'fdb_fusionne': bool(fdb_meta_par_ip.get(ip, {}).get('fusionne')),
+                        # FDB indexée par n° de bridge-port faute de
+                        # dot1dBasePortIfIndex : ces MAC ne peuvent pas être
+                        # rattachées à un port de façade → listées à part.
+                        'fdb_orphelins': [
+                            {'cle': _k, 'noms': _voisins_port(_ms, inv_mac)['noms']}
+                            for _k, _ms in sorted((fdb_par_ip.get(ip) or {}).items())[:40]
+                            if _k not in infos and _ms],
                         'calibre': calibre})
 
                 # ── prises murales d'un bandeau RJ : LED via le port de switch du
                 #    cordon de brassage + contrôle de câblage (FDB live, repli topologie) ──
                 if etats_par_ip:
-                    topo_par_ip = {}
-                    for eip, pidx, vaid in conn.execute(
-                            "SELECT equipement_ip, port_index, appareil_vu_id FROM diag_topologie "
-                            "WHERE client_id=? AND appareil_vu_id IS NOT NULL", (cid,)):
-                        try:
-                            topo_par_ip.setdefault(eip, {}).setdefault(int(pidx), set()).add(int(vaid))
-                        except (TypeError, ValueError):
-                            continue
                     noms_par_ip = {ipx: v[0] for ipx, v in poll_par_ip.items()}
                     pm_ports, pm_journal = _prises_murales_activite(
                         conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot,

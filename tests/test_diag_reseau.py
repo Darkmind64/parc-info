@@ -735,6 +735,32 @@ def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, mo
     assert any(i['ifindex'] == 1 for i in detail['interfaces'])   # liste complète des interfaces
 
 
+def test_cycle_activite_repli_topologie_quand_fdb_vide(conn, deux_clients, make_appareil, monkeypatch):
+    """Un port mappé, actif, dont la FDB « live » ne montre rien (agent lent,
+    table par bridge-port, VLAN non sondé…) doit récupérer l'appareil branché
+    depuis `diag_topologie` (palier 4), avec `voisins_source='topologie'`."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
+    pc = make_appareil(cid, nom_machine='PC-COMPTA', adresse_mac='AA:BB:CC:00:00:07')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1)", (slot_id,))
+    conn.execute(
+        "INSERT INTO diag_topologie (client_id, equipement_ip, port_index, appareil_vu_id, "
+        "appareil_vu_nom, est_uplink) VALUES (?,?,?,?,?,0)",
+        (cid, '10.0.0.2', 1, pc, 'PC-COMPTA'))
+    conn.commit()
+    # port baie 1 -> nom 'Gi0/1' -> ifIndex 1 ; FDB live VIDE
+    _mock_snmp_switch(monkeypatch, {1: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0,
+                                            in_pkts=0, out_pkts=0, in_err=0, out_err=0)}, fdb={})
+    network_diag._cycle_activite([cid])
+    with network_diag._activite_lock:
+        res = network_diag._activite_resultat.get(cid)
+    p1 = next(p for p in res['ports'] if p['numero'] == 1)
+    assert 'PC-COMPTA' in p1['voisins']
+    assert p1['voisins_source'] == 'topologie'
+
+
 def test_prises_murales_activite(conn, deux_clients, make_appareil):
     """LED d'une prise murale via le port de switch du cordon de brassage, +
     contrôle de câblage : la MAC déclarée sur la prise doit être apprise (FDB

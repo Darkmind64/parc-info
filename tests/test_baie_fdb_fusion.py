@@ -54,6 +54,29 @@ def test_noms_interfaces_releve_court_est_fusionne(monkeypatch):
     assert infos[20]['nom'] == 'Gi1/0/20'
 
 
+def test_fdb_par_vlan_flague_tronque_quand_des_vlan_sont_sautes(monkeypatch):
+    monkeypatch.setattr(ND, '_vlans_actifs', lambda ip, c: ([10, 20, 30], {}))
+    calls = []
+
+    def _walk(oid, comm):
+        calls.append(comm)
+        return {}
+
+    def _agrege(f, avec_vlan, vid_force=None, out=None, vlans=None):
+        pass
+
+    # budget large : les 3 VLAN sont sondés -> pas de troncature
+    st = {}
+    ND._fdb_par_vlan('1.2.3.4', ['public'], {}, _agrege, _walk, st)
+    assert 'tronque' not in st and len(calls) == 3
+
+    # budget epuise d'entree : on saute des VLAN -> tronque
+    monkeypatch.setattr(ND, '_FDB_VLAN_BUDGET_S', -1.0)
+    st2 = {}
+    ND._fdb_par_vlan('1.2.3.4', ['public'], {}, _agrege, _walk, st2)
+    assert st2.get('tronque') is True
+
+
 def test_snmp_walk_transmet_le_timeout(monkeypatch):
     vus = {}
 

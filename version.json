@@ -1,26 +1,25 @@
 {
-  "version": "2.32.1",
+  "version": "2.32.2",
   "release_date": "2026-09-09",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.1",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.32.2",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif : vue d'activite de la baie -- certains ports de switch/routeur n'affichaient plus les appareils detectes, au hasard, un cycle sur deux. Cause : sur un agent SNMP un peu lent, une reponse GETBULK tardive coupait le releve de la table d'apprentissage MAC au milieu, a un endroit different a chaque fois -- et ce releve tronque remplacait quand meme le cache complet precedent. Corrige : timeout du releve de fond porte de 1,2 a 3 s ; un releve incomplet FUSIONNE desormais avec le dernier releve complet au lieu de le remplacer (une MAC vue maintenant fait autorite pour son port, une MAC connue seulement du cache est conservee -- elle bouge peu) ; meme logique pour la table des interfaces ; au retour sur l'onglet Baie, le premier cycle sert la derniere table connue au lieu d'une table vide. Le Moniteur affiche l'etat de la table MAC (nb d'adresses, 'incomplete' / 'fusionnee').",
+    "new_features": "Suite du correctif « appareils qui disparaissent des ports de la baie » (v2.32.1 ne traitait qu'une des causes). Analyse complete de la chaine « appareil branche -> infobulle » -> 3 causes de plus, toutes corrigees : (1) dot1dBasePortIfIndex (n° de bridge-port -> ifIndex) incomplet -> la table MAC se retrouve indexee par n° de bridge-port pour une partie des ports (la LED marche, l'infobulle est vide) ; cette table etant statique, un releve plus court que le precedent est desormais fusionne. (2) Table MAC relevee VLAN par VLAN (Cisco/HP) : les VLAN les plus calmes etaient sautes en silence sous le budget de 45 s ; on le detecte maintenant et on fusionne avec le cache. (3) Aucun repli quand la table MAC live ne montre rien : si un port mappe et actif n'a pas d'appareil dans la table MAC live, on prend l'appareil vu par la cartographie de topologie (palier 4), marque « (topologie) » dans l'infobulle. + le Moniteur liste les appareils vus sur le switch mais sur un port non identifiable.",
     "improvements": [
-      "Baie : releve FDB/ARP de fond -- timeout par datagramme 1,2 s -> 3 s (relevé toutes les 150 s, on peut etre patient).",
-      "Baie : `_fusion_fdb` -- un relevé de table MAC tronque fusionne avec le cache au lieu de le remplacer.",
-      "Baie : relevé d'interfaces nettement plus court que le precedent -> fusionne, pas substitue.",
-      "Baie : au retour sur l'onglet, le 1er cycle sert la derniere FDB connue (avant : infobulles vides un cycle).",
-      "Moniteur baie : ligne 'table MAC N' + marqueur INCOMPLETE / fusionnee ; journal signale un relevé incomplet."
+      "Baie : dot1dBasePortIfIndex (bridge-port -> ifIndex) est statique -> un relevé plus court que le precedent est fusionne (union) avec le cache.",
+      "Baie : `_fdb_par_vlan` pose `tronque` quand des VLAN sont sautes (budget) -> declenche la fusion avec le cache au lieu de perdre leurs MAC.",
+      "Baie : repli sur `diag_topologie` pour l'infobulle d'un port de switch (comme les prises murales) quand la table MAC live est vide -- `voisins_source='topologie'`.",
+      "Moniteur baie : `fdb_orphelins` -- appareils vus sur le switch mais sur un port non identifie (dot1dBasePortIfIndex absent) ; journal des VLAN sautes."
     ]
   },
   "checksums": {
@@ -31,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.1"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.2"
 }
