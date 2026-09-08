@@ -1,5 +1,30 @@
 # CHANGELOG - ParcInfo
 
+## [2.30.0] - 2026-09-09 🔍
+
+### Recherche globale — palette `Ctrl+K` (Plan 4)
+
+La barre de recherche du bandeau devient une **vraie palette** : `Ctrl/Cmd+K` depuis n'importe où, navigation clavier (**↑ ↓ Entrée Échap**), `AbortController` (pas de réponse en retard), infobulle de résultats groupés par catégorie.
+
+Elle cherche en une frappe dans **appareils, périphériques, contrats, services, utilisateurs finaux, identifiants et clients** — par nom, n° de série, IP, MAC, login, n° de contrat, localisation, utilisateur affecté…
+
+**`search_utils.py` réécrit :**
+
+- **`_normaliser_terme(q)`** détecte :
+  - une **IP** → correspondance **exacte** sur `adresse_ip` (score 100) ;
+  - une **MAC**, avec ou sans séparateurs et casse indifférente : `aa:bb:cc:dd:ee:ff` = `AABBCCDDEEFF` = `aa-bb-cc-dd` (partielle) — cherche aussi les **MAC secondaires** (`appareil_macs`) ;
+  - un **numéro** (série / commande / contrat).
+- **`search_global(query, client_ids, actif_id, limit)`** prend une **liste d'ids** : `scope=actif` (défaut) = le client actif ; `scope=tous` = **tous les clients accessibles** — l'ACL est faite par la route (`get_clients()`), `search_global` ne l'élargit **jamais**. Le client actif est classé d'abord ; chaque résultat porte son `client_nom` (badge affiché en mode « tous clients »).
+- **`_score`** : correspondance exacte (100) > début de champ (60) > sous-chaîne (30).
+- Nouvelle entité **`clients`** (par nom / contact / email → URL de sélection).
+- Les **identifiants** ne renvoient **jamais** le mot de passe (libellé / login / URL seulement).
+
+Route `GET /api/search?q=&scope=actif|tous&limit=` (renvoie `ms`, le temps de la requête). Approche `LIKE` directe, pas de FTS5 — mesuré à **6-15 ms** sur un petit parc.
+
+Tests : `tests/test_recherche.py` (8 — normalisation, classement, **ACL stricte** en scope actif/tous, MAC avec/sans séparateurs, IP exacte, mot de passe jamais renvoyé, la route), `test_recherche.py` (racine). Vérifié navigateur : `Ctrl+K` / scope / clavier / IP / MAC / n° série / n° contrat.
+
+---
+
 ## [2.29.0] - 2026-09-09 🩺
 
 ### Score de santé : fiche, mobile, tableau de bord (Plan 2, lots 3-4)

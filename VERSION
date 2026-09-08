@@ -1,9 +1,35 @@
-PARCINFO_VERSION=2.29.0
+PARCINFO_VERSION=2.30.0
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090902
+BUILD_NUMBER=2026090903
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.30.0 - Recherche globale (palette Ctrl+K) (Plan 4)
+#
+# La barre de recherche du bandeau devient une vraie palette : Ctrl/Cmd+K
+# (depuis n'importe ou), navigation clavier (fleches / Entree / Echap),
+# AbortController (pas de reponse en retard).
+#
+# search_utils.py reecrit :
+#  - `_normaliser_terme(q)` detecte une IP (correspondance EXACTE), une MAC
+#    avec ou sans separateurs (aa:bb:cc.. == aabbcc.. == AA-BB-CC..), un
+#    numero de serie / commande / contrat.
+#  - `search_global(query, client_ids, actif_id, limit)` prend une LISTE
+#    d'ids : `scope=actif` (defaut) = le client actif ; `scope=tous` = tous
+#    les clients ACCESSIBLES (l'ACL est faite par la route via get_clients(),
+#    search_global ne l'elargit jamais). Le client actif est classe d'abord ;
+#    chaque resultat porte son client_nom (badge en mode "tous clients").
+#  - `_score` : correspondance exacte (100) > debut de champ (60) >
+#    sous-chaine (30). MAC secondaires (`appareil_macs`) reconnues.
+#  - Nouvelle entite : clients (recherche par nom/contact/email, URL de
+#    selection). Les identifiants ne renvoient JAMAIS le mot de passe.
+#
+# Route `GET /api/search?q=&scope=actif|tous&limit=` (renvoie `ms`).
+#
+# Tests : tests/test_recherche.py (8), test_recherche.py (racine).
+# Verifie navigateur : Ctrl+K, scope, clavier, IP/MAC/serie/contrat, ~6-15 ms.
+#
+# ----------------------------------------------------------------------------
 # Version 2.29.0 - Score de sante : fiche, mobile, tableau de bord (Plan 2, lots 3-4)
 #
 # Suite de 2.28.0 (calcul + colonne dans la liste). Le score de sante est

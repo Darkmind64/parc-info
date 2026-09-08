@@ -1076,18 +1076,27 @@
         <a href="/apropos" class="nav-version-info" title="À propos de ParcInfo">ℹ</a>
     </div>
 
-    <!-- SEARCH BAR -->
-    <div id="nav-search-wrap" style="display:flex;align-items:center;margin-left:1rem;margin-right:1rem;flex:0 0 auto;">
-        <input type="text" id="global-search-input" placeholder="Rechercher..."
-            style="width:180px;padding:.4rem .6rem;background:var(--input-bg);border:1px solid var(--input-border);
+    <!-- SEARCH BAR (palette Ctrl+K) -->
+    <div id="nav-search-wrap" style="display:flex;align-items:center;gap:.4rem;margin-left:1rem;margin-right:1rem;flex:0 0 auto;position:relative;">
+        <input type="text" id="global-search-input" placeholder="Rechercher…  (Ctrl+K)" autocomplete="off"
+            aria-label="Recherche globale" aria-expanded="false" aria-controls="search-results"
+            role="combobox"
+            style="width:200px;padding:.4rem .6rem;background:var(--input-bg);border:1px solid var(--input-border);
                    border-radius:3px;color:var(--text-primary);font-size:.75rem;font-family:'Share Tech Mono',monospace;
                    transition:all .2s;box-sizing:border-box;"
-            onkeyup="handleGlobalSearch(event)"
+            oninput="handleGlobalSearch(event)"
+            onkeydown="searchKeydown(event)"
             onfocus="this.style.borderColor='var(--accent)';this.style.boxShadow='0 0 8px rgba(0,201,255,.3)'"
             onblur="this.style.borderColor='var(--input-border)';this.style.boxShadow='none'">
-        <div id="search-results" style="position:absolute;top:50px;left:0;right:0;background:var(--bg-card);border:1px solid var(--border);
-                                        border-radius:3px;max-height:400px;overflow-y:auto;display:none;z-index:1000;
-                                        min-width:300px;box-shadow:0 4px 16px rgba(0,0,0,.3);">
+        <label id="search-scope-lbl" title="Chercher dans tous vos clients"
+               style="display:flex;align-items:center;gap:.25rem;font-size:.62rem;color:var(--text-muted);cursor:pointer;white-space:nowrap;user-select:none;">
+            <input type="checkbox" id="search-scope-tous" onchange="_searchRelancer()"
+                   style="width:12px;height:12px;flex-shrink:0;">tous clients
+        </label>
+        <div id="search-results" role="listbox" aria-label="Résultats"
+             style="position:absolute;top:calc(100% + 6px);left:0;background:var(--bg-card);border:1px solid var(--border);
+                    border-radius:6px;max-height:70vh;overflow-y:auto;display:none;z-index:1200;
+                    min-width:340px;max-width:460px;box-shadow:0 12px 32px rgba(0,0,0,.45);">
         </div>
     </div>
 
@@ -1261,6 +1270,7 @@ window._flashMessages = [
 <div class="kbd-help-overlay" id="kbd-help" onclick="this.classList.remove('open')">
     <div class="kbd-help-box" onclick="event.stopPropagation()">
         <div class="kbd-help-title">⌨ Raccourcis clavier</div>
+        <div class="kbd-row"><span class="kbd">Ctrl+K</span><span class="kbd-desc">Recherche globale (appareils, contrats, IP, MAC…)</span></div>
         <div class="kbd-row"><span class="kbd">N</span><span class="kbd-desc">Nouvel élément (sur une page liste)</span></div>
         <div class="kbd-row"><span class="kbd">Échap</span><span class="kbd-desc">Retour à la liste / Fermer</span></div>
         <div class="kbd-row"><span class="kbd">?</span><span class="kbd-desc">Afficher/masquer cette aide</span></div>
@@ -1729,103 +1739,137 @@ function showFlash(msg, cat) {
     showFlash(m.msg, m.cat);
 })();
 
-// ── RECHERCHE GLOBALE ──────────────────────────────────────────────────────────
-let _searchTimeout = null;
-function handleGlobalSearch(event) {
-    const query = event.target.value.trim();
-    const resultsDiv = document.getElementById('search-results');
+// ── RECHERCHE GLOBALE (palette Ctrl+K) ─────────────────────────────────────────
+let _searchTimeout = null, _searchAbort = null, _searchItems = [], _searchSel = -1;
+const _SEARCH_LBL = {appareils:'🖥 Appareils', peripheriques:'🖱 Périphériques',
+    contrats:'📋 Contrats', services:'🔧 Services', utilisateurs:'👤 Utilisateurs',
+    identifiants:'🔐 Identifiants', clients:'🏢 Clients'};
+const _SEARCH_ORDRE = ['clients','appareils','peripheriques','contrats','services','utilisateurs','identifiants'];
 
-    if (!query || query.length < 2) {
-        resultsDiv.style.display = 'none';
-        return;
-    }
+function _searchEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function _searchClose() {
+    const d = document.getElementById('search-results');
+    if (d) { d.style.display = 'none'; d.innerHTML = ''; }
+    const i = document.getElementById('global-search-input');
+    if (i) i.setAttribute('aria-expanded', 'false');
+    _searchItems = []; _searchSel = -1;
+}
+function _searchRelancer() {
+    const i = document.getElementById('global-search-input');
+    if (i && i.value.trim().length >= 2) handleGlobalSearch({target: i});
+}
+function _searchScope() {
+    const c = document.getElementById('search-scope-tous');
+    return (c && c.checked) ? 'tous' : 'actif';
+}
+
+function handleGlobalSearch(event) {
+    const query = (event.target.value || '').trim();
+    const box = document.getElementById('search-results');
+    if (!box) return;
+    if (query.length < 2) { _searchClose(); return; }
 
     clearTimeout(_searchTimeout);
     _searchTimeout = setTimeout(() => {
-        fetch(`/api/search?q=${encodeURIComponent(query)}&limit=8`)
+        if (_searchAbort) _searchAbort.abort();
+        _searchAbort = new AbortController();
+        fetch(`/api/search?q=${encodeURIComponent(query)}&scope=${_searchScope()}&limit=8`,
+              {signal: _searchAbort.signal})
             .then(r => r.json())
-            .then(data => {
-                if (!data.total) {
-                    resultsDiv.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--text-muted);">Aucun résultat</div>';
-                    resultsDiv.style.display = 'block';
-                    return;
-                }
-
-                let html = '<div style="padding:0;">';
-
-                // Appareils
-                if (data.appareils && data.appareils.length) {
-                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;">🖥 Appareils (' + data.appareils.length + ')</div>';
-                    for (let item of data.appareils) {
-                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
-                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
-                    }
-                }
-
-                // Périphériques
-                if (data.peripheriques && data.peripheriques.length) {
-                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">🖱 Périphériques (' + data.peripheriques.length + ')</div>';
-                    for (let item of data.peripheriques) {
-                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
-                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
-                    }
-                }
-
-                // Contrats
-                if (data.contrats && data.contrats.length) {
-                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">📋 Contrats (' + data.contrats.length + ')</div>';
-                    for (let item of data.contrats) {
-                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
-                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
-                    }
-                }
-
-                // Services
-                if (data.services && data.services.length) {
-                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">🔧 Services (' + data.services.length + ')</div>';
-                    for (let item of data.services) {
-                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
-                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
-                    }
-                }
-
-                // Utilisateurs
-                if (data.utilisateurs && data.utilisateurs.length) {
-                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">👤 Utilisateurs (' + data.utilisateurs.length + ')</div>';
-                    for (let item of data.utilisateurs) {
-                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
-                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
-                    }
-                }
-
-                // Identifiants
-                if (data.identifiants && data.identifiants.length) {
-                    html += '<div style="padding:.5rem .6rem;border-bottom:1px solid var(--border);border-top:1px solid var(--border);font-size:.65rem;color:var(--text-muted);text-transform:uppercase;margin-top:.5rem;">🔐 Identifiants (' + data.identifiants.length + ')</div>';
-                    for (let item of data.identifiants) {
-                        html += '<a href="' + item.url + '" style="display:block;padding:.5rem .6rem;color:var(--text-primary);text-decoration:none;border-bottom:1px solid rgba(30,58,95,.3);transition:background .15s;" onmouseover="this.style.background=\'rgba(0,201,255,.1)\'" onmouseout="this.style.background=\'transparent\'">';
-                        html += '<strong>' + item.nom + '</strong><br><span style="font-size:.65rem;color:var(--text-muted);">' + (item.detail || '') + '</span></a>';
-                    }
-                }
-
-                html += '</div>';
-                resultsDiv.innerHTML = html;
-                resultsDiv.style.display = 'block';
-            })
+            .then(data => _searchRendre(data, query))
             .catch(err => {
-                console.error('Search error:', err);
-                resultsDiv.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--accent-red);">Erreur de recherche</div>';
-                resultsDiv.style.display = 'block';
+                if (err.name === 'AbortError') return;
+                box.innerHTML = '<div style="padding:1rem;text-align:center;color:var(--accent-red);font-size:.78rem;">Recherche indisponible</div>';
+                box.style.display = 'block';
             });
-    }, 300);
+    }, 150);
+}
+
+function _searchRendre(data, query) {
+    const box = document.getElementById('search-results');
+    const input = document.getElementById('global-search-input');
+    _searchItems = []; _searchSel = -1;
+    if (!data || !data.total) {
+        box.innerHTML = '<div style="padding:1.1rem;text-align:center;color:var(--text-muted);font-size:.78rem;">'
+            + 'Aucun résultat pour « ' + _searchEsc(query) + ' »'
+            + (_searchScope() === 'actif' ? '<br><span style="font-size:.68rem;">— cochez « tous clients » pour élargir</span>' : '')
+            + '</div>';
+        box.style.display = 'block';
+        if (input) input.setAttribute('aria-expanded', 'true');
+        return;
+    }
+    const tousClients = _searchScope() === 'tous';
+    let html = '';
+    for (const ent of _SEARCH_ORDRE) {
+        const lst = data[ent] || [];
+        if (!lst.length) continue;
+        html += '<div style="padding:.4rem .7rem;font-size:.62rem;letter-spacing:.06em;color:var(--text-muted);'
+            + 'text-transform:uppercase;background:rgba(128,128,128,.06);border-bottom:1px solid var(--border);">'
+            + _SEARCH_LBL[ent] + ' (' + lst.length + ')</div>';
+        for (const it of lst) {
+            const idx = _searchItems.length;
+            _searchItems.push(it.url);
+            const cn = (tousClients && it.client_nom)
+                ? '<span style="float:right;font-size:.6rem;color:var(--accent);opacity:.85;">' + _searchEsc(it.client_nom) + '</span>' : '';
+            html += '<a href="' + _searchEsc(it.url) + '" data-sidx="' + idx + '" role="option" '
+                + 'style="display:block;padding:.5rem .7rem;color:var(--text-primary);text-decoration:none;'
+                + 'border-bottom:1px solid rgba(128,128,128,.12);" '
+                + 'onmouseenter="_searchHover(' + idx + ')">'
+                + cn
+                + '<strong style="font-size:.82rem;">' + _searchEsc(it.icone) + ' ' + _searchEsc(it.titre) + '</strong>'
+                + (it.sous_titre ? '<br><span style="font-size:.68rem;color:var(--text-muted);">' + _searchEsc(it.sous_titre) + '</span>' : '')
+                + '</a>';
+        }
+    }
+    if (data.tronque) {
+        html += '<div style="padding:.4rem .7rem;font-size:.66rem;color:var(--text-muted);text-align:center;">'
+            + 'Résultats partiels — précisez le terme</div>';
+    }
+    box.innerHTML = html;
+    box.style.display = 'block';
+    if (input) input.setAttribute('aria-expanded', 'true');
+}
+
+function _searchHover(idx) {
+    _searchSel = idx;
+    _searchMajSel();
+}
+function _searchMajSel() {
+    const box = document.getElementById('search-results');
+    if (!box) return;
+    box.querySelectorAll('a[data-sidx]').forEach(a => {
+        const on = (+a.dataset.sidx === _searchSel);
+        a.style.background = on ? 'rgba(0,201,255,.14)' : 'transparent';
+        if (on) a.scrollIntoView({block: 'nearest'});
+    });
+}
+function searchKeydown(e) {
+    if (e.key === 'Escape') {
+        if (_searchItems.length) { e.stopPropagation(); _searchClose(); }
+        else e.target.blur();
+        return;
+    }
+    if (!_searchItems.length) return;
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _searchSel = (_searchSel + 1) % _searchItems.length; _searchMajSel();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _searchSel = (_searchSel - 1 + _searchItems.length) % _searchItems.length; _searchMajSel();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const url = _searchItems[_searchSel >= 0 ? _searchSel : 0];
+        if (url) window.location.href = url;
+    }
 }
 
 // Fermer les résultats au clic ailleurs
 document.addEventListener('click', function(e) {
-    const searchInput = document.getElementById('global-search-input');
-    const searchResults = document.getElementById('search-results');
-    if (searchResults && !searchResults.contains(e.target) && !searchInput.contains(e.target)) {
-        searchResults.style.display = 'none';
-    }
+    const wrap = document.getElementById('nav-search-wrap');
+    if (wrap && !wrap.contains(e.target)) _searchClose();
 });
 
 // ── RACCOURCIS CLAVIER GLOBAUX ────────────────────────────────────────────────
@@ -1833,6 +1877,13 @@ document.addEventListener('keydown', function(e) {
     // Ignorer si on tape dans un champ
     const tag = document.activeElement ? document.activeElement.tagName : '';
     const isInput = ['INPUT','TEXTAREA','SELECT'].includes(tag);
+
+    // Ctrl/Cmd+K = ouvrir la recherche globale (fonctionne même depuis un champ)
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        const si = document.getElementById('global-search-input');
+        if (si) { e.preventDefault(); si.focus(); si.select(); }
+        return;
+    }
 
     // ? = aide raccourcis
     if (!isInput && e.key === '?') {
