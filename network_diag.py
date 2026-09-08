@@ -2699,6 +2699,238 @@ def sous_reseaux_detectes(client_id: int) -> dict:
             'detectes': detectes}
 
 
+# ── Découverte de sous-réseaux hors des plages saisies ──────────────────────
+# `plage_ip_locale` est saisie à la main : sur un site dont on ne connaît pas
+# tous les VLAN, c'est insuffisant. Ces sondes agrègent tout ce qu'on peut
+# apprendre SANS que l'utilisateur tape quoi que ce soit :
+#   - la table de routage de CE poste (chaque route = un sous-réseau réel) ;
+#   - ses serveurs DNS (souvent sur un VLAN de management) ;
+#   - son cache ARP/voisins (IP hors des plages connues) ;
+#   - le SNMP des routeurs de l'inventaire (`sous_reseaux_detectes`, déjà là).
+# Purement informatif : rien n'est scanné sans un clic explicite.
+# En Docker sans `network_mode: host`, les sondes locales ne voient que le
+# réseau bridge interne → on les court-circuite (même choix que
+# `app._reseaux_locaux_actuels`), le SNMP prend le relais.
+
+_RESOLVEURS_PUBLICS = {
+    '8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1', '9.9.9.9', '149.112.112.112',
+    '208.67.222.222', '208.67.220.220', '4.2.2.1', '4.2.2.2', '76.76.2.0', '76.76.10.0',
+}
+
+
+def _cidr_scannable(net) -> bool:
+    """Un réseau IPv4 qu'on peut raisonnablement proposer au scan : ni loopback /
+    link-local / multicast, ni trop large (/8…/15 = des dizaines de milliers
+    d'adresses), ni /31-/32."""
+    try:
+        return (net.version == 4 and not net.is_loopback and not net.is_link_local
+                and not net.is_multicast and not net.is_reserved
+                and 16 <= net.prefixlen <= 30 and str(net) != '0.0.0.0/0')
+    except Exception:
+        return False
+
+
+def _routes_locales_poste() -> set:
+    """Sous-réseaux (CIDR) présents dans la table de routage de CE poste."""
+    if os.environ.get('RUNNING_IN_DOCKER'):
+        return set()
+    out_set = set()
+
+    def _ajouter(net_str):
+        try:
+            net = ipaddress.ip_network(net_str, strict=False)
+        except (ValueError, TypeError):
+            return
+        if _cidr_scannable(net):
+            out_set.add(str(net))
+
+    try:
+        if IS_WINDOWS:
+            txt = _run(['route', 'print', '-4'], timeout=5).stdout
+            for ligne in txt.splitlines():
+                p = ligne.split()
+                if (len(p) >= 2 and re.fullmatch(r'\d{1,3}(?:\.\d{1,3}){3}', p[0])
+                        and re.fullmatch(r'\d{1,3}(?:\.\d{1,3}){3}', p[1])):
+                    _ajouter(f'{p[0]}/{p[1]}')
+        else:
+            txt = _run(['ip', '-4', 'route', 'show'], timeout=5).stdout
+            if txt.strip():
+                for ligne in txt.splitlines():
+                    tok = (ligne.split() or [''])[0]
+                    if '/' in tok:
+                        _ajouter(tok)
+            else:                                    # macOS / BSD
+                txt = _run(['netstat', '-rn', '-f', 'inet'], timeout=5).stdout
+                for ligne in txt.splitlines():
+                    dst = (ligne.split() or [''])[0]
+                    if '/' in dst:
+                        _ajouter(dst)
+                    elif re.fullmatch(r'\d{1,3}(?:\.\d{1,3}){1,2}', dst):
+                        # netstat BSD abrège un réseau : « 192.168.1 » = /24,
+                        # « 10.5 » = /16. Un « 10.5.1.7 » (host route) n'est PAS
+                        # matché ici (3 points) — on ne veut que les réseaux.
+                        octs = dst.split('.')
+                        pfx = 24 if len(octs) == 3 else 16
+                        base = '.'.join(octs + ['0'] * (4 - len(octs)))
+                        _ajouter(f'{base}/{pfx}')
+    except Exception:
+        logger.debug('network_diag: lecture routage local en échec', exc_info=True)
+    return out_set
+
+
+def _dns_configures_poste() -> set:
+    """IP des serveurs DNS configurés sur ce poste, hors résolveurs publics."""
+    if os.environ.get('RUNNING_IN_DOCKER'):
+        return set()
+    ips = set()
+    try:
+        if IS_WINDOWS:
+            txt = _run(['powershell', '-NoProfile', '-Command',
+                        '(Get-DnsClientServerAddress -AddressFamily IPv4).ServerAddresses'],
+                       timeout=6).stdout
+            ips |= set(re.findall(r'\d{1,3}(?:\.\d{1,3}){3}', txt))
+        else:
+            try:
+                with open('/etc/resolv.conf', 'r', encoding='utf-8', errors='ignore') as f:
+                    for l in f:
+                        m = re.match(r'\s*nameserver\s+([0-9.]+)', l)
+                        if m:
+                            ips.add(m.group(1))
+            except OSError:
+                pass
+            if not ips:                              # macOS
+                txt = _run(['scutil', '--dns'], timeout=5).stdout
+                ips |= set(re.findall(r'nameserver\[\d+\]\s*:\s*([0-9.]+)', txt))
+    except Exception:
+        logger.debug('network_diag: lecture DNS local en échec', exc_info=True)
+    bons = set()
+    for i in ips:
+        try:
+            a = ipaddress.ip_address(i)
+        except ValueError:
+            continue
+        if not a.is_loopback and i not in _RESOLVEURS_PUBLICS:
+            bons.add(i)
+    return bons
+
+
+def decouvrir_reseaux(client_id: int) -> dict:
+    """Sous-réseaux candidats au scan, AU-DELÀ de `plage_ip_locale`, agrégés de
+    toutes les sources disponibles sans saisie manuelle. Lecture seule, pensée
+    pour un appel synchrone (chargement de la page Scan) — chaque sonde a son
+    propre garde-fou de durée.
+
+    Retourne `{'ok', 'configurees': [cidr...], 'detectes': [{'cidr',
+    'hint_hotes': int, 'confiance': 'forte'|'faible', 'sources': [{'via',
+    'label'}]}]}` — `via` ∈ `routage_local` | `dns` | `arp_local` | `snmp`.
+    `forte` = des hôtes y ont été vus / un routeur SNMP le connaît."""
+    from database import get_db
+    try:
+        conn = get_db()
+        row = conn.execute("SELECT plage_ip_locale FROM parc_general WHERE client_id=?",
+                           (client_id,)).fetchone()
+        conn.close()
+    except Exception:
+        row = None
+    configurees = _parse_plages(row[0] if row else '')
+
+    detectes = {}
+
+    def _add(cidr_str, via, label, hint=0):
+        try:
+            net = ipaddress.ip_network(cidr_str, strict=False)
+        except (ValueError, TypeError):
+            return
+        if not _cidr_scannable(net):
+            return
+        if any(net == c or net.subnet_of(c) for c in configurees):
+            return
+        e = detectes.setdefault(str(net), {'cidr': str(net), 'sources': [], 'hint_hotes': 0})
+        if not any(s['via'] == via and s['label'] == label for s in e['sources']):
+            e['sources'].append({'via': via, 'label': label})
+        e['hint_hotes'] = max(e['hint_hotes'], int(hint or 0))
+
+    # ── vue locale du poste ──
+    try:
+        for r in _routes_locales_poste():
+            _add(r, 'routage_local', 'route de ce poste')
+    except Exception:
+        logger.debug('network_diag: routes locales', exc_info=True)
+    try:
+        for d in _dns_configures_poste():
+            if d in _RESOLVEURS_PUBLICS:
+                continue
+            _add(str(ipaddress.ip_network(d + '/24', strict=False)),
+                 'dns', 'serveur DNS %s' % d)
+    except Exception:
+        logger.debug('network_diag: DNS locaux', exc_info=True)
+    try:
+        if not os.environ.get('RUNNING_IN_DOCKER'):
+            par_net = {}
+            for ipx in (_table_arp() or {}):
+                try:
+                    n = str(ipaddress.ip_network(ipx + '/24', strict=False))
+                except ValueError:
+                    continue
+                par_net.setdefault(n, set()).add(ipx)
+            for netstr, ips in par_net.items():
+                _add(netstr, 'arp_local', '%d hôte(s) déjà vus en ARP' % len(ips),
+                     hint=len(ips))
+    except Exception:
+        logger.debug('network_diag: ARP local (découverte réseaux)', exc_info=True)
+
+    # ── SNMP des équipements de l'inventaire (déjà éprouvé) ──
+    try:
+        sr = sous_reseaux_detectes(client_id)
+        if sr.get('ok'):
+            for d in sr.get('detectes', []):
+                for s in d.get('sources', []):
+                    _add(d['cidr'], 'snmp', '%s (%s)' % (s.get('nom', '?'), s.get('ip', '?')))
+    except Exception:
+        logger.debug('network_diag: sous_reseaux_detectes (agrégat)', exc_info=True)
+
+    # Confiance : un candidat est FORT si des hôtes y ont été vus (ARP) ou si un
+    # routeur SNMP le connaît. Un candidat routage/DNS seul, sans aucune
+    # activité, est FAIBLE — sur un portable Windows, `route print` liste les
+    # réseaux virtuels Hyper-V/WSL/VirtualBox, à ne pas mélanger avec les VLAN
+    # du client. Un /20+ (Hyper-V typique) sans preuve d'hôte est ÉCARTÉ.
+    sortie = []
+    for e in detectes.values():
+        vias = {s['via'] for s in e['sources']}
+        pfx = ipaddress.ip_network(e['cidr']).prefixlen
+        fort = e['hint_hotes'] > 0 or 'snmp' in vias
+        if not fort and pfx < 22:
+            continue          # /20 sans hôte : quasi sûrement un switch virtuel
+        e['confiance'] = 'forte' if fort else 'faible'
+        sortie.append(e)
+
+    ordonnes = sorted(sortie, key=lambda d: (
+        0 if d['confiance'] == 'forte' else 1, -d['hint_hotes'],
+        ipaddress.ip_network(d['cidr']).prefixlen, d['cidr']))
+    return {'ok': True, 'configurees': [str(c) for c in configurees], 'detectes': ordonnes}
+
+
+def reseaux_hors_plage(plages, *sources_ip) -> list:
+    """À partir des IP découvertes pendant un scan (UPnP/mDNS/ONVIF, ARP SNMP…),
+    renvoie les /24 qui ne sont dans AUCUNE des `plages` scannées, avec le nb
+    d'IP concernées. Sert l'encart « d'autres réseaux ont répondu » post-scan."""
+    scannes = _parse_plages(','.join(str(p) for p in (plages or [])))
+    par_net = {}
+    for src in sources_ip:
+        for ipx in (src or {}):
+            try:
+                a = ipaddress.ip_address(str(ipx))
+            except ValueError:
+                continue
+            if any(a in c for c in scannes):
+                continue
+            n = str(ipaddress.ip_network(str(ipx) + '/24', strict=False))
+            par_net.setdefault(n, set()).add(str(ipx))
+    out = [{'cidr': n, 'hint_hotes': len(v)} for n, v in par_net.items()
+           if _cidr_scannable(ipaddress.ip_network(n))]
+    return sorted(out, key=lambda d: (-d['hint_hotes'], d['cidr']))
+
+
 def _ip_depuis_suffixe_arp(suffixe: str) -> str:
     """Les 4 DERNIERS sous-identifiants d'un index `ipNetToMediaPhysAddress`
     (`ifIndex.A.B.C.D`, 5 composants) ou `ipNetToPhysicalPhysAddress`

@@ -10812,6 +10812,19 @@ def _run_scan(plages, nb_threads, enrich_wmi=False, client_id=None):
         for f, t in fils_decouverte:
             f.join(timeout=t)
 
+        # Lot D : des IP découvertes en UPnP/mDNS/ONVIF ou dans la table ARP
+        # d'un routeur SNMP peuvent être HORS des plages qu'on s'apprête à
+        # scanner — le signe d'un sous-réseau qu'on ignorait. On ne scanne pas
+        # d'office (l'utilisateur clique), mais on le remonte dès maintenant.
+        try:
+            hp = network_diag.reseaux_hors_plage(
+                plages, decouvertes_upnp, decouvertes_mdns, decouvertes_onvif,
+                decouvertes_snmp_arp, decouvertes_capture_arp)
+            with scan_lock:
+                scan_status["reseaux_hors_plage"] = hp
+        except Exception:
+            logger.debug('scan: reseaux_hors_plage', exc_info=True)
+
         total = len(hosts); found = []; scanned = [0]
         def on_done(future, ip):
             scanned[0] += 1
@@ -10893,16 +10906,15 @@ def api_scan_client_suggere():
 @app.route('/api/scan/sous-reseaux')
 @login_required
 def api_scan_sous_reseaux():
-    """Sous-réseaux supplémentaires détectés via SNMP sur les routeurs/switchs
-    du client actif — signalé en usage réel : des appareils sur un second
-    /24 routé (derrière la même box) n'apparaissaient nulle part (scan,
-    baie, diagnostic) faute que quiconque pense à taper cette plage à la
-    main. Lecture seule (aucun scan déclenché ici) ; requiert seulement un
-    accès en lecture, comme le reste de la page avant de lancer un scan."""
+    """Sous-réseaux candidats au scan, AU-DELÀ des plages saisies dans
+    `parc_general.plage_ip_locale`, agrégés de toutes les sources disponibles
+    sans saisie manuelle : table de routage de CE poste, ses serveurs DNS, son
+    cache ARP, et le SNMP des routeurs/switchs de l'inventaire. Lecture seule
+    (aucun scan déclenché ici), accès en lecture suffisant."""
     cid = get_client_id()
     if not get_client_access(cid):
-        return jsonify({'ok': False, 'motif': 'acces_refuse', 'configurees': [], 'detectes': []}), 403
-    return jsonify(network_diag.sous_reseaux_detectes(cid))
+        return jsonify({'ok': False, 'configurees': [], 'detectes': []}), 403
+    return jsonify(network_diag.decouvrir_reseaux(cid))
 
 @app.route('/api/scan/lancer', methods=['POST'])
 @login_required

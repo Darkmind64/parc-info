@@ -1,5 +1,34 @@
 # CHANGELOG - ParcInfo
 
+## [2.25.0] - 2026-09-08 🔭
+
+### Scan réseau : découvrir les appareils **hors des plages saisies**
+
+Sur demande : *« Je ne connais pas toujours toutes les plages réseau d'un client — définir les plages à la main n'est pas suffisant. »*
+
+`parc_general.plage_ip_locale` reste saisie à la main, mais ParcInfo propose maintenant des **sous-réseaux candidats** à partir de tout ce qu'il peut apprendre **sans aucune saisie** :
+
+| Source | Fonction |
+|---|---|
+| **Table de routage de CE poste** (`ip -4 route` / `route print -4` / `netstat -rn`) — chaque route = un sous-réseau réellement utilisé | `network_diag._routes_locales_poste()` |
+| **Serveurs DNS du poste** (`resolv.conf` / `Get-DnsClientServerAddress` / `scutil`), hors résolveurs publics → le `/24` autour (souvent un VLAN de management) | `network_diag._dns_configures_poste()` |
+| **Cache ARP du poste** — IP déjà vues, hors des plages connues | `_table_arp` |
+| **SNMP des routeurs de l'inventaire** — table IP/routes (inchangé) | `sous_reseaux_detectes` |
+
+`network_diag.decouvrir_reseaux(client_id)` agrège tout, exclut les plages déjà déclarées, et note chaque candidat **`forte`** (des appareils y ont été vus, ou un routeur SNMP le connaît) ou **`faible`** (route/DNS seul). Un `/20`+ *route-only sans hôte* est **écarté** — sur un portable Windows, `route print` liste les réseaux virtuels Hyper-V/WSL/VirtualBox, à ne pas mélanger avec les VLAN du client. Les candidats `faible` sont repliés derrière un `<details>`.
+
+**Après un scan** (`network_diag.reseaux_hors_plage`) : un encart remonte les `/24` où des appareils (UPnP/mDNS/ONVIF, ARP d'un routeur SNMP) ont répondu **sans être dans les plages balayées** — le signe d'un sous-réseau qu'on ignorait. Bouton « + Ajouter » par ligne + « Tout ajouter et relancer ».
+
+**Rien n'est jamais scanné d'office** — un clic par plage. Route `GET /api/scan/sous-reseaux` (remplace la version SNMP-seul).
+
+> En Docker sans `network_mode: host`, les sondes locales ne voient que le réseau bridge → elles sont court-circuitées (même choix que `_reseaux_locaux_actuels`), le SNMP prend le relais.
+
+*Lots suivants (validés, non encore livrés)* : traceroute vers passerelle/IP publique/DNS, SNMP sur la passerelle hors inventaire, écoute passive élargie (LLDP/CDP, RA IPv6, hellos OSPF/HSRP).
+
+Tests : `tests/test_decouverte_reseaux.py` (6), `test_decouverte_reseaux.py` (4 sections). Vérifié en navigateur sur un vrai portable Windows.
+
+---
+
 ## [2.24.4] - 2026-09-07 🎯
 
 ### Baie de brassage : **LA** cause racine — le HP 1810G ne fait pas de GETBULK
