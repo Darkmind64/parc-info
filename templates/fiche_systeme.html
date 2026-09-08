@@ -406,6 +406,37 @@ tr.fs-nic-phys > td:first-child { box-shadow: inset 2px 0 0 var(--accent); }
 })();
 </script>
 
+<!-- ── BAIL DHCP (Plan 1) — hors du garde "rapport" (un routeur/NAS n'a pas
+     de collecte système). L'encart ne s'affiche que si un bail existe. ── -->
+<div class="fs-section" id="fs-dhcp" style="display:none;">
+    <h3>■ DHCP</h3>
+    <div id="fs-dhcp-body" style="font-size:.85rem;"></div>
+</div>
+<script>
+(function(){
+    fetch('/api/appareil/{{ appareil.id }}/dhcp').then(r=>r.json()).then(d => {
+        if (!d || !d.a_montrer || !d.bail) return;
+        const b = d.bail;
+        const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+        const TYPE = {statique:'réservation (statique)', dynamique:'bail dynamique', inconnu:'type inconnu'};
+        let h = `<p><strong>${esc(TYPE[b.type] || b.type)}</strong>`
+              + (b.ip ? ` · ${esc(b.ip)}` : '')
+              + (b.expiration && b.expiration !== 'never' ? ` · expire ${esc(b.expiration.slice(0,16).replace('T',' '))}` : '')
+              + (b.source_methode ? ` · <span style="color:var(--text-secondary);">source : ${esc(b.source_methode)}</span>` : '')
+              + '</p>';
+        if (b.hostname) h += `<p>Hostname annoncé au DHCP : <strong>${esc(b.hostname)}</strong>`
+                           + (b.hostname_diverge ? ' <span style="color:#e0952a;">(≠ nom de la fiche)</span>' : '') + '</p>';
+        if (b.ip_incoherente) h += `<div style="margin:.3rem 0;padding:.4rem .6rem;border-left:3px solid #e0952a;">
+            L'appareil répond à une IP différente de celle de son bail DHCP (${esc(b.ip)}) — bail périmé côté routeur, IP fixe hors réservation, ou double serveur DHCP.</div>`;
+        if (b.type === 'dynamique' && /serveur|nas|imprimante|switch|routeur|camera|onduleur/i.test('{{ appareil.type_appareil|e }}'))
+            h += `<div style="margin:.3rem 0;padding:.4rem .6rem;border-left:3px solid #6ba3ff;">
+                Cet équipement d'infrastructure est en <strong>bail dynamique</strong> — une réservation DHCP (ou une IP fixe) est préférable pour qu'il garde toujours la même adresse.</div>`;
+        document.getElementById('fs-dhcp-body').innerHTML = h;
+        document.getElementById('fs-dhcp').style.display = '';
+    }).catch(()=>{});
+})();
+</script>
+
 {% if not rapport and not logiciels %}
 <div class="fs-section">
     <div class="fs-empty">

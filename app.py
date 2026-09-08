@@ -871,6 +871,9 @@ def init_db():
         ('wifi_password2',  "''"),
         ('wifi_securite2',  "'WPA2'"),
         ('wifi_notes',      "''"),
+        # Serveur / service DHCP déclaré (Plan 1) — confronté au relevé réel
+        # par `verifier_parc_general`.
+        ('serveur_dhcp',    "''"),
     ]:
         try:
             c.execute(f"ALTER TABLE parc_general ADD COLUMN {col} TEXT DEFAULT {defval}")
@@ -916,6 +919,31 @@ def init_db():
     try:
         c.execute('CREATE INDEX IF NOT EXISTS idx_appareil_macs_client '
                   'ON appareil_macs(client_id, adresse_mac)')
+    except Exception:
+        pass
+
+    # Baux DHCP relevés à la source (routeur / serveur DHCP) — Plan 1. Créée
+    # ICI (avant la boucle _TRACKED_JOURNAL) car elle est synchronisée entre
+    # instances : un relevé fait depuis le site alimente la consultation à
+    # distance. UNIQUE(client_id, adresse_ip, adresse_mac) : l'import
+    # « remplace » par source_methode. type ∈ 'dynamique'|'statique'|'inconnu'.
+    c.execute('''CREATE TABLE IF NOT EXISTS dhcp_baux (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        adresse_ip TEXT NOT NULL,
+        adresse_mac TEXT NOT NULL,
+        hostname TEXT DEFAULT '',
+        type TEXT DEFAULT 'inconnu',
+        debut TEXT DEFAULT '',
+        expiration TEXT DEFAULT '',
+        source_equipement_id INTEGER,
+        source_methode TEXT DEFAULT '',
+        vu_le TEXT DEFAULT '',
+        UNIQUE(client_id, adresse_ip, adresse_mac),
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    try:
+        c.execute('CREATE INDEX IF NOT EXISTS idx_dhcp_baux '
+                  'ON dhcp_baux(client_id, adresse_mac)')
     except Exception:
         pass
 
@@ -2001,6 +2029,9 @@ def init_db():
         # existantes) ont, elles, besoin d'un rattrapage séparé : voir
         # rattraper_sync_baie_prises_murales() plus bas.
         'baie_prises_murales': 'id',
+        # Baux DHCP relevés à la source (Plan 1) — partagés entre instances
+        # (un relevé fait depuis le site alimente la consultation à distance).
+        'dhcp_baux': 'id',
         # Tables à clé texte (pas de colonne 'id')
         'config': 'cle', 'journal_maj': 'cle', 'collectes': 'cle',
         'cles_recuperation': 'cle',
@@ -4165,7 +4196,7 @@ def parc_general():
         if parc.get('id'):
             conn.execute('''UPDATE parc_general SET nom_site=?,adresse=?,type_connexion=?,debit_montant=?,
                 debit_descendant=?,fournisseur_internet=?,ip_publique=?,plage_ip_locale=?,nb_machines=?,
-                nb_utilisateurs=?,domaine=?,serveur_dns=?,passerelle=?,baie_marque=?,baie_nb_u=?,
+                nb_utilisateurs=?,domaine=?,serveur_dns=?,passerelle=?,serveur_dhcp=?,baie_marque=?,baie_nb_u=?,
                 switch_marque=?,switch_nb_ports=?,switch_nb_unites=?,routeur_marque=?,serveur_marque=?,
                 serveur_modele=?,ups_marque=?,ups_capacite=?,autres_equipements=?,logiciels_metier=?,
                 antivirus=?,os_principal=?,suite_bureautique=?,notes=?,
@@ -4176,7 +4207,7 @@ def parc_general():
                 f.get('debit_montant',''), f.get('debit_descendant',''), f.get('fournisseur_internet',''),
                 f.get('ip_publique',''), f.get('plage_ip_locale','192.168.1.0/24'),
                 int(f.get('nb_machines') or 0), int(f.get('nb_utilisateurs') or 0),
-                f.get('domaine',''), f.get('serveur_dns',''), f.get('passerelle',''),
+                f.get('domaine',''), f.get('serveur_dns',''), f.get('passerelle',''), f.get('serveur_dhcp',''),
                 f.get('baie_marque',''), int(f.get('baie_nb_u') or 0), f.get('switch_marque',''),
                 int(f.get('switch_nb_ports') or 0), int(f.get('switch_nb_unites') or 0),
                 f.get('routeur_marque',''), f.get('serveur_marque',''), f.get('serveur_modele',''),
@@ -11483,12 +11514,26 @@ def _importer_appareils_scan(conn, cid, items, origine='scan', libelle=''):
     now = _utcnow().isoformat()
     importes = 0; mis_a_jour = 0
     suggestions_baie = []
+    # Croisement baux DHCP (Plan 1) : hostname annoncé au serveur DHCP = candidat
+    # de nom prioritaire (plus fiable que NetBIOS) ; IP scannée ≠ IP du bail →
+    # trace un conflit. Chargé une fois (indexé par MAC).
+    _dhcp_par_mac = {}
+    try:
+        for _r in conn.execute(
+                "SELECT adresse_mac, adresse_ip, hostname FROM dhcp_baux WHERE client_id=?",
+                (cid,)):
+            _dhcp_par_mac[(_r[0] or '').lower()] = {'ip': _r[1], 'hostname': _r[2] or ''}
+    except Exception:
+        _dhcp_par_mac = {}
     for item in items:
         ip        = item.get('ip', '')
         ports_str = ','.join(str(p) for p in item.get('ports', []))
-        nom       = item.get('netbios') or item.get('display_name') or item.get('hostname') or ip
-        dns       = item.get('hostname', '')
         mac       = item.get('mac', '')
+        _bail_dhcp = _dhcp_par_mac.get(_norm_mac_pi(mac)) if mac else None
+        _dhcp_host = (_bail_dhcp or {}).get('hostname') or ''
+        nom       = (item.get('netbios') or item.get('display_name')
+                     or _dhcp_host or item.get('hostname') or ip)
+        dns       = item.get('hostname', '') or _dhcp_host
         vendor    = item.get('vendor', '')
         # Marque : la plus précise disponible (WMI/UPnP identifient l'appareil
         # lui-même — marque_detectee, posée par _scan_host) sinon repli sur le
@@ -11570,6 +11615,13 @@ def _importer_appareils_scan(conn, cid, items, origine='scan', libelle=''):
             importes += 1
             log_history(conn, cid, 'appareil', app_id, nom, 'Création (scan réseau)',
                         {'source': 'scan-reseau', 'ip': ip, 'mac': mac})
+
+        # Conflit IP / bail DHCP : l'appareil répond à une IP différente de
+        # celle que le serveur DHCP lui a attribuée (bail périmé côté routeur,
+        # IP fixe posée à la main hors réservation, deux DHCP…).
+        if _bail_dhcp and _bail_dhcp.get('ip') and ip and _bail_dhcp['ip'] != ip:
+            log_history(conn, cid, 'appareil', app_id, nom, 'Conflit IP / bail DHCP',
+                        {'ip_scan': ip, 'ip_bail': _bail_dhcp['ip'], 'mac': _m_scan})
 
         type_detecte = item.get('type', 'PC')
         if type_detecte in _TYPES_SUGGESTION_BAIE:
@@ -14311,6 +14363,177 @@ def page_scan_planifie():
     return render_template('scan_planifie.html',
                            clients=get_clients(), client_actif_id=cid,
                            est_admin=(get_auth_user() or {}).get('role') == 'admin')
+
+
+# ─── BAUX DHCP DU ROUTEUR (module netdiag.dhcp) ──────────────────────────────
+#
+# Lit la table des baux à la source (routeur / serveur DHCP) et la croise avec
+# le scan et l'inventaire : hostname annoncé, réservation vs bail dynamique,
+# appareils « fantômes » (réservation dont la MAC n'est dans aucune fiche).
+# Relevé SNMP opt-in (`dhcp_actif`) ; l'import d'un fichier reste toujours
+# possible (`POST /api/dhcp/importer`).
+
+_dhcp_releve_etat = {'dernier_tick': None, 'dernier_run': None}
+_dhcp_lock = threading.Lock()
+
+
+def _dhcp_relever_client(conn, cid, *, declencheur='auto'):
+    """Relève les baux SNMP d'un client, les écrit, journalise l'apparition
+    d'un fantôme. Renvoie un résumé. `conn` reste ouverte (commit par l'appelant)."""
+    from netdiag import dhcp as _dhcp
+    res = {'client_id': cid, 'declencheur': declencheur, 'horodatage': _utcnow().isoformat(),
+           'releves': 0, 'ecrits': 0, 'sources': [], 'erreur': None}
+    try:
+        rel = _dhcp.relever_baux(conn, cid, budget_s=20.0)
+        res['sources'] = rel.get('sources', [])
+        baux = rel.get('baux', [])
+        res['releves'] = len(baux)
+        if baux:
+            imp = _dhcp.importer_baux(conn, cid, baux, source_methode='snmp:mikrotik')
+            res['ecrits'] = imp['ecrits']
+        conn.commit()
+    except Exception as e:
+        logger.exception('Relevé DHCP — client %s', cid)
+        res['erreur'] = str(e)
+    return res
+
+
+def _dhcp_releve_periodique():
+    """Job scheduler : relève les baux SNMP des clients dont le site est
+    joignable. No-op sans `dhcp_actif=1`."""
+    if str(cfg_get('dhcp_actif', '0')) != '1':
+        return
+    if not _dhcp_lock.acquire(blocking=False):
+        return
+    try:
+        _dhcp_releve_etat['dernier_tick'] = _utcnow().isoformat()
+        conn = get_db()
+        try:
+            clients = [r[0] for r in conn.execute("SELECT id FROM clients")]
+            try:
+                import site_terrain
+                sur_site = site_terrain.clients_sur_site(conn)     # set | None
+            except Exception:
+                sur_site = None
+            runs = []
+            for cid in clients:
+                if sur_site is not None and cid not in sur_site:
+                    continue
+                r = _dhcp_relever_client(conn, cid, declencheur='auto')
+                if r['releves'] or r['erreur']:
+                    runs.append(r)
+            if runs:
+                _dhcp_releve_etat['dernier_run'] = runs[-1]
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception('Relevé DHCP périodique')
+    finally:
+        _dhcp_lock.release()
+
+
+@app.route('/api/dhcp/baux', methods=['GET'])
+@login_required
+def api_dhcp_baux():
+    """Baux connus du client + (si `?relever=1` et accès en écriture) un relevé
+    SNMP à la demande d'abord."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    from netdiag import dhcp as _dhcp
+    conn = get_db()
+    try:
+        run = None
+        if request.args.get('relever') == '1' and can_write(cid):
+            run = _dhcp_relever_client(conn, cid, declencheur='manuel')
+        baux = _dhcp.lister_baux(conn, cid)
+        fantomes = _dhcp.baux_hors_inventaire(conn, cid)
+        resume = _dhcp.resume_client(conn, cid)
+    finally:
+        conn.close()
+    fant_macs = {b['mac'] for b in fantomes}
+    for b in baux:
+        b['fantome'] = b['mac'] in fant_macs
+    return jsonify({'baux': baux, 'resume': resume, 'nb_fantomes': len(fantomes),
+                    'releve': run, 'dhcp_actif': str(cfg_get('dhcp_actif', '0')) == '1'})
+
+
+@app.route('/api/dhcp/importer', methods=['POST'])
+@login_required
+def api_dhcp_importer():
+    """Import d'un fichier de baux : `dhcpd.leases` (ISC — pfSense/OPNsense),
+    `dhcp.leases` dnsmasq (OpenWrt), export CSV Windows Server. Le format est
+    auto-détecté. Champ `fichier` (upload) ou `contenu` (texte collé)."""
+    cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    texte = ''
+    f = request.files.get('fichier')
+    if f and f.filename:
+        try:
+            texte = f.read(4 * 1024 * 1024).decode('utf-8', errors='replace')
+        except Exception:
+            return jsonify({'error': 'Fichier illisible'}), 400
+    else:
+        texte = (request.form.get('contenu') or (request.json or {}).get('contenu') or '')
+    if not texte.strip():
+        return jsonify({'error': 'Aucun contenu'}), 400
+
+    from netdiag import dhcp as _dhcp
+    baux, fmt = _dhcp.parser_auto(texte)
+    if not fmt:
+        return jsonify({'error': "Format non reconnu (attendu : dhcpd.leases ISC, "
+                                "dhcp.leases dnsmasq, ou export CSV Windows DHCP)"}), 400
+    if not baux:
+        return jsonify({'error': "Format « %s » reconnu mais aucun bail actif trouvé" % fmt,
+                        'format': fmt}), 400
+    conn = get_db()
+    try:
+        imp = _dhcp.importer_baux(conn, cid, baux, source_methode='fichier:%s' % fmt)
+        conn.commit()
+        u = get_auth_user()
+        log_history(conn, cid, 'client', cid, (u or {}).get('login', ''),
+                    'Import de baux DHCP', {'format': fmt, 'baux': imp['ecrits']})
+        conn.commit()
+        resume = _dhcp.resume_client(conn, cid)
+    finally:
+        conn.close()
+    return jsonify({'ok': True, 'format': fmt, 'ecrits': imp['ecrits'],
+                    'supprimes': imp['supprimes'], 'resume': resume})
+
+
+@app.route('/api/appareil/<int:app_id>/dhcp', methods=['GET'])
+@login_required
+def api_appareil_dhcp(app_id):
+    """Bail DHCP de l'appareil (pour l'encart « DHCP » de la fiche système)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    from netdiag import dhcp as _dhcp
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT adresse_mac, adresse_ip, nom_machine FROM appareils WHERE id=? AND client_id=?",
+            (app_id, cid)).fetchone()
+        if not row:
+            return jsonify({'error': 'Not Found'}), 404
+        macs = [(row[0] or '')]
+        macs += [r[0] for r in conn.execute(
+            "SELECT adresse_mac FROM appareil_macs WHERE appareil_id=?", (app_id,))]
+        bail = None
+        for m in macs:
+            bail = _dhcp.bail_pour_mac(conn, cid, m)
+            if bail:
+                break
+    finally:
+        conn.close()
+    if not bail:
+        return jsonify({'a_montrer': False})
+    ip_app = (row[1] or '').strip()
+    bail['ip_incoherente'] = bool(bail['ip'] and ip_app and bail['ip'] != ip_app)
+    bail['hostname_diverge'] = bool(
+        bail['hostname'] and row[2] and bail['hostname'].lower() not in (row[2] or '').lower())
+    return jsonify({'a_montrer': True, 'bail': bail})
 
 
 def _notify_upcoming_maintenances():
@@ -18870,6 +19093,11 @@ if __name__ == '__main__':
     # scan_auto_actif=1 ET une cadence par client.
     scheduler.add_job(_scan_planifie_periodique, 'interval', minutes=15,
                       next_run_time=_utcnow() + timedelta(seconds=150))
+    # Baux DHCP : relevé SNMP périodique (routeurs Mikrotik). No-op sans
+    # dhcp_actif=1. Cadence lue à chaque tick via `_dhcp_intervalle`.
+    _dhcp_min = max(5, int(int(cfg_get('dhcp_intervalle_s', '3600') or 3600) / 60))
+    scheduler.add_job(_dhcp_releve_periodique, 'interval', minutes=_dhcp_min,
+                      next_run_time=_utcnow() + timedelta(seconds=200))
     # Cron job optionnel : rapport de diagnostic réseau par e-mail
     _diag_cron = network_diag.parse_rapport_cron(cfg_get('diag_rapport_cron', ''))
     if _diag_cron:

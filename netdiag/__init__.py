@@ -15,6 +15,6 @@ déléguera ici au fur et à mesure.
   ``trafic``).
 """
 
-from . import analyse, collect, etat, events  # noqa: F401
+from . import analyse, collect, dhcp, etat, events  # noqa: F401
 
-__all__ = ['analyse', 'collect', 'etat', 'events']
+__all__ = ['analyse', 'collect', 'dhcp', 'etat', 'events']

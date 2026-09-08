@@ -93,6 +93,12 @@
                 <input id="id-serveur_dns" type="text" name="serveur_dns" value="{{ parc.serveur_dns or '' }}" placeholder="Ex: 8.8.8.8, 1.1.1.1">
             </div>
         </div>
+        <div class="form-row cols-2">
+            <div class="form-group">
+                <label for="id-serveur_dhcp">Serveur / service DHCP <span class="pg-verif" data-verif="serveur_dhcp"></span></label>
+                <input id="id-serveur_dhcp" type="text" name="serveur_dhcp" value="{{ parc.serveur_dhcp or '' }}" placeholder="Ex: 192.168.1.1 (routeur) ou nom du serveur">
+            </div>
+        </div>
     </div>
 
     <!-- BAIE DE BRASSAGE -->

@@ -278,6 +278,36 @@
     </div>
 </div>
 
+<!-- ── BAUX DHCP (Plan 1) : lus à la source (routeur / serveur DHCP) ── -->
+<details id="dhcp-panel" style="margin-top:1rem;border:1px solid var(--border);border-radius:6px;">
+  <summary style="cursor:pointer;padding:.6rem .9rem;font-size:.85rem;font-weight:600;">
+    📋 Baux DHCP <span id="dhcp-resume" style="font-weight:400;color:var(--text-muted);"></span>
+  </summary>
+  <div style="padding:.4rem .9rem 1rem;">
+    <p style="font-size:.78rem;color:var(--text-muted);line-height:1.5;margin:.2rem 0 .8rem;">
+      La table des baux du routeur / serveur DHCP donne l'association IP ↔ MAC ↔ hostname
+      et distingue <b>réservation</b> et <b>bail dynamique</b>. Relevé SNMP automatique pour
+      un routeur Mikrotik ; sinon importez un fichier <code>dhcpd.leases</code> (pfSense / OPNsense),
+      <code>dhcp.leases</code> dnsmasq (OpenWrt) ou un export CSV Windows Server.
+    </p>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.8rem;">
+      <button type="button" class="btn btn-secondary btn-sm" id="dhcp-relever">↻ Relever en SNMP</button>
+      <label class="btn btn-secondary btn-sm" style="cursor:pointer;margin:0;">
+        📂 Importer un fichier
+        <input type="file" id="dhcp-file" style="display:none;" accept=".leases,.txt,.csv,.log">
+      </label>
+      <button type="button" class="btn btn-secondary btn-sm" id="dhcp-paste-toggle">✎ Coller le contenu</button>
+      <span id="dhcp-flash" style="font-size:.78rem;"></span>
+    </div>
+    <div id="dhcp-paste-wrap" style="display:none;margin-bottom:.8rem;">
+      <textarea id="dhcp-paste" rows="6" style="width:100%;font-family:monospace;font-size:.72rem;"
+        placeholder="Collez ici le contenu de dhcpd.leases / dhcp.leases / l'export CSV Windows…"></textarea>
+      <button type="button" class="btn btn-primary btn-sm" id="dhcp-paste-send" style="margin-top:.4rem;">Importer le texte collé</button>
+    </div>
+    <div id="dhcp-table-wrap" style="overflow-x:auto;"></div>
+  </div>
+</details>
+
 <!-- ── MODALE : POUR QUEL CLIENT SCANNE-T-ON ? ── -->
 <div id="scan-client-modal" class="modal-overlay">
     <div style="
@@ -948,5 +978,80 @@ document.addEventListener('DOMContentLoaded', () => {
         demarrerScanReel();
     }
 });
+
+/* ── Baux DHCP (Plan 1) ────────────────────────────────────────────────── */
+(function(){
+  const esc = s => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function dhcpFlash(m, ok){
+    const e = document.getElementById('dhcp-flash');
+    e.textContent = m; e.style.color = ok ? '#1f9d55' : 'var(--accent-red,#ef4444)';
+    if (m) setTimeout(()=>{ if (e.textContent===m) e.textContent=''; }, 5000);
+  }
+  function dhcpRender(d){
+    const r = d.resume || {};
+    document.getElementById('dhcp-resume').textContent =
+      r.total ? `— ${r.total} bail(s) · ${r.statiques||0} réservation(s) · ${d.nb_fantomes||0} hors inventaire` : '— aucun';
+    const baux = (d.baux||[]).slice().sort((a,b)=>{
+      const pa = a.ip.split('.').map(Number), pb = b.ip.split('.').map(Number);
+      for (let i=0;i<4;i++){ if ((pa[i]||0)!==(pb[i]||0)) return (pa[i]||0)-(pb[i]||0); }
+      return 0;
+    });
+    if (!baux.length){ document.getElementById('dhcp-table-wrap').innerHTML =
+      '<p style="font-size:.8rem;color:var(--text-muted);">Aucun bail connu. Relevez en SNMP ou importez un fichier.</p>'; return; }
+    const TYPE = {statique:'réservation', dynamique:'dynamique', inconnu:'—'};
+    let h = '<table style="width:100%;border-collapse:collapse;font-size:.78rem;"><thead><tr>'
+          + ['IP','MAC','Hostname','Type','Expire','Source'].map(x=>`<th style="text-align:left;padding:.35rem .5rem;border-bottom:1px solid var(--border);color:var(--text-muted);">${x}</th>`).join('')
+          + '</tr></thead><tbody>';
+    for (const b of baux){
+      h += `<tr${b.fantome ? ' style="background:rgba(224,149,42,.10);"' : ''}>`
+         + `<td style="padding:.3rem .5rem;">${esc(b.ip)}</td>`
+         + `<td style="padding:.3rem .5rem;font-family:monospace;">${esc(b.mac)}</td>`
+         + `<td style="padding:.3rem .5rem;">${esc(b.hostname||'')}${b.fantome ? ' <span title="MAC dans aucune fiche" style="color:#e0952a;">⚠ hors inventaire</span>' : ''}</td>`
+         + `<td style="padding:.3rem .5rem;">${esc(TYPE[b.type]||b.type)}</td>`
+         + `<td style="padding:.3rem .5rem;">${esc((b.expiration||'').slice(0,16).replace('T',' '))}</td>`
+         + `<td style="padding:.3rem .5rem;color:var(--text-muted);">${esc(b.source_methode||'')}</td></tr>`;
+    }
+    document.getElementById('dhcp-table-wrap').innerHTML = h + '</tbody></table>';
+  }
+  async function dhcpCharger(relever){
+    try {
+      const r = await fetch('/api/dhcp/baux' + (relever ? '?relever=1' : ''));
+      const d = await r.json();
+      if (!r.ok){ dhcpFlash(d.error || 'Erreur', false); return; }
+      if (relever && d.releve){
+        const rv = d.releve;
+        dhcpFlash(rv.erreur ? ('Relevé : ' + rv.erreur)
+          : `Relevé SNMP : ${rv.releves} bail(s) sur ${(rv.sources||[]).length} routeur(s)`, !rv.erreur);
+      }
+      dhcpRender(d);
+    } catch(e){ dhcpFlash('Erreur réseau', false); }
+  }
+  async function dhcpImporter(body, isForm){
+    try {
+      const opt = isForm ? {method:'POST', body} : {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)};
+      const r = await fetch('/api/dhcp/importer', opt);
+      const d = await r.json();
+      if (!r.ok){ dhcpFlash(d.error || 'Import refusé', false); return; }
+      dhcpFlash(`Import « ${d.format} » : ${d.ecrits} bail(s)`, true);
+      dhcpCharger(false);
+    } catch(e){ dhcpFlash('Erreur réseau', false); }
+  }
+  document.getElementById('dhcp-relever').addEventListener('click', () => dhcpCharger(true));
+  document.getElementById('dhcp-paste-toggle').addEventListener('click', () => {
+    const w = document.getElementById('dhcp-paste-wrap'); w.style.display = w.style.display === 'none' ? '' : 'none';
+  });
+  document.getElementById('dhcp-paste-send').addEventListener('click', () => {
+    const t = document.getElementById('dhcp-paste').value.trim();
+    if (t) dhcpImporter({contenu: t}, false);
+  });
+  document.getElementById('dhcp-file').addEventListener('change', function(){
+    if (!this.files || !this.files[0]) return;
+    const fd = new FormData(); fd.append('fichier', this.files[0]);
+    dhcpImporter(fd, true); this.value = '';
+  });
+  document.getElementById('dhcp-panel').addEventListener('toggle', function(){
+    if (this.open && !this.dataset.loaded){ this.dataset.loaded = '1'; dhcpCharger(false); }
+  });
+})();
 </script>
 {% endblock %}

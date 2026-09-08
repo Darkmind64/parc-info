@@ -2601,6 +2601,40 @@ def verifier_parc_general(client_id: int) -> dict:
         else:
             res['domaine'] = {'declare': domaine_d, 'etat': 'divergent',
                               'detail': "Aucun nom DNS d'appareil ne contient ce domaine."}
+
+    # ── serveur_dhcp (Plan 1) : confronté aux baux réellement relevés ──
+    try:
+        from database import get_db as _gdb
+        _c = _gdb()
+        try:
+            pg2 = _c.execute("SELECT serveur_dhcp FROM parc_general WHERE client_id=?",
+                             (client_id,)).fetchone()
+            dhcp_d = ((pg2[0] if pg2 else '') or '').strip()
+            srcs = [r[0] for r in _c.execute(
+                "SELECT DISTINCT source_methode FROM dhcp_baux WHERE client_id=?", (client_id,))]
+            nb_baux = _c.execute(
+                "SELECT COUNT(*) FROM dhcp_baux WHERE client_id=?", (client_id,)).fetchone()[0]
+            src_ips = {r[0] for r in _c.execute(
+                "SELECT a.adresse_ip FROM appareils a JOIN dhcp_baux d ON d.source_equipement_id=a.id "
+                "WHERE d.client_id=? AND COALESCE(a.adresse_ip,'')<>''", (client_id,))}
+        finally:
+            _c.close()
+    except Exception:
+        dhcp_d, srcs, nb_baux, src_ips = '', [], 0, set()
+    if not dhcp_d:
+        res['serveur_dhcp'] = {'declare': '', 'etat': 'non_verifie',
+                               'detail': "Aucun serveur DHCP déclaré."}
+    elif not nb_baux:
+        res['serveur_dhcp'] = {'declare': dhcp_d, 'etat': 'non_verifie',
+                               'detail': "Aucun bail DHCP relevé — importez un fichier de baux "
+                                         "ou activez le relevé SNMP pour vérifier."}
+    elif src_ips and dhcp_d not in src_ips:
+        res['serveur_dhcp'] = {
+            'declare': dhcp_d, 'etat': 'divergent',
+            'detail': "Les baux relevés viennent de %s, pas de l'IP déclarée." % ', '.join(sorted(src_ips))}
+    else:
+        res['serveur_dhcp'] = {'declare': dhcp_d, 'etat': 'confirme',
+                               'detail': "%d bail(s) DHCP connus (%s)." % (nb_baux, ', '.join(srcs) or 'fichier')}
     return res
 
 
