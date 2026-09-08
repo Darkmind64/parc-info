@@ -1,24 +1,25 @@
 {
-  "version": "2.24.4",
-  "release_date": "2026-09-07",
+  "version": "2.25.0",
+  "release_date": "2026-09-08",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.4/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.4/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.4/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.24.4",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.4/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.4/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.4/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.4/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.24.4/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.25.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.25.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.25.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.25.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.25.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.25.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.25.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.25.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.25.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "La cause racine du demarrage tres lent de la baie de brassage est trouvee. Le HP ProCurve 1810G (et d'autres switches web-manages bas de gamme) ne repond PAS au GETBULK SNMP. ParcInfo retombait alors sur un balayage GETNEXT une colonne a la fois : ~170 aller-retours UDP sequentiels par relevé, a chaque cycle. Sur le CPU lent de ce switch : ~2 minutes. Corrige : GETNEXT multi-colonnes (toutes les colonnes avancent ensemble, ~24 aller-retours) puis, une fois la liste des ports connue, un GET groupe (~6 aller-retours). Le mode qui marche est memorise par equipement. Mesure sur agent factice : 127 s -> ~5 s par cycle. Inclut les correctifs 2.24.1 a 2.24.3 (pre-chauffe, sonde de presence, cache des colonnes absentes).",
+    "new_features": "Scan reseau : decouvrir les appareils HORS des plages saisies. On ne connait pas toujours toutes les plages IP d'un client, et les taper a la main ne suffit pas. ParcInfo propose maintenant des sous-reseaux candidats a partir de tout ce qu'il peut apprendre sans saisie : la table de routage de CE poste (chaque route = un sous-reseau reel), ses serveurs DNS (souvent un VLAN de management), son cache ARP, et le SNMP des routeurs de l'inventaire. Chaque candidat est note 'forte' (des appareils y ont ete vus) ou 'faible' (route/DNS seul, replie), et les reseaux virtuels d'un portable Windows (Hyper-V/WSL/VirtualBox) sont ecartes. Apres un scan, un encart remonte aussi les reseaux ou des appareils ont repondu (mDNS/UPnP/SNMP) alors qu'ils n'etaient pas dans les plages balayees, avec un bouton 'tout ajouter et relancer'. Rien n'est jamais scanne d'office. Inclut la refonte SNMP de la baie de brassage (2.24.4 : ~127 s -> ~5 s par cycle sur un HP 1810G).",
     "improvements": [
-      "Baie/SNMP : GETNEXT multi-colonnes puis GET groupe quand un agent ne fait pas de GETBULK (HP 1810G) -> ~170 aller-retours par relevé ramenes a ~6.",
-      "Baie/SNMP : le mode (bulk / next) qui marche est memorise par equipement.",
-      "Baie : cache des colonnes SNMP qu'un agent n'expose pas ; sonde de presence ; pre-chauffe non bridee par le mode terrain (2.24.1-3)."
+      "Scan : sous-reseaux candidats depuis la table de routage / les DNS / le cache ARP du poste, en plus du SNMP.",
+      "Scan : encart post-scan des reseaux hors plages ou des appareils ont quand meme repondu.",
+      "Scan : les candidats sans appareil detecte sont replies ; les reseaux virtuels Hyper-V/WSL sont ecartes.",
+      "Baie/SNMP : GETNEXT multi-colonnes + GET groupe pour les agents sans GETBULK (2.24.4)."
     ]
   },
   "checksums": {
@@ -29,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.24.4"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.25.0"
 }

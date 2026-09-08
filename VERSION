@@ -1,9 +1,47 @@
-PARCINFO_VERSION=2.24.4
-RELEASE_DATE=2026-09-07
-BUILD_NUMBER=2026090708
+PARCINFO_VERSION=2.25.0
+RELEASE_DATE=2026-09-08
+BUILD_NUMBER=2026090801
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.25.0 - Scan reseau : decouvrir les appareils HORS des plages saisies
+#
+# Demande : « je ne connais pas toujours toutes les plages reseau d'un client ;
+# taper les plages a la main ne suffit pas ». `plage_ip_locale` reste saisie a
+# la main mais ParcInfo propose maintenant des sous-reseaux candidats a partir
+# de tout ce qu'il peut apprendre SANS saisie (Lots A + D valides ; B/C plus
+# tard) :
+#
+#  - `network_diag._routes_locales_poste()` : table de routage de CE poste
+#    (`ip -4 route` / `route print -4` / `netstat -rn`). Chaque route = un
+#    sous-reseau reellement utilise. Court-circuite en Docker (voit le bridge).
+#  - `network_diag._dns_configures_poste()` : serveurs DNS du poste
+#    (`resolv.conf` / `Get-DnsClientServerAddress` / `scutil`), hors resolveurs
+#    publics -> le /24 autour (souvent un VLAN de management).
+#  - cache ARP du poste (`_table_arp`) : IP deja vues, hors plages connues.
+#  - SNMP des routeurs de l'inventaire (`sous_reseaux_detectes`, inchange).
+#
+#  `network_diag.decouvrir_reseaux(client_id)` agrege tout ca, exclut les
+#  plages deja declarees, note chaque candidat `forte` (des hotes y ont ete
+#  vus / un routeur SNMP le connait) ou `faible` (route/DNS seul). Un /20+
+#  route-only sans hote est ECARTE (bruit Hyper-V/WSL/VirtualBox d'un portable
+#  Windows). Route `GET /api/scan/sous-reseaux` (remplace la version SNMP-seul).
+#
+#  Lot D : `network_diag.reseaux_hors_plage(plages, *sources_ip)` -> apres un
+#  scan, les /24 ou des appareils (UPnP/mDNS/ONVIF, ARP d'un routeur SNMP) ont
+#  repondu sans etre dans les plages balayees. `_run_scan` le calcule et le
+#  pousse dans `scan_status['reseaux_hors_plage']` ; encart post-scan dans
+#  `scan_reseau.html` (« d'autres reseaux ont repondu ») + « Tout ajouter et
+#  relancer ».
+#
+#  Rien n'est jamais scanne d'office : un clic « + Ajouter » par plage.
+#  Les candidats `faible` sont replies derriere un <details>.
+#
+# Tests : tests/test_decouverte_reseaux.py (6), test_decouverte_reseaux.py
+# (4 sections). Verifie en navigateur sur un vrai portable Windows (LAN reel +
+# reseaux virtuels correctement classes).
+#
+# ----------------------------------------------------------------------------
 # Version 2.24.4 - Baie : LA cause racine (le HP 1810G ne fait pas de GETBULK)
 #
 # Apres 2.24.1/2/3 l'utilisateur signale : « c'est TOUJOURS plusieurs minutes ».

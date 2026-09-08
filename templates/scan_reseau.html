@@ -155,10 +155,14 @@
         <div style="font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:.35rem;">Plages IP</div>
         <div id="plages-wrap"></div>
         <button class="plage-add" onclick="ajouterPlage()">+ Ajouter une plage</button>
-        <!-- Sous-réseaux détectés via SNMP sur les routeurs/switchs du client
-             (voir sous_reseaux_detectes côté serveur) — masqué s'il n'y en a
-             aucun. Jamais ajouté d'office : un clic par plage proposée. -->
+        <!-- Sous-réseaux candidats découverts sans saisie manuelle : table de
+             routage du poste, ses serveurs DNS, son cache ARP, SNMP des routeurs
+             de l'inventaire (network_diag.decouvrir_reseaux). Masqué s'il n'y en
+             a aucun. Jamais ajouté d'office : un clic par plage. -->
         <div id="sous-reseaux-wrap"></div>
+        <!-- Post-scan : réseaux hors des plages scannées où des appareils ont
+             quand même répondu (Lot D). -->
+        <div id="hors-plage-wrap"></div>
         <div style="display:flex;gap:.6rem;margin-bottom:.7rem;">
             <div class="form-group" style="margin:0;flex:1;">
                 <label style="font-size:.7rem;">Threads</label>
@@ -316,6 +320,8 @@ let scanLastCount = -1;   // nb d'hôtes au dernier rendu du tableau (audit #14)
 const plageWrap = document.getElementById('plages-wrap');
 
 function ajouterPlage(val) {
+    val = (val || '').trim();
+    if (val && getPlages().includes(val)) return;   // déjà dans la liste
     const row = document.createElement('div');
     row.className = 'plage-row';
     row.innerHTML = `
@@ -332,12 +338,18 @@ function getPlages() {
 
 ajouterPlage('{{ parc_plage or "192.168.1.0/24" }}');
 
-// ── SOUS-RÉSEAUX DÉTECTÉS VIA SNMP ──────────────────────────────────────────
-// Signalé en usage réel : des appareils sur un second /24 routé (derrière le
-// même routeur/box) n'apparaissaient nulle part — scan, baie, diagnostic —
-// faute que quiconque pense à taper cette plage à la main. Le routeur, lui,
-// la connaît (sa propre table IP/routes en SNMP) ; on la propose ici, un
-// clic par plage, jamais ajoutée d'office.
+// ── SOUS-RÉSEAUX CANDIDATS (découverts sans saisie manuelle) ────────────────
+// La plage IP est saisie à la main : sur un site dont on ne connaît pas tous
+// les VLAN, c'est insuffisant. On agrège ici tout ce qu'on peut apprendre
+// sans rien taper : table de routage de CE poste, ses serveurs DNS, son cache
+// ARP, et le SNMP des routeurs de l'inventaire. Un clic par plage, jamais
+// ajoutée d'office.
+const VIA_LABEL = {
+    routage_local: 'table de routage du poste',
+    dns: 'serveur DNS du poste',
+    arp_local: 'cache ARP du poste',
+    snmp: 'SNMP',
+};
 async function chargerSousReseaux() {
     const wrap = document.getElementById('sous-reseaux-wrap');
     if (!wrap) return;
@@ -346,17 +358,27 @@ async function chargerSousReseaux() {
         d = await fetch('/api/scan/sous-reseaux').then(r => r.json());
     } catch (e) { return; }
     if (!d.ok || !(d.detectes || []).length) { wrap.innerHTML = ''; return; }
-    wrap.innerHTML = '<div class="sous-reseaux-box">'
-        + '<div class="titre">🔎 Sous-réseaux détectés via SNMP</div>'
-        + d.detectes.map((s, i) => {
-            const sources = (s.sources || []).map(x => `${escH(x.nom)} (${escH(x.ip)})`).join(', ');
-            return `<div class="sous-reseaux-row" id="sr-row-${i}">
-                <span><span class="cidr">${escH(s.cidr)}</span>`
-                + (sources ? ` <span class="src">— vu sur ${sources}</span>` : '') + '</span>'
-                + `<button type="button" onclick="ajouterSousReseau(${i}, '${escH(s.cidr)}')">+ Ajouter</button>
-            </div>`;
-        }).join('')
-        + '</div>';
+    const ligne = (s, i) => {
+        const vias = [...new Set((s.sources || []).map(x => VIA_LABEL[x.via] || x.via))].join(', ');
+        const detail = (s.sources || []).map(x => escH(x.label)).filter(Boolean).join(' · ');
+        const hint = s.hint_hotes ? ` <span class="src">(${s.hint_hotes} hôte(s) probable(s))</span>` : '';
+        return `<div class="sous-reseaux-row" id="sr-row-${i}">
+            <span><span class="cidr">${escH(s.cidr)}</span>${hint}
+              <span class="src" title="${detail}">— via ${escH(vias)}</span></span>
+            <button type="button" onclick="ajouterSousReseau(${i}, '${escH(s.cidr)}')">+ Ajouter</button>
+        </div>`;
+    };
+    const forts = d.detectes.filter(s => s.confiance !== 'faible');
+    const faibles = d.detectes.filter(s => s.confiance === 'faible');
+    let html = '<div class="sous-reseaux-box"><div class="titre">🔎 Sous-réseaux candidats</div>';
+    html += forts.map((s, i) => ligne(s, i)).join('')
+        || '<div style="font-size:.75rem;color:var(--text-muted);">Aucun avec appareil détecté.</div>';
+    if (faibles.length) {
+        html += `<details style="margin-top:.4rem;"><summary style="cursor:pointer;font-size:.75rem;color:var(--text-muted);">`
+            + `${faibles.length} réseau(x) vus dans la config du poste, sans appareil détecté</summary>`
+            + faibles.map((s, i) => ligne(s, i + forts.length)).join('') + '</details>';
+    }
+    wrap.innerHTML = html + '</div>';
 }
 function ajouterSousReseau(i, cidr) {
     ajouterPlage(cidr);
@@ -525,11 +547,47 @@ async function pollStatus() {
             updateStats();
             showDiff();   // mettre à jour en temps réel pendant le scan
         }
+        if (Array.isArray(d.reseaux_hors_plage)) majReseauxHorsPlage(d.reseaux_hors_plage);
         if (!d.running) {
             clearInterval(scanInterval); scanInterval = null;
             resetUI();
         }
     } catch(e) {}
+}
+
+// Lot D : des appareils ont répondu (UPnP/mDNS/ONVIF, ARP d'un routeur SNMP)
+// sur des /24 qui n'étaient PAS dans les plages scannées → on ignorait ces
+// sous-réseaux. Un clic les ajoute, un autre relance le scan dessus.
+function majReseauxHorsPlage(liste) {
+    const wrap = document.getElementById('hors-plage-wrap');
+    if (!wrap) return;
+    liste = (liste || []).filter(x => x && x.cidr);
+    if (!liste.length) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = '<div class="sous-reseaux-box" style="border-color:rgba(255,140,0,.35);">'
+        + '<div class="titre">📡 D\'autres réseaux ont répondu pendant ce scan</div>'
+        + '<div style="font-size:.72rem;color:var(--text-muted);margin:-.2rem 0 .5rem;">'
+        + 'Des appareils ont été vus (mDNS/UPnP/SNMP) sur des plages non scannées.</div>'
+        + liste.map((s, i) => `<div class="sous-reseaux-row" id="hp-row-${i}">
+             <span><span class="cidr">${escH(s.cidr)}</span>
+               <span class="src">— ${s.hint_hotes || 0} hôte(s) probable(s)</span></span>
+             <button type="button" onclick="ajouterHorsPlage(${i}, '${escH(s.cidr)}')">+ Ajouter</button>
+           </div>`).join('')
+        + `<div style="text-align:right;margin-top:.5rem;">
+             <button type="button" class="btn btn-secondary btn-sm" onclick="ajouterTousHorsPlage()">Tout ajouter et relancer</button>
+           </div></div>`;
+    wrap._liste = liste;
+}
+function ajouterHorsPlage(i, cidr) {
+    ajouterPlage(cidr);
+    const row = document.getElementById('hp-row-' + i);
+    if (row) { row.classList.add('ajoute');
+        const b = row.querySelector('button'); b.textContent = '✓ Ajoutée'; b.onclick = null; }
+}
+function ajouterTousHorsPlage() {
+    const wrap = document.getElementById('hors-plage-wrap');
+    (wrap._liste || []).forEach(s => ajouterPlage(s.cidr));
+    wrap.innerHTML = '';
+    demarrerScanReel();
 }
 
 function arreterScan() {
