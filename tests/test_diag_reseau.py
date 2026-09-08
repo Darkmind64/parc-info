@@ -541,9 +541,10 @@ def test_mapping_baie_ifindex(conn, deux_clients, make_appareil):
     assert 3 not in m4
 
 
-def test_mapping_sfp_pas_de_nom_port(conn, deux_clients, make_appareil):
-    """Un port de baie SFP (numéro 1001+) ne doit PAS être mappé par nom
-    d'interface : son numéro logique (1) collisionnerait avec le port RJ 1."""
+def test_mapping_sfp_par_nom_fibre(conn, deux_clients, make_appareil):
+    """Un port de baie SFP (numéro 1001+) se mappe sur une interface au NOM
+    fibre (`Te1/1/1` = 10 G), pas sur le RJ de même rang. RJ 1 (`Gi1/0/1`) et
+    SFP 1 (`Te1/1/1`) vont dans deux index séparés → aucune collision."""
     cid = deux_clients['cid_a']
     sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
     conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
@@ -555,7 +556,26 @@ def test_mapping_sfp_pas_de_nom_port(conn, deux_clients, make_appareil):
              49: {'nom': 'Te1/1/1',  'alias': '', 'ethernet': True}}
     m, src, _, _ = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
     assert m.get(1) == 1 and src.get(1) == 'nom_port'
-    assert 1001 not in m                              # SFP non mappé par nom
+    assert m.get(1001) == 49 and src.get(1001) == 'nom_port'
+
+
+def test_mapping_collision_stack_pas_de_nom_port(conn, deux_clients, make_appareil):
+    """Stack : `Gi1/0/12` et `Gi2/0/12` donnent tous deux « 12 » via le nom.
+    On ne peut pas trancher → le port 12 n'est PAS mappé par nom (mieux vaut
+    non calibré que calibré sur le mauvais membre du stack)."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.2')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,12)", (slot_id,))
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,7)", (slot_id,))
+    conn.commit()
+    infos = {12:  {'nom': 'Gi1/0/12', 'alias': '', 'ethernet': True},
+             112: {'nom': 'Gi2/0/12', 'alias': '', 'ethernet': True},
+             7:   {'nom': 'Gi1/0/7',  'alias': '', 'ethernet': True}}
+    m, src, _, _ = network_diag._mapping_baie_ifindex(conn, cid, slot_id, sw, infos)
+    assert 12 not in m                                # collision → non mappé
+    assert m.get(7) == 7 and src.get(7) == 'nom_port'  # pas de collision → OK
 
 
 def test_mapping_divergence(conn, deux_clients, make_appareil):

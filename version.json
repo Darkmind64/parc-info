@@ -1,25 +1,25 @@
 {
-  "version": "2.32.2",
+  "version": "2.32.3",
   "release_date": "2026-09-09",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.2",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.2/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.32.3",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.3/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Suite du correctif « appareils qui disparaissent des ports de la baie » (v2.32.1 ne traitait qu'une des causes). Analyse complete de la chaine « appareil branche -> infobulle » -> 3 causes de plus, toutes corrigees : (1) dot1dBasePortIfIndex (n° de bridge-port -> ifIndex) incomplet -> la table MAC se retrouve indexee par n° de bridge-port pour une partie des ports (la LED marche, l'infobulle est vide) ; cette table etant statique, un releve plus court que le precedent est desormais fusionne. (2) Table MAC relevee VLAN par VLAN (Cisco/HP) : les VLAN les plus calmes etaient sautes en silence sous le budget de 45 s ; on le detecte maintenant et on fusionne avec le cache. (3) Aucun repli quand la table MAC live ne montre rien : si un port mappe et actif n'a pas d'appareil dans la table MAC live, on prend l'appareil vu par la cartographie de topologie (palier 4), marque « (topologie) » dans l'infobulle. + le Moniteur liste les appareils vus sur le switch mais sur un port non identifiable.",
+    "new_features": "Audit approfondi des fonctionnalites reseau -> 4 correctifs. (1) IMPORTANT : `_snmp_bulk_cols` plafonnait le releve SNMP a ~600 VARBINDS et non 600 lignes -- un switch 48 ports interroge sur ~20 colonnes (diagnostic palier 3, topologie, ecran Trafic & erreurs) voyait sa table amputee a ~30 ports, EN SILENCE : la moitie des ports absents du diagnostic et de la topologie. Le plafond est maintenant en LIGNES (max_rows x nb_colonnes en interne). (2) `_port_physique_depuis_nom` faisait collisionner les membres d'un stack (`Gi1/0/12` et `Gi2/0/12` donnaient tous deux « 12 ») -> LED sur le mauvais port ; et `_RE_SFP` ne reconnaissait pas les formes courtes Cisco (`Te1/1/1`, `Fo1/0/1`) -> port fibre 10/40 G confondu avec le RJ de meme rang. Une collision de nom desactive maintenant le mapping par nom pour ce port (mieux non calibre que mal calibre). (3) `diag_etat_port` / `diag_etat_equipement` ne purgeaient jamais : un port disparu ou un equipement supprime gardait son `classe_erreur` fige et gonflait le verdict « N ports en erreur » / « N equipements muets » indefiniment. (4) Double-clic sur « lancer maintenant » du scan planifie -> deux scans concurrents sur le meme moteur mono-instance ; verrou ajoute.",
     "improvements": [
-      "Baie : dot1dBasePortIfIndex (bridge-port -> ifIndex) est statique -> un relevé plus court que le precedent est fusionne (union) avec le cache.",
-      "Baie : `_fdb_par_vlan` pose `tronque` quand des VLAN sont sautes (budget) -> declenche la fusion avec le cache au lieu de perdre leurs MAC.",
-      "Baie : repli sur `diag_topologie` pour l'infobulle d'un port de switch (comme les prises murales) quand la table MAC live est vide -- `voisins_source='topologie'`.",
-      "Moniteur baie : `fdb_orphelins` -- appareils vus sur le switch mais sur un port non identifie (dot1dBasePortIfIndex absent) ; journal des VLAN sautes."
+      "SNMP : `_snmp_bulk_cols` -- `max_rows` compte des LIGNES (ports), plus des varbinds ; les gros switchs / stacks ne sont plus amputes en silence.",
+      "Baie : `_port_physique_depuis_nom` -- collision de membres de stack detectee (port non mappe plutot que mal mappe) ; `_RE_SFP` reconnait `Te`/`Fo`/`Twe`/`Hu` courts (Cisco).",
+      "Diagnostic : `diag_etat_port` purge les ports disparus (garde-fou : pas sur un releve partiel) ; `diag_etat_equipement` purge les equipements sortis de l'inventaire.",
+      "Scan planifie : verrou `_scan_planifie_run_lock` -- un seul scan planifie a la fois."
     ]
   },
   "checksums": {
@@ -30,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.2"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.3"
 }

@@ -368,6 +368,10 @@ espacée repart à froid.
   `_snmp_walk` **et** `_snmp_bulk_cols` vérifient le request-id de la réponse
   (un switch lent renvoyait parfois une réponse tardive à la requête
   précédente → relevé décalé). Erreurs relevées 1 cycle sur 8.
+  **v2.32.3** : `_snmp_bulk_cols` `max_rows` compte des **lignes** de table
+  (plafond interne `max_rows × nb_colonnes` varbinds) — auparavant 600 varbinds,
+  soit ~30 ports seulement sur un switch interrogé sur 20 colonnes (palier 3 +
+  topologie), la moitié de la table amputée **en silence**.
 - **Réponse partielle** (v2.19.15) : si la colonne `ifOperStatus` manque pour un
   port (réponse GETBULK tronquée, ou démarrage où 10 colonnes sont demandées le
   temps que `_activite_hc` se fixe) alors que les octets répondent,

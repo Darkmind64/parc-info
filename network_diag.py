@@ -1265,11 +1265,17 @@ def _hist_diag(conn, client_id, appareil_id, nom, action, details):
         logger.debug('network_diag: log_history diag en échec', exc_info=True)
 
 
-def _marquer_equipements_muets(client_id, ips_vus, motifs=None):
+def _marquer_equipements_muets(client_id, ips_vus, motifs=None, inventaire_ips=None):
     """Après un balayage SNMP : un équipement qui avait un état `snmp_ok=1` et
     n'a pas répondu cette passe repasse `snmp_ok=0` (+ trace historique). Sans
     ça, `diag_etat_equipement` gardait indéfiniment le dernier état connu et le
-    verdict comptait un switch mort comme joignable."""
+    verdict comptait un switch mort comme joignable.
+
+    `inventaire_ips` : les IP des équipements SNMP encore présents dans
+    l'inventaire du client. Les lignes d'état (`diag_etat_equipement` /
+    `diag_etat_port`) d'une IP qui n'y est plus (équipement supprimé, IP
+    changée) sont **effacées** — sinon elles gonflaient éternellement le
+    « N équipements muets » / « N ports en erreur » du verdict."""
     motifs = motifs or {}
     try:
         from database import get_db
@@ -1277,10 +1283,20 @@ def _marquer_equipements_muets(client_id, ips_vus, motifs=None):
     except Exception:
         return
     try:
+        if inventaire_ips is not None:
+            inv = set(inventaire_ips)
+            orphelines = [r[0] for r in conn.execute(
+                "SELECT DISTINCT equipement_ip FROM diag_etat_equipement WHERE client_id=?",
+                (client_id,)) if r[0] not in inv]
+            for eip in orphelines:
+                conn.execute("DELETE FROM diag_etat_port WHERE client_id=? AND equipement_ip=?",
+                             (client_id, eip))
+                conn.execute("DELETE FROM diag_etat_equipement WHERE client_id=? AND equipement_ip=?",
+                             (client_id, eip))
         rows = conn.execute(
             "SELECT equipement_ip, appareil_id, sysname FROM diag_etat_equipement "
             "WHERE client_id=? AND snmp_ok=1", (client_id,)).fetchall()
-        touche = False
+        touche = bool(inventaire_ips is not None)
         for eip, aid, sysname in rows:
             if eip in ips_vus:
                 continue
@@ -1314,9 +1330,10 @@ def _ecrire_etat_snmp(conn, client_id, ip, appareil_id, sysname, lignes_etat, no
             "WHERE client_id=? AND equipement_ip=?", (client_id, ip)):
         anciens[r[0]] = (r[1], r[2])
     _anc_eq = conn.execute(
-        "SELECT snmp_ok FROM diag_etat_equipement WHERE client_id=? AND equipement_ip=?",
+        "SELECT snmp_ok, nb_ports FROM diag_etat_equipement WHERE client_id=? AND equipement_ip=?",
         (client_id, ip)).fetchone()
     etait_muet = _anc_eq is not None and not _anc_eq[0]
+    _anc_nb_ports = (_anc_eq[1] if _anc_eq else 0) or 0
     _nom_hist = sysname or ip
     # appareil vu par port + alias, depuis la dernière cartographie de topologie
     vu_par_port = {}
@@ -1383,6 +1400,17 @@ def _ecrire_etat_snmp(conn, client_id, ip, appareil_id, sysname, lignes_etat, no
              L['err_min'], L['disc_min'],
              L['crc_min'], L['debit_pct'], L['classe_erreur'], L['classe_libelle'],
              L['gravite'], depuis, now))
+    # Ports disparus du relevé (stack démembré, ifIndex qui a changé…) : on
+    # efface leur ligne d'état — sinon un `classe_erreur` figé gonflait
+    # éternellement le verdict. Garde-fou : seulement si ce relevé est au moins
+    # aussi complet que le précédent (un relevé partiel, agent lent, ne doit pas
+    # faire disparaître des ports encore là).
+    pi_vus = {L['port_index'] for L in lignes_etat}
+    if pi_vus and len(pi_vus) >= _anc_nb_ports * 3 // 4:
+        _ph = ','.join('?' * len(pi_vus))
+        conn.execute(
+            f"DELETE FROM diag_etat_port WHERE client_id=? AND equipement_ip=? "
+            f"AND port_index NOT IN ({_ph})", (client_id, ip, *pi_vus))
     nb_up = sum(1 for L in lignes_etat if L['oper'] == 1)
     conn.execute(
         "INSERT INTO diag_etat_equipement (client_id, equipement_ip, appareil_id, sysname, "
@@ -1468,7 +1496,8 @@ def interroger_equipements_client(client_id: int, budget_s: float = 0.0) -> list
     try:
         motifs = {m['ip']: m.get('detail', '') for m in getattr(bal, 'muets', [])
                   if isinstance(m, dict) and m.get('ip')}
-        _marquer_equipements_muets(client_id, vus, motifs)
+        _marquer_equipements_muets(client_id, vus, motifs,
+                                   inventaire_ips={e[1] for e in equipements})
     except Exception:
         logger.debug('network_diag: marquage des équipements muets en échec', exc_info=True)
     return findings
@@ -5904,15 +5933,32 @@ def _mapping_baie_ifindex(conn, client_id, slot_id, appareil_id_switch, infos):
             except (TypeError, ValueError):
                 continue
 
-    _RE_SFP = re.compile(r'(sfp|xfp|qsfp|fiber|fibre|tengig|fortygig|hundredgig|\bte\b|\bxe-|\bfo\b)', re.I)
+    # Marqueurs fibre / SFP dans un nom d'interface — dont les formes COURTES
+    # Cisco (`Te1/1/1`, `Fo1/0/1`, `Twe1/1/1`, `Hu1/0/1`) que `\bte\b` ne
+    # capturait pas (pas de frontière de mot avant le chiffre) : ces ports 10/25/
+    # 40/100 G collisionnaient alors avec le RJ de même rang dans `_mapping_baie_ifindex`.
+    _RE_SFP = re.compile(
+        r'(sfp|xfp|qsfp|fiber|fibre|tengig|twentyfivegig|fortygig|fiftygig|hundredgig'
+        r'|fourhundredgig|\bte[-\d]|\btwe[-\d]|\bfo[-\d]|\bfi[-\d]|\bhu[-\d]|\bxe-|\bet-)', re.I)
     par_nom, par_nom_sfp = {}, {}   # port physique déduit du nom -> ifindex
+    _collision = set()              # n° physiques revendiqués par ≥2 interfaces
     for ifx, meta in sorted(infos.items()):
         if not meta.get('ethernet', True):
             continue
         nom = str(meta.get('nom') or '')
         pp = _port_physique_depuis_nom(nom) or _port_physique_depuis_nom(meta.get('alias'))
         if pp is not None:
-            (par_nom_sfp if _RE_SFP.search(nom) else par_nom).setdefault(pp, ifx)
+            cible = par_nom_sfp if _RE_SFP.search(nom) else par_nom
+            if pp in cible and cible[pp] != ifx:
+                # Stack : `Gi1/0/12` et `Gi2/0/12` donnent tous deux « 12 ». On ne
+                # peut pas trancher par le nom → on retire ce n° du mapping par
+                # nom (mieux vaut non calibré que calibré sur le mauvais port).
+                _collision.add(pp)
+            else:
+                cible.setdefault(pp, ifx)
+    for pp in _collision:
+        par_nom.pop(pp, None)
+        par_nom_sfp.pop(pp, None)
 
     repli_naif = str(_cfg('diag_baie_activite_repli_naif', '0')) == '1'
     mapping, sources, calibre, divergences = {}, {}, False, []

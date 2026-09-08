@@ -1,5 +1,28 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.3] - 2026-09-09 🔍
+
+### Audit approfondi des fonctionnalités réseau → 4 correctifs
+
+Revue systématique de la chaîne **scan / diagnostic / baie / SNMP / topologie** (à la demande, après les correctifs de la baie).
+
+**1. `_snmp_bulk_cols` — plafond en varbinds et non en lignes.** Le relevé SNMP multi-colonnes (`app._snmp_bulk_cols`) plafonnait à `max_rows` (600) **varbinds**, pas 600 lignes de table. Un switch 48 ports interrogé sur ~20 colonnes — c'est le cas du diagnostic **palier 3** (`netdiag.collect.balayer`), de la **cartographie de topologie**, de l'écran **« Trafic & erreurs »** et du poll des **LEDs** — voyait sa table **amputée à ~30 ports, en silence**. La moitié des ports étaient absents du diagnostic et de la topologie (et donc du filet de repli de la vue baie ajouté en v2.32.2). Corrigé : le plafond interne est `max_rows × nb_colonnes` varbinds ; `max_rows` compte désormais des **lignes**.
+
+**2. `_port_physique_depuis_nom` / `_RE_SFP` — mapping de port par nom d'interface.**
+
+- **Stack** : `Gi1/0/12` et `Gi2/0/12` donnaient tous deux « 12 » → le 2ᵉ membre du stack était ombré, les LEDs de ses ports se retrouvaient sur les ports du 1ᵉʳ. Une collision de numéro physique **désactive maintenant le mapping par nom** pour ce port (mieux non calibré que mal calibré).
+- `_RE_SFP` ne reconnaissait pas les formes **courtes** Cisco (`Te1/1/1`, `Fo1/0/1`, `Twe1/1/1`, `Hu1/0/1`) → un port fibre 10/25/40/100 G collisionnait avec le RJ de même rang. Regex élargie.
+
+**3. `diag_etat_port` / `diag_etat_equipement` — jamais purgées.** Ces tables d'**état courant** gardaient la dernière ligne d'un port disparu (SFP débranché, ifIndex changé) ou d'un équipement supprimé de l'inventaire — avec son `classe_erreur` figé → le **verdict** comptait « N ports en erreur » / « N équipements muets » à vie. Corrigé : `_ecrire_etat_snmp` efface les ports absents du relevé (garde‑fou : seulement si le relevé couvre ≥ 75 % du nombre de ports précédent — un relevé partiel ne purge rien) ; `_marquer_equipements_muets(inventaire_ips=…)` efface les lignes d'une IP sortie de l'inventaire.
+
+**4. `_scan_planifie_executer` — double exécution.** Un double‑clic sur « lancer maintenant » (ou scheduler + manuel en même temps) lançait deux `_run_scan` concurrents sur le `scan_status` global mono‑instance → résultats mélangés. Verrou `_scan_planifie_run_lock` (non bloquant) : le 2ᵉ appel renvoie « un scan planifié tourne déjà ».
+
+**Limites connues, non corrigées** (documentées) : `err_delta` accumulé sur 8 cycles vs seuil 1 cycle (marginal) ; clé bridge‑port vs ifIndex de la FDB quand `dot1dBasePortIfIndex` n'est jamais exposé complet (mitigé en v2.32.1/.2, impossible à résoudre à 100 % sans le matériel).
+
+Tests : `tests/test_diag_reseau.py` (mapping stack / SFP fibre), `tests/test_netdiag_transitions.py` (purge des ports disparus + équipements orphelins). **423 tests pytest.**
+
+---
+
 ## [2.32.2] - 2026-09-09 🔧
 
 ### Suite du correctif — appareils qui disparaissent des ports de la baie
