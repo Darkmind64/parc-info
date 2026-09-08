@@ -121,6 +121,7 @@ N._traceroute = lambda cible, **k: (['192.168.1.1', '62.4.16.1', '8.8.8.8'] if c
 A._snmp_presence = lambda ip, c, **k: (True, True, 'ok')
 N._sous_reseaux_equipement = lambda ip, c: (['192.168.99.0/24'] if ip == '192.168.1.1' else [])
 N._echo_reply_ok = lambda ip: ip in ('192.168.5.1', '10.0.0.1')
+N.etat_capture = lambda: {'disponible': False}       # pas de vrai sniffer scapy
 da = N.decouvrir_reseaux_actif(CID, budget_s=10)
 if _docker2 is not None:
     os.environ['RUNNING_IN_DOCKER'] = _docker2
@@ -130,6 +131,42 @@ verifier(pa.get('192.168.50.0/24', {}).get('confiance') == 'forte', '  -> confia
 verifier(not any(c.startswith(('8.8.8', '62.4')) for c in pa), 'sauts publics ignorés')
 verifier('192.168.99.0/24' in pa, 'SNMP sur la passerelle hors inventaire -> sous-réseau proposé')
 verifier('192.168.5.0/24' in pa and '10.0.0.0/24' in pa, 'passerelles voisines qui répondent -> proposées')
+
+print('\n=== 6. écoute passive multi-protocoles (Lot C) : LLDP / OSPF / mDNS ===')
+import types as _types
+
+
+class _C6:
+    def __init__(self, **kw): self.__dict__.update(kw)
+
+
+class _Pkt6:
+    def __init__(self, **layers): self._l = layers
+    def haslayer(self, n): return self._l.get(getattr(n, '__name__', n)) is not None
+    def __getitem__(self, n): return self._l[getattr(n, '__name__', n)]
+
+
+_E6 = type('Ether', (_C6,), {}); _IP6 = type('IP', (_C6,), {})
+_UDP6 = type('UDP', (_C6,), {}); _RAW6 = type('Raw', (_C6,), {})
+N._charger_scapy = lambda: _types.SimpleNamespace(
+    Ether=_E6, IP=_IP6, UDP=_UDP6, Raw=_RAW6, AsyncSniffer=object)
+_ec = N._EcouteReseaux()
+_lldp = bytes([(8 << 9 | 12) >> 8, (8 << 9 | 12) & 0xFF, 5, 1, 10, 9, 9, 1, 2, 0, 0, 0, 1, 0])
+_ec._on(_Pkt6(Ether=_E6(type=0x88cc, dst='01:80:c2:00:00:0e', payload=_lldp)))
+_ec._on(_Pkt6(Ether=_E6(type=0x0800, dst='01:00:5e:00:00:fb'),
+              IP=_IP6(src='192.168.77.5', dst='224.0.0.251', proto=17),
+              UDP=_UDP6(sport=5353, dport=5353)))
+_ospf = bytes([2, 1] + [0] * 22 + [255, 255, 255, 0] + [0] * 8)
+_ec._on(_Pkt6(Ether=_E6(type=0x0800, dst='01:00:5e:00:00:05'),
+              IP=_IP6(src='172.31.4.2', dst='224.0.0.5', proto=89), Raw=_RAW6(load=_ospf)))
+_cdp_val = bytes([0, 0, 0, 1, 1, 1, 0xCC, 0x00, 0x04, 172, 20, 5, 1])
+_cdp = bytes([0x02, 0xB4, 0, 0]) + bytes([0x00, 0x02, 0x00, 4 + len(_cdp_val)]) + _cdp_val
+_ec._on(_Pkt6(Ether=_E6(type=0x0800, dst='01:00:0c:cc:cc:cc'), Raw=_RAW6(load=_cdp)))
+_c6 = {c['cidr']: c for c in _ec.arreter()}
+verifier(_c6.get('10.9.9.0/24', {}).get('via') == 'lldp', 'adresse de gestion LLDP -> /24 candidat')
+verifier(_c6.get('192.168.77.0/24', {}).get('via') == 'mdns', 'mDNS d\'un autre VLAN -> /24 candidat')
+verifier(_c6.get('172.31.4.0/24', {}).get('exact') is True, 'OSPF Hello -> réseau au masque EXACT')
+verifier(_c6.get('172.20.5.0/24', {}).get('via') == 'cdp', 'adresse CDP -> /24 candidat')
 
 conn.close()
 print()

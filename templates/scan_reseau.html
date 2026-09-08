@@ -352,13 +352,19 @@ const VIA_LABEL = {
     traceroute: 'traceroute',
     passerelle_snmp: 'passerelle (SNMP)',
     passerelle_voisine: 'passerelle voisine qui répond',
+    lldp: 'adresse de gestion LLDP', cdp: 'adresse CDP',
+    ospf: 'OSPF (routage)', eigrp: 'EIGRP (routage)',
+    vrrp: 'VRRP (passerelle)', hsrp: 'HSRP (passerelle)',
+    mdns: 'mDNS (écoute passive)', ssdp: 'SSDP (écoute passive)',
+    nbns: 'NetBIOS (écoute passive)', llmnr: 'LLMNR (écoute passive)',
+    ecoute_passive: 'écoute passive (multicast)',
 };
 function _rendreSousReseaux(d, actifFait) {
     const wrap = document.getElementById('sous-reseaux-wrap');
     if (!wrap) return;
     const boutonActif = actifFait
         ? '<span style="font-size:.7rem;color:var(--text-muted);">sondage étendu effectué</span>'
-        : `<button type="button" class="btn btn-secondary btn-sm" id="btn-sonder-loin" onclick="sonderPlusLoin()">🔍 Sonder plus loin (traceroute, passerelles…)</button>`;
+        : `<button type="button" class="btn btn-secondary btn-sm" id="btn-sonder-loin" onclick="sonderPlusLoin()">🔍 Sonder plus loin (traceroute, passerelles, écoute LLDP/OSPF…)</button>`;
     if (!d.ok || !(d.detectes || []).length) {
         wrap.innerHTML = `<div class="sous-reseaux-box"><div class="titre">🔎 Sous-réseaux candidats</div>`
             + `<div style="font-size:.75rem;color:var(--text-muted);margin-bottom:.4rem;">Aucun détecté automatiquement.</div>`
