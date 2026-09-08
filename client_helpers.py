@@ -624,6 +624,14 @@ def fmt_appareils(appareils: list) -> list:
         a['rmm_status'] = _compute_sec_status(rmm_label, a.get('rmm_date_fin') or '')
         _format_date_field(a, 'rmm_date_fin', '%d/%m/%Y')
 
+        # Score de santé (cache — voir sante.py). Les raisons sont stockées en
+        # JSON ; on les rend exploitables par le template.
+        a['sante_niveau'] = a.get('sante_niveau') or 'ok'
+        try:
+            a['sante_raisons_list'] = json.loads(a.get('sante_raisons') or '[]')
+        except (ValueError, TypeError):
+            a['sante_raisons_list'] = []
+
     return appareils
 
 

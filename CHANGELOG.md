@@ -1,5 +1,29 @@
 # CHANGELOG - ParcInfo
 
+## [2.28.0] - 2026-09-09 🩺
+
+### Score de santé synthétique par appareil (optimisation « croisement des données », lots 1-2)
+
+Un **feu tricolore** (`ok` / `attention` / `critique`) + une **liste de raisons actionnables** sur chaque appareil, agrégés depuis des signaux **déjà en base** — aucune requête réseau, aucun SNMP à la volée.
+
+**Trois familles de signaux** (`sante.py`, fonction pure `sante_appareil(appareil, ctx)`) :
+
+1. **Collecteur système** — on réutilise tel quel `collector_core.build_alerts` : disque saturé, antivirus absent, TPM/Secure Boot, pare-feu, BitLocker, batterie usée, **fin de support Windows**, certificats qui expirent, arrêts inattendus. Le jugement est *identique* à celui de la fiche système et du rapport PDF.
+2. **Cycle de vie côté inventaire** (ce que le collecteur ne voit pas) : garantie expirée **sans contrat de maintenance**, matériel ancien (seuil par famille : 6 ans un poste, 8 un serveur/NAS, 10 un switch/routeur), abonnement AV/EDR expiré, collecte jamais faite (*nudge* `info`, avec grâce pour un appareil récent) ou trop ancienne, équipement d'infra injoignable.
+3. **Réseau** — `diag_etat_equipement` / `diag_etat_port` du diagnostic : équipement SNMP muet, port de switch en erreur de trafic là où l'appareil est vu.
+
+`niveau` = `critique` si ≥ 1 raison critique, `attention` si ≥ 1 attention, sinon `ok`. Ce n'est **pas une note sur 100** : `score` ne sert qu'au tri « à traiter en priorité ».
+
+**Mise en cache** (`appareils.sante_niveau` / `_score` / `_raisons` / `_maj`) pour que la liste d'inventaire trie et filtre en SQL sans recalculer 300 fois. `sante.recalculer(conn, client_id)` n'**écrit** que les lignes dont le niveau ou le score a **effectivement changé** — un balayage « rien n'a bougé » ne produit aucune écriture (ni bruit de sync Turso). Recalcul : après une collecte (`/api/device-info`), à l'ouverture de la liste si le cache du client date de plus d'une heure, et par un **balayage périodique** (`scheduler`, toutes les 30 min — le score dépend du temps).
+
+**Interface** — `liste_appareils.html` : nouvelle colonne 🩺 (pastille + infobulle listant les raisons), triable, filtre « À traiter / Critique / Attention ». Réglages : `sante_collecte_jours` (45), `sante_injoignable_jours` (3), `sante_regles_desactivees` (CSV de codes pour couper une règle).
+
+Tests : `tests/test_sante_appareil.py` (16), `test_sante_appareil.py` (racine, 6 sections) — fonction pure règle par règle + `charger_contexte_sante` + `recalculer` (n'écrit que le changement) + la route (pastille, filtre, tri, ACL).
+
+*Lots suivants (Plan 2) : encart « Santé » en tête de fiche appareil + mobile ; tuile « Santé du parc » sur le tableau de bord + journalisation des bascules ok↔critique.*
+
+---
+
 ## [2.27.1] - 2026-09-08 🎲
 
 ### Fix : `_fdb_corriger` déterministe sur collision de préfixe

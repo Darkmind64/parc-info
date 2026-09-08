@@ -2129,6 +2129,16 @@ def init_db():
         ('logiciels_installes_json', "TEXT DEFAULT '[]'"),
         ('derniere_synchro', "TEXT DEFAULT NULL"),
         ('rapport_systeme_json', "TEXT DEFAULT ''"),
+        # Score de santé synthétique (sante.py) — mis en cache pour que la liste
+        # d'inventaire trie/filtre en SQL sans recalculer 300 fois. Recalculé
+        # après une collecte, à l'édition d'une fiche, et par un balayage
+        # périodique (le score dépend du temps : une garantie franchit son
+        # échéance, un port tombe en erreur…). Écrit UNIQUEMENT quand la valeur
+        # change (pas de bruit dans le journal de sync).
+        ('sante_niveau', "TEXT DEFAULT ''"),
+        ('sante_score', "INTEGER DEFAULT 0"),
+        ('sante_raisons', "TEXT DEFAULT '[]'"),
+        ('sante_maj', "TEXT DEFAULT ''"),
     ]:
         if col not in cols_app3:
             try:
@@ -4336,6 +4346,8 @@ _APP_SORT_COLS = {
     'statut':   'a.statut, a.nom_machine',
     'marque':   'a.marque, a.modele, a.nom_machine',
     'os':       'a.os, a.nom_machine',
+    'sante':    ("CASE COALESCE(a.sante_niveau,'') WHEN 'critique' THEN 0 "
+                "WHEN 'attention' THEN 1 ELSE 2 END, -a.sante_score, a.nom_machine"),
 }
 
 @app.route('/appareils')
@@ -4350,6 +4362,7 @@ def liste_appareils():
     f_statut  = request.args.get('statut', '')
     f_av      = request.args.get('av', '')
     f_service = request.args.get('service', '')
+    f_sante   = request.args.get('sante', '')
 
     order_expr = _APP_SORT_COLS.get(sort_col, 'ip_sort_key(a.adresse_ip)')
     direction  = 'DESC' if sort_dir == 'desc' else 'ASC'
@@ -4383,6 +4396,12 @@ def liste_appareils():
         q += " AND (a.av_nom!='' AND a.av_nom IS NOT NULL) AND a.av_date_fin!='' AND a.av_date_fin IS NOT NULL AND date(a.av_date_fin)>=date('now') AND date(a.av_date_fin)<=date('now','+30 days')"
     elif f_av == 'active':
         q += " AND (a.av_nom!='' AND a.av_nom IS NOT NULL) AND (a.av_date_fin='' OR a.av_date_fin IS NULL OR date(a.av_date_fin)>date('now','+30 days'))"
+
+    if f_sante == 'probleme':
+        q += " AND COALESCE(a.sante_niveau,'') IN ('attention','critique')"
+    elif f_sante in ('critique', 'attention'):
+        q += " AND a.sante_niveau=?"
+        params.append(f_sante)
 
     q += f' ORDER BY {order_expr} {direction}'
 
@@ -4427,7 +4446,8 @@ def liste_appareils():
                            clients=get_clients(), client_actif_id=cid, pagination=pagination,
                            sort_col=sort_col, sort_dir=sort_dir,
                            f_types=f_types, f_statut=f_statut, f_av=f_av,
-                           f_service=f_service, service_filtre_nom=service_filtre_nom)
+                           f_service=f_service, service_filtre_nom=service_filtre_nom,
+                           f_sante=f_sante)
 
 def _save_licences(conn, appareil_id, cid, form):
     """Supprime puis réinsère les licences d'un appareil depuis les données du formulaire."""
@@ -4678,7 +4698,13 @@ def editer_appareil(id):
         _sync_appareil_to_periph(conn, id, cid)
         _propager_utilisateur_aux_peripheriques(
             conn, id, cid, _old.get('utilisateur', ''), request.form.get('utilisateur', ''))
-        conn.commit(); conn.close()
+        conn.commit()
+        try:
+            import sante as _sante_mod
+            _sante_mod.recalculer(conn, cid, [id])   # garantie/type/statut peuvent changer la pastille
+        except Exception:
+            logger.debug('Recalcul santé après édition appareil %s', id, exc_info=True)
+        conn.close()
         flash('Appareil mis à jour', 'success')
         return redirect(url_for('liste_appareils'))
     a = row_to_dict(conn.execute('SELECT * FROM appareils WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
@@ -12635,6 +12661,14 @@ def api_device_info():
         except Exception:
             logger.exception('Sync MAC collecteur (appareil %s)', app_id)
 
+        # Score de santé : cet appareil vient de changer matériellement (disque,
+        # antivirus, fin de support…) — recalculer sa pastille tout de suite.
+        try:
+            import sante as _sante_mod
+            _sante_mod.recalculer(conn, cid, [app_id])
+        except Exception:
+            logger.debug('Recalcul santé après collecte (appareil %s)', app_id, exc_info=True)
+
         conn.close()
 
         app.logger.info(f"Device info received: {device_name} ({action}) - MAC: {mac_address}, IP: {ip_address}")
@@ -13927,6 +13961,34 @@ def _envoyer_email_piece_jointe(to_email, subject, body_html, nom_fichier, conte
     except Exception as e:
         logger.error(f'Erreur envoi email avec pièce jointe: {e}')
         return False
+
+
+def _sante_balayage_periodique():
+    """Recalcule le score de santé de tous les appareils, tous clients confondus.
+
+    Le score dépend du temps : une garantie franchit son échéance, un port
+    tombe en erreur, une collecte devient trop ancienne… Sans ce balayage, la
+    pastille resterait figée à la dernière collecte / édition. `recalculer`
+    n'écrit que les lignes dont le niveau ou le score a effectivement changé,
+    donc un cycle « rien n'a bougé » ne produit aucune écriture.
+    """
+    try:
+        import sante as _sante_mod
+        conn = get_db()
+        try:
+            clients = [r[0] for r in conn.execute("SELECT id FROM clients")]
+            total = 0
+            for cid in clients:
+                try:
+                    total += _sante_mod.recalculer(conn, cid)
+                except Exception:
+                    logger.debug('Balayage santé client %s', cid, exc_info=True)
+            if total:
+                logger.info('Balayage santé : %d pastille(s) mise(s) à jour', total)
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception('Balayage santé périodique')
 
 
 def _notify_upcoming_maintenances():
@@ -18473,6 +18535,10 @@ if __name__ == '__main__':
     # nécessaire en plus du téléchargement au démarrage pour une instance
     # qui tourne en continu (Docker) sans jamais redémarrer.
     scheduler.add_job(lambda: _oui_telecharger(force=False), 'cron', hour=3, minute=30)
+    # Score de santé des appareils : balayage périodique (le score dépend du
+    # temps). N'écrit que ce qui a changé.
+    scheduler.add_job(_sante_balayage_periodique, 'interval', minutes=30,
+                      next_run_time=_utcnow() + timedelta(seconds=90))
     # Cron job optionnel : rapport de diagnostic réseau par e-mail
     _diag_cron = network_diag.parse_rapport_cron(cfg_get('diag_rapport_cron', ''))
     if _diag_cron:

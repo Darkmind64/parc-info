@@ -207,6 +207,22 @@ th[data-col].sorted { color: var(--accent); }
 
 .qa-edit  { color: var(--accent); border-color: rgba(0,201,255,.3); }
 .qa-edit:hover  { background: rgba(0,201,255,.1); }
+
+/* Pastille de santé (score sante.py) */
+.sante-dot { display:inline-block; width:11px; height:11px; border-radius:50%;
+    vertical-align:middle; cursor:help; }
+.sante-ok        { background:#00c97a; box-shadow:0 0 0 2px #00c97a22; }
+.sante-attention { background:#ff9800; box-shadow:0 0 0 2px #ff980022; }
+.sante-critique  { background:#ff3355; box-shadow:0 0 0 2px #ff335522; }
+.sante-tip { position:fixed; z-index:9999; display:none; max-width:340px;
+    background:var(--bg-card,#141821); border:1px solid var(--border,#2a3240);
+    border-radius:6px; padding:.55rem .7rem; font-size:.76rem; line-height:1.4;
+    box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.sante-tip.show { display:block; }
+.sante-tip b { color:var(--accent); }
+.sante-tip .r-crit { color:#ff6b81; }
+.sante-tip .r-att  { color:#ffb454; }
+.sante-tip .r-info { color:var(--text-muted); }
 </style>
 {% endblock %}
 
@@ -292,6 +308,12 @@ th[data-col].sorted { color: var(--accent); }
             <option value="expired" {% if f_av == 'expired' %}selected{% endif %}>🛡 Expiré</option>
             <option value="none" {% if f_av == 'none' %}selected{% endif %}>🛡 Non configuré</option>
         </select>
+        <select id="filtre-sante" title="Filtrer par santé de l'appareil">
+            <option value="" {% if not f_sante %}selected{% endif %}>🩺 Toute santé</option>
+            <option value="probleme" {% if f_sante == 'probleme' %}selected{% endif %}>🩺 À traiter</option>
+            <option value="critique" {% if f_sante == 'critique' %}selected{% endif %}>🔴 Critique</option>
+            <option value="attention" {% if f_sante == 'attention' %}selected{% endif %}>🟠 Attention</option>
+        </select>
         <button type="button" class="btn-apply-filtres" onclick="applyFilters()" title="Appliquer les filtres">Filtrer</button>
         <button id="btn-reset-filtres" class="btn-reset-filtres" onclick="resetFiltres()" title="Réinitialiser tous les filtres">✕ Réinitialiser</button>
     </div>
@@ -305,6 +327,7 @@ th[data-col].sorted { color: var(--accent); }
             <tr>
                 <th data-sort-col="nom" onclick="sortBy('nom')" style="cursor:pointer;white-space:nowrap;">Appareil <span class="sort-ind" id="si-nom"></span></th>
                 <th data-sort-col="type" onclick="sortBy('type')" style="cursor:pointer;white-space:nowrap;">Type <span class="sort-ind" id="si-type"></span></th>
+                <th data-sort-col="sante" onclick="sortBy('sante')" style="cursor:pointer;white-space:nowrap;" title="Santé synthétique : garantie, sécurité, disque, réseau…">🩺 <span class="sort-ind" id="si-sante"></span></th>
                 <th data-sort-col="ip" onclick="sortBy('ip')" style="cursor:pointer;white-space:nowrap;">IP / Réseau <span class="sort-ind" id="si-ip"></span></th>
                 <th data-sort-col="user" onclick="sortBy('user')" style="cursor:pointer;white-space:nowrap;">Utilisateur <span class="sort-ind" id="si-user"></span></th>
                 <th title="Périphériques associés">Périph.</th>
@@ -344,6 +367,20 @@ th[data-col].sorted { color: var(--accent); }
                 </div>
             </td>
             <td data-sort="{{ a.type_appareil or '' }}"><span class="badge type-{{ a.type_appareil|type_css }}" title="{{ a.type_appareil|type_description or 'PC' }}">{{ a.type_appareil|type_badge }}</span></td>
+            <td data-sort="{{ {'critique':'0','attention':'1','ok':'2'}.get(a.sante_niveau, '2') }}{{ '%03d'|format(999 - (a.sante_score or 0)) }}" style="text-align:center;">
+                {% if a.sante_niveau and a.sante_niveau != 'ok' %}
+                <span class="sante-dot sante-{{ a.sante_niveau }}"
+                      data-sante="{{ a.sante_niveau }}"
+                      data-raisons="{{ a.sante_raisons_list|tojson|forceescape }}"
+                      onmouseenter="showSanteTip(event, this)" onmouseleave="hideSanteTip()"></span>
+                {% elif a.sante_raisons_list %}
+                <span class="sante-dot sante-ok" data-sante="ok"
+                      data-raisons="{{ a.sante_raisons_list|tojson|forceescape }}"
+                      onmouseenter="showSanteTip(event, this)" onmouseleave="hideSanteTip()"></span>
+                {% else %}
+                <span class="sante-dot sante-ok" title="Aucun point d'attention"></span>
+                {% endif %}
+            </td>
             <td data-sort="{{ a.adresse_ip or '' }}">
                 <div class="mono" style="font-size:0.88rem;">{{ a.adresse_ip or '—' }}</div>
                 {% if a.adresse_mac %}
@@ -463,7 +500,7 @@ th[data-col].sorted { color: var(--accent); }
         </tr>
         {% else %}
         <tr>
-            <td colspan="8" style="text-align:center;padding:3rem;color:var(--text-secondary);">
+            <td colspan="9" style="text-align:center;padding:3rem;color:var(--text-secondary);">
                 Aucun appareil enregistré.
                 <a href="/appareil/nouveau" style="color:var(--accent);">Ajouter un appareil</a> ou
                 <a href="/scan" style="color:var(--accent);">lancer un scan</a>.
@@ -511,6 +548,7 @@ th[data-col].sorted { color: var(--accent); }
 {% for t in f_types %}{% set pg_extra = pg_extra ~ '&type=' ~ t|urlencode %}{% endfor %}
 {% if f_statut %}{% set pg_extra = pg_extra ~ '&statut=' ~ f_statut|urlencode %}{% endif %}
 {% if f_av %}{% set pg_extra = pg_extra ~ '&av=' ~ f_av|urlencode %}{% endif %}
+{% if f_sante %}{% set pg_extra = pg_extra ~ '&sante=' ~ f_sante|urlencode %}{% endif %}
 <div style="display:flex;align-items:center;justify-content:center;gap:.5rem;padding:1rem;border-top:1px solid var(--border);flex-wrap:wrap;">
     {% if pagination.page > 1 %}
     <a href="?page={{ pagination.page - 1 }}{{ pg_extra }}" class="btn btn-sm" style="border-color:var(--border);color:var(--text-secondary);">← Précédent</a>
@@ -983,10 +1021,42 @@ const FILTER_STATE = {
     types:  {{ f_types | tojson }},
     statut: '{{ f_statut }}',
     av:     '{{ f_av }}',
+    sante:  '{{ f_sante }}',
 };
 
+// ── Infobulle de santé ────────────────────────────────────────────────────
+const _R_CLS = { critique:'r-crit', attention:'r-att', info:'r-info' };
+let _santeTipEl = null;
+function showSanteTip(ev, el) {
+    let raisons = [];
+    try { raisons = JSON.parse(el.dataset.raisons || '[]'); } catch (e) {}
+    if (!_santeTipEl) {
+        _santeTipEl = document.createElement('div');
+        _santeTipEl.className = 'sante-tip';
+        document.body.appendChild(_santeTipEl);
+    }
+    const niv = el.dataset.sante;
+    const titre = niv === 'critique' ? '🔴 À traiter en priorité'
+                : niv === 'attention' ? '🟠 Point d\'attention'
+                : '🟢 Rien de bloquant';
+    _santeTipEl.innerHTML = '<b>' + titre + '</b>'
+        + (raisons.length ? '<ul style="margin:.35rem 0 0;padding-left:1.1rem;">'
+            + raisons.map(r => '<li class="' + (_R_CLS[r.gravite] || '') + '">'
+                + escH(r.texte) + '</li>').join('') + '</ul>'
+            : '<div style="color:var(--text-muted);margin-top:.3rem;">Aucun point d\'attention</div>');
+    _santeTipEl.classList.add('show');
+    const r = el.getBoundingClientRect();
+    let x = r.right + 8, y = r.top;
+    const tw = _santeTipEl.offsetWidth, th = _santeTipEl.offsetHeight;
+    if (x + tw > window.innerWidth - 8) x = r.left - tw - 8;
+    if (y + th > window.innerHeight - 8) y = window.innerHeight - th - 8;
+    _santeTipEl.style.left = Math.max(8, x) + 'px';
+    _santeTipEl.style.top = Math.max(8, y) + 'px';
+}
+function hideSanteTip() { if (_santeTipEl) _santeTipEl.classList.remove('show'); }
+
 function initSortHeaders() {
-    const SORT_LABELS = { nom:'Appareil', type:'Type', ip:'IP / Réseau', user:'Utilisateur', garantie:'Garantie', statut:'État' };
+    const SORT_LABELS = { nom:'Appareil', type:'Type', sante:'Santé', ip:'IP / Réseau', user:'Utilisateur', garantie:'Garantie', statut:'État' };
     // Ce tableau ne passe pas par TriTable (tri.js) — il trie côté serveur via
     // sortBy(col)/rechargement de page — donc les mêmes attributs
     // d'accessibilité (scope, clavier, aria-sort) sont posés ici plutôt que
@@ -1019,7 +1089,7 @@ function initSortHeaders() {
     // Barre de statut de tri
     const bar = document.getElementById('sort-status');
     if (!bar) return;
-    const SORT_LABELS2 = { nom:'Appareil', type:'Type', ip:'IP / Réseau', user:'Utilisateur', garantie:'Garantie', statut:'État', marque:'Marque', os:'OS' };
+    const SORT_LABELS2 = { nom:'Appareil', type:'Type', sante:'Santé', ip:'IP / Réseau', user:'Utilisateur', garantie:'Garantie', statut:'État', marque:'Marque', os:'OS' };
     if (SORT_STATE.col !== 'ip' || SORT_STATE.dir !== 'asc') {
         document.getElementById('sort-col-name').textContent = SORT_LABELS2[SORT_STATE.col] || SORT_STATE.col;
         document.getElementById('sort-dir-name').textContent = SORT_STATE.dir === 'asc' ? '↑ croissant' : '↓ décroissant';
@@ -1037,6 +1107,7 @@ function sortBy(col) {
     FILTER_STATE.types.forEach(t => params.append('type', t));
     if (FILTER_STATE.statut) params.set('statut', FILTER_STATE.statut);
     if (FILTER_STATE.av)     params.set('av',     FILTER_STATE.av);
+    if (FILTER_STATE.sante)  params.set('sante',  FILTER_STATE.sante);
     window.location.href = '/appareils?' + params.toString();
 }
 
@@ -1046,6 +1117,7 @@ function resetTri() {
     FILTER_STATE.types.forEach(t => params.append('type', t));
     if (FILTER_STATE.statut) params.set('statut', FILTER_STATE.statut);
     if (FILTER_STATE.av)     params.set('av',     FILTER_STATE.av);
+    if (FILTER_STATE.sante)  params.set('sante',  FILTER_STATE.sante);
     const qs = params.toString();
     // Mettre à jour localStorage (sans le tri)
     if (qs) localStorage.setItem(_APP_FILTER_KEY, qs);
@@ -1117,7 +1189,8 @@ function restoreFilterUI() {
     }
     if (FILTER_STATE.types.length) updateMSBtn('filtre-type', 'Tous les types');
     // Afficher le bouton réinitialiser si des filtres sont actifs
-    const hasFilter = FILTER_STATE.types.length || FILTER_STATE.statut || FILTER_STATE.av;
+    const hasFilter = FILTER_STATE.types.length || FILTER_STATE.statut || FILTER_STATE.av
+                      || FILTER_STATE.sante;
     document.getElementById('btn-reset-filtres').style.display = hasFilter ? '' : 'none';
 }
 
@@ -1131,6 +1204,7 @@ function applyFilters() {
     const types  = getMSValues('filtre-type');
     const statut = document.getElementById('filtre-statut').value;
     const av     = document.getElementById('filtre-av').value;
+    const sante  = document.getElementById('filtre-sante').value;
     const params = new URLSearchParams();
     if (SORT_STATE.col !== 'ip' || SORT_STATE.dir !== 'asc') {
         params.set('sort', SORT_STATE.col);
@@ -1139,6 +1213,7 @@ function applyFilters() {
     types.forEach(t => params.append('type', t));
     if (statut) params.set('statut', statut);
     if (av)     params.set('av',     av);
+    if (sante)  params.set('sante',  sante);
     const qs = params.toString();
     // Mettre à jour localStorage avant de naviguer
     if (qs) localStorage.setItem(_APP_FILTER_KEY, qs);

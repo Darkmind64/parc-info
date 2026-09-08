@@ -1,23 +1,25 @@
 {
-  "version": "2.27.1",
-  "release_date": "2026-09-08",
+  "version": "2.28.0",
+  "release_date": "2026-09-09",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.27.1",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.27.1/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.28.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.28.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.28.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.28.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.28.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.28.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.28.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.28.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.28.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif : _fdb_corriger (reparation d'une table MAC deformee par un agent SNMP buggue) est desormais deterministe quand deux MAC de l'inventaire partagent le meme prefixe tronque. L'index de correspondance etait construit en iterant un set, dont l'ordre depend de PYTHONHASHSEED ; le representant de la collision signale a la vue baie (meta['ambigus']) pouvait donc changer d'un lancement a l'autre. Index construit sur sorted() : le representant est la plus petite MAC lexicalement. Aucun autre effet. Au passage, tests/test_diag_reseau.py est remis au vert (8 mocks perimes : _fdb_switch renvoie un 2-uplet, _snmp_walk a gagne max_vars=).",
+    "new_features": "Score de sante synthetique par appareil (croisement des donnees). Un feu tricolore ok / attention / critique + une liste de raisons actionnables, agrege depuis des signaux DEJA en base, sans aucune requete reseau : les points d'attention du collecteur systeme (disque, antivirus, TPM, pare-feu, BitLocker, fin de support Windows, certificats...), le cycle de vie cote inventaire (garantie expiree sans contrat de maintenance, materiel ancien, abonnement AV/EDR expire, collecte trop ancienne, equipement injoignable) et l'etat du diagnostic reseau (equipement SNMP muet, port de switch en erreur). Colonne 'sante' triable et filtrable sur la liste d'inventaire, avec une infobulle qui liste les raisons. Le score est mis en cache et recalcule apres une collecte, a l'ouverture de la liste, et par un balayage periodique.",
     "improvements": [
-      "Fix : _fdb_corriger deterministe sur collision de prefixe (index sur sorted(), plus l'ordre d'un set).",
-      "Tests : tests/test_diag_reseau.py remis au vert (mocks _fdb_switch / _snmp_walk resynchronises)."
+      "Inventaire : colonne de sante (pastille verte / orange / rouge) triable et filtrable, infobulle listant les raisons.",
+      "Sante : reutilise collector_core.build_alerts -- meme jugement que la fiche systeme et le rapport PDF.",
+      "Sante : cache dans appareils.sante_*, ecrit UNIQUEMENT ce qui a change (aucun bruit de synchronisation).",
+      "Reglages : sante_collecte_jours, sante_injoignable_jours, sante_regles_desactivees (couper une regle)."
     ]
   },
   "checksums": {
@@ -28,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.27.1"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.28.0"
 }
