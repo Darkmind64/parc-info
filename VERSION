@@ -1,9 +1,46 @@
-PARCINFO_VERSION=2.32.0
+PARCINFO_VERSION=2.32.1
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090905
+BUILD_NUMBER=2026090906
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.1 - Correctif : appareils qui disparaissent des ports de la baie au hasard
+#
+# Retour terrain : dans la vue d'activite de la baie, certains ports de switch
+# ou de routeur n'affichaient plus les appareils detectes -- pas toujours les
+# memes, un cycle sur deux, « lie au rafraichissement ».
+#
+# CAUSE : la table d'apprentissage MAC (FDB) est relevee en tache de fond et
+# mise en cache 150 s. Sur un agent SNMP un peu lent (frequent en PME), une
+# reponse GETBULK qui met > 1,2 s (timeout par datagramme) COUPE le parcours au
+# milieu de la table -- a un endroit different a chaque fois. Ce releve tronque
+# REMPLACAIT quand meme le cache complet : pendant 150 s, tous les ports dont
+# les MAC etaient dans la partie non lue perdaient leurs appareils.
+# Second cas : au retour sur l'onglet Baie, le 1er cycle relevait les LEDs mais
+# PAS la FDB -> un cycle avec toutes les infobulles vides.
+#
+# CORRECTIF (network_diag.py) :
+#  - timeout du walk FDB/ARP de fond : 1,2 s -> 3 s (_ACTIVITE_FDB_TIMEOUT). Le
+#    releve est fait toutes les 150 s, on peut etre patient. `_snmp_walk` (facade
+#    network_diag) transmet desormais un `timeout` a app._snmp_walk.
+#  - `_fusion_fdb(cache, frais)` (pur) : un releve INCOMPLET fusionne avec le
+#    dernier releve complet au lieu de le remplacer. Une MAC vue MAINTENANT fait
+#    autorite pour SON port (elle a pu bouger) ; une MAC connue seulement du
+#    cache est conservee (elle bouge peu -- meme principe que _ACTIVITE_FDB_PERIME).
+#  - `_maj_noms_interfaces` : un releve d'interfaces nettement plus court que le
+#    precedent (< 80 %) est fusionne, pas substitue (sinon des ports sortaient
+#    du mapping -> « appareils vus » vides).
+#  - `_relever_switch_activite` : au 1er cycle d'un visionnage (avec_fdb=False),
+#    sert la derniere FDB connue (_activite_fdb) si < _ACTIVITE_FDB_PERIME, au
+#    lieu d'une table vide.
+#  - Observabilite : `detail_sw` porte `fdb_nb_macs` / `fdb_incomplet` /
+#    `fdb_fusionne` ; le Moniteur affiche « table MAC N » (+ « INCOMPLETE » /
+#    « fusionnee ») ; une ligne de journal signale un releve incomplet
+#    (`_activite_fdb_tronq`, une fois).
+#
+# Tests : tests/test_baie_fdb_fusion.py (5). 418 tests pytest.
+#
+# ----------------------------------------------------------------------------
 # Version 2.32.0 - Baux DHCP releves a la source (Plan 1)
 #
 # ParcInfo lit la table des baux DHCP directement depuis le routeur / serveur

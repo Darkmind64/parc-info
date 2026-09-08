@@ -3708,7 +3708,11 @@ const MoniteurModal = {
                 if (sw.redemarre) ctx.push('<span style="color:var(--accent-orange,#f59e0b);">vient de redémarrer</span>');
                 else if (sw.uptime_s != null) ctx.push(fmtUptime(sw.uptime_s));
                 const ctxHead = ctx.length ? ' · ' + ctx.join(' · ') : '';
-                return `<div class="mon-sw-head">${escH(sw.sysname || sw.nom)} — ${escH(sw.ip)}${ctxHead} · poll ${sw.duree_poll_ms} ms${sw.dt_s ? ' · Δt ' + sw.dt_s + ' s' : ''} · comm. « ${escH(sw.communaute || '?')} » · compteurs ${sw.compteurs_64bits ? '64' : '32'} bits · ${sw.nb_ifindex_ethernet} interface(s) · ${sw.nb_ports_calibres}/${sw.nb_ports_mappes} calibré(s)${sw.nb_manques ? ' · ' + sw.nb_manques + ' manque(s)' : ''}${poeHead}</div>
+                const fdbTxt = sw.fdb_nb_macs != null
+                    ? ` · table MAC ${sw.fdb_nb_macs}${sw.fdb_fusionne ? ' (fusionnée)' : sw.fdb_incomplet ? ' (INCOMPLÈTE)' : ''}`
+                    : '';
+                return `<div class="mon-sw-head">${escH(sw.sysname || sw.nom)} — ${escH(sw.ip)}${ctxHead} · poll ${sw.duree_poll_ms} ms${sw.dt_s ? ' · Δt ' + sw.dt_s + ' s' : ''} · comm. « ${escH(sw.communaute || '?')} » · compteurs ${sw.compteurs_64bits ? '64' : '32'} bits · ${sw.nb_ifindex_ethernet} interface(s) · ${sw.nb_ports_calibres}/${sw.nb_ports_mappes} calibré(s)${fdbTxt}${sw.nb_manques ? ' · ' + sw.nb_manques + ' manque(s)' : ''}${poeHead}</div>
+                    ${sw.fdb_incomplet && !sw.fdb_fusionne ? '<div style="font-size:.66rem;color:var(--accent-orange,#f59e0b);margin:.2rem 0;">⚠ Relevé de la table d’apprentissage MAC incomplet ce cycle (agent SNMP lent) — certains ports peuvent temporairement ne pas montrer leurs appareils. Se corrige au relevé suivant.</div>' : ''}
                     ${pegge ? '<div style="font-size:.66rem;color:var(--accent-orange,#f59e0b);margin:.2rem 0;">⚠ Cet équipement bloque ses compteurs d’octets à 2 Go (agent SNMP défectueux) — l’activité est estimée sur les paquets/s seulement.</div>' : ''}
                     ${sw.nb_divergences ? '<div style="font-size:.66rem;color:var(--accent-orange,#f59e0b);margin:.2rem 0;">⚠ ' + sw.nb_divergences + ' port(s) où la topologie et le nom d’interface divergent — calibration à vérifier (marqués ⚠ ci-dessous).</div>' : ''}
                     <div style="font-size:.66rem;color:var(--text-muted);margin:.2rem 0;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;">

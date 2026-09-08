@@ -1,26 +1,26 @@
 {
-  "version": "2.32.0",
+  "version": "2.32.1",
   "release_date": "2026-09-09",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.0/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.0/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.0/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.32.1",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.1/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baux DHCP releves a la source. ParcInfo lit la table des baux directement depuis le routeur / serveur DHCP du client : association IP <-> MAC <-> hostname annonce, et surtout la distinction reservation (statique) / bail dynamique. Releve SNMP automatique pour un routeur Mikrotik ; sinon import d'un fichier dhcpd.leases (pfSense / OPNsense), dhcp.leases dnsmasq (OpenWrt) ou export CSV Windows Server -- format auto-detecte. Croisements : le hostname DHCP devient le nom candidat prioritaire a l'import d'un scan, une IP scannee differente du bail est journalisee (conflit), une reservation dont la MAC n'a aucune fiche est signalee comme appareil hors inventaire, l'encart DHCP de la fiche appareil signale un equipement d'infra en bail dynamique, et le champ 'serveur DHCP' de la fiche parc est confronte aux baux reellement releves.",
+    "new_features": "Correctif : vue d'activite de la baie -- certains ports de switch/routeur n'affichaient plus les appareils detectes, au hasard, un cycle sur deux. Cause : sur un agent SNMP un peu lent, une reponse GETBULK tardive coupait le releve de la table d'apprentissage MAC au milieu, a un endroit different a chaque fois -- et ce releve tronque remplacait quand meme le cache complet precedent. Corrige : timeout du releve de fond porte de 1,2 a 3 s ; un releve incomplet FUSIONNE desormais avec le dernier releve complet au lieu de le remplacer (une MAC vue maintenant fait autorite pour son port, une MAC connue seulement du cache est conservee -- elle bouge peu) ; meme logique pour la table des interfaces ; au retour sur l'onglet Baie, le premier cycle sert la derniere table connue au lieu d'une table vide. Le Moniteur affiche l'etat de la table MAC (nb d'adresses, 'incomplete' / 'fusionnee').",
     "improvements": [
-      "Baux DHCP : parseurs ISC / dnsmasq / Windows CSV (purs, auto-detection), relevé SNMP Mikrotik (mtxrDHCPLeaseTable).",
-      "Baux DHCP : panneau sur la page Scan reseau (import fichier ou texte colle, relevé SNMP a la demande, table IP/MAC/hostname/type, marqueur 'hors inventaire').",
-      "Baux DHCP : encart sur la fiche systeme, badge de verification sur le champ 'serveur DHCP' de la fiche parc.",
-      "Import de scan : le hostname annonce au serveur DHCP prime sur le NetBIOS ; conflit IP <-> bail trace dans l'historique.",
-      "Relevé SNMP periodique opt-in (dhcp_actif), respecte le mode terrain."
+      "Baie : releve FDB/ARP de fond -- timeout par datagramme 1,2 s -> 3 s (relevé toutes les 150 s, on peut etre patient).",
+      "Baie : `_fusion_fdb` -- un relevé de table MAC tronque fusionne avec le cache au lieu de le remplacer.",
+      "Baie : relevé d'interfaces nettement plus court que le precedent -> fusionne, pas substitue.",
+      "Baie : au retour sur l'onglet, le 1er cycle sert la derniere FDB connue (avant : infobulles vides un cycle).",
+      "Moniteur baie : ligne 'table MAC N' + marqueur INCOMPLETE / fusionnee ; journal signale un relevé incomplet."
     ]
   },
   "checksums": {
@@ -31,5 +31,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.1"
 }

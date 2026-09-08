@@ -945,11 +945,13 @@ _TYPES_EQUIP_SNMP = ('Switch', 'Switch/AP', 'Routeur/Pare-feu', 'NAS', 'Onduleur
 _TYPE_UPS = 'Onduleur / UPS'
 
 
-def _snmp_walk(oid_base, ip, communautes, max_vars=None, stats=None):
+def _snmp_walk(oid_base, ip, communautes, max_vars=None, stats=None, timeout=None):
     """Parcours SNMP (GETBULK v2c, repli GETNEXT, SNMPv3 en premier si
     configuré). `max_vars` : plafond de lignes ; `stats` : dict renseigné en
     sortie (`tronque`, `mode`) — sans lui une table trop grande était amputée
-    en silence (constat d'audit #05)."""
+    en silence (constat d'audit #05). `timeout` : délai par datagramme (défaut
+    1,2 s côté app) — à allonger pour un relevé de fond (FDB) sur un agent lent,
+    où une réponse GETBULK > 1,2 s tronquait la table au hasard d'un cycle."""
     try:
         from app import _snmp_walk as _w
         kw = {}
@@ -957,6 +959,8 @@ def _snmp_walk(oid_base, ip, communautes, max_vars=None, stats=None):
             kw['max_vars'] = max_vars
         if stats is not None:
             kw['stats'] = stats
+        if timeout is not None:
+            kw['timeout'] = timeout
         return _w(ip, oid_base, communautes, **kw) or {}
     except Exception:
         return {}
@@ -5701,6 +5705,10 @@ _ACTIVITE_DEBOUNCE      = 2       # cycles consécutifs demandant idle<->traffic
 _ACTIVITE_FDB_TTL       = 150.0   # s — cache de la table d'apprentissage MAC (bridge-MIB) par switch
 _ACTIVITE_FDB_BACKOFF   = 45.0    # s — attente avant de retenter un walk FDB infructueux
 _ACTIVITE_FDB_PERIME    = 900.0   # s — au-delà, on cesse de servir une FDB périmée (une MAC bouge peu)
+_ACTIVITE_FDB_TIMEOUT   = 3.0     # s — délai par datagramme du walk FDB/ARP : relevé de fond (TTL 150 s),
+                                 # on peut être patient. À 1,2 s, une réponse GETBULK tardive d'un agent
+                                 # lent tronquait la table → des ports « perdaient » leurs appareils un
+                                 # cycle sur deux, au hasard (retour terrain).
 _ACTIVITE_VOISINS_MAX   = 6       # noms d'appareils listés dans l'infobulle d'un port (au-delà : « +N »)
 _CPT_SENTINELLE_32      = {2**31 - 1, 2**32 - 1}   # valeurs "compteur indisponible" de certains agents
 
@@ -5750,6 +5758,7 @@ _activite_hostres    = {}   # ip -> (epoch, {logiciels, processus, stockage}) : 
 _activite_fdb_baseport = {} # ip -> (epoch, {bridge_port: ifIndex}) : dot1dBasePortIfIndex, quasi statique
 _activite_fdb_dialecte = {} # ip -> 'dot1q' | 'dot1d' | 'dot1q-vlan' : quel jeu FDB répond
 _activite_fdb_echec  = {}   # ip -> epoch du dernier walk FDB infructueux (backoff)
+_activite_fdb_tronq  = {}   # (cid, ip) -> bool : dernier relevé FDB incomplet ? (anti-répétition journal)
 _activite_infra_mac  = {}   # ip -> (epoch, set(mac)) : MAC propres du switch (base bridge + ifPhysAddress)
 _activite_echecs     = {}   # client_id -> nb d'échecs consécutifs de _cycle_activite
 _ACTIVITE_HIST_MAX   = 60   # échantillons conservés par port pour la sparkline
@@ -6031,6 +6040,16 @@ def _maj_noms_interfaces(ip, communautes):
             'ethernet': (t is None) or (t in _IFTYPE_ETHERNET),
         }
     if infos:
+        # Relevé nettement plus court que le précédent = walk tronqué (agent
+        # lent) : on FUSIONNE avec le cache plutôt que de perdre des interfaces
+        # (leurs ports sortiraient du mapping → « appareils vus » vides au
+        # hasard). Le nom/type/vitesse d'une interface ne bouge quasi jamais.
+        _ent = _activite_noms.get(ip)
+        _anc = _ent['infos'] if _ent and _ent.get('infos') else {}
+        if _anc and len(infos) < len(_anc) * 0.8:
+            fusion = dict(_anc)
+            fusion.update(infos)
+            infos = fusion
         _activite_noms[ip] = {'ts': time.time(), 'infos': infos}
     else:
         ent = _activite_noms.get(ip)
@@ -6550,7 +6569,8 @@ def _bridge_fdb_brute(ip, communautes, baseport_if, stats=None):
 
     def _walk_fdb(oid, comm):
         st = {}
-        f = _snmp_walk(oid, ip, comm, max_vars=_FDB_MAX_ENTREES, stats=st)
+        f = _snmp_walk(oid, ip, comm, max_vars=_FDB_MAX_ENTREES, stats=st,
+                       timeout=_ACTIVITE_FDB_TIMEOUT)
         if st.get('tronque') and stats is not None:
             stats['tronque'] = True
         return f
@@ -6603,6 +6623,26 @@ def _fdb_par_vlan(ip, communautes, baseport_if, _agrege, _walk_fdb):
     return out, vlans
 
 
+def _fusion_fdb(cache: dict, frais: dict) -> dict:
+    """Fusionne une table d'apprentissage MAC INCOMPLÈTE (`frais`, relevé tronqué
+    par un agent lent) avec le dernier relevé complet (`cache`). Règles :
+      - une MAC vue dans `frais` fait autorité pour SON port (elle a pu bouger) —
+        on la retire des autres ports du cache ;
+      - une MAC connue seulement du `cache` est conservée (elle bouge peu, même
+        principe que `_ACTIVITE_FDB_PERIME`).
+    `{ifIndex: set(mac)}` en entrée comme en sortie. Pur."""
+    frais_macs = {m for macs in frais.values() for m in macs}
+    fusion = {ifx: set(macs) for ifx, macs in cache.items()}
+    for ifx, macs in frais.items():
+        fusion.setdefault(ifx, set()).update(macs)
+    for ifx in list(fusion):
+        fusion[ifx] = {m for m in fusion[ifx]
+                       if m not in frais_macs or m in frais.get(ifx, set())}
+        if not fusion[ifx]:
+            del fusion[ifx]
+    return fusion
+
+
 def _fdb_switch(ip, communautes):
     """Table d'apprentissage MAC du switch : `({ifIndex: set(mac)}, info)` avec
     `info = {'vlans': {(ifIndex, mac): vid}, 'tronque': bool}`. Sources :
@@ -6622,7 +6662,8 @@ def _fdb_switch(ip, communautes):
         if bp_hit and (time.time() - bp_hit[0]) < _ACTIVITE_SYSINFO_TTL:
             baseport_if = bp_hit[1]
         else:
-            baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes, max_vars=600)
+            baseport_if = _snmp_walk(_OID_FDB_BASEPORT_IF, ip, communautes, max_vars=600,
+                                     timeout=_ACTIVITE_FDB_TIMEOUT)
             if baseport_if:
                 _activite_fdb_baseport[ip] = (time.time(), baseport_if)
             elif bp_hit:
@@ -6645,9 +6686,11 @@ def _fdb_switch(ip, communautes):
         # relevé plus large si elle est vide (probable routeur / switch L3).
         arp_cap = 150 if par_if else 800
         st_arp = {}
-        arp = _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes, max_rows=arp_cap, stats=st_arp)
+        arp = _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes, max_rows=arp_cap,
+                                stats=st_arp, timeout=_ACTIVITE_FDB_TIMEOUT)
         if not arp:
-            arp = _snmp_walk_octets(_OID_ARP_PHYS_2, ip, communautes, max_rows=arp_cap, stats=st_arp)
+            arp = _snmp_walk_octets(_OID_ARP_PHYS_2, ip, communautes, max_rows=arp_cap,
+                                    stats=st_arp, timeout=_ACTIVITE_FDB_TIMEOUT)
         if st_arp.get('tronque'):
             stats['tronque'] = True
         arp_macs = set()
@@ -6667,8 +6710,16 @@ def _fdb_switch(ip, communautes):
         # liste complète des vraies MAC du LAN — précieuse comme RÉFÉRENCE pour
         # réparer la FDB tronquée d'un switch voisin (ProCurve : 2 octets perdus,
         # mais les 4 premiers suffisent à retrouver la MAC entière dans l'ARP).
+        tronque = bool(stats.get('tronque'))
         info = {'vlans': vlans, 'pvid': pvid_par_ifx, 'arp_macs': arp_macs,
-                'tronque': bool(stats.get('tronque'))}
+                'tronque': tronque, 'fusionne': False}
+        if par_if and tronque and hit and (time.time() - hit[0]) < _ACTIVITE_FDB_PERIME:
+            # Relevé INCOMPLET (agent lent : une réponse GETBULK tardive coupe le
+            # parcours). Plutôt que de remplacer une table plus complète par une
+            # table amputée — ce qui faisait « disparaître » les appareils de
+            # certains ports un cycle sur deux, au hasard —, on FUSIONNE avec le
+            # dernier relevé.
+            par_if, info['fusionne'] = _fusion_fdb(hit[1], par_if), True
         if par_if:
             _activite_fdb[ip] = (time.time(), par_if, info)
             _activite_fdb_echec.pop(ip, None)
@@ -6808,6 +6859,7 @@ def _releve_mac_switch(ip, communautes, inv_mac, reference=None):
     meta['pvid'] = info.get('pvid') or {}
     meta['arp_macs'] = info.get('arp_macs') or set()
     meta['tronque_taille'] = bool(info.get('tronque'))
+    meta['fusionne'] = bool(info.get('fusionne'))
     if meta['tronque_taille']:
         meta['fiable'] = False
     return fdb, meta
@@ -7175,6 +7227,15 @@ def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
 
     try:
         fdb, fdb_meta = {}, {}
+        if not avec_fdb:
+            # 1er cycle d'un visionnage (LEDs d'abord, FDB au suivant) : plutôt
+            # que de renvoyer une FDB vide — les infobulles perdraient tous leurs
+            # « appareils vus » le temps d'un cycle, au retour sur l'onglet —, on
+            # sert la dernière table connue si elle n'est pas trop vieille.
+            _h = _activite_fdb.get(ip)
+            if _h and (time.time() - _h[0]) < _ACTIVITE_FDB_PERIME:
+                fdb = _fdb_corriger(_h[1], inv_mac,
+                                    str(_cfg(f'diag_fdb_mode:{ip}', '')))[0]
         if avec_fdb:
             # FDB en premier : quand elle est due (TTL long), le switch n'a pas
             # encore été martelé par les GETBULK du cycle — un agent lent lâche
@@ -7185,6 +7246,16 @@ def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
                                 f"déformée (agent SNMP) : {fdb_meta['reconnues']} "
                                 f"appareil(s) recoupé(s) avec l'inventaire "
                                 f"(hypothèse « {fdb_meta['transform']} »)", 'warn', ip))
+            elif fdb_meta.get('tronque_taille') and not fdb_meta.get('fusionne'):
+                # Relevé incomplet ET pas de cache récent à fusionner : des ports
+                # peuvent manquer leurs appareils ce cycle. Signalé une seule fois.
+                if not _activite_fdb_tronq.get((cid, ip)):
+                    journal.append((f"{nom} ({ip}) — relevé de la table MAC incomplet "
+                                    f"(agent SNMP lent) : certains ports peuvent manquer "
+                                    f"leurs appareils ce cycle", 'info', ip))
+                _activite_fdb_tronq[(cid, ip)] = True
+            elif fdb:
+                _activite_fdb_tronq[(cid, ip)] = False
         t0 = time.time()
         infos = _noms_interfaces(ip, communautes)
         _t_poll = time.time()
@@ -7422,6 +7493,7 @@ def _cycle_activite(clients):
                 mapping_par_slot = {} # slot_id switch -> {numero: ifindex}
                 ip_par_slot = {}      # slot_id switch -> ip
                 fdb_par_ip = {}       # ip -> {ifindex: set(mac)} : FDB live (câblage + voisins)
+                fdb_meta_par_ip = {}  # ip -> meta du relevé FDB (tronque_taille, fusionne, tronquee…)
                 inv_mac = {}          # mac normalisée -> (appareil_id, nom_machine, type_appareil)
                 if switchs:
                     _meta_aid = {}
@@ -7466,6 +7538,7 @@ def _cycle_activite(clients):
                     for _r in _releves:
                         poll_par_ip[_r['ip']] = _r['poll']
                         fdb_par_ip[_r['ip']] = _r['fdb']
+                        fdb_meta_par_ip[_r['ip']] = _r.get('fdb_meta') or {}
                         journal_ops.extend(_r['journal'])
                         if _r['calib']:
                             calib_a_appliquer.append(_r['calib'])
@@ -7698,6 +7771,9 @@ def _cycle_activite(clients):
                         'poe': bool(poe_ports), 'poe_alerte': poe_alerte,
                         'poe_total_w': poe.get('total_w'), 'poe_budget_w': poe.get('budget_w'),
                         'poe_nb_alimentes': sum(1 for x in poe_ports.values() if x['statut'] == 3),
+                        'fdb_nb_macs': sum(len(v) for v in (fdb_par_ip.get(ip) or {}).values()),
+                        'fdb_incomplet': bool(fdb_meta_par_ip.get(ip, {}).get('tronque_taille')),
+                        'fdb_fusionne': bool(fdb_meta_par_ip.get(ip, {}).get('fusionne')),
                         'calibre': calibre})
 
                 # ── prises murales d'un bandeau RJ : LED via le port de switch du
@@ -7768,7 +7844,8 @@ def _activite_loop():
                 if partis:      # structures par (client, …) d'un client qui ne regarde plus
                     pset = set(partis)
                     for reg in (_activite_switch_ok, _activite_etat_mappe, _activite_calib,
-                                _activite_hist, _activite_sut, _presence_baie):
+                                _activite_hist, _activite_sut, _presence_baie,
+                                _activite_fdb_tronq):
                         for k in [k for k in reg if k[0] in pset]:
                             reg.pop(k, None)
                     for c in pset:
