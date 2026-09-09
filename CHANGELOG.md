@@ -1,5 +1,27 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.7] - 2026-09-09 🔎
+
+### Baie de brassage — le bandeau d'information détaille le relevé SNMP
+
+Le bandeau (v2.32.6) était laconique sur l'activité SNMP (« démarrage du relevé… » puis « ⚡ 3 switchs · 12 ports actifs »). Il **détaille** maintenant le relevé :
+
+**Pendant le relevé** :
+- `⚡ relevé SNMP en cours · 2/3 switchs` — compteur qui avance ;
+- le 1ᵉʳ passage annonce `· 1ᵉʳ passage (référence des compteurs)` ;
+- chaque switch **déjà relevé** ce passage : `SW-Core ✓ 180 ms` / `SW-Test ✗ muet` ;
+- un switch qui **traîne** (agent SNMP lent — HP ProCurve 1810G, ~2 min) : `⏳ 45 s — un switch répond lentement…`.
+
+**Une fois prêt** :
+- ligne principale + `· relevé il y a N s` ;
+- **un segment par switch** : `SW-Edge · 4/6 actifs · 22 Mb/s · 1.4 s · 32 bits · 12 MAC · ⚠ 3 err` (ports actifs/up, débit, temps de poll, compteurs 32/64 bits, MAC apprises, erreurs) — limité à 6 switchs puis `+N switch(s)…` ;
+- `⚙ non calibré : SW-Edge — assistant dans le 📊 Moniteur` quand un switch n'est pas calibré ;
+- un échec répété est distingué d'un « SNMP désactivé ».
+
+Côté serveur : `network_diag._activite_progres[cid]` (phase / fait / total / `faits[]`) alimenté par `_cycle_activite` au fil du `ThreadPoolExecutor`, exposé par `activite_baie()` sous la clé `progres` ; les entrées de `equipements[]` portent en plus `muet` / `poll_ms` / `compteurs_64bits` / `fdb_nb_macs`. Côté page : `BaieInfo.set(cle, valeur)` accepte un tableau de segments.
+
+---
+
 ## [2.32.6] - 2026-09-09 🎛️
 
 ### Baie de brassage — bandeau d'information au-dessus du rack

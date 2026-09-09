@@ -301,8 +301,8 @@ def _chrono(label, fn, repet=1):
     N._activite_rechauffe[0] = 0
     for k in ('_activite_prev', '_activite_sut', '_activite_noms', '_activite_switch_ok',
               '_activite_etat_mappe', '_activite_hc', '_activite_resultat', '_activite_detail',
-              '_activite_sysinfo', '_activite_noms_froid', '_activite_poe', '_activite_capa_neg',
-              '_activite_capa_reprobe', '_activite_fdb'):
+              '_activite_progres', '_activite_sysinfo', '_activite_noms_froid', '_activite_poe',
+              '_activite_capa_neg', '_activite_capa_reprobe', '_activite_fdb'):
         try:
             getattr(N, k).clear()
         except Exception:

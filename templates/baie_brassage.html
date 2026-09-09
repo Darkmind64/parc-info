@@ -1732,11 +1732,16 @@ function toggleVerrouBaie() {
 // du brassage… — à étendre : scan, collecte). Rendu au-dessus du rack. Sans
 // message actif, affiche un résumé passif (nb d'équipements, en ligne).
 const BaieInfo = {
-    _msgs: {},                                        // cle -> {txt, ton}
+    _msgs: {},                                        // cle -> {txt, ton} | [{txt, ton}, …]
     _ordre: ['scan', 'collecte', 'activite', 'ping', 'brassage'],
-    set(cle, txt, ton) {
-        if (!txt) return this.clear(cle);
-        this._msgs[cle] = { txt, ton: ton || 'info' };
+    // `val` : une chaîne, un {txt, ton}, ou un tableau des deux (plusieurs
+    // segments pour une même clé — utilisé par le relevé SNMP : ligne
+    // principale + un segment par switch).
+    set(cle, val, ton) {
+        const vide = !val || (Array.isArray(val) && !val.length);
+        if (vide) return this.clear(cle);
+        const norm = x => typeof x === 'string' ? { txt: x, ton: ton || 'info' } : x;
+        this._msgs[cle] = Array.isArray(val) ? val.map(norm) : norm(val);
         this._rendre();
     },
     clear(cle) {
@@ -1754,9 +1759,15 @@ const BaieInfo = {
     _rendre() {
         const el = document.getElementById('baie-infob');
         if (!el) return;
-        const actifs = this._ordre.filter(c => this._msgs[c]).map(c => this._msgs[c]);
-        const items = actifs.length ? actifs : [this._resumePassif()];
-        el.innerHTML = items.map(m => `<span class="bi-item bi-${m.ton}">${escH(m.txt)}</span>`).join('');
+        let items = [];
+        for (const c of this._ordre) {
+            const m = this._msgs[c];
+            if (!m) continue;
+            Array.isArray(m) ? items.push(...m) : items.push(m);
+        }
+        if (!items.length) items = [this._resumePassif()];
+        el.innerHTML = items.map(m =>
+            `<span class="bi-item bi-${m.ton || 'info'}">${escH(m.txt)}</span>`).join('');
     },
 };
 
@@ -3500,30 +3511,81 @@ function _viderActivite() {
     });
 }
 
+// Détail d'un switch dans le bandeau : « SW-Core · 8/12 actifs · 62 Mb/s · 41 ms »
+function _segSwitch(e) {
+    if (e.muet) return { txt: `${e.nom} ✗ muet`, ton: 'err' };
+    let s = `${e.nom} · ${e.nb_actifs || 0}/${e.nb_ports_up || 0} actif${(e.nb_ports_up || 0) > 1 ? 's' : ''} · ${fmtDebit(e.debit_total_bps || 0)}`;
+    if (e.poll_ms) s += ` · ${e.poll_ms >= 1000 ? (e.poll_ms / 1000).toFixed(1) + ' s' : e.poll_ms + ' ms'}`;
+    if (e.compteurs_64bits === false) s += ' · 32 bits';
+    if (e.fdb_nb_macs) s += ` · ${e.fdb_nb_macs} MAC`;
+    if (e.erreurs) s += ` · ⚠ ${e.erreurs} err`;
+    return { txt: s, ton: e.erreurs ? 'warn' : (e.calibre ? 'info' : 'warn') };
+}
+
+function _ageTxt(ts) {
+    if (!ts) return '';
+    const s = Math.max(0, Math.round(Date.now() / 1000 - ts));
+    return s < 90 ? `${s} s` : `${Math.round(s / 60)} min`;
+}
+
 function majBandeauActivite(d) {
-    if (!d || d.actif !== true) {
-        if (d && d.actif === false)
-            BaieInfo.set('activite', '⚡ SNMP désactivé — active-le dans le diagnostic réseau', 'err');
-        else if (d && d.actif === null)
-            BaieInfo.set('activite', '⚡ démarrage du relevé SNMP… (deux passages nécessaires pour mesurer le trafic, ~1 min sur un switch lent)', 'muted');
-        else
-            BaieInfo.clear('activite');
+    if (!d || d.actif === false) {
+        if (!d) { BaieInfo.clear('activite'); return; }
+        BaieInfo.set('activite', [{
+            txt: d.motif === 'erreur_interne'
+                ? '⚡ relevé SNMP en échec répété — voir le 📊 Moniteur'
+                : '⚡ SNMP désactivé — active-le dans le diagnostic réseau',
+            ton: 'err' }]);
         return;
     }
+    const pr = d.progres || {};
+
+    // ── relevé SNMP EN COURS (1er passage, ou cycle en train de tourner) ──
+    if (d.actif === null || pr.phase === 'releve') {
+        const parts = [];
+        const tot = pr.total || 0, fait = pr.fait || 0;
+        let tete = '⚡ relevé SNMP en cours';
+        if (tot) tete += ` · ${fait}/${tot} switch${tot > 1 ? 's' : ''}`;
+        if (pr.cycle === 0) tete += ' · 1ᵉʳ passage (référence des compteurs)';
+        else if (pr.avec_fdb === false) tete += ' · trafic (table MAC au passage suivant)';
+        parts.push({ txt: tete, ton: 'muted' });
+        // switchs déjà relevés ce passage (nom, durée, muet ?)
+        for (const s of (pr.faits || [])) {
+            parts.push({ txt: `${s.nom} ${s.ok ? '✓' : '✗ muet'}${s.ms ? ` ${s.ms >= 1000 ? (s.ms / 1000).toFixed(1) + ' s' : s.ms + ' ms'}` : ''}`,
+                         ton: s.ok ? 'ok' : 'warn' });
+        }
+        // un switch traîne (agent lent — HP 1810G ~2 min)
+        if (pr.depuis && fait < tot) {
+            const sec = Math.round(Date.now() / 1000 - pr.depuis);
+            if (sec >= 8) parts.push({ txt: `⏳ ${_ageTxt(pr.depuis)} — un switch répond lentement…`, ton: 'warn' });
+        }
+        BaieInfo.set('activite', parts);
+        return;
+    }
+
+    // ── relevé prêt ──
     const eqs = d.equipements || [];
     if (!eqs.length) {
-        BaieInfo.set('activite', d.motif === 'sans_reponse'
-            ? `⚡ ${d.nb_switchs} switch${d.nb_switchs > 1 ? 's' : ''} dans la baie — aucune réponse SNMP (communauté / pare-feu / SNMP désactivé sur l'équipement ?)`
-            : `⚡ Aucun switch de la baie associé à un appareil avec adresse IP — reliez le slot du switch à sa fiche appareil`, 'warn');
+        BaieInfo.set('activite', [{ txt: d.motif === 'sans_reponse'
+            ? `⚡ ${d.nb_switchs} switch${d.nb_switchs > 1 ? 's' : ''} dans la baie — aucune réponse SNMP (communauté / pare-feu / SNMP coupé sur l'équipement ?)`
+            : `⚡ Aucun switch de la baie relié à une fiche appareil avec adresse IP — reliez le slot du switch à sa fiche`, ton: 'warn' }]);
         return;
     }
     const nbActifs = eqs.reduce((n, e) => n + (e.nb_actifs || 0), 0);
     const debit = eqs.reduce((n, e) => n + (e.debit_total_bps || 0), 0);
     const cad = (d.cadence_s && d.cadence_s > 3) ? ` · maj ~${d.cadence_s} s` : '';
-    BaieInfo.set('activite',
-        `⚡ ${eqs.length} switch${eqs.length > 1 ? 's' : ''} · ${nbActifs} port${nbActifs > 1 ? 's' : ''} actif${nbActifs > 1 ? 's' : ''} · ${fmtDebit(debit)}${cad}`
-        + (d.calibre ? '' : ' · non calibré'),
-        d.calibre ? 'ok' : 'warn');
+    const age = _ageTxt(d.ts);
+    const parts = [{
+        txt: `⚡ ${eqs.length} switch${eqs.length > 1 ? 's' : ''} · ${nbActifs} port${nbActifs > 1 ? 's' : ''} actif${nbActifs > 1 ? 's' : ''} · ${fmtDebit(debit)}${cad}${age ? ` · relevé il y a ${age}` : ''}`,
+        ton: d.calibre ? 'ok' : 'warn' }];
+    // détail par switch (limité pour ne pas noyer le bandeau)
+    const LIM = 6;
+    eqs.slice(0, LIM).forEach(e => parts.push(_segSwitch(e)));
+    if (eqs.length > LIM) parts.push({ txt: `+${eqs.length - LIM} switch(s)…`, ton: 'muted' });
+    // ports non calibrés : nomme les switchs concernés
+    const nonCal = eqs.filter(e => !e.muet && !e.calibre).map(e => e.nom);
+    if (nonCal.length) parts.push({ txt: `⚙ non calibré : ${nonCal.join(', ')} — assistant dans le 📊 Moniteur`, ton: 'warn' });
+    BaieInfo.set('activite', parts);
 }
 
 async function chargerActivite() {
