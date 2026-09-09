@@ -711,6 +711,79 @@ verifier(_rb.get('1.3.6.1.2.1.31.1.1.1.1') == {'1': 'Gi1/0/1', '2': 'Gi1/0/2', '
          "GETBULK 2 colonnes, réponse en ordre colonne-majeur -> attribution par préfixe (pas par position)",
          str(_rb))
 
+print('\n=== 19bis. _snmp_walk / _snmp_bulk_cols : une réponse perdue -> retransmission, pas repli ===')
+# Sur un lien chargé, une réponse GETBULK perdue faisait tomber tout le walk sur
+# le repli (GETNEXT par ligne, ~25x plus de paquets). Une retransmission unique
+# sur silence évite cet effet de falaise.
+
+
+def _agent_perd_n(sock, table_getnext, n_a_perdre):
+    """Agent GETNEXT/GETBULK qui IGNORE les `n_a_perdre` premières requêtes
+    (simule des pertes UDP) puis répond normalement."""
+    perdus = [0]
+    while True:
+        try:
+            data, exp = sock.recvfrom(65535)
+        except OSError:
+            return
+        if perdus[0] < n_a_perdre:
+            perdus[0] += 1
+            continue
+        try:
+            _, corps, _ = A._ber_lire_tlv(data, 0)
+            p = 0
+            _, _v, p = A._ber_lire_tlv(corps, p)
+            _, _c, p = A._ber_lire_tlv(corps, p)
+            _tag, pdu, _ = A._ber_lire_tlv(corps, p)
+            pp = 0
+            _, reqid, pp = A._ber_lire_tlv(pdu, pp)
+            _, _e, pp = A._ber_lire_tlv(pdu, pp)
+            _, _ei, pp = A._ber_lire_tlv(pdu, pp)
+            _, vbl, pp = A._ber_lire_tlv(pdu, pp)
+            bp = 0
+            _, vb, bp = A._ber_lire_tlv(vbl, bp)
+            bbp = 0
+            _, ob, bbp = A._ber_lire_tlv(vb, bbp)
+            demande = A._ber_decoder_oid(ob)
+            suivant = next((t for t in table_getnext
+                            if _oid_key(t[0]) > _oid_key(demande)), None)
+            oid_r, tag_r, val_r = suivant if suivant else (demande, 0x82, b'')
+            vb_r = A._ber_sequence(0x30, A._ber_oid(oid_r) + bytes([tag_r])
+                                   + A._ber_longueur(len(val_r)) + val_r)
+            pdu_r = A._ber_sequence(0xa2, A._ber_sequence(0x02, reqid) + A._ber_entier(0)
+                                   + A._ber_entier(0) + A._ber_sequence(0x30, vb_r))
+            sock.sendto(A._ber_sequence(0x30, A._ber_entier(1)
+                                       + A._ber_chaine('public') + pdu_r), exp)
+        except Exception:
+            pass
+
+
+_T19b = sorted([
+    ('1.3.6.1.2.1.2.2.1.2.1', 0x04, b'Gi1/0/1'),
+    ('1.3.6.1.2.1.2.2.1.2.2', 0x04, b'Gi1/0/2'),
+    ('1.3.6.1.2.1.2.2.1.3.1', 0x02, b'\x06'),
+], key=lambda t: _oid_key(t[0]))
+
+_s19b = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+_s19b.bind(('127.0.0.1', 0))
+_p19b = _s19b.getsockname()[1]
+_th.Thread(target=_agent_perd_n, args=(_s19b, _T19b, 1), daemon=True).start()
+_r19b = A._snmp_walk('127.0.0.1', '1.3.6.1.2.1.2.2.1.2', ['public'], timeout=0.6, port=_p19b)
+_s19b.close()
+verifier(_r19b == {'1': 'Gi1/0/1', '2': 'Gi1/0/2'},
+         "1re requête perdue -> retransmise -> walk complet malgré tout", str(_r19b))
+
+# Agent totalement muet (GETBULK initial + retransmission + GETNEXT initial +
+# retransmission tous perdus) : abandon propre ({}), pas de boucle infinie.
+_s19c = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+_s19c.bind(('127.0.0.1', 0))
+_p19c = _s19c.getsockname()[1]
+_th.Thread(target=_agent_perd_n, args=(_s19c, _T19b, 4), daemon=True).start()
+_r19c = A._snmp_walk('127.0.0.1', '1.3.6.1.2.1.2.2.1.2', ['public'], timeout=0.35, port=_p19c)
+_s19c.close()
+verifier(_r19c == {}, "silence total malgré retransmissions -> abandon propre ({})", str(_r19c))
+
+
 print('\n=== 20. Cartographie : ni blocage sur un agent muet, ni sur un agent lent ===')
 import time as _t20
 

@@ -64,8 +64,15 @@ _SYS_DESCR      = '1.3.6.1.2.1.1.1.0'
 _IFTYPE_ETHERNET = frozenset({6, 7, 62, 69, 117})
 
 # Colonnes selon les besoins déclarés.
-_COLS_BASE = (_IF_DESCR, _IF_TYPE, _IF_NAME, _IF_ALIAS, _IF_OPER, _IF_ADMIN,
-              _IF_SPEED, _IF_HIGHSPEED)
+# _COLS_META : métadonnées d'interface QUASI STATIQUES (nom, description, type,
+#   alias, vitesse nominale). Ne changent qu'à un changement de câblage /
+#   firmware / insertion de module → servies d'un cache mémoire, PAS re-parcourues
+#   à chaque cycle SNMP de 120 s (gain ~40 % de varbinds/cycle sur un switch
+#   48 ports interrogé sur ~20 colonnes).
+# _COLS_ETAT : état d'interface — varie d'un cycle à l'autre (lien up/down,
+#   admin) → toujours relevé.
+_COLS_META = (_IF_DESCR, _IF_TYPE, _IF_NAME, _IF_ALIAS, _IF_SPEED, _IF_HIGHSPEED)
+_COLS_ETAT = (_IF_OPER, _IF_ADMIN)
 _COLS_COMPTEURS = (_IF_IN_ERRORS, _IF_OUT_ERRORS, _IF_IN_DISCARDS, _IF_OUT_DISCARDS,
                    _IF_HCIN, _IF_HCOUT, _IF_IN_OCTETS, _IF_OUT_OCTETS)
 _COLS_DOT3 = (_DOT3_ALIGN, _DOT3_FCS, _DOT3_LATECOLL, _DOT3_EXCCOLL, _DOT3_DUPLEX)
@@ -81,6 +88,35 @@ _TIMEOUT_COL = 1.5
 # ─── Cache mémoire des derniers relevés (pour releve_frais / la vue baie) ─────
 _cache: dict[str, 'ReleveEquipement'] = {}
 _cache_lock = threading.Lock()
+
+# ─── Cache des métadonnées d'interface quasi statiques (voir _COLS_META) ──────
+#     ip -> (monotonic_au_relevé, {oid_base: {suffixe: valeur}})
+_meta_cache: dict[str, tuple] = {}
+_meta_cache_lock = threading.Lock()
+_META_TTL_DEFAUT = 900.0        # s — ≈ 7 cycles SNMP, aligné sur la cadence topo
+
+
+def _meta_ttl() -> float:
+    try:
+        import network_diag
+        return float(max(60, network_diag._cfg_int('diag_snmp_meta_ttl_s',
+                                                   int(_META_TTL_DEFAUT))))
+    except Exception:
+        return _META_TTL_DEFAUT
+
+
+def _meta_frais(ip: str):
+    with _meta_cache_lock:
+        ent = _meta_cache.get(ip)
+    if ent and (time.monotonic() - ent[0]) <= _meta_ttl():
+        return ent[1]
+    return None
+
+
+def _meta_stocker(ip: str, meta: dict):
+    if meta.get(_IF_DESCR) or meta.get(_IF_NAME):
+        with _meta_cache_lock:
+            _meta_cache[ip] = (time.monotonic(), meta)
 
 
 @dataclass
@@ -171,7 +207,8 @@ def _assembler(ip: str, data: dict, besoin_dot3: bool) -> tuple[dict, dict]:
     return equipement, interfaces
 
 
-def _collecter_un(ip: str, communautes, besoins: frozenset, deadline: float) -> ReleveEquipement:
+def _collecter_un(ip: str, communautes, besoins: frozenset, deadline: float,
+                  rafraichir_meta: bool = False) -> ReleveEquipement:
     r = ReleveEquipement(ip=ip)
     try:
         from app import _snmp_presence
@@ -186,20 +223,67 @@ def _collecter_un(ip: str, communautes, besoins: frozenset, deadline: float) -> 
         r.snmp_ok = False
         return r
 
-    cols = list(_COLS_BASE)
-    if 'compteurs' in besoins:
-        cols += list(_COLS_COMPTEURS)
     besoin_dot3 = 'dot3' in besoins
+    # Colonnes relevées à CHAQUE cycle : état + compteurs (+ dot3) + sysUpTime.
+    cols_cycle = list(_COLS_ETAT)
+    if 'compteurs' in besoins:
+        cols_cycle += list(_COLS_COMPTEURS)
     if besoin_dot3:
-        cols += list(_COLS_DOT3)
-    cols.append(_SYS_UPTIME_B)
+        cols_cycle += list(_COLS_DOT3)
+    cols_cycle.append(_SYS_UPTIME_B)
 
-    try:
-        from app import _snmp_bulk_cols
-        data = _snmp_bulk_cols(ip, cols, communautes, timeout=_TIMEOUT_COL) or {}
-    except Exception:
-        logger.debug('netdiag.collect: GETBULK %s en échec', ip, exc_info=True)
-        data = {}
+    # Métadonnées quasi statiques : servies du cache si fraîches (une passe de
+    # GETBULK en moins par cycle). Sinon relevées avec le reste et mémorisées.
+    meta = None if rafraichir_meta else _meta_frais(ip)
+    cols = list(cols_cycle) if meta is not None else (list(_COLS_META) + cols_cycle)
+
+    def _bulk(colonnes):
+        try:
+            from app import _snmp_bulk_cols
+            return _snmp_bulk_cols(ip, colonnes, communautes, timeout=_TIMEOUT_COL) or {}
+        except Exception:
+            logger.debug('netdiag.collect: GETBULK %s en échec', ip, exc_info=True)
+            return {}
+
+    data = _bulk(cols)
+    fournit_cycle = any(data.get(c) for c in _COLS_ETAT) or bool(data.get(_IF_HCIN)) \
+        or bool(data.get(_IF_IN_OCTETS)) or bool(data.get(_IF_IN_ERRORS))
+
+    if meta is not None:
+        if not fournit_cycle:
+            # Cache présent mais l'agent n'a rien rendu ce cycle : NE PAS
+            # fabriquer un relevé à partir des seules métadonnées en cache.
+            r.snmp_ok = False
+            r.motif = 'aucune réponse SNMP au relevé (agent injoignable ce cycle)'
+            return r
+        # Un port encore inconnu apparaît dans les compteurs (module inséré,
+        # membre de stack ajouté) → le cache ne le couvre pas, on le rafraîchit
+        # tout de suite plutôt que d'attendre l'expiration du TTL.
+        connus = set(meta.get(_IF_DESCR, {})) | set(meta.get(_IF_NAME, {}))
+        vus = {s for c in (_IF_OPER, _IF_HCIN, _IF_IN_OCTETS, _IF_IN_ERRORS)
+               for s in data.get(c, {})}
+        if vus - connus:
+            m2 = _bulk(list(_COLS_META))
+            if m2.get(_IF_DESCR) or m2.get(_IF_NAME):
+                meta = m2
+                _meta_stocker(ip, m2)
+        # Fusion : les métadonnées du cache ne sont réinjectées que pour les
+        # ports encore VUS ce cycle (une entrée oper/admin/compteur fraîche) —
+        # un port retiré (module débranché) ne doit pas ressurgir en fantôme
+        # « up, 0 trafic » jusqu'à l'expiration du TTL.
+        live = set()
+        for c in (_IF_OPER, _IF_ADMIN, _IF_HCIN, _IF_HCOUT, _IF_IN_OCTETS,
+                  _IF_OUT_OCTETS, _IF_IN_ERRORS, _IF_OUT_ERRORS):
+            live |= set(data.get(c, {}))
+        for c, vals in meta.items():
+            fusion = dict(data.get(c) or {})
+            for s, v in vals.items():
+                if s in live:
+                    fusion.setdefault(s, v)
+            data[c] = fusion
+    elif data.get(_IF_DESCR) or data.get(_IF_NAME):
+        _meta_stocker(ip, {c: data[c] for c in _COLS_META if data.get(c)})
+
     if not data.get(_IF_DESCR) and not data.get(_IF_NAME):
         r.snmp_ok = False
         r.motif = motif or 'SNMP lisible mais aucune interface exposée'
@@ -222,7 +306,7 @@ def _collecter_un(ip: str, communautes, besoins: frozenset, deadline: float) -> 
 
 def balayer(client_id: int, *, besoins=('compteurs',), budget_s: float = 0.0,
             communautes=None, equipements=None, workers: int | None = None,
-            inclure_ups: bool = False) -> ResultatBalayage:
+            inclure_ups: bool = False, rafraichir_meta: bool = False) -> ResultatBalayage:
     """Balaye en parallèle tous les équipements SNMP du client.
 
     `besoins` ⊆ {'compteurs', 'dot3', 'sysinfo'} — quelles colonnes relever.
@@ -231,6 +315,9 @@ def balayer(client_id: int, *, besoins=('compteurs',), budget_s: float = 0.0,
     silence.
     `equipements` : liste `[(appareil_id, ip, type_appareil)]` déjà résolue
     (sinon lue depuis l'inventaire). `inclure_ups` : garder les onduleurs.
+    `rafraichir_meta` : force le relevé des métadonnées d'interface quasi
+    statiques (nom/description/alias/vitesse) au lieu de servir le cache —
+    normalement inutile (TTL `diag_snmp_meta_ttl_s` + détection de port ajouté).
     """
     t0 = time.time()
     besoins = frozenset(besoins)
@@ -281,7 +368,8 @@ def balayer(client_id: int, *, besoins=('compteurs',), budget_s: float = 0.0,
 
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers,
                                                  thread_name_prefix='DiagCollect')
-    futurs = {pool.submit(_collecter_un, ip, communautes, besoins, deadline): (aid, ip, ta)
+    futurs = {pool.submit(_collecter_un, ip, communautes, besoins, deadline,
+                          rafraichir_meta): (aid, ip, ta)
               for aid, ip, ta in uniques}
     try:
         restant = (deadline - time.time()) if deadline else None
@@ -329,3 +417,5 @@ def releve_frais(ip: str, max_age: float = 12.0) -> ReleveEquipement | None:
 def vider_cache():
     with _cache_lock:
         _cache.clear()
+    with _meta_cache_lock:
+        _meta_cache.clear()

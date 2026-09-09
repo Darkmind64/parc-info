@@ -17,7 +17,7 @@ paresseusement depuis `app`) :
 
 | Module | Rôle |
 |--------|------|
-| `netdiag/collect.py` | **Collecteur SNMP unifié** : `balayer(client_id, besoins, budget_s)` relève chaque équipement en **une passe GETBULK multi-colonnes**, en parallèle (`ThreadPoolExecutor`, `diag_snmp_workers`), sonde `_snmp_presence` en tête, `deadline` propagée. Remplace les 3 balayages SNMP indépendants d'avant (palier 3 séquentiel, palier 4, vue baie). `releve_frais(ip, max_age)` sert un relevé récent sans re-poller. |
+| `netdiag/collect.py` | **Collecteur SNMP unifié** : `balayer(client_id, besoins, budget_s)` relève chaque équipement en **une passe GETBULK multi-colonnes**, en parallèle (`ThreadPoolExecutor`, `diag_snmp_workers`), sonde `_snmp_presence` en tête, `deadline` propagée. Remplace les 3 balayages SNMP indépendants d'avant (palier 3 séquentiel, palier 4, vue baie). `releve_frais(ip, max_age)` sert un relevé récent sans re-poller. **v2.32.4** : les métadonnées d'interface quasi statiques (`_COLS_META` : ifDescr/ifName/ifAlias/ifType/vitesses) sont servies d'un cache mémoire (`_meta_cache`, TTL `diag_snmp_meta_ttl_s` 900 s) au lieu d'être re-parcourues chaque cycle ; seuls `_COLS_ETAT` (oper/admin) + compteurs sont relevés systématiquement (~40 % de varbinds/cycle en moins). Refresh ciblé si un port inconnu apparaît ; un port retiré ne ressurgit pas (fusion filtrée sur les suffixes vus ce cycle). |
 | `netdiag/analyse.py` | **Fonctions pures** `relevé → findings` + `classer_erreur()` : étiquette chaque port en clair (*couche physique (CRC/FCS)* / *duplex mismatch* / *rejets (mémoire tampon / saturation)* / *cause indéterminée*) + conseil. |
 | `netdiag/events.py` | **Auto-résolution** : un évènement de port (`port_crc`, `duplex_mismatch`…) se résout seul si sa condition n'a pas reparu depuis `diag_snmp_auto_resolution_s` sur un équipement toujours relevé. |
 | `netdiag/etat.py` | **Read models** de l'interface : `verdict()` (bandeau) et `trafic()` (écran « Trafic & erreurs ») — lisent `diag_etat_equipement`/`diag_etat_port`, aucun recalcul. `pour_appareil()` alimente l'encart de la fiche appareil. |
@@ -372,6 +372,11 @@ espacée repart à froid.
   (plafond interne `max_rows × nb_colonnes` varbinds) — auparavant 600 varbinds,
   soit ~30 ports seulement sur un switch interrogé sur 20 colonnes (palier 3 +
   topologie), la moitié de la table amputée **en silence**.
+  **v2.32.4** : `_snmp_walk` et `_snmp_bulk_cols._un_parcours` **retransmettent
+  une fois** (même request-id) sur silence avant de basculer sur le repli — une
+  réponse GETBULK perdue sur un lien chargé faisait sinon abandonner la méthode
+  et repartir de zéro (GETNEXT par ligne, walk par colonne). Les réponses
+  tardives à la requête précédente restent drainées.
 - **Réponse partielle** (v2.19.15) : si la colonne `ifOperStatus` manque pour un
   port (réponse GETBULK tronquée, ou démarrage où 10 colonnes sont demandées le
   temps que `_activite_hc` se fixe) alors que les octets répondent,

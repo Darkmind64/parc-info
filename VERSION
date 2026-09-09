@@ -1,9 +1,53 @@
-PARCINFO_VERSION=2.32.3
+PARCINFO_VERSION=2.32.4
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090908
+BUILD_NUMBER=2026090909
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.4 - Collecte SNMP : cache des metadonnees + retransmission
+#
+# Suite de l'audit reseau (2.32.3). Deux optimisations de performance dans la
+# couche SNMP, sans changement de comportement fonctionnel.
+#
+# 1. CACHE DES METADONNEES D'INTERFACE QUASI STATIQUES
+#    `netdiag.collect.balayer` re-parcourait a CHAQUE cycle SNMP (120 s) les
+#    colonnes ifDescr / ifName / ifAlias / ifType / ifSpeed / ifHighSpeed en
+#    plus des compteurs -- alors que seuls les compteurs et l'etat oper/admin
+#    changent d'un cycle a l'autre. Ces metadonnees sont desormais servies d'un
+#    cache memoire (`collect._meta_cache`, TTL `diag_snmp_meta_ttl_s` = 900 s
+#    ~= 7 cycles, aligne sur la cadence topo). Rafraichi :
+#      - a l'expiration du TTL ;
+#      - immediatement si un port encore inconnu apparait dans les compteurs
+#        (module insere, membre de stack ajoute) -- un 2e GETBULK cible sur les
+#        seules colonnes metadonnees, dans le meme cycle ;
+#      - sur demande (`balayer(rafraichir_meta=True)`).
+#    Un port RETIRE ne ressurgit pas en fantome : les metadonnees en cache ne
+#    sont reinjectees que pour les ports encore vus ce cycle (entree oper/admin/
+#    compteur fraiche). Un agent muet ce cycle -> releve muet, jamais un faux
+#    releve bati sur le seul cache.
+#    Gain : ~40 % de varbinds en moins par cycle sur un switch 48 ports
+#    interroge sur ~20 colonnes.
+#
+# 2. RETRANSMISSION UNIQUE SUR REPONSE SNMP PERDUE
+#    `app._snmp_walk` et `app._snmp_bulk_cols` : une reponse GETBULK perdue en
+#    cours de balayage (lien charge, switch qui rate-limite le SNMP) faisait
+#    ABANDONNER la methode et repartir de ZERO sur le repli -- GETNEXT par
+#    ligne, puis walk par colonne : ~25x plus de paquets. Un silence declenche
+#    maintenant UNE retransmission de la meme requete (meme request-id) avant
+#    de basculer sur le repli. Les reponses tardives a la requete PRECEDENTE
+#    restent drainees (boucle de 4) -- les associer decalerait le walk (ports
+#    fantomes, valeurs repetees). Un silence total malgre la retransmission ->
+#    abandon propre, comme avant.
+#
+# Nouvelle cle de config : `diag_snmp_meta_ttl_s` (900). La baisser si le
+# cablage bouge tres souvent.
+#
+# Tests : tests/test_netdiag_collect.py (+6 : cache 2 cycles, port ajoute,
+# agent muet, port retire, rafraichir_meta), test_diagnostic_reseau.py 19bis
+# (perte -> retransmission -> walk complet ; silence total -> {}).
+#
+# ---------------------------------------------------------------------------
+#
 # Version 2.32.3 - Audit approfondi des fonctionnalites reseau -> 4 correctifs
 #
 # Demande : verification poussee des fonctionnalites reseau apres les correctifs

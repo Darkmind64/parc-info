@@ -156,6 +156,125 @@ def test_balayer_exclut_ups_par_defaut(bouchons):
     assert list(res.releves) == ['10.0.0.2']
 
 
+def test_meta_cache_seconde_passe_ne_reparcourt_pas_les_metadonnees(bouchons):
+    """2e cycle : les colonnes quasi statiques (ifDescr/ifName/ifAlias/vitesse)
+    ne sont PAS redemandées, mais le relevé reste complet (servi du cache)."""
+    eq = [(10, '10.0.0.1', 'Switch')]
+    collect.balayer(0, besoins=('compteurs', 'dot3'), communautes=['public'], equipements=eq)
+    collect.balayer(0, besoins=('compteurs', 'dot3'), communautes=['public'], equipements=eq)
+    bases_c1 = set(bouchons['bulk'][0][1])
+    bases_c2 = set(bouchons['bulk'][1][1])
+    assert collect._IF_DESCR in bases_c1 and collect._IF_NAME in bases_c1
+    assert collect._IF_DESCR not in bases_c2 and collect._IF_ALIAS not in bases_c2
+    assert collect._IF_OPER in bases_c2 and collect._IF_HCIN in bases_c2   # état + compteurs toujours
+    # relevé du 2e cycle complet malgré tout
+    rv = collect.balayer(0, besoins=('compteurs',), communautes=['public'],
+                         equipements=eq).releves['10.0.0.1']
+    p1 = next(p for p in rv.equipement['ports'] if p['index'] == 1)
+    assert p1['alias'] == 'PC-Compta' and p1['speed_mbps'] == 1000 and p1['nom'] == 'Gi1/0/1'
+
+
+def test_meta_cache_rafraichi_si_port_ajoute(monkeypatch):
+    """Un port qui apparaît dans les compteurs et pas dans le cache force un
+    relevé neuf des métadonnées dans le même cycle."""
+    import app as A
+    monkeypatch.setattr(A, '_snmp_presence',
+                        lambda ip, c=('public',), port=161, timeout=1.2: (True, True, 'ok'))
+    monkeypatch.setattr(A, '_snmp_get_typed',
+                        lambda ip, oids, communaute='public', timeout=1.0, port=161, **k: {})
+    etat = {'ports': 4}
+    bulk_appels = []
+
+    def _bulk(ip, bases, comm=('public',), timeout=1.5, **k):
+        bulk_appels.append(tuple(bases))
+        r = range(1, etat['ports'] + 1)
+        t = {
+            collect._IF_DESCR: {str(i): f'Gi1/0/{i}' for i in r},
+            collect._IF_NAME:  {str(i): f'Gi1/0/{i}' for i in r},
+            collect._IF_TYPE:  {str(i): 6 for i in r},
+            collect._IF_OPER:  {str(i): 1 for i in r},
+            collect._IF_ADMIN: {str(i): 1 for i in r},
+            collect._IF_HCIN:  {str(i): 10 * i for i in r},
+            collect._IF_HCOUT: {str(i): 10 * i for i in r},
+        }
+        return {b: dict(t.get(b, {})) for b in bases}
+
+    monkeypatch.setattr(A, '_snmp_bulk_cols', _bulk)
+    collect.vider_cache()
+    eq = [(10, '10.0.0.1', 'Switch')]
+    collect.balayer(0, communautes=['public'], equipements=eq)          # cache 4 ports
+    etat['ports'] = 6                                                   # 2 ports ajoutés
+    bulk_appels.clear()
+    rv = collect.balayer(0, communautes=['public'], equipements=eq).releves['10.0.0.1']
+    # un 2e GETBULK métadonnées a été déclenché dans le cycle
+    assert any(collect._IF_DESCR in b and collect._IF_OPER not in b for b in bulk_appels)
+    assert {p['index'] for p in rv.equipement['ports']} == {1, 2, 3, 4, 5, 6}
+    assert all(p['nom'] == f"Gi1/0/{p['index']}" for p in rv.equipement['ports'])
+
+
+def test_meta_cache_agent_muet_ne_fabrique_pas_de_releve(monkeypatch):
+    """Cache présent mais l'agent ne répond plus ce cycle : relevé muet, pas
+    un faux relevé bâti sur les seules métadonnées en cache."""
+    import app as A
+    monkeypatch.setattr(A, '_snmp_presence',
+                        lambda ip, c=('public',), port=161, timeout=1.2: (True, True, 'ok'))
+    monkeypatch.setattr(A, '_snmp_get_typed',
+                        lambda *a, **k: {})
+    reponses = [_table_switch(), {}]
+
+    def _bulk(ip, bases, comm=('public',), timeout=1.5, **k):
+        t = reponses[min(len(_bulk.n), 1)]
+        _bulk.n.append(1)
+        return {b: dict(t.get(b, {})) for b in bases}
+    _bulk.n = []
+
+    monkeypatch.setattr(A, '_snmp_bulk_cols', _bulk)
+    collect.vider_cache()
+    eq = [(10, '10.0.0.1', 'Switch')]
+    collect.balayer(0, communautes=['public'], equipements=eq)
+    res = collect.balayer(0, communautes=['public'], equipements=eq)
+    rv = res.releves['10.0.0.1']
+    assert not rv.snmp_ok and rv.equipement is None
+    assert res.muets and 'aucune réponse' in res.muets[0]['detail']
+
+
+def test_meta_cache_port_retire_ne_ressurgit_pas(monkeypatch):
+    """Un port disparu du relevé frais n'est pas réinjecté depuis le cache."""
+    import app as A
+    monkeypatch.setattr(A, '_snmp_presence',
+                        lambda ip, c=('public',), port=161, timeout=1.2: (True, True, 'ok'))
+    monkeypatch.setattr(A, '_snmp_get_typed', lambda *a, **k: {})
+    etat = {'ports': 4}
+
+    def _bulk(ip, bases, comm=('public',), timeout=1.5, **k):
+        r = range(1, etat['ports'] + 1)
+        meta_r = range(1, 5)   # le cache connaîtra toujours 4 ports
+        t = {
+            collect._IF_DESCR: {str(i): f'Gi1/0/{i}' for i in meta_r},
+            collect._IF_NAME:  {str(i): f'Gi1/0/{i}' for i in meta_r},
+            collect._IF_TYPE:  {str(i): 6 for i in meta_r},
+            collect._IF_OPER:  {str(i): 1 for i in r},
+            collect._IF_ADMIN: {str(i): 1 for i in r},
+            collect._IF_HCIN:  {str(i): 10 for i in r},
+        }
+        return {b: dict(t.get(b, {})) for b in bases}
+
+    monkeypatch.setattr(A, '_snmp_bulk_cols', _bulk)
+    collect.vider_cache()
+    eq = [(10, '10.0.0.1', 'Switch')]
+    collect.balayer(0, communautes=['public'], equipements=eq)
+    etat['ports'] = 2                                        # 2 ports retirés
+    rv = collect.balayer(0, communautes=['public'], equipements=eq).releves['10.0.0.1']
+    assert {p['index'] for p in rv.equipement['ports']} == {1, 2}
+
+
+def test_rafraichir_meta_force_le_releve(bouchons):
+    eq = [(10, '10.0.0.1', 'Switch')]
+    collect.balayer(0, communautes=['public'], equipements=eq)
+    collect.balayer(0, communautes=['public'], equipements=eq, rafraichir_meta=True)
+    assert collect._IF_DESCR in set(bouchons['bulk'][1][1])
+
+
 def test_releve_frais(bouchons):
     collect.balayer(0, communautes=['public'], equipements=[(1, '10.0.0.9', 'Switch')])
     rv = collect.releve_frais('10.0.0.9', max_age=60)
