@@ -2193,10 +2193,15 @@ _OID_LLDP_REM_SYSNAME = '1.0.8802.1.1.2.1.4.1.1.9'
 _OID_LLDP_REM_SYSDESC = '1.0.8802.1.1.2.1.4.1.1.10'
 _OID_LLDP_REM_CAP_EN  = '1.0.8802.1.1.2.1.4.1.1.12'     # lldpRemSysCapEnabled (BITS)
 _OID_LLDP_LOC_PORTID  = '1.0.8802.1.1.2.1.3.7.1.3'      # lldpLocPortId : localPortNum -> nom d'interface locale
-# lldpRemManAddrIfId : l'INDEX porte l'adresse de gestion du voisin
+# lldpRemManAddrIfId (.4) : l'INDEX porte l'adresse de gestion du voisin
 # (timeMark.portNum.remIndex.subtype.len.a.b.c.d) — graine de la découverte
-# récursive (constat d'audit #10).
-_OID_LLDP_REM_MAN_ADDR = '1.0.8802.1.1.2.1.4.2.1.2'
+# récursive (constat d'audit #10). On parcourt la colonne .4 et NON .2
+# (lldpRemManAddr) : cette dernière est un objet d'index MAX-ACCESS
+# not-accessible (IEEE 802.1AB / LLDP-MIB) — un agent conforme ne la renvoie
+# jamais dans un walk, le sous-arbre s'arrêtait donc immédiatement et la
+# découverte LLDP récursive ne remontait aucune IP. .4 est read-only, toujours
+# présente, et porte le même index.
+_OID_LLDP_REM_MAN_ADDR = '1.0.8802.1.1.2.1.4.2.1.4'
 # CDP (CISCO-CDP-MIB, cdpCacheEntry) : index = cdpCacheIfIndex.cdpCacheDeviceIndex
 _OID_CDP_ADDR     = '1.3.6.1.4.1.9.9.23.1.2.1.1.4'
 _OID_CDP_DEVICE   = '1.3.6.1.4.1.9.9.23.1.2.1.1.6'

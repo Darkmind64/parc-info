@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.5] - 2026-09-09 📖
+
+### Conformité RFC / IEEE des outils réseau — 1 bug LLDP corrigé
+
+Revue de l'implémentation SNMP / mDNS / LLDP contre **RFC 1213** (MIB-II), **RFC 4188** (BRIDGE-MIB), **RFC 6762** (mDNS), **RFC 6763** (DNS-SD) et **IEEE 802.1AB** (LLDP), à la demande.
+
+**Bug trouvé et corrigé — découverte de topologie LLDP récursive.** `network_diag._voisins_lldp_cdp` lisait l'adresse de gestion d'un voisin en parcourant `lldpRemManAddr` (`1.0.8802.1.1.2.1.4.2.1.2`). Cet objet est un **composant d'index** de `lldpRemManAddrEntry`, `MAX-ACCESS not-accessible` : un agent SNMP conforme ne le renvoie **jamais** dans un walk → le sous-arbre s'arrêtait immédiatement, aucune IP de voisin n'était remontée. La graine de la cartographie L2 récursive (constat d'audit #10 de la 2.19.32) était donc **inopérante sur tout matériel non-Cisco** (LLDP seul ; CDP expose une colonne accessible et fonctionnait). Corrigé : on parcourt `lldpRemManAddrIfId` (`…4.2.1.4`, read-only), qui porte le même index — parsing inchangé. Test : `test_diagnostic_reseau.py` §27ter.
+
+**Vérifié conforme, aucune correction :** ifTable / ifXTable / ipNetToMediaTable (RFC 1213), dot3StatsTable (RFC 3635), dot1d FDB + STP + basePortIfIndex (RFC 4188), ENTITY-MIB, UPS-MIB, POWER-ETHERNET-MIB, HOST-RESOURCES-MIB ; décodeurs de trames passifs LLDP (TLV « Management Address » type 8), CDP, OSPF Hello ; mDNS/DNS-SD délégués à la bibliothèque `zeroconf`. *(Précision de doc : `dot1qTpFdbPort` / `dot1qVlanStaticName` / `dot1qPvid` relèvent de Q-BRIDGE-MIB — RFC 4363 — et non de la RFC 4188.)*
+
+**Switch HP ProCurve 1810G (J9450A), firmware P.2.24 — rien à retirer.** Toutes les adaptations spécifiques à ce switch sont de l'**auto-détection à l'exécution**, jamais un test de version de firmware : mode GETBULK↔GETNEXT re-sondé toutes les 30 min (et à chaque redémarrage), colonnes `ifXTable`/`dot3`/PoE absentes re-sondées toutes les 15 min, compteurs 32/64 bits re-testés périodiquement, forme de la table MAC (`_fdb_corriger` mode `auto`) re-scorée contre l'inventaire à chaque appel. Si P.2.24 corrige l'un de ces points, ParcInfo le détecte seul au cycle suivant. Seul réglage à vérifier manuellement : `diag_fdb_mode:<ip>` (Réglages) — s'il avait été forcé à `prefixe`/`ignorer`, le remettre à `auto`.
+
+---
+
 ## [2.32.4] - 2026-09-09 ⚡
 
 ### Collecte SNMP — cache des métadonnées + retransmission
