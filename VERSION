@@ -1,9 +1,42 @@
-PARCINFO_VERSION=2.32.5
+PARCINFO_VERSION=2.32.6
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090910
+BUILD_NUMBER=2026090911
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.6 - Baie de brassage : bandeau d'information au-dessus du rack
+#
+# Demande : remplacer le champ « Rechercher un equipement » (aucune utilite
+# reelle) au-dessus de la baie par un bandeau d'information, qui pourra
+# afficher les infos de fonctionnement de la baie (etape de scan reseau,
+# etapes de collecte, etc.).
+#
+# templates/baie_brassage.html :
+#   - Supprime : `.search-rack` (CSS), `#rack-search` + son bouton, la fonction
+#     `rechercherEquip()`. CONSERVE : `.rack-cell.highlighted` et
+#     `surbrillanceEquip()` (surbrillance d'un equipement depuis la liste).
+#     Supprime aussi le petit `#activite-bandeau` coince dans la barre d'outils.
+#   - Ajoute : `<div class="baie-infob" id="baie-infob">` a la place, + registre
+#     JS `BaieInfo` :
+#       BaieInfo.set(cle, texte, ton)  ton ∈ ok|warn|err|muted|info
+#       BaieInfo.clear(cle)
+#     cles ordonnees : scan, collecte, activite, ping, brassage (extensible).
+#     Sans message actif -> resume passif du rack (`_resumePassif` : nb
+#     d'equipements, combien en ligne), re-rendu en fin de `renderRack()`.
+#   - Branchements : `majBandeauActivite()` ecrit la cle `activite` (etat du
+#     releve SNMP d'activite) ; `pingerToutelaBaie()` ecrit/efface `ping`
+#     (progression) ; `BrassageModal.charger()` ecrit/efface `brassage`
+#     (progression du releve SNMP des tables MAC, desormais visible hors modale).
+#   Les cles `scan` / `collecte` sont pretes a etre alimentees par de futurs
+#   traitements de la page.
+#
+# Verifie au navigateur : champ de recherche absent, bandeau present, resume
+# passif « Baie vide », empilement de 3 messages (activite ok + ping + brassage)
+# avec retour au resume passif apres clear ; aucune erreur console ; JS
+# `node --check` OK ; Jinja compile.
+#
+# ---------------------------------------------------------------------------
+#
 # Version 2.32.5 - Conformite RFC/IEEE des outils reseau : 1 bug LLDP corrige
 #
 # Demande : verification des outils reseau contre RFC 1213 (MIB-II), RFC 4188

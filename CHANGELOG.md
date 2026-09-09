@@ -1,5 +1,21 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.6] - 2026-09-09 🎛️
+
+### Baie de brassage — bandeau d'information au-dessus du rack
+
+Le champ **« 🔍 Rechercher un équipement »** au-dessus de la baie (sans usage réel — la surbrillance se fait déjà depuis la liste d'équipements) est remplacé par un **bandeau d'information** qui affiche l'état de fonctionnement de la baie :
+
+- **relevé SNMP d'activité** : « démarrage du relevé… (2 passages, ~1 min) », puis « ⚡ 3 switchs · 12 ports actifs · 84 Mb/s · maj ~5 s » (le statut était jusque-là coincé dans la barre d'outils) ;
+- **ping de toute la baie** : progression « 📡 ping de la baie 7/18 » ;
+- **« Deviner le brassage »** : progression du relevé SNMP des tables MAC — désormais visible **hors de la modale**.
+
+Sans opération en cours, le bandeau affiche un résumé passif : « N équipements dans la baie · M/N en ligne ».
+
+Côté code (`templates/baie_brassage.html`) : registre `BaieInfo.set(cle, texte, ton)` / `clear(cle)`, clés ordonnées `scan` / `collecte` / `activite` / `ping` / `brassage` — les deux premières sont prêtes pour de futurs traitements de la page. `#rack-search` / `rechercherEquip()` supprimés ; `surbrillanceEquip()` (surbrillance depuis la liste) conservé.
+
+---
+
 ## [2.32.5] - 2026-09-09 📖
 
 ### Conformité RFC / IEEE des outils réseau — 1 bug LLDP corrigé
