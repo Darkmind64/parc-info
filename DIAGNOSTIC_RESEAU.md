@@ -311,8 +311,12 @@ tableau de bord est ouvert, le navigateur envoie un battement à
 (`network_diag.py`, calqué sur `_moniteur_loop`) interroge alors les compteurs
 SNMP des switchs de la baie et calcule l'état à peindre par port.
 
-**Bandeau d'information (v2.32.6/.7).** Au-dessus du rack, `#baie-infob` affiche
-l'état de fonctionnement de la baie (registre JS `BaieInfo`). Pour le relevé
+**Bandeau d'information (v2.32.6/.7/.8).** Au-dessus du rack, `#baie-infob` affiche
+l'état de fonctionnement de la baie (registre JS `BaieInfo`). **Hauteur fixe
+d'une ligne** — `.baie-infob` est `position:absolute` dans un conteneur à
+hauteur fixe, donc hors flux : un contenu long ne décale jamais le rack. Le
+débord ouvre un panneau superposé (`.baie-infob-detail`) au survol / focus.
+Pour le relevé
 d'activité, `_cycle_activite` publie `_activite_progres[cid]`
 (`{phase:'releve'|'pret', fait, total, depuis, faits:[{nom,ip,ms,ok}]}`),
 incrémenté au fil du `ThreadPoolExecutor` de `_relever_switch_activite` et
