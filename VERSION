@@ -1,9 +1,47 @@
-PARCINFO_VERSION=2.32.7
+PARCINFO_VERSION=2.32.8
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090912
+BUILD_NUMBER=2026090913
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.8 - Baie : le bandeau d'info ne décale plus le rack
+#
+# Retour utilisateur : « toutes les infos ne tiennent pas toujours dans la
+# barre d'info de la baie, du coup la baie se décale quand il y a un passage
+# à la ligne ». Le détail par switch (v2.32.7) peut être long → le bandeau
+# passait à la ligne et repoussait toute la baie verticalement à chaque
+# rafraîchissement (toutes les 3 s), effet de saut désagréable.
+#
+# templates/baie_brassage.html — CSS uniquement (+ 2 lignes JS) :
+#   - `.baie-infob-wrap` : HAUTEUR FIXE `height:2.25rem` (une ligne).
+#   - `.baie-infob` : `position:absolute; inset:0` DANS le wrap → son contenu
+#     est HORS FLUX. Un contenu non sécable trop large ne peut plus :
+#       * gonfler la piste `1fr` de la grille `.baie-page` (le sizing
+#         intrinsèque ignore les descendants `position:absolute`),
+#       * repousser la barre d'outils (qui se re-répartissait alors, changeant
+#         de hauteur) ni décaler le rack.
+#     `overflow:hidden` masque le débord.
+#   - Débord détecté (`el.scrollWidth > el.clientWidth`) → classe `.a-detail`
+#     sur le wrap : fondu `mask-image` à droite + chevron `▾` (`::after`), et
+#     le panneau `.baie-infob-detail` (`position:absolute; top:100%`, hors
+#     flux) s'ouvre au `:hover` / `:focus-within` avec TOUS les segments
+#     empilés. Il SURVOLE le haut du rack, ne le pousse pas.
+#   - `_rendre()` remplit aussi `#baie-infob-detail` et bascule `.a-detail` ;
+#     re-évalué au `resize`.
+#   - Garde-fou générique : `.baie-page` passe à
+#     `grid-template-columns: minmax(0,1fr) [340px]` (au lieu de `1fr`) +
+#     `.baie-page > * { min-width:0 }` — un `1fr` a un minimum implicite
+#     `auto` (= min-content) qui laissait tout contenu non sécable de la
+#     colonne gauche déborder.
+#
+# Vérifié au navigateur : `rackTop` CONSTANT (359 px) et `grid-template-columns`
+# stable (776 px) sur tous les états du bandeau (relevé en cours, 4 switchs
+# détaillés + non calibré, ping, idle) ; le panneau de détail s'ouvre/ferme
+# au survol/focus sans bouger le rack ; aucune erreur console ; JS `node
+# --check` OK ; Jinja compile.
+#
+# ---------------------------------------------------------------------------
+#
 # Version 2.32.7 - Baie : le bandeau d'info détaille le relevé SNMP d'activité
 #
 # Demande : « un détail de progression du relevé SNMP dans le bandeau

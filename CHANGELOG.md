@@ -1,5 +1,20 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.8] - 2026-09-09 📐
+
+### Baie de brassage — le bandeau d'information ne décale plus le rack
+
+Retour utilisateur : *« toutes les infos ne tiennent pas toujours dans la barre d'info de la baie, du coup la baie se décale quand il y a un passage à la ligne »*. Le détail par switch (v2.32.7) peut être long → le bandeau passait à la ligne et repoussait toute la baie verticalement à **chaque rafraîchissement** (3 s), un effet de saut désagréable.
+
+**Correctif (CSS)** :
+- `.baie-infob-wrap` a une **hauteur fixe d'une ligne** ; `.baie-infob` est `position:absolute; inset:0` dedans → son contenu est **hors flux**. Un contenu non sécable trop large ne peut plus gonfler la colonne de la grille `.baie-page`, ni repousser la barre d'outils, ni décaler le rack. Le débord est simplement masqué.
+- Quand le contenu déborde : **fondu à droite + chevron `▾`**, et le **détail complet s'ouvre au survol / focus** dans un panneau superposé (`.baie-infob-detail`, `position:absolute`) qui survole le haut du rack sans le pousser.
+- Garde-fou générique : `.baie-page` passe à `grid-template-columns: minmax(0,1fr) 340px` (au lieu de `1fr`) + `min-width:0` sur les colonnes — un `1fr` garde sinon un minimum implicite `auto` (min-content) qui laissait tout contenu non sécable de la colonne gauche déborder.
+
+Vérifié au navigateur : position verticale du rack **constante** sur tous les états du bandeau ; panneau de détail qui s'ouvre/ferme au survol sans bouger le rack.
+
+---
+
 ## [2.32.7] - 2026-09-09 🔎
 
 ### Baie de brassage — le bandeau d'information détaille le relevé SNMP

@@ -1,23 +1,22 @@
 {
-  "version": "2.32.7",
+  "version": "2.32.8",
   "release_date": "2026-09-09",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.7/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.7/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.7/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.7",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.7/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.7/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.7/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.7/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.7/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.32.8",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : le bandeau d'information (v2.32.6) DETAILLE desormais le releve SNMP d'activite. Pendant le releve : « releve SNMP en cours · 2/3 switchs », le 1er passage annonce « reference des compteurs », chaque switch deja releve apparait avec son nom / sa duree / muet-ou-non, et un switch qui traine (agent lent type HP 1810G, ~2 min) est signale « un switch repond lentement ». Une fois pret : ligne principale (nb switchs, ports actifs, debit, « releve il y a N s ») + UN segment par switch (ports actifs/up, debit, temps de poll, compteurs 32/64 bits, nb de MAC apprises, erreurs) + la liste des switchs non calibres. Cote serveur : nouveau `network_diag._activite_progres[cid]` (phase / fait / total / faits[]) alimente par `_cycle_activite` au fil du `ThreadPoolExecutor`, expose par `activite_baie()` sous la cle `progres` ; les entrees de `equipements[]` portent en plus `muet` / `poll_ms` / `compteurs_64bits` / `fdb_nb_macs` / `nb_ports_mappes` / `nb_divergences`. Cote page : `templates/baie_brassage.html` `majBandeauActivite()` reecrit ; `BaieInfo.set(cle, valeur)` accepte un tableau de segments.",
+    "new_features": "Baie de brassage : le bandeau d'information (v2.32.6/.7) ne DECALE PLUS le rack. Le detail par switch peut etre long ; avant, il passait a la ligne et decalait toute la baie verticalement a chaque rafraichissement. Desormais : le bandeau a une HAUTEUR FIXE d'une ligne, son contenu (`position:absolute` dans un conteneur a hauteur fixe) est totalement hors flux -- il ne peut plus gonfler la colonne de la grille `.baie-page` ni repousser la barre d'outils / le rack. Quand le contenu deborde : fondu a droite + chevron ▾, et le detail complet s'ouvre au SURVOL / focus dans un panneau superpose (`.baie-infob-detail`) qui ne pousse rien. Au passage : `.baie-page` en `grid-template-columns: minmax(0,1fr)` (au lieu de `1fr`) + `min-width:0` sur les colonnes -- garde-fou generique contre tout contenu non secable trop large dans cette colonne.",
     "improvements": [
-      "Baie de brassage : progression du releve SNMP d'activite detaillee dans le bandeau (fait/total, switch en cours, duree par switch, switch lent signale).",
-      "Baie de brassage : detail par switch une fois le releve pret (ports actifs, debit, poll ms, 32/64 bits, MAC apprises, erreurs, non calibre)."
+      "Baie de brassage : le bandeau d'information a une hauteur fixe d'une ligne ; le rack ne se decale plus quand le contenu change. Detail complet au survol dans un panneau superpose."
     ]
   },
   "checksums": {
@@ -28,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.7"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.8"
 }

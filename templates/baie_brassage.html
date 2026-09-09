@@ -4,8 +4,16 @@
 {% block extra_styles %}
 <style>
 /* ── LAYOUT ── */
-.baie-page { display:grid; grid-template-columns:1fr 340px; gap:1.5rem; align-items:start; }
-@media(max-width:1100px) { .baie-page { grid-template-columns:1fr; } }
+/* `minmax(0,1fr)` et non `1fr` : sans ça, un contenu non sécable et trop
+   large dans la colonne gauche (bandeau d'info à hauteur fixe, nom d'appareil
+   à rallonge…) gonfle la piste au-delà de `1fr` → toute la grille déborde et
+   la barre d'outils se re-répartit, ce qui décalait le rack verticalement. */
+.baie-page { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:1.5rem; align-items:start; }
+@media(max-width:1100px) { .baie-page { grid-template-columns:minmax(0,1fr); } }
+/* `min-width:0` sur chaque colonne : un item de grille garde sinon
+   `min-width:auto` (= min-content), donc un contenu non sécable trop large
+   (bandeau d'info) déborde et repousse la barre d'outils / le rack. */
+.baie-page > * { min-width:0; }
 
 /* ── RACK ── */
 .rack-outer {
@@ -610,25 +618,59 @@ table.mon-table td.mon-wrap select { max-width:100%; }
     border-radius:3px; cursor:pointer; font-size:.85rem; z-index:10; }
 
 /* ── BANDEAU D'INFORMATION DE LA BAIE ── */
-/* Au-dessus du rack : état de fonctionnement de la baie (relevé SNMP
-   d'activité, ping de la baie, analyse du brassage — extensible : scan,
-   collecte…). Vide -> résumé passif (nb d'équipements, en ligne). */
+/* Au-dessus du rack : état de fonctionnement de la baie (relevé SNMP,
+   ping, analyse du brassage — extensible : scan, collecte…). Vide ->
+   résumé passif (nb d'équipements, en ligne).
+   Le WRAP réserve EXACTEMENT une ligne de hauteur ; le bandeau lui-même est
+   `position:absolute` DANS le wrap → son contenu (parfois très large, non
+   sécable : détail par switch) est HORS FLUX. Il ne peut donc ni gonfler la
+   piste `1fr` de la grille `.baie-page` (le sizing intrinsèque ignore les
+   descendants `position:absolute`), ni repousser la barre d'outils, ni
+   décaler le rack — ce qui se produisait à chaque rafraîchissement (3 s).
+   Le débord est masqué (`overflow:hidden`) ; le détail complet s'ouvre au
+   survol / focus dans le panneau superposé `.baie-infob-detail`. */
+.baie-infob-wrap { position:relative; height:2.25rem; margin-bottom:.7rem; }
 .baie-infob {
-    margin-bottom:.7rem; padding:.45rem .75rem; border-radius:4px;
+    position:absolute; inset:0;
+    padding:.4rem 1.6rem .4rem .75rem; border-radius:4px;
     border:1px solid var(--border);
     background:var(--bg-elevated, rgba(255,255,255,.025));
-    font-size:.74rem; line-height:1.5; min-height:2rem;
-    display:flex; flex-wrap:wrap; align-items:center; gap:.3rem 1.1rem;
+    font-size:.74rem; line-height:1.4; box-sizing:border-box;
+    display:flex; flex-wrap:nowrap; align-items:center; gap:.3rem 1.1rem;
+    overflow:hidden;
 }
-.baie-infob .bi-item {
+.baie-infob-wrap.a-detail .baie-infob {
+    /* fondu à droite + chevron : indique qu'il y a plus à voir */
+    -webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 2.2rem),transparent);
+    mask-image:linear-gradient(90deg,#000 calc(100% - 2.2rem),transparent);
+    cursor:pointer;
+}
+.baie-infob-wrap.a-detail::after {
+    content:'▾'; position:absolute; right:.55rem; top:50%; transform:translateY(-50%);
+    color:var(--text-muted,#94a3b8); font-size:.7rem; pointer-events:none;
+}
+.baie-infob .bi-item, .baie-infob-detail .bi-item {
     display:inline-flex; align-items:center; gap:.35rem;
-    font-family:'Share Tech Mono',monospace;
+    font-family:'Share Tech Mono',monospace; white-space:nowrap;
 }
-.baie-infob .bi-ok    { color:var(--accent-green); }
-.baie-infob .bi-warn  { color:var(--accent-orange,#f59e0b); }
-.baie-infob .bi-err   { color:var(--accent-red); }
-.baie-infob .bi-muted { color:var(--text-muted,#94a3b8); }
-.baie-infob .bi-info  { color:var(--text-secondary); }
+.baie-infob .bi-item { flex:0 0 auto; }   /* aucun segment ne rétrécit → débordement net et détectable */
+.baie-infob-wrap .bi-ok    { color:var(--accent-green); }
+.baie-infob-wrap .bi-warn  { color:var(--accent-orange,#f59e0b); }
+.baie-infob-wrap .bi-err   { color:var(--accent-red); }
+.baie-infob-wrap .bi-muted { color:var(--text-muted,#94a3b8); }
+.baie-infob-wrap .bi-info  { color:var(--text-secondary); }
+/* panneau superposé : ne fait PAS partie du flux → le rack ne bouge pas */
+.baie-infob-detail {
+    position:absolute; top:calc(100% - 2px); left:0; right:0; z-index:40;
+    background:var(--bg-elevated, #101d30); border:1px solid var(--border);
+    border-top-color:transparent; border-radius:0 0 4px 4px;
+    box-shadow:0 10px 28px rgba(0,0,0,.5);
+    padding:.5rem .8rem; font-size:.74rem; line-height:1.85;
+    display:none;
+}
+.baie-infob-detail .bi-item { display:flex; }
+.baie-infob-wrap.a-detail:hover .baie-infob-detail,
+.baie-infob-wrap.a-detail:focus-within .baie-infob-detail { display:block; }
 
 /* Encart "Ports/Configuration" du panneau + Placer et de la modale
    d'édition — mis en évidence (bordure + fond teinté) pour que les champs
@@ -888,8 +930,13 @@ table.mon-table td.mon-wrap select { max-width:100%; }
         </div>
 
         <!-- Bandeau d'information : fonctionnement de la baie (relevé SNMP,
-             ping, analyse du brassage… — alimenté par BaieInfo). -->
-        <div class="baie-infob" id="baie-infob" aria-live="polite"></div>
+             ping, analyse du brassage… — alimenté par BaieInfo). Hauteur
+             FIXE d'une ligne (le rack ne se décale plus) ; le détail complet
+             s'ouvre au survol / focus dans le panneau superposé. -->
+        <div class="baie-infob-wrap" id="baie-infob-wrap">
+            <div class="baie-infob" id="baie-infob" tabindex="0"></div>
+            <div class="baie-infob-detail" id="baie-infob-detail"></div>
+        </div>
 
         <!-- RACK -->
         <div class="rack-outer" id="rack-outer">
@@ -1626,7 +1673,10 @@ async function init() {
     let _resizeTimer;
     window.addEventListener('resize', () => {
         clearTimeout(_resizeTimer);
-        _resizeTimer = setTimeout(() => { calcUH(false); renderCableLinks(); }, 150);
+        _resizeTimer = setTimeout(() => {
+            calcUH(false); renderCableLinks();
+            BaieInfo._rendre();   // ré-évalue le débordement du bandeau d'info
+        }, 150);
     });
 }
 
@@ -1766,8 +1816,18 @@ const BaieInfo = {
             Array.isArray(m) ? items.push(...m) : items.push(m);
         }
         if (!items.length) items = [this._resumePassif()];
-        el.innerHTML = items.map(m =>
+        const html = items.map(m =>
             `<span class="bi-item bi-${m.ton || 'info'}">${escH(m.txt)}</span>`).join('');
+        el.innerHTML = html;
+        // Bandeau à hauteur fixe (1 ligne, overflow:hidden). Si le contenu
+        // déborde réellement, on active `.a-detail` : fondu + chevron ▾, et le
+        // panneau superposé (`.baie-infob-detail`) reprend tout au survol /
+        // focus. Le rack ne bouge JAMAIS (panneau hors flux).
+        const det = document.getElementById('baie-infob-detail');
+        const wrap = document.getElementById('baie-infob-wrap');
+        const deborde = el.scrollWidth > el.clientWidth + 2;
+        if (det) det.innerHTML = deborde ? html : '';
+        if (wrap) wrap.classList.toggle('a-detail', deborde);
     },
 };
 
