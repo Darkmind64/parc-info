@@ -609,9 +609,26 @@ table.mon-table td.mon-wrap select { max-width:100%; }
     border:1px solid var(--border); color:var(--text-primary); padding:.4rem .9rem;
     border-radius:3px; cursor:pointer; font-size:.85rem; z-index:10; }
 
-/* ── RECHERCHE ── */
-.search-rack { display:flex; gap:.4rem; margin-bottom:.7rem; }
-.search-rack input { flex:1; font-size:.8rem; padding:.3rem .6rem; }
+/* ── BANDEAU D'INFORMATION DE LA BAIE ── */
+/* Au-dessus du rack : état de fonctionnement de la baie (relevé SNMP
+   d'activité, ping de la baie, analyse du brassage — extensible : scan,
+   collecte…). Vide -> résumé passif (nb d'équipements, en ligne). */
+.baie-infob {
+    margin-bottom:.7rem; padding:.45rem .75rem; border-radius:4px;
+    border:1px solid var(--border);
+    background:var(--bg-elevated, rgba(255,255,255,.025));
+    font-size:.74rem; line-height:1.5; min-height:2rem;
+    display:flex; flex-wrap:wrap; align-items:center; gap:.3rem 1.1rem;
+}
+.baie-infob .bi-item {
+    display:inline-flex; align-items:center; gap:.35rem;
+    font-family:'Share Tech Mono',monospace;
+}
+.baie-infob .bi-ok    { color:var(--accent-green); }
+.baie-infob .bi-warn  { color:var(--accent-orange,#f59e0b); }
+.baie-infob .bi-err   { color:var(--accent-red); }
+.baie-infob .bi-muted { color:var(--text-muted,#94a3b8); }
+.baie-infob .bi-info  { color:var(--text-secondary); }
 
 /* Encart "Ports/Configuration" du panneau + Placer et de la modale
    d'édition — mis en évidence (bordure + fond teinté) pour que les champs
@@ -858,7 +875,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                     <option value="3000">⚡ activité 3 s</option>
                     <option value="5000">⚡ activité 5 s</option>
                 </select>
-                <span id="activite-bandeau" style="display:none;font-family:'Share Tech Mono',monospace;font-size:.68rem;color:var(--accent-green);align-self:center;"></span>
                 <button onclick="MoniteurModal.ouvrir()" class="btn btn-primary btn-sm" title="Moniteur réseau : compteurs bruts des ports, journal d'évènements, capture de trafic — pour comprendre ce que montrent les LEDs">📊 Moniteur</button>
                 <button onclick="BrassageModal.ouvrir()" class="btn btn-primary btn-sm" title="Deviner le brassage : à partir de toutes les MAC vues sur les switchs (SNMP), corrélées à l'inventaire, propose la machine de chaque prise/port, les cordons bandeau ⇄ switch et les liens switch ⇄ éléments. Aperçu avant application.">🧠 Deviner le brassage</button>
                 <button onclick="FdbBrut.ouvrir()" class="btn btn-secondary btn-sm" title="Relevé brut de la table d'apprentissage MAC de chaque switch — forme exacte des adresses renvoyées par l'agent SNMP. À utiliser si « Deviner le brassage » montre des MAC bizarres (00:01…, 8 octets).">🔬 FDB brut</button>
@@ -871,12 +887,9 @@ table.mon-table td.mon-wrap select { max-width:100%; }
             </div>
         </div>
 
-        <!-- Recherche -->
-        <div class="search-rack">
-            <input type="text" id="rack-search" placeholder="🔍 Rechercher un équipement..."
-                   oninput="rechercherEquip(this.value)">
-            <button class="btn btn-primary btn-sm" onclick="rechercherEquip('')">✕</button>
-        </div>
+        <!-- Bandeau d'information : fonctionnement de la baie (relevé SNMP,
+             ping, analyse du brassage… — alimenté par BaieInfo). -->
+        <div class="baie-infob" id="baie-infob" aria-live="polite"></div>
 
         <!-- RACK -->
         <div class="rack-outer" id="rack-outer">
@@ -1714,6 +1727,39 @@ function toggleVerrouBaie() {
 }
 
 // ── RENDER RACK ───────────────────────────────────────────────────────────────
+// ── Bandeau d'information de la baie ─────────────────────────────────────────
+// Registre de messages courts par clé (activité SNMP, ping de la baie, analyse
+// du brassage… — à étendre : scan, collecte). Rendu au-dessus du rack. Sans
+// message actif, affiche un résumé passif (nb d'équipements, en ligne).
+const BaieInfo = {
+    _msgs: {},                                        // cle -> {txt, ton}
+    _ordre: ['scan', 'collecte', 'activite', 'ping', 'brassage'],
+    set(cle, txt, ton) {
+        if (!txt) return this.clear(cle);
+        this._msgs[cle] = { txt, ton: ton || 'info' };
+        this._rendre();
+    },
+    clear(cle) {
+        if (cle in this._msgs) { delete this._msgs[cle]; this._rendre(); }
+    },
+    _resumePassif() {
+        const eqs = Object.values(slots);
+        if (!eqs.length) return { txt: 'ℹ️ Baie vide — ajoutez des équipements avec les boutons ci-dessus', ton: 'muted' };
+        const avecIp = eqs.filter(s => s.appareil_id);
+        const enLigne = avecIp.filter(s => s.en_ligne).length;
+        let t = `ℹ️ ${eqs.length} équipement${eqs.length > 1 ? 's' : ''} dans la baie`;
+        if (avecIp.length) t += ` · ${enLigne}/${avecIp.length} en ligne`;
+        return { txt: t, ton: 'muted' };
+    },
+    _rendre() {
+        const el = document.getElementById('baie-infob');
+        if (!el) return;
+        const actifs = this._ordre.filter(c => this._msgs[c]).map(c => this._msgs[c]);
+        const items = actifs.length ? actifs : [this._resumePassif()];
+        el.innerHTML = items.map(m => `<span class="bi-item bi-${m.ton}">${escH(m.txt)}</span>`).join('');
+    },
+};
+
 function renderRack() {
     document.getElementById('lbl-u').textContent = nbU;
     document.getElementById('rack-hdr').textContent = `{{ parc.baie_marque or 'RACK' }} — ${nbU}U · ${currentBaie}`;
@@ -1941,6 +1987,8 @@ function renderCableLinks() {
         svg.appendChild(zoneClic);
         idx++;
     });
+
+    BaieInfo._rendre();   // rafraîchit le résumé passif du bandeau
 }
 
 // Ramène au premier plan (dernier peint = visible par-dessus tous les
@@ -3346,7 +3394,10 @@ async function pingerToutelaBaie(manuel = true) {
     // progression, corrigée juste en dessous).
     if (manuel) { btn.disabled = true; }
     let fait = 0;
-    const majProgress = () => { progressEl.textContent = `📡 ${fait}/${cibles.length}`; };
+    const majProgress = () => {
+        progressEl.textContent = `📡 ${fait}/${cibles.length}`;
+        BaieInfo.set('ping', `📡 ping de la baie ${fait}/${cibles.length}`, 'info');
+    };
     progressEl.style.display = ''; majProgress();
     try {
         let sansIp = 0, nbOnline = 0;
@@ -3386,6 +3437,7 @@ async function pingerToutelaBaie(manuel = true) {
     } finally {
         if (manuel) { btn.disabled = false; }
         progressEl.style.display = 'none';
+        BaieInfo.clear('ping');
     }
 }
 
@@ -3449,32 +3501,29 @@ function _viderActivite() {
 }
 
 function majBandeauActivite(d) {
-    const b = document.getElementById('activite-bandeau');
-    if (!b) return;
     if (!d || d.actif !== true) {
-        b.style.display = 'none';
-        b.textContent = '';
-        if (d && d.actif === false) { b.style.display = ''; b.style.color = 'var(--accent-red)';
-            b.textContent = '⚡ SNMP désactivé — active-le dans le diagnostic réseau'; }
-        else if (d && d.actif === null) { b.style.display = ''; b.style.color = 'var(--text-muted, #94a3b8)';
-            b.textContent = '⚡ démarrage du relevé SNMP… (deux passages sont nécessaires pour mesurer le trafic, ~1 min sur un switch lent)'; }
+        if (d && d.actif === false)
+            BaieInfo.set('activite', '⚡ SNMP désactivé — active-le dans le diagnostic réseau', 'err');
+        else if (d && d.actif === null)
+            BaieInfo.set('activite', '⚡ démarrage du relevé SNMP… (deux passages nécessaires pour mesurer le trafic, ~1 min sur un switch lent)', 'muted');
+        else
+            BaieInfo.clear('activite');
         return;
     }
     const eqs = d.equipements || [];
-    b.style.display = '';
     if (!eqs.length) {
-        b.style.color = 'var(--accent-orange, #f59e0b)';
-        b.textContent = d.motif === 'sans_reponse'
+        BaieInfo.set('activite', d.motif === 'sans_reponse'
             ? `⚡ ${d.nb_switchs} switch${d.nb_switchs > 1 ? 's' : ''} dans la baie — aucune réponse SNMP (communauté / pare-feu / SNMP désactivé sur l'équipement ?)`
-            : `⚡ Aucun switch de la baie associé à un appareil avec adresse IP — reliez le slot du switch à sa fiche appareil`;
+            : `⚡ Aucun switch de la baie associé à un appareil avec adresse IP — reliez le slot du switch à sa fiche appareil`, 'warn');
         return;
     }
     const nbActifs = eqs.reduce((n, e) => n + (e.nb_actifs || 0), 0);
     const debit = eqs.reduce((n, e) => n + (e.debit_total_bps || 0), 0);
-    b.style.color = d.calibre ? 'var(--accent-green)' : 'var(--accent-orange, #f59e0b)';
     const cad = (d.cadence_s && d.cadence_s > 3) ? ` · maj ~${d.cadence_s} s` : '';
-    b.textContent = `⚡ ${eqs.length} switch${eqs.length > 1 ? 's' : ''} · ${nbActifs} port${nbActifs > 1 ? 's' : ''} actif${nbActifs > 1 ? 's' : ''} · ${fmtDebit(debit)}${cad}`
-                    + (d.calibre ? '' : ' · non calibré');
+    BaieInfo.set('activite',
+        `⚡ ${eqs.length} switch${eqs.length > 1 ? 's' : ''} · ${nbActifs} port${nbActifs > 1 ? 's' : ''} actif${nbActifs > 1 ? 's' : ''} · ${fmtDebit(debit)}${cad}`
+        + (d.calibre ? '' : ' · non calibré'),
+        d.calibre ? 'ok' : 'warn');
 }
 
 async function chargerActivite() {
@@ -3951,14 +4000,16 @@ const BrassageModal = {
             const url = '/api/baie/brassage/proposer' + (premier && forcer ? '?forcer=1' : '');
             premier = false;
             try { d = await (await fetch(url)).json(); }
-            catch (e) { corps.innerHTML = '<span style="color:var(--accent-red);">Erreur de communication.</span>'; return; }
+            catch (e) { corps.innerHTML = '<span style="color:var(--accent-red);">Erreur de communication.</span>'; BaieInfo.clear('brassage'); return; }
             if (!d.en_cours) break;
             const p = d.progress || 0;
             corps.innerHTML = `<span style="color:var(--text-muted);">Relevé SNMP en cours (table d'apprentissage MAC des switchs)…`
                 + (p ? ` <strong>${p}%</strong>` : '')
                 + (d.message ? `<br><span style="font-size:.72rem;">${escH(d.message)}</span>` : '') + `</span>`;
+            BaieInfo.set('brassage', `🧠 analyse du brassage — relevé SNMP des tables MAC${p ? ` ${p}%` : ''}`, 'info');
             await new Promise(r => setTimeout(r, 1500));
         }
+        BaieInfo.clear('brassage');
         if (d && d.en_cours) {
             corps.innerHTML = '<span style="color:var(--accent-orange,#f59e0b);">Relevé trop long — réessaie dans un moment.</span>';
             return;
@@ -4158,34 +4209,6 @@ const BrassageModal = {
         await chargerBaie(currentBaie);
     },
 };
-
-// ── RECHERCHE ─────────────────────────────────────────────────────────────────
-function rechercherEquip(q) {
-    document.getElementById('rack-search').value = q;
-    q = q.toLowerCase().trim();
-    document.querySelectorAll('.rack-cell.occupied').forEach(cell => {
-        cell.classList.remove('highlighted');
-    });
-    if (!q) return;
-    document.querySelectorAll('.rack-cell.occupied').forEach(cell => {
-        const id  = parseInt(cell.dataset.id);
-        const sk  = key(parseInt(cell.dataset.pos), parseInt(cell.dataset.col));
-        const s   = slots[sk] || Object.values(slots).find(x => x.id === id);
-        if (!s) return;
-        const champs = [s.nom_machine, s.nom_custom, s.type_equipement, s.adresse_ip, s.description,
-                        s.p_categorie, s.p_marque, s.p_modele];
-        // Couvre aussi le contenu des ports (usage libre, cible câblée) et,
-        // pour un bandeau RJ, de leur prise murale (pièce, cible) — chercher
-        // le nom d'une pièce ne trouvait jusqu'ici rien, seul l'élément
-        // lui-même était indexé, jamais ce que ses ports/prises portent.
-        (s.ports || []).forEach(p => {
-            champs.push(p.piece, p.usage_libre, p.nom_cible, p.cible_finale);
-            if (p.prise_murale) champs.push(p.prise_murale.piece, p.prise_murale.identification, p.prise_murale.usage_libre, p.prise_murale.nom_cible);
-        });
-        const txt = champs.join(' ').toLowerCase();
-        if (txt.includes(q)) cell.classList.add('highlighted');
-    });
-}
 
 // ── LISTE ÉQUIPEMENTS ─────────────────────────────────────────────────────────
 function renderList() {

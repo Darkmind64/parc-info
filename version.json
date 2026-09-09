@@ -1,23 +1,23 @@
 {
-  "version": "2.32.5",
+  "version": "2.32.6",
   "release_date": "2026-09-09",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.5/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.5/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.5/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.5",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.5/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.5/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.5/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.5/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.5/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.6/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.6/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.6/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.32.6",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.6/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.6/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.6/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.6/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.6/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Verification de conformite des outils reseau contre RFC 1213 (MIB-II), RFC 4188 (BRIDGE-MIB), RFC 6762/6763 (mDNS/DNS-SD) et IEEE 802.1AB (LLDP). Un bug trouve et corrige : `network_diag._voisins_lldp_cdp` lisait l'adresse de gestion d'un voisin sur `lldpRemManAddr` (OID .2), un objet d'INDEX MAX-ACCESS not-accessible -- un agent SNMP conforme ne le renvoie jamais dans un walk, le sous-arbre s'arretait donc immediatement et la decouverte de topologie LLDP recursive ne remontait AUCUNE IP de voisin (sur du materiel non-Cisco, ou seul LLDP est parle). Corrige : on parcourt `lldpRemManAddrIfId` (OID .4, read-only), qui porte le meme index. Le reste des OID (ifTable/ipNetToMediaTable, dot3StatsTable, dot1d FDB/STP, ENTITY-MIB, UPS-MIB, PoE-MIB, HOST-RESOURCES-MIB) et les decodeurs de trames passifs (LLDP TLV type 8, CDP, OSPF Hello) sont conformes. mDNS/DNS-SD s'appuient sur la bibliotheque zeroconf. Aucune adaptation specifique au switch HP ProCurve 1810G n'est a retirer : elles sont toutes auto-detectees et re-sondees periodiquement (GETBULK vs GETNEXT : 30 min ; colonnes ifXTable/dot3/PoE absentes : 15 min ; forme de la table MAC : reevaluee a chaque appel). Une mise a jour de firmware du switch est prise en compte automatiquement au prochain cycle de re-sondage ou au redemarrage de ParcInfo.",
+    "new_features": "Baie de brassage : le champ « Rechercher un equipement » (sans usage reel) au-dessus du rack est remplace par un BANDEAU D'INFORMATION. Il affiche l'etat de fonctionnement de la baie -- releve SNMP d'activite (« demarrage du releve… », « 3 switchs / 12 ports actifs / 84 Mb/s »), progression du ping de toute la baie, progression de l'analyse « Deviner le brassage » -- et sert de point d'accroche pour d'autres statuts (scan reseau, collecte…). Sans operation en cours, il affiche un resume passif (nombre d'equipements, combien en ligne). Cote code : registre JS `BaieInfo.set(cle, texte, ton)` / `clear(cle)` dans `templates/baie_brassage.html` ; l'ancien `#rack-search` / `rechercherEquip()` est supprime (la surbrillance depuis la liste d'equipements, `surbrillanceEquip()`, est conservee).",
     "improvements": [
-      "Topologie : decouverte LLDP recursive -- l'adresse de gestion d'un voisin est lue sur lldpRemManAddrIfId (colonne accessible) et non lldpRemManAddr (index not-accessible) ; fonctionne desormais sur un agent SNMP conforme, pas seulement sur les agents qui exposent a tort la colonne d'index.",
-      "Doc : conformite RFC/IEEE des OID et decodeurs reseau verifiee et annotee."
+      "Baie de brassage : bandeau d'information au-dessus du rack (etat SNMP, ping, analyse du brassage) a la place du champ de recherche inutilise.",
+      "Baie de brassage : le statut du releve SNMP d'activite, jusque-la coince dans la barre d'outils, passe dans le bandeau ; la progression de « Deviner le brassage » est desormais visible hors de la modale."
     ]
   },
   "checksums": {
@@ -28,5 +28,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.5"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.6"
 }
