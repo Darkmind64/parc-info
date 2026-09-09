@@ -1,9 +1,50 @@
-PARCINFO_VERSION=2.32.6
+PARCINFO_VERSION=2.32.7
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090911
+BUILD_NUMBER=2026090912
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.7 - Baie : le bandeau d'info détaille le relevé SNMP d'activité
+#
+# Demande : « un détail de progression du relevé SNMP dans le bandeau
+# d'information ? Des informations plus détaillées ? »
+#
+# SERVEUR (network_diag.py) :
+#   - Nouveau `_activite_progres` (dict par client, sous `_activite_lock`) :
+#       {phase:'releve'|'pret', fait, total, depuis(epoch), avec_fdb, cycle,
+#        switch, faits:[{nom, ip, ms, ok}]}
+#     Alimenté dans `_cycle_activite` : posé à `phase='releve'` avant le
+#     ThreadPoolExecutor de `_relever_switch_activite`, un wrapper incrémente
+#     `fait` et empile `faits` à chaque switch terminé (thread-safe), puis
+#     passe à `phase='pret'` une fois le résultat assemblé. Purgé avec les
+#     autres structures d'activité.
+#   - `activite_baie()` fusionne `_activite_progres[cid]` dans la réponse sous
+#     la clé `progres` (copie de `faits`).
+#   - `equipements[]` (déjà exposé) gagne : `muet`, `poll_ms`,
+#     `compteurs_64bits`, `fdb_nb_macs`, `nb_ports_mappes`, `nb_divergences`.
+#     `dms_par_ip` (durée du relevé par IP) construit depuis `_releves`.
+#
+# PAGE (templates/baie_brassage.html) :
+#   - `BaieInfo.set(cle, valeur, ton)` accepte maintenant un TABLEAU de
+#     segments (`[{txt, ton}, …]`) pour une même clé — `_rendre()` aplatit.
+#   - `majBandeauActivite(d)` réécrit :
+#       * relevé en cours (`d.actif===null` OU `d.progres.phase==='releve'`) :
+#         « ⚡ relevé SNMP en cours · 2/3 switchs [· 1ᵉʳ passage …] », un
+#         segment par switch déjà relevé (nom ✓/✗ + durée), « ⏳ N s — un
+#         switch répond lentement… » si `fait<total` depuis ≥ 8 s ;
+#       * relevé prêt : ligne principale (+ « relevé il y a N s ») puis un
+#         segment par switch via `_segSwitch(e)` (ports actifs/up, débit,
+#         poll ms, « 32 bits », « N MAC », « ⚠ N err »), limité à 6 + « +N
+#         switch(s)… », puis « ⚙ non calibré : <noms> » ;
+#       * `erreur_interne` distingué de « SNMP désactivé ».
+#
+# Tests : test_diagnostic_reseau.py section activité (progres 'pret' 1/1 +
+# champs détaillés equipements[] + fusion dans activite_baie()) ;
+# isolations mémoire mises à jour (bench_baie_activite.py,
+# tests/test_baie_prechauffe.py).
+#
+# ---------------------------------------------------------------------------
+#
 # Version 2.32.6 - Baie de brassage : bandeau d'information au-dessus du rack
 #
 # Demande : remplacer le champ « Rechercher un equipement » (aucune utilite

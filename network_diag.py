@@ -5774,6 +5774,9 @@ _activite_wake       = threading.Event()   # réveille la boucle quand un nouvea
 _activite_heartbeat  = {}   # client_id -> epoch du dernier battement
 _activite_resultat   = {}   # client_id -> dict prêt pour l'UI (LEDs)
 _activite_detail     = {}   # client_id -> {ts, switchs:[...], ports:[...], interfaces:[...]}
+_activite_progres    = {}   # client_id -> avancement du relevé SNMP en cours (bandeau d'info) :
+                            # {phase:'releve'|'pret', fait, total, depuis(epoch), avec_fdb,
+                            #  cycle, switch, faits:[{nom,ip,ms,ok}]}
 _activite_journal    = collections.deque(maxlen=250)   # évènements, récent en tête
 _activite_calib      = None  # (défini plus bas) — SOUS _activite_lock : partagé loop <-> requête
 # Touchés par le seul thread _activite_loop. La purge (sous _activite_lock) et la
@@ -7558,6 +7561,7 @@ def _cycle_activite(clients):
                 nb_muets = 0
                 ips_muets = set()  # dédup par IP : un switch sur 2 emplacements ne compte qu'une fois
                 poll_par_ip = {}   # ip -> (infos, cur_ports, ok, hc, dt_switch, reboot, poe, sysinfo, uptime_s)
+                dms_par_ip = {}    # ip -> durée du relevé SNMP de ce switch, en ms (bandeau d'info)
                 etats_par_ip = {}     # ip -> {ifindex: led}  (pour les prises murales d'un bandeau)
                 mapping_par_slot = {} # slot_id switch -> {numero: ifindex}
                 ip_par_slot = {}      # slot_id switch -> ip
@@ -7596,16 +7600,41 @@ def _cycle_activite(clients):
                     premier_slot.setdefault(_sw['ip'], _sw)
                 if premier_slot:
                     from concurrent.futures import ThreadPoolExecutor
-                    _nw = max(2, min(len(premier_slot), _cfg_int('diag_snmp_workers', 8)))
+                    _items = list(premier_slot.items())
+                    _nw = max(2, min(len(_items), _cfg_int('diag_snmp_workers', 8)))
+                    # Avancement live du relevé (bandeau d'info) : un compteur
+                    # `fait/total` incrémenté au fil des switchs, + la liste de
+                    # ceux déjà relevés (nom, durée, muet ?). Un switch lent
+                    # (HP 1810G ~2 min) reste ainsi visible « en cours » au lieu
+                    # d'un « démarrage… » opaque.
+                    with _activite_lock:
+                        _activite_progres[cid] = {
+                            'phase': 'releve', 'fait': 0, 'total': len(_items),
+                            'depuis': time.time(), 'avec_fdb': avec_fdb,
+                            'cycle': _activite_rechauffe[0], 'switch': '', 'faits': []}
+                    _prog_lock = threading.Lock()
+
+                    def _relever_un(kv):
+                        r = _relever_switch_activite(
+                            cid, kv[0], kv[1]['slot_id'], kv[1]['nom'],
+                            communautes, inv_mac, avec_fdb,
+                            double_froid=(froid and (cid, kv[0]) not in _activite_sut))
+                        with _prog_lock, _activite_lock:
+                            p = _activite_progres.get(cid)
+                            if p and p.get('phase') == 'releve':
+                                p['fait'] += 1
+                                p['switch'] = kv[1]['nom']
+                                p['faits'].append({
+                                    'nom': kv[1]['nom'], 'ip': kv[0],
+                                    'ms': int(r.get('dms', 0) or 0),
+                                    'ok': bool(r['poll'][2])})
+                        return r
+
                     with ThreadPoolExecutor(max_workers=_nw, thread_name_prefix='baie-act') as _ex:
-                        _releves = list(_ex.map(
-                            lambda kv: _relever_switch_activite(
-                                cid, kv[0], kv[1]['slot_id'], kv[1]['nom'],
-                                communautes, inv_mac, avec_fdb,
-                                double_froid=(froid and (cid, kv[0]) not in _activite_sut)),
-                            list(premier_slot.items())))
+                        _releves = list(_ex.map(_relever_un, _items))
                     for _r in _releves:
                         poll_par_ip[_r['ip']] = _r['poll']
+                        dms_par_ip[_r['ip']] = int(_r.get('dms', 0) or 0)
                         fdb_par_ip[_r['ip']] = _r['fdb']
                         fdb_meta_par_ip[_r['ip']] = _r.get('fdb_meta') or {}
                         journal_ops.extend(_r['journal'])
@@ -7860,7 +7889,11 @@ def _cycle_activite(clients):
                     equipements.append({
                         'ip': ip, 'nom': sw['nom'], 'appareil_id': sw['appareil_id'],
                         'calibre': calibre, 'debit_total_bps': round(debit_total),
-                        'nb_ports_up': nb_up, 'nb_actifs': nb_actifs, 'erreurs': err_total})
+                        'nb_ports_up': nb_up, 'nb_actifs': nb_actifs, 'erreurs': err_total,
+                        'muet': not ok, 'poll_ms': dms_par_ip.get(ip, 0),
+                        'compteurs_64bits': hc,
+                        'nb_ports_mappes': len(mapping), 'nb_divergences': len(divergences),
+                        'fdb_nb_macs': sum(len(v) for v in (fdb_par_ip.get(ip) or {}).values())})
                     detail_sw.append({
                         'ip': ip, 'nom': sw['nom'], 'appareil_id': sw['appareil_id'],
                         'slot_id': slot_id,
@@ -7916,6 +7949,10 @@ def _cycle_activite(clients):
                     'equipements': equipements, 'ports': ports_ui}
                 _activite_detail[cid] = {'ts': _now_z(), 'switchs': detail_sw,
                                          'ports': detail_ports, 'interfaces': detail_ifs}
+                if cid in _activite_progres:
+                    _activite_progres[cid] = {
+                        'phase': 'pret', 'total': len({s['ip'] for s in switchs}),
+                        'fait': len({s['ip'] for s in switchs}), 'depuis': time.time()}
             _activite_echecs[cid] = 0
         except Exception:
             n = _activite_echecs.get(cid, 0) + 1
@@ -7947,6 +7984,7 @@ def _activite_loop():
                     _activite_heartbeat.pop(c, None)
                     _activite_resultat.pop(c, None)
                     _activite_detail.pop(c, None)
+                    _activite_progres.pop(c, None)
                 if partis:      # structures par (client, …) d'un client qui ne regarde plus
                     pset = set(partis)
                     for reg in (_activite_switch_ok, _activite_etat_mappe, _activite_calib,
@@ -7996,6 +8034,7 @@ def _activite_loop():
                     for c in clients:
                         _activite_resultat[c] = {'actif': False}
                         _activite_detail[c] = {'ts': _now_z(), 'switchs': [], 'ports': []}
+                        _activite_progres.pop(c, None)
                 if _activite_wake.wait(5):
                     _activite_wake.clear()
                 continue
@@ -8103,6 +8142,9 @@ def activite_baie(client_id: int) -> dict:
         nouveau = client_id not in _activite_heartbeat
         _activite_heartbeat[client_id] = time.time()
         res = dict(_activite_resultat.get(client_id, {'actif': None}))
+        _pr = _activite_progres.get(client_id)
+        if _pr:
+            res['progres'] = {**_pr, 'faits': list(_pr.get('faits', []))}
     _demarrer_activite_thread()
     if nouveau or res.get('actif') is None:
         # onglet /baie qui vient de s'ouvrir (ou relevé pas encore fait) :

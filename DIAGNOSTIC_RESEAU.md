@@ -311,6 +311,17 @@ tableau de bord est ouvert, le navigateur envoie un battement à
 (`network_diag.py`, calqué sur `_moniteur_loop`) interroge alors les compteurs
 SNMP des switchs de la baie et calcule l'état à peindre par port.
 
+**Bandeau d'information (v2.32.6/.7).** Au-dessus du rack, `#baie-infob` affiche
+l'état de fonctionnement de la baie (registre JS `BaieInfo`). Pour le relevé
+d'activité, `_cycle_activite` publie `_activite_progres[cid]`
+(`{phase:'releve'|'pret', fait, total, depuis, faits:[{nom,ip,ms,ok}]}`),
+incrémenté au fil du `ThreadPoolExecutor` de `_relever_switch_activite` et
+fusionné par `activite_baie()` sous la clé `progres` : le bandeau montre
+`fait/total switchs`, chaque switch relevé (nom, durée, muet ?), signale un
+switch lent, puis — une fois `phase='pret'` — un segment par switch (ports
+actifs, débit, `poll_ms`, compteurs 32/64 bits, MAC apprises, erreurs) et la
+liste des switchs non calibrés.
+
 ### Pré-chauffe (v2.22.0)
 
 Sans elle, deux frottements : (a) un démarrage **à froid exige deux relevés**

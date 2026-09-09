@@ -19,8 +19,8 @@ def _mock_snmp_switch(monkeypatch, ports):
 def _isoler_memoire(monkeypatch):
     for nom in ('_activite_prev', '_activite_sut', '_activite_switch_ok',
                 '_activite_etat_mappe', '_activite_noms', '_activite_resultat',
-                '_activite_detail', '_activite_heartbeat', '_activite_echecs',
-                '_presence_baie'):
+                '_activite_detail', '_activite_progres', '_activite_heartbeat',
+                '_activite_echecs', '_presence_baie'):
         monkeypatch.setattr(N, nom, {})
     monkeypatch.setattr(N, '_activite_rechauffe', [0])
     monkeypatch.setattr(N, '_ACTIVITE_DOUBLE_ECART', 0.02)   # pas de vraie attente en test

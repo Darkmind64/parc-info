@@ -629,6 +629,17 @@ verifier(_detail and _detail['switchs'][0]['compteurs_64bits'] is True
 verifier(N.activite_baie(908).get('actif') is True and 908 in N._activite_heartbeat,
          "activite_baie() enregistre un battement et renvoie l'état en cache")
 
+# avancement du relevé SNMP exposé pour le bandeau d'information
+with N._activite_lock:
+    _prog = N._activite_progres.get(908)
+verifier(_prog and _prog.get('phase') == 'pret' and _prog.get('total') == 1 and _prog.get('fait') == 1,
+         "_activite_progres : phase 'pret', 1/1 switch relevé après le cycle", str(_prog))
+_eq0 = (_res or {}).get('equipements', [{}])[0]
+verifier('muet' in _eq0 and 'poll_ms' in _eq0 and _eq0.get('compteurs_64bits') is True,
+         "equipements[] : champs détaillés (muet, poll_ms, compteurs_64bits) pour le bandeau", str(_eq0))
+verifier(N.activite_baie(908).get('progres', {}).get('phase') == 'pret',
+         "activite_baie() fusionne 'progres' dans la réponse")
+
 verifier(N.calibrer_port_baie(908, 80, 9, 49) is True,
          "calibrer_port_baie() fixe l'ifIndex d'un port de baie")
 _c = A.get_db()
