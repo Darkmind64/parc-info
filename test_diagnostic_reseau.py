@@ -1127,6 +1127,41 @@ verifier(N._stp_switch('10.9.0.2', ['public'], {}) == ({}, {}),
          "aucune table STP exposée -> résultat vide, pas d'exception")
 
 
+print('\n=== 27ter. _voisins_lldp_cdp() : IP de gestion via lldpRemManAddrIfId (colonne accessible) ===')
+# lldpRemManAddr (.2) est un objet d'INDEX not-accessible (IEEE 802.1AB) — un
+# agent SNMP conforme ne le renvoie JAMAIS dans un walk. La graine de la
+# découverte LLDP récursive doit donc parcourir .4 (lldpRemManAddrIfId,
+# read-only), qui porte le même index. Ici l'agent factice ne répond QUE sur .4.
+verifier(N._OID_LLDP_REM_MAN_ADDR == '1.0.8802.1.1.2.1.4.2.1.4',
+         "l'OID parcouru est lldpRemManAddrIfId (.4), pas lldpRemManAddr (.2, not-accessible)")
+
+_MAN_IDX = '0.7.1.1.4.10.9.0.5'   # timeMark.portNum.remIndex.subtype(1=IPv4).len(4).a.b.c.d
+
+
+def _walk_lldp_conforme(oid, ip, comm, **k):
+    if oid == N._OID_LLDP_REM_SYSNAME:
+        return {'0.7.1': 'SW-Voisin'}
+    if oid == N._OID_LLDP_REM_MAN_ADDR:          # .4 uniquement
+        return {_MAN_IDX: '7'}
+    if oid == '1.0.8802.1.1.2.1.4.2.1.2':        # .2 : un agent conforme ne renvoie rien
+        return {}
+    return {}
+
+
+_walk_orig_27t, _walko_orig_27t = N._snmp_walk, N._snmp_walk_octets
+N._snmp_walk = _walk_lldp_conforme
+N._snmp_walk_octets = lambda oid, ip, comm, **k: {}
+try:
+    _vois27t = N._voisins_lldp_cdp('10.9.0.1', ['public'], {})
+finally:
+    N._snmp_walk, N._snmp_walk_octets = _walk_orig_27t, _walko_orig_27t
+
+verifier(_vois27t.get(7, {}).get('nom') == 'SW-Voisin',
+         "le voisin LLDP du port local 7 est décodé", str(_vois27t))
+verifier(_vois27t.get(7, {}).get('ip') == '10.9.0.5',
+         "son IP de gestion est extraite de l'index de lldpRemManAddrIfId (.4)", str(_vois27t))
+
+
 print('\n=== 28. decouvrir_topologie() : découverte récursive + plafond de profondeur ===')
 # Audit réseau 2026-09-05, #18 : la découverte récursive (constat d'audit #10
 # de 2.19.32) et son plafond _TOPO_PROFONDEUR_MAX n'étaient testés que de

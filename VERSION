@@ -1,9 +1,78 @@
-PARCINFO_VERSION=2.32.4
+PARCINFO_VERSION=2.32.5
 RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090909
+BUILD_NUMBER=2026090910
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.5 - Conformite RFC/IEEE des outils reseau : 1 bug LLDP corrige
+#
+# Demande : verification des outils reseau contre RFC 1213 (MIB-II), RFC 4188
+# (BRIDGE-MIB), RFC 6762 (mDNS), RFC 6763 (DNS-SD), IEEE 802.1AB (LLDP) ; et
+# reevaluation des adaptations specifiques au switch HP ProCurve 1810G (J9450A)
+# apres sa mise a jour firmware P.2.24.
+#
+# BUG TROUVE ET CORRIGE -- decouverte de topologie LLDP recursive
+#   `network_diag._voisins_lldp_cdp` lisait l'adresse de gestion d'un voisin en
+#   parcourant `_OID_LLDP_REM_MAN_ADDR = 1.0.8802.1.1.2.1.4.2.1.2`
+#   (lldpRemManAddr). Or cet objet est un composant d'INDEX de
+#   lldpRemManAddrEntry, MAX-ACCESS *not-accessible* (IEEE 802.1AB / LLDP-MIB).
+#   Un agent SNMP conforme ne le renvoie JAMAIS dans un GETNEXT/GETBULK : le
+#   walk avancait aussitot vers la colonne .3, hors du sous-arbre .2, et le
+#   garde-fou "OID croissant hors prefixe" arretait tout -> resultat vide. La
+#   graine de la decouverte de topologie LLDP recursive (constat d'audit #10 de
+#   2.19.32) ne remontait donc AUCUNE IP de voisin sur tout agent conforme
+#   (c.-a-d. la quasi-totalite du materiel non-Cisco, ou seul LLDP est parle ;
+#   CDP, lui, expose une colonne accessible et fonctionnait).
+#   Corrige : on parcourt `1.0.8802.1.1.2.1.4.2.1.4` (lldpRemManAddrIfId,
+#   read-only), qui porte STRICTEMENT le meme index
+#   (timeMark.portNum.remIndex.subtype.len.a.b.c.d) -- le parsing existant est
+#   inchange. Fonctionne aussi sur les agents qui exposaient .2 a tort.
+#   Test : test_diagnostic_reseau.py section 27ter (agent conforme : ne repond
+#   que sur .4).
+#
+# VERIFIE CONFORME (aucune correction) :
+#   - RFC 1213 / IF-MIB : ifTable (.2.2.1.x), ifXTable (.31.1.1.1.x),
+#     ipNetToMediaTable (.4.22.1.2), ipAddrTable, ipCidrRouteTable -- OID exacts.
+#   - RFC 3635 EtherLike-MIB : dot3StatsTable (.10.7.2.1.x) -- exact.
+#   - RFC 4188 BRIDGE-MIB : dot1dTpFdbPort (.17.4.3.1.2), dot1dBasePortIfIndex
+#     (.17.1.4.1.2), dot1dStp* (.17.2.x) -- exact. NB : dot1qTpFdbPort /
+#     dot1qVlanStaticName / dot1qPvid relevent de Q-BRIDGE-MIB (RFC 4363, ex
+#     RFC 2674), pas de RFC 4188 -- OID exacts, precision de doc seulement.
+#   - RFC 4133 ENTITY-MIB, RFC 1628 UPS-MIB, RFC 3621 POWER-ETHERNET-MIB,
+#     RFC 2790 HOST-RESOURCES-MIB -- OID exacts.
+#   - IEEE 802.1AB : decodeur passif de trame LLDP (_lldp_mgmt_ipv4, TLV type 8
+#     "Management Address" par 8.5.9) -- conforme ; idem _cdp_addr_ipv4,
+#     _ospf_hello_reseau.
+#   - RFC 6762 / 6763 : la decouverte mDNS/DNS-SD s'appuie sur la bibliotheque
+#     `zeroconf` (conforme) ; l'ecoute passive n'extrait que l'IP source d'un
+#     paquet multicast, sans parser d'enregistrement.
+#   Imprecisions mineures notees, sans impact (recoupement inventaire) :
+#   `_ip_depuis_suffixe_arp` prendrait les 4 derniers octets d'une entree IPv6
+#   de ipNetToPhysicalTable ; `lldpRemChassisId` de 6 octets suppose une MAC
+#   sans verifier le sous-type.
+#
+# SWITCH HP PROCURVE 1810G (J9450A), firmware P.2.24 : RIEN A RETIRER.
+#   Toutes les adaptations sont de l'auto-detection a l'execution, jamais un
+#   test de version de firmware :
+#     - `_bulk_col_mode` (GETBULK <-> GETNEXT) : re-sonde tous les modes apres
+#       30 min, et repart de zero a chaque redemarrage de ParcInfo.
+#     - `_bulk_col_absente` (ifXTable / dot3 / PoE non exposees) : re-sonde
+#       apres 15 min.
+#     - `_activite_hc` (compteurs 32 vs 64 bits) : re-teste tous les
+#       _ACTIVITE_REPROBE_CYCLES cycles.
+#     - `_fdb_corriger` mode `auto` : re-score les hypotheses de forme de la
+#       table MAC contre l'inventaire a CHAQUE appel ; si l'agent est repare,
+#       l'hypothese `exact` gagne et rien n'est transforme.
+#     - `_mac_octets` (tolerance de prefixe parasite), ifType 117 : sans effet
+#       si l'agent est correct.
+#   => si P.2.24 corrige le GETBULK / l'ifXTable / l'encodage de la table MAC,
+#      ParcInfo le detecte seul au cycle de re-sondage suivant (ou tout de
+#      suite apres un redemarrage). Rien a desinstaller. Le seul reglage a
+#      verifier manuellement : `diag_fdb_mode:<ip_du_switch>` (Reglages) -- s'il
+#      avait ete force a `prefixe` ou `ignorer`, le remettre a `auto`/vide.
+#
+# ---------------------------------------------------------------------------
+#
 # Version 2.32.4 - Collecte SNMP : cache des metadonnees + retransmission
 #
 # Suite de l'audit reseau (2.32.3). Deux optimisations de performance dans la

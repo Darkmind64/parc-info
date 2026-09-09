@@ -855,7 +855,9 @@ ipCidrRouteDest 1.3.6.1.2.1.4.24.4.1.1
 # LLDP-MIB
 lldpRemSysName  1.0.8802.1.1.2.1.4.1.1.9
 lldpRemPortId   1.0.8802.1.1.2.1.4.1.1.7
-lldpRemManAddrIfId 1.0.8802.1.1.2.1.4.2.1.2   (l'INDEX porte l'IP de gestion du voisin)
+lldpRemManAddrIfId 1.0.8802.1.1.2.1.4.2.1.4   (l'INDEX porte l'IP de gestion du voisin ;
+                                              .2 = lldpRemManAddr est not-accessible, un
+                                              agent conforme ne le renvoie pas dans un walk)
 # UPS-MIB (RFC 1628, 1.3.6.1.2.1.33.1.x) — onduleurs
 upsIdentModel .1.1.2   upsBatteryStatus .1.2.1   upsSecondsOnBattery .1.2.2
 upsEstimatedMinutesRemaining .1.2.3   upsEstimatedChargeRemaining .1.2.4
