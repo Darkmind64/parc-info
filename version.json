@@ -1,23 +1,22 @@
 {
-  "version": "2.32.10",
+  "version": "2.32.11",
   "release_date": "2026-09-10",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.10",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.32.11",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Synchronisation Turso -- deux correctifs a la suite de 2.32.9. (1) REGRESSION 2.32.9 corrigee : les modifications d'appareils ne se synchronisaient plus entre instances. Le filtre anti-ecrasement du PULL considerait comme \"edition locale en attente\" toute ligne ayant une entree recente dans le journal -- or un recalcul de score de sante (toutes les 30 min) ou un ping en laisse une, sans que ce soit une vraie modif. Resultat : l'instance refusait les modifs venues des autres. Desormais le champ `date_maj` fait autorite : on ne garde la version locale que si elle est strictement plus recente que la distante (les tables sans `date_maj` -- cablage de baie, MAC secondaires, listes -- gardent la regle \"edition locale en attente prime\"). (2) COPIE INITIALE : le journal de sync ne propage que les ecritures POSTERIEURES a la pose de ses declencheurs. Une table ajoutee au suivi apres coup (`appareil_macs`, `licences_appareils`, documents lies, droits...), ou dont les lignes preexistaient a l'activation de la sync, restait vide sur Turso indefiniment. Nouveau `_seed_tables_vides_sur_turso` : au premier cycle qui suit la mise a jour, chaque table suivie non vide localement MAIS vide sur Turso voit toutes ses lignes journalisees puis poussees. Garde-fou strict : une table deja peuplee sur Turso n'est jamais reecrite (drapeau par table, cout nul ensuite).",
+    "new_features": "Synchronisation Turso -- le rapport \"Changements depuis la derniere visite\" (table client_instantane) est desormais partage entre instances. Une photo de l'inventaire prise en fin de scan SUR SITE devient consultable depuis l'instance de bureau -- c'est tout l'objet de la fonctionnalite. Comme cette table entre dans la sync alors que des instantanes existent deja (id 1, 2, 3... identiques d'une instance a l'autre), un decalage anti-collision d'id est applique une seule fois par base au demarrage (_reclef_client_instantane) : les instantanes existants sont re-indexes dans une plage propre a la machine (~2^48), sans passer par les declencheurs de journal, sqlite_sequence recale. Sur : aucune table ne reference client_instantane.id et la colonne `reference` est un drapeau 0/1, pas un id. La copie initiale vers Turso est ensuite geree par _seed_tables_vides_sur_turso (v2.32.10). Suite de 2.32.9 (modifs qui revenaient en arriere) et 2.32.10 (regression + copie initiale). NON synchronisees : les tables diag_* (topologie, evenements reseau, metriques, diag_baie_snapshot) -- caches/series temporelles reconstruits localement par SNMP sur site, volontairement locaux.",
     "improvements": [
-      "Sync Turso : les modifications d'appareils se re-synchronisent entre instances (regression 2.32.9).",
-      "Sync Turso : copie initiale automatique des tables restees vides sur Turso (appareil_macs, licences, droits, documents lies...)."
+      "Sync Turso : le rapport \"Changements depuis la derniere visite\" est consultable depuis toutes les instances (client_instantane synchronisee, avec decalage anti-collision d'id)."
     ]
   },
   "checksums": {
@@ -28,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.10"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.11"
 }

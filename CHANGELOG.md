@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.11] - 2026-09-10 🔁
+
+### Synchronisation Turso — « Changements depuis la dernière visite » partagé entre instances
+
+La table `client_instantane` (photo compacte de l'inventaire prise en fin de scan, base du rapport *« Changements depuis la dernière visite »*) entre dans la synchronisation Turso : **une photo prise sur site devient consultable depuis l'instance de bureau** — c'est tout l'objet de la fonctionnalité.
+
+**Anti-collision d'id.** Cette table rejoint le suivi alors que des instantanés existent déjà en production, avec des `id` 1, 2, 3… **identiques d'une instance à l'autre** — un simple UPSERT de sync les écraserait. `app.init_db()` appelle donc `_reclef_client_instantane()` **une seule fois par base** (drapeau `config`) : les instantanés existants sont ré-indexés dans la plage propre à la machine (offset ~2⁴⁸), déclencheurs de journal suspendus le temps de l'opération, `sqlite_sequence` recalé. Sûr sans re-mapping : aucune table ne référence `client_instantane.id`, et la colonne `reference` est un drapeau 0/1 (« photo épinglée »), pas un id. La copie initiale vers Turso enchaîne via `_seed_tables_vides_sur_turso` (2.32.10).
+
+**Laissé local volontairement.** Les tables `diag_*` (`diag_topologie`, `diag_reseau_evenements`, `diag_metriques`, `diag_baie_snapshot`…) restent non synchronisées : caches et séries temporelles reconstruits par le SNMP sur site, sans intérêt à distance (`diag_baie_snapshot` est réécrit toutes les ~5 min → tempête de sync pour rien).
+
+**Déploiement.** À installer sur toutes les instances. Test `test_sync_client_instantane.py` (10 vérifications).
+
+---
+
 ## [2.32.10] - 2026-09-10 🔁
 
 ### Synchronisation Turso — suite de 2.32.9 (régression + copie initiale)
