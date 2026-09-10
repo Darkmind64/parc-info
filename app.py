@@ -818,6 +818,47 @@ def _invalidate_crypto_cache():
     with _crypto_shared_lock:
         _crypto_shared_cache = None
 
+_CLE_RECLEF_INSTANTANE = '_client_instantane_reclef_v1'
+
+
+def _reclef_client_instantane(c, id_offset):
+    """Décale les id de `client_instantane` déjà présents dans la plage propre à
+    cette machine (~2^48), une seule fois par base (drapeau `config`).
+
+    `client_instantane` entre dans la sync Turso en v2.32.11. L'anti-collision
+    par `sqlite_sequence` ne s'applique qu'aux tables encore vides ; une base
+    qui a déjà des instantanés porte des id 1, 2, 3… identiques à ceux de
+    l'autre instance → au premier `_seed_tables_vides_sur_turso`, le second à
+    pousser écraserait les lignes du premier. On ré-indexe donc les lignes
+    existantes AVANT toute synchronisation.
+
+    Sûr sans re-mapping : aucune table ne référence `client_instantane.id`, et
+    la colonne `reference` est un drapeau 0/1 (« photo épinglée »), pas un id.
+    Les triggers `_trg_journal_*` sont suspendus le temps de l'opération —
+    `_seed_tables_vides_sur_turso` journalisera ensuite les lignes proprement.
+    """
+    if (c.execute("SELECT valeur FROM config WHERE cle=?",
+                  (_CLE_RECLEF_INSTANTANE,)).fetchone() or [None])[0]:
+        return
+    try:
+        n = c.execute("SELECT COUNT(*) FROM client_instantane").fetchone()[0]
+    except Exception:
+        return
+    if n:
+        c.execute("INSERT OR IGNORE INTO _sync_applying (id) VALUES (1)")
+        try:
+            c.execute("UPDATE client_instantane SET id = id + ?", (int(id_offset),))
+            c.execute("DELETE FROM sqlite_sequence WHERE name='client_instantane'")
+            mx = c.execute("SELECT COALESCE(MAX(id), 0) FROM client_instantane").fetchone()[0]
+            c.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('client_instantane', ?)", (mx,))
+        finally:
+            c.execute("DELETE FROM _sync_applying")
+        logger.info("client_instantane : %d instantané(s) ré-indexé(s) (+%d) pour la sync", n, id_offset)
+    c.execute(
+        "INSERT OR REPLACE INTO config (cle, valeur, date_maj) VALUES (?, ?, ?)",
+        (_CLE_RECLEF_INSTANTANE, _utcnow().isoformat(), _utcnow().isoformat()))
+
+
 def init_db():
     conn = get_db(); c = conn.cursor()
 
@@ -944,6 +985,31 @@ def init_db():
     try:
         c.execute('CREATE INDEX IF NOT EXISTS idx_dhcp_baux '
                   'ON dhcp_baux(client_id, adresse_mac)')
+    except Exception:
+        pass
+
+    # Instantané de l'inventaire d'un client (photo compacte : nom/IP/MAC/type/
+    # ports par appareil). Créé automatiquement en fin de scan ; le rapport
+    # « Changements depuis la dernière visite » diffe les deux derniers.
+    # Créée ICI (avant la boucle _TRACKED_JOURNAL) car synchronisée entre
+    # instances : une photo prise en fin de scan SUR SITE doit être consultable
+    # depuis l'instance de bureau — c'est tout l'objet de la fonctionnalité.
+    # Bornée (`_INSTANTANES_GARDES`=20/client + la référence épinglée).
+    # `reference` est un DRAPEAU 0/1 (« photo épinglée »), pas un id → aucune
+    # référence interne à re-mapper lors du décalage anti-collision d'id.
+    c.execute('''CREATE TABLE IF NOT EXISTS client_instantane (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL,
+        horodatage TEXT DEFAULT '',
+        epoch REAL DEFAULT 0,
+        origine TEXT DEFAULT '',
+        libelle TEXT DEFAULT '',
+        reference INTEGER DEFAULT 0,
+        donnees_json TEXT DEFAULT '{}',
+        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
+    try:
+        c.execute('''CREATE INDEX IF NOT EXISTS idx_client_instantane
+            ON client_instantane(client_id, id)''')
     except Exception:
         pass
 
@@ -2032,6 +2098,10 @@ def init_db():
         # Baux DHCP relevés à la source (Plan 1) — partagés entre instances
         # (un relevé fait depuis le site alimente la consultation à distance).
         'dhcp_baux': 'id',
+        # Instantanés d'inventaire (« Changements depuis la dernière visite ») —
+        # partagés pour la consultation à distance. Décalage anti-collision d'id
+        # sur base existante : voir `_reclef_client_instantane()` plus bas.
+        'client_instantane': 'id',
         # Tables à clé texte (pas de colonne 'id')
         'config': 'cle', 'journal_maj': 'cle', 'collectes': 'cle',
         'cles_recuperation': 'cle',
@@ -2148,6 +2218,19 @@ def init_db():
                     c.execute("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)", (_tbl, _id_offset))
             except Exception:
                 pass
+
+        # client_instantane vient d'entrer dans la sync (v2.32.11). Le décalage
+        # sqlite_sequence ci-dessus ne protège que les tables ENCORE VIDES ;
+        # une base qui a déjà des instantanés porte des id 1, 2, 3… qui se
+        # chevauchent avec ceux de l'autre instance → un UPSERT de sync en
+        # écraserait. On ré-indexe donc les lignes existantes dans la plage
+        # propre à cette machine, une seule fois (drapeau `config`). Sûr :
+        # aucune autre table ne référence `client_instantane.id`, et
+        # `reference` est un booléen, pas un id.
+        try:
+            _reclef_client_instantane(c, _id_offset)
+        except Exception:
+            logger.exception("Ré-indexation client_instantane - échec non bloquant")
     except Exception:
         logger.exception("Anti-collision ID (sqlite_sequence) - échec non bloquant")
 
@@ -2252,21 +2335,8 @@ def init_db():
         ports_json TEXT DEFAULT '{}',
         PRIMARY KEY (client_id, equipement_ip),
         FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
-    # Instantané de l'inventaire d'un client (photo compacte : nom/IP/MAC/type/
-    # ports par appareil). Créé automatiquement en fin de scan ; le rapport
-    # « Changements » diffe les deux derniers. v2.22.x.
-    c.execute('''CREATE TABLE IF NOT EXISTS client_instantane (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        client_id INTEGER NOT NULL,
-        horodatage TEXT DEFAULT '',
-        epoch REAL DEFAULT 0,
-        origine TEXT DEFAULT '',
-        libelle TEXT DEFAULT '',
-        reference INTEGER DEFAULT 0,
-        donnees_json TEXT DEFAULT '{}',
-        FOREIGN KEY(client_id) REFERENCES clients(id) ON DELETE CASCADE)''')
-    c.execute('''CREATE INDEX IF NOT EXISTS idx_client_instantane
-        ON client_instantane(client_id, id)''')
+    # (client_instantane : créée plus haut, avant la boucle _TRACKED_JOURNAL,
+    #  car synchronisée entre instances.)
     # Palier 4 — topologie L2 découverte (instantané, remplacé à chaque poll).
     c.execute('''CREATE TABLE IF NOT EXISTS diag_topologie (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
