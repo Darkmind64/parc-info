@@ -1,22 +1,22 @@
 {
-  "version": "2.32.8",
-  "release_date": "2026-09-09",
+  "version": "2.32.9",
+  "release_date": "2026-09-10",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.8",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.8/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.9/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.9/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.9/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.32.9",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.9/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.9/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.9/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.9/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.9/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : le bandeau d'information (v2.32.6/.7) ne DECALE PLUS le rack. Le detail par switch peut etre long ; avant, il passait a la ligne et decalait toute la baie verticalement a chaque rafraichissement. Desormais : le bandeau a une HAUTEUR FIXE d'une ligne, son contenu (`position:absolute` dans un conteneur a hauteur fixe) est totalement hors flux -- il ne peut plus gonfler la colonne de la grille `.baie-page` ni repousser la barre d'outils / le rack. Quand le contenu deborde : fondu a droite + chevron ▾, et le detail complet s'ouvre au SURVOL / focus dans un panneau superpose (`.baie-infob-detail`) qui ne pousse rien. Au passage : `.baie-page` en `grid-template-columns: minmax(0,1fr)` (au lieu de `1fr`) + `min-width:0` sur les colonnes -- garde-fou generique contre tout contenu non secable trop large dans cette colonne.",
+    "new_features": "Synchronisation Turso : une modification de fiche appareil ne disparait plus quelques minutes apres sa saisie. En deploiement multi-instance (Docker + PC), la sync replique la LIGNE ENTIERE et fait le PULL avant le PUSH : une ecriture de fond sur une autre instance en retard (recalcul du score de sante, en_ligne/dernier_ping, scan planifie) repoussait toute sa ligne perimee, le PULL l'appliquait par-dessus l'edition fraiche, puis le PUSH figeait la regression sur Turso et la propageait partout (un champ sans rapport touche ailleurs suffisait -- effet de « croisement entre rubriques »). Correctif `database._proteger_versions_locales` applique au PULL : une ligne distante n'ecrase plus la locale quand une edition locale est encore en attente de push, ou quand le `date_maj` local est strictement plus recent (la ligne locale est alors rejournalisee pour que le PUSH suivant corrige Turso). Les suppressions faites ailleurs continuent de primer. A installer sur TOUTES les instances ; une fiche deja cassee cote Turso se repare en la re-editant depuis n'importe quelle instance.",
     "improvements": [
-      "Baie de brassage : le bandeau d'information a une hauteur fixe d'une ligne ; le rack ne se decale plus quand le contenu change. Detail complet au survol dans un panneau superpose."
+      "Sync Turso : le PULL ne reapplique plus une ligne distante par-dessus une edition locale en attente ou plus recente -- fin des modifications d'appareils qui reviennent en arriere toutes seules en multi-instance."
     ]
   },
   "checksums": {
@@ -27,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.8"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.9"
 }
