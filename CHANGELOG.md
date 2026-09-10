@@ -1,5 +1,21 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.10] - 2026-09-10 🔁
+
+### Synchronisation Turso — suite de 2.32.9 (régression + copie initiale)
+
+**1. Régression 2.32.9 corrigée.** Après 2.32.9, *les modifications d'appareils ne se synchronisaient plus entre instances*. Le filtre anti-écrasement du PULL protégeait **toute** ligne ayant une entrée récente dans le `_sync_journal` local, en la traitant comme « édition locale en attente ». Or un recalcul du score de santé (toutes les 30 min) ou un ping en laisse une, sans que ce soit une modification de fond → l'instance refusait alors les modifications venues des autres instances, définitivement.
+
+Désormais, pour une table qui a une colonne `date_maj`, **c'est `date_maj` qui fait autorité** : on ne conserve la version locale que si son `date_maj` est strictement plus récent que celui du distant (ou égal *et* une édition locale est réellement en attente). Un recalcul de santé / un ping ne touchant pas `date_maj`, il ne bloque plus rien. Les tables sans `date_maj` (câblage de baie, `config`, `appareil_macs`, `licences_appareils`…) gardent la règle « une édition locale en attente de push prime ».
+
+**2. Copie initiale vers Turso.** Le `_sync_journal` ne propage que les écritures *postérieures* à la pose de ses déclencheurs. Une table ajoutée au suivi après coup (`appareil_macs`, `licences_appareils`, documents liés, droits utilisateurs…), ou dont les lignes préexistaient à l'activation de la sync, restait **vide sur Turso indéfiniment** — il n'existait que des rattrapages table par table codés à la main.
+
+Nouveau `database._seed_tables_vides_sur_turso` : au premier cycle de sync qui suit la mise à jour, chaque table suivie non vide localement **mais vide sur Turso** voit toutes ses lignes journalisées puis poussées. Garde-fou strict : une table déjà peuplée sur Turso n'est **jamais** réécrite ; drapeau par table → coût nul aux cycles suivants.
+
+**Déploiement.** À installer sur toutes les instances. Tests `test_sync_versions_locales.py` (6 scénarios) + `test_sync_seed_turso.py` (3 scénarios). 428 tests pytest OK.
+
+---
+
 ## [2.32.9] - 2026-09-10 🔁
 
 ### Synchronisation Turso — une modification d'appareil ne disparaît plus après coup

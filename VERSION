@@ -1,9 +1,49 @@
-PARCINFO_VERSION=2.32.9
+PARCINFO_VERSION=2.32.10
 RELEASE_DATE=2026-09-10
-BUILD_NUMBER=2026091001
+BUILD_NUMBER=2026091002
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.10 - Sync Turso : suite de 2.32.9 (régression + copie initiale)
+#
+# 1) RÉGRESSION 2.32.9 — « les modifs d'appareils ne se synchronisent plus
+#    entre instances ». Le filtre anti-écrasement du PULL
+#    (_proteger_versions_locales) protégeait TOUTE ligne ayant une entrée
+#    récente dans le _sync_journal local, en la considérant comme « édition
+#    locale en attente ». Or un recalcul de score de santé
+#    (_sante_balayage_periodique, toutes les 30 min) ou un ping en laisse une,
+#    sans que ce soit une modification de fond → l'instance refusait alors les
+#    modifications venues des autres instances, définitivement (le curseur de
+#    pull avançait quand même).
+#    Corrigé : pour une table qui a une colonne `date_maj`, c'est `date_maj`
+#    qui fait autorité — on ne conserve la version locale que si son `date_maj`
+#    est strictement plus récent que le distant (ou égal ET une édition locale
+#    est réellement en attente). Un recalcul de santé / un ping ne touchant pas
+#    `date_maj`, il ne protège plus rien. Les tables SANS `date_maj`
+#    (baie_slot_ports, config, appareil_macs, licences_appareils…) gardent la
+#    règle « une édition locale en attente de push prime ».
+#
+# 2) COPIE INITIALE VERS TURSO — le _sync_journal ne propage QUE les écritures
+#    postérieures à la pose de ses triggers. Une table ajoutée à
+#    _TRACKED_JOURNAL après coup (appareil_macs, licences_appareils,
+#    documents_*, droits_utilisateurs…), ou dont les lignes préexistaient à
+#    l'activation de la sync, restait VIDE sur Turso indéfiniment — il
+#    n'existait que des rattrapages table par table codés à la main
+#    (rattraper_sync_baie_slot_ports, …).
+#    Nouveau database._seed_tables_vides_sur_turso : au premier cycle de sync
+#    qui suit la mise à jour, pour chaque table suivie non vide localement MAIS
+#    vide sur Turso, toutes les lignes locales sont journalisées en INSERT (le
+#    PUSH du même cycle les envoie). Garde-fou : une table déjà peuplée sur
+#    Turso n'est JAMAIS réécrite ; drapeau par table dans _sync_meta → coût nul
+#    aux cycles suivants.
+#
+# À déployer sur TOUTES les instances. Tests : test_sync_versions_locales.py
+# (6 scénarios), test_sync_seed_turso.py (3 scénarios) ; test_sync_turso.py /
+# test_sync_curseur_echec.py / test_sync_resurrection_suppression.py
+# inchangés ; 428 tests pytest OK.
+#
+# ---------------------------------------------------------------------------
+#
 # Version 2.32.9 - Sync Turso : une modif d'appareil ne disparaît plus après coup
 #
 # Signalé en usage réel : on modifie une fiche appareil dans l'inventaire, c'est
