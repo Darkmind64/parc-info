@@ -8,12 +8,55 @@
    large dans la colonne gauche (bandeau d'info à hauteur fixe, nom d'appareil
    à rallonge…) gonfle la piste au-delà de `1fr` → toute la grille déborde et
    la barre d'outils se re-répartit, ce qui décalait le rack verticalement. */
-.baie-page { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:1.5rem; align-items:start; }
-@media(max-width:1100px) { .baie-page { grid-template-columns:minmax(0,1fr); } }
+/* Coquille 3 zones (refonte lot 1) : bibliothèque | rack | configuration.
+   Les deux rails latéraux se replient en un onglet vertical (état mémorisé
+   par navigateur). La largeur des colonnes passe par des variables pour que
+   `--lib-w` / `--insp-w` basculent selon `data-lib` / `data-insp`. */
+.baie-page {
+    display:grid;
+    grid-template-columns:var(--lib-w,34px) minmax(0,1fr) var(--insp-w,340px);
+    gap:1.1rem; align-items:start;
+}
+.baie-page[data-lib="open"]    { --lib-w:264px; }
+.baie-page[data-lib="closed"]  { --lib-w:34px; }
+.baie-page[data-insp="open"]   { --insp-w:340px; }
+.baie-page[data-insp="closed"] { --insp-w:34px; }
 /* `min-width:0` sur chaque colonne : un item de grille garde sinon
    `min-width:auto` (= min-content), donc un contenu non sécable trop large
-   (bandeau d'info) déborde et repousse la barre d'outils / le rack. */
+   (bandeau d'info) déborde et repousse le rack. */
 .baie-page > * { min-width:0; }
+
+.baie-rail { position:sticky; top:94px; align-self:start; }
+.baie-rail .rail-inner { background:var(--bg-card); border:1px solid var(--border);
+    border-radius:4px; display:flex; flex-direction:column; overflow:hidden; max-height:calc(100vh - 110px); }
+.baie-rail .rail-hd { display:flex; align-items:center; justify-content:space-between;
+    gap:.5rem; padding:.5rem .75rem; border-bottom:1px solid var(--border); flex:0 0 auto; }
+.baie-rail .rail-hd h3 { margin:0; font-family:'Rajdhani',sans-serif; font-size:.8rem;
+    font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-primary); }
+.rail-x { background:var(--bg-secondary); border:1px solid var(--border); border-radius:3px;
+    color:var(--text-muted); width:22px; height:22px; line-height:1; cursor:pointer; flex:0 0 auto; }
+.rail-x:hover { color:var(--accent); border-color:var(--accent); }
+.baie-rail .rail-bd { padding:.9rem .8rem; overflow-y:auto; overflow-x:hidden; min-height:0; }
+.rail-tab { display:none; writing-mode:vertical-rl; background:var(--bg-card);
+    border:1px solid var(--border); border-radius:4px; color:var(--text-secondary);
+    font-family:'Rajdhani',sans-serif; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+    font-size:.72rem; padding:1rem .3rem; cursor:pointer; width:100%; }
+.rail-tab:hover { color:var(--accent); border-color:var(--accent); }
+.baie-page[data-lib="closed"]  #rail-lib  .rail-inner,
+.baie-page[data-insp="closed"] #rail-insp .rail-inner { display:none; }
+.baie-page[data-lib="closed"]  #rail-lib  .rail-tab,
+.baie-page[data-insp="closed"] #rail-insp .rail-tab { display:block; }
+/* dans le rail, la cfg-panel perd son propre cadre / sticky (le rail les porte) */
+.rail-bd .cfg-panel { position:static; padding:0; border:0; background:none; border-radius:0; }
+.rail-soon { font-size:.74rem; color:var(--text-muted); line-height:1.65; }
+.rail-soon b { color:var(--text-secondary); }
+
+@media(max-width:1100px) {
+    .baie-page { grid-template-columns:minmax(0,1fr); }
+    .baie-rail { position:static; }
+    .baie-rail .rail-inner { max-height:none; }
+    .rail-tab { writing-mode:horizontal-tb; padding:.5rem .8rem; text-align:left; }
+}
 
 /* ── BARRE D'OUTILS (refonte lot 1 : groupes nommés) ──
    Les boutons gardent leur id/onclick ; seul le conteneur change. */
@@ -901,11 +944,8 @@ table.mon-table td.mon-wrap select { max-width:100%; }
     </div>
 </div>
 
-<div class="baie-page">
-    <!-- ── COLONNE GAUCHE ── -->
-    <div>
-        <!-- Barre de contrôles — groupes nommés (refonte lot 1) -->
-        <div class="baie-toolbar">
+<!-- Barre de contrôles — groupes nommés (refonte lot 1), pleine largeur au-dessus des 3 zones -->
+<div class="baie-toolbar">
             <div class="tb-group">
                 <span class="tb-group-lbl">Baie</span>
                 <div class="tb-group-items">
@@ -974,7 +1014,30 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                     <button onclick="toutVider()" class="btn btn-sm btn-danger" title="Vider : retire tous les équipements de cette baie">✕ Vider</button>
                 </div>
             </div>
+</div>
+
+<div class="baie-page" id="baie-page" data-lib="closed" data-insp="open">
+
+    <!-- ── ZONE GAUCHE : bibliothèque (contenu au lot 3) ── -->
+    <aside class="baie-rail rail-lib" id="rail-lib">
+        <button class="rail-tab" onclick="toggleRail('lib')" title="Ouvrir la bibliothèque d'appareils">📚&nbsp;Bibliothèque</button>
+        <div class="rail-inner">
+            <div class="rail-hd">
+                <h3>Bibliothèque</h3>
+                <button class="rail-x" onclick="toggleRail('lib')" aria-label="Replier la bibliothèque">‹</button>
+            </div>
+            <div class="rail-bd">
+                <p class="rail-soon"><b>Bientôt (lot 3)</b> — la liste des appareils à glisser
+                dans la baie : inventaire du client <i>et</i> appareils vus en SNMP mais pas
+                encore inventoriés.<br><br>
+                En attendant : onglet <b>+ Placer</b> à droite, ou les boutons
+                <b>+ Bandeau RJ</b> / <b>+ Étagère</b> de la barre d'outils.</p>
+            </div>
         </div>
+    </aside>
+
+    <!-- ── ZONE CENTRALE : rack ── -->
+    <div class="baie-center">
 
         <!-- Bandeau d'information : fonctionnement de la baie (relevé SNMP,
              ping, analyse du brassage… — alimenté par BaieInfo). Hauteur
@@ -1056,7 +1119,15 @@ table.mon-table td.mon-wrap select { max-width:100%; }
         </div>
     </div>
 
-    <!-- ── PANNEAU DROIT ── -->
+    <!-- ── ZONE DROITE : inspecteur / configuration ── -->
+    <aside class="baie-rail rail-insp" id="rail-insp">
+        <button class="rail-tab" onclick="toggleRail('insp')" title="Ouvrir le panneau de configuration">⚙&nbsp;Configuration</button>
+        <div class="rail-inner">
+            <div class="rail-hd">
+                <h3>Configuration</h3>
+                <button class="rail-x" onclick="toggleRail('insp')" aria-label="Replier le panneau">›</button>
+            </div>
+            <div class="rail-bd">
     <div class="cfg-panel">
         <div class="cfg-tabs">
             <button class="cfg-tab active" onclick="showTab('tab-add')">+ Placer</button>
@@ -1164,8 +1235,11 @@ table.mon-table td.mon-wrap select { max-width:100%; }
         <div class="cfg-pane" id="tab-list">
             <div id="equip-list-wrap"></div>
         </div>
-    </div>
-</div>
+    </div><!-- /.cfg-panel -->
+            </div><!-- /.rail-bd -->
+        </div><!-- /.rail-inner -->
+    </aside><!-- /#rail-insp -->
+</div><!-- /.baie-page -->
 
 <!-- TOOLTIP -->
 <div class="rack-tooltip" id="rack-tooltip"></div>
@@ -1705,8 +1779,35 @@ function libelleComplet(s) {
     return derive || '—';
 }
 
+// ── COQUILLE 3 ZONES : rails rétractables (refonte lot 1) ─────────────────────
+// État mémorisé par navigateur (comme le verrou de baie) — pas partagé.
+function _railDefaut(which) { return which === 'insp' ? 'open' : 'closed'; }
+function initRails() {
+    const pg = document.getElementById('baie-page');
+    if (!pg) return;
+    ['lib', 'insp'].forEach(w => {
+        let v;
+        try { v = localStorage.getItem('baie-rail-' + w); } catch (e) { v = null; }
+        pg.dataset[w] = (v === 'open' || v === 'closed') ? v : _railDefaut(w);
+    });
+}
+function toggleRail(which) {
+    const pg = document.getElementById('baie-page');
+    if (!pg) return;
+    const nv = (pg.dataset[which] === 'open') ? 'closed' : 'open';
+    pg.dataset[which] = nv;
+    try { localStorage.setItem('baie-rail-' + which, nv); } catch (e) {}
+    // la largeur de la zone centrale a changé -> recalcul des proportions du rack
+    setTimeout(() => {
+        calcUH(true);
+        if (typeof renderCableLinks === 'function') renderCableLinks();
+        if (window.BaieInfo && BaieInfo._rendre) BaieInfo._rendre();
+    }, 60);
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────────────
 async function init() {
+    initRails();
     await chargerBaie('Baie principale');
     // Calcul des proportions après chargement initial
     setTimeout(() => calcUH(true), 50);
