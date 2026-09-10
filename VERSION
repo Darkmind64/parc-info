@@ -1,9 +1,44 @@
-PARCINFO_VERSION=2.32.8
-RELEASE_DATE=2026-09-09
-BUILD_NUMBER=2026090913
+PARCINFO_VERSION=2.32.9
+RELEASE_DATE=2026-09-10
+BUILD_NUMBER=2026091001
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.32.9 - Sync Turso : une modif d'appareil ne disparaît plus après coup
+#
+# Signalé en usage réel : on modifie une fiche appareil dans l'inventaire, c'est
+# bien enregistré, puis quelques minutes plus tard la modification revient à une
+# ancienne valeur — définitivement.
+#
+# Déploiement multi-instance (Docker + PC, config db_type=sync). Le moteur de
+# sync réplique la LIGNE ENTIÈRE (INSERT OR REPLACE), jamais champ par champ, et
+# exécute le PULL (Turso → local) AVANT le PUSH (local → Turso) :
+#   1. l'utilisateur édite la fiche ici → poussé sur Turso ;
+#   2. une autre instance en retard fait une écriture de fond sur la même ligne
+#      (recalcul de sante.recalculer, en_ligne/dernier_ping, scan planifié) →
+#      journalise un UPDATE appareils et repousse TOUTE sa ligne, périmée ;
+#   3. l'instance de l'utilisateur PULL cette ligne par-dessus l'édition, puis le
+#      PUSH qui suit renvoie la version écrasée sur Turso → régression figée et
+#      propagée partout (un champ sans rapport touché ailleurs suffit : effet de
+#      « croisement entre rubriques »).
+#
+# database._proteger_versions_locales (nouveau, appliqué au PULL) : une ligne
+# distante n'est plus réappliquée par-dessus la locale quand
+#   (1) une édition locale est encore en attente de push (_sync_journal), ou
+#   (2) le date_maj local est strictement plus récent que le distant.
+# Cas 2 : la ligne locale est rejournalisée pour que le PUSH suivant corrige
+# Turso. Les DELETE distants ne sont jamais filtrés (une suppression faite
+# ailleurs prime, comportement inchangé). Docstring de sync_once corrigée.
+#
+# À déployer sur TOUTES les instances. Une fiche déjà cassée côté Turso se
+# répare en la ré-éditant depuis n'importe quelle instance.
+#
+# Test test_sync_versions_locales.py (4 scénarios, dont le cas exact signalé) ;
+# test_sync_turso.py / test_sync_curseur_echec.py /
+# test_sync_resurrection_suppression.py inchangés ; 428 tests pytest OK.
+#
+# ---------------------------------------------------------------------------
+#
 # Version 2.32.8 - Baie : le bandeau d'info ne décale plus le rack
 #
 # Retour utilisateur : « toutes les infos ne tiennent pas toujours dans la

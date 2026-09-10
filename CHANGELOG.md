@@ -1,5 +1,30 @@
 # CHANGELOG - ParcInfo
 
+## [2.32.9] - 2026-09-10 🔁
+
+### Synchronisation Turso — une modification d'appareil ne disparaît plus après coup
+
+Signalé en usage réel : *« je modifie un appareil dans l'inventaire, les modifications sont mémorisées sur le coup mais disparaissent quelques minutes plus tard »* — la fiche revient à une ancienne valeur, définitivement.
+
+**Cause.** Déploiement multi-instance (Docker + PC, `db_type = sync`). Le moteur de sync réplique **la ligne entière** (`INSERT OR REPLACE`), jamais champ par champ, et exécute le **PULL avant le PUSH** :
+
+1. l'utilisateur édite la fiche → poussé sur Turso ;
+2. une autre instance en retard fait une écriture de fond sur la même ligne (recalcul du score de santé, `en_ligne`/`dernier_ping`, scan planifié) → journalise un `UPDATE appareils` et repousse **toute sa ligne, périmée** ;
+3. l'instance de l'utilisateur PULL cette ligne par-dessus l'édition, puis le PUSH renvoie la version écrasée sur Turso → régression figée et propagée partout. Un champ sans rapport touché ailleurs suffit — d'où l'impression de « croisement entre rubriques ».
+
+**Correctif.** `database._proteger_versions_locales`, appliqué au PULL : une ligne distante n'est plus réappliquée par-dessus la locale quand
+
+- une édition locale est encore en attente de push (`_sync_journal`), ou
+- le `date_maj` local est strictement plus récent que le distant (cas 2 : la ligne locale est rejournalisée pour que le PUSH suivant corrige Turso).
+
+Les `DELETE` distants ne sont jamais filtrés (une suppression faite ailleurs prime, comportement inchangé). Docstring de `sync_once` corrigée.
+
+**Déploiement.** À installer **sur toutes les instances**. Une fiche déjà cassée côté Turso se répare en la ré-éditant depuis n'importe quelle instance.
+
+Test `test_sync_versions_locales.py` (4 scénarios, dont le cas exact signalé). 428 tests pytest OK.
+
+---
+
 ## [2.32.8] - 2026-09-09 📐
 
 ### Baie de brassage — le bandeau d'information ne décale plus le rack
