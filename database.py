@@ -572,17 +572,19 @@ def sync_once() -> tuple:
     Effectue une synchronisation complète local ↔ Turso (voir
     _sync_using_journal pour le détail : pull puis push, journal par journal).
 
-    Pas de fusion par champ ni de comparaison de date_maj — corrigé ici après
-    un contrôle du système de synchronisation, cette docstring affirmait
-    l'inverse alors que rien de tel n'existe dans le code depuis le passage à
-    _sync_journal. Le dernier écrit CÔTÉ TURSO gagne, ligne entière comprise :
-    si deux instances modifient le MÊME enregistrement avant d'avoir chacune
-    synchronisé, celle qui pousse en second écrase silencieusement l'autre —
-    aucun avertissement, aucune fusion des deux jeux de changements. En usage
-    normal (des appareils différents modifiés depuis des instances
-    différentes), ce n'est jamais rencontré ; ça reste une limite réelle si
-    deux personnes modifient la MÊME fiche depuis deux instances au même
-    moment, sans y avoir accès en même temps dans l'interface elle-même.
+    Pas de fusion par CHAMP : la ligne entière est répliquée. Le dernier écrit
+    CÔTÉ TURSO gagne pour un enregistrement donné — deux personnes qui éditent
+    la MÊME fiche depuis deux instances au même instant : la seconde à pousser
+    l'emporte, sans fusion des deux jeux de changements.
+
+    En revanche, depuis _proteger_versions_locales(), PULL ne réapplique PLUS
+    aveuglément une ligne distante par-dessus une ligne locale quand (1) une
+    édition locale est encore en attente de push, ou (2) le `date_maj` local
+    est strictement plus récent que le distant. Sans cette garde, une écriture
+    de fond sur une instance en retard (recalcul de santé, ping, scan planifié)
+    repoussait la ligne ENTIÈRE périmée : un champ édité ailleurs revenait
+    quelques minutes plus tard à une vieille valeur, puis le PUSH suivant
+    figeait la régression partout (« croisement entre rubriques »).
     Retourne (ok: bool, stats: dict, error: str|None).
     """
     from config_helpers import cfg_get
@@ -825,6 +827,93 @@ def _apply_table_changes(source, target, tbl: str, pk_col: str, changes: dict):
             target.commit()
 
 
+def _proteger_versions_locales(local, remote, tbl: str, pk_col: str, changes: dict):
+    """PULL (Turso → local) : retire des ensembles INSERT/UPDATE à appliquer
+    localement les enregistrements dont la version LOCALE doit primer.
+
+    Deux cas, tous deux constatés en usage réel (multi-instance Docker + PC) :
+
+      1. **Édition locale en attente de push.** Une fiche vient d'être modifiée
+         ici et l'entrée correspondante est encore dans le `_sync_journal`
+         local (pas encore poussée). PULL s'exécutant AVANT PUSH, appliquer la
+         ligne distante écraserait l'édition, puis le PUSH qui suit renverrait
+         cette version écrasée sur Turso — la perte devient définitive et se
+         propage à toutes les instances.
+
+      2. **Ligne distante périmée, `date_maj` plus ancien.** Une instance en
+         retard qui touche un seul champ (recalcul de santé, `en_ligne` /
+         `dernier_ping`, scan planifié…) journalise un UPDATE et repousse la
+         ligne ENTIÈRE, avec ses autres colonnes périmées. Si la ligne locale
+         porte un `date_maj` strictement plus récent, on la conserve — c'est
+         le « croisement entre rubriques » signalé : un champ édité ici
+         revenait à une vieille valeur parce qu'une autre instance avait
+         touché une colonne sans rapport.
+
+    Les DELETE distants ne sont jamais filtrés : une suppression faite
+    ailleurs prime (voir la note sur l'ordre PULL-avant-PUSH).
+
+    Retourne `(changes_filtre, nb_conserves_localement)`.
+    """
+    upsert = changes.get('INSERT', set()) | changes.get('UPDATE', set())
+    if not upsert:
+        return changes, 0
+
+    garder = set()
+
+    # Cas 1 : modification locale non encore poussée.
+    try:
+        pend = {str(r[0]) for r in local.execute(
+            "SELECT record_id FROM _sync_journal "
+            "WHERE tbl=? AND action IN ('INSERT','UPDATE')", (tbl,)).fetchall()}
+        if pend:
+            garder |= {rid for rid in upsert if str(rid) in pend}
+    except Exception:
+        pass
+
+    # Cas 2 : date_maj local strictement plus récent que le distant.
+    plus_recents = set()
+    reste = [rid for rid in upsert if rid not in garder]
+    if reste and 'date_maj' in _get_cols(local, tbl):
+        ph = ','.join('?' * len(reste))
+        try:
+            loc = {str(k): (v or '') for k, v in local.execute(
+                f"SELECT [{pk_col}], date_maj FROM [{tbl}] WHERE [{pk_col}] IN ({ph})",
+                list(reste)).fetchall()}
+            rem = {str(k): (v or '') for k, v in remote.execute(
+                f"SELECT [{pk_col}], date_maj FROM [{tbl}] WHERE [{pk_col}] IN ({ph})",
+                list(reste)).fetchall()}
+            for rid in reste:
+                dl, dr = loc.get(str(rid), ''), rem.get(str(rid), '')
+                if dl and dr and dl > dr:
+                    garder.add(rid)
+                    plus_recents.add(rid)
+        except Exception:
+            pass
+
+    # Une ligne conservée uniquement parce qu'elle est plus récente (aucune
+    # entrée de journal locale ne la couvrait) doit être RE-POUSSÉE, sinon
+    # Turso garde indéfiniment sa version périmée : on rejournalise un UPDATE
+    # pour que la phase PUSH qui suit corrige le distant.
+    if plus_recents:
+        try:
+            for rid in plus_recents:
+                local.execute(
+                    "INSERT INTO _sync_journal (tbl, record_id, action, timestamp) "
+                    "VALUES (?, ?, 'UPDATE', datetime('now')) "
+                    "ON CONFLICT(tbl, record_id, action) DO NOTHING",
+                    (tbl, str(rid)))
+            local.commit()
+        except Exception:
+            pass
+
+    if not garder:
+        return changes, 0
+    filtre = dict(changes)
+    filtre['INSERT'] = {r for r in changes.get('INSERT', set()) if r not in garder}
+    filtre['UPDATE'] = {r for r in changes.get('UPDATE', set()) if r not in garder}
+    return filtre, len(garder)
+
+
 def _sync_using_journal(local, turso) -> tuple:
     """
     Synchronise en utilisant le journal de modifications _sync_journal, dans les
@@ -924,9 +1013,13 @@ def _sync_using_journal(local, turso) -> tuple:
                 ids_tbl = ids_by_table[tbl]
                 try:
                     pk_col = _pk_column(local, tbl)
+                    changes, nb_locaux = _proteger_versions_locales(
+                        local, turso, tbl, pk_col, changes)
                     _apply_table_changes(turso, local, tbl, pk_col, changes)
                     stats.setdefault(tbl, {})['pulled'] = len(changes['INSERT'] | changes['UPDATE'])
                     stats[tbl]['pulled_deletes'] = len(changes['DELETE'])
+                    if nb_locaux:
+                        stats[tbl]['versions_locales_conservees'] = nb_locaux
                     max_id_ok = max(max_id_ok, max(ids_tbl))
                 except Exception as e:
                     errors.append(f'pull {tbl}: {e}')
