@@ -15,6 +15,32 @@
    (bandeau d'info) déborde et repousse la barre d'outils / le rack. */
 .baie-page > * { min-width:0; }
 
+/* ── BARRE D'OUTILS (refonte lot 1 : groupes nommés) ──
+   Les boutons gardent leur id/onclick ; seul le conteneur change. */
+.baie-toolbar { display:flex; flex-wrap:wrap; align-items:flex-start; gap:.45rem .85rem; margin-bottom:.8rem; }
+.tb-group { display:flex; flex-direction:column; gap:.3rem; }
+.tb-group + .tb-group { padding-left:.85rem; border-left:1px solid var(--border); }
+.tb-group.tb-right { margin-left:auto; border-left:0; padding-left:0; }
+.tb-group-lbl { font-family:'Share Tech Mono',monospace; font-size:.53rem; letter-spacing:2px;
+    text-transform:uppercase; color:var(--text-muted); padding-left:.15rem; white-space:nowrap; }
+.tb-group-items { display:flex; flex-wrap:wrap; align-items:center; gap:.32rem; }
+/* bouton neutre : la plupart des actions ne sont pas « primaires » — on réserve
+   le cyan plein à la seule action mise en avant (Deviner le brassage). */
+.baie-toolbar .btn.btn-neutral { border-color:var(--border); color:var(--text-secondary); background:var(--bg-secondary); }
+.baie-toolbar .btn.btn-neutral:hover { border-color:var(--accent); color:var(--accent); background:rgba(0,201,255,.06); }
+.baie-toolbar .btn.btn-neutral.active,
+.baie-toolbar select.btn.btn-neutral:not([value="0"]):focus { border-color:var(--accent); color:var(--accent); }
+.baie-toolbar select.btn { width:auto; flex:0 0 auto; padding-right:1.1rem; }
+/* stepper de hauteur de baie */
+.u-stepper { display:inline-flex; align-items:center; border:1px solid var(--border); border-radius:3px;
+    overflow:hidden; background:var(--bg-secondary); }
+.u-stepper button { background:none; border:0; color:var(--text-secondary); padding:.32rem .55rem;
+    font-family:'Share Tech Mono',monospace; font-size:.72rem; font-weight:700; cursor:pointer; }
+.u-stepper button:hover { color:var(--accent); }
+.u-stepper .u-val { padding:.32rem .5rem; font-family:'Share Tech Mono',monospace; font-size:.72rem;
+    border-left:1px solid var(--border); border-right:1px solid var(--border); color:var(--text-primary); }
+@media(max-width:820px){ .tb-group + .tb-group{ padding-left:0; border-left:0; } }
+
 /* ── RACK ── */
 .rack-outer {
     background:#0a0e14; border:3px solid #2a3a4a; border-radius:8px; overflow:visible;
@@ -878,54 +904,75 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 <div class="baie-page">
     <!-- ── COLONNE GAUCHE ── -->
     <div>
-        <!-- Barre de contrôles -->
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem;flex-wrap:wrap;gap:.5rem;">
-            <div style="display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;">
-                <!-- Sélecteur de baie -->
-                <div style="display:flex;align-items:center;gap:.4rem;">
-                    <span style="font-size:.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;">Baie</span>
-                    <select id="sel-baie" onchange="changerBaie(this.value)"
-                        style="font-family:'Share Tech Mono',monospace;font-size:.75rem;padding:.25rem .5rem;">
+        <!-- Barre de contrôles — groupes nommés (refonte lot 1) -->
+        <div class="baie-toolbar">
+            <div class="tb-group">
+                <span class="tb-group-lbl">Baie</span>
+                <div class="tb-group-items">
+                    <select id="sel-baie" onchange="changerBaie(this.value)" class="btn btn-sm btn-neutral"
+                        style="font-family:'Share Tech Mono',monospace;">
                         <option value="Baie principale">Baie principale</option>
                     </select>
-                    <button class="btn btn-primary btn-sm" onclick="ajouterBaie()" title="Nouvelle baie">+</button>
-                    <button class="btn btn-danger btn-sm" onclick="supprimerBaie()" title="Supprimer cette baie">🗑</button>
-                </div>
-                <span style="font-family:'Rajdhani',sans-serif;font-size:.72rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);">
-                    &#9632; Vue de face — <span id="lbl-u">{{ nb_u }}</span>U
-                </span>
-            </div>
-            <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;">
-                <button onclick="ajouterBandeauRJ()" class="btn btn-primary btn-sm" title="Pré-remplit le formulaire : 1U, 24 ports — reste à choisir la position et valider">+ Bandeau RJ</button>
-                <button onclick="ajouterEtagere()" class="btn btn-primary btn-sm" title="Une tablette physique (1U, pleine largeur) — les appareils posés dessus se placent ensuite normalement, dans la rangée juste au-dessus">+ Étagère</button>
-                <button id="btn-mode-lien" onclick="toggleModeLien()" class="btn btn-primary btn-sm" title="Lier deux ports : cliquer sur deux ports successivement pour les relier (câblage physique)">🔗 Lier</button>
-                <span class="ping-baie-wrap">
-                    <button id="btn-ping-baie" onclick="pingerToutelaBaie()" class="btn btn-primary btn-sm" title="Pinger tous les appareils reliés à un port de cette baie">📡</button>
-                    <span id="ping-baie-progress" class="ping-progress-badge" style="display:none;"></span>
-                </span>
-                <select id="sel-ping-auto" onchange="changerPingAuto(this)" class="btn btn-primary btn-sm" style="width:auto;flex:0 0 auto;padding-right:1.2rem;" title="Ping automatique de toute la baie à intervalle régulier">
-                    <option value="0">🔁 désactivé</option>
-                    <option value="5000">🔁 5 s</option>
-                    <option value="10000">🔁 10 s</option>
-                    <option value="20000">🔁 20 s</option>
-                    <option value="30000">🔁 30 s</option>
-                    <option value="60000">🔁 60 s</option>
-                    <option value="300000">🔁 300 s</option>
-                </select>
-                <select id="sel-activite" onchange="changerActivite(this)" class="btn btn-primary btn-sm" style="width:auto;flex:0 0 auto;padding-right:1.2rem;" title="Activité en direct : anime les LEDs des ports des switchs selon le trafic réel (SNMP). Nécessite le SNMP activé dans le diagnostic réseau.">
-                    <option value="0">⚡ activité off</option>
-                    <option value="3000">⚡ activité 3 s</option>
-                    <option value="5000">⚡ activité 5 s</option>
-                </select>
-                <button onclick="MoniteurModal.ouvrir()" class="btn btn-primary btn-sm" title="Moniteur réseau : compteurs bruts des ports, journal d'évènements, capture de trafic — pour comprendre ce que montrent les LEDs">📊 Moniteur</button>
-                <button onclick="BrassageModal.ouvrir()" class="btn btn-primary btn-sm" title="Deviner le brassage : à partir de toutes les MAC vues sur les switchs (SNMP), corrélées à l'inventaire, propose la machine de chaque prise/port, les cordons bandeau ⇄ switch et les liens switch ⇄ éléments. Aperçu avant application.">🧠 Deviner le brassage</button>
-                <button onclick="FdbBrut.ouvrir()" class="btn btn-secondary btn-sm" title="Relevé brut de la table d'apprentissage MAC de chaque switch — forme exacte des adresses renvoyées par l'agent SNMP. À utiliser si « Deviner le brassage » montre des MAC bizarres (00:01…, 8 octets).">🔬 FDB brut</button>
-                <a href="{{ url_for('baie_cablage') }}" class="btn btn-secondary btn-sm" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌</a>
-                <button onclick="changerU(-1)" class="btn btn-primary btn-sm" title="Réduire la baie d'1U">− U</button>
-                <button onclick="changerU(1)"  class="btn btn-primary btn-sm" title="Agrandir la baie d'1U">+ U</button>
-                <button id="btn-verrou" onclick="toggleVerrouBaie()" class="btn btn-primary btn-sm"
+                    <button class="btn btn-sm btn-neutral" onclick="ajouterBaie()" title="Nouvelle baie">+</button>
+                    <button class="btn btn-sm btn-danger" onclick="supprimerBaie()" title="Supprimer cette baie">🗑</button>
+                    <span class="u-stepper" title="Hauteur de la baie (unités)">
+                        <button onclick="changerU(-1)" aria-label="Réduire la baie d'1U">−U</button>
+                        <span class="u-val"><span id="lbl-u">{{ nb_u }}</span>U</span>
+                        <button onclick="changerU(1)" aria-label="Agrandir la baie d'1U">+U</button>
+                    </span>
+                    <button id="btn-verrou" onclick="toggleVerrouBaie()" class="btn btn-sm btn-neutral"
                         title="Verrouiller la baie : bloque le glisser-déposer et le redimensionnement (évite un déplacement accidentel) — préférence locale à ce navigateur, pas partagée avec les autres utilisateurs">🔓</button>
-                <button onclick="toutVider()"  class="btn btn-danger btn-sm" title="Vider : retire tous les équipements de cette baie">✕ Vider</button>
+                </div>
+            </div>
+
+            <div class="tb-group">
+                <span class="tb-group-lbl">Ajouter</span>
+                <div class="tb-group-items">
+                    <button onclick="ajouterBandeauRJ()" class="btn btn-sm btn-neutral" title="Pré-remplit le formulaire : 1U, 24 ports — reste à choisir la position et valider">+ Bandeau RJ</button>
+                    <button onclick="ajouterEtagere()" class="btn btn-sm btn-neutral" title="Une tablette physique (1U, pleine largeur) — les appareils posés dessus se placent ensuite normalement, dans la rangée juste au-dessus">+ Étagère</button>
+                </div>
+            </div>
+
+            <div class="tb-group">
+                <span class="tb-group-lbl">Affichage</span>
+                <div class="tb-group-items">
+                    <span class="ping-baie-wrap">
+                        <button id="btn-ping-baie" onclick="pingerToutelaBaie()" class="btn btn-sm btn-neutral" title="Pinger tous les appareils reliés à un port de cette baie">📡</button>
+                        <span id="ping-baie-progress" class="ping-progress-badge" style="display:none;"></span>
+                    </span>
+                    <select id="sel-ping-auto" onchange="changerPingAuto(this)" class="btn btn-sm btn-neutral" title="Ping automatique de toute la baie à intervalle régulier">
+                        <option value="0">🔁 désactivé</option>
+                        <option value="5000">🔁 5 s</option>
+                        <option value="10000">🔁 10 s</option>
+                        <option value="20000">🔁 20 s</option>
+                        <option value="30000">🔁 30 s</option>
+                        <option value="60000">🔁 60 s</option>
+                        <option value="300000">🔁 300 s</option>
+                    </select>
+                    <select id="sel-activite" onchange="changerActivite(this)" class="btn btn-sm btn-neutral" title="Activité en direct : anime les LEDs des ports des switchs selon le trafic réel (SNMP). Nécessite le SNMP activé dans le diagnostic réseau.">
+                        <option value="0">⚡ activité off</option>
+                        <option value="3000">⚡ activité 3 s</option>
+                        <option value="5000">⚡ activité 5 s</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="tb-group">
+                <span class="tb-group-lbl">Câblage &amp; analyse</span>
+                <div class="tb-group-items">
+                    <button id="btn-mode-lien" onclick="toggleModeLien()" class="btn btn-sm btn-neutral" title="Lier deux ports : cliquer sur deux ports successivement pour les relier (câblage physique)">🔗 Lier</button>
+                    <button onclick="MoniteurModal.ouvrir()" class="btn btn-sm btn-neutral" title="Moniteur réseau : compteurs bruts des ports, journal d'évènements, capture de trafic — pour comprendre ce que montrent les LEDs">📊 Moniteur</button>
+                    <button onclick="BrassageModal.ouvrir()" class="btn btn-sm btn-primary" title="Deviner le brassage : à partir de toutes les MAC vues sur les switchs (SNMP), corrélées à l'inventaire, propose la machine de chaque prise/port, les cordons bandeau ⇄ switch et les liens switch ⇄ éléments. Aperçu avant application.">🧠 Deviner le brassage</button>
+                    <button onclick="FdbBrut.ouvrir()" class="btn btn-sm btn-neutral" title="Relevé brut de la table d'apprentissage MAC de chaque switch — forme exacte des adresses renvoyées par l'agent SNMP. À utiliser si « Deviner le brassage » montre des MAC bizarres (00:01…, 8 octets).">🔬 FDB brut</button>
+                    <a href="{{ url_for('baie_cablage') }}" class="btn btn-sm btn-neutral" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌 Câblage</a>
+                </div>
+            </div>
+
+            <div class="tb-group tb-right">
+                <span class="tb-group-lbl">&nbsp;</span>
+                <div class="tb-group-items">
+                    <button onclick="toutVider()" class="btn btn-sm btn-danger" title="Vider : retire tous les équipements de cette baie">✕ Vider</button>
+                </div>
             </div>
         </div>
 
