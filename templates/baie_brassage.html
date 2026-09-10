@@ -549,11 +549,33 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .port.netic-up   .port-netic-ic { bottom:calc(100% + 1px); }
 .port.netic-down .port-netic-ic { top:calc(100% + 1px); }
 .port .port-netic-ic:hover { transform:translateX(-50%) scale(1.3); z-index:7; }
-.port.port-netic.netic-declared .port-netic-ic { opacity:.62; }
+.port.port-netic.netic-declared:not(.netic-detected):not(.netic-incoherent) .port-netic-ic { opacity:.6; }
 /* `.cell-ports` (et son wrap) sont overflow:hidden — on réserve un couloir
    pour que l'icône posée hors du port ne soit pas rognée. */
 .cell-ports.has-netic-up   { padding-top:14px; }
 .cell-ports.has-netic-down { padding-bottom:14px; }
+
+/* panneau annexe « appareils du port » (lot 5) */
+.port-appareils { margin-top:1rem; border:1px solid var(--border); border-top:2px solid var(--accent);
+    border-radius:4px; background:var(--bg-card); overflow:hidden; }
+.port-appareils[hidden] { display:none; }
+.port-appareils .pa-head { display:flex; align-items:center; justify-content:space-between;
+    gap:.6rem; padding:.5rem .8rem; border-bottom:1px solid var(--border); }
+.port-appareils .pa-head h3 { margin:0; font-family:'Rajdhani',sans-serif; font-size:.85rem;
+    font-weight:700; letter-spacing:1px; text-transform:uppercase; }
+.port-appareils .pa-head-r { display:flex; align-items:center; gap:.7rem; }
+.port-appareils .pa-meta { font-family:'Share Tech Mono',monospace; font-size:.66rem; color:var(--text-muted); }
+.port-appareils .pa-body { padding:.5rem .8rem .7rem; max-height:38vh; overflow:auto; }
+.pa-tbl { width:100%; border-collapse:collapse; font-size:.78rem; }
+.pa-tbl th { text-align:left; font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:1px;
+    text-transform:uppercase; color:var(--text-muted); padding:.3rem .5rem; border-bottom:1px solid var(--border); }
+.pa-tbl td { padding:.32rem .5rem; border-bottom:1px solid var(--border); }
+.pa-tbl td.mono, .pa-tbl td.ipc { font-family:'Share Tech Mono',monospace; font-size:.72rem; color:var(--text-secondary); }
+.pa-badge { font-family:'Share Tech Mono',monospace; font-size:8.5px; letter-spacing:.5px;
+    padding:.06rem .34rem; border-radius:3px; border:1px solid var(--border); color:var(--text-muted); }
+.pa-badge.ok { color:var(--accent-green); border-color:color-mix(in srgb,var(--accent-green) 45%,var(--border)); }
+.pa-badge.warn { color:var(--accent-orange); border-color:color-mix(in srgb,var(--accent-orange) 45%,var(--border)); }
+.pa-empty { color:var(--text-muted); font-size:.76rem; padding:.4rem .2rem; }
 
 /* proposition #1 : pastille de santé de l'équipement (diagnostic réseau SNMP) */
 .cell-sante { display:inline-flex; align-items:center; gap:3px; flex-shrink:0;
@@ -1092,7 +1114,10 @@ table.mon-table td.mon-wrap select { max-width:100%; }
             {% endfor %}
             <span class="legend-item"><span class="cell-led led-on" style="display:inline-block;"></span> En ligne</span>
             <span class="legend-item"><span class="cell-led led-off" style="display:inline-block;"></span> Hors ligne</span>
-            <span class="legend-item"><span style="display:inline-block;width:11px;height:11px;border-radius:2px;box-shadow:0 0 0 2px var(--accent-orange,#e0952a);"></span> 🔀 🌐 📶 équipement réseau au bout du port</span>
+            <span class="legend-item">🔀🌐📶 équipement réseau au bout du port —
+                <span style="display:inline-block;width:9px;height:9px;border-radius:2px;box-shadow:0 0 0 2px var(--accent-orange,#e0952a);"></span> déclaré
+                <span style="display:inline-block;width:9px;height:9px;border-radius:2px;box-shadow:0 0 0 2px #22c55e;margin-left:4px;"></span> détecté
+                <span style="display:inline-block;width:9px;height:9px;border-radius:2px;box-shadow:0 0 0 2px #ef4444;margin-left:4px;"></span> incohérent (clic sur l'icône : appareils du port)</span>
         </div>
         <div class="legend-wrap" id="legende-activite" style="display:none;">
             <span style="font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--text-muted);">Activité :</span>
@@ -1101,6 +1126,20 @@ table.mon-table td.mon-wrap select { max-width:100%; }
             <span class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b;"></span> saturation ≥ 80 %</span>
             <span class="legend-item"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ef4444;"></span> erreurs CRC/rejets</span>
             <span class="legend-item"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ef4444;color:#fff;font-size:7px;line-height:9px;text-align:center;">⚠</span> prise murale : câblage incohérent (le switch voit un autre appareil)</span>
+        </div>
+
+        <!-- APPAREILS DU PORT (refonte baie, lot 5) — panneau annexe ouvert au
+             clic sur l'icône réseau d'un port ; liste les appareils vus /
+             déclarés derrière ce port (switch ou borne Wi-Fi en aval). -->
+        <div id="port-appareils" class="port-appareils" hidden>
+            <div class="pa-head">
+                <h3 id="pa-title">Appareils du port</h3>
+                <div class="pa-head-r">
+                    <span id="pa-meta" class="pa-meta"></span>
+                    <button type="button" id="pa-close" class="rail-x" aria-label="Fermer">✕</button>
+                </div>
+            </div>
+            <div id="pa-body" class="pa-body"></div>
         </div>
 
         <!-- PHOTOS -->
@@ -5683,18 +5722,27 @@ function appliquerDiagErreurs() {
         row.insertBefore(b, row.firstChild);
     }
 }
-// ── Ports « équipement réseau » (refonte baie, lot 4) ────────────────────────
-// Un port dont le cordon aboutit à un switch / routeur-pare-feu / borne Wi-Fi
-// (déclaré via le câblage — `p.lie_type`) reçoit un anneau + une petite icône,
-// posée au-dessus ou au-dessous du port selon sa ligne pour ne rien masquer.
-// Un clic sur l'icône ouvre la fiche du port (la liste des appareils vus/
-// déclarés viendra s'y greffer au lot 5).
+// ── Ports « équipement réseau » (refonte baie, lot 4 + 5) ────────────────────
+// Un port qui dessert un switch / routeur-pare-feu / borne Wi-Fi reçoit un
+// anneau (ambre = déclaré via le câblage · vert = détecté en SNMP · rouge =
+// détecté ≠ déclaré) et une petite icône (🔀/🌐/📶) posée HORS du port.
+// Clic sur l'icône → panneau « appareils du port » (liste des appareils vus /
+// déclarés derrière ce port — switch ou borne en aval).
+const NETIC_IC = { switch: '🔀', router: '🌐', ap: '📶' };
+const NETIC_LBL = { switch: 'Switch', router: 'Routeur / pare-feu', ap: 'Borne Wi-Fi' };
 function _neticKind(t) {
     if (!t) return null;
-    if (t === 'Switch' || t === 'Switch/AP') return { k: 'switch', ic: '🔀', lbl: 'Switch' };
-    if (t === 'Routeur/Pare-feu' || t === 'Box internet (FAI)') return { k: 'router', ic: '🌐', lbl: t };
-    if (t === 'Borne Wi-Fi' || t === 'Borne WiFi' || t === 'Pont Wi-Fi') return { k: 'ap', ic: '📶', lbl: t };
+    if (t === 'Switch' || t === 'Switch/AP') return 'switch';
+    if (t === 'Routeur/Pare-feu' || t === 'Box internet (FAI)') return 'router';
+    if (t === 'Borne Wi-Fi' || t === 'Borne WiFi' || t === 'Pont Wi-Fi') return 'ap';
     return null;
+}
+let _neticDetecte = {};   // "<slot>:<port>" -> {detected_kind, uplink, vlan, n, devices:[]}
+async function chargerTopoPorts() {
+    try {
+        _neticDetecte = await (await fetch('/api/baie/topologie-ports')).json() || {};
+    } catch { _neticDetecte = {}; }
+    appliquerNeticPorts();
 }
 function appliquerNeticPorts() {
     document.querySelectorAll('.port.port-netic').forEach(el => {
@@ -5704,39 +5752,92 @@ function appliquerNeticPorts() {
     });
     document.querySelectorAll('.cell-ports.has-netic-up, .cell-ports.has-netic-down')
         .forEach(el => el.classList.remove('has-netic-up', 'has-netic-down'));
-    Object.values(slots).forEach(s => {
-        (s.ports || []).forEach(p => {
-            const nk = _neticKind(p.lie_type);
-            if (!nk) return;
-            const el = document.querySelector(
-                `.port[data-slot="${p.slot_id}"][data-numero="${p.numero}"]`);
-            if (!el) return;
-            el.classList.add('port-netic', 'netic-declared');
-            // Position de l'icône : au-dessous du port par défaut (place libre
-            // sous la bande de ports) ; au-dessus seulement pour un port de la
-            // 1re rangée d'une bande à PLUSIEURS rangées (sinon l'icône
-            // recouvrirait la rangée du dessous).
-            const bande = el.closest('.cell-ports') || el.parentElement;
-            const tops = [...bande.querySelectorAll('.port')].map(p => Math.round(p.getBoundingClientRect().top));
-            const multiRangees = new Set(tops).size > 1;
-            const premiereRangee = Math.round(el.getBoundingClientRect().top) === Math.min(...tops);
-            const dir = (multiRangees && premiereRangee) ? 'netic-up' : 'netic-down';
-            el.classList.add(dir);
-            bande.classList.add(dir === 'netic-up' ? 'has-netic-up' : 'has-netic-down');
-            const b = document.createElement('span');
-            b.className = 'port-netic-ic';
-            b.textContent = nk.ic;
-            b.title = nk.lbl + ' déclaré au bout de ce port'
-                + (p.lie_port_numero ? ' (cordon → ' + escH(p.nom_cible || '') + ')' : '')
-                + ' — voir la fiche du port';
-            b.addEventListener('click', ev => {
-                ev.stopPropagation();
-                PortModal.ouvrir(parseInt(p.slot_id), parseInt(p.numero));
-            });
-            el.appendChild(b);
+
+    // union des ports concernés : déclarés (câblage) + détectés (SNMP)
+    const parPort = {};   // "<slot>:<port>" -> {declared, detected, slot, num}
+    Object.values(slots).forEach(s => (s.ports || []).forEach(p => {
+        const d = _neticKind(p.lie_type);
+        if (d) parPort[p.slot_id + ':' + p.numero] = { slot: p.slot_id, num: p.numero, declared: d, detected: null };
+    }));
+    for (const [cle, info] of Object.entries(_neticDetecte)) {
+        if (!info || !info.detected_kind) continue;
+        const [slot, num] = cle.split(':');
+        (parPort[cle] = parPort[cle] || { slot, num, declared: null }).detected = info.detected_kind;
+    }
+
+    for (const [cle, x] of Object.entries(parPort)) {
+        const el = document.querySelector(`.port[data-slot="${x.slot}"][data-numero="${x.num}"]`);
+        if (!el) continue;
+        const kind = x.detected || x.declared;
+        const etat = (x.detected && x.declared && x.detected !== x.declared) ? 'netic-incoherent'
+                   : x.detected ? 'netic-detected' : 'netic-declared';
+        el.classList.add('port-netic', etat);
+        const bande = el.closest('.cell-ports') || el.parentElement;
+        const tops = [...bande.querySelectorAll('.port')].map(pp => Math.round(pp.getBoundingClientRect().top));
+        const multiRangees = new Set(tops).size > 1;
+        const premiereRangee = Math.round(el.getBoundingClientRect().top) === Math.min(...tops);
+        const dir = (multiRangees && premiereRangee) ? 'netic-up' : 'netic-down';
+        el.classList.add(dir);
+        bande.classList.add(dir === 'netic-up' ? 'has-netic-up' : 'has-netic-down');
+
+        const info = _neticDetecte[cle] || {};
+        const b = document.createElement('span');
+        b.className = 'port-netic-ic';
+        b.textContent = NETIC_IC[kind] || '🔀';
+        b.title = (NETIC_LBL[kind] || 'Équipement réseau')
+            + (etat === 'netic-incoherent' ? ' — ⚠ détecté ≠ déclaré' : etat === 'netic-detected' ? ' détecté (SNMP)' : ' déclaré')
+            + ((info.devices && info.devices.length) ? ' · ' + info.devices.length + ' appareil(s)' : '')
+            + ' — clic : voir les appareils du port';
+        b.addEventListener('click', ev => {
+            ev.stopPropagation();
+            ouvrirAppareilsPort(x.slot, x.num, kind, etat);
         });
-    });
+        el.appendChild(b);
+    }
 }
+
+// Panneau annexe « appareils du port » (lot 5)
+function ouvrirAppareilsPort(slotId, numero, kind, etat) {
+    const pan = document.getElementById('port-appareils');
+    const cle = slotId + ':' + numero;
+    const info = _neticDetecte[cle] || {};
+    const s = Object.values(slots).find(x => String(x.id) === String(slotId)) || {};
+    const port = (s.ports || []).find(p => String(p.numero) === String(numero)) || {};
+    const nomSlot = libelleComplet(s);
+    document.getElementById('pa-title').textContent =
+        (NETIC_IC[kind] || '') + ' Port ' + numeroAffiche(numero) + ' — ' + nomSlot;
+    const bits = [];
+    bits.push(NETIC_LBL[kind] || 'équipement réseau');
+    if (etat === 'netic-incoherent') bits.push('⚠ détecté ≠ déclaré');
+    else if (etat === 'netic-detected') bits.push('détecté SNMP');
+    else bits.push('déclaré');
+    if (info.uplink) bits.push('liaison montante');
+    if (info.vlan) bits.push('VLAN ' + info.vlan);
+    if (port.nom_cible) bits.push('cordon → ' + port.nom_cible);
+    document.getElementById('pa-meta').textContent = bits.join(' · ');
+
+    const devs = info.devices || [];
+    const body = document.getElementById('pa-body');
+    if (!devs.length) {
+        body.innerHTML = '<div class="pa-empty">' + (info.detected_kind
+            ? 'Aucun appareil relevé sur ce port pour l’instant (relance le diagnostic SNMP pour rafraîchir).'
+            : 'Équipement déclaré au bout du cordon, mais pas encore vu en SNMP. Active le diagnostic réseau (SNMP) pour lister les appareils en aval.') + '</div>';
+    } else {
+        body.innerHTML =
+            '<table class="pa-tbl"><thead><tr><th>Appareil</th><th>IP</th><th>MAC</th><th>Vu par</th></tr></thead><tbody>'
+            + devs.map(d =>
+                '<tr><td>' + escH(d.nom || '—') + '</td>'
+                + '<td class="ipc">' + escH(d.ip || '') + '</td>'
+                + '<td class="mono">' + escH(d.mac || '') + '</td>'
+                + '<td><span class="pa-badge ' + (d.via === 'LLDP' ? 'ok' : '') + '">' + escH(d.via || '') + '</span></td></tr>'
+              ).join('')
+            + '</tbody></table>';
+    }
+    pan.hidden = false;
+    pan.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+document.getElementById('pa-close').addEventListener('click',
+    () => { document.getElementById('port-appareils').hidden = true; });
 
 // re-décorer après chaque redraw du rack
 const _renderRackOrig = renderRack;
@@ -5746,9 +5847,10 @@ renderRack = function() {
     appliquerNeticPorts();
 };
 setInterval(chargerDiagErreurs, 60000);
+setInterval(chargerTopoPorts, 90000);
 
 // ── START ────────────────────────────────────────────────────────────────────
-init().then(chargerDiagErreurs);
+init().then(() => { chargerDiagErreurs(); chargerTopoPorts(); });
 </script>
 <!-- html2canvas pour export PNG (chargé en différé) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>

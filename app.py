@@ -7617,6 +7617,23 @@ def api_baie_diag_erreurs():
     })
 
 
+@app.route('/api/baie/topologie-ports')
+@login_required
+def api_baie_topologie_ports():
+    """Topologie SNMP projetée sur les ports de la baie (refonte baie, lot 5) :
+    `{"<slot>:<port>": {detected_kind, uplink, vlan, n, devices:[...]}}`.
+    Alimente l'anneau « équipement réseau détecté » et le panneau
+    « appareils du port ». Lecture seule, aucun SNMP synchrone."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        return jsonify(network_diag.appareils_par_port_baie(cid))
+    except Exception:
+        logger.debug('api_baie_topologie_ports', exc_info=True)
+        return jsonify({})
+
+
 @app.route('/api/baie/activite/moniteur')
 @login_required
 def api_baie_activite_moniteur():

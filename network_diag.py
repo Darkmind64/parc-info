@@ -4399,6 +4399,109 @@ def _json_charge(s):
         return {}
 
 
+def _netic_kind_de(caps, hotes, nb_macs, est_uplink, app_types):
+    """Type d'équipement réseau détecté sur un port : d'abord les capacités
+    LLDP du voisin, sinon le type d'inventaire d'un appareil vu, sinon un
+    uplink / plusieurs MAC = équipement intermédiaire non identifié."""
+    c = set((caps or '').split(','))
+    if 'wlan' in c:
+        return 'ap'
+    if 'router' in c:
+        return 'router'
+    if 'bridge' in c:
+        return 'switch'
+    for h in hotes:
+        t = app_types.get(h.get('appareil_id'), '')
+        if t in ('Switch', 'Switch/AP'):
+            return 'switch'
+        if t in ('Routeur/Pare-feu', 'Box internet (FAI)'):
+            return 'router'
+        if t in ('Borne Wi-Fi', 'Pont Wi-Fi'):
+            return 'ap'
+    if est_uplink or (nb_macs and nb_macs > 3):
+        return 'switch'
+    return None
+
+
+def appareils_par_port_baie(client_id: int) -> dict:
+    """Projette la topologie L2 relevée en SNMP sur les ports de la baie de
+    brassage (refonte baie, lot 5) — lecture seule, données persistées
+    (`diag_topologie` + `diag_etat_port`), aucun SNMP synchrone.
+
+    Retourne `{"<baie_slot_id>:<baie_port>": {detected_kind, uplink, vlan,
+    n, devices: [{nom, ip, mac, via}]}}` :
+      - pour un port de switch/routeur monté en baie et calibré ;
+      - propagé au port de bandeau RJ qui aboutit sur ce port de switch
+        (cordon `lie_slot_id`/`lie_port_numero`).
+    """
+    from database import get_db
+    try:
+        topo = etat_topologie(client_id)
+    except Exception:
+        logger.debug('appareils_par_port_baie : etat_topologie a échoué', exc_info=True)
+        return {}
+    conn = get_db()
+    try:
+        maps = {}                       # (ip, port_index) -> (baie_slot_id, baie_port)
+        for r in conn.execute(
+                "SELECT equipement_ip, port_index, baie_slot_id, baie_port "
+                "FROM diag_etat_port WHERE client_id=? "
+                "AND baie_slot_id IS NOT NULL AND baie_port IS NOT NULL", (client_id,)):
+            maps[(r[0], r[1])] = (r[2], r[3])
+        liens = []                      # [((slot, port), (slot_switch, port_switch))]
+        for r in conn.execute(
+                "SELECT bp.slot_id, bp.numero, bp.lie_slot_id, bp.lie_port_numero "
+                "FROM baie_slot_ports bp JOIN baie_slots s ON s.id=bp.slot_id "
+                "WHERE s.client_id=? AND bp.lie_slot_id IS NOT NULL "
+                "AND bp.lie_port_numero IS NOT NULL", (client_id,)):
+            liens.append(((r[0], r[1]), (r[2], r[3])))
+        app = {r[0]: {'nom': r[1] or '', 'ip': r[2] or '', 'type': r[3] or ''}
+               for r in conn.execute(
+                   "SELECT id, nom_machine, adresse_ip, type_appareil "
+                   "FROM appareils WHERE client_id=?", (client_id,))}
+    except Exception:
+        logger.debug('appareils_par_port_baie : lecture DB', exc_info=True)
+        conn.close()
+        return {}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    app_types = {i: v['type'] for i, v in app.items()}
+    out = {}
+    for eq in topo.get('equipements', []):
+        ip = eq.get('ip')
+        for p in eq.get('ports', []):
+            cible = maps.get((ip, p.get('port_index')))
+            if not cible:
+                continue
+            slot, port = cible
+            devs, seen = [], set()
+            for h in p.get('hotes', []):
+                a = app.get(h.get('appareil_id')) or {}
+                nom = h.get('appareil_nom') or a.get('nom') or ''
+                mac = h.get('mac') or ''
+                if (nom, mac) in seen:
+                    continue
+                seen.add((nom, mac))
+                devs.append({'nom': nom or '(MAC inconnue)', 'ip': a.get('ip', ''),
+                             'mac': mac,
+                             'via': 'LLDP' if (p.get('voisin_caps') and h.get('appareil_id')) else 'FDB'})
+            info = {'detected_kind': _netic_kind_de(p.get('voisin_caps'), p.get('hotes', []),
+                                                    p.get('nb_macs'), p.get('est_uplink'), app_types),
+                    'uplink': bool(p.get('est_uplink')),
+                    'vlan': p.get('vlan') or None,
+                    'n': p.get('nb_macs') or len(devs),
+                    'devices': devs}
+            out[f"{slot}:{port}"] = info
+            for (bs, bp), (ss, sp) in liens:
+                if ss == slot and sp == port:
+                    out[f"{bs}:{bp}"] = dict(info, devices=list(devs))
+    return out
+
+
 def proposer_topologie_baie(client_id: int) -> dict:
     """Aperçu de ce que « Renseigner les ports vides de la baie » écrirait, sans
     rien modifier : `{'propositions': [...], 'ignores': [...]}`.
