@@ -6520,6 +6520,7 @@ def _ports_avec_details(conn, slot_id):
         d['lie_appareil_id'] = None
         lie_type_appareil = None
         lie_p_categorie = None
+        cible = None
         if d['appareil_id']:
             nom = d['nom_machine'] or ('Appareil #%d' % d['appareil_id'])
         elif d['peripherique_id']:
@@ -6606,6 +6607,10 @@ def _ports_avec_details(conn, slot_id):
         else:
             d['couleur'] = _couleur_port(d.get('type_appareil'), d.get('p_categorie'), d.get('usage_libre'), bool(d['lie_slot_id']))
         d['prise_murale'] = prises_par_numero.get(d['numero'])
+        # Type de l'équipement au bout du cordon (appareil lié, sinon
+        # type_equipement du slot en face) — sert au marqueur « équipement
+        # réseau déclaré sur ce port » côté client (refonte baie, lot 4).
+        d['lie_type'] = lie_type_appareil or (cible[1] if d['lie_slot_id'] and cible else '') or ''
         ports.append(d)
     return ports
 

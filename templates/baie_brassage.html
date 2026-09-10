@@ -531,6 +531,30 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .port.port-diag-err::after { content:'⚠'; position:absolute; top:-6px; right:-5px; font-size:9px;
     line-height:1; color:#fff; background:#e0952a; border-radius:50%; padding:1px 2px; z-index:5; }
 .port.port-diag-err.port-diag-crit::after { background:#ef4444; }
+
+/* refonte baie, lot 4 : port qui dessert un équipement réseau
+   (switch / routeur-pare-feu / borne Wi-Fi), déclaré (câblage) ou détecté (SNMP).
+   Anneau coloré + icône posée HORS du port (au-dessus / au-dessous selon la
+   ligne) — n'occulte ni le voyant ni le numéro. Le rack (.rack-outer) a
+   overflow:visible, l'icône peut donc déborder de la cellule. */
+.port.port-netic { position:relative; }
+.port.port-netic.netic-declared { box-shadow:0 0 0 2px var(--accent-orange,#e0952a); }
+.port.port-netic.netic-detected { box-shadow:0 0 0 2px #22c55e; }
+.port.port-netic.netic-incoherent { box-shadow:0 0 0 2px #ef4444, 0 0 8px #ef4444; }
+.port .port-netic-ic {
+    position:absolute; left:50%; transform:translateX(-50%);
+    font-size:12px; line-height:1; z-index:6; cursor:pointer;
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,.95));
+}
+.port.netic-up   .port-netic-ic { bottom:calc(100% + 1px); }
+.port.netic-down .port-netic-ic { top:calc(100% + 1px); }
+.port .port-netic-ic:hover { transform:translateX(-50%) scale(1.3); z-index:7; }
+.port.port-netic.netic-declared .port-netic-ic { opacity:.62; }
+/* `.cell-ports` (et son wrap) sont overflow:hidden — on réserve un couloir
+   pour que l'icône posée hors du port ne soit pas rognée. */
+.cell-ports.has-netic-up   { padding-top:14px; }
+.cell-ports.has-netic-down { padding-bottom:14px; }
+
 /* proposition #1 : pastille de santé de l'équipement (diagnostic réseau SNMP) */
 .cell-sante { display:inline-flex; align-items:center; gap:3px; flex-shrink:0;
     font-size:.6rem; font-weight:700; padding:1px 5px; border-radius:9px; margin-right:.3rem;
@@ -1068,6 +1092,7 @@ table.mon-table td.mon-wrap select { max-width:100%; }
             {% endfor %}
             <span class="legend-item"><span class="cell-led led-on" style="display:inline-block;"></span> En ligne</span>
             <span class="legend-item"><span class="cell-led led-off" style="display:inline-block;"></span> Hors ligne</span>
+            <span class="legend-item"><span style="display:inline-block;width:11px;height:11px;border-radius:2px;box-shadow:0 0 0 2px var(--accent-orange,#e0952a);"></span> 🔀 🌐 📶 équipement réseau au bout du port</span>
         </div>
         <div class="legend-wrap" id="legende-activite" style="display:none;">
             <span style="font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--text-muted);">Activité :</span>
@@ -5658,9 +5683,68 @@ function appliquerDiagErreurs() {
         row.insertBefore(b, row.firstChild);
     }
 }
+// ── Ports « équipement réseau » (refonte baie, lot 4) ────────────────────────
+// Un port dont le cordon aboutit à un switch / routeur-pare-feu / borne Wi-Fi
+// (déclaré via le câblage — `p.lie_type`) reçoit un anneau + une petite icône,
+// posée au-dessus ou au-dessous du port selon sa ligne pour ne rien masquer.
+// Un clic sur l'icône ouvre la fiche du port (la liste des appareils vus/
+// déclarés viendra s'y greffer au lot 5).
+function _neticKind(t) {
+    if (!t) return null;
+    if (t === 'Switch' || t === 'Switch/AP') return { k: 'switch', ic: '🔀', lbl: 'Switch' };
+    if (t === 'Routeur/Pare-feu' || t === 'Box internet (FAI)') return { k: 'router', ic: '🌐', lbl: t };
+    if (t === 'Borne Wi-Fi' || t === 'Borne WiFi' || t === 'Pont Wi-Fi') return { k: 'ap', ic: '📶', lbl: t };
+    return null;
+}
+function appliquerNeticPorts() {
+    document.querySelectorAll('.port.port-netic').forEach(el => {
+        el.classList.remove('port-netic', 'netic-declared', 'netic-detected', 'netic-incoherent', 'netic-up', 'netic-down');
+        const ic = el.querySelector('.port-netic-ic');
+        if (ic) ic.remove();
+    });
+    document.querySelectorAll('.cell-ports.has-netic-up, .cell-ports.has-netic-down')
+        .forEach(el => el.classList.remove('has-netic-up', 'has-netic-down'));
+    Object.values(slots).forEach(s => {
+        (s.ports || []).forEach(p => {
+            const nk = _neticKind(p.lie_type);
+            if (!nk) return;
+            const el = document.querySelector(
+                `.port[data-slot="${p.slot_id}"][data-numero="${p.numero}"]`);
+            if (!el) return;
+            el.classList.add('port-netic', 'netic-declared');
+            // Position de l'icône : au-dessous du port par défaut (place libre
+            // sous la bande de ports) ; au-dessus seulement pour un port de la
+            // 1re rangée d'une bande à PLUSIEURS rangées (sinon l'icône
+            // recouvrirait la rangée du dessous).
+            const bande = el.closest('.cell-ports') || el.parentElement;
+            const tops = [...bande.querySelectorAll('.port')].map(p => Math.round(p.getBoundingClientRect().top));
+            const multiRangees = new Set(tops).size > 1;
+            const premiereRangee = Math.round(el.getBoundingClientRect().top) === Math.min(...tops);
+            const dir = (multiRangees && premiereRangee) ? 'netic-up' : 'netic-down';
+            el.classList.add(dir);
+            bande.classList.add(dir === 'netic-up' ? 'has-netic-up' : 'has-netic-down');
+            const b = document.createElement('span');
+            b.className = 'port-netic-ic';
+            b.textContent = nk.ic;
+            b.title = nk.lbl + ' déclaré au bout de ce port'
+                + (p.lie_port_numero ? ' (cordon → ' + escH(p.nom_cible || '') + ')' : '')
+                + ' — voir la fiche du port';
+            b.addEventListener('click', ev => {
+                ev.stopPropagation();
+                PortModal.ouvrir(parseInt(p.slot_id), parseInt(p.numero));
+            });
+            el.appendChild(b);
+        });
+    });
+}
+
 // re-décorer après chaque redraw du rack
 const _renderRackOrig = renderRack;
-renderRack = function() { _renderRackOrig.apply(this, arguments); appliquerDiagErreurs(); };
+renderRack = function() {
+    _renderRackOrig.apply(this, arguments);
+    appliquerDiagErreurs();
+    appliquerNeticPorts();
+};
 setInterval(chargerDiagErreurs, 60000);
 
 // ── START ────────────────────────────────────────────────────────────────────
