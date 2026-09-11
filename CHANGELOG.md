@@ -1,5 +1,21 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.2] - 2026-09-11 🖱️
+
+### Baie de brassage : ergonomie fine alignée sur la maquette
+
+Suite du correctif 2.33.1 (contenu de l'inspecteur) : trois nouveaux retours utilisateur montrant que la maquette validée faisait aussi foi pour l'ergonomie fine — présentation, souplesse du redimensionnement, fiabilité du déplacement — pas seulement le contenu affiché.
+
+**1. En-tête et barre d'outils.** En-tête dédié compact (titre « Éditeur de baie », client/baie en sous-ligne, boutons *Exporter*/*Configurer*) à la place de la grande bannière générique de l'application — la navigation globale ParcInfo reste au-dessus. Typographie de la barre d'outils alignée sur la maquette (casse normale, densité resserrée) au lieu du style bouton d'action très majuscule et espacé du reste de l'app. Les poignées de redimensionnement portent désormais un repère visuel permanent, auparavant invisibles au repos. Le menu *Affichage* gagne les boutons manquants de la maquette : 🩺 Santé, 🏷 Câbles, 🛰 Hors site (ce dernier passe aussi la baie en lecture quasi seule, glisser-déposer et redimensionnement bloqués).
+
+**2. Redimensionnement en largeur.** La grille horizontale d'un emplacement passait par 10 crans seulement (dixièmes de la largeur du rack) — un glisser de la poignée de largeur sautait donc par paliers de 10 %, nettement perceptibles et loin du geste continu de la maquette. Elle passe à 1000 crans (millièmes) : le redimensionnement suit maintenant la souris au pixel près. Migration automatique et unique au démarrage, aucune perte de position ni de largeur déjà choisie.
+
+**3. Déplacement d'un équipement.** Signalé comme peu fiable : l'équipement suivait la souris puis retombait systématiquement à sa place au relâchement. Cause identifiée : le déplacement utilisait le glisser-déposer HTML5 natif du navigateur, qui s'annule silencieusement dès qu'un survol intermédiaire ne confirme pas explicitement la cible — sans la moindre erreur visible. Remplacé par le même mécanisme que la maquette (évènements souris avec repositionnement direct de l'élément), déjà utilisé sans souci par les poignées de redimensionnement du même écran. Le glisser-déposer natif reste réservé au dépôt depuis la bibliothèque, un geste court à sens unique jamais concerné par ce problème.
+
+**Déploiement.** Une migration automatique et unique (grille de largeur) au premier démarrage après mise à jour ; aucune perte de données. Vérifié en navigateur à chaque correctif, dont plusieurs déplacements réels consécutifs réussis dans les deux sens ; suite de tests baie revérifiée, zéro régression.
+
+---
+
 ## [2.33.1] - 2026-09-11 🔧
 
 ### Baie de brassage : le rendu recale sur la maquette validée

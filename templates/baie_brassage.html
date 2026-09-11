@@ -88,12 +88,81 @@
 .eqm-typebar-actions button:hover { border-color:var(--accent); color:var(--accent); }
 .eqm-typebar-actions button.go:hover { border-color:var(--accent-orange,#f59e0b); color:var(--accent-orange,#f59e0b); }
 
+/* Inspecteur — refonte visuelle (fidèle à la maquette validée, corrigée
+   après retour utilisateur : le lot 2 avait seulement déplacé les champs
+   de l'ancienne modale sans jamais reprendre le design proposé). */
+.insp-head { display:flex; align-items:center; gap:.6rem; margin-bottom:.8rem; }
+.insp-head .insp-ic { width:32px; height:32px; border-radius:5px; display:grid; place-items:center;
+    font-size:1rem; background:var(--bg-secondary); border:1px solid var(--border); flex-shrink:0; }
+.insp-head .insp-txt { flex:1; min-width:0; }
+.insp-head .insp-kind-lbl { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:1.5px;
+    text-transform:uppercase; color:var(--text-muted); }
+.insp-head .insp-kind-nom { font-family:'Rajdhani',sans-serif; font-weight:700; font-size:1.05rem; line-height:1.15;
+    color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.insp-close { background:none; border:1px solid var(--border); color:var(--text-muted); border-radius:3px;
+    padding:.15rem .5rem; cursor:pointer; flex-shrink:0; }
+.insp-close:hover { border-color:var(--accent); color:var(--accent); }
+
+/* bloc « det » : stats réseau / bandeau / câblage — même famille visuelle
+   que .eqm-typebar mais neutre (pas d'alerte). */
+.insp-det { border:1px solid var(--border); border-radius:5px; padding:.5rem .6rem; margin-bottom:.6rem;
+    background:var(--bg-secondary); font-size:.78rem; }
+.insp-det-h { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:1px; text-transform:uppercase;
+    color:var(--text-muted); margin-bottom:.35rem; }
+.insp-det-line { display:flex; justify-content:space-between; gap:.6rem; padding:.14rem 0; }
+.insp-det-line .k { color:var(--text-muted); }
+.insp-det-line .v { color:var(--text-primary); font-family:'Share Tech Mono',monospace; font-size:.74rem; text-align:right; }
+.insp-det-line .v.ok { color:var(--accent-green); }
+.insp-det-line .v.warn { color:var(--accent-orange); }
+
+/* Position/largeur : lecture seule dans l'inspecteur (glisser le corps /
+   bord droit dans la baie pour les changer, poignées déjà existantes) */
+.insp-ro { font-family:'Share Tech Mono',monospace; font-size:.78rem; color:var(--text-secondary);
+    background:var(--bg-secondary); border:1px dashed var(--border); border-radius:4px; padding:.34rem .5rem; }
+
+/* stepper hauteur (U) — seule dimension réglable au clic (physiquement en
+   U entiers), le reste se règle en glissant dans la baie */
+.insp-ustep { display:flex; align-items:center; border:1px solid var(--border); border-radius:4px;
+    overflow:hidden; background:var(--bg-secondary); width:100%; }
+.insp-ustep button { background:none; border:0; color:var(--text-secondary); padding:.34rem .6rem;
+    font-size:.85rem; font-weight:700; cursor:pointer; }
+.insp-ustep button:hover { color:var(--accent); }
+.insp-ustep span { flex:1; text-align:center; font-family:'Share Tech Mono',monospace; font-size:.78rem;
+    color:var(--text-primary); border-left:1px solid var(--border); border-right:1px solid var(--border); padding:.34rem 0; }
+
+/* boutons d'action groupés en bas de l'inspecteur */
+.insp-actions { display:flex; flex-direction:column; gap:.45rem; margin-top:.9rem; padding-top:.75rem;
+    border-top:1px solid var(--border); }
+.insp-abtn { display:flex; align-items:center; justify-content:center; gap:.4rem; border:1px solid var(--border);
+    background:var(--bg-secondary); color:var(--text-secondary); border-radius:4px; padding:.45rem; font-size:.78rem;
+    font-weight:600; cursor:pointer; width:100%; }
+.insp-abtn:hover { border-color:var(--border-glow); color:var(--text-primary); }
+.insp-abtn.acc { border-color:color-mix(in srgb,var(--accent) 45%,var(--border)); color:var(--accent); }
+.insp-abtn.danger { border-color:color-mix(in srgb,var(--accent-red) 40%,var(--border)); color:var(--accent-red); }
+
 @media(max-width:1100px) {
     .baie-page { grid-template-columns:minmax(0,1fr); }
     .baie-rail { position:static; }
     .baie-rail .rail-inner { max-height:none; }
     .rail-tab { writing-mode:horizontal-tb; padding:.5rem .8rem; text-align:left; }
 }
+
+/* ── EN-TÊTE DÉDIÉ (fidèle à la maquette editeur-baie.html : bandeau compact,
+   pas la grosse bannière uppercase générique de .page-header) — la nav
+   globale ParcInfo reste au-dessus (décision utilisateur : cohérence avec
+   le reste de l'appli), ce bandeau la complète juste en dessous. */
+.baie-apphead { display:flex; align-items:baseline; justify-content:space-between; gap:1rem;
+    padding:.4rem 0 .7rem; margin-bottom:.9rem; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.baie-apphead h1 { font-family:'Rajdhani',sans-serif; font-weight:700; font-size:1.35rem;
+    letter-spacing:.3px; text-transform:none; color:var(--text-primary); line-height:1; margin:0; }
+.baie-apphead h1 span { color:var(--accent); }
+.baie-apphead p { font-size:.72rem; color:var(--text-secondary); margin:.2rem 0 0; }
+.baie-apphead p b { color:var(--accent); font-weight:600; }
+.baie-apphead-r { display:flex; align-items:center; gap:.4rem; }
+.baie-apphead-r .btn { font-family:'Exo 2',system-ui,sans-serif; text-transform:none; letter-spacing:0;
+    font-weight:600; font-size:.72rem; padding:.32rem .6rem; border-radius:4px; background:transparent;
+    border:1px solid var(--border); color:var(--text-secondary); }
+.baie-apphead-r .btn:hover { border-color:var(--accent); color:var(--accent); }
 
 /* ── BARRE D'OUTILS (refonte lot 1 : groupes nommés) ──
    Les boutons gardent leur id/onclick ; seul le conteneur change. */
@@ -106,6 +175,15 @@
 .tb-group-items { display:flex; flex-wrap:wrap; align-items:center; gap:.32rem; }
 /* bouton neutre : la plupart des actions ne sont pas « primaires » — on réserve
    le cyan plein à la seule action mise en avant (Deviner le brassage). */
+/* Typographie propre à cette barre d'outils (fidèle à la maquette .tbtn) :
+   le .btn générique de l'appli est en majuscules Rajdhani très espacées
+   (CTA du reste de ParcInfo) — beaucoup plus « criard » que les boutons
+   d'outils denses et discrets de la maquette (casse normale, police du
+   corps de texte, espacement resserré). Ne touche que .baie-toolbar. */
+.baie-toolbar .btn, .baie-toolbar select.btn {
+    font-family:'Exo 2',system-ui,sans-serif; text-transform:none; letter-spacing:0;
+    font-weight:600; font-size:.74rem; padding:.34rem .58rem; border-radius:4px; gap:.34rem;
+}
 .baie-toolbar .btn.btn-neutral { border-color:var(--border); color:var(--text-secondary); background:var(--bg-secondary); }
 .baie-toolbar .btn.btn-neutral:hover { border-color:var(--accent); color:var(--accent); background:rgba(0,201,255,.06); }
 .baie-toolbar .btn.btn-neutral.active,
@@ -170,9 +248,10 @@
     color:#2a4a6a; padding-right:4px; flex-shrink:0;
 }
 .rack-rows { flex:1; display:flex; flex-direction:column; gap:1px; }
-/* Grille FIXE à 10 colonnes — chaque élément (occupé ou case vide) se
-   positionne via grid-column:"début / span largeur" (voir makeOccupiedCell/
-   makeEmptyCell), en dixièmes de la largeur du rack. Remplace l'ancien
+/* Grille FIXE à NB_COLS_BAIE colonnes (1000, quasi continue) — chaque
+   élément (occupé ou case vide) se positionne via grid-column:"début / span
+   largeur" (voir makeOccupiedCell/makeEmptyCell), en millièmes de la
+   largeur du rack. Remplace l'ancien
    modèle flex (col_index = index de tranche 0-4, largeur calculée par
    partage égal du flex restant) : ce dernier cassait dès qu'un élément à la
    fois partiel en largeur ET en hauteur (hauteur_u > 1) partageait sa
@@ -182,7 +261,17 @@
    rangée à l'autre. Avec une grille à positions absolues, l'alignement est
    garanti par construction : la même paire (début, largeur) produit
    toujours le même grid-column, quelle que soit la rangée. */
-.rack-row { display:grid; grid-template-columns:repeat(10, 1fr); gap:2px; position:relative; }
+/* grid-template-columns:repeat(1000, ...) — grille fine (voir NB_COLS_BAIE
+   JS / app.py) pour un redimensionnement/positionnement quasi continu.
+   gap:0 est OBLIGATOIRE à cette résolution : `gap` s'applique entre CHAQUE
+   paire de pistes adjacentes de la grille, pas seulement entre deux
+   éléments rendus séparément — à 1000 pistes, un gap de 2px aurait
+   consommé 999×2px ≈ 2000px de la largeur de la rangée avant même de
+   placer le moindre équipement. L'espacement visuel entre deux éléments
+   voisins vient maintenant de la marge posée sur .rack-cell ci-dessous
+   (appliquée à la boîte de CHAQUE cellule rendue, jamais entre pistes
+   internes qu'un même élément traverse). */
+.rack-row { display:grid; grid-template-columns:repeat(1000, 1fr); gap:0; position:relative; }
 
 /* U height constant */
 .rack-cell {
@@ -190,6 +279,7 @@
     cursor:pointer; display:flex; align-items:center; padding:0 6px; overflow:hidden;
     font-family:'Share Tech Mono',monospace; font-size:.65rem; transition:all .12s;
     position:relative; min-width:0; box-sizing:border-box;
+    margin:0 1px;
 }
 /* Case vide : pas de "plaque grise" visible au repos (fond/bordure
    transparents, se fond dans le rack) — gênant visuellement autour d'un
@@ -216,6 +306,14 @@
 .rack-cell.selected     { border-color:var(--accent)!important; box-shadow:0 0 8px rgba(0,201,255,.3); }
 .rack-cell.highlighted  { border-color:#fbbf24!important; background:rgba(251,191,36,.1)!important; }
 .rack-cell.dragging     { opacity:.4; }
+/* Repère de la case visée pendant un déplacement à la souris (voir
+   mousedown dans makeOccupiedCell) — même famille visuelle que .cell-magnet
+   ci-dessus, mais positionné en `fixed` sur toute la case cible (pas
+   seulement une colonne) puisqu'il suit un geste libre, pas un survol de
+   case précise. */
+.move-preview { display:none; position:fixed; z-index:60; pointer-events:none;
+    border:2px solid var(--accent); border-radius:3px; background:rgba(0,201,255,.14); }
+.move-preview.invalide { border-color:var(--accent-red,#ff3355); background:rgba(255,51,85,.14); }
 /* Redimensionnement (poignée bas/droite/coin) en cours de chevaucher un
    autre élément — même code couleur rouge, sur la cellule qu'on étire. */
 .rack-cell.invalide { outline:2px solid var(--accent-red,#ff3355); outline-offset:-2px; }
@@ -227,8 +325,8 @@
    en plusieurs rangées lisibles.
    Taille de port FIXE (24×22px) — colonnes en repeat(auto-fill, ...) plutôt
    qu'un nombre de colonnes fixe à largeur variable (1fr) : un élément
-   redimensionné plus étroit (largeur_u < 10, ou plusieurs éléments côte à
-   côte) doit garder des ports de la même taille et simplement en tenir
+   redimensionné plus étroit (largeur_u < NB_COLS_BAIE, ou plusieurs éléments
+   côte à côte) doit garder des ports de la même taille et simplement en tenir
    moins par rangée (repli automatique sur plusieurs lignes), jamais des
    ports rétrécis pour tous tenir sur une seule rangée. */
 .rack-cell.has-ports { flex-direction:column; align-items:stretch; padding:3px 6px; }
@@ -454,15 +552,29 @@
     position:absolute; left:0; right:0; bottom:-4px; height:9px; cursor:ns-resize; z-index:6;
 }
 .cell-resize:hover, .cell-resize.resizing { background:rgba(0,201,255,.35); }
+/* Repère visuel permanent (fidèle à la maquette .grip.e/.grip.s ::after) :
+   sans lui, une poignée totalement invisible au repos ne se découvre qu'au
+   survol par hasard — la maquette montre toujours une petite pastille
+   discrète, qui ne fait que s'accentuer au survol/pendant le geste. */
+.cell-resize::after {
+    content:''; position:absolute; left:50%; bottom:2px; width:22px; height:3px;
+    transform:translateX(-50%); background:rgba(255,255,255,.22); border-radius:2px; pointer-events:none;
+}
+.cell-resize:hover::after, .cell-resize.resizing::after { background:var(--accent); }
 
 /* Poignée de redimensionnement en LARGEUR — bord droit de l'élément, glisser
-   pour changer largeur_u par pas de 1/10 de la largeur du rack (voir
-   redimensionnerLargeurSlot()). Même logique que .cell-resize (hauteur),
-   orientée horizontalement. */
+   pour changer largeur_u au pas de la grille fine (1/NB_COLS_BAIE de la
+   largeur du rack, <1px — voir redimensionnerLargeurSlot()). Même logique
+   que .cell-resize (hauteur), orientée horizontalement. */
 .cell-resize-w {
     position:absolute; top:0; bottom:0; right:-4px; width:9px; cursor:ew-resize; z-index:6;
 }
 .cell-resize-w:hover, .cell-resize-w.resizing { background:rgba(0,201,255,.35); }
+.cell-resize-w::after {
+    content:''; position:absolute; top:50%; right:2px; width:3px; height:18px;
+    transform:translateY(-50%); background:rgba(255,255,255,.22); border-radius:2px; pointer-events:none;
+}
+.cell-resize-w:hover::after, .cell-resize-w.resizing::after { background:var(--accent); }
 
 /* Poignée de redimensionnement DIAGONAL — coin bas-droit, change hauteur_u
    ET largeur_u en un seul geste (voir redimensionnerCoinSlot()). */
@@ -471,6 +583,12 @@
     border-radius:0 0 2px 0;
 }
 .cell-resize-corner:hover, .cell-resize-corner.resizing { background:rgba(0,201,255,.55); }
+.cell-resize-corner::after {
+    content:''; position:absolute; right:3px; bottom:3px; width:6px; height:6px;
+    border-right:2px solid rgba(255,255,255,.28); border-bottom:2px solid rgba(255,255,255,.28);
+    pointer-events:none;
+}
+.cell-resize-corner:hover::after, .cell-resize-corner.resizing::after { border-color:var(--accent); }
 
 /* Un port RJ45 dans la grille d'un élément réseau — numéroté, coloré selon
    sa cible (couleur type/catégorie déjà configurée ailleurs dans l'app, ou
@@ -658,6 +776,23 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .cell-sante.cs-ok { color:#1f9d55; background:rgba(31,157,85,.14); }
 .cell-sante.cs-attention { color:#c77700; background:rgba(224,149,42,.16); }
 .cell-sante.cs-critique { color:#ef4444; background:rgba(239,68,68,.16); }
+/* bouton toolbar « 🩺 Santé » (menu Affichage, fidèle à la maquette) : masque
+   simplement les pastilles déjà posées par appliquerDiagErreurs(), sans
+   toucher au calcul ni au chargement des données. */
+body.baie-sante-off .cell-sante { display:none; }
+
+/* bouton toolbar « 🏷 Câbles » : étiquette permanente couleur/longueur du
+   cordon sur chaque lien du rack (voir renderCableLinks) — la même donnée
+   que l'infobulle et la modale de port, juste rendue visible sans survol. */
+.cable-label { font-family:'Share Tech Mono',monospace; font-size:8px; fill:#a9c0dd;
+    paint-order:stroke; stroke:#0a0e14; stroke-width:3px; stroke-linejoin:round; pointer-events:none; }
+
+/* bouton toolbar « 🛰 Hors site » (menu Affichage) : rappel visuel « lecture
+   quasi-seule » — assombrit le rack et désactive drag/redimensionnement,
+   entièrement local à ce navigateur, aucun appel serveur (comme le
+   verrouillage). Voir toggleHorsSite(). */
+body.baie-hors-site .rack-outer { filter:saturate(.55) brightness(.85); }
+body.baie-hors-site .rack-cell.occupied { cursor:default; }
 
 /* ── Modale « Moniteur réseau » ─────────────────────────────────────────── */
 .mon-box { background:var(--bg-secondary); border:1px solid var(--border-glow); border-radius:8px;
@@ -1035,15 +1170,15 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 {% endmacro %}
 
 {% block content %}
-<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+<div class="baie-apphead">
     <div>
-        <h1>Baie de <span>Brassage</span></h1>
-        <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        <h1>Éditeur de <span>baie</span></h1>
+        <p>Client <b style="color:{{ client.couleur or 'var(--accent)' }};">{{ client.nom }}</b>
         · {{ parc.baie_marque or 'Baie' }}{% if parc.baie_nb_u %} · {{ parc.baie_nb_u }}U{% endif %}</p>
     </div>
-    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.4rem;">
-        <button class="btn btn-primary btn-sm" onclick="exportRack()" title="Exporter en image PNG">📷</button>
-        <a href="/parc" class="btn btn-primary btn-sm" title="Configuration de la baie (parc général)">✏</a>
+    <div class="baie-apphead-r">
+        <button class="btn" onclick="exportRack()" title="Exporter en image PNG">📷 Exporter</button>
+        <a href="/parc" class="btn" title="Configuration de la baie (parc général)">✏ Configurer</a>
     </div>
 </div>
 
@@ -1064,7 +1199,7 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <button onclick="changerU(1)" aria-label="Agrandir la baie d'1U">+U</button>
                     </span>
                     <button id="btn-verrou" onclick="toggleVerrouBaie()" class="btn btn-sm btn-neutral"
-                        title="Verrouiller la baie : bloque le glisser-déposer et le redimensionnement (évite un déplacement accidentel) — préférence locale à ce navigateur, pas partagée avec les autres utilisateurs">🔓</button>
+                        title="Verrouiller la baie : bloque le glisser-déposer et le redimensionnement (évite un déplacement accidentel) — préférence locale à ce navigateur, pas partagée avec les autres utilisateurs"><span class="i">🔓</span> Édition</button>
                 </div>
             </div>
 
@@ -1090,6 +1225,12 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <option value="3000">⚡ activité 3 s</option>
                         <option value="5000">⚡ activité 5 s</option>
                     </select>
+                    <button id="btn-sante" onclick="toggleSante()" class="btn btn-sm btn-neutral active" aria-pressed="true"
+                        title="Afficher/masquer la pastille de santé réseau (diagnostic SNMP) sur chaque équipement — préférence locale à ce navigateur">🩺 Santé</button>
+                    <button id="btn-cables" onclick="toggleLabelsCables()" class="btn btn-sm btn-neutral" aria-pressed="false"
+                        title="Afficher en permanence la couleur/longueur de chaque cordon sur le rack (déjà visible en survol/double-clic sur un lien) — préférence locale à ce navigateur">🏷 Câbles</button>
+                    <button id="btn-offsite" onclick="toggleHorsSite()" class="btn btn-sm btn-neutral" aria-pressed="false"
+                        title="Mode hors site : assombrit la baie et bloque le glisser-déposer/redimensionnement — repère visuel local à ce navigateur, aucun appel serveur, n'affecte pas les autres utilisateurs">🛰 Hors site</button>
                 </div>
             </div>
 
@@ -1316,9 +1457,13 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 
             <!-- Équipement (ex-#equipment-modal) -->
             <div id="insp-equipement" style="display:none;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
-                    <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">⬛ <span id="eqm-titre">Équipement</span></h3>
-                    <button type="button" onclick="EquipmentModal.fermer()" title="Fermer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                <div class="insp-head">
+                    <span class="insp-ic" id="eqm-ic">⬛</span>
+                    <div class="insp-txt">
+                        <div class="insp-kind-lbl" id="eqm-kind-lbl">Équipement</div>
+                        <div class="insp-kind-nom" id="eqm-titre">Équipement</div>
+                    </div>
+                    <button type="button" class="insp-close" onclick="EquipmentModal.fermer()" title="Fermer">✕</button>
                 </div>
                 <!-- Bandeau « type à valider » (refonte lot 6) — voir
                      EquipmentModal.majBandeauType(), rempli seulement quand
@@ -1331,6 +1476,23 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <button type="button" onclick="EquipmentModal.ignorerType()">Ignorer</button>
                     </div>
                 </div>
+
+                <!-- Stats réseau (switch/routeur/AP…) ou bandeau RJ — voir
+                     EquipmentModal.majStats(), calculées depuis les données
+                     déjà chargées (ports, _neticDetecte, _diagErreurs). -->
+                <div id="eqm-stats" class="insp-det" style="display:none;">
+                    <div class="insp-det-h" id="eqm-stats-titre">Réseau — détecté</div>
+                    <div class="insp-det-line"><span class="k" id="eqm-stat-1-k">Ports occupés</span><span class="v" id="eqm-stat-1-v"></span></div>
+                    <div class="insp-det-line"><span class="k" id="eqm-stat-2-k">Appareils vus</span><span class="v" id="eqm-stat-2-v"></span></div>
+                    <div class="insp-det-line" id="eqm-stat-3-row" style="display:none;"><span class="k" id="eqm-stat-3-k"></span><span class="v warn" id="eqm-stat-3-v"></span></div>
+                    <div class="insp-det-line" id="eqm-stat-4-row" style="display:none;"><span class="k" id="eqm-stat-4-k">SNMP</span><span class="v ok" id="eqm-stat-4-v"></span></div>
+                </div>
+                <button type="button" id="eqm-btn-annexe" class="insp-abtn acc" style="margin-bottom:.6rem;display:none;" onclick="EquipmentModal.ouvrirAppareilsEquipement()">👁 Tous les appareils par port</button>
+
+                <div class="form-group" style="margin-bottom:.6rem;">
+                    <label>Nom affiché</label>
+                    <input type="text" id="eqm-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
+                </div>
                 <div class="form-group" style="margin-bottom:.6rem;">
                     <label>Type d'équipement</label>
                     <select id="eqm-type" onchange="couleurAuto('eqm')">
@@ -1342,31 +1504,54 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
                     </select>
                 </div>
-                {{ ports_box('eqm') }}
                 <div class="form-row cols-2" style="margin-bottom:.6rem;">
                     <div class="form-group" style="margin-bottom:0;">
-                        <label>Position (U)</label>
-                        <input type="number" id="eqm-pos" min="1" max="{{ nb_u }}" style="font-family:'Share Tech Mono',monospace;">
+                        <label>Appareil lié (inventaire)</label>
+                        <select id="eqm-app" onchange="autoRemplir('eqm')"></select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Périphérique lié</label>
+                        <select id="eqm-periph" onchange="autoRemplirPeriph('eqm')"></select>
+                    </div>
+                </div>
+
+                <!-- Position/largeur en lecture seule — se règlent en
+                     glissant l'équipement dans la baie (corps = déplacer,
+                     bord droit = largeur, poignées déjà existantes),
+                     comme dans la maquette. Seule la hauteur reste un
+                     réglage direct ici (pas de geste de glisser pratique
+                     pour une valeur en U entiers). Champs cachés
+                     eqm-pos/-col/-largeur/-hu conservés pour
+                     lirePayloadEquipement() et mis à jour par le glisser
+                     dans la baie comme avant. -->
+                <div class="form-row cols-2" style="margin-bottom:.6rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Position</label>
+                        <div class="insp-ro" id="eqm-pos-ro">U1 · 0 % à g.</div>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
                         <label>Hauteur (U)</label>
-                        <select id="eqm-hu">
-                            {% for i in range(1,9) %}<option value="{{ i }}">{{ i }}U</option>{% endfor %}
-                        </select>
+                        <span class="insp-ustep">
+                            <button type="button" onclick="EquipmentModal.ajusterHauteur(-1)" aria-label="Réduire la hauteur">−</button>
+                            <span id="eqm-hu-affiche">1U</span>
+                            <button type="button" onclick="EquipmentModal.ajusterHauteur(1)" aria-label="Augmenter la hauteur">+</button>
+                        </span>
                     </div>
                 </div>
                 <div class="form-row cols-2" style="margin-bottom:.6rem;">
                     <div class="form-group" style="margin-bottom:0;">
-                        <label>Colonne (0-9)</label>
-                        <input type="number" id="eqm-col" min="0" max="9" style="font-family:'Share Tech Mono',monospace;">
+                        <label>Largeur</label>
+                        <div class="insp-ro" id="eqm-largeur-ro">100 % de la baie</div>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label>Largeur</label>
-                        <select id="eqm-largeur">
-                            {% for i in range(1,11) %}<option value="{{ i }}">{{ i }}/10</option>{% endfor %}
-                        </select>
+                        <label>Couleur</label>
+                        <input type="color" id="eqm-couleur">
                     </div>
                 </div>
+                <input type="hidden" id="eqm-pos"><input type="hidden" id="eqm-col">
+                <input type="hidden" id="eqm-largeur"><input type="hidden" id="eqm-hu">
+                <div class="form-hint" style="margin:-.2rem 0 .7rem;">Dans la baie : glisser le corps = déplacer · bord droit = largeur (poignées au survol de l'équipement posé).</div>
+
                 <div class="form-group" style="margin-bottom:.6rem;">
                     <label>Orientation</label>
                     <select id="eqm-orientation" title="Verticale : le nom et les ports/prises s'affichent de haut en bas — pour un PDU/onduleur monté sur le rail latéral">
@@ -1374,42 +1559,50 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <option value="vertical">↕ Verticale</option>
                     </select>
                 </div>
-                <div class="form-group" style="margin-bottom:.6rem;">
-                    <label>Couleur</label>
-                    <input type="color" id="eqm-couleur">
-                </div>
-                <div class="form-group" style="margin-bottom:.6rem;">
-                    <label>Associer à un appareil</label>
-                    <select id="eqm-app" onchange="autoRemplir('eqm')"></select>
-                </div>
-                <div class="form-group" style="margin-bottom:.6rem;">
-                    <label>Associer à un périphérique</label>
-                    <select id="eqm-periph" onchange="autoRemplirPeriph('eqm')"></select>
-                </div>
-                <div class="form-group" style="margin-bottom:.6rem;">
-                    <label>Nom personnalisé</label>
-                    <input type="text" id="eqm-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
-                </div>
+
+                {{ ports_box('eqm') }}
+
                 <div class="form-group" style="margin-bottom:.8rem;">
-                    <label>Description / note</label>
-                    <input type="text" id="eqm-desc" placeholder="Ex: Ports 1-24 bureau...">
+                    <label>Note</label>
+                    <textarea id="eqm-desc" placeholder="Ex: Ports 1-20 bureaux · 21-24 liaisons" rows="2" style="resize:vertical;"></textarea>
                 </div>
                 <div id="eqm-ports-editor" style="display:none;margin-bottom:.8rem;padding-top:.8rem;border-top:1px solid var(--border);">
                     <div class="form-section-title" style="margin-bottom:.6rem;">&#9632; Ports</div>
                     <div id="eqm-ports-editor-list" style="display:flex;flex-direction:column;gap:.4rem;max-height:280px;overflow-y:auto;"></div>
                 </div>
-                <div style="display:flex;gap:.6rem;justify-content:space-between;margin-top:1rem;">
-                    <button type="button" class="btn btn-sm btn-danger" onclick="EquipmentModal.retirer()">🗑 Retirer</button>
-                    <button type="button" class="btn btn-success btn-sm" onclick="EquipmentModal.enregistrer()">✓ Enregistrer</button>
+
+                <div class="insp-actions">
+                    <button type="button" id="eqm-btn-fiche" class="insp-abtn" style="display:none;" onclick="EquipmentModal.ouvrirFicheAppareil()">🗂 Ouvrir la fiche appareil</button>
+                    <button type="button" class="insp-abtn acc" onclick="EquipmentModal.enregistrer()" style="border-color:color-mix(in srgb,var(--accent-green) 45%,var(--border));color:var(--accent-green);">✓ Enregistrer</button>
+                    <button type="button" class="insp-abtn danger" onclick="EquipmentModal.retirer()">✕ Retirer de la baie</button>
                 </div>
             </div>
 
             <!-- Port RJ (ex-#port-modal) -->
             <div id="insp-port" style="display:none;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
-                    <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">🔌 <span id="pom-titre">Port</span></h3>
-                    <button type="button" onclick="PortModal.fermer()" title="Fermer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                <div class="insp-head">
+                    <span class="insp-ic">🔌</span>
+                    <div class="insp-txt">
+                        <div class="insp-kind-lbl">Port</div>
+                        <div class="insp-kind-nom" id="pom-titre">Port</div>
+                    </div>
+                    <button type="button" class="insp-close" onclick="PortModal.fermer()" title="Fermer">✕</button>
                 </div>
+
+                <!-- « Ce qui est branché » / « Aperçu » — voir PortModal.ouvrir(),
+                     calculés depuis les données déjà chargées (port, _neticDetecte). -->
+                <div id="pom-det" class="insp-det" style="display:none;">
+                    <div class="insp-det-h">Ce qui est branché</div>
+                    <div class="insp-det-line" id="pom-det-equip-row" style="display:none;"><span class="k">Équipement</span><span class="v" id="pom-det-equip"></span></div>
+                    <div class="insp-det-line"><span class="k">Appareils sur le port</span><span class="v" id="pom-det-nb"></span></div>
+                    <div class="insp-det-line" id="pom-det-role-row" style="display:none;"><span class="k">Rôle</span><span class="v warn">liaison montante</span></div>
+                    <div class="insp-det-line" id="pom-det-incoh-row" style="display:none;"><span class="k">⚠</span><span class="v warn">détecté ≠ déclaré</span></div>
+                </div>
+                <div id="pom-apercu" class="insp-det" style="display:none;">
+                    <div class="insp-det-h">Aperçu</div>
+                    <div id="pom-apercu-lignes"></div>
+                </div>
+
                 <div id="pom-cible-section">
                     <div class="form-group" style="margin-bottom:.3rem;">
                         <label>Utilisation</label>
@@ -1437,17 +1630,32 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         </div>
                     </div>
                 </div>
-                <div style="display:flex;justify-content:flex-end;margin-top:1rem;">
-                    <button type="button" class="btn btn-success btn-sm" onclick="PortModal.enregistrer()">✓ Enregistrer</button>
+                <div class="insp-actions">
+                    <button type="button" id="pom-btn-appareils" class="insp-abtn acc" style="display:none;" onclick="PortModal.ouvrirAppareils()">👁 Voir les appareils du port</button>
+                    <button type="button" class="insp-abtn acc" style="border-color:color-mix(in srgb,var(--accent-green) 45%,var(--border));color:var(--accent-green);" onclick="PortModal.enregistrer()">✓ Enregistrer</button>
                 </div>
             </div>
 
             <!-- Prise murale (ex-#prise-murale-modal) -->
             <div id="insp-prise" style="display:none;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
-                    <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">🚪 <span id="pmm-titre">Prise murale</span></h3>
-                    <button type="button" onclick="PriseMuraleModal.fermer()" title="Fermer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                <div class="insp-head">
+                    <span class="insp-ic">🚪</span>
+                    <div class="insp-txt">
+                        <div class="insp-kind-lbl">Prise murale</div>
+                        <div class="insp-kind-nom" id="pmm-titre">Prise murale</div>
+                    </div>
+                    <button type="button" class="insp-close" onclick="PriseMuraleModal.fermer()" title="Fermer">✕</button>
                 </div>
+
+                <!-- « Chaîne de câblage » — voir PriseMuraleModal.ouvrir() -->
+                <div class="insp-det">
+                    <div class="insp-det-h">Chaîne de câblage</div>
+                    <div class="insp-det-line"><span class="k">Pièce du site</span><span class="v" id="pmm-det-piece">—</span></div>
+                    <div class="insp-det-line"><span class="k">Câble mur → bandeau</span><span class="v" id="pmm-det-cable">—</span></div>
+                    <div class="insp-det-line"><span class="k">Cordon → switch</span><span class="v" id="pmm-det-cordon">—</span></div>
+                    <div class="insp-det-line" id="pmm-det-appareil-row" style="display:none;"><span class="k">Appareil du bureau</span><span class="v" id="pmm-det-appareil"></span></div>
+                </div>
+
                 <div class="form-group" style="margin-bottom:.7rem;">
                     <label>Emplacement de la prise</label>
                     <input type="text" id="pmm-piece" list="dl-localisations" placeholder="Bureau, salle de réunion…">
@@ -1455,6 +1663,16 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <div class="form-group" style="margin-bottom:.7rem;">
                     <label>Identification de la prise</label>
                     <input type="text" id="pmm-identification" placeholder="Repère physique, ex. RJ 3.12…">
+                </div>
+                <div class="form-row cols-2" style="margin-bottom:.3rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Couleur câble</label>
+                        <input type="text" id="pmm-cable-couleur" placeholder="Bleu, gris…">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Longueur câble</label>
+                        <input type="text" id="pmm-cable-longueur" placeholder="12 m…">
+                    </div>
                 </div>
                 <div class="form-group" style="margin-bottom:.3rem;">
                     <label>Utilisation</label>
@@ -1466,8 +1684,8 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <div class="form-group" id="pmm-usage-wrap" style="display:none;margin-bottom:.7rem;">
                     <input type="text" id="pmm-usage" placeholder="Téléphonie, alarme...">
                 </div>
-                <div style="display:flex;justify-content:flex-end;margin-top:1rem;">
-                    <button type="button" class="btn btn-success btn-sm" onclick="PriseMuraleModal.enregistrer()">✓ Enregistrer</button>
+                <div class="insp-actions">
+                    <button type="button" class="insp-abtn acc" style="border-color:color-mix(in srgb,var(--accent-green) 45%,var(--border));color:var(--accent-green);" onclick="PriseMuraleModal.enregistrer()">✓ Enregistrer</button>
                 </div>
             </div>
             </div><!-- /.rail-bd -->
@@ -1617,6 +1835,16 @@ let baiesList   = ['Baie principale'];
 // n'empêche ni la sélection/édition via le formulaire, ni la suppression
 // (déjà protégée par un confirm()), ni l'ajout de nouveaux éléments.
 let baieVerrouillee = false;
+// Repères visuels préférence locale (comme baieVerrouillee) : n'influent
+// que sur CE navigateur, aucun appel serveur, voir toggleSante()/
+// toggleLabelsCables()/toggleHorsSite() plus bas.
+let santeVisible = true;
+let labelsCablesVisibles = false;
+let horsSiteActif = false;
+// Un geste d'édition (glisser, redimensionner) doit être bloqué à la fois
+// par le verrouillage explicite ET par le mode « hors site » (lecture
+// quasi-seule) — un seul point de vérité pour les deux.
+function editionBloquee() { return baieVerrouillee || horsSiteActif; }
 // Slot actuellement ouvert dans la modale d'édition (voir EquipmentModal
 // plus bas, double-clic sur un équipement) — permet à enregistrerPort()/
 // delierPort() de rafraîchir sa liste de ports après une modification qui
@@ -1643,10 +1871,17 @@ const MAX_COLS = 5;
 // (1 U = 1,75 pouce ; largeur rack = 19 pouces → ratio = 1,75/19 ≈ 0,0921)
 const U_RATIO = 1.75 / 19;
 let U_H = 44;   // valeur initiale, recalculée après rendu
-// Largeur réelle (px) d'une rangée du rack — grille à 10 colonnes fractionnées
-// (voir .rack-row en CSS) : sert à convertir un span de colonnes (1-10,
-// largeur_u) en pixels pour tailleElecVertical() ci-dessous. Mesurée en même
-// temps que U_H (même conteneur, même règle de recalcul).
+// Résolution de la grille horizontale — était 10 (dixièmes de la largeur du
+// rack), trop grossier pour un redimensionnement à la souris (crans de 10 %
+// visibles, "cassé" comparé à la maquette qui suit le pixel). 1000 donne un
+// pas <1px sur n'importe quel rack affiché, perçu comme continu. Doit
+// rester identique à app.py:NB_COLS_BAIE (même grille des deux côtés).
+const NB_COLS_BAIE = 1000;
+// Largeur réelle (px) d'une rangée du rack — grille à NB_COLS_BAIE colonnes
+// fractionnées (voir .rack-row en CSS) : sert à convertir un span de
+// colonnes (1-NB_COLS_BAIE, largeur_u) en pixels pour tailleElecVertical()
+// ci-dessous. Mesurée en même temps que U_H (même conteneur, même règle de
+// recalcul).
 let RACK_ROW_W = 900;   // valeur initiale, recalculée après rendu
 
 function calcUH(rerender) {
@@ -1764,13 +1999,15 @@ function tailleElec(rowH) {
 // une colonne bien trop étroite pour les accueillir — signalé en usage
 // réel, corrigé en appliquant ici le même principe de réduction que
 // tailleElec, sur l'axe perpendiculaire.
-// largeur : span de colonnes du rack (1-10, PAS un pixel — le paramètre
-// `largeur` déjà reçu par makeOccupiedCell), converti en pixels via
-// RACK_ROW_W (grille à 10 colonnes fractionnées, voir .rack-row en CSS).
+// largeur : span de colonnes du rack (1-NB_COLS_BAIE, PAS un pixel — le
+// paramètre `largeur` déjà reçu par makeOccupiedCell), converti en pixels
+// via RACK_ROW_W (grille à NB_COLS_BAIE colonnes fractionnées, gap:0, voir
+// .rack-row en CSS — la marge de .rack-cell, constante quelle que soit la
+// largeur span née, est retirée à part).
 function tailleElecVertical(largeur) {
-    const nbColsRack = 10, gapRack = 2, paddingCellule = 10;
-    const colPx = (RACK_ROW_W - (nbColsRack - 1) * gapRack) / nbColsRack;
-    const largeurCellPx = colPx * (largeur || 10) + Math.max(0, (largeur || 10) - 1) * gapRack;
+    const paddingCellule = 10;
+    const colPx = RACK_ROW_W / NB_COLS_BAIE;
+    const largeurCellPx = colPx * (largeur || NB_COLS_BAIE) - 2;
     const dispo = largeurCellPx - paddingCellule;
     const taille = Math.max(28, Math.min(54, dispo));
     const ratio = taille / 54;
@@ -1950,7 +2187,7 @@ function elementEnCollision(position, hauteur, colDebut, largeur, excludeId) {
     const finCol = colDebut + largeur - 1;
     for (const sl of Object.values(slots)) {
         if (sl.id === excludeId) continue;
-        const slHu = sl.hauteur_u || 1, slLu = sl.largeur_u || 10, slCol = sl.col_index || 0;
+        const slHu = sl.hauteur_u || 1, slLu = sl.largeur_u || NB_COLS_BAIE, slCol = sl.col_index || 0;
         const slFinU = sl.position + slHu - 1;
         const slFinCol = slCol + slLu - 1;
         if (position <= slFinU && sl.position <= finU && colDebut <= slFinCol && slCol <= finCol) return sl;
@@ -1974,10 +2211,12 @@ function majBoutonVerrou() {
     const btn = document.getElementById('btn-verrou');
     if (!btn) return;
     btn.classList.toggle('active', baieVerrouillee);
-    // Icône seule (cadenas ouvert/fermé, déjà univoque) + style actif —
-    // le détail complet reste dans le title, comme les autres boutons
-    // compactés de cette barre d'outils.
-    btn.textContent = baieVerrouillee ? '🔒' : '🔓';
+    btn.setAttribute('aria-pressed', String(baieVerrouillee));
+    // Icône + libellé (fidèle à la maquette : 🔓 Édition / 🔒 Verrouillé) —
+    // le détail complet reste dans le title.
+    btn.innerHTML = baieVerrouillee
+        ? '<span class="i">🔒</span> Verrouillé'
+        : '<span class="i">🔓</span> Édition';
     btn.title = baieVerrouillee
         ? 'Baie verrouillée : glisser-déposer et redimensionnement bloqués (préférence locale à ce navigateur) — cliquer pour déverrouiller'
         : 'Verrouiller la baie : bloque le glisser-déposer et le redimensionnement (évite un déplacement accidentel) — préférence locale à ce navigateur, pas partagée avec les autres utilisateurs';
@@ -1991,6 +2230,52 @@ function toggleVerrouBaie() {
     showFlash(baieVerrouillee
         ? 'Baie verrouillée : glisser-déposer et redimensionnement bloqués sur ce navigateur.'
         : 'Baie déverrouillée.', 'info');
+}
+
+// ── PRÉFÉRENCES D'AFFICHAGE (menu « Affichage », fidèles à la maquette) ──────
+// Toutes locales à ce navigateur (localStorage), aucune ne modifie les
+// données ni n'appelle le serveur — voir editionBloquee() pour le lien avec
+// le verrouillage.
+function chargerPrefsAffichage() {
+    try { santeVisible = localStorage.getItem('baie_sante_visible') !== '0'; } catch (e) {}
+    try { labelsCablesVisibles = localStorage.getItem('baie_labels_cables') === '1'; } catch (e) {}
+    try { horsSiteActif = localStorage.getItem('baie_hors_site') === '1'; } catch (e) {}
+    const btnS = document.getElementById('btn-sante');
+    if (btnS) { btnS.classList.toggle('active', santeVisible); btnS.setAttribute('aria-pressed', String(santeVisible)); }
+    document.body.classList.toggle('baie-sante-off', !santeVisible);
+    const btnC = document.getElementById('btn-cables');
+    if (btnC) { btnC.classList.toggle('active', labelsCablesVisibles); btnC.setAttribute('aria-pressed', String(labelsCablesVisibles)); }
+    const btnO = document.getElementById('btn-offsite');
+    if (btnO) { btnO.classList.toggle('active', horsSiteActif); btnO.setAttribute('aria-pressed', String(horsSiteActif)); }
+    document.body.classList.toggle('baie-hors-site', horsSiteActif);
+}
+
+function toggleSante() {
+    santeVisible = !santeVisible;
+    try { localStorage.setItem('baie_sante_visible', santeVisible ? '1' : '0'); } catch (e) {}
+    const btn = document.getElementById('btn-sante');
+    if (btn) { btn.classList.toggle('active', santeVisible); btn.setAttribute('aria-pressed', String(santeVisible)); }
+    document.body.classList.toggle('baie-sante-off', !santeVisible);
+}
+
+function toggleLabelsCables() {
+    labelsCablesVisibles = !labelsCablesVisibles;
+    try { localStorage.setItem('baie_labels_cables', labelsCablesVisibles ? '1' : '0'); } catch (e) {}
+    const btn = document.getElementById('btn-cables');
+    if (btn) { btn.classList.toggle('active', labelsCablesVisibles); btn.setAttribute('aria-pressed', String(labelsCablesVisibles)); }
+    renderCableLinks();
+}
+
+function toggleHorsSite() {
+    horsSiteActif = !horsSiteActif;
+    try { localStorage.setItem('baie_hors_site', horsSiteActif ? '1' : '0'); } catch (e) {}
+    const btn = document.getElementById('btn-offsite');
+    if (btn) { btn.classList.toggle('active', horsSiteActif); btn.setAttribute('aria-pressed', String(horsSiteActif)); }
+    document.body.classList.toggle('baie-hors-site', horsSiteActif);
+    renderRack();
+    showFlash(horsSiteActif
+        ? 'Mode hors site activé : affichage assombri, glisser-déposer/redimensionnement bloqués sur ce navigateur (repère visuel, rien n\'est modifié côté serveur).'
+        : 'Mode hors site désactivé.', 'info');
 }
 
 // ── RENDER RACK ───────────────────────────────────────────────────────────────
@@ -2126,22 +2411,22 @@ function renderRack() {
         row.className = 'rack-row';
         row.style.height = rowH + 'px';
 
-        // Plages de colonnes (0-9) déjà couvertes à cette rangée, par une
+        // Plages de colonnes (0-999) déjà couvertes à cette rangée, par une
         // origine réelle ou un débordement venu d'au-dessus — le
-        // complémentaire dans [0,9] devient des cases vides. Aucune plaque
-        // grise n'est donc jamais rendue sous un élément qui déborde depuis
-        // une rangée du dessus (demandé explicitement).
+        // complémentaire dans [0,NB_COLS_BAIE) devient des cases vides.
+        // Aucune plaque grise n'est donc jamais rendue sous un élément qui
+        // déborde depuis une rangée du dessus (demandé explicitement).
         const couvert = [];
         origines.forEach(s => {
-            const debut = Math.min(9, Math.max(0, s.col_index || 0));
-            const largeur = Math.min(10 - debut, Math.max(1, s.largeur_u || 10));
+            const debut = Math.min(NB_COLS_BAIE - 1, Math.max(0, s.col_index || 0));
+            const largeur = Math.min(NB_COLS_BAIE - debut, Math.max(1, s.largeur_u || NB_COLS_BAIE));
             couvert.push({debut, fin: debut + largeur - 1});
             totalOccupied++;
             row.appendChild(makeOccupiedCell(s, u, debut, largeur, rowH));
         });
         debordent.forEach(s => {
-            const debut = Math.min(9, Math.max(0, s.col_index || 0));
-            const largeur = Math.min(10 - debut, Math.max(1, s.largeur_u || 10));
+            const debut = Math.min(NB_COLS_BAIE - 1, Math.max(0, s.col_index || 0));
+            const largeur = Math.min(NB_COLS_BAIE - debut, Math.max(1, s.largeur_u || NB_COLS_BAIE));
             couvert.push({debut, fin: debut + largeur - 1});
         });
 
@@ -2151,7 +2436,7 @@ function renderRack() {
             if (c.debut > curseur) row.appendChild(makeEmptyCell(u, curseur, c.debut - curseur, rowH));
             curseur = Math.max(curseur, c.fin + 1);
         });
-        if (curseur < 10) row.appendChild(makeEmptyCell(u, curseur, 10 - curseur, rowH));
+        if (curseur < NB_COLS_BAIE) row.appendChild(makeEmptyCell(u, curseur, NB_COLS_BAIE - curseur, rowH));
 
         rows.appendChild(row);
     }
@@ -2240,6 +2525,25 @@ function renderCableLinks() {
         path.setAttribute('class', horsLigne ? 'cable-link cable-warning' : 'cable-link');
         path.dataset.cle = els[0].dataset.cle;
         svg.appendChild(path);
+
+        // Étiquette permanente couleur/longueur (bouton toolbar « 🏷 Câbles »,
+        // fidèle à la maquette) — point milieu de la même courbe de Bézier
+        // cubique que le tracé visible (t=0.5), pas juste le milieu du
+        // segment droit A-B, sinon l'étiquette ne suit pas la bombe.
+        if (labelsCablesVisibles) {
+            const texte = a.dataset.cable || b.dataset.cable || '';
+            if (texte) {
+                const mx = 0.125 * x1 + 0.375 * (x1 + bombe) + 0.375 * (x2 + bombe) + 0.125 * x2;
+                const my = 0.125 * y1 + 0.375 * y1 + 0.375 * y2 + 0.125 * y2;
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', mx);
+                label.setAttribute('y', my - 4);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('class', 'cable-label');
+                label.textContent = texte;
+                svg.appendChild(label);
+            }
+        }
 
         // Zone de double-clic élargie et invisible, superposée (voir CSS
         // .cable-link-hit) : édition rapide du câble (couleur/longueur)
@@ -2343,10 +2647,11 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         cell.style.height = (rowH || U_H) + 'px';
     }
 
-    // Position/largeur dans la grille à 10 colonnes du rack — debut (0-9)
-    // et largeur (1-10, largeur_u en base) sont TOUJOURS explicites
-    // (largeur_u vaut 10 par défaut côté serveur, jamais "auto"), donc la
-    // même paire produit toujours le même grid-column quelle que soit la
+    // Position/largeur dans la grille à NB_COLS_BAIE colonnes du rack —
+    // debut (0 à NB_COLS_BAIE-1) et largeur (1-NB_COLS_BAIE, largeur_u en
+    // base) sont TOUJOURS explicites (largeur_u vaut NB_COLS_BAIE par défaut
+    // côté serveur, jamais "auto"), donc la même paire produit toujours le
+    // même grid-column quelle que soit la
     // rangée : c'est ce qui garantit l'alignement des rangées "débordées"
     // par un élément haut de plusieurs U (voir renderRack()).
     cell.style.gridColumn = `${debut + 1} / span ${largeur}`;
@@ -2576,9 +2881,9 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // pouvant très bien ne pas couvrir toute la baie. Baie verrouillée :
     // aucune poignée de redimensionnement du tout (voir toggleVerrouBaie).
     cell.innerHTML = ligneInfo + zonePorts + badgeAlimentation
-        + (estEtagere || baieVerrouillee ? '' : `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`)
-        + (baieVerrouillee ? '' : `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`)
-        + (estEtagere || baieVerrouillee ? '' : `<div class="cell-resize-corner" title="Redimensionner en hauteur et largeur (glisser en diagonale)"></div>`);
+        + (estEtagere || editionBloquee() ? '' : `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`)
+        + (editionBloquee() ? '' : `<div class="cell-resize-w" title="Redimensionner en largeur (glisser)"></div>`)
+        + (estEtagere || editionBloquee() ? '' : `<div class="cell-resize-corner" title="Redimensionner en hauteur et largeur (glisser en diagonale)"></div>`);
 
     // Ports : clic = surbrillance de tout port lié à la même cible (ou, en
     // mode "Lier des ports", sélection du 1er/2e port à câbler ensemble),
@@ -2705,16 +3010,13 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     });
 
     // Redimensionnement à la souris : glisser la poignée du bas change
-    // hauteur_u par pas de 1U. draggable est désactivé le temps du geste —
-    // sinon le navigateur démarre un déplacement natif (dragstart) dès que
-    // la souris bouge dans un élément draggable, même sur cette poignée.
-    // Absente pour une étagère (voir plus haut, jamais rendue dans le HTML
-    // pour ce type) : querySelector renvoie alors null, d'où ce garde-fou.
+    // hauteur_u par pas de 1U. Absente pour une étagère (voir plus haut,
+    // jamais rendue dans le HTML pour ce type) : querySelector renvoie
+    // alors null, d'où ce garde-fou.
     const poignee = cell.querySelector('.cell-resize');
     if (poignee) poignee.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
-        cell.draggable = false;
         poignee.classList.add('resizing');
         const startY = e.clientY;
         const startHu = s.hauteur_u || 1;
@@ -2731,7 +3033,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             // Chevauchement en direct (voir elementEnCollision) — rouge
             // PENDANT le geste plutôt que de découvrir le refus seulement
             // au relâchement (voir CLAUDE.md, correctif "galère souris").
-            dernierInvalide = !!elementEnCollision(s.position, nv, debut, s.largeur_u || 10, s.id);
+            dernierInvalide = !!elementEnCollision(s.position, nv, debut, s.largeur_u || NB_COLS_BAIE, s.id);
             cell.classList.toggle('invalide', dernierInvalide);
             renderCableLinks(); // suit les ports en direct pendant le geste
         };
@@ -2740,7 +3042,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             document.removeEventListener('mouseup', onUp);
             poignee.classList.remove('resizing');
             cell.classList.remove('invalide');
-            cell.draggable = true;
             const nv = calculerNouvelleHu(ev.clientY);
             if (nv === startHu) { renderRack(); return; }
             if (dernierInvalide) {
@@ -2757,24 +3058,25 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     });
 
     // Redimensionnement en LARGEUR à la souris : glisser la poignée de
-    // droite change largeur_u par pas de 1/10 de la largeur du rack, borné
-    // pour ne jamais dépasser le bord droit de la grille (10 - debut).
-    // Absente si la baie est verrouillée (jamais rendue dans le HTML, voir
-    // plus haut) — même garde-fou que .cell-resize/.cell-resize-corner.
+    // droite change largeur_u au pas de la grille fine (1/NB_COLS_BAIE de
+    // la largeur du rack, <1px — suit la souris au pixel près, plus les
+    // crans de 10 % perceptibles d'avant), borné pour ne jamais dépasser
+    // le bord droit de la grille (NB_COLS_BAIE - debut). Absente si la
+    // baie est verrouillée (jamais rendue dans le HTML, voir plus haut) —
+    // même garde-fou que .cell-resize/.cell-resize-corner.
     const poigneeW = cell.querySelector('.cell-resize-w');
     if (poigneeW) poigneeW.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
-        cell.draggable = false;
         poigneeW.classList.add('resizing');
         const row = cell.parentElement;
-        const tenthPx = row.getBoundingClientRect().width / 10;
+        const unitePx = row.getBoundingClientRect().width / NB_COLS_BAIE;
         const startX = e.clientX;
-        const startLargeur = s.largeur_u || 10;
-        const maxLargeur = 10 - debut;
+        const startLargeur = s.largeur_u || NB_COLS_BAIE;
+        const maxLargeur = NB_COLS_BAIE - debut;
 
         const calculerNouvelleLargeur = clientX => {
-            const delta = Math.round((clientX - startX) / tenthPx);
+            const delta = Math.round((clientX - startX) / unitePx);
             return Math.min(maxLargeur, Math.max(1, startLargeur + delta));
         };
         let dernierInvalide = false;
@@ -2790,7 +3092,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             document.removeEventListener('mouseup', onUp);
             poigneeW.classList.remove('resizing');
             cell.classList.remove('invalide');
-            cell.draggable = true;
             const nv = calculerNouvelleLargeur(ev.clientX);
             if (nv === startLargeur) { renderRack(); return; }
             if (dernierInvalide) {
@@ -2812,19 +3113,18 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     if (poigneeC) poigneeC.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
-        cell.draggable = false;
         poigneeC.classList.add('resizing');
         const row = cell.parentElement;
-        const tenthPx = row.getBoundingClientRect().width / 10;
+        const unitePx = row.getBoundingClientRect().width / NB_COLS_BAIE;
         const startX = e.clientX, startY = e.clientY;
         const startHu = s.hauteur_u || 1;
-        const startLargeur = s.largeur_u || 10;
+        const startLargeur = s.largeur_u || NB_COLS_BAIE;
         const maxHu = Math.min(8, nbU - s.position + 1);
-        const maxLargeur = 10 - debut;
+        const maxLargeur = NB_COLS_BAIE - debut;
 
         const calculer = (clientX, clientY) => ({
             hu: Math.min(maxHu, Math.max(1, startHu + Math.round((clientY - startY) / U_H))),
-            largeur: Math.min(maxLargeur, Math.max(1, startLargeur + Math.round((clientX - startX) / tenthPx))),
+            largeur: Math.min(maxLargeur, Math.max(1, startLargeur + Math.round((clientX - startX) / unitePx))),
         });
         let dernierInvalide = false;
         const onMove = ev => {
@@ -2840,7 +3140,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             document.removeEventListener('mouseup', onUp);
             poigneeC.classList.remove('resizing');
             cell.classList.remove('invalide');
-            cell.draggable = true;
             const {hu, largeur} = calculer(ev.clientX, ev.clientY);
             if (hu === startHu && largeur === startLargeur) { renderRack(); return; }
             if (dernierInvalide) {
@@ -2859,30 +3158,107 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     cell.addEventListener('mousemove',  e => { const t = document.getElementById('rack-tooltip'); if(t.classList.contains('show')) positionnerTooltip(e); });
     cell.addEventListener('mouseleave', () => masquerTooltip());
 
-    // Drag & drop — désactivé si la baie est verrouillée (voir
-    // toggleVerrouBaie) : le navigateur ne déclenche alors jamais dragstart,
-    // donc rien de plus à bloquer côté cases vides (dropzones).
-    cell.draggable = !baieVerrouillee;
-    cell.addEventListener('dragstart', e => {
-        e.dataTransfer.setData('text/plain', JSON.stringify({id: s.id, pos: u, col: debut}));
-        // Décalage de prise EN U et en colonnes — l'endroit où la souris a
-        // saisi l'élément, pas forcément son coin haut-gauche (rare de
-        // saisir un pavé de plusieurs U pile par son origine). Sans ce
-        // décalage, déposer faisait toujours correspondre l'ORIGINE de
-        // l'élément à la case survolée, quel que soit l'endroit où il avait
-        // été saisi — un pavé haut de 3U saisi près du bas "sautait" de 2U
-        // vers le haut au dépôt, disproportionné par rapport au geste
-        // réellement fait. Ici, le point saisi reste sous le curseur.
-        const rect = cell.getBoundingClientRect();
-        const decalageU = Math.max(0, Math.min(hu - 1, Math.floor((e.clientY - rect.top) / U_H)));
-        const decalageCol = Math.max(0, Math.min(largeur - 1, Math.floor((e.clientX - rect.left) / (rect.width / largeur))));
-        dragInfo = { id: s.id, hauteurU: hu, largeurU: largeur, decalageU, decalageCol };
-        cell.classList.add('dragging');
-        setTimeout(() => cell.classList.add('dragging'), 0);
+    // Déplacement à la souris — fidèle à la maquette (editeur-baie.html) :
+    // mousedown/mousemove/mouseup qui repositionnent l'élément EN DIRECT
+    // (translate CSS), exactement comme les poignées de redimensionnement
+    // juste au-dessus — PAS le glisser-déposer HTML5 natif
+    // (draggable/dragstart/dragover/drop) utilisé ici auparavant.
+    // Le natif s'est avéré peu fiable en usage réel (« suit la souris mais
+    // retombe à sa place ») : le navigateur annule silencieusement un drag
+    // dès qu'un dragover intermédiaire ne confirme pas explicitement la
+    // cible (facile à manquer sur une grille aussi fine), sans qu'aucune
+    // erreur ne remonte — c'est d'ailleurs pour cette même raison que les
+    // poignées de redimensionnement ci-dessus ont toujours dû désactiver
+    // cell.draggable pendant leur propre geste, sans quoi le navigateur
+    // démarrait un déplacement natif au lieu du redimensionnement voulu.
+    // Le glisser-déposer natif reste utilisé pour la bibliothèque → baie
+    // (placerDepuisBibliotheque) : un dépôt ponctuel depuis un panneau
+    // externe, geste bien plus court, jamais concerné par ce problème.
+    cell.addEventListener('mousedown', e => {
+        if (e.button !== 0 || editionBloquee()) return;
+        // Icônes/zones qui gèrent déjà leur propre interaction (port, prise
+        // murale, bouton ✕/🌐 de l'en-tête, poignée de redimensionnement) :
+        // jamais le point de départ d'un déplacement — même exclusion que
+        // le pointerdown de la maquette (voir canvas.addEventListener
+        // ('pointerdown', ...) : portEl/grip traités à part avant move).
+        if (e.target.closest('.port, .prise-murale, .cell-del, .cell-admin, .cell-resize, .cell-resize-w, .cell-resize-corner')) return;
+        const startX = e.clientX, startY = e.clientY;
+        const rows = document.getElementById('rack-rows');
+        let moved = false, cible = { pos: u, col: debut }, invalide = false;
+        const onMove = ev => {
+            const dx = ev.clientX - startX, dy = ev.clientY - startY;
+            // Seuil de quelques pixels avant de considérer que c'est un
+            // déplacement plutôt qu'un simple clic (voir onUp) — la
+            // maquette n'en a pas besoin (pointerdown y sépare déjà clic de
+            // glisser via .grip/.port ciblés à part), mais ici le corps de
+            // la cellule sert aussi de zone de clic pour la sélection.
+            if (!moved && Math.hypot(dx, dy) < 4) return;
+            if (!moved) { moved = true; cell.classList.add('dragging'); afficherApercuDeplacement(); }
+            cell.style.transform = `translate(${dx}px, ${dy}px)`;
+            const rowRef = rows.children[u - 1] || cell.parentElement;
+            const unitePx = rowRef.getBoundingClientRect().width / NB_COLS_BAIE;
+            cible.pos = Math.max(1, Math.min(nbU - hu + 1, u + Math.round(dy / U_H)));
+            cible.col = Math.max(0, Math.min(NB_COLS_BAIE - largeur, debut + Math.round(dx / unitePx)));
+            invalide = !!elementEnCollision(cible.pos, hu, cible.col, largeur, s.id);
+            cell.classList.toggle('invalide', invalide);
+            majApercuDeplacement(cible.pos, cible.col, largeur, hu, invalide);
+        };
+        const onUp = async () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            cell.style.transform = '';
+            cell.classList.remove('dragging', 'invalide');
+            masquerApercuDeplacement();
+            if (!moved) return; // simple clic : le handler 'click' ci-dessous gère la sélection
+            if (cible.pos === u && cible.col === debut) { renderRack(); return; }
+            if (invalide) {
+                showFlash('Chevauche un autre élément — déplacement annulé.', 'danger');
+                renderRack();
+                return;
+            }
+            await deplacerSlot(s.id, cible.pos, cible.col);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
     });
-    cell.addEventListener('dragend', () => { cell.classList.remove('dragging'); dragInfo = null; });
 
     return cell;
+}
+
+// Repère visuel de la case visée pendant un déplacement (voir mousedown
+// ci-dessus) — un seul élément réutilisé pour toutes les cellules, comme le
+// #ghost de la maquette. Positionné en `fixed` à partir du rectangle RÉEL
+// de la/les rangée(s) cible(s) (jamais un calcul U_H à l'aveugle : une
+// rangée d'étagère peut être plus fine, voir SHELF_H).
+let _apercuDeplacementEl = null;
+function afficherApercuDeplacement() {
+    if (!_apercuDeplacementEl) {
+        _apercuDeplacementEl = document.createElement('div');
+        _apercuDeplacementEl.className = 'move-preview';
+        document.body.appendChild(_apercuDeplacementEl);
+    }
+    _apercuDeplacementEl.style.display = 'block';
+}
+function majApercuDeplacement(pos, col, largeur, hu, invalide) {
+    if (!_apercuDeplacementEl) return;
+    const rows = document.getElementById('rack-rows');
+    const rowDebut = rows.children[pos - 1];
+    if (!rowDebut) return;
+    const r = rowDebut.getBoundingClientRect();
+    let hauteur = 0;
+    for (let i = 0; i < hu; i++) {
+        const rw = rows.children[pos - 1 + i];
+        hauteur += rw ? rw.getBoundingClientRect().height : r.height;
+    }
+    const unitePx = r.width / NB_COLS_BAIE;
+    _apercuDeplacementEl.style.left = (r.left + col * unitePx) + 'px';
+    _apercuDeplacementEl.style.top = r.top + 'px';
+    _apercuDeplacementEl.style.width = (largeur * unitePx) + 'px';
+    _apercuDeplacementEl.style.height = hauteur + 'px';
+    _apercuDeplacementEl.classList.toggle('invalide', invalide);
+}
+function masquerApercuDeplacement() {
+    if (_apercuDeplacementEl) _apercuDeplacementEl.style.display = 'none';
 }
 
 function makeEmptyCell(u, debut, largeur, rowH) {
@@ -2892,9 +3268,9 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     cell.style.gridColumn = `${debut + 1} / span ${largeur}`;
     cell.dataset.pos = u;
     cell.dataset.col = debut;
-    cell.innerHTML = (largeur >= 10
+    cell.innerHTML = (largeur >= NB_COLS_BAIE
         ? `<span style="color:#1a2a3a;font-size:.52rem;user-select:none;">U${u}</span>`
-        : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">C${debut}</span>`)
+        : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">${Math.round(debut / NB_COLS_BAIE * 100)}%</span>`)
         + `<div class="cell-magnet"></div>`;
 
     // Grille de positionnement INVISIBLE : cette case vide peut couvrir tout
@@ -2909,8 +3285,8 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     function colonneVisee(clientX) {
         const row = cell.parentElement;
         const r = row.getBoundingClientRect();
-        const tenthPx = r.width / 10;
-        const col = Math.floor((clientX - r.left) / tenthPx);
+        const unitePx = r.width / NB_COLS_BAIE;
+        const col = Math.floor((clientX - r.left) / unitePx);
         return Math.min(debut + largeur - 1, Math.max(debut, col));
     }
     function majMarqueur(clientX) {
@@ -2967,28 +3343,24 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     cell.addEventListener('drop', async e => {
         e.preventDefault();
         cell.classList.remove('drag-over');
-        // Repli défensif : draggable=false sur les cellules occupées
-        // empêche déjà tout dragstart quand la baie est verrouillée (voir
-        // toggleVerrouBaie), donc cette branche ne devrait jamais s'exécuter
-        // dans ce cas — gardée quand même au cas où un glisser aurait pu
-        // démarrer autrement.
-        if (baieVerrouillee) { masquerMarqueur(); return; }
+        // Seule la bibliothèque utilise encore le glisser-déposer HTML5
+        // natif (voir wireLibDrag) — déplacer un équipement DÉJÀ posé passe
+        // désormais par mousedown/mousemove/mouseup (voir makeOccupiedCell),
+        // plus fiable que le natif. Repli défensif si un glisser a quand
+        // même pu démarrer pendant que la baie était verrouillée.
+        if (editionBloquee()) { masquerMarqueur(); return; }
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
         const { pos, col } = positionViseeGlisser(e.clientX);
         // Déjà signalé en rouge pendant le survol (voir majMarqueur) : pas
         // la peine d'aller vérifier côté serveur, l'utilisateur a déjà vu
         // que cet endroit était refusé avant même de relâcher la souris.
         if (dragInfo && elementEnCollision(pos, dragInfo.hauteurU, col, dragInfo.largeurU, dragInfo.id)) {
-            showFlash(`Chevauche un autre élément — ${data.lib ? 'placement' : 'déplacement'} annulé.`, 'danger');
+            showFlash('Chevauche un autre élément — placement annulé.', 'danger');
             masquerMarqueur();
             return;
         }
         masquerMarqueur();
-        // data.lib : glissé depuis la bibliothèque (refonte lot 3, voir
-        // libDragStart) — pas un id de slot existant à déplacer, mais un
-        // nouvel équipement à créer ici.
-        if (data.lib) { await placerDepuisBibliotheque(data, pos, col); }
-        else { await deplacerSlot(data.id, pos, col); }
+        await placerDepuisBibliotheque(data, pos, col);
     });
 
     return cell;
@@ -3013,13 +3385,14 @@ async function deplacerSlot(id, newPos, newCol) {
     // Rebuild slots map — à partir de la réponse SERVEUR (slot.position/
     // col_index), pas des newPos/newCol demandés : le serveur peut avoir
     // recalé la colonne pour que le slot (avec sa largeur propre) ne
-    // déborde pas de la grille à 10 colonnes (voir _clamp dans
+    // déborde pas de la grille (voir _clamp dans
     // api_baie_deplacer_slot) — utiliser les valeurs demandées ici aurait
     // indexé le slot au mauvais endroit dans la carte côté client.
     Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
     slots[key(slot.position, slot.col_index || 0)] = slot;
     nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1));
     renderRack();
+    EquipmentModal.majPositionAffichee(slot);
 }
 
 // Dépose d'un élément de la BIBLIOTHÈQUE (refonte lot 3, voir libDragStart)
@@ -3032,7 +3405,7 @@ async function deplacerSlot(id, newPos, newCol) {
 // affiner ports/taille/type sans repasser par un second geste.
 async function placerDepuisBibliotheque(data, pos, col) {
     const payload = {
-        position: pos, col_index: col, hauteur_u: 1, largeur_u: 10,
+        position: pos, col_index: col, hauteur_u: 1, largeur_u: NB_COLS_BAIE,
         baie_nom: currentBaie,
         type_equipement: data.type || '',
         nom_custom: data.nom || '',
@@ -3139,6 +3512,9 @@ const GENERIC_LIB = [
     { type: 'Patch Panel', ic: '🔲' }, { type: 'Bandeau RJ', ic: '🔌' },
     { type: 'Étagère', ic: '▬' }, { type: 'Autre', ic: '⬛' },
 ];
+function iconPourType(t) {
+    return (GENERIC_LIB.find(g => g.type === t) || {}).ic || '⬛';
+}
 function libItemGeneriqueHTML(g) {
     return `<div class="lib-item lib-item-generique" draggable="true" data-nom="${escH(g.type)}" data-type="${escH(g.type)}" title="Glisser sur une case libre de la baie">
         <span class="lib-item-ic">${g.ic}</span>
@@ -3200,14 +3576,14 @@ function initBibliothequeDnD() {
         wrap.addEventListener('dragstart', e => {
             const el = e.target.closest('.lib-item');
             if (!el) return;
-            if (baieVerrouillee) { e.preventDefault(); return; }
+            if (editionBloquee()) { e.preventDefault(); return; }
             e.dataTransfer.setData('text/plain', JSON.stringify({
                 lib: true,
                 appareil_id: el.dataset.appareilId ? parseInt(el.dataset.appareilId) : null,
                 nom: el.dataset.nom || '',
                 type: el.dataset.type || '',
             }));
-            dragInfo = { id: null, hauteurU: 1, largeurU: 10, decalageU: 0, decalageCol: 0 };
+            dragInfo = { id: null, hauteurU: 1, largeurU: NB_COLS_BAIE, decalageU: 0, decalageCol: 0 };
             el.classList.add('dragging');
         });
         wrap.addEventListener('dragend', e => {
@@ -3249,6 +3625,7 @@ async function redimensionnerSlot(s, nouvelleHu) {
     }
     slots[key(updated.position, updated.col_index || 0)] = updated;
     renderRack();
+    EquipmentModal.majPositionAffichee(updated);
 }
 
 // ── REDIMENSIONNEMENT EN LARGEUR (glisser la poignée de droite) ────────────────
@@ -3274,6 +3651,7 @@ async function redimensionnerLargeurSlot(s, nouvelleLargeur) {
     }
     slots[key(updated.position, updated.col_index || 0)] = updated;
     renderRack();
+    EquipmentModal.majPositionAffichee(updated);
 }
 
 // Redimensionnement diagonal (poignée du coin) : hauteur et largeur en un
@@ -3299,6 +3677,7 @@ async function redimensionnerCoinSlot(s, nouvelleHu, nouvelleLargeur) {
     }
     slots[key(updated.position, updated.col_index || 0)] = updated;
     renderRack();
+    EquipmentModal.majPositionAffichee(updated);
 }
 
 // ── TOOLTIP ───────────────────────────────────────────────────────────────────
@@ -3312,7 +3691,7 @@ function afficherTooltip(e, s) {
     if (s.type_equipement) html += `<div class="tip-row"><span class="tip-key">Type</span><span class="tip-val">${escH(s.type_equipement)}</span></div>`;
     if (s.adresse_ip)     html += `<div class="tip-row"><span class="tip-key">IP</span><span class="tip-val">${escH(s.adresse_ip)}</span></div>`;
     html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${statut}</span></div>`;
-    html += `<div class="tip-row"><span class="tip-key">Position</span><span class="tip-val">U${s.position} · C${s.col_index||0} · ${s.hauteur_u||1}U${s.largeur_u ? ' · '+s.largeur_u+'/10' : ''}</span></div>`;
+    html += `<div class="tip-row"><span class="tip-key">Position</span><span class="tip-val">U${s.position} · ${Math.round((s.col_index||0)/NB_COLS_BAIE*100)}% à g. · ${s.hauteur_u||1}U${s.largeur_u ? ' · '+Math.round(s.largeur_u/NB_COLS_BAIE*100)+'%' : ''}</span></div>`;
     if (s.description)    html += `<div class="tip-row"><span class="tip-key">Note</span><span class="tip-val">${escH(s.description)}</span></div>`;
     t.innerHTML = html;
     // Le schema de cascade a besoin de plus que les 260 px par defaut.
@@ -3398,7 +3777,12 @@ function portHTML(p, estElec, typeEquipement) {
     // Voyant de ping omis pour une prise électrique (demandé, voir
     // classePing ci-dessus) — jamais de statut réseau à montrer dessus.
     const voyant = estElec ? '' : '<span class="port-led"></span>';
-    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${estElec ? ' port-elec' : ''}${estEntree ? ' port-entree' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
+    // Couleur/longueur du cordon (renseignées via PortModal, voir
+    // enregistrerPort()) — reprises en attribut pour l'étiquette permanente
+    // du bouton toolbar « 🏷 Câbles » (renderCableLinks), sans requête
+    // supplémentaire : même donnée que l'infobulle de survol.
+    const cable = [p.cable_couleur, p.cable_longueur].filter(Boolean).join(' · ');
+    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${estElec ? ' port-elec' : ''}${estEntree ? ' port-entree' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}${cable ? ` data-cable="${escH(cable)}"` : ''}>
         ${voyant}${badgeLien}${symbole ? `<span class="port-elec-symbole">${symbole}</span>` : ''}${contenuNumero}</span>`;
 }
 
@@ -5141,9 +5525,11 @@ const PriseMuraleModal = (() => {
         const pm = (port && port.prise_murale) || {};
         slotId = sid; numero = num;
         document.getElementById('pmm-titre').textContent =
-            `Prise murale ${num} — ${(s && nomEquipementSlot(s)) || 'Bandeau'}`;
+            `Prise B${String(num).padStart(2, '0')} — ${(s && nomEquipementSlot(s)) || 'Bandeau'}`;
         document.getElementById('pmm-piece').value = pm.piece || '';
         document.getElementById('pmm-identification').value = pm.identification || '';
+        document.getElementById('pmm-cable-couleur').value = pm.cable_couleur || '';
+        document.getElementById('pmm-cable-longueur').value = pm.cable_longueur || '';
         const valeur = pm.appareil_id ? 'a:'+pm.appareil_id
             : (pm.peripherique_id ? 'p:'+pm.peripherique_id
             : (pm.usage_libre ? 'u' : ''));
@@ -5155,6 +5541,27 @@ const PriseMuraleModal = (() => {
         sel.value = valeur;
         document.getElementById('pmm-usage').value = pm.usage_libre || '';
         document.getElementById('pmm-usage-wrap').style.display = valeur === 'u' ? '' : 'none';
+
+        // « Chaîne de câblage » (voir renderPriseInspector de la maquette) :
+        // pièce, câble mur → bandeau, cordon → switch (port RJ de même
+        // numéro, voir baie_slot_ports.lie_slot_id), appareil du bureau.
+        document.getElementById('pmm-det-piece').textContent = pm.piece || '—';
+        const cable = [pm.cable_couleur, pm.cable_longueur].filter(Boolean).join(' · ');
+        document.getElementById('pmm-det-cable').textContent = cable || '—';
+        const cordonEl = document.getElementById('pmm-det-cordon');
+        cordonEl.textContent = port && port.lie_slot_id ? ('🔗 ' + (port.nom_cible || '')) : 'non brassé';
+        cordonEl.className = 'v' + (port && port.lie_slot_id ? ' ok' : ' warn');
+        const appareilRow = document.getElementById('pmm-det-appareil-row');
+        const nomAppareil = pm.appareil_id
+            ? (document.querySelector(`#cfg-app option[value="${pm.appareil_id}"]`) || {}).dataset?.nom
+            : (pm.peripherique_id
+                ? (document.querySelector(`#cfg-periph option[value="${pm.peripherique_id}"]`) || {}).dataset?.nom
+                : (pm.usage_libre || ''));
+        if (nomAppareil) {
+            document.getElementById('pmm-det-appareil').textContent = nomAppareil;
+            appareilRow.style.display = '';
+        } else appareilRow.style.display = 'none';
+
         afficherInspecteur('prise');
     }
 
@@ -5176,6 +5583,8 @@ const PriseMuraleModal = (() => {
         const payload = {
             piece: document.getElementById('pmm-piece').value.trim(),
             identification: document.getElementById('pmm-identification').value.trim(),
+            cable_couleur: document.getElementById('pmm-cable-couleur').value.trim(),
+            cable_longueur: document.getElementById('pmm-cable-longueur').value.trim(),
             appareil_id: null, peripherique_id: null, usage_libre: '',
         };
         if (v.startsWith('a:')) payload.appareil_id = parseInt(v.slice(2));
@@ -5213,6 +5622,7 @@ document.addEventListener('keydown', e => {
 // rail de droite) — ex-modale flottante.
 const PortModal = (() => {
     let slotId = null, numero = null, valeurInitiale = '', usageInitial = '', cableInitial = ['', ''];
+    let derniereKind = null, derniereEtat = null;
 
     function ouvrir(sid, num) {
         const s = Object.values(slots).find(x => x.id === sid);
@@ -5222,6 +5632,36 @@ const PortModal = (() => {
         const estBandeau = s.type_equipement === 'Bandeau RJ';
         const titrePort = libellePortAffiche(s.type_equipement, num);
         document.getElementById('pom-titre').textContent = `${titrePort} — ${nomEquipementSlot(s) || 'Élément'}`;
+
+        // « Ce qui est branché » / « Aperçu » (voir renderPortInspector de
+        // la maquette) — depuis _neticDetecte (lot 5) et le port lui-même,
+        // aucun appel réseau supplémentaire.
+        const cle = sid + ':' + num;
+        const info = _neticDetecte[cle] || {};
+        const kindDeclare = _neticKind(port.lie_type);
+        const kind = info.detected_kind || kindDeclare;
+        derniereKind = kind;
+        derniereEtat = (info.detected_kind && kindDeclare && info.detected_kind !== kindDeclare) ? 'netic-incoherent'
+            : info.detected_kind ? 'netic-detected' : 'netic-declared';
+        const equipRow = document.getElementById('pom-det-equip-row');
+        if (kind) {
+            document.getElementById('pom-det-equip').textContent =
+                (NETIC_IC[kind] || '') + ' ' + (NETIC_LBL[kind] || 'Équipement réseau') + (info.detected_kind ? ' (détecté)' : ' (déclaré)');
+            equipRow.style.display = '';
+        } else equipRow.style.display = 'none';
+        const devs = info.devices || [];
+        document.getElementById('pom-det-nb').textContent = String(devs.length);
+        document.getElementById('pom-det-role-row').style.display = info.uplink ? '' : 'none';
+        document.getElementById('pom-det-incoh-row').style.display = derniereEtat === 'netic-incoherent' ? '' : 'none';
+        document.getElementById('pom-det').style.display = (kind || devs.length) ? '' : 'none';
+        const apercu = document.getElementById('pom-apercu');
+        if (devs.length) {
+            document.getElementById('pom-apercu-lignes').innerHTML = devs.slice(0, 4).map(d =>
+                `<div class="insp-det-line"><span class="k">${escH(d.nom || '—')}</span><span class="v">${escH(d.ip || d.mac || '')}</span></div>`
+            ).join('') + (devs.length > 4 ? `<div class="insp-det-line"><span class="k" style="opacity:.6">+ ${devs.length - 4} autre(s)…</span><span class="v"></span></div>` : '');
+            apercu.style.display = '';
+        } else apercu.style.display = 'none';
+        document.getElementById('pom-btn-appareils').style.display = devs.length ? '' : 'none';
 
         document.getElementById('pom-cible-section').style.display = estBandeau ? 'none' : '';
         valeurInitiale = ''; usageInitial = '';
@@ -5315,7 +5755,13 @@ const PortModal = (() => {
         fermer();
     }
 
-    return { ouvrir, fermer, changerCible, enregistrer };
+    // Bouton « 👁 Voir les appareils du port » — même tiroir que le clic
+    // sur l'icône réseau du port dans le rack (ouvrirAppareilsPort, lot 5).
+    function ouvrirAppareils() {
+        if (slotId && numero != null) ouvrirAppareilsPort(slotId, numero, derniereKind, derniereEtat);
+    }
+
+    return { ouvrir, fermer, changerCible, enregistrer, ouvrirAppareils };
 })();
 
 // ── INSPECTEUR D'UN ÉQUIPEMENT (clic dans le rack, refonte lot 2) ──────────────
@@ -5335,6 +5781,8 @@ const EquipmentModal = (() => {
         const s = Object.values(slots).find(x => x.id === sid);
         if (!s) return;
         slotId = sid;
+        document.getElementById('eqm-ic').textContent = iconPourType(s.type_equipement);
+        document.getElementById('eqm-kind-lbl').textContent = s.type_equipement || 'Équipement';
         document.getElementById('eqm-titre').textContent = nomEquipementSlot(s) || 'Équipement';
         document.getElementById('eqm-type').value = s.type_equipement || '';
         document.getElementById('eqm-nb-ports').value = s.nb_ports || 0;
@@ -5346,7 +5794,10 @@ const EquipmentModal = (() => {
         document.getElementById('eqm-pos').value = s.position;
         document.getElementById('eqm-hu').value = s.hauteur_u || 1;
         document.getElementById('eqm-col').value = s.col_index || 0;
-        document.getElementById('eqm-largeur').value = s.largeur_u || 10;
+        document.getElementById('eqm-largeur').value = s.largeur_u || NB_COLS_BAIE;
+        document.getElementById('eqm-pos-ro').textContent = `U${s.position} · ${Math.round((s.col_index || 0) / NB_COLS_BAIE * 100)} % à g.`;
+        document.getElementById('eqm-hu-affiche').textContent = `${s.hauteur_u || 1}U`;
+        document.getElementById('eqm-largeur-ro').textContent = `${Math.round((s.largeur_u || NB_COLS_BAIE) / NB_COLS_BAIE * 100)} % de la baie`;
         document.getElementById('eqm-orientation').value = s.orientation === 'vertical' ? 'vertical' : 'horizontal';
         document.getElementById('eqm-couleur').value = s.couleur || '#1e3a5f';
         // Options identiques à celles du panneau + Placer (même liste
@@ -5358,9 +5809,102 @@ const EquipmentModal = (() => {
         document.getElementById('eqm-periph').value = s.peripherique_id || '';
         document.getElementById('eqm-nom').value = nomEquipementSlot(s) || '';
         document.getElementById('eqm-desc').value = s.description || '';
+        document.getElementById('eqm-btn-fiche').style.display = s.appareil_id ? '' : 'none';
         afficherEditeurPorts(s);
         majBandeauType();
+        majStats(s);
         afficherInspecteur('equipement');
+    }
+
+    // Position/hauteur/largeur affichées en lecture seule (voir HTML) —
+    // rafraîchies après un glisser/redimensionnement dans la baie SANS
+    // fermer/rouvrir l'inspecteur (appelé par renderRack quand ce slot
+    // est celui actuellement affiché).
+    function majPositionAffichee(s) {
+        if (s.id !== slotId) return;
+        document.getElementById('eqm-pos').value = s.position;
+        document.getElementById('eqm-col').value = s.col_index || 0;
+        document.getElementById('eqm-largeur').value = s.largeur_u || NB_COLS_BAIE;
+        document.getElementById('eqm-hu').value = s.hauteur_u || 1;
+        document.getElementById('eqm-pos-ro').textContent = `U${s.position} · ${Math.round((s.col_index || 0) / NB_COLS_BAIE * 100)} % à g.`;
+        document.getElementById('eqm-largeur-ro').textContent = `${Math.round((s.largeur_u || NB_COLS_BAIE) / NB_COLS_BAIE * 100)} % de la baie`;
+        document.getElementById('eqm-hu-affiche').textContent = `${s.hauteur_u || 1}U`;
+    }
+
+    // Seule dimension réglable au clic dans l'inspecteur (par pas d'U
+    // entiers, contrainte physique de la baie) — position et largeur se
+    // règlent en glissant l'équipement dans le rack (poignées existantes),
+    // comme dans la maquette validée.
+    function ajusterHauteur(delta) {
+        const hu = document.getElementById('eqm-hu');
+        const nv = Math.max(1, Math.min(8, (parseInt(hu.value) || 1) + delta));
+        hu.value = nv;
+        document.getElementById('eqm-hu-affiche').textContent = nv + 'U';
+    }
+
+    // Bloc stats (« Réseau — détecté » ou « Bandeau RJ · prises murales »,
+    // voir renderInspector() de la maquette) — calculé à partir des
+    // données déjà chargées côté client (ports du slot, _neticDetecte du
+    // lot 5, _diagErreurs/_diagSante du diagnostic réseau), aucun appel
+    // réseau supplémentaire.
+    function majStats(s) {
+        const wrap = document.getElementById('eqm-stats');
+        const btnAnnexe = document.getElementById('eqm-btn-annexe');
+        const ports = s.ports || [];
+        if (!ports.length) { wrap.style.display = 'none'; btnAnnexe.style.display = 'none'; return; }
+        if (s.type_equipement === 'Bandeau RJ') {
+            const prises = ports.map(p => p.prise_murale).filter(Boolean);
+            const affectees = prises.filter(pm => pm.piece || pm.appareil_id || pm.peripherique_id || pm.usage_libre).length;
+            const brassees = ports.filter(p => p.lie_slot_id).length;
+            document.getElementById('eqm-stats-titre').textContent = 'Bandeau RJ · prises murales';
+            document.getElementById('eqm-stat-1-k').textContent = 'Affectées à une pièce';
+            document.getElementById('eqm-stat-1-v').textContent = `${affectees} / ${ports.length}`;
+            document.getElementById('eqm-stat-2-k').textContent = 'Brassées vers un switch';
+            document.getElementById('eqm-stat-2-v').textContent = `${brassees} / ${ports.length}`;
+            document.getElementById('eqm-stat-3-row').style.display = 'none';
+            document.getElementById('eqm-stat-4-row').style.display = 'none';
+            wrap.style.display = '';
+            btnAnnexe.style.display = 'none';
+            return;
+        }
+        let occ = 0, vus = 0, err = 0, snmpVu = false;
+        ports.forEach(p => {
+            if (p.appareil_id || p.peripherique_id || p.usage_libre || p.lie_slot_id) occ++;
+            const cle = s.id + ':' + p.numero;
+            const info = _neticDetecte[cle];
+            if (info) { snmpVu = true; vus += (info.devices || []).length; }
+            if (_diagErreurs[cle]) err++;
+        });
+        document.getElementById('eqm-stats-titre').textContent = 'Réseau — détecté';
+        document.getElementById('eqm-stat-1-k').textContent = 'Ports occupés';
+        document.getElementById('eqm-stat-1-v').textContent = `${occ} / ${ports.length}`;
+        document.getElementById('eqm-stat-2-k').textContent = 'Appareils vus';
+        document.getElementById('eqm-stat-2-v').textContent = String(vus);
+        const errRow = document.getElementById('eqm-stat-3-row');
+        if (err) {
+            document.getElementById('eqm-stat-3-k').textContent = 'Ports en erreur';
+            document.getElementById('eqm-stat-3-v').textContent = String(err);
+            errRow.style.display = '';
+        } else errRow.style.display = 'none';
+        const snmpRow = document.getElementById('eqm-stat-4-row');
+        const estEquipReseau = ['Switch', 'Routeur/Pare-feu', 'Borne WiFi'].includes(s.type_equipement);
+        if (estEquipReseau) {
+            const joignable = snmpVu || !!_diagSante[s.id];
+            const v4 = document.getElementById('eqm-stat-4-v');
+            v4.textContent = joignable ? 'joignable' : 'non testé';
+            v4.className = 'v' + (joignable ? ' ok' : '');
+            snmpRow.style.display = '';
+        } else snmpRow.style.display = 'none';
+        wrap.style.display = '';
+        btnAnnexe.style.display = '';
+    }
+
+    function ouvrirAppareilsEquipement() {
+        if (slotId) ouvrirAppareilsPortEquipement(slotId);
+    }
+    function ouvrirFicheAppareil() {
+        const s = slotCourant();
+        if (s && s.appareil_id) window.open('/appareil/' + s.appareil_id + '/fiche-systeme', '_blank');
     }
 
     function fermer() {
@@ -5437,7 +5981,8 @@ const EquipmentModal = (() => {
         }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });
     }
 
-    return { ouvrir, fermer, enregistrer, retirer, slotCourant, majBandeauType, validerType, ignorerType };
+    return { ouvrir, fermer, enregistrer, retirer, slotCourant, majBandeauType, validerType, ignorerType,
+        ajusterHauteur, ouvrirAppareilsEquipement, ouvrirFicheAppareil, majPositionAffichee };
 })();
 
 // ── MODALE D'ÉDITION D'UNE PHOTO DE BAIE (double-clic) ──────────────────────
@@ -5627,6 +6172,10 @@ function appliquerReglesType(prefix) {
     hu.disabled = estEtagere;
     hu.title = estEtagere ? 'Une étagère est toujours 1U (fine tablette, pas de hauteur ajustable)' : '';
     if (estEtagere) hu.value = '1';
+    // Affichage lecture seule de la hauteur (voir eqm-hu-affiche, stepper
+    // EquipmentModal.ajusterHauteur) — n'existe que pour l'inspecteur.
+    const huAffiche = document.getElementById(prefix + '-hu-affiche');
+    if (huAffiche) huAffiche.textContent = hu.value + 'U';
 
     // Disposition des ports RJ (1/2 lignes) : réservée aux switchs
     // (demandé) — masquée et remise à sa valeur par défaut pour tout autre
@@ -5688,7 +6237,7 @@ function lirePayloadEquipement(prefix) {
 
     return {
         position: parseInt(g('pos').value) || 1,
-        col_index: Math.min(9, Math.max(0, parseInt(g('col').value) || 0)),
+        col_index: Math.min(NB_COLS_BAIE - 1, Math.max(0, parseInt(g('col').value) || 0)),
         hauteur_u: parseInt(g('hu').value) || 1,
         baie_nom: currentBaie,
         type_equipement: typeEquip,
@@ -6013,6 +6562,45 @@ function ouvrirAppareilsPort(slotId, numero, kind, etat) {
     }
     pan.hidden = false;
 }
+
+// Bouton « 👁 Tous les appareils par port » de l'inspecteur d'équipement
+// (voir EquipmentModal.ouvrirAppareilsEquipement, maquette : openAnnex) —
+// même tiroir que ouvrirAppareilsPort ci-dessus, mais une ligne par port
+// occupé de CET équipement plutôt qu'un seul port.
+function ouvrirAppareilsPortEquipement(slotId) {
+    const pan = document.getElementById('port-appareils');
+    const s = Object.values(slots).find(x => String(x.id) === String(slotId));
+    if (!s) return;
+    const nomSlot = libelleComplet(s);
+    document.getElementById('pa-title').textContent = '👁 Appareils connectés — ' + nomSlot;
+    const ports = (s.ports || []).filter(p =>
+        p.appareil_id || p.peripherique_id || p.usage_libre || p.lie_slot_id || _neticDetecte[s.id + ':' + p.numero]);
+    document.getElementById('pa-meta').textContent =
+        `${ports.length} port(s) occupé(s) · ${(s.ports || []).length} port(s) au total`;
+    const body = document.getElementById('pa-body');
+    if (!ports.length) {
+        body.innerHTML = '<div class="pa-empty">Aucun port occupé pour l’instant.</div>';
+    } else {
+        body.innerHTML =
+            '<table class="pa-tbl"><thead><tr><th>Port</th><th>Appareil</th><th>IP</th><th>État</th></tr></thead><tbody>'
+            + ports.map(p => {
+                const cle = s.id + ':' + p.numero;
+                const info = _neticDetecte[cle] || {};
+                const dev = (info.devices || [])[0] || {};
+                const nom = dev.nom || p.nom_cible || p.nom_machine || p.usage_libre || '—';
+                const err = _diagErreurs[cle];
+                const etat = err
+                    ? '<span class="pa-badge">⚠ ' + escH(err.libelle || 'erreur') + '</span>'
+                    : (p.lie_slot_id || p.appareil_id || p.peripherique_id ? '<span class="pa-badge ok">up</span>' : '');
+                return '<tr><td>' + escH(String(numeroAffiche(p.numero))) + '</td>'
+                    + '<td>' + escH(nom) + '</td>'
+                    + '<td class="ipc">' + escH(dev.ip || '') + '</td>'
+                    + '<td>' + etat + '</td></tr>';
+            }).join('')
+            + '</tbody></table>';
+    }
+    pan.hidden = false;
+}
 document.getElementById('pa-close').addEventListener('click',
     () => { document.getElementById('port-appareils').hidden = true; });
 
@@ -6065,6 +6653,7 @@ setInterval(chargerTopoPorts, 90000);
 setInterval(chargerTypesAValider, 90000);
 
 // ── START ────────────────────────────────────────────────────────────────────
+chargerPrefsAffichage();
 init().then(() => { chargerDiagErreurs(); chargerTopoPorts(); chargerBibliotheque(); chargerTypesAValider(); });
 </script>
 <!-- html2canvas pour export PNG (chargé en différé) -->

@@ -1,8 +1,54 @@
-PARCINFO_VERSION=2.33.1
+PARCINFO_VERSION=2.33.2
 RELEASE_DATE=2026-09-11
-BUILD_NUMBER=2026091102
+BUILD_NUMBER=2026091103
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.2 - Baie de brassage : ergonomie fine alignée sur la maquette
+#
+# Suite du correctif 2.33.1 (contenu de l'inspecteur) : trois nouveaux
+# retours utilisateur montrant que la maquette validée faisait aussi foi
+# pour l'ergonomie fine, pas seulement le contenu.
+#
+# 1) En-tête + barre d'outils — en-tête dédié compact (titre, client/baie,
+#    boutons Exporter/Configurer) à la place de la grosse bannière
+#    générique de l'application (la nav globale ParcInfo reste au-dessus,
+#    décision utilisateur). Typographie de la barre d'outils alignée sur
+#    la maquette (casse normale, densité resserrée) au lieu du style CTA
+#    majuscule très espacé du reste de l'app. Poignées de redimensionnement
+#    dotées d'un repère visuel permanent (pastille), auparavant invisibles
+#    au repos. Menu « Affichage » complété (🩺 Santé, 🏷 Câbles, 🛰 Hors
+#    site), ce dernier bloquant aussi le déplacement/redimensionnement.
+# 2) Redimensionnement en largeur — la grille horizontale passe de 10
+#    crans (dixièmes de la largeur du rack) à 1000 (millièmes) : un
+#    glisser de la poignée de largeur suit désormais la souris au pixel
+#    près, au lieu de sauter par paliers de 10 % nettement perceptibles.
+#    Migration automatique et unique au démarrage (drapeau
+#    config._baie_grille_1000), aucune perte de position/largeur
+#    existante — mêmes proportions, juste plus de graduations.
+# 3) Déplacement d'un équipement déjà posé — signalé comme ne fonctionnant
+#    pas de façon fiable (suit la souris puis retombe systématiquement à
+#    sa place). Cause identifiée après investigation : le glisser-déposer
+#    HTML5 natif (draggable/dragstart/dragover/drop) s'annule
+#    silencieusement dès qu'un survol intermédiaire ne confirme pas
+#    explicitement la cible juste avant le relâchement — aucune erreur ne
+#    remonte. Signe qui aurait dû alerter plus tôt : les poignées de
+#    redimensionnement du même écran avaient toujours dû désactiver
+#    cell.draggable pendant leur propre geste pour ne pas se faire voler
+#    par un déplacement natif accidentel. Remplacé par le même mécanisme
+#    que la maquette (événements souris avec repositionnement direct de
+#    l'élément), identique au schéma déjà utilisé par les poignées de
+#    redimensionnement — qui n'ont, elles, jamais eu ce problème. Le
+#    glisser-déposer natif reste utilisé pour le dépôt depuis la
+#    bibliothèque (un geste court à sens unique, jamais concerné).
+#
+# Vérifié en navigateur : plusieurs déplacements réels consécutifs réussis
+# dans les deux sens (contre un échec systématique avant), sélection au
+# clic simple et redimensionnement revérifiés intacts, dépôt depuis la
+# bibliothèque revérifié fonctionnel. Suite de tests baie revérifiée
+# (56 passed sur les fichiers concernés), aucun changement côté serveur
+# pour le déplacement (uniquement le redimensionnement en largeur touche
+# app.py, migration testée sur une base existante).
 
 # Version 2.33.1 - Baie de brassage : le rendu recale sur la maquette validée
 #
