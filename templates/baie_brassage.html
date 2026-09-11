@@ -1194,8 +1194,9 @@ table.mon-table td.mon-wrap select { max-width:100%; }
             <div class="rail-bd">
     <div class="cfg-panel">
         <div class="cfg-tabs">
-            <button class="cfg-tab active" onclick="showTab('tab-add')">+ Placer</button>
-            <button class="cfg-tab" onclick="showTab('tab-list')">📋 Liste</button>
+            <button class="cfg-tab active" data-tab="tab-add" onclick="showTab('tab-add')">+ Placer</button>
+            <button class="cfg-tab" data-tab="tab-list" onclick="showTab('tab-list')">📋 Liste</button>
+            <button class="cfg-tab" data-tab="tab-inspect" onclick="showTab('tab-inspect')">🔍 Inspecteur</button>
         </div>
 
         <!-- ONGLET PLACER -->
@@ -1299,6 +1300,164 @@ table.mon-table td.mon-wrap select { max-width:100%; }
         <div class="cfg-pane" id="tab-list">
             <div id="equip-list-wrap"></div>
         </div>
+
+        <!-- ONGLET INSPECTEUR — refonte lot 2. Panneau contextuel unique,
+             alimenté par un clic sur un équipement/port/prise murale dans le
+             rack (EquipmentModal/PortModal/PriseMuraleModal, cf plus bas) —
+             remplace les 3 anciennes modales flottantes : mêmes ids de champs
+             (eqm-*/pom-*/pmm-*, simplement déplacés ici), mêmes fonctions
+             ouvrir()/enregistrer(), seule la présentation change (panneau
+             fixe du rail plutôt qu'un voile par-dessus la baie). Une seule
+             des 3 sections visible à la fois, alternées par afficherInspecteur(). -->
+        <div class="cfg-pane" id="tab-inspect">
+            <div id="insp-empty" class="form-hint" style="margin-top:.2rem;">Cliquez un équipement, un port ou une prise murale dans la baie pour afficher et modifier ses informations ici.</div>
+
+            <!-- Équipement (ex-#equipment-modal) -->
+            <div id="insp-equipement" style="display:none;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
+                    <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">⬛ <span id="eqm-titre">Équipement</span></h3>
+                    <button type="button" onclick="EquipmentModal.fermer()" title="Revenir à + Placer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                </div>
+                <div class="form-group" style="margin-bottom:.6rem;">
+                    <label>Type d'équipement</label>
+                    <select id="eqm-type" onchange="couleurAuto('eqm')">
+                        <option value="">—</option>
+                        <option>Serveur</option><option>Mini PC</option><option>Switch</option>
+                        <option>Routeur/Pare-feu</option><option>NAS</option>
+                        <option>UPS</option><option>Patch Panel</option>
+                        <option>Bandeau RJ</option><option>Étagère</option>
+                        <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
+                    </select>
+                </div>
+                {{ ports_box('eqm') }}
+                <div class="form-row cols-2" style="margin-bottom:.6rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Position (U)</label>
+                        <input type="number" id="eqm-pos" min="1" max="{{ nb_u }}" style="font-family:'Share Tech Mono',monospace;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Hauteur (U)</label>
+                        <select id="eqm-hu">
+                            {% for i in range(1,9) %}<option value="{{ i }}">{{ i }}U</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row cols-2" style="margin-bottom:.6rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Colonne (0-9)</label>
+                        <input type="number" id="eqm-col" min="0" max="9" style="font-family:'Share Tech Mono',monospace;">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Largeur</label>
+                        <select id="eqm-largeur">
+                            {% for i in range(1,11) %}<option value="{{ i }}">{{ i }}/10</option>{% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom:.6rem;">
+                    <label>Orientation</label>
+                    <select id="eqm-orientation" title="Verticale : le nom et les ports/prises s'affichent de haut en bas — pour un PDU/onduleur monté sur le rail latéral">
+                        <option value="horizontal">↔ Horizontale</option>
+                        <option value="vertical">↕ Verticale</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:.6rem;">
+                    <label>Couleur</label>
+                    <input type="color" id="eqm-couleur">
+                </div>
+                <div class="form-group" style="margin-bottom:.6rem;">
+                    <label>Associer à un appareil</label>
+                    <select id="eqm-app" onchange="autoRemplir('eqm')"></select>
+                </div>
+                <div class="form-group" style="margin-bottom:.6rem;">
+                    <label>Associer à un périphérique</label>
+                    <select id="eqm-periph" onchange="autoRemplirPeriph('eqm')"></select>
+                </div>
+                <div class="form-group" style="margin-bottom:.6rem;">
+                    <label>Nom personnalisé</label>
+                    <input type="text" id="eqm-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
+                </div>
+                <div class="form-group" style="margin-bottom:.8rem;">
+                    <label>Description / note</label>
+                    <input type="text" id="eqm-desc" placeholder="Ex: Ports 1-24 bureau...">
+                </div>
+                <div id="eqm-ports-editor" style="display:none;margin-bottom:.8rem;padding-top:.8rem;border-top:1px solid var(--border);">
+                    <div class="form-section-title" style="margin-bottom:.6rem;">&#9632; Ports</div>
+                    <div id="eqm-ports-editor-list" style="display:flex;flex-direction:column;gap:.4rem;max-height:280px;overflow-y:auto;"></div>
+                </div>
+                <div style="display:flex;gap:.6rem;justify-content:space-between;margin-top:1rem;">
+                    <button type="button" class="btn btn-sm btn-danger" onclick="EquipmentModal.retirer()">🗑 Retirer</button>
+                    <button type="button" class="btn btn-success btn-sm" onclick="EquipmentModal.enregistrer()">✓ Enregistrer</button>
+                </div>
+            </div>
+
+            <!-- Port RJ (ex-#port-modal) -->
+            <div id="insp-port" style="display:none;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
+                    <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">🔌 <span id="pom-titre">Port</span></h3>
+                    <button type="button" onclick="PortModal.fermer()" title="Revenir à + Placer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                </div>
+                <div id="pom-cible-section">
+                    <div class="form-group" style="margin-bottom:.3rem;">
+                        <label>Utilisation</label>
+                        <select id="pom-cible" onchange="PortModal.changerCible()" style="width:100%;">
+                            <option value="">— Libre —</option>
+                            <option value="u">✎ Usage personnalisé…</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="pom-usage-wrap" style="display:none;margin-bottom:.7rem;">
+                        <input type="text" id="pom-usage" placeholder="Téléphonie, alarme...">
+                    </div>
+                </div>
+                <div id="pom-lien-section" style="display:none;">
+                    <div class="form-group" style="margin-bottom:.3rem;">
+                        <label>Interconnexion</label>
+                        <div id="pom-lien-etat" style="font-size:.85rem;color:var(--text-secondary);padding:.3rem 0;"></div>
+                    </div>
+                    <div id="pom-cable-wrap" style="display:none;">
+                        <div class="form-group" style="margin-bottom:.7rem;">
+                            <label>Câble (cordon de brassage)</label>
+                            <div style="display:flex;gap:.5rem;">
+                                <input type="text" id="pom-cable-couleur" placeholder="Couleur" style="flex:1;">
+                                <input type="text" id="pom-cable-longueur" placeholder="Longueur" style="flex:1;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex;justify-content:flex-end;margin-top:1rem;">
+                    <button type="button" class="btn btn-success btn-sm" onclick="PortModal.enregistrer()">✓ Enregistrer</button>
+                </div>
+            </div>
+
+            <!-- Prise murale (ex-#prise-murale-modal) -->
+            <div id="insp-prise" style="display:none;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
+                    <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">🚪 <span id="pmm-titre">Prise murale</span></h3>
+                    <button type="button" onclick="PriseMuraleModal.fermer()" title="Revenir à + Placer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                </div>
+                <div class="form-group" style="margin-bottom:.7rem;">
+                    <label>Emplacement de la prise</label>
+                    <input type="text" id="pmm-piece" list="dl-localisations" placeholder="Bureau, salle de réunion…">
+                </div>
+                <div class="form-group" style="margin-bottom:.7rem;">
+                    <label>Identification de la prise</label>
+                    <input type="text" id="pmm-identification" placeholder="Repère physique, ex. RJ 3.12…">
+                </div>
+                <div class="form-group" style="margin-bottom:.3rem;">
+                    <label>Utilisation</label>
+                    <select id="pmm-cible" onchange="PriseMuraleModal.changerCible()" style="width:100%;">
+                        <option value="">— Libre —</option>
+                        <option value="u">✎ Usage personnalisé…</option>
+                    </select>
+                </div>
+                <div class="form-group" id="pmm-usage-wrap" style="display:none;margin-bottom:.7rem;">
+                    <input type="text" id="pmm-usage" placeholder="Téléphonie, alarme...">
+                </div>
+                <div style="display:flex;justify-content:flex-end;margin-top:1rem;">
+                    <button type="button" class="btn btn-success btn-sm" onclick="PriseMuraleModal.enregistrer()">✓ Enregistrer</button>
+                </div>
+            </div>
+        </div>
     </div><!-- /.cfg-panel -->
             </div><!-- /.rail-bd -->
         </div><!-- /.rail-inner -->
@@ -1308,181 +1467,11 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 <!-- TOOLTIP -->
 <div class="rack-tooltip" id="rack-tooltip"></div>
 
-<!-- MODALE D'ÉDITION D'UNE PRISE MURALE — double-clic sur une prise murale
-     dans le rack (voir PriseMuraleModal plus bas), pour éditer ses infos
-     sans passer par le panneau latéral complet. -->
-<div id="prise-murale-modal" class="modal-overlay" onclick="PriseMuraleModal.fermerSiOverlay(event)">
-    <div style="background:var(--bg-secondary);border:1px solid var(--border-glow);border-radius:8px;
-                padding:1.4rem;width:380px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.4);">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
-            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">🚪 <span id="pmm-titre">Prise murale</span></h3>
-            <button type="button" onclick="PriseMuraleModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
-        </div>
-        <div class="form-group" style="margin-bottom:.7rem;">
-            <label>Emplacement de la prise</label>
-            <input type="text" id="pmm-piece" list="dl-localisations" placeholder="Bureau, salle de réunion…">
-        </div>
-        <div class="form-group" style="margin-bottom:.7rem;">
-            <label>Identification de la prise</label>
-            <input type="text" id="pmm-identification" placeholder="Repère physique, ex. RJ 3.12…">
-        </div>
-        <div class="form-group" style="margin-bottom:.3rem;">
-            <label>Utilisation</label>
-            <select id="pmm-cible" onchange="PriseMuraleModal.changerCible()" style="width:100%;">
-                <option value="">— Libre —</option>
-                <option value="u">✎ Usage personnalisé…</option>
-            </select>
-        </div>
-        <div class="form-group" id="pmm-usage-wrap" style="display:none;margin-bottom:.7rem;">
-            <input type="text" id="pmm-usage" placeholder="Téléphonie, alarme...">
-        </div>
-        <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1rem;">
-            <button type="button" class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="PriseMuraleModal.fermer()">Annuler</button>
-            <button type="button" class="btn btn-success btn-sm" onclick="PriseMuraleModal.enregistrer()">✓ Enregistrer</button>
-        </div>
-    </div>
-</div>
-
-<!-- MODALE D'ÉDITION D'UN PORT RJ — double-clic sur un port dans le rack (voir
-     PortModal plus bas) ou sur la courbe de câble d'un lien déjà créé. Cible
-     directe (appareil/périphérique/usage) masquée pour un port de bandeau
-     RJ (interconnexion uniquement, voir portRjEditorRowHTML côté panneau
-     latéral) ; étiquette du cordon affichée seulement si le port est relié. -->
-<div id="port-modal" class="modal-overlay" onclick="PortModal.fermerSiOverlay(event)">
-    <div style="background:var(--bg-secondary);border:1px solid var(--border-glow);border-radius:8px;
-                padding:1.4rem;width:380px;max-width:92vw;box-shadow:0 20px 60px rgba(0,0,0,.4);">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
-            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">🔌 <span id="pom-titre">Port</span></h3>
-            <button type="button" onclick="PortModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
-        </div>
-        <div id="pom-cible-section">
-            <div class="form-group" style="margin-bottom:.3rem;">
-                <label>Utilisation</label>
-                <select id="pom-cible" onchange="PortModal.changerCible()" style="width:100%;">
-                    <option value="">— Libre —</option>
-                    <option value="u">✎ Usage personnalisé…</option>
-                </select>
-            </div>
-            <div class="form-group" id="pom-usage-wrap" style="display:none;margin-bottom:.7rem;">
-                <input type="text" id="pom-usage" placeholder="Téléphonie, alarme...">
-            </div>
-        </div>
-        <div id="pom-lien-section" style="display:none;">
-            <div class="form-group" style="margin-bottom:.3rem;">
-                <label>Interconnexion</label>
-                <div id="pom-lien-etat" style="font-size:.85rem;color:var(--text-secondary);padding:.3rem 0;"></div>
-            </div>
-            <div id="pom-cable-wrap" style="display:none;">
-                <div class="form-group" style="margin-bottom:.7rem;">
-                    <label>Câble (cordon de brassage)</label>
-                    <div style="display:flex;gap:.5rem;">
-                        <input type="text" id="pom-cable-couleur" placeholder="Couleur" style="flex:1;">
-                        <input type="text" id="pom-cable-longueur" placeholder="Longueur" style="flex:1;">
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div style="display:flex;gap:.6rem;justify-content:flex-end;margin-top:1rem;">
-            <button type="button" class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="PortModal.fermer()">Annuler</button>
-            <button type="button" class="btn btn-success btn-sm" onclick="PortModal.enregistrer()">✓ Enregistrer</button>
-        </div>
-    </div>
-</div>
-
-<!-- MODALE D'ÉDITION D'UN ÉQUIPEMENT — double-clic sur un équipement déjà
-     posé dans le rack (voir EquipmentModal plus bas). Remplace l'ancien
-     mécanisme où un clic simple pré-remplissait le panneau + Placer, qui
-     servait alors à la fois à créer ET éditer — signalé peu ergonomique
-     (champs propres au type noyés dans une longue liste identique quel
-     que soit l'équipement, ports SFP/disposition introuvables). Type
-     d'équipement en premier, encart de configuration mis en évidence
-     juste en-dessous (voir la macro ports_box()), champs secondaires
-     ensuite, éditeur de ports en bas — un seul endroit pour tout ce qui
-     concerne CET équipement. -->
-<div id="equipment-modal" class="modal-overlay" onclick="EquipmentModal.fermerSiOverlay(event)">
-    <div style="background:var(--bg-secondary);border:1px solid var(--border-glow);border-radius:8px;
-                padding:1.4rem;width:420px;max-width:94vw;max-height:88vh;overflow-y:auto;
-                box-shadow:0 20px 60px rgba(0,0,0,.4);">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
-            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">⬛ <span id="eqm-titre">Équipement</span></h3>
-            <button type="button" onclick="EquipmentModal.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
-        </div>
-        <div class="form-group" style="margin-bottom:.6rem;">
-            <label>Type d'équipement</label>
-            <select id="eqm-type" onchange="couleurAuto('eqm')">
-                <option value="">—</option>
-                <option>Serveur</option><option>Mini PC</option><option>Switch</option>
-                <option>Routeur/Pare-feu</option><option>NAS</option>
-                <option>UPS</option><option>Patch Panel</option>
-                <option>Bandeau RJ</option><option>Étagère</option>
-                <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
-            </select>
-        </div>
-        {{ ports_box('eqm') }}
-        <div class="form-row cols-2" style="margin-bottom:.6rem;">
-            <div class="form-group" style="margin-bottom:0;">
-                <label>Position (U)</label>
-                <input type="number" id="eqm-pos" min="1" max="{{ nb_u }}" style="font-family:'Share Tech Mono',monospace;">
-            </div>
-            <div class="form-group" style="margin-bottom:0;">
-                <label>Hauteur (U)</label>
-                <select id="eqm-hu">
-                    {% for i in range(1,9) %}<option value="{{ i }}">{{ i }}U</option>{% endfor %}
-                </select>
-            </div>
-        </div>
-        <div class="form-row cols-2" style="margin-bottom:.6rem;">
-            <div class="form-group" style="margin-bottom:0;">
-                <label>Colonne (0-9)</label>
-                <input type="number" id="eqm-col" min="0" max="9" style="font-family:'Share Tech Mono',monospace;">
-            </div>
-            <div class="form-group" style="margin-bottom:0;">
-                <label>Largeur</label>
-                <select id="eqm-largeur">
-                    {% for i in range(1,11) %}<option value="{{ i }}">{{ i }}/10</option>{% endfor %}
-                </select>
-            </div>
-        </div>
-        <div class="form-group" style="margin-bottom:.6rem;">
-            <label>Orientation</label>
-            <select id="eqm-orientation" title="Verticale : le nom et les ports/prises s'affichent de haut en bas — pour un PDU/onduleur monté sur le rail latéral">
-                <option value="horizontal">↔ Horizontale</option>
-                <option value="vertical">↕ Verticale</option>
-            </select>
-        </div>
-        <div class="form-group" style="margin-bottom:.6rem;">
-            <label>Couleur</label>
-            <input type="color" id="eqm-couleur">
-        </div>
-        <div class="form-group" style="margin-bottom:.6rem;">
-            <label>Associer à un appareil</label>
-            <select id="eqm-app" onchange="autoRemplir('eqm')"></select>
-        </div>
-        <div class="form-group" style="margin-bottom:.6rem;">
-            <label>Associer à un périphérique</label>
-            <select id="eqm-periph" onchange="autoRemplirPeriph('eqm')"></select>
-        </div>
-        <div class="form-group" style="margin-bottom:.6rem;">
-            <label>Nom personnalisé</label>
-            <input type="text" id="eqm-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
-        </div>
-        <div class="form-group" style="margin-bottom:.8rem;">
-            <label>Description / note</label>
-            <input type="text" id="eqm-desc" placeholder="Ex: Ports 1-24 bureau...">
-        </div>
-        <div id="eqm-ports-editor" style="display:none;margin-bottom:.8rem;padding-top:.8rem;border-top:1px solid var(--border);">
-            <div class="form-section-title" style="margin-bottom:.6rem;">&#9632; Ports</div>
-            <div id="eqm-ports-editor-list" style="display:flex;flex-direction:column;gap:.4rem;max-height:280px;overflow-y:auto;"></div>
-        </div>
-        <div style="display:flex;gap:.6rem;justify-content:space-between;margin-top:1rem;">
-            <button type="button" class="btn btn-sm btn-danger" onclick="EquipmentModal.retirer()">🗑 Retirer</button>
-            <div style="display:flex;gap:.6rem;">
-                <button type="button" class="btn btn-sm" style="border-color:var(--border);color:var(--text-muted);" onclick="EquipmentModal.fermer()">Annuler</button>
-                <button type="button" class="btn btn-success btn-sm" onclick="EquipmentModal.enregistrer()">✓ Enregistrer</button>
-            </div>
-        </div>
-    </div>
-</div>
+<!-- L'édition d'une prise murale / d'un port RJ / d'un équipement posé ne
+     passe plus par une modale flottante — voir l'onglet « 🔍 Inspecteur » du
+     panneau de droite (#tab-inspect, refonte lot 2) qui porte désormais ces
+     mêmes champs (ids pmm-*/pom-*/eqm-* inchangés). PriseMuraleModal /
+     PortModal / EquipmentModal (plus bas) pilotent cet onglet. -->
 
 <!-- MODALE D'ÉDITION D'UNE PHOTO DE BAIE — double-clic sur une vignette (le
      clic simple reste la prévisualisation, voir ouvrirPhoto) : nom/
@@ -2589,7 +2578,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         el.addEventListener('click', e => {
             e.stopPropagation();
             if (modeLien) { gererClicLienPort(s, p, el); }
-            else { surbrillerPortsLies(cleCiblePort(p)); }
+            else { surbrillerPortsLies(cleCiblePort(p)); PortModal.ouvrir(s.id, p.numero); }
         });
         // Double-clic = édition rapide de CE port (cible directe et/ou
         // étiquette du cordon si déjà relié) — demandé, même principe que
@@ -2648,6 +2637,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         el.addEventListener('click', e => {
             e.stopPropagation();
             surbrillerPortsLies(cleCiblePriseMurale(pm));
+            PriseMuraleModal.ouvrir(s.id, port.numero);
         });
         // Double-clic = édition rapide de CETTE prise murale (demandé) —
         // sans passer par la sélection du bandeau puis le panneau latéral.
@@ -2676,13 +2666,14 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         });
     }
 
-    // Clic simple = juste une surbrillance visuelle (aucun effet de bord sur
-    // le panneau + Placer, qui reste dédié à la création — voir plus bas).
-    // Double-clic = ouvre la modale d'édition complète de l'équipement,
-    // même principe que pour un port ou une prise murale.
+    // Clic simple = surbrillance + ouverture de l'inspecteur contextuel de
+    // l'équipement (refonte lot 2, EquipmentModal.ouvrir → onglet
+    // « 🔍 Inspecteur » du rail de droite). Double-clic conservé, même effet
+    // — même principe que pour un port ou une prise murale.
     cell.addEventListener('click', () => {
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
         cell.classList.add('selected');
+        EquipmentModal.ouvrir(s.id);
     });
     cell.addEventListener('dblclick', e => {
         e.stopPropagation();
@@ -4941,13 +4932,14 @@ async function enregistrerPriseMurale(slotId, numero, payload) {
     if (cur) afficherEditeurPorts(cur);
 }
 
-// ── MODALE D'ÉDITION D'UNE PRISE MURALE (double-clic) ───────────────────────
+// ── INSPECTEUR D'UNE PRISE MURALE (clic, refonte lot 2) ─────────────────────
 // Édition rapide d'une seule prise murale directement depuis le rack, sans
 // devoir d'abord sélectionner tout le bandeau puis dérouler son panneau
 // latéral (afficherEditeurPorts) — les 4 informations demandées : emplacement
 // (pièce), identification (repère physique de la prise), utilisation, et
 // appareil connecté (choix dans la liste des appareils/périphériques, même
-// sélecteur que le panneau latéral — voir optionsAppareilsPeriph).
+// sélecteur que le panneau latéral — voir optionsAppareilsPeriph). Rendu dans
+// #insp-prise (onglet Inspecteur du rail de droite) — ex-modale flottante.
 const PriseMuraleModal = (() => {
     let slotId = null, numero = null;
 
@@ -4971,18 +4963,14 @@ const PriseMuraleModal = (() => {
         sel.value = valeur;
         document.getElementById('pmm-usage').value = pm.usage_libre || '';
         document.getElementById('pmm-usage-wrap').style.display = valeur === 'u' ? '' : 'none';
-        document.getElementById('prise-murale-modal').classList.add('open');
+        afficherInspecteur('prise');
     }
 
     function fermer() {
-        document.getElementById('prise-murale-modal').classList.remove('open');
         slotId = null; numero = null;
-    }
-
-    // Clic sur le voile (pas sur la boîte elle-même) — même convention que
-    // DocsModal.fermerSiOverlay.
-    function fermerSiOverlay(e) {
-        if (e.target.id === 'prise-murale-modal') fermer();
+        document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
+        viderInspecteur();
+        showTab('tab-add');
     }
 
     function changerCible() {
@@ -5006,22 +4994,21 @@ const PriseMuraleModal = (() => {
         fermer();
     }
 
-    return { ouvrir, fermer, fermerSiOverlay, changerCible, enregistrer };
+    return { ouvrir, fermer, changerCible, enregistrer };
 })();
 
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && document.getElementById('prise-murale-modal').classList.contains('open')) {
-        PriseMuraleModal.fermer();
-    }
-    if (e.key === 'Escape' && document.getElementById('port-modal').classList.contains('open')) {
-        PortModal.fermer();
-    }
     if (e.key === 'Escape' && document.getElementById('photo-modal').classList.contains('open')) {
         PhotoModal.fermer();
     }
+    if (e.key === 'Escape' && document.getElementById('tab-inspect').classList.contains('active')) {
+        if (document.getElementById('insp-equipement').style.display !== 'none') EquipmentModal.fermer();
+        else if (document.getElementById('insp-port').style.display !== 'none') PortModal.fermer();
+        else if (document.getElementById('insp-prise').style.display !== 'none') PriseMuraleModal.fermer();
+    }
 });
 
-// ── MODALE D'ÉDITION D'UN PORT (double-clic) ────────────────────────────────
+// ── INSPECTEUR D'UN PORT (clic, refonte lot 2) ──────────────────────────────
 // Même principe que PriseMuraleModal, appliqué au port lui-même — cible
 // directe (appareil/périphérique/usage) pour un port non-bandeau, section
 // masquée pour un port de bandeau RJ (interconnexion uniquement) ; étiquette
@@ -5031,7 +5018,8 @@ document.addEventListener('keydown', e => {
 // jamais détacher un lien existant — cible_fournie côté serveur (voir
 // api_baie_port) détache TOUJOURS le lien en cours, même en réenvoyant la
 // même valeur, donc l'appel est purement et simplement évité si rien n'a
-// changé dans cette section.
+// changé dans cette section. Rendu dans #insp-port (onglet Inspecteur du
+// rail de droite) — ex-modale flottante.
 const PortModal = (() => {
     let slotId = null, numero = null, valeurInitiale = '', usageInitial = '', cableInitial = ['', ''];
 
@@ -5080,16 +5068,14 @@ const PortModal = (() => {
             }
             cableWrap.style.display = 'none';
         }
-        document.getElementById('port-modal').classList.add('open');
+        afficherInspecteur('port');
     }
 
     function fermer() {
-        document.getElementById('port-modal').classList.remove('open');
         slotId = null; numero = null;
-    }
-
-    function fermerSiOverlay(e) {
-        if (e.target.id === 'port-modal') fermer();
+        document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
+        viderInspecteur();
+        showTab('tab-add');
     }
 
     function changerCible() {
@@ -5139,17 +5125,18 @@ const PortModal = (() => {
         fermer();
     }
 
-    return { ouvrir, fermer, fermerSiOverlay, changerCible, enregistrer };
+    return { ouvrir, fermer, changerCible, enregistrer };
 })();
 
-// ── MODALE D'ÉDITION D'UN ÉQUIPEMENT (double-clic dans le rack) ────────────────
+// ── INSPECTEUR D'UN ÉQUIPEMENT (clic dans le rack, refonte lot 2) ──────────────
 // Remplace l'ancien mécanisme "clic simple = pré-remplir le panneau + Placer,
 // qui servait alors À LA FOIS à créer et à éditer" — signalé peu ergonomique
 // en usage réel (champs propres au type noyés dans une longue liste
 // identique quel que soit l'équipement). Le panneau + Placer ne sert plus
 // qu'à créer (voir placerEquip()) ; toute l'édition d'un équipement déjà
-// posé — position, type, configuration réseau/électrique, ports — passe
-// par cette modale, sur le même principe que PortModal/PriseMuraleModal.
+// posé — position, type, configuration réseau/électrique, ports — passe par
+// #insp-equipement (onglet Inspecteur du rail de droite, ex-modale
+// flottante), sur le même principe que PortModal/PriseMuraleModal.
 const EquipmentModal = (() => {
     let slotId = null;
 
@@ -5185,16 +5172,14 @@ const EquipmentModal = (() => {
         document.getElementById('eqm-nom').value = nomEquipementSlot(s) || '';
         document.getElementById('eqm-desc').value = s.description || '';
         afficherEditeurPorts(s);
-        document.getElementById('equipment-modal').classList.add('open');
+        afficherInspecteur('equipement');
     }
 
     function fermer() {
-        document.getElementById('equipment-modal').classList.remove('open');
         slotId = null;
-    }
-
-    function fermerSiOverlay(e) {
-        if (e.target.id === 'equipment-modal') fermer();
+        document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
+        viderInspecteur();
+        showTab('tab-add');
     }
 
     async function enregistrer() {
@@ -5230,7 +5215,7 @@ const EquipmentModal = (() => {
         }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });
     }
 
-    return { ouvrir, fermer, fermerSiOverlay, enregistrer, retirer, slotCourant };
+    return { ouvrir, fermer, enregistrer, retirer, slotCourant };
 })();
 
 // ── MODALE D'ÉDITION D'UNE PHOTO DE BAIE (double-clic) ──────────────────────
@@ -5653,11 +5638,39 @@ function exportRack() {
 
 // ── TABS ─────────────────────────────────────────────────────────────────────
 function showTab(id) {
-    document.querySelectorAll('.cfg-tab').forEach((t, i) => {
-        t.classList.toggle('active', ['tab-add','tab-list'][i] === id);
+    document.querySelectorAll('.cfg-tab').forEach(t => {
+        t.classList.toggle('active', t.dataset.tab === id);
     });
     document.querySelectorAll('.cfg-pane').forEach(p => p.classList.toggle('active', p.id === id));
     if (id === 'tab-list') renderList();
+}
+
+// ── INSPECTEUR CONTEXTUEL (refonte lot 2) ───────────────────────────────────
+// Un clic sur un équipement/port/prise murale du rack affiche ses infos ici
+// (une seule des 3 sections à la fois) au lieu d'ouvrir une modale flottante
+// — EquipmentModal/PortModal/PriseMuraleModal (plus bas) appellent
+// afficherInspecteur() en fin de leur ouvrir(), et viderInspecteur() en fin
+// de leur fermer(). Ouvre le rail de droite tout seul s'il était replié
+// (sinon le panneau se remplit hors champ de vision, jamais vu).
+function ouvrirRailInspecteur() {
+    const pg = document.getElementById('baie-page');
+    if (pg && pg.dataset.insp !== 'open') toggleRail('insp');
+}
+function afficherInspecteur(which) {
+    document.getElementById('insp-empty').style.display = 'none';
+    ['equipement', 'port', 'prise'].forEach(w => {
+        const el = document.getElementById('insp-' + w);
+        if (el) el.style.display = (w === which) ? '' : 'none';
+    });
+    ouvrirRailInspecteur();
+    showTab('tab-inspect');
+}
+function viderInspecteur() {
+    ['equipement', 'port', 'prise'].forEach(w => {
+        const el = document.getElementById('insp-' + w);
+        if (el) el.style.display = 'none';
+    });
+    document.getElementById('insp-empty').style.display = '';
 }
 
 // ── PHOTOS ───────────────────────────────────────────────────────────────────
