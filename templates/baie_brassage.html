@@ -306,6 +306,14 @@
 .rack-cell.selected     { border-color:var(--accent)!important; box-shadow:0 0 8px rgba(0,201,255,.3); }
 .rack-cell.highlighted  { border-color:#fbbf24!important; background:rgba(251,191,36,.1)!important; }
 .rack-cell.dragging     { opacity:.4; }
+/* Repère de la case visée pendant un déplacement à la souris (voir
+   mousedown dans makeOccupiedCell) — même famille visuelle que .cell-magnet
+   ci-dessus, mais positionné en `fixed` sur toute la case cible (pas
+   seulement une colonne) puisqu'il suit un geste libre, pas un survol de
+   case précise. */
+.move-preview { display:none; position:fixed; z-index:60; pointer-events:none;
+    border:2px solid var(--accent); border-radius:3px; background:rgba(0,201,255,.14); }
+.move-preview.invalide { border-color:var(--accent-red,#ff3355); background:rgba(255,51,85,.14); }
 /* Redimensionnement (poignée bas/droite/coin) en cours de chevaucher un
    autre élément — même code couleur rouge, sur la cellule qu'on étire. */
 .rack-cell.invalide { outline:2px solid var(--accent-red,#ff3355); outline-offset:-2px; }
@@ -3002,16 +3010,13 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     });
 
     // Redimensionnement à la souris : glisser la poignée du bas change
-    // hauteur_u par pas de 1U. draggable est désactivé le temps du geste —
-    // sinon le navigateur démarre un déplacement natif (dragstart) dès que
-    // la souris bouge dans un élément draggable, même sur cette poignée.
-    // Absente pour une étagère (voir plus haut, jamais rendue dans le HTML
-    // pour ce type) : querySelector renvoie alors null, d'où ce garde-fou.
+    // hauteur_u par pas de 1U. Absente pour une étagère (voir plus haut,
+    // jamais rendue dans le HTML pour ce type) : querySelector renvoie
+    // alors null, d'où ce garde-fou.
     const poignee = cell.querySelector('.cell-resize');
     if (poignee) poignee.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
-        cell.draggable = false;
         poignee.classList.add('resizing');
         const startY = e.clientY;
         const startHu = s.hauteur_u || 1;
@@ -3037,7 +3042,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             document.removeEventListener('mouseup', onUp);
             poignee.classList.remove('resizing');
             cell.classList.remove('invalide');
-            cell.draggable = true;
             const nv = calculerNouvelleHu(ev.clientY);
             if (nv === startHu) { renderRack(); return; }
             if (dernierInvalide) {
@@ -3064,7 +3068,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     if (poigneeW) poigneeW.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
-        cell.draggable = false;
         poigneeW.classList.add('resizing');
         const row = cell.parentElement;
         const unitePx = row.getBoundingClientRect().width / NB_COLS_BAIE;
@@ -3089,7 +3092,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             document.removeEventListener('mouseup', onUp);
             poigneeW.classList.remove('resizing');
             cell.classList.remove('invalide');
-            cell.draggable = true;
             const nv = calculerNouvelleLargeur(ev.clientX);
             if (nv === startLargeur) { renderRack(); return; }
             if (dernierInvalide) {
@@ -3111,7 +3113,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     if (poigneeC) poigneeC.addEventListener('mousedown', e => {
         e.preventDefault();
         e.stopPropagation();
-        cell.draggable = false;
         poigneeC.classList.add('resizing');
         const row = cell.parentElement;
         const unitePx = row.getBoundingClientRect().width / NB_COLS_BAIE;
@@ -3139,7 +3140,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             document.removeEventListener('mouseup', onUp);
             poigneeC.classList.remove('resizing');
             cell.classList.remove('invalide');
-            cell.draggable = true;
             const {hu, largeur} = calculer(ev.clientX, ev.clientY);
             if (hu === startHu && largeur === startLargeur) { renderRack(); return; }
             if (dernierInvalide) {
@@ -3158,30 +3158,107 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     cell.addEventListener('mousemove',  e => { const t = document.getElementById('rack-tooltip'); if(t.classList.contains('show')) positionnerTooltip(e); });
     cell.addEventListener('mouseleave', () => masquerTooltip());
 
-    // Drag & drop — désactivé si la baie est verrouillée (voir
-    // toggleVerrouBaie) : le navigateur ne déclenche alors jamais dragstart,
-    // donc rien de plus à bloquer côté cases vides (dropzones).
-    cell.draggable = !editionBloquee();
-    cell.addEventListener('dragstart', e => {
-        e.dataTransfer.setData('text/plain', JSON.stringify({id: s.id, pos: u, col: debut}));
-        // Décalage de prise EN U et en colonnes — l'endroit où la souris a
-        // saisi l'élément, pas forcément son coin haut-gauche (rare de
-        // saisir un pavé de plusieurs U pile par son origine). Sans ce
-        // décalage, déposer faisait toujours correspondre l'ORIGINE de
-        // l'élément à la case survolée, quel que soit l'endroit où il avait
-        // été saisi — un pavé haut de 3U saisi près du bas "sautait" de 2U
-        // vers le haut au dépôt, disproportionné par rapport au geste
-        // réellement fait. Ici, le point saisi reste sous le curseur.
-        const rect = cell.getBoundingClientRect();
-        const decalageU = Math.max(0, Math.min(hu - 1, Math.floor((e.clientY - rect.top) / U_H)));
-        const decalageCol = Math.max(0, Math.min(largeur - 1, Math.floor((e.clientX - rect.left) / (rect.width / largeur))));
-        dragInfo = { id: s.id, hauteurU: hu, largeurU: largeur, decalageU, decalageCol };
-        cell.classList.add('dragging');
-        setTimeout(() => cell.classList.add('dragging'), 0);
+    // Déplacement à la souris — fidèle à la maquette (editeur-baie.html) :
+    // mousedown/mousemove/mouseup qui repositionnent l'élément EN DIRECT
+    // (translate CSS), exactement comme les poignées de redimensionnement
+    // juste au-dessus — PAS le glisser-déposer HTML5 natif
+    // (draggable/dragstart/dragover/drop) utilisé ici auparavant.
+    // Le natif s'est avéré peu fiable en usage réel (« suit la souris mais
+    // retombe à sa place ») : le navigateur annule silencieusement un drag
+    // dès qu'un dragover intermédiaire ne confirme pas explicitement la
+    // cible (facile à manquer sur une grille aussi fine), sans qu'aucune
+    // erreur ne remonte — c'est d'ailleurs pour cette même raison que les
+    // poignées de redimensionnement ci-dessus ont toujours dû désactiver
+    // cell.draggable pendant leur propre geste, sans quoi le navigateur
+    // démarrait un déplacement natif au lieu du redimensionnement voulu.
+    // Le glisser-déposer natif reste utilisé pour la bibliothèque → baie
+    // (placerDepuisBibliotheque) : un dépôt ponctuel depuis un panneau
+    // externe, geste bien plus court, jamais concerné par ce problème.
+    cell.addEventListener('mousedown', e => {
+        if (e.button !== 0 || editionBloquee()) return;
+        // Icônes/zones qui gèrent déjà leur propre interaction (port, prise
+        // murale, bouton ✕/🌐 de l'en-tête, poignée de redimensionnement) :
+        // jamais le point de départ d'un déplacement — même exclusion que
+        // le pointerdown de la maquette (voir canvas.addEventListener
+        // ('pointerdown', ...) : portEl/grip traités à part avant move).
+        if (e.target.closest('.port, .prise-murale, .cell-del, .cell-admin, .cell-resize, .cell-resize-w, .cell-resize-corner')) return;
+        const startX = e.clientX, startY = e.clientY;
+        const rows = document.getElementById('rack-rows');
+        let moved = false, cible = { pos: u, col: debut }, invalide = false;
+        const onMove = ev => {
+            const dx = ev.clientX - startX, dy = ev.clientY - startY;
+            // Seuil de quelques pixels avant de considérer que c'est un
+            // déplacement plutôt qu'un simple clic (voir onUp) — la
+            // maquette n'en a pas besoin (pointerdown y sépare déjà clic de
+            // glisser via .grip/.port ciblés à part), mais ici le corps de
+            // la cellule sert aussi de zone de clic pour la sélection.
+            if (!moved && Math.hypot(dx, dy) < 4) return;
+            if (!moved) { moved = true; cell.classList.add('dragging'); afficherApercuDeplacement(); }
+            cell.style.transform = `translate(${dx}px, ${dy}px)`;
+            const rowRef = rows.children[u - 1] || cell.parentElement;
+            const unitePx = rowRef.getBoundingClientRect().width / NB_COLS_BAIE;
+            cible.pos = Math.max(1, Math.min(nbU - hu + 1, u + Math.round(dy / U_H)));
+            cible.col = Math.max(0, Math.min(NB_COLS_BAIE - largeur, debut + Math.round(dx / unitePx)));
+            invalide = !!elementEnCollision(cible.pos, hu, cible.col, largeur, s.id);
+            cell.classList.toggle('invalide', invalide);
+            majApercuDeplacement(cible.pos, cible.col, largeur, hu, invalide);
+        };
+        const onUp = async () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            cell.style.transform = '';
+            cell.classList.remove('dragging', 'invalide');
+            masquerApercuDeplacement();
+            if (!moved) return; // simple clic : le handler 'click' ci-dessous gère la sélection
+            if (cible.pos === u && cible.col === debut) { renderRack(); return; }
+            if (invalide) {
+                showFlash('Chevauche un autre élément — déplacement annulé.', 'danger');
+                renderRack();
+                return;
+            }
+            await deplacerSlot(s.id, cible.pos, cible.col);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
     });
-    cell.addEventListener('dragend', () => { cell.classList.remove('dragging'); dragInfo = null; });
 
     return cell;
+}
+
+// Repère visuel de la case visée pendant un déplacement (voir mousedown
+// ci-dessus) — un seul élément réutilisé pour toutes les cellules, comme le
+// #ghost de la maquette. Positionné en `fixed` à partir du rectangle RÉEL
+// de la/les rangée(s) cible(s) (jamais un calcul U_H à l'aveugle : une
+// rangée d'étagère peut être plus fine, voir SHELF_H).
+let _apercuDeplacementEl = null;
+function afficherApercuDeplacement() {
+    if (!_apercuDeplacementEl) {
+        _apercuDeplacementEl = document.createElement('div');
+        _apercuDeplacementEl.className = 'move-preview';
+        document.body.appendChild(_apercuDeplacementEl);
+    }
+    _apercuDeplacementEl.style.display = 'block';
+}
+function majApercuDeplacement(pos, col, largeur, hu, invalide) {
+    if (!_apercuDeplacementEl) return;
+    const rows = document.getElementById('rack-rows');
+    const rowDebut = rows.children[pos - 1];
+    if (!rowDebut) return;
+    const r = rowDebut.getBoundingClientRect();
+    let hauteur = 0;
+    for (let i = 0; i < hu; i++) {
+        const rw = rows.children[pos - 1 + i];
+        hauteur += rw ? rw.getBoundingClientRect().height : r.height;
+    }
+    const unitePx = r.width / NB_COLS_BAIE;
+    _apercuDeplacementEl.style.left = (r.left + col * unitePx) + 'px';
+    _apercuDeplacementEl.style.top = r.top + 'px';
+    _apercuDeplacementEl.style.width = (largeur * unitePx) + 'px';
+    _apercuDeplacementEl.style.height = hauteur + 'px';
+    _apercuDeplacementEl.classList.toggle('invalide', invalide);
+}
+function masquerApercuDeplacement() {
+    if (_apercuDeplacementEl) _apercuDeplacementEl.style.display = 'none';
 }
 
 function makeEmptyCell(u, debut, largeur, rowH) {
@@ -3266,11 +3343,11 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     cell.addEventListener('drop', async e => {
         e.preventDefault();
         cell.classList.remove('drag-over');
-        // Repli défensif : draggable=false sur les cellules occupées
-        // empêche déjà tout dragstart quand la baie est verrouillée (voir
-        // toggleVerrouBaie), donc cette branche ne devrait jamais s'exécuter
-        // dans ce cas — gardée quand même au cas où un glisser aurait pu
-        // démarrer autrement.
+        // Seule la bibliothèque utilise encore le glisser-déposer HTML5
+        // natif (voir wireLibDrag) — déplacer un équipement DÉJÀ posé passe
+        // désormais par mousedown/mousemove/mouseup (voir makeOccupiedCell),
+        // plus fiable que le natif. Repli défensif si un glisser a quand
+        // même pu démarrer pendant que la baie était verrouillée.
         if (editionBloquee()) { masquerMarqueur(); return; }
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
         const { pos, col } = positionViseeGlisser(e.clientX);
@@ -3278,16 +3355,12 @@ function makeEmptyCell(u, debut, largeur, rowH) {
         // la peine d'aller vérifier côté serveur, l'utilisateur a déjà vu
         // que cet endroit était refusé avant même de relâcher la souris.
         if (dragInfo && elementEnCollision(pos, dragInfo.hauteurU, col, dragInfo.largeurU, dragInfo.id)) {
-            showFlash(`Chevauche un autre élément — ${data.lib ? 'placement' : 'déplacement'} annulé.`, 'danger');
+            showFlash('Chevauche un autre élément — placement annulé.', 'danger');
             masquerMarqueur();
             return;
         }
         masquerMarqueur();
-        // data.lib : glissé depuis la bibliothèque (refonte lot 3, voir
-        // libDragStart) — pas un id de slot existant à déplacer, mais un
-        // nouvel équipement à créer ici.
-        if (data.lib) { await placerDepuisBibliotheque(data, pos, col); }
-        else { await deplacerSlot(data.id, pos, col); }
+        await placerDepuisBibliotheque(data, pos, col);
     });
 
     return cell;
