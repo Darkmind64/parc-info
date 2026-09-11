@@ -1,25 +1,25 @@
 {
-  "version": "2.33.0",
+  "version": "2.33.1",
   "release_date": "2026-09-11",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.33.0",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.33.1",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Refonte complete de l'ecran Baie de brassage (6 lots), a partir d'une maquette interactive validee avec l'utilisateur. Lot 1 : barre d'outils regroupee par groupes nommes + coquille 3 zones retractables (bibliotheque | rack | inspecteur), etat memorise par navigateur. Lot 2 : les 3 modales flottantes d'edition (equipement/port/prise murale) fusionnees dans un onglet Inspecteur du rail de droite -- clic simple = selection + ouverture. Lot 3 : bibliotheque d'appareils a glisser-deposer (inventaire du client pas deja place dans une baie + appareils vus en SNMP mais absents de l'inventaire, sur demande). Lot 4 : ports ou un switch/routeur/borne Wi-Fi est DECLARE mis en evidence. Lot 5 : ces memes ports enrichis de ce que le diagnostic reseau y voit REELLEMENT (topologie SNMP projetee sur la baie) -- anneau vert si confirme, rouge si incoherent, panneau listant les appareils vus/declares. Lot 6 : validation du type d'equipement -- compare la capacite LLDP detectee (pont/routeur/wlan) au type declare, bouton et bandeau dediees pour valider ou ignorer. Lecture seule, aucun SNMP synchrone pour les lots 4/5/6.",
+    "new_features": "Correctif direct de la v2.33.0 (refonte de la baie de brassage) suite a un retour utilisateur : le livre ne correspondait pas a la maquette interactive pourtant validee avant implementation. (1) Panneau de droite : l'ancien panneau + Placer/Liste avait ete GARDE en plus du nouvel inspecteur au lieu d'etre remplace -- supprime entierement, l'inspecteur est desormais le seul contenu du rail de droite. (2) Bibliotheque : nouvelle section Generique (12 types de baie, toujours presents, glisser-depose) pour ne pas perdre la capacite de creation retiree avec le panneau + Placer. (3) Icones reseau (switch/routeur/borne Wi-Fi detectes ou declares sur un port) : ne suivaient pas la regle haut/bas selon la rangee sur un switch en disposition 2 lignes -- corrige, plus deux problemes annexes trouves en revalidant le cas des deux rangees simultanement (icone qui volait le clic de la poignee de redimensionnement, couloir reserve qui pouvait deborder du conteneur sur un switch 1U deja tres rempli). (4) Panneau appareils du port : converti en vrai tiroir ancre en bas de la fenetre, au lieu d'un bloc insere dans le flux normal de la page.",
     "improvements": [
-      "Baie de brassage : panneau de droite unifie (inspecteur contextuel equipement/port/prise murale).",
-      "Baie de brassage : bibliotheque d'appareils (inventaire + SNMP) avec placement par glisser-deposer.",
-      "Baie de brassage : mise en evidence des equipements reseau declares ET detectes par SNMP, avec panneau des appareils vus par port.",
-      "Baie de brassage : validation assistee du type d'equipement a partir des capacites LLDP detectees."
+      "Baie de brassage : panneau de droite (inspecteur) redevenu le seul mecanisme d'edition, sans ancien panneau de creation residuel.",
+      "Baie de brassage : bibliotheque enrichie d'une section d'equipements generiques toujours disponibles au glisser-depose.",
+      "Baie de brassage : positionnement fiable des icones reseau haut/bas sur un switch a 2 rangees de ports, y compris tres rempli.",
+      "Baie de brassage : panneau des appareils par port ancre en bas de fenetre, toujours visible sans defilement."
     ]
   },
   "checksums": {
@@ -30,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.0"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.1"
 }
