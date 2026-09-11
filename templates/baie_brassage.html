@@ -584,13 +584,18 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .port.port-netic.netic-detected { box-shadow:0 0 0 2px #22c55e; }
 .port.port-netic.netic-incoherent { box-shadow:0 0 0 2px #ef4444, 0 0 8px #ef4444; }
 .port .port-netic-ic {
+    /* z-index:8 > .cell-resize/.cell-resize-w (6) : une icône sur la
+       rangée basse d'un switch 2 lignes tombe pile sur la poignée de
+       redimensionnement (bord bas de la cellule, pleine largeur) — sans
+       ça, la poignée récupérait le clic à sa place (trouvé en testant un
+       switch 2 lignes avec un port réseau sur la rangée basse). */
     position:absolute; left:50%; transform:translateX(-50%);
-    font-size:12px; line-height:1; z-index:6; cursor:pointer;
+    font-size:12px; line-height:1; z-index:8; cursor:pointer;
     filter:drop-shadow(0 1px 2px rgba(0,0,0,.95));
 }
 .port.netic-up   .port-netic-ic { bottom:calc(100% + 1px); }
 .port.netic-down .port-netic-ic { top:calc(100% + 1px); }
-.port .port-netic-ic:hover { transform:translateX(-50%) scale(1.3); z-index:7; }
+.port .port-netic-ic:hover { transform:translateX(-50%) scale(1.3); z-index:9; }
 .port.port-netic.netic-declared:not(.netic-detected):not(.netic-incoherent) .port-netic-ic { opacity:.6; }
 /* `.cell-ports` (et son wrap) sont overflow:hidden — on réserve un couloir
    pour que l'icône posée hors du port ne soit pas rognée. En disposition
@@ -603,6 +608,18 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .cell-ports.has-netic-down,
 .cell-ports-rj-zone.has-netic-down,
 .cell-ports-stack.has-netic-down { padding-bottom:14px; }
+/* Filet de sécurité (voir appliquerNeticPorts) : .cell-ports-wrap et
+   .cell-ports-main-switch ont leur propre budget de hauteur, FIXE et
+   indépendant de celui de la zone de ports qu'ils englobent (dérivé de la
+   hauteur de ligne du rack, pas du contenu) — sur un switch 1U en 2
+   lignes déjà très rempli, rétrécir les ports (tailleDeuxLignes) ne peut
+   pas toujours regagner à lui seul les 14-28px de couloir nécessaires
+   (plancher de lisibilité 9px atteint). Overflow visible ici : la vraie
+   limite reste .rack-cell (hauteur de l'U), qui a toujours la marge.
+   Sans risque de fuite visuelle : ces conteneurs sont pleine largeur, un
+   débordement ne peut être que vertical, dans la case du dessus/dessous. */
+.cell-ports-wrap.has-netic-up, .cell-ports-wrap.has-netic-down,
+.cell-ports-main-switch.has-netic-up, .cell-ports-main-switch.has-netic-down { overflow:visible; }
 
 /* Panneau annexe « appareils du port » (lot 5, corrigé après retour
    utilisateur — refonte lot 5 v1 l'insérait dans le flux normal de
@@ -1684,14 +1701,21 @@ function numeroAffiche(numero) {
 // de cette taille normale, et seulement autant que nécessaire pour que
 // les 2 rangées tiennent sans être rognées par l'overflow:hidden du
 // conteneur (le filet de sécurité si l'espace venait vraiment à manquer).
-function tailleDeuxLignes(rowH) {
+// `reserve` (0/14/28px, voir appel dans makeOccupiedCell) : espace en plus
+// à soustraire quand une icône réseau (.port-netic-ic, refonte lot 4/5)
+// doit se loger au-dessus de la rangée haute et/ou en dessous de la
+// rangée basse — sans ça, sur un switch 1U bien rempli (2 rangées déjà
+// quasi pleine taille), l'icône déborde de .rack-cell (overflow:hidden,
+// hauteur fixée à l'U) et disparaît purement et simplement, un switch 1U
+// n'ayant pas la marge du bandeau de titre comme la rangée du haut.
+function tailleDeuxLignes(rowH, reserve) {
     // Marge de sécurité (4px) : quelques pixels de décalage constatés en
     // pratique entre cette estimation (info-row + padding + interligne)
     // et la position réelle de la 1re rangée — sous-pixels d'arrondi de
     // mise en page, jamais entièrement nuls d'un navigateur à l'autre.
     // Mieux vaut quelques px d'espace inutilisé en bas qu'un débordement.
     const hauteurLigneInfo = 16, paddingHautZone = 3, gapEntreLignes = 2, margeSecurite = 4;
-    const dispo = (rowH || U_H) - hauteurLigneInfo - paddingHautZone - gapEntreLignes - margeSecurite;
+    const dispo = (rowH || U_H) - hauteurLigneInfo - paddingHautZone - gapEntreLignes - margeSecurite - (reserve || 0);
     const h = Math.max(9, Math.min(22, Math.floor(dispo / 2)));
     const ratio = h / 22;
     const w = Math.max(14, Math.round(24 * ratio));
@@ -2495,7 +2519,15 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         // de filtrer par parité plutôt que de retrier.
         const impairs = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 1);
         const pairs   = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 0);
-        const styleDeuxLignes = tailleDeuxLignes(rowH);
+        // Réserve la place de l'icône réseau (voir tailleDeuxLignes) dès que
+        // la rangée haute et/ou basse porte un port réseau déclaré (câblage,
+        // connu dès ce rendu) ou déjà détecté en SNMP (_neticDetecte, connu
+        // si un relevé a déjà eu lieu avant ce rendu) — _neticKind/
+        // _neticDetecte sont définis plus bas dans ce script mais des
+        // function declarations, donc déjà hissées et utilisables ici.
+        const aNetic = p => _neticKind(p.lie_type) || !!((_neticDetecte[s.id + ':' + p.numero] || {}).detected_kind);
+        const reserve = (impairs.some(aNetic) ? 14 : 0) + (pairs.some(aNetic) ? 14 : 0);
+        const styleDeuxLignes = tailleDeuxLignes(rowH, reserve);
         ligneRJ = `<div class="cell-ports-row" style="${styleDeuxLignes}">${impairs.map(p => portHTML(p, false)).join('')}</div>`
                 + `<div class="cell-ports-row" style="${styleDeuxLignes}">${pairs.map(p => portHTML(p, false)).join('')}</div>`;
         zonePortsPrincipale = zonesSwitchActives
@@ -5908,7 +5940,23 @@ function appliquerNeticPorts() {
         const premiereRangee = Math.round(el.getBoundingClientRect().top) === Math.min(...tops);
         const dir = (multiRangees && premiereRangee) ? 'netic-up' : 'netic-down';
         el.classList.add(dir);
-        bande.classList.add(dir === 'netic-up' ? 'has-netic-up' : 'has-netic-down');
+        const classeHas = dir === 'netic-up' ? 'has-netic-up' : 'has-netic-down';
+        bande.classList.add(classeHas);
+        // Filet de sécurité : sur un switch 1U en 2 lignes déjà très
+        // rempli (24 ports+), une icône déclarée EN HAUT et détectée EN
+        // BAS sur le même équipement (les deux couloirs de 14px réservés
+        // par tailleDeuxLignes en même temps) peut dépasser la marge
+        // regagnée en rétrécissant les ports (plancher 9px atteint,
+        // rétrécissement plus poussé impossible sans devenir illisible).
+        // .cell-ports-wrap/.cell-ports-main-switch (englobent les 2
+        // rangées + la zone SFP éventuelle) passent alors en overflow
+        // visible plutôt que de rogner l'icône : .rack-cell (limite
+        // réelle, hauteur de l'U) a toujours la marge nécessaire, vérifié
+        // en usage réel.
+        const wrap = el.closest('.cell-ports-wrap');
+        const mainSwitch = el.closest('.cell-ports-main-switch');
+        if (wrap) wrap.classList.add(classeHas);
+        if (mainSwitch) mainSwitch.classList.add(classeHas);
 
         const info = _neticDetecte[cle] || {};
         const b = document.createElement('span');
