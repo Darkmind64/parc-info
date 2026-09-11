@@ -46,8 +46,6 @@
 .baie-page[data-insp="closed"] #rail-insp .rail-inner { display:none; }
 .baie-page[data-lib="closed"]  #rail-lib  .rail-tab,
 .baie-page[data-insp="closed"] #rail-insp .rail-tab { display:block; }
-/* dans le rail, la cfg-panel perd son propre cadre / sticky (le rail les porte) */
-.rail-bd .cfg-panel { position:static; padding:0; border:0; background:none; border-radius:0; }
 .rail-soon { font-size:.74rem; color:var(--text-muted); line-height:1.65; }
 .rail-soon b { color:var(--text-secondary); }
 
@@ -595,21 +593,35 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .port .port-netic-ic:hover { transform:translateX(-50%) scale(1.3); z-index:7; }
 .port.port-netic.netic-declared:not(.netic-detected):not(.netic-incoherent) .port-netic-ic { opacity:.6; }
 /* `.cell-ports` (et son wrap) sont overflow:hidden — on réserve un couloir
-   pour que l'icône posée hors du port ne soit pas rognée. */
-.cell-ports.has-netic-up   { padding-top:14px; }
-.cell-ports.has-netic-down { padding-bottom:14px; }
+   pour que l'icône posée hors du port ne soit pas rognée. En disposition
+   2 lignes (switch), chaque rangée est son propre .cell-ports-row SANS
+   overflow:hidden propre : c'est .cell-ports-rj-zone / .cell-ports-stack,
+   conteneur commun aux 2 rangées, qui coupe — même couloir à y réserver. */
+.cell-ports.has-netic-up,
+.cell-ports-rj-zone.has-netic-up,
+.cell-ports-stack.has-netic-up   { padding-top:14px; }
+.cell-ports.has-netic-down,
+.cell-ports-rj-zone.has-netic-down,
+.cell-ports-stack.has-netic-down { padding-bottom:14px; }
 
-/* panneau annexe « appareils du port » (lot 5) */
-.port-appareils { margin-top:1rem; border:1px solid var(--border); border-top:2px solid var(--accent);
-    border-radius:4px; background:var(--bg-card); overflow:hidden; }
+/* Panneau annexe « appareils du port » (lot 5, corrigé après retour
+   utilisateur — refonte lot 5 v1 l'insérait dans le flux normal de
+   .baie-center, au milieu de la page, au lieu d'un vrai tiroir qui se
+   déplie en bas de la fenêtre comme dans la maquette validée : un rack
+   haut le rendait invisible sans faire défiler la page jusqu'à lui).
+   position:fixed sur toute la largeur de la fenêtre — recouvre les rails
+   à l'ouverture, comme un tiroir/bottom-sheet, jusqu'à sa fermeture (✕). */
+.port-appareils { position:fixed; left:0; right:0; bottom:0; z-index:70;
+    border-top:2px solid var(--accent); box-shadow:0 -10px 30px rgba(0,0,0,.5);
+    background:var(--bg-card); max-height:44vh; display:flex; flex-direction:column; }
 .port-appareils[hidden] { display:none; }
 .port-appareils .pa-head { display:flex; align-items:center; justify-content:space-between;
-    gap:.6rem; padding:.5rem .8rem; border-bottom:1px solid var(--border); }
+    gap:.6rem; padding:.5rem .8rem; border-bottom:1px solid var(--border); flex:0 0 auto; }
 .port-appareils .pa-head h3 { margin:0; font-family:'Rajdhani',sans-serif; font-size:.85rem;
     font-weight:700; letter-spacing:1px; text-transform:uppercase; }
 .port-appareils .pa-head-r { display:flex; align-items:center; gap:.7rem; }
 .port-appareils .pa-meta { font-family:'Share Tech Mono',monospace; font-size:.66rem; color:var(--text-muted); }
-.port-appareils .pa-body { padding:.5rem .8rem .7rem; max-height:38vh; overflow:auto; }
+.port-appareils .pa-body { padding:.5rem .8rem .7rem; flex:1 1 auto; overflow:auto; }
 .pa-tbl { width:100%; border-collapse:collapse; font-size:.78rem; }
 .pa-tbl th { text-align:left; font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:1px;
     text-transform:uppercase; color:var(--text-muted); padding:.3rem .5rem; border-bottom:1px solid var(--border); }
@@ -714,22 +726,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 .tip-key  { color:#4a6a8a; min-width:60px; }
 .tip-val  { color:#cbd5e1; }
 
-/* ── PANEL DROITE ── */
-.cfg-panel {
-    background:var(--bg-card); border:1px solid var(--border); border-radius:4px;
-    padding:1.2rem; position:sticky; top:94px;
-}
-.cfg-tabs { display:flex; gap:0; margin-bottom:1rem; border:1px solid var(--border); border-radius:3px; overflow:hidden; }
-.cfg-tab {
-    flex:1; padding:.4rem; text-align:center; cursor:pointer;
-    font-family:'Rajdhani',sans-serif; font-size:.68rem; font-weight:700;
-    letter-spacing:1px; text-transform:uppercase;
-    background:var(--bg-secondary); color:var(--text-muted); transition:all .15s; border:none;
-}
-.cfg-tab.active { background:rgba(0,201,255,.1); color:var(--accent); }
-.cfg-pane { display:none; }
-.cfg-pane.active { display:block; }
-
 /* ── LÉGENDE ── */
 .legend-wrap { display:flex; flex-wrap:wrap; gap:.4rem; margin-top:.7rem; }
 .legend-item { display:flex; align-items:center; gap:4px; font-size:.68rem; color:var(--text-secondary); }
@@ -831,11 +827,11 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 .baie-infob-wrap.a-detail:hover .baie-infob-detail,
 .baie-infob-wrap.a-detail:focus-within .baie-infob-detail { display:block; }
 
-/* Encart "Ports/Configuration" du panneau + Placer et de la modale
-   d'édition — mis en évidence (bordure + fond teinté) pour que les champs
-   propres au type choisi (ports Switch, prises électriques...) ne se
-   noient plus dans une longue liste de champs identiques, quel que soit
-   l'équipement — signalé comme peu ergonomique en usage réel. */
+/* Encart "Ports/Configuration" de l'inspecteur d'équipement — mis en
+   évidence (bordure + fond teinté) pour que les champs propres au type
+   choisi (ports Switch, prises électriques...) ne se noient plus dans une
+   longue liste de champs identiques, quel que soit l'équipement — signalé
+   comme peu ergonomique en usage réel. */
 .ports-config-box {
     background: rgba(0,201,255,.05); border: 1px solid rgba(0,201,255,.25);
     border-radius: 6px; padding: .7rem .8rem;
@@ -1055,13 +1051,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 </div>
             </div>
 
-            <div class="tb-group">
-                <span class="tb-group-lbl">Ajouter</span>
-                <div class="tb-group-items">
-                    <button onclick="ajouterBandeauRJ()" class="btn btn-sm btn-neutral" title="Pré-remplit le formulaire : 1U, 24 ports — reste à choisir la position et valider">+ Bandeau RJ</button>
-                    <button onclick="ajouterEtagere()" class="btn btn-sm btn-neutral" title="Une tablette physique (1U, pleine largeur) — les appareils posés dessus se placent ensuite normalement, dans la rangée juste au-dessus">+ Étagère</button>
-                </div>
-            </div>
 
             <div class="tb-group">
                 <span class="tb-group-lbl">Affichage</span>
@@ -1148,6 +1137,10 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <button type="button" class="lib-refresh" id="lib-snmp-refresh" onclick="chargerBibliothequeSnmp()" title="Sonder les équipements réseau du client (quelques secondes)">🔄</button>
                     </div>
                     <div id="lib-snmp" class="lib-list"><div class="lib-empty lib-hint">Cliquez 🔄 pour sonder les équipements réseau SNMP du client — appareils vus mais pas encore inventoriés.</div></div>
+                </div>
+                <div class="lib-section">
+                    <div class="lib-section-hd"><span>🧩 Générique</span></div>
+                    <div id="lib-generique" class="lib-list"></div>
                 </div>
             </div>
         </div>
@@ -1254,140 +1247,61 @@ table.mon-table td.mon-wrap select { max-width:100%; }
         </div>
     </div>
 
-    <!-- ── ZONE DROITE : inspecteur / configuration ── -->
+    <!-- ── ZONE DROITE : inspecteur ── -->
     <aside class="baie-rail rail-insp" id="rail-insp">
-        <button class="rail-tab" onclick="toggleRail('insp')" title="Ouvrir le panneau de configuration">⚙&nbsp;Configuration</button>
+        <button class="rail-tab" onclick="toggleRail('insp')" title="Ouvrir l'inspecteur">🔍&nbsp;Inspecteur</button>
         <div class="rail-inner">
             <div class="rail-hd">
-                <h3>Configuration</h3>
+                <h3>Inspecteur</h3>
                 <button class="rail-x" onclick="toggleRail('insp')" aria-label="Replier le panneau">›</button>
             </div>
             <div class="rail-bd">
-    <div class="cfg-panel">
-        <div class="cfg-tabs">
-            <button class="cfg-tab active" data-tab="tab-add" onclick="showTab('tab-add')">+ Placer</button>
-            <button class="cfg-tab" data-tab="tab-list" onclick="showTab('tab-list')">📋 Liste</button>
-            <button class="cfg-tab" data-tab="tab-inspect" onclick="showTab('tab-inspect')">🔍 Inspecteur</button>
-        </div>
+    <!-- Panneau contextuel unique (refonte lot 2, corrigé après retour
+         utilisateur : plus d'onglets +Placer/Liste — la création
+         d'équipement passe entièrement par la bibliothèque en glisser-
+         déposer, voir #rail-lib). Alimenté par un clic sur un équipement/
+         port/prise murale dans le rack (EquipmentModal/PortModal/
+         PriseMuraleModal, cf plus bas) : mêmes ids de champs (eqm-*/pom-*/
+         pmm-*), mêmes fonctions ouvrir()/enregistrer(). Une seule des 3
+         sections visible à la fois, alternées par afficherInspecteur(). -->
+    <div id="insp-empty" class="form-hint" style="margin-top:.2rem;">Cliquez un équipement, un port ou une prise murale dans la baie pour afficher et modifier ses informations ici.</div>
 
-        <!-- ONGLET PLACER -->
-        <div class="cfg-pane active" id="tab-add">
-            <div class="form-hint" style="margin:-.2rem 0 .8rem;">Cliquez une case libre de la baie pour pré-remplir la position, ou double-cliquez un équipement déjà posé pour l'éditer.</div>
-            <div class="form-group" style="margin-bottom:.6rem;">
-                <label>Type d'équipement</label>
-                <select id="cfg-type" onchange="couleurAuto('cfg')">
-                    <option value="">—</option>
-                    <option>Serveur</option><option>Mini PC</option><option>Switch</option>
-                    <option>Routeur/Pare-feu</option><option>NAS</option>
-                    <option>UPS</option><option>Patch Panel</option>
-                    <option>Bandeau RJ</option><option>Étagère</option>
-                    <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
-                </select>
-            </div>
-            {{ ports_box('cfg') }}
-            <div class="form-row cols-2" style="margin-bottom:.6rem;">
-                <div class="form-group" style="margin-bottom:0;">
-                    <label>Position (U)</label>
-                    <input type="number" id="cfg-pos" min="1" max="{{ nb_u }}" value="1"
-                           style="font-family:'Share Tech Mono',monospace;">
-                </div>
-                <div class="form-group" style="margin-bottom:0;">
-                    <label>Hauteur (U)</label>
-                    <select id="cfg-hu">
-                        {% for i in range(1,9) %}<option value="{{ i }}"{% if i==1 %} selected{% endif %}>{{ i }}U</option>{% endfor %}
-                    </select>
-                </div>
-            </div>
-            <div class="form-row cols-2" style="margin-bottom:.6rem;">
-                <div class="form-group" style="margin-bottom:0;">
-                    <label>Colonne (0-9)</label>
-                    <input type="number" id="cfg-col" min="0" max="9" value="0"
-                           style="font-family:'Share Tech Mono',monospace;" title="Position de départ dans la grille de 10 colonnes du rack">
-                </div>
-                <div class="form-group" style="margin-bottom:0;">
-                    <label>Largeur</label>
-                    <select id="cfg-largeur" title="Se règle aussi en glissant le bord droit (ou le coin) de l'élément dans la baie">
-                        {% for i in range(1,11) %}<option value="{{ i }}"{% if i==10 %} selected{% endif %}>{{ i }}/10</option>{% endfor %}
-                    </select>
-                </div>
-            </div>
-            <div class="form-group" style="margin-bottom:.6rem;">
-                <label>Orientation</label>
-                <select id="cfg-orientation" title="Verticale : le nom et les ports/prises s'affichent de haut en bas — pour un PDU/onduleur monté sur le rail latéral">
-                    <option value="horizontal" selected>↔ Horizontale</option>
-                    <option value="vertical">↕ Verticale</option>
-                </select>
-            </div>
-            <div class="form-row cols-2" style="margin-bottom:.6rem;">
-                <div class="form-group" style="margin-bottom:0;">
-                    <label>Couleur</label>
-                    <input type="color" id="cfg-couleur" value="#1e3a5f">
-                </div>
-            </div>
-            <div class="form-group" style="margin-bottom:.6rem;">
-                <label>Associer à un appareil</label>
-                <select id="cfg-app" onchange="autoRemplir('cfg')">
-                    <option value="">— Aucun / saisie libre —</option>
-                    {% for a in appareils %}
-                    <option value="{{ a.id }}" data-nom="{{ a.nom_machine }}"
-                            data-type="{{ a.type_appareil }}" data-ip="{{ a.adresse_ip }}">
-                        {{ a.nom_machine }}{% if a.adresse_ip %} — {{ a.adresse_ip }}{% endif %}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group" style="margin-bottom:.6rem;">
-                <label>Associer à un périphérique</label>
-                <select id="cfg-periph" onchange="autoRemplirPeriph('cfg')">
-                    <option value="">— Aucun / saisie libre —</option>
-                    {% for p in peripheriques %}
-                    <option value="{{ p.id }}" data-nom="{{ p.categorie }} {{ p.marque }} {{ p.modele }}"
-                            data-type="{{ p.categorie }}">
-                        {{ p.categorie }} — {{ p.marque }} {{ p.modele }}
-                    </option>
-                    {% endfor %}
-                </select>
-                <div class="form-hint">Onduleur, panneau de brassage… un slot n'est lié qu'à un seul équipement à la fois.</div>
-            </div>
-            <div class="form-group" style="margin-bottom:.6rem;">
-                <label>Nom personnalisé</label>
-                <input type="text" id="cfg-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
-            </div>
-            <div class="form-group" style="margin-bottom:.8rem;">
-                <label>Description / note</label>
-                <input type="text" id="cfg-desc" placeholder="Ex: Ports 1-24 bureau...">
-            </div>
-            <button onclick="placerEquip()" class="btn btn-success" style="width:100%;">✓ Placer l'équipement</button>
-        </div>
-
-        <!-- Suggestions pour l'affectation d'un port à une pièce (bandeau RJ) —
-             mêmes valeurs de localisation déjà saisies sur les appareils/
-             périphériques du client. -->
-        <datalist id="dl-localisations">
-            {% for loc in localisations %}<option value="{{ loc }}">{% endfor %}
-        </datalist>
-
-        <!-- ONGLET LISTE -->
-        <div class="cfg-pane" id="tab-list">
-            <div id="equip-list-wrap"></div>
-        </div>
-
-        <!-- ONGLET INSPECTEUR — refonte lot 2. Panneau contextuel unique,
-             alimenté par un clic sur un équipement/port/prise murale dans le
-             rack (EquipmentModal/PortModal/PriseMuraleModal, cf plus bas) —
-             remplace les 3 anciennes modales flottantes : mêmes ids de champs
-             (eqm-*/pom-*/pmm-*, simplement déplacés ici), mêmes fonctions
-             ouvrir()/enregistrer(), seule la présentation change (panneau
-             fixe du rail plutôt qu'un voile par-dessus la baie). Une seule
-             des 3 sections visible à la fois, alternées par afficherInspecteur(). -->
-        <div class="cfg-pane" id="tab-inspect">
-            <div id="insp-empty" class="form-hint" style="margin-top:.2rem;">Cliquez un équipement, un port ou une prise murale dans la baie pour afficher et modifier ses informations ici.</div>
+    <!-- Source de données cachée : options appareils/périphériques,
+         réutilisées telles quelles par optionsAppareilsPeriph() (affectation
+         d'un port) et par EquipmentModal.ouvrir() (recopie dans eqm-app/
+         eqm-periph) — un seul rendu Jinja de la liste, jamais dupliqué. -->
+    <div style="display:none;" aria-hidden="true">
+        <select id="cfg-app">
+            <option value="">— Aucun / saisie libre —</option>
+            {% for a in appareils %}
+            <option value="{{ a.id }}" data-nom="{{ a.nom_machine }}"
+                    data-type="{{ a.type_appareil }}" data-ip="{{ a.adresse_ip }}">
+                {{ a.nom_machine }}{% if a.adresse_ip %} — {{ a.adresse_ip }}{% endif %}
+            </option>
+            {% endfor %}
+        </select>
+        <select id="cfg-periph">
+            <option value="">— Aucun / saisie libre —</option>
+            {% for p in peripheriques %}
+            <option value="{{ p.id }}" data-nom="{{ p.categorie }} {{ p.marque }} {{ p.modele }}"
+                    data-type="{{ p.categorie }}">
+                {{ p.categorie }} — {{ p.marque }} {{ p.modele }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    <!-- Suggestions pour l'affectation d'un port à une pièce (bandeau RJ) —
+         mêmes valeurs de localisation déjà saisies sur les appareils/
+         périphériques du client. -->
+    <datalist id="dl-localisations">
+        {% for loc in localisations %}<option value="{{ loc }}">{% endfor %}
+    </datalist>
 
             <!-- Équipement (ex-#equipment-modal) -->
             <div id="insp-equipement" style="display:none;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
                     <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">⬛ <span id="eqm-titre">Équipement</span></h3>
-                    <button type="button" onclick="EquipmentModal.fermer()" title="Revenir à + Placer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                    <button type="button" onclick="EquipmentModal.fermer()" title="Fermer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
                 </div>
                 <!-- Bandeau « type à valider » (refonte lot 6) — voir
                      EquipmentModal.majBandeauType(), rempli seulement quand
@@ -1477,7 +1391,7 @@ table.mon-table td.mon-wrap select { max-width:100%; }
             <div id="insp-port" style="display:none;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
                     <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">🔌 <span id="pom-titre">Port</span></h3>
-                    <button type="button" onclick="PortModal.fermer()" title="Revenir à + Placer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                    <button type="button" onclick="PortModal.fermer()" title="Fermer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
                 </div>
                 <div id="pom-cible-section">
                     <div class="form-group" style="margin-bottom:.3rem;">
@@ -1515,7 +1429,7 @@ table.mon-table td.mon-wrap select { max-width:100%; }
             <div id="insp-prise" style="display:none;">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
                     <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">🚪 <span id="pmm-titre">Prise murale</span></h3>
-                    <button type="button" onclick="PriseMuraleModal.fermer()" title="Revenir à + Placer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                    <button type="button" onclick="PriseMuraleModal.fermer()" title="Fermer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
                 </div>
                 <div class="form-group" style="margin-bottom:.7rem;">
                     <label>Emplacement de la prise</label>
@@ -1539,8 +1453,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                     <button type="button" class="btn btn-success btn-sm" onclick="PriseMuraleModal.enregistrer()">✓ Enregistrer</button>
                 </div>
             </div>
-        </div>
-    </div><!-- /.cfg-panel -->
             </div><!-- /.rail-bd -->
         </div><!-- /.rail-inner -->
     </aside><!-- /#rail-insp -->
@@ -1550,10 +1462,10 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 <div class="rack-tooltip" id="rack-tooltip"></div>
 
 <!-- L'édition d'une prise murale / d'un port RJ / d'un équipement posé ne
-     passe plus par une modale flottante — voir l'onglet « 🔍 Inspecteur » du
-     panneau de droite (#tab-inspect, refonte lot 2) qui porte désormais ces
-     mêmes champs (ids pmm-*/pom-*/eqm-* inchangés). PriseMuraleModal /
-     PortModal / EquipmentModal (plus bas) pilotent cet onglet. -->
+     passe plus par une modale flottante — voir le panneau « 🔍 Inspecteur »
+     du rail de droite (#rail-insp, refonte lot 2) qui porte ces mêmes champs
+     (ids pmm-*/pom-*/eqm-* inchangés). PriseMuraleModal / PortModal /
+     EquipmentModal (plus bas) pilotent ce panneau. -->
 
 <!-- MODALE D'ÉDITION D'UNE PHOTO DE BAIE — double-clic sur une vignette (le
      clic simple reste la prévisualisation, voir ouvrirPhoto) : nom/
@@ -1992,11 +1904,9 @@ async function chargerBaie(baieNom) {
     if (data.nb_u && data.nb_u !== nbU) {
         nbU = data.nb_u;
         document.getElementById('lbl-u').textContent = nbU;
-        document.getElementById('cfg-pos').max = nbU;
     }
     chargerVerrouBaie();
     renderRack();
-    renderList();
 }
 
 function key(pos, col) { return `${pos}-${col}`; }
@@ -3010,20 +2920,10 @@ function makeEmptyCell(u, debut, largeur, rowH) {
         return { pos: Math.max(1, u - dragInfo.decalageU), col: Math.max(0, col - dragInfo.decalageCol) };
     }
 
-    // Pré-remplit position ET largeur pour reprendre l'espace libre depuis
-    // la colonne visée jusqu'à la fin de l'espace disponible (l'utilisateur
-    // peut toujours ajuster ensuite).
-    cell.addEventListener('click', e => {
-        document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
-        const col = colonneVisee(e.clientX);
-        document.getElementById('cfg-pos').value = u;
-        document.getElementById('cfg-col').value = col;
-        document.getElementById('cfg-largeur').value = String(debut + largeur - col);
-        document.getElementById('cfg-nb-ports').value = 0;
-        document.getElementById('cfg-orientation').value = 'horizontal';
-        document.getElementById('cfg-va').value = 0;
-        showTab('tab-add');
-    });
+    // Une case libre n'a plus de comportement au clic (l'ancien panneau
+    // "+ Placer" qu'il préremplissait a disparu, refonte lot 3 corrigée
+    // après retour utilisateur) — seule la bibliothèque en glisser-déposer
+    // y place un équipement (voir plus bas, dragover/drop).
     cell.addEventListener('mouseenter', e => { cell.classList.add('drag-over'); majMarqueur(e.clientX); });
     cell.addEventListener('mousemove', e => { majMarqueur(e.clientX); });
     cell.addEventListener('mouseleave', () => { cell.classList.remove('drag-over'); masquerMarqueur(); });
@@ -3087,19 +2987,17 @@ async function deplacerSlot(id, newPos, newCol) {
     Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
     slots[key(slot.position, slot.col_index || 0)] = slot;
     nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1));
-    renderRack(); renderList();
+    renderRack();
 }
 
 // Dépose d'un élément de la BIBLIOTHÈQUE (refonte lot 3, voir libDragStart)
 // sur une case libre — pas un slot existant à déplacer : crée un nouvel
-// équipement 1U pleine largeur ici (même route POST que placerEquip()),
-// avec juste le nom et — pour un appareil de l'inventaire — son type
-// déclaré préremplis (même logique que autoRemplir('cfg') sur le
-// sélecteur "Associer à un appareil" du panneau + Placer, y compris
-// l'absence de contrôle de correspondance avec la liste des types de
-// baie : l'utilisateur corrige au besoin). Ouvre aussitôt l'inspecteur
-// (lot 2) du nouveau slot pour affiner ports/taille/type sans repasser
-// par un second geste.
+// équipement 1U pleine largeur ici (même route POST /api/baie/slot), avec
+// juste le nom et — pour un appareil de l'inventaire ou une carte
+// générique — son type préremplis, sans contrôle de correspondance avec
+// la liste des types de baie (l'utilisateur corrige au besoin dans
+// l'inspecteur). Ouvre aussitôt l'inspecteur (lot 2) du nouveau slot pour
+// affiner ports/taille/type sans repasser par un second geste.
 async function placerDepuisBibliotheque(data, pos, col) {
     const payload = {
         position: pos, col_index: col, hauteur_u: 1, largeur_u: 10,
@@ -3124,7 +3022,7 @@ async function placerDepuisBibliotheque(data, pos, col) {
     }
     slots[key(s.position, s.col_index || 0)] = s;
     if ((s.col_index || 0) + 1 > nbCols) nbCols = (s.col_index || 0) + 1;
-    renderRack(); renderList(); renderBibliotheque();
+    renderRack(); renderBibliotheque();
     EquipmentModal.ouvrir(s.id);
 }
 
@@ -3194,6 +3092,28 @@ function libItemSnmpHTML(ip, h) {
     </div>`;
 }
 
+// Éléments génériques (refonte lot 3, corrigée après retour utilisateur) —
+// toujours présents, indépendamment de l'inventaire/SNMP : c'est la seule
+// façon de poser un Bandeau RJ, une Étagère ou tout autre équipement qui
+// n'est ni un appareil connu ni vu en SNMP. Remplace l'ancien panneau
+// "+ Placer"/les raccourcis "+ Bandeau RJ"/"+ Étagère" de la barre d'outils
+// (supprimés), sur le même principe drag-and-drop que le reste de la
+// bibliothèque — mêmes 12 types que l'ancien sélecteur "Type d'équipement".
+const GENERIC_LIB = [
+    { type: 'Switch', ic: '🔀' }, { type: 'Routeur/Pare-feu', ic: '🌐' },
+    { type: 'Borne WiFi', ic: '📶' }, { type: 'Serveur', ic: '🖥' },
+    { type: 'Mini PC', ic: '💻' }, { type: 'NAS', ic: '🗄' },
+    { type: 'UPS', ic: '🔋' }, { type: 'PDU', ic: '⚡' },
+    { type: 'Patch Panel', ic: '🔲' }, { type: 'Bandeau RJ', ic: '🔌' },
+    { type: 'Étagère', ic: '▬' }, { type: 'Autre', ic: '⬛' },
+];
+function libItemGeneriqueHTML(g) {
+    return `<div class="lib-item lib-item-generique" draggable="true" data-nom="${escH(g.type)}" data-type="${escH(g.type)}" title="Glisser sur une case libre de la baie">
+        <span class="lib-item-ic">${g.ic}</span>
+        <span class="lib-item-txt">${escH(g.type)}</span>
+    </div>`;
+}
+
 function renderBibliotheque() {
     const filtre = (document.getElementById('lib-filtre').value || '').trim().toLowerCase();
     const dejaPlaces = new Set(Object.values(slots).map(s => s.appareil_id).filter(Boolean));
@@ -3227,6 +3147,11 @@ function renderBibliotheque() {
                 ? '<div class="lib-empty">Aucun résultat pour ce filtre.</div>'
                 : filtrees.map(([ip, h]) => libItemSnmpHTML(ip, h)).join(''));
     }
+
+    const genFiltres = !filtre ? GENERIC_LIB : GENERIC_LIB.filter(g => g.type.toLowerCase().includes(filtre));
+    document.getElementById('lib-generique').innerHTML = !genFiltres.length
+        ? '<div class="lib-empty">Aucun résultat pour ce filtre.</div>'
+        : genFiltres.map(libItemGeneriqueHTML).join('');
 }
 
 // Délégation d'évènement (un seul listener par liste, jamais à réattacher
@@ -3238,7 +3163,7 @@ let _libInit = false;
 function initBibliothequeDnD() {
     if (_libInit) return;
     _libInit = true;
-    ['lib-appareils', 'lib-snmp'].forEach(idListe => {
+    ['lib-appareils', 'lib-snmp', 'lib-generique'].forEach(idListe => {
         const wrap = document.getElementById(idListe);
         wrap.addEventListener('dragstart', e => {
             const el = e.target.closest('.lib-item');
@@ -3291,7 +3216,7 @@ async function redimensionnerSlot(s, nouvelleHu) {
         return;
     }
     slots[key(updated.position, updated.col_index || 0)] = updated;
-    renderRack(); renderList();
+    renderRack();
 }
 
 // ── REDIMENSIONNEMENT EN LARGEUR (glisser la poignée de droite) ────────────────
@@ -3316,7 +3241,7 @@ async function redimensionnerLargeurSlot(s, nouvelleLargeur) {
         return;
     }
     slots[key(updated.position, updated.col_index || 0)] = updated;
-    renderRack(); renderList();
+    renderRack();
 }
 
 // Redimensionnement diagonal (poignée du coin) : hauteur et largeur en un
@@ -3341,7 +3266,7 @@ async function redimensionnerCoinSlot(s, nouvelleHu, nouvelleLargeur) {
         return;
     }
     slots[key(updated.position, updated.col_index || 0)] = updated;
-    renderRack(); renderList();
+    renderRack();
 }
 
 // ── TOOLTIP ───────────────────────────────────────────────────────────────────
@@ -4792,31 +4717,9 @@ const BrassageModal = {
     },
 };
 
-// ── LISTE ÉQUIPEMENTS ─────────────────────────────────────────────────────────
-function renderList() {
-    const wrap = document.getElementById('equip-list-wrap');
-    const sorted = Object.values(slots).sort((a,b) => a.position - b.position || (a.col_index||0) - (b.col_index||0));
-    if (!sorted.length) {
-        wrap.innerHTML = '<div style="color:var(--text-muted);font-size:.8rem;text-align:center;padding:1.5rem;">Aucun équipement</div>';
-        return;
-    }
-    wrap.innerHTML = sorted.map(s => {
-        const nom = escH(libelleComplet(s));
-        const led = s.appareil_id ? (s.en_ligne ? '#22c55e' : '#dc2626') : '#374151';
-        return `<div class="equip-row" onclick="surbrillanceEquip(${s.position},${s.col_index||0})">
-            <div class="equip-pos">U${s.position}${s.col_index?'·C'+s.col_index:''}</div>
-            <div style="width:8px;height:8px;border-radius:50%;background:${led};box-shadow:0 0 4px ${led};flex-shrink:0;"></div>
-            <div>
-                <strong style="font-size:.8rem;">${nom}</strong>
-                <div style="font-size:.68rem;color:var(--text-secondary);">
-                    ${escH(s.type_equipement||'')}${s.adresse_ip?' · '+escH(s.adresse_ip):''}${(s.hauteur_u||1)>1?' · '+(s.hauteur_u)+'U':''}
-                </div>
-            </div>
-            <button onclick="event.stopPropagation();delSlot(${s.id})" class="btn btn-danger btn-sm" style="padding:1px 5px;font-size:.6rem;">✕</button>
-        </div>`;
-    }).join('');
-}
-
+// Met en surbrillance un équipement dans le rack par sa position (utilisé
+// par cyclerTypesAValider, lot 6 — l'ancien onglet « Liste » qui s'en
+// servait aussi a disparu avec le panneau + Placer, refonte lot 3 corrigée).
 function surbrillanceEquip(pos, col) {
     document.querySelectorAll('.rack-cell.highlighted').forEach(c => c.classList.remove('highlighted'));
     const target = document.querySelector(`.rack-cell[data-pos="${pos}"][data-col="${col}"]`);
@@ -5227,7 +5130,6 @@ const PriseMuraleModal = (() => {
         slotId = null; numero = null;
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
         viderInspecteur();
-        showTab('tab-add');
     }
 
     function changerCible() {
@@ -5332,7 +5234,6 @@ const PortModal = (() => {
         slotId = null; numero = null;
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
         viderInspecteur();
-        showTab('tab-add');
     }
 
     function changerCible() {
@@ -5386,14 +5287,11 @@ const PortModal = (() => {
 })();
 
 // ── INSPECTEUR D'UN ÉQUIPEMENT (clic dans le rack, refonte lot 2) ──────────────
-// Remplace l'ancien mécanisme "clic simple = pré-remplir le panneau + Placer,
-// qui servait alors À LA FOIS à créer et à éditer" — signalé peu ergonomique
-// en usage réel (champs propres au type noyés dans une longue liste
-// identique quel que soit l'équipement). Le panneau + Placer ne sert plus
-// qu'à créer (voir placerEquip()) ; toute l'édition d'un équipement déjà
-// posé — position, type, configuration réseau/électrique, ports — passe par
-// #insp-equipement (onglet Inspecteur du rail de droite, ex-modale
-// flottante), sur le même principe que PortModal/PriseMuraleModal.
+// Toute l'édition d'un équipement déjà posé — position, type,
+// configuration réseau/électrique, ports — passe par #insp-equipement
+// (panneau Inspecteur du rail de droite), sur le même principe que
+// PortModal/PriseMuraleModal. La création, elle, passe entièrement par la
+// bibliothèque en glisser-déposer (#rail-lib, refonte lot 3).
 const EquipmentModal = (() => {
     let slotId = null;
 
@@ -5437,7 +5335,6 @@ const EquipmentModal = (() => {
         slotId = null;
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
         viderInspecteur();
-        showTab('tab-add');
     }
 
     // Bandeau « ⚠ Type à valider » (refonte lot 6, voir _typesAValider /
@@ -5492,7 +5389,7 @@ const EquipmentModal = (() => {
         Object.keys(slots).forEach(k => { if (slots[k].id === slotId && k !== nk) delete slots[k]; });
         slots[nk] = s;
         if ((s.col_index||0) + 1 > nbCols) nbCols = (s.col_index||0) + 1;
-        renderRack(); renderList();
+        renderRack();
         fermer();
     }
 
@@ -5503,7 +5400,7 @@ const EquipmentModal = (() => {
             await fetch('/api/baie/slot/' + sid, { method:'DELETE' });
             Object.keys(slots).forEach(k => { if (slots[k].id === sid) delete slots[k]; });
             nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1), 1);
-            renderRack(); renderList();
+            renderRack();
             fermer();
         }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });
     }
@@ -5585,19 +5482,11 @@ function delierPort(slotId, numero, nomCible) {
 }
 
 // ── ACTIONS ──────────────────────────────────────────────────────────────────
-// #cfg-app a déjà son onchange="autoRemplir('cfg')" inline dans le HTML —
-// cet addEventListener supplémentaire est un reliquat d'avant que
-// autoRemplir() prenne un paramètre prefix (voir plus bas) : il
-// l'appelait alors sans argument, l'Event natif se retrouvant à la place
-// du prefix attendu, ce qui levait une erreur JS à CHAQUE changement de
-// ce champ (document.getElementById(event + '-app') === null). Retiré,
-// l'attribut onchange suffit déjà.
-document.getElementById('cfg-type').addEventListener('change', () => couleurAuto('cfg'));
-
-// Les trois fonctions suivantes opèrent indifféremment sur le panneau +
-// Placer ('cfg') ou la modale d'édition ('eqm') — même paire d'ids
-// suffixés que appliquerReglesType()/lirePayloadEquipement(), pour ne
-// jamais dupliquer cette logique deux fois.
+// Les trois fonctions suivantes n'opèrent plus que sur l'inspecteur ('eqm',
+// double-clic ou clic sur un équipement déjà posé) — même préfixe
+// paramétrable que appliquerReglesType()/lirePayloadEquipement(), gardé même
+// à un seul appelant pour ne jamais dupliquer cette logique si un second
+// formulaire réapparaissait un jour.
 function autoRemplir(prefix) {
     const sel = document.getElementById(prefix + '-app');
     const opt = sel.options[sel.selectedIndex];
@@ -5629,54 +5518,13 @@ function couleurAuto(prefix) {
 // à choisir la position et valider. N'assigne aucun appareil/périphérique :
 // c'est chaque PORT du bandeau qui sera ensuite affecté à une pièce du
 // site, pas le bandeau lui-même.
-function ajouterBandeauRJ() {
-    document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
-    document.getElementById('cfg-hu').value = 1;
-    document.getElementById('cfg-col').value = 0;
-    document.getElementById('cfg-largeur').value = '10';
-    document.getElementById('cfg-type').value = 'Bandeau RJ';
-    document.getElementById('cfg-nom').value = 'Bandeau RJ';
-    document.getElementById('cfg-desc').value = '';
-    document.getElementById('cfg-app').value = '';
-    document.getElementById('cfg-periph').value = '';
-    document.getElementById('cfg-nb-ports').value = 24;
-    couleurAuto('cfg');
-    showTab('tab-add');
-    document.getElementById('cfg-pos').focus();
-}
-
-// Raccourci "+ Étagère" : pré-remplit le formulaire Placer pour une
-// étagère pleine tôle (1U par défaut, ajustable comme tout élément) — reste
-// à choisir la position et valider. Pas un élément réseau : ni ports ni
-// appareil associé, juste une tablette PHYSIQUE (voir .cell-etagere en CSS,
-// rendue en fine plaque en bas de sa rangée plutôt qu'en boîtier plein).
-// Les appareils qu'elle porte restent des éléments normaux, à placer dans
-// la rangée du dessus avec la grille magnétique habituelle — aucune
-// association technique entre l'étagère et ce qu'elle porte, exactement
-// comme dans un vrai rack.
-function ajouterEtagere() {
-    document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
-    document.getElementById('cfg-hu').value = 1;
-    document.getElementById('cfg-col').value = 0;
-    document.getElementById('cfg-largeur').value = '10';
-    document.getElementById('cfg-type').value = 'Étagère';
-    document.getElementById('cfg-nom').value = 'Étagère';
-    document.getElementById('cfg-desc').value = '';
-    document.getElementById('cfg-app').value = '';
-    document.getElementById('cfg-periph').value = '';
-    document.getElementById('cfg-nb-ports').value = 0;
-    couleurAuto('cfg');
-    showTab('tab-add');
-    document.getElementById('cfg-pos').focus();
-}
-
 // Applique les règles dépendantes du type d'équipement (visibilité/libellés
 // des champs de la section Ports/Configuration, plafonds, hauteur figée
-// pour une étagère) à UN des deux formulaires équivalents de l'écran —
-// 'cfg' (panneau + Placer, création) ou 'eqm' (modale d'édition, double-clic
-// sur un équipement déjà posé) — tous deux construits avec le même jeu
-// d'ids suffixés (voir la macro ports_box() et #equipment-modal), pour ne
-// jamais dupliquer cette logique deux fois.
+// pour une étagère) au formulaire de l'inspecteur ('eqm', double-clic ou
+// clic sur un équipement déjà posé) — un Bandeau RJ/une Étagère se placent
+// désormais via la bibliothèque (glisser-déposer, section « 🧩 Générique »)
+// plutôt qu'un panneau "+ Placer" dédié, mais cette fonction reste
+// paramétrée par préfixe pour ne jamais dupliquer cette logique.
 function appliquerReglesType(prefix) {
     const g = id => document.getElementById(prefix + '-' + id);
     const type = g('type').value;
@@ -5779,10 +5627,10 @@ function appliquerReglesType(prefix) {
     if (!estUPS) g('va').value = '0';
 }
 
-// Construit le payload JSON envoyé à /api/baie/slot depuis l'UN OU L'AUTRE
-// des deux formulaires équivalents de l'écran ('cfg' = panneau + Placer,
-// 'eqm' = modale d'édition) — mêmes ids suffixés que appliquerReglesType(),
-// pour ne jamais dupliquer cette lecture/ces plafonds deux fois.
+// Construit le payload JSON envoyé à /api/baie/slot depuis l'inspecteur
+// ('eqm') — mêmes ids suffixés que appliquerReglesType(), gardé
+// paramétrable par préfixe pour ne pas dupliquer cette lecture/ces
+// plafonds si un second formulaire les réutilisait un jour.
 function lirePayloadEquipement(prefix) {
     const g = id => document.getElementById(prefix + '-' + id);
     const typeEquip = g('type').value;
@@ -5827,36 +5675,12 @@ function lirePayloadEquipement(prefix) {
     };
 }
 
-// Le panneau + Placer ne sert plus qu'à CRÉER un nouvel équipement — POST
-// systématique (voir EquipmentModal.enregistrer() pour l'édition d'un
-// équipement déjà posé, sur double-clic dans le rack).
-async function placerEquip() {
-    const payload = lirePayloadEquipement('cfg');
-    if (payload.position < 1 || payload.position > nbU) { showFlash(`Position entre 1 et ${nbU}`, 'info'); return; }
-
-    const r = await fetch('/api/baie/slot', {
-        method: 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)
-    });
-    const s = await r.json();
-    if (!r.ok || s.error) {
-        // Rejeté (le plus souvent : chevauchement avec un autre élément,
-        // voir _slots_en_collision côté serveur) — rien n'a changé en
-        // base, ne rien changer côté client non plus : pas de re-rendu qui
-        // ferait disparaître ou dédoubler quoi que ce soit à l'écran.
-        showFlash(s.error || 'Le placement a été refusé.', 'danger');
-        return;
-    }
-    slots[key(s.position, s.col_index||0)] = s;
-    if ((s.col_index||0) + 1 > nbCols) nbCols = (s.col_index||0) + 1;
-    renderRack(); renderList();
-}
-
 function delSlot(id) {
     appConfirm('Retirer cet équipement de la baie ?', async () => {
         await fetch('/api/baie/slot/' + id, { method:'DELETE' });
         Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
         nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1), 1);
-        renderRack(); renderList();
+        renderRack();
     }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });
 }
 
@@ -5865,7 +5689,7 @@ function toutVider() {
         for (const s of Object.values(slots))
             await fetch('/api/baie/slot/' + s.id, { method:'DELETE' });
         slots = {}; nbCols = 1;
-        renderRack(); renderList();
+        renderRack();
     }, { title: 'Action irréversible', icon: '🗑️', ok: 'Vider' });
 }
 
@@ -5876,7 +5700,6 @@ async function changerU(delta) {
     await fetch('/api/baie/nb_u', {
         method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({nb_u: nbU})
     });
-    document.getElementById('cfg-pos').max = nbU;
     renderRack();
 }
 
@@ -5930,21 +5753,15 @@ function exportRack() {
 }
 
 // ── TABS ─────────────────────────────────────────────────────────────────────
-function showTab(id) {
-    document.querySelectorAll('.cfg-tab').forEach(t => {
-        t.classList.toggle('active', t.dataset.tab === id);
-    });
-    document.querySelectorAll('.cfg-pane').forEach(p => p.classList.toggle('active', p.id === id));
-    if (id === 'tab-list') renderList();
-}
-
-// ── INSPECTEUR CONTEXTUEL (refonte lot 2) ───────────────────────────────────
+// ── INSPECTEUR CONTEXTUEL (refonte lot 2, panneau unique) ───────────────────
 // Un clic sur un équipement/port/prise murale du rack affiche ses infos ici
 // (une seule des 3 sections à la fois) au lieu d'ouvrir une modale flottante
 // — EquipmentModal/PortModal/PriseMuraleModal (plus bas) appellent
 // afficherInspecteur() en fin de leur ouvrir(), et viderInspecteur() en fin
 // de leur fermer(). Ouvre le rail de droite tout seul s'il était replié
-// (sinon le panneau se remplit hors champ de vision, jamais vu).
+// (sinon le panneau se remplit hors champ de vision, jamais vu). Plus
+// d'onglets (+Placer/Liste supprimés après retour utilisateur) : c'est le
+// seul contenu du rail, donc juste montrer/cacher les sections suffit.
 function ouvrirRailInspecteur() {
     const pg = document.getElementById('baie-page');
     if (pg && pg.dataset.insp !== 'open') toggleRail('insp');
@@ -5956,7 +5773,6 @@ function afficherInspecteur(which) {
         if (el) el.style.display = (w === which) ? '' : 'none';
     });
     ouvrirRailInspecteur();
-    showTab('tab-inspect');
 }
 function viderInspecteur() {
     ['equipement', 'port', 'prise'].forEach(w => {
@@ -6056,7 +5872,7 @@ function appliquerNeticPorts() {
         const ic = el.querySelector('.port-netic-ic');
         if (ic) ic.remove();
     });
-    document.querySelectorAll('.cell-ports.has-netic-up, .cell-ports.has-netic-down')
+    document.querySelectorAll('.has-netic-up, .has-netic-down')
         .forEach(el => el.classList.remove('has-netic-up', 'has-netic-down'));
 
     // union des ports concernés : déclarés (câblage) + détectés (SNMP)
@@ -6078,7 +5894,15 @@ function appliquerNeticPorts() {
         const etat = (x.detected && x.declared && x.detected !== x.declared) ? 'netic-incoherent'
                    : x.detected ? 'netic-detected' : 'netic-declared';
         el.classList.add('port-netic', etat);
-        const bande = el.closest('.cell-ports') || el.parentElement;
+        // La disposition « 2 lignes » d'un switch (ports impairs/pairs, voir
+        // portsDeuxLignesHTML) rend chaque rangée dans son PROPRE
+        // .cell-ports-row — .cell-ports ne matche alors rien et le repli sur
+        // parentElement ne voit QUE cette rangée seule, jamais l'autre :
+        // multiRangees était donc toujours faux et l'icône retombait
+        // systématiquement en bas, quelle que soit la rangée réelle (bug
+        // signalé en usage réel). .cell-ports-rj-zone/.cell-ports-stack
+        // sont les conteneurs communs aux 2 rangées, à chercher en premier.
+        const bande = el.closest('.cell-ports-rj-zone, .cell-ports-stack, .cell-ports') || el.parentElement;
         const tops = [...bande.querySelectorAll('.port')].map(pp => Math.round(pp.getBoundingClientRect().top));
         const multiRangees = new Set(tops).size > 1;
         const premiereRangee = Math.round(el.getBoundingClientRect().top) === Math.min(...tops);
@@ -6140,7 +5964,6 @@ function ouvrirAppareilsPort(slotId, numero, kind, etat) {
             + '</tbody></table>';
     }
     pan.hidden = false;
-    pan.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 document.getElementById('pa-close').addEventListener('click',
     () => { document.getElementById('port-appareils').hidden = true; });
