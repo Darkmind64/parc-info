@@ -1,8 +1,43 @@
-PARCINFO_VERSION=2.33.0
+PARCINFO_VERSION=2.33.1
 RELEASE_DATE=2026-09-11
-BUILD_NUMBER=2026091101
+BUILD_NUMBER=2026091102
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.1 - Baie de brassage : le rendu recale sur la maquette validée
+#
+# Correctif direct suite à un retour utilisateur sur la v2.33.0 : le livré
+# ne correspondait pas à la maquette interactive pourtant validée avant
+# implémentation. Quatre écarts corrigés.
+#
+# 1) Panneau de droite — l'ancien panneau "+ Placer"/"Liste" avait été
+#    GARDÉ en plus du nouvel inspecteur (lot 2), au lieu d'être remplacé.
+#    Supprimé entièrement (formulaire de création, showTab, renderList,
+#    groupe toolbar "Ajouter", clic sur case vide) : l'inspecteur est
+#    désormais le seul contenu du rail de droite, état vide compris,
+#    fidèle à la maquette.
+# 2) Bibliothèque — nouvelle section "Générique" (12 types de baie,
+#    toujours présents, glisser-déposer) pour ne pas perdre la capacité
+#    de créer un Bandeau RJ/une Étagère/un équipement générique une fois
+#    le panneau "+ Placer" retiré.
+# 3) Icônes réseau (switch/routeur/borne Wi-Fi détectés ou déclarés sur
+#    un port) — ne suivaient pas la règle « au-dessus pour la rangée du
+#    haut, en dessous pour celle du bas » sur un switch en disposition
+#    2 lignes : le sélecteur de détection de rangée ne matchait rien pour
+#    cette disposition, l'icône retombait donc toujours en bas. Corrigé,
+#    puis 2 problèmes supplémentaires trouvés en revérifiant le cas des
+#    deux rangées simultanément sur un switch 1U déjà bien rempli :
+#    l'icône basse tombait sur la poignée de redimensionnement (z-index
+#    corrigé), et le couloir réservé pouvait dépasser le budget de
+#    hauteur de son conteneur avant même d'atteindre le bord réel de la
+#    cellule (rétrécissement des ports + repli overflow visible).
+# 4) Panneau "appareils du port" — converti en vrai tiroir ancré en bas
+#    de la fenêtre (position fixe), au lieu d'un bloc inséré dans le flux
+#    normal de la page, invisible sans faire défiler tout un rack haut.
+#
+# Vérifié en navigateur à chaque correctif (inspecteur seul, placement
+# générique, icônes haut/bas isolées et combinées, tiroir bas de page) +
+# suite de tests baie (121 passed), zéro régression.
 
 # Version 2.33.0 - Refonte de l'écran Baie de brassage (6 lots)
 #

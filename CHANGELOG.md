@@ -1,5 +1,23 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.1] - 2026-09-11 🔧
+
+### Baie de brassage : le rendu recale sur la maquette validée
+
+Correctif direct de la v2.33.0, suite à un retour utilisateur : le livré ne correspondait pas à la maquette interactive pourtant validée avant implémentation.
+
+**1. Panneau de droite.** L'ancien panneau *« + Placer »/« Liste »* avait été gardé en plus du nouvel inspecteur, au lieu d'être remplacé — la maquette n'a que l'inspecteur, toute création passe par la bibliothèque en glisser-déposer. Supprimés : le formulaire de création, les raccourcis « + Bandeau RJ »/« + Étagère » de la barre d'outils, le clic sur une case vide qui préremplissait le formulaire. L'inspecteur est désormais le seul contenu du rail de droite.
+
+**2. Bibliothèque.** Nouvelle section *« 🧩 Générique »* (12 types d'équipement de baie, toujours disponibles en glisser-déposer) pour ne pas perdre la capacité de créer un Bandeau RJ, une Étagère ou tout autre équipement hors inventaire/SNMP une fois le panneau de création retiré.
+
+**3. Icônes réseau.** Sur un switch en disposition « 2 lignes », l'icône d'équipement réseau (switch/routeur/borne Wi-Fi) ne suivait pas la règle *au-dessus pour la rangée du haut, en dessous pour celle du bas* — un vrai bug de sélecteur CSS qui la faisait toujours retomber en bas. Corrigé, avec au passage deux problèmes annexes découverts en testant le cas des deux rangées simultanément sur un switch bien rempli : l'icône basse qui volait le clic à la poignée de redimensionnement de la cellule, et le risque qu'elle soit rognée avant même d'atteindre le bord réel de la cellule.
+
+**4. Panneau « appareils du port ».** Converti en véritable tiroir ancré en bas de la fenêtre, au lieu d'un bloc inséré dans le flux normal de la page — invisible sans faire défiler tout un rack haut.
+
+**Déploiement.** Purement côté interface, aucune migration de schéma. Vérifié en navigateur à chaque correctif ; suite de tests baie revérifiée (121 passed), zéro régression.
+
+---
+
 ## [2.33.0] - 2026-09-11 🎛️
 
 ### Refonte complète de l'écran Baie de brassage (6 lots)
