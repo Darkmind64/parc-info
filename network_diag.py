@@ -4502,6 +4502,86 @@ def appareils_par_port_baie(client_id: int) -> dict:
     return out
 
 
+# Capacité LLDP détectée -> type de baie proposé (refonte baie, lot 6) : même
+# principe que le `retypage` d'`analyser_brassage_baie` (capacités LLDP du
+# voisin contre le type déclaré), mais appliqué au `type_equipement` d'un
+# SLOT de la baie plutôt qu'au `type_appareil` de l'inventaire — les deux
+# listes de types se recoupent sur ces 3 valeurs, jamais exactement ailleurs.
+_CAP_TYPE_BAIE = (
+    (('wlan',), (), ('Borne WiFi',), 'Borne WiFi'),
+    (('router',), ('bridge', 'wlan'), ('Routeur/Pare-feu',), 'Routeur/Pare-feu'),
+    (('bridge',), ('router', 'wlan'), ('Switch',), 'Switch'),
+)
+
+
+def types_a_valider(client_id: int) -> dict:
+    """Types d'équipement de la baie à valider (refonte baie, lot 6) —
+    lecture seule, aucun SNMP synchrone (même profil que
+    `appareils_par_port_baie`, données déjà persistées par le relevé de
+    topologie continu).
+
+    Pour chaque slot dont l'appareil associé (`baie_slots.appareil_id`, MAC
+    principale ou secondaire via `appareil_macs`) a été vu comme VOISIN LLDP
+    d'un switch/routeur du client (`diag_topologie.voisin_mac`/`voisin_caps`),
+    compare la capacité détectée (pont→Switch, routeur→Routeur/Pare-feu,
+    wlan→Borne WiFi, voir `_CAP_TYPE_BAIE`) au `type_equipement` DÉCLARÉ sur
+    le slot — ne propose que si celui-ci ne correspond pas déjà.
+
+    Retourne `{"<slot_id>": {detected, source, current}}`, à titre indicatif
+    seulement (aucune écriture) : côté appelant, "Valider" réutilise la route
+    normale de modification du slot."""
+    from database import get_db
+    conn = get_db()
+    try:
+        appareil_slot = {r[0]: r[1] for r in conn.execute(
+            "SELECT appareil_id, id FROM baie_slots WHERE client_id=? AND appareil_id IS NOT NULL",
+            (client_id,))}
+        if not appareil_slot:
+            return {}
+        mac_slot = {}
+        for aid, mac in conn.execute(
+                "SELECT id, adresse_mac FROM appareils WHERE client_id=?", (client_id,)):
+            sid = appareil_slot.get(aid)
+            if sid and mac:
+                m = _norm_mac(mac)
+                if m:
+                    mac_slot[m] = sid
+        for m, aid in _macs_secondaires(conn, client_id).items():
+            sid = appareil_slot.get(aid)
+            if sid:
+                mac_slot.setdefault(m, sid)
+        if not mac_slot:
+            return {}
+
+        types_actuels = {r[0]: (r[1] or '') for r in conn.execute(
+            "SELECT id, type_equipement FROM baie_slots WHERE client_id=?", (client_id,))}
+
+        resultat, vus = {}, set()
+        for voisin_mac, voisin_caps in conn.execute(
+                "SELECT voisin_mac, voisin_caps FROM diag_topologie "
+                "WHERE client_id=? AND COALESCE(voisin_caps,'')!='' AND COALESCE(voisin_mac,'')!=''",
+                (client_id,)):
+            sid = mac_slot.get(_norm_mac(voisin_mac))
+            if not sid or sid in vus:
+                continue
+            caps = set((voisin_caps or '').lower().split(','))
+            actuel = types_actuels.get(sid, '')
+            for need, interdits, oks, propose in _CAP_TYPE_BAIE:
+                if all(n in caps for n in need) and not any(i in caps for i in interdits) and actuel not in oks:
+                    resultat[str(sid)] = {
+                        'detected': propose, 'current': actuel or '(non renseigné)',
+                        'source': 'LLDP : ' + ', '.join(sorted(caps)),
+                    }
+                    vus.add(sid)
+                    break
+        return resultat
+    except Exception:
+        logger.debug('network_diag: types_a_valider', exc_info=True)
+        return {}
+    finally:
+        conn.close()
+
+
 def proposer_topologie_baie(client_id: int) -> dict:
     """Aperçu de ce que « Renseigner les ports vides de la baie » écrirait, sans
     rien modifier : `{'propositions': [...], 'ignores': [...]}`.

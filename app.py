@@ -7675,6 +7675,22 @@ def api_baie_bibliotheque():
     return jsonify(resultat)
 
 
+@app.route('/api/baie/types-a-valider')
+@login_required
+def api_baie_types_a_valider():
+    """Types d'équipement de la baie que la LLDP contredit (refonte baie,
+    lot 6) : `{"<slot_id>": {detected, source, current}}`. Lecture seule,
+    aucun SNMP synchrone — voir network_diag.types_a_valider."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        return jsonify(network_diag.types_a_valider(cid))
+    except Exception:
+        logger.debug('api_baie_types_a_valider', exc_info=True)
+        return jsonify({})
+
+
 @app.route('/api/baie/activite/moniteur')
 @login_required
 def api_baie_activite_moniteur():

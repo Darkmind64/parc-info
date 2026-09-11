@@ -76,6 +76,20 @@
 .lib-item-txt small { display:block; color:var(--text-muted); font-size:.62rem; }
 .lib-item-snmp { border-style:dashed; }
 
+/* Bandeau « type à valider » de l'inspecteur d'équipement (refonte lot 6) */
+.eqm-typebar { border:1px solid color-mix(in srgb,var(--accent-orange,#f59e0b) 45%,var(--border));
+    border-radius:6px; background:color-mix(in srgb,var(--accent-orange,#f59e0b) 10%,transparent);
+    padding:.5rem .6rem; margin-bottom:.8rem; font-size:.74rem; }
+.eqm-typebar-th { font-weight:700; color:var(--accent-orange,#f59e0b); margin-bottom:.3rem; }
+.eqm-typebar p { margin:0 0 .5rem; color:var(--text-secondary); line-height:1.4; }
+.eqm-typebar-actions { display:flex; gap:.4rem; flex-wrap:wrap; }
+.eqm-typebar-actions button { font-size:.7rem; padding:.28rem .55rem; border-radius:3px; border:1px solid var(--border);
+    background:var(--bg-secondary); color:var(--text-secondary); font-weight:600; cursor:pointer; }
+.eqm-typebar-actions button.go { border-color:var(--accent-orange,#f59e0b); color:var(--accent-orange,#f59e0b);
+    background:rgba(245,158,11,.12); }
+.eqm-typebar-actions button:hover { border-color:var(--accent); color:var(--accent); }
+.eqm-typebar-actions button.go:hover { border-color:var(--accent-orange,#f59e0b); color:var(--accent-orange,#f59e0b); }
+
 @media(max-width:1100px) {
     .baie-page { grid-template-columns:minmax(0,1fr); }
     .baie-rail { position:static; }
@@ -99,6 +113,11 @@
 .baie-toolbar .btn.btn-neutral.active,
 .baie-toolbar select.btn.btn-neutral:not([value="0"]):focus { border-color:var(--accent); color:var(--accent); }
 .baie-toolbar select.btn { width:auto; flex:0 0 auto; padding-right:1.1rem; }
+/* type(s) d'équipement à valider (refonte lot 6) — même amber que les
+   autres signaux « à vérifier » de l'écran (⚠ divergence, saturation…). */
+.baie-toolbar .btn.btn-warn { border-color:var(--accent-orange,#f59e0b); color:var(--accent-orange,#f59e0b);
+    background:rgba(245,158,11,.1); }
+.baie-toolbar .btn.btn-warn:hover { background:rgba(245,158,11,.18); }
 /* stepper de hauteur de baie */
 .u-stepper { display:inline-flex; align-items:center; border:1px solid var(--border); border-radius:3px;
     overflow:hidden; background:var(--bg-secondary); }
@@ -1079,6 +1098,17 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 </div>
             </div>
 
+            <!-- Validation du type d'équipement (refonte lot 6) — masqué tant
+                 qu'aucune divergence LLDP ↔ type déclaré n'est détectée, voir
+                 chargerTypesAValider(). -->
+            <div class="tb-group" id="tb-grp-types" hidden>
+                <span class="tb-group-lbl">À traiter</span>
+                <div class="tb-group-items">
+                    <button id="btn-types" onclick="cyclerTypesAValider()" class="btn btn-sm btn-warn"
+                        title="Le type détecté en LLDP pour cet équipement ne correspond pas au type déclaré dans la baie — cliquer pour les vérifier un par un">⚠ <span id="types-n">0</span> type(s) à valider</button>
+                </div>
+            </div>
+
             <div class="tb-group tb-right">
                 <span class="tb-group-lbl">&nbsp;</span>
                 <div class="tb-group-items">
@@ -1358,6 +1388,17 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
                     <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">⬛ <span id="eqm-titre">Équipement</span></h3>
                     <button type="button" onclick="EquipmentModal.fermer()" title="Revenir à + Placer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                </div>
+                <!-- Bandeau « type à valider » (refonte lot 6) — voir
+                     EquipmentModal.majBandeauType(), rempli seulement quand
+                     ce slot figure dans _typesAValider. -->
+                <div id="eqm-typebar" class="eqm-typebar" style="display:none;">
+                    <div class="eqm-typebar-th">⚠ Type à valider</div>
+                    <p id="eqm-typebar-txt"></p>
+                    <div class="eqm-typebar-actions">
+                        <button type="button" class="go" onclick="EquipmentModal.validerType()">Valider <span id="eqm-typebar-detected"></span></button>
+                        <button type="button" onclick="EquipmentModal.ignorerType()">Ignorer</button>
+                    </div>
                 </div>
                 <div class="form-group" style="margin-bottom:.6rem;">
                     <label>Type d'équipement</label>
@@ -5388,6 +5429,7 @@ const EquipmentModal = (() => {
         document.getElementById('eqm-nom').value = nomEquipementSlot(s) || '';
         document.getElementById('eqm-desc').value = s.description || '';
         afficherEditeurPorts(s);
+        majBandeauType();
         afficherInspecteur('equipement');
     }
 
@@ -5396,6 +5438,41 @@ const EquipmentModal = (() => {
         document.querySelectorAll('.rack-cell.selected').forEach(c => c.classList.remove('selected'));
         viderInspecteur();
         showTab('tab-add');
+    }
+
+    // Bandeau « ⚠ Type à valider » (refonte lot 6, voir _typesAValider /
+    // chargerTypesAValider) — rappelé aussi bien depuis ouvrir() que depuis
+    // le relevé périodique, pour rafraîchir un inspecteur déjà ouvert sans
+    // reperdre une saisie en cours dans le reste du formulaire.
+    function majBandeauType() {
+        const bar = document.getElementById('eqm-typebar');
+        const sugg = slotId ? _typesAValider[String(slotId)] : null;
+        if (!sugg) { bar.style.display = 'none'; return; }
+        document.getElementById('eqm-typebar-txt').innerHTML =
+            `Détecté comme <b>${escH(sugg.detected)}</b> (${escH(sugg.source)}). Type déclaré actuel : <b>${escH(sugg.current)}</b>.`;
+        document.getElementById('eqm-typebar-detected').textContent = sugg.detected;
+        bar.style.display = '';
+    }
+    // Applique le type détecté puis enregistre normalement (même route que
+    // le bouton ✓ Enregistrer) — capture slotId AVANT enregistrer(), qui
+    // appelle fermer() et le remet à null.
+    async function validerType() {
+        if (!slotId) return;
+        const sid = slotId;
+        const sugg = _typesAValider[String(sid)];
+        if (!sugg) return;
+        document.getElementById('eqm-type').value = sugg.detected;
+        couleurAuto('eqm');
+        await enregistrer();
+        delete _typesAValider[String(sid)];
+        majBadgeTypes();
+        showFlash(`Type validé : ${sugg.detected}.`, 'success');
+    }
+    function ignorerType() {
+        if (!slotId) return;
+        delete _typesAValider[String(slotId)];
+        majBadgeTypes();
+        document.getElementById('eqm-typebar').style.display = 'none';
     }
 
     async function enregistrer() {
@@ -5431,7 +5508,7 @@ const EquipmentModal = (() => {
         }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });
     }
 
-    return { ouvrir, fermer, enregistrer, retirer, slotCourant };
+    return { ouvrir, fermer, enregistrer, retirer, slotCourant, majBandeauType, validerType, ignorerType };
 })();
 
 // ── MODALE D'ÉDITION D'UNE PHOTO DE BAIE (double-clic) ──────────────────────
@@ -6068,6 +6145,43 @@ function ouvrirAppareilsPort(slotId, numero, kind, etat) {
 document.getElementById('pa-close').addEventListener('click',
     () => { document.getElementById('port-appareils').hidden = true; });
 
+// ── VALIDATION DU TYPE D'ÉQUIPEMENT (refonte lot 6) ─────────────────────────
+// Compare, pour chaque slot dont l'appareil associé a été vu comme voisin
+// LLDP d'un switch/routeur du client, la capacité détectée (pont/routeur/
+// wlan) au type déclaré sur le slot — voir network_diag.types_a_valider,
+// lecture seule (aucun SNMP synchrone, même profil que /topologie-ports).
+// "Ignorer" (EquipmentModal.ignorerType) n'efface la suggestion que côté
+// client, pour cette session : elle réapparaîtra au prochain relevé
+// (setInterval ci-dessous) tant que la LLDP la signale toujours et que le
+// type déclaré n'a pas été corrigé — aucune trace "ignoré" en base.
+let _typesAValider = {};   // "<slot_id>" -> {detected, source, current}
+
+async function chargerTypesAValider() {
+    try {
+        _typesAValider = await (await fetch('/api/baie/types-a-valider')).json() || {};
+    } catch { _typesAValider = {}; }
+    majBadgeTypes();
+    EquipmentModal.majBandeauType();
+}
+function majBadgeTypes() {
+    const n = Object.keys(_typesAValider).length;
+    document.getElementById('types-n').textContent = String(n);
+    document.getElementById('tb-grp-types').hidden = n === 0;
+}
+// Bouton « ⚠ N type(s) à valider » de la barre d'outils : ouvre l'inspecteur
+// du prochain équipement concerné (boucle), le met en surbrillance dans le
+// rack — même mécanisme que la Liste (surbrillanceEquip).
+function cyclerTypesAValider() {
+    const ids = Object.keys(_typesAValider);
+    if (!ids.length) return;
+    const cur = EquipmentModal.slotCourant();
+    const i = cur ? ids.indexOf(String(cur.id)) : -1;
+    const nextId = parseInt(ids[(i + 1) % ids.length]);
+    EquipmentModal.ouvrir(nextId);
+    const k = Object.keys(slots).find(k => slots[k].id === nextId);
+    if (k) surbrillanceEquip(slots[k].position, slots[k].col_index || 0);
+}
+
 // re-décorer après chaque redraw du rack
 const _renderRackOrig = renderRack;
 renderRack = function() {
@@ -6077,9 +6191,10 @@ renderRack = function() {
 };
 setInterval(chargerDiagErreurs, 60000);
 setInterval(chargerTopoPorts, 90000);
+setInterval(chargerTypesAValider, 90000);
 
 // ── START ────────────────────────────────────────────────────────────────────
-init().then(() => { chargerDiagErreurs(); chargerTopoPorts(); chargerBibliotheque(); });
+init().then(() => { chargerDiagErreurs(); chargerTopoPorts(); chargerBibliotheque(); chargerTypesAValider(); });
 </script>
 <!-- html2canvas pour export PNG (chargé en différé) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
