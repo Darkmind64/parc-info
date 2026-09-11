@@ -147,6 +147,23 @@
     .rail-tab { writing-mode:horizontal-tb; padding:.5rem .8rem; text-align:left; }
 }
 
+/* ── EN-TÊTE DÉDIÉ (fidèle à la maquette editeur-baie.html : bandeau compact,
+   pas la grosse bannière uppercase générique de .page-header) — la nav
+   globale ParcInfo reste au-dessus (décision utilisateur : cohérence avec
+   le reste de l'appli), ce bandeau la complète juste en dessous. */
+.baie-apphead { display:flex; align-items:baseline; justify-content:space-between; gap:1rem;
+    padding:.4rem 0 .7rem; margin-bottom:.9rem; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.baie-apphead h1 { font-family:'Rajdhani',sans-serif; font-weight:700; font-size:1.35rem;
+    letter-spacing:.3px; text-transform:none; color:var(--text-primary); line-height:1; margin:0; }
+.baie-apphead h1 span { color:var(--accent); }
+.baie-apphead p { font-size:.72rem; color:var(--text-secondary); margin:.2rem 0 0; }
+.baie-apphead p b { color:var(--accent); font-weight:600; }
+.baie-apphead-r { display:flex; align-items:center; gap:.4rem; }
+.baie-apphead-r .btn { font-family:'Exo 2',system-ui,sans-serif; text-transform:none; letter-spacing:0;
+    font-weight:600; font-size:.72rem; padding:.32rem .6rem; border-radius:4px; background:transparent;
+    border:1px solid var(--border); color:var(--text-secondary); }
+.baie-apphead-r .btn:hover { border-color:var(--accent); color:var(--accent); }
+
 /* ── BARRE D'OUTILS (refonte lot 1 : groupes nommés) ──
    Les boutons gardent leur id/onclick ; seul le conteneur change. */
 .baie-toolbar { display:flex; flex-wrap:wrap; align-items:flex-start; gap:.45rem .85rem; margin-bottom:.8rem; }
@@ -158,6 +175,15 @@
 .tb-group-items { display:flex; flex-wrap:wrap; align-items:center; gap:.32rem; }
 /* bouton neutre : la plupart des actions ne sont pas « primaires » — on réserve
    le cyan plein à la seule action mise en avant (Deviner le brassage). */
+/* Typographie propre à cette barre d'outils (fidèle à la maquette .tbtn) :
+   le .btn générique de l'appli est en majuscules Rajdhani très espacées
+   (CTA du reste de ParcInfo) — beaucoup plus « criard » que les boutons
+   d'outils denses et discrets de la maquette (casse normale, police du
+   corps de texte, espacement resserré). Ne touche que .baie-toolbar. */
+.baie-toolbar .btn, .baie-toolbar select.btn {
+    font-family:'Exo 2',system-ui,sans-serif; text-transform:none; letter-spacing:0;
+    font-weight:600; font-size:.74rem; padding:.34rem .58rem; border-radius:4px; gap:.34rem;
+}
 .baie-toolbar .btn.btn-neutral { border-color:var(--border); color:var(--text-secondary); background:var(--bg-secondary); }
 .baie-toolbar .btn.btn-neutral:hover { border-color:var(--accent); color:var(--accent); background:rgba(0,201,255,.06); }
 .baie-toolbar .btn.btn-neutral.active,
@@ -506,6 +532,15 @@
     position:absolute; left:0; right:0; bottom:-4px; height:9px; cursor:ns-resize; z-index:6;
 }
 .cell-resize:hover, .cell-resize.resizing { background:rgba(0,201,255,.35); }
+/* Repère visuel permanent (fidèle à la maquette .grip.e/.grip.s ::after) :
+   sans lui, une poignée totalement invisible au repos ne se découvre qu'au
+   survol par hasard — la maquette montre toujours une petite pastille
+   discrète, qui ne fait que s'accentuer au survol/pendant le geste. */
+.cell-resize::after {
+    content:''; position:absolute; left:50%; bottom:2px; width:22px; height:3px;
+    transform:translateX(-50%); background:rgba(255,255,255,.22); border-radius:2px; pointer-events:none;
+}
+.cell-resize:hover::after, .cell-resize.resizing::after { background:var(--accent); }
 
 /* Poignée de redimensionnement en LARGEUR — bord droit de l'élément, glisser
    pour changer largeur_u par pas de 1/10 de la largeur du rack (voir
@@ -515,6 +550,11 @@
     position:absolute; top:0; bottom:0; right:-4px; width:9px; cursor:ew-resize; z-index:6;
 }
 .cell-resize-w:hover, .cell-resize-w.resizing { background:rgba(0,201,255,.35); }
+.cell-resize-w::after {
+    content:''; position:absolute; top:50%; right:2px; width:3px; height:18px;
+    transform:translateY(-50%); background:rgba(255,255,255,.22); border-radius:2px; pointer-events:none;
+}
+.cell-resize-w:hover::after, .cell-resize-w.resizing::after { background:var(--accent); }
 
 /* Poignée de redimensionnement DIAGONAL — coin bas-droit, change hauteur_u
    ET largeur_u en un seul geste (voir redimensionnerCoinSlot()). */
@@ -523,6 +563,12 @@
     border-radius:0 0 2px 0;
 }
 .cell-resize-corner:hover, .cell-resize-corner.resizing { background:rgba(0,201,255,.55); }
+.cell-resize-corner::after {
+    content:''; position:absolute; right:3px; bottom:3px; width:6px; height:6px;
+    border-right:2px solid rgba(255,255,255,.28); border-bottom:2px solid rgba(255,255,255,.28);
+    pointer-events:none;
+}
+.cell-resize-corner:hover::after, .cell-resize-corner.resizing::after { border-color:var(--accent); }
 
 /* Un port RJ45 dans la grille d'un élément réseau — numéroté, coloré selon
    sa cible (couleur type/catégorie déjà configurée ailleurs dans l'app, ou
@@ -710,6 +756,23 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .cell-sante.cs-ok { color:#1f9d55; background:rgba(31,157,85,.14); }
 .cell-sante.cs-attention { color:#c77700; background:rgba(224,149,42,.16); }
 .cell-sante.cs-critique { color:#ef4444; background:rgba(239,68,68,.16); }
+/* bouton toolbar « 🩺 Santé » (menu Affichage, fidèle à la maquette) : masque
+   simplement les pastilles déjà posées par appliquerDiagErreurs(), sans
+   toucher au calcul ni au chargement des données. */
+body.baie-sante-off .cell-sante { display:none; }
+
+/* bouton toolbar « 🏷 Câbles » : étiquette permanente couleur/longueur du
+   cordon sur chaque lien du rack (voir renderCableLinks) — la même donnée
+   que l'infobulle et la modale de port, juste rendue visible sans survol. */
+.cable-label { font-family:'Share Tech Mono',monospace; font-size:8px; fill:#a9c0dd;
+    paint-order:stroke; stroke:#0a0e14; stroke-width:3px; stroke-linejoin:round; pointer-events:none; }
+
+/* bouton toolbar « 🛰 Hors site » (menu Affichage) : rappel visuel « lecture
+   quasi-seule » — assombrit le rack et désactive drag/redimensionnement,
+   entièrement local à ce navigateur, aucun appel serveur (comme le
+   verrouillage). Voir toggleHorsSite(). */
+body.baie-hors-site .rack-outer { filter:saturate(.55) brightness(.85); }
+body.baie-hors-site .rack-cell.occupied { cursor:default; }
 
 /* ── Modale « Moniteur réseau » ─────────────────────────────────────────── */
 .mon-box { background:var(--bg-secondary); border:1px solid var(--border-glow); border-radius:8px;
@@ -1087,15 +1150,15 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 {% endmacro %}
 
 {% block content %}
-<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+<div class="baie-apphead">
     <div>
-        <h1>Baie de <span>Brassage</span></h1>
-        <p><span style="color:{{ client.couleur or '#00c9ff' }};font-weight:700;">{{ client.nom }}</span>
+        <h1>Éditeur de <span>baie</span></h1>
+        <p>Client <b style="color:{{ client.couleur or 'var(--accent)' }};">{{ client.nom }}</b>
         · {{ parc.baie_marque or 'Baie' }}{% if parc.baie_nb_u %} · {{ parc.baie_nb_u }}U{% endif %}</p>
     </div>
-    <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.4rem;">
-        <button class="btn btn-primary btn-sm" onclick="exportRack()" title="Exporter en image PNG">📷</button>
-        <a href="/parc" class="btn btn-primary btn-sm" title="Configuration de la baie (parc général)">✏</a>
+    <div class="baie-apphead-r">
+        <button class="btn" onclick="exportRack()" title="Exporter en image PNG">📷 Exporter</button>
+        <a href="/parc" class="btn" title="Configuration de la baie (parc général)">✏ Configurer</a>
     </div>
 </div>
 
@@ -1116,7 +1179,7 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <button onclick="changerU(1)" aria-label="Agrandir la baie d'1U">+U</button>
                     </span>
                     <button id="btn-verrou" onclick="toggleVerrouBaie()" class="btn btn-sm btn-neutral"
-                        title="Verrouiller la baie : bloque le glisser-déposer et le redimensionnement (évite un déplacement accidentel) — préférence locale à ce navigateur, pas partagée avec les autres utilisateurs">🔓</button>
+                        title="Verrouiller la baie : bloque le glisser-déposer et le redimensionnement (évite un déplacement accidentel) — préférence locale à ce navigateur, pas partagée avec les autres utilisateurs"><span class="i">🔓</span> Édition</button>
                 </div>
             </div>
 
@@ -1142,6 +1205,12 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <option value="3000">⚡ activité 3 s</option>
                         <option value="5000">⚡ activité 5 s</option>
                     </select>
+                    <button id="btn-sante" onclick="toggleSante()" class="btn btn-sm btn-neutral active" aria-pressed="true"
+                        title="Afficher/masquer la pastille de santé réseau (diagnostic SNMP) sur chaque équipement — préférence locale à ce navigateur">🩺 Santé</button>
+                    <button id="btn-cables" onclick="toggleLabelsCables()" class="btn btn-sm btn-neutral" aria-pressed="false"
+                        title="Afficher en permanence la couleur/longueur de chaque cordon sur le rack (déjà visible en survol/double-clic sur un lien) — préférence locale à ce navigateur">🏷 Câbles</button>
+                    <button id="btn-offsite" onclick="toggleHorsSite()" class="btn btn-sm btn-neutral" aria-pressed="false"
+                        title="Mode hors site : assombrit la baie et bloque le glisser-déposer/redimensionnement — repère visuel local à ce navigateur, aucun appel serveur, n'affecte pas les autres utilisateurs">🛰 Hors site</button>
                 </div>
             </div>
 
@@ -1746,6 +1815,16 @@ let baiesList   = ['Baie principale'];
 // n'empêche ni la sélection/édition via le formulaire, ni la suppression
 // (déjà protégée par un confirm()), ni l'ajout de nouveaux éléments.
 let baieVerrouillee = false;
+// Repères visuels préférence locale (comme baieVerrouillee) : n'influent
+// que sur CE navigateur, aucun appel serveur, voir toggleSante()/
+// toggleLabelsCables()/toggleHorsSite() plus bas.
+let santeVisible = true;
+let labelsCablesVisibles = false;
+let horsSiteActif = false;
+// Un geste d'édition (glisser, redimensionner) doit être bloqué à la fois
+// par le verrouillage explicite ET par le mode « hors site » (lecture
+// quasi-seule) — un seul point de vérité pour les deux.
+function editionBloquee() { return baieVerrouillee || horsSiteActif; }
 // Slot actuellement ouvert dans la modale d'édition (voir EquipmentModal
 // plus bas, double-clic sur un équipement) — permet à enregistrerPort()/
 // delierPort() de rafraîchir sa liste de ports après une modification qui
@@ -2103,10 +2182,12 @@ function majBoutonVerrou() {
     const btn = document.getElementById('btn-verrou');
     if (!btn) return;
     btn.classList.toggle('active', baieVerrouillee);
-    // Icône seule (cadenas ouvert/fermé, déjà univoque) + style actif —
-    // le détail complet reste dans le title, comme les autres boutons
-    // compactés de cette barre d'outils.
-    btn.textContent = baieVerrouillee ? '🔒' : '🔓';
+    btn.setAttribute('aria-pressed', String(baieVerrouillee));
+    // Icône + libellé (fidèle à la maquette : 🔓 Édition / 🔒 Verrouillé) —
+    // le détail complet reste dans le title.
+    btn.innerHTML = baieVerrouillee
+        ? '<span class="i">🔒</span> Verrouillé'
+        : '<span class="i">🔓</span> Édition';
     btn.title = baieVerrouillee
         ? 'Baie verrouillée : glisser-déposer et redimensionnement bloqués (préférence locale à ce navigateur) — cliquer pour déverrouiller'
         : 'Verrouiller la baie : bloque le glisser-déposer et le redimensionnement (évite un déplacement accidentel) — préférence locale à ce navigateur, pas partagée avec les autres utilisateurs';
@@ -2120,6 +2201,52 @@ function toggleVerrouBaie() {
     showFlash(baieVerrouillee
         ? 'Baie verrouillée : glisser-déposer et redimensionnement bloqués sur ce navigateur.'
         : 'Baie déverrouillée.', 'info');
+}
+
+// ── PRÉFÉRENCES D'AFFICHAGE (menu « Affichage », fidèles à la maquette) ──────
+// Toutes locales à ce navigateur (localStorage), aucune ne modifie les
+// données ni n'appelle le serveur — voir editionBloquee() pour le lien avec
+// le verrouillage.
+function chargerPrefsAffichage() {
+    try { santeVisible = localStorage.getItem('baie_sante_visible') !== '0'; } catch (e) {}
+    try { labelsCablesVisibles = localStorage.getItem('baie_labels_cables') === '1'; } catch (e) {}
+    try { horsSiteActif = localStorage.getItem('baie_hors_site') === '1'; } catch (e) {}
+    const btnS = document.getElementById('btn-sante');
+    if (btnS) { btnS.classList.toggle('active', santeVisible); btnS.setAttribute('aria-pressed', String(santeVisible)); }
+    document.body.classList.toggle('baie-sante-off', !santeVisible);
+    const btnC = document.getElementById('btn-cables');
+    if (btnC) { btnC.classList.toggle('active', labelsCablesVisibles); btnC.setAttribute('aria-pressed', String(labelsCablesVisibles)); }
+    const btnO = document.getElementById('btn-offsite');
+    if (btnO) { btnO.classList.toggle('active', horsSiteActif); btnO.setAttribute('aria-pressed', String(horsSiteActif)); }
+    document.body.classList.toggle('baie-hors-site', horsSiteActif);
+}
+
+function toggleSante() {
+    santeVisible = !santeVisible;
+    try { localStorage.setItem('baie_sante_visible', santeVisible ? '1' : '0'); } catch (e) {}
+    const btn = document.getElementById('btn-sante');
+    if (btn) { btn.classList.toggle('active', santeVisible); btn.setAttribute('aria-pressed', String(santeVisible)); }
+    document.body.classList.toggle('baie-sante-off', !santeVisible);
+}
+
+function toggleLabelsCables() {
+    labelsCablesVisibles = !labelsCablesVisibles;
+    try { localStorage.setItem('baie_labels_cables', labelsCablesVisibles ? '1' : '0'); } catch (e) {}
+    const btn = document.getElementById('btn-cables');
+    if (btn) { btn.classList.toggle('active', labelsCablesVisibles); btn.setAttribute('aria-pressed', String(labelsCablesVisibles)); }
+    renderCableLinks();
+}
+
+function toggleHorsSite() {
+    horsSiteActif = !horsSiteActif;
+    try { localStorage.setItem('baie_hors_site', horsSiteActif ? '1' : '0'); } catch (e) {}
+    const btn = document.getElementById('btn-offsite');
+    if (btn) { btn.classList.toggle('active', horsSiteActif); btn.setAttribute('aria-pressed', String(horsSiteActif)); }
+    document.body.classList.toggle('baie-hors-site', horsSiteActif);
+    renderRack();
+    showFlash(horsSiteActif
+        ? 'Mode hors site activé : affichage assombri, glisser-déposer/redimensionnement bloqués sur ce navigateur (repère visuel, rien n\'est modifié côté serveur).'
+        : 'Mode hors site désactivé.', 'info');
 }
 
 // ── RENDER RACK ───────────────────────────────────────────────────────────────
@@ -2369,6 +2496,25 @@ function renderCableLinks() {
         path.setAttribute('class', horsLigne ? 'cable-link cable-warning' : 'cable-link');
         path.dataset.cle = els[0].dataset.cle;
         svg.appendChild(path);
+
+        // Étiquette permanente couleur/longueur (bouton toolbar « 🏷 Câbles »,
+        // fidèle à la maquette) — point milieu de la même courbe de Bézier
+        // cubique que le tracé visible (t=0.5), pas juste le milieu du
+        // segment droit A-B, sinon l'étiquette ne suit pas la bombe.
+        if (labelsCablesVisibles) {
+            const texte = a.dataset.cable || b.dataset.cable || '';
+            if (texte) {
+                const mx = 0.125 * x1 + 0.375 * (x1 + bombe) + 0.375 * (x2 + bombe) + 0.125 * x2;
+                const my = 0.125 * y1 + 0.375 * y1 + 0.375 * y2 + 0.125 * y2;
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', mx);
+                label.setAttribute('y', my - 4);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('class', 'cable-label');
+                label.textContent = texte;
+                svg.appendChild(label);
+            }
+        }
 
         // Zone de double-clic élargie et invisible, superposée (voir CSS
         // .cable-link-hit) : édition rapide du câble (couleur/longueur)
@@ -2705,9 +2851,9 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // pouvant très bien ne pas couvrir toute la baie. Baie verrouillée :
     // aucune poignée de redimensionnement du tout (voir toggleVerrouBaie).
     cell.innerHTML = ligneInfo + zonePorts + badgeAlimentation
-        + (estEtagere || baieVerrouillee ? '' : `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`)
-        + (baieVerrouillee ? '' : `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`)
-        + (estEtagere || baieVerrouillee ? '' : `<div class="cell-resize-corner" title="Redimensionner en hauteur et largeur (glisser en diagonale)"></div>`);
+        + (estEtagere || editionBloquee() ? '' : `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`)
+        + (editionBloquee() ? '' : `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`)
+        + (estEtagere || editionBloquee() ? '' : `<div class="cell-resize-corner" title="Redimensionner en hauteur et largeur (glisser en diagonale)"></div>`);
 
     // Ports : clic = surbrillance de tout port lié à la même cible (ou, en
     // mode "Lier des ports", sélection du 1er/2e port à câbler ensemble),
@@ -2991,7 +3137,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // Drag & drop — désactivé si la baie est verrouillée (voir
     // toggleVerrouBaie) : le navigateur ne déclenche alors jamais dragstart,
     // donc rien de plus à bloquer côté cases vides (dropzones).
-    cell.draggable = !baieVerrouillee;
+    cell.draggable = !editionBloquee();
     cell.addEventListener('dragstart', e => {
         e.dataTransfer.setData('text/plain', JSON.stringify({id: s.id, pos: u, col: debut}));
         // Décalage de prise EN U et en colonnes — l'endroit où la souris a
@@ -3101,7 +3247,7 @@ function makeEmptyCell(u, debut, largeur, rowH) {
         // toggleVerrouBaie), donc cette branche ne devrait jamais s'exécuter
         // dans ce cas — gardée quand même au cas où un glisser aurait pu
         // démarrer autrement.
-        if (baieVerrouillee) { masquerMarqueur(); return; }
+        if (editionBloquee()) { masquerMarqueur(); return; }
         const data = JSON.parse(e.dataTransfer.getData('text/plain'));
         const { pos, col } = positionViseeGlisser(e.clientX);
         // Déjà signalé en rouge pendant le survol (voir majMarqueur) : pas
@@ -3333,7 +3479,7 @@ function initBibliothequeDnD() {
         wrap.addEventListener('dragstart', e => {
             const el = e.target.closest('.lib-item');
             if (!el) return;
-            if (baieVerrouillee) { e.preventDefault(); return; }
+            if (editionBloquee()) { e.preventDefault(); return; }
             e.dataTransfer.setData('text/plain', JSON.stringify({
                 lib: true,
                 appareil_id: el.dataset.appareilId ? parseInt(el.dataset.appareilId) : null,
@@ -3534,7 +3680,12 @@ function portHTML(p, estElec, typeEquipement) {
     // Voyant de ping omis pour une prise électrique (demandé, voir
     // classePing ci-dessus) — jamais de statut réseau à montrer dessus.
     const voyant = estElec ? '' : '<span class="port-led"></span>';
-    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${estElec ? ' port-elec' : ''}${estEntree ? ' port-entree' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}>
+    // Couleur/longueur du cordon (renseignées via PortModal, voir
+    // enregistrerPort()) — reprises en attribut pour l'étiquette permanente
+    // du bouton toolbar « 🏷 Câbles » (renderCableLinks), sans requête
+    // supplémentaire : même donnée que l'infobulle de survol.
+    const cable = [p.cable_couleur, p.cable_longueur].filter(Boolean).join(' · ');
+    return `<span class="port${libre ? ' port-libre' : ''}${p.lie_slot_id ? ' port-lie' : ''}${sfp ? ' port-sfp' : ''}${estElec ? ' port-elec' : ''}${estEntree ? ' port-entree' : ''}${classePing}" style="${style}" data-cle="${escH(cleCiblePort(p))}" data-appareil="${appareilCible}" data-slot="${p.slot_id}" data-numero="${p.numero}"${p.cible_hors_ligne ? ' data-hors-ligne="1"' : ''}${cable ? ` data-cable="${escH(cable)}"` : ''}>
         ${voyant}${badgeLien}${symbole ? `<span class="port-elec-symbole">${symbole}</span>` : ''}${contenuNumero}</span>`;
 }
 
@@ -6405,6 +6556,7 @@ setInterval(chargerTopoPorts, 90000);
 setInterval(chargerTypesAValider, 90000);
 
 // ── START ────────────────────────────────────────────────────────────────────
+chargerPrefsAffichage();
 init().then(() => { chargerDiagErreurs(); chargerTopoPorts(); chargerBibliotheque(); chargerTypesAValider(); });
 </script>
 <!-- html2canvas pour export PNG (chargé en différé) -->
