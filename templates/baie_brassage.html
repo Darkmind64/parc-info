@@ -51,6 +51,31 @@
 .rail-soon { font-size:.74rem; color:var(--text-muted); line-height:1.65; }
 .rail-soon b { color:var(--text-secondary); }
 
+/* Bibliothèque d'appareils à glisser-déposer (refonte lot 3) */
+.lib-filtre { width:100%; margin-bottom:0; }
+.lib-section + .lib-section { margin-top:1rem; }
+.lib-section-hd { display:flex; align-items:center; justify-content:space-between; gap:.5rem;
+    font-family:'Rajdhani',sans-serif; font-size:.72rem; font-weight:700; letter-spacing:1px;
+    text-transform:uppercase; color:var(--text-secondary); margin-bottom:.4rem; }
+.lib-count { font-family:'Share Tech Mono',monospace; color:var(--text-muted); font-weight:400;
+    text-transform:none; letter-spacing:0; }
+.lib-refresh { background:var(--bg-secondary); border:1px solid var(--border); border-radius:3px;
+    color:var(--text-muted); width:22px; height:22px; line-height:1; cursor:pointer; font-size:.8rem; }
+.lib-refresh:hover:not(:disabled) { color:var(--accent); border-color:var(--accent); }
+.lib-refresh:disabled { opacity:.5; cursor:default; }
+.lib-list { display:flex; flex-direction:column; gap:.3rem; max-height:220px; overflow-y:auto; }
+.lib-empty { font-size:.7rem; color:var(--text-muted); padding:.4rem 0; }
+.lib-hint { line-height:1.5; }
+.lib-item { display:flex; align-items:center; gap:.4rem; background:var(--bg-secondary);
+    border:1px solid var(--border); border-radius:3px; padding:.35rem .5rem; cursor:grab;
+    font-size:.72rem; color:var(--text-secondary); user-select:none; }
+.lib-item:hover { border-color:var(--accent); color:var(--text-primary); }
+.lib-item.dragging { opacity:.4; }
+.lib-item-ic { flex-shrink:0; }
+.lib-item-txt { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lib-item-txt small { display:block; color:var(--text-muted); font-size:.62rem; }
+.lib-item-snmp { border-style:dashed; }
+
 @media(max-width:1100px) {
     .baie-page { grid-template-columns:minmax(0,1fr); }
     .baie-rail { position:static; }
@@ -1064,7 +1089,15 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 
 <div class="baie-page" id="baie-page" data-lib="closed" data-insp="open">
 
-    <!-- ── ZONE GAUCHE : bibliothèque (contenu au lot 3) ── -->
+    <!-- ── ZONE GAUCHE : bibliothèque (refonte lot 3) ── -->
+    <!-- Appareils à glisser-déposer dans une case libre du rack : inventaire
+         du client pas déjà placé dans une baie (chargerBibliotheque(), au
+         chargement de la page) + appareils vus en SNMP mais absents de
+         l'inventaire (chargerBibliothequeSnmp(), sur demande explicite —
+         sonde SNMP en direct, voir /api/baie/bibliotheque?snmp=1). Le dépôt
+         (voir makeEmptyCell → drop) crée un nouvel équipement 1U pleine
+         largeur puis ouvre aussitôt son inspecteur (lot 2) pour affiner
+         type/ports/taille. -->
     <aside class="baie-rail rail-lib" id="rail-lib">
         <button class="rail-tab" onclick="toggleRail('lib')" title="Ouvrir la bibliothèque d'appareils">📚&nbsp;Bibliothèque</button>
         <div class="rail-inner">
@@ -1073,11 +1106,19 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <button class="rail-x" onclick="toggleRail('lib')" aria-label="Replier la bibliothèque">‹</button>
             </div>
             <div class="rail-bd">
-                <p class="rail-soon"><b>Bientôt (lot 3)</b> — la liste des appareils à glisser
-                dans la baie : inventaire du client <i>et</i> appareils vus en SNMP mais pas
-                encore inventoriés.<br><br>
-                En attendant : onglet <b>+ Placer</b> à droite, ou les boutons
-                <b>+ Bandeau RJ</b> / <b>+ Étagère</b> de la barre d'outils.</p>
+                <input type="text" id="lib-filtre" class="lib-filtre" placeholder="🔎 Filtrer…" oninput="renderBibliotheque()">
+                <div class="form-hint" style="margin:.4rem 0 .7rem;">Glissez un appareil sur une case libre de la baie pour le placer.</div>
+                <div class="lib-section">
+                    <div class="lib-section-hd"><span>🖥 Inventaire</span><span class="lib-count" id="lib-count-app"></span></div>
+                    <div id="lib-appareils" class="lib-list"><div class="lib-empty">Chargement…</div></div>
+                </div>
+                <div class="lib-section">
+                    <div class="lib-section-hd">
+                        <span>📡 Vus en SNMP</span>
+                        <button type="button" class="lib-refresh" id="lib-snmp-refresh" onclick="chargerBibliothequeSnmp()" title="Sonder les équipements réseau du client (quelques secondes)">🔄</button>
+                    </div>
+                    <div id="lib-snmp" class="lib-list"><div class="lib-empty lib-hint">Cliquez 🔄 pour sonder les équipements réseau SNMP du client — appareils vus mais pas encore inventoriés.</div></div>
+                </div>
             </div>
         </div>
     </aside>
@@ -2965,12 +3006,16 @@ function makeEmptyCell(u, debut, largeur, rowH) {
         // la peine d'aller vérifier côté serveur, l'utilisateur a déjà vu
         // que cet endroit était refusé avant même de relâcher la souris.
         if (dragInfo && elementEnCollision(pos, dragInfo.hauteurU, col, dragInfo.largeurU, dragInfo.id)) {
-            showFlash('Chevauche un autre élément — déplacement annulé.', 'danger');
+            showFlash(`Chevauche un autre élément — ${data.lib ? 'placement' : 'déplacement'} annulé.`, 'danger');
             masquerMarqueur();
             return;
         }
         masquerMarqueur();
-        await deplacerSlot(data.id, pos, col);
+        // data.lib : glissé depuis la bibliothèque (refonte lot 3, voir
+        // libDragStart) — pas un id de slot existant à déplacer, mais un
+        // nouvel équipement à créer ici.
+        if (data.lib) { await placerDepuisBibliotheque(data, pos, col); }
+        else { await deplacerSlot(data.id, pos, col); }
     });
 
     return cell;
@@ -3002,6 +3047,177 @@ async function deplacerSlot(id, newPos, newCol) {
     slots[key(slot.position, slot.col_index || 0)] = slot;
     nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1));
     renderRack(); renderList();
+}
+
+// Dépose d'un élément de la BIBLIOTHÈQUE (refonte lot 3, voir libDragStart)
+// sur une case libre — pas un slot existant à déplacer : crée un nouvel
+// équipement 1U pleine largeur ici (même route POST que placerEquip()),
+// avec juste le nom et — pour un appareil de l'inventaire — son type
+// déclaré préremplis (même logique que autoRemplir('cfg') sur le
+// sélecteur "Associer à un appareil" du panneau + Placer, y compris
+// l'absence de contrôle de correspondance avec la liste des types de
+// baie : l'utilisateur corrige au besoin). Ouvre aussitôt l'inspecteur
+// (lot 2) du nouveau slot pour affiner ports/taille/type sans repasser
+// par un second geste.
+async function placerDepuisBibliotheque(data, pos, col) {
+    const payload = {
+        position: pos, col_index: col, hauteur_u: 1, largeur_u: 10,
+        baie_nom: currentBaie,
+        type_equipement: data.type || '',
+        nom_custom: data.nom || '',
+        description: '',
+        couleur: TYPE_COLORS[data.type] || '#1e3a5f',
+        orientation: 'horizontal',
+        puissance_va: 0,
+        appareil_id: data.appareil_id || null,
+        peripherique_id: null,
+        nb_ports: 0, nb_ports_sfp: 0, nb_ports_wan: 0, ports_disposition: 'ligne',
+    };
+    const r = await fetch('/api/baie/slot', {
+        method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    const s = await r.json();
+    if (!r.ok || s.error) {
+        showFlash(s.error || 'Le placement a été refusé.', 'danger');
+        return;
+    }
+    slots[key(s.position, s.col_index || 0)] = s;
+    if ((s.col_index || 0) + 1 > nbCols) nbCols = (s.col_index || 0) + 1;
+    renderRack(); renderList(); renderBibliotheque();
+    EquipmentModal.ouvrir(s.id);
+}
+
+// ── BIBLIOTHÈQUE D'APPAREILS (refonte lot 3) ────────────────────────────────
+// Panneau du rail de gauche (#rail-lib) : liste à glisser-déposer sur une
+// case libre du rack. Deux sources : l'inventaire du client pas déjà placé
+// dans une baie (chargée une fois au démarrage, rapide — simple lecture
+// base), et les appareils vus dans la table ARP des équipements réseau
+// SNMP du client mais absents de l'inventaire (chargée à la demande
+// seulement, sur clic 🔄 — sonde SNMP EN DIRECT côté serveur, jusqu'à 10 s,
+// voir network_diag.hotes_vus_snmp). "Déjà placé" est réévalué à chaque
+// rendu depuis `slots` (pas seulement à l'appel serveur) : un appareil
+// déposé disparaît donc immédiatement de la bibliothèque sans recharger.
+let _bibliotheque = { appareils: [], snmp: null };
+
+async function chargerBibliotheque() {
+    try {
+        const r = await fetch('/api/baie/bibliotheque');
+        const data = await r.json();
+        _bibliotheque.appareils = data.appareils || [];
+    } catch (e) {
+        _bibliotheque.appareils = [];
+    }
+    renderBibliotheque();
+    initBibliothequeDnD();
+}
+
+async function chargerBibliothequeSnmp() {
+    const btn = document.getElementById('lib-snmp-refresh');
+    btn.disabled = true;
+    btn.textContent = '⏳';
+    document.getElementById('lib-snmp').innerHTML = '<div class="lib-empty lib-hint">Sondage SNMP en cours (jusqu’à 10 s)…</div>';
+    try {
+        const r = await fetch('/api/baie/bibliotheque?snmp=1');
+        const data = await r.json();
+        _bibliotheque.snmp = data.snmp || { ok: false, motif: 'erreur', hotes: {} };
+    } catch (e) {
+        _bibliotheque.snmp = { ok: false, motif: 'erreur', hotes: {} };
+    }
+    btn.disabled = false;
+    btn.textContent = '🔄';
+    renderBibliotheque();
+}
+
+const LIB_SNMP_MOTIFS = {
+    snmp_inactif: 'SNMP désactivé (Réglages → Réseau & Scan).',
+    aucun_equipement: 'Aucun switch/routeur SNMP dans l’inventaire du client.',
+    aucune_reponse_snmp: 'Aucun équipement n’a répondu au SNMP.',
+    erreur: 'Erreur pendant le relevé SNMP.',
+};
+
+function libItemAppareilHTML(a) {
+    const sous = [a.type_appareil, a.adresse_ip].filter(Boolean).join(' · ');
+    return `<div class="lib-item" draggable="true" data-appareil-id="${a.id}" data-nom="${escH(a.nom_machine||'')}" data-type="${escH(a.type_appareil||'')}" title="Glisser sur une case libre de la baie">
+        <span class="lib-item-ic">🖥</span>
+        <span class="lib-item-txt">${escH(a.nom_machine||'(sans nom)')}${sous ? `<small>${escH(sous)}</small>` : ''}</span>
+    </div>`;
+}
+function libItemSnmpHTML(ip, h) {
+    const nomSource = (h.sources && h.sources[0] && h.sources[0].nom) || '';
+    const nom = nomSource || h.vendor || ip;
+    const sous = [h.vendor, ip].filter(Boolean).join(' · ');
+    const via = nomSource ? `Vu via ${nomSource} — ` : '';
+    return `<div class="lib-item lib-item-snmp" draggable="true" data-nom="${escH(nom)}" data-type="" title="${escH(via)}glisser sur une case libre de la baie">
+        <span class="lib-item-ic">📡</span>
+        <span class="lib-item-txt">${escH(nom)}${sous ? `<small>${escH(sous)}</small>` : ''}</span>
+    </div>`;
+}
+
+function renderBibliotheque() {
+    const filtre = (document.getElementById('lib-filtre').value || '').trim().toLowerCase();
+    const dejaPlaces = new Set(Object.values(slots).map(s => s.appareil_id).filter(Boolean));
+    const appareils = _bibliotheque.appareils.filter(a => !dejaPlaces.has(a.id));
+    const appFiltres = !filtre ? appareils : appareils.filter(a =>
+        (a.nom_machine||'').toLowerCase().includes(filtre)
+        || (a.adresse_ip||'').toLowerCase().includes(filtre)
+        || (a.type_appareil||'').toLowerCase().includes(filtre));
+    document.getElementById('lib-count-app').textContent = appareils.length ? String(appareils.length) : '';
+    document.getElementById('lib-appareils').innerHTML = !appareils.length
+        ? '<div class="lib-empty">Tous les appareils de l’inventaire sont déjà placés.</div>'
+        : (!appFiltres.length
+            ? '<div class="lib-empty">Aucun résultat pour ce filtre.</div>'
+            : appFiltres.map(libItemAppareilHTML).join(''));
+
+    const wrapSnmp = document.getElementById('lib-snmp');
+    const snmp = _bibliotheque.snmp;
+    if (!snmp) {
+        // Rien encore demandé : laisse l'indication "cliquez 🔄" du HTML statique.
+    } else if (!snmp.ok) {
+        wrapSnmp.innerHTML = `<div class="lib-empty lib-hint">${escH(LIB_SNMP_MOTIFS[snmp.motif] || 'Rien à afficher.')}</div>`;
+    } else {
+        const entrees = Object.entries(snmp.hotes || {});
+        const filtrees = !filtre ? entrees : entrees.filter(([ip, h]) =>
+            ip.toLowerCase().includes(filtre)
+            || (h.vendor||'').toLowerCase().includes(filtre)
+            || (h.sources||[]).some(s => (s.nom||'').toLowerCase().includes(filtre)));
+        wrapSnmp.innerHTML = !entrees.length
+            ? '<div class="lib-empty">Aucun appareil vu en SNMP en dehors de l’inventaire.</div>'
+            : (!filtrees.length
+                ? '<div class="lib-empty">Aucun résultat pour ce filtre.</div>'
+                : filtrees.map(([ip, h]) => libItemSnmpHTML(ip, h)).join(''));
+    }
+}
+
+// Délégation d'évènement (un seul listener par liste, jamais à réattacher
+// après un re-rendu de renderBibliotheque()) — dragInfo (même variable
+// globale que le déplacement d'un équipement déjà posé, voir plus haut)
+// avec un id null : ne peut jamais correspondre à un slot existant, donc
+// n'exclut jamais rien du contrôle de chevauchement (voir elementEnCollision).
+let _libInit = false;
+function initBibliothequeDnD() {
+    if (_libInit) return;
+    _libInit = true;
+    ['lib-appareils', 'lib-snmp'].forEach(idListe => {
+        const wrap = document.getElementById(idListe);
+        wrap.addEventListener('dragstart', e => {
+            const el = e.target.closest('.lib-item');
+            if (!el) return;
+            if (baieVerrouillee) { e.preventDefault(); return; }
+            e.dataTransfer.setData('text/plain', JSON.stringify({
+                lib: true,
+                appareil_id: el.dataset.appareilId ? parseInt(el.dataset.appareilId) : null,
+                nom: el.dataset.nom || '',
+                type: el.dataset.type || '',
+            }));
+            dragInfo = { id: null, hauteurU: 1, largeurU: 10, decalageU: 0, decalageCol: 0 };
+            el.classList.add('dragging');
+        });
+        wrap.addEventListener('dragend', e => {
+            const el = e.target.closest('.lib-item');
+            if (el) el.classList.remove('dragging');
+            dragInfo = null;
+        });
+    });
 }
 
 // ── REDIMENSIONNEMENT (glisser la poignée du bas) ──────────────────────────────
@@ -5863,7 +6079,7 @@ setInterval(chargerDiagErreurs, 60000);
 setInterval(chargerTopoPorts, 90000);
 
 // ── START ────────────────────────────────────────────────────────────────────
-init().then(() => { chargerDiagErreurs(); chargerTopoPorts(); });
+init().then(() => { chargerDiagErreurs(); chargerTopoPorts(); chargerBibliotheque(); });
 </script>
 <!-- html2canvas pour export PNG (chargé en différé) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
