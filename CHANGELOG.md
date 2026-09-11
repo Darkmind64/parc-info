@@ -1,5 +1,25 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.0] - 2026-09-11 🎛️
+
+### Refonte complète de l'écran Baie de brassage (6 lots)
+
+Demande directe : l'ancienne interface de `/baie` n'était *« pas ergonomique ni intuitive »* — panneau de droite peu clair, boutons disparates au-dessus du rack, aucune bibliothèque d'appareils, aucune mise en évidence des équipements réseau détectés, aucune validation du type déclaré. Une maquette interactive a été construite et validée avec l'utilisateur avant toute implémentation réelle, puis livrée par lots.
+
+**Lot 1 — Barre d'outils regroupée + coquille 3 zones rétractables.** Les actions de la barre d'outils sont désormais rassemblées par groupes nommés (Baie, Ajouter, Affichage, Câblage & analyse). L'écran passe à 3 zones : bibliothèque à gauche, rack au centre, inspecteur à droite — les deux rails latéraux se replient en un onglet vertical, état mémorisé par navigateur.
+
+**Lot 2 — Inspecteur contextuel unifié.** Les 3 modales flottantes qui servaient à éditer un équipement, un port ou une prise murale sont fusionnées en un seul panneau (onglet « 🔍 Inspecteur » du rail de droite). Un simple clic sur un équipement, un port ou une prise l'ouvre et le remplit (le double-clic reste disponible) ; fermer revient à l'onglet « + Placer ».
+
+**Lot 3 — Bibliothèque d'appareils à glisser-déposer.** Le rail de gauche liste les appareils de l'inventaire pas encore placés dans une baie, ainsi que — sur demande explicite (sonde SNMP en direct) — les appareils vus dans la table ARP des équipements réseau du client mais absents de l'inventaire. Glisser un appareil sur une case libre du rack le place aussitôt et ouvre son inspecteur pour affiner ports/type/taille.
+
+**Lots 4 et 5 — Ports réseau déclarés et détectés.** Un port sur lequel un switch, un routeur/pare-feu ou une borne Wi-Fi est déclaré porte désormais une icône dédiée. Cette icône se combine à ce que le diagnostic réseau y voit réellement (topologie SNMP) : anneau vert si le déclaré et le détecté concordent, rouge s'ils divergent. Un clic sur l'icône ouvre un panneau listant les appareils vus ou déclarés sur ce port.
+
+**Lot 6 — Validation du type d'équipement.** Quand un appareil placé dans la baie a été vu comme voisin LLDP d'un switch ou d'un routeur du client, avec des capacités qui contredisent son type déclaré, un bouton « ⚠ type(s) à valider » apparaît dans la barre d'outils et un bandeau dans l'inspecteur propose de confirmer le type détecté ou de l'ignorer.
+
+**Déploiement.** Purement côté interface + 3 nouvelles routes de lecture (`GET /api/baie/bibliotheque`, `/topologie-ports`, `/types-a-valider`), aucun SNMP synchrone, aucune migration de schéma requise au-delà de ce qui existait déjà pour le diagnostic réseau. Vérifié en navigateur à chaque lot ; suites de tests baie et diagnostic réseau revérifiées à chaque étape, zéro régression.
+
+---
+
 ## [2.32.10] - 2026-09-10 🔁
 
 ### Synchronisation Turso — suite de 2.32.9 (régression + copie initiale)

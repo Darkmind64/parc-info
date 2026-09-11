@@ -6520,6 +6520,7 @@ def _ports_avec_details(conn, slot_id):
         d['lie_appareil_id'] = None
         lie_type_appareil = None
         lie_p_categorie = None
+        cible = None
         if d['appareil_id']:
             nom = d['nom_machine'] or ('Appareil #%d' % d['appareil_id'])
         elif d['peripherique_id']:
@@ -6606,6 +6607,10 @@ def _ports_avec_details(conn, slot_id):
         else:
             d['couleur'] = _couleur_port(d.get('type_appareil'), d.get('p_categorie'), d.get('usage_libre'), bool(d['lie_slot_id']))
         d['prise_murale'] = prises_par_numero.get(d['numero'])
+        # Type de l'équipement au bout du cordon (appareil lié, sinon
+        # type_equipement du slot en face) — sert au marqueur « équipement
+        # réseau déclaré sur ce port » côté client (refonte baie, lot 4).
+        d['lie_type'] = lie_type_appareil or (cible[1] if d['lie_slot_id'] and cible else '') or ''
         ports.append(d)
     return ports
 
@@ -7610,6 +7615,80 @@ def api_baie_diag_erreurs():
                   for r in rows},
         'equipements': equipements,
     })
+
+
+@app.route('/api/baie/topologie-ports')
+@login_required
+def api_baie_topologie_ports():
+    """Topologie SNMP projetée sur les ports de la baie (refonte baie, lot 5) :
+    `{"<slot>:<port>": {detected_kind, uplink, vlan, n, devices:[...]}}`.
+    Alimente l'anneau « équipement réseau détecté » et le panneau
+    « appareils du port ». Lecture seule, aucun SNMP synchrone."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        return jsonify(network_diag.appareils_par_port_baie(cid))
+    except Exception:
+        logger.debug('api_baie_topologie_ports', exc_info=True)
+        return jsonify({})
+
+
+@app.route('/api/baie/bibliotheque')
+@login_required
+def api_baie_bibliotheque():
+    """Bibliothèque d'appareils à glisser dans la baie (refonte baie, lot 3) :
+    les appareils de l'inventaire du client pas encore placés dans UNE baie
+    (toutes les baies de ce client confondues — un appareil physique n'existe
+    qu'à un seul endroit, quel que soit le nom de la baie affichée) et, sur
+    demande explicite (`?snmp=1` — coûteux, sonde SNMP EN DIRECT, voir
+    network_diag.hotes_vus_snmp), les hôtes vus dans la table ARP des
+    équipements réseau SNMP du client mais absents de l'inventaire (IP ou MAC
+    déjà connue du client écartée : un doublon de ce qui figure déjà côté
+    inventaire n'apporterait rien de plus ici)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    conn = get_db()
+    tous = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine, type_appareil, adresse_ip, adresse_mac, marque, modele '
+        'FROM appareils WHERE client_id=? ORDER BY nom_machine COLLATE NOCASE', (cid,)).fetchall()]
+    deja_places = {r[0] for r in conn.execute(
+        'SELECT appareil_id FROM baie_slots WHERE client_id=? AND appareil_id IS NOT NULL',
+        (cid,)).fetchall()}
+    a_placer = [a for a in tous if a['id'] not in deja_places]
+
+    resultat = {'appareils': a_placer, 'snmp': None}
+    if request.args.get('snmp') == '1':
+        ips_connues = {a['adresse_ip'] for a in tous if a.get('adresse_ip')}
+        macs_connues = {network_diag._norm_mac(a['adresse_mac']) for a in tous if a.get('adresse_mac')}
+        macs_connues |= set(network_diag._macs_secondaires(conn, cid).keys())
+        try:
+            snmp = network_diag.hotes_vus_snmp(cid)
+        except Exception:
+            logger.debug('api_baie_bibliotheque: hotes_vus_snmp', exc_info=True)
+            snmp = {'ok': False, 'motif': 'erreur', 'hotes': {}}
+        hotes = {ip: h for ip, h in (snmp.get('hotes') or {}).items()
+                 if ip not in ips_connues and network_diag._norm_mac(h.get('mac')) not in macs_connues}
+        resultat['snmp'] = {'ok': snmp.get('ok'), 'motif': snmp.get('motif'), 'hotes': hotes}
+    conn.close()
+    return jsonify(resultat)
+
+
+@app.route('/api/baie/types-a-valider')
+@login_required
+def api_baie_types_a_valider():
+    """Types d'équipement de la baie que la LLDP contredit (refonte baie,
+    lot 6) : `{"<slot_id>": {detected, source, current}}`. Lecture seule,
+    aucun SNMP synchrone — voir network_diag.types_a_valider."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        return jsonify(network_diag.types_a_valider(cid))
+    except Exception:
+        logger.debug('api_baie_types_a_valider', exc_info=True)
+        return jsonify({})
 
 
 @app.route('/api/baie/activite/moniteur')

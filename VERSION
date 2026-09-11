@@ -1,8 +1,43 @@
-PARCINFO_VERSION=2.32.10
-RELEASE_DATE=2026-09-10
-BUILD_NUMBER=2026091002
+PARCINFO_VERSION=2.33.0
+RELEASE_DATE=2026-09-11
+BUILD_NUMBER=2026091101
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.0 - Refonte de l'écran Baie de brassage (6 lots)
+#
+# Demande directe : l'ancienne interface de /baie n'était « pas ergonomique
+# ni intuitive » — panneau de droite peu clair, boutons disparates au-dessus
+# du rack, aucune bibliothèque d'appareils, aucune mise en évidence des
+# équipements réseau détectés, aucune validation du type déclaré. Maquette
+# interactive validée avec l'utilisateur avant toute implémentation réelle.
+#
+# Lot 1 — barre d'outils regroupée par groupes nommés (.baie-toolbar/
+#   .tb-group) + coquille 3 zones rétractables (bibliothèque | rack |
+#   inspecteur), état mémorisé par navigateur (initRails/toggleRail).
+# Lot 2 — les 3 modales flottantes d'édition (équipement/port/prise murale)
+#   fusionnées dans un onglet « Inspecteur » du rail de droite ; clic simple
+#   = sélection + ouverture (double-clic conservé en plus).
+# Lot 3 — bibliothèque d'appareils à glisser-déposer : inventaire du client
+#   pas déjà placé dans une baie + (sur demande, sonde SNMP en direct)
+#   appareils vus en SNMP mais absents de l'inventaire ; glisser sur une
+#   case libre crée l'équipement puis ouvre aussitôt son inspecteur.
+# Lot 4 — ports où un switch/routeur/borne Wi-Fi est DÉCLARÉ mis en
+#   évidence (icône hors du port, cliquable).
+# Lot 5 — ces mêmes ports enrichis de ce que le diagnostic réseau y voit
+#   RÉELLEMENT (topologie SNMP projetée sur la baie) : anneau vert si
+#   confirmé, rouge si incohérent avec le déclaré, panneau listant les
+#   appareils vus/déclarés au clic sur l'icône.
+# Lot 6 — validation du type d'équipement : compare, pour chaque
+#   équipement vu comme voisin LLDP d'un switch/routeur du client, la
+#   capacité détectée (pont/routeur/wlan) au type déclaré dans la baie —
+#   bouton « type(s) à valider » dans la barre d'outils, bandeau dans
+#   l'inspecteur pour valider ou ignorer. Lecture seule, aucun SNMP
+#   synchrone (données déjà relevées en continu par le diagnostic réseau).
+#
+# Vérifié en navigateur à chaque lot (chargement, glisser-déposer,
+# sauvegarde réelle, collision, incohérences LLDP synthétiques) + suites de
+# tests baie/diagnostic réseau revérifiées à chaque étape, zéro régression.
 
 # Version 2.32.10 - Sync Turso : suite de 2.32.9 (régression + copie initiale)
 #

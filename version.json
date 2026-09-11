@@ -1,23 +1,25 @@
 {
-  "version": "2.32.10",
-  "release_date": "2026-09-10",
+  "version": "2.33.0",
+  "release_date": "2026-09-11",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.10",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.10/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.33.0",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.0/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Synchronisation Turso -- deux correctifs a la suite de 2.32.9. (1) REGRESSION 2.32.9 corrigee : les modifications d'appareils ne se synchronisaient plus entre instances. Le filtre anti-ecrasement du PULL considerait comme \"edition locale en attente\" toute ligne ayant une entree recente dans le journal -- or un recalcul de score de sante (toutes les 30 min) ou un ping en laisse une, sans que ce soit une vraie modif. Resultat : l'instance refusait les modifs venues des autres. Desormais le champ `date_maj` fait autorite : on ne garde la version locale que si elle est strictement plus recente que la distante (les tables sans `date_maj` -- cablage de baie, MAC secondaires, listes -- gardent la regle \"edition locale en attente prime\"). (2) COPIE INITIALE : le journal de sync ne propage que les ecritures POSTERIEURES a la pose de ses declencheurs. Une table ajoutee au suivi apres coup (`appareil_macs`, `licences_appareils`, documents lies, droits...), ou dont les lignes preexistaient a l'activation de la sync, restait vide sur Turso indefiniment. Nouveau `_seed_tables_vides_sur_turso` : au premier cycle qui suit la mise a jour, chaque table suivie non vide localement MAIS vide sur Turso voit toutes ses lignes journalisees puis poussees. Garde-fou strict : une table deja peuplee sur Turso n'est jamais reecrite (drapeau par table, cout nul ensuite).",
+    "new_features": "Refonte complete de l'ecran Baie de brassage (6 lots), a partir d'une maquette interactive validee avec l'utilisateur. Lot 1 : barre d'outils regroupee par groupes nommes + coquille 3 zones retractables (bibliotheque | rack | inspecteur), etat memorise par navigateur. Lot 2 : les 3 modales flottantes d'edition (equipement/port/prise murale) fusionnees dans un onglet Inspecteur du rail de droite -- clic simple = selection + ouverture. Lot 3 : bibliotheque d'appareils a glisser-deposer (inventaire du client pas deja place dans une baie + appareils vus en SNMP mais absents de l'inventaire, sur demande). Lot 4 : ports ou un switch/routeur/borne Wi-Fi est DECLARE mis en evidence. Lot 5 : ces memes ports enrichis de ce que le diagnostic reseau y voit REELLEMENT (topologie SNMP projetee sur la baie) -- anneau vert si confirme, rouge si incoherent, panneau listant les appareils vus/declares. Lot 6 : validation du type d'equipement -- compare la capacite LLDP detectee (pont/routeur/wlan) au type declare, bouton et bandeau dediees pour valider ou ignorer. Lecture seule, aucun SNMP synchrone pour les lots 4/5/6.",
     "improvements": [
-      "Sync Turso : les modifications d'appareils se re-synchronisent entre instances (regression 2.32.9).",
-      "Sync Turso : copie initiale automatique des tables restees vides sur Turso (appareil_macs, licences, droits, documents lies...)."
+      "Baie de brassage : panneau de droite unifie (inspecteur contextuel equipement/port/prise murale).",
+      "Baie de brassage : bibliotheque d'appareils (inventaire + SNMP) avec placement par glisser-deposer.",
+      "Baie de brassage : mise en evidence des equipements reseau declares ET detectes par SNMP, avec panneau des appareils vus par port.",
+      "Baie de brassage : validation assistee du type d'equipement a partir des capacites LLDP detectees."
     ]
   },
   "checksums": {
@@ -28,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.10"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.0"
 }
