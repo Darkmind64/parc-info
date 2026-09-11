@@ -1,24 +1,22 @@
 {
-  "version": "2.33.2",
+  "version": "2.33.3",
   "release_date": "2026-09-11",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.33.2",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.33.3",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Baie de brassage : la maquette validee etait aussi le modele a suivre pour l'ergonomie fine, pas seulement le contenu de l'inspecteur (deja corrige en 2.33.1). Trois retours utilisateur traites dans cette version. (1) En-tete + barre d'outils : en-tete dedie compact (titre, client/baie, boutons Exporter/Configurer) au lieu de la grosse banniere generique -- nav globale ParcInfo conservee au-dessus. Typographie de la barre d'outils alignee sur la maquette (casse normale, densite resserree) au lieu du style CTA majuscule du reste de l'app. Poignees de redimensionnement dotees d'un repere visuel permanent. Menu Affichage complete (Sante, Cables, Hors site). (2) Redimensionnement en largeur : la grille horizontale passe de 10 crans (dixiemes) a 1000 (millièmes) -- un glisser suit desormais la souris au pixel pres au lieu de sauter par paliers de 10% perceptibles. Migration automatique au demarrage, aucune perte de position/largeur existante. (3) Deplacement d'un equipement deja pose : ne fonctionnait pas de facon fiable (suivait la souris puis retombait a sa place) -- cause identifiee, le glisser-depose HTML5 natif s'annule silencieusement des qu'un survol intermediaire ne confirme pas la cible. Remplace par le meme mecanisme que la maquette (evenements souris avec repositionnement direct), comme les poignees de redimensionnement qui n'avaient jamais eu ce probleme. Verifie par plusieurs deplacements reels consecutifs dans le navigateur.",
+    "new_features": "Interface : l'ensemble de l'application n'exploitait pas la largeur des ecrans 1920px, la norme actuelle. Le conteneur principal (templates/base.html) plafonnait toutes les pages a 1400px de large quelle que soit la resolution -- sur un ecran 1920px, environ 500px de marges mortes de chaque cote, alors que la nav et la barre client, elles, etaient deja pleine largeur. Plafond remonte a 1800px : gain de place reel sur les ecrans charges en donnees (listes, tableau de bord, baie de brassage) sans devenir excessif sur un ecran ultrawide. Verifie en navigateur a 1920x1080 sur le tableau de bord, la liste des appareils et la baie de brassage.",
     "improvements": [
-      "Baie de brassage : en-tete dedie et barre d'outils alignes visuellement sur la maquette (typographie, poignees, menu Affichage complet).",
-      "Baie de brassage : redimensionnement en largeur quasi continu (grille a 1000 positions au lieu de 10).",
-      "Baie de brassage : deplacement d'un equipement fiabilise (evenements souris directs au lieu du glisser-depose HTML5 natif)."
+      "Interface : largeur de contenu maximale remontee de 1400px a 1800px sur toutes les pages, pour mieux exploiter un ecran 1920px."
     ]
   },
   "checksums": {
@@ -29,5 +27,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.2"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.3"
 }

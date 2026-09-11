@@ -1,8 +1,25 @@
-PARCINFO_VERSION=2.33.2
+PARCINFO_VERSION=2.33.3
 RELEASE_DATE=2026-09-11
-BUILD_NUMBER=2026091103
+BUILD_NUMBER=2026091104
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.3 - Interface : exploiter la largeur des écrans 1920px
+#
+# Remarque utilisateur : l'ensemble de l'interface n'exploitait pas la
+# largeur d'un écran 1920px, la norme actuelle, alors que ça permettrait
+# d'afficher plus de détails. Cause : le conteneur principal
+# (templates/base.html) plafonnait TOUTES les pages à 1400px de large,
+# quelle que soit la résolution — la nav et la barre client, elles,
+# étaient déjà pleine largeur. Sur 1920px ça laissait ~500px de marges
+# mortes de chaque côté. Plafond remonté à 1800px : gain de place réel
+# sur les écrans data-denses (listes, tableau de bord, baie de brassage)
+# sans devenir excessif sur un ultrawide. Vérifié qu'aucun gabarit n'a de
+# conteneur interne plus étroit qui annulerait le gain (les formulaires
+# gardent leur propre largeur, volontairement plus étroite pour la
+# lisibilité). Vérifié en navigateur à 1920x1080 sur le tableau de bord,
+# la liste des appareils et la baie de brassage — aucune erreur console,
+# mise en page toujours correcte.
 
 # Version 2.33.2 - Baie de brassage : ergonomie fine alignée sur la maquette
 #

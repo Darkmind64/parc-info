@@ -6,7 +6,7 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.33.2 ⭐ **Baie de brassage : ergonomie fine alignée sur la maquette** — en-tête dédié et barre d'outils repris visuellement de la maquette (typographie, poignées de redimensionnement avec repère permanent, menu Affichage complété), redimensionnement en largeur quasi continu (grille à 1000 positions au lieu de 10), déplacement d'un équipement fiabilisé (évènements souris directs au lieu du glisser-déposer HTML5 natif, source d'échecs silencieux). Suite du correctif 2.33.1 (contenu de l'inspecteur) et de la refonte complète de l'écran Baie de brassage (6 lots, v2.33.0).  
+**Version** : 2.33.3 ⭐ **Interface : exploiter la largeur des écrans 1920px** — le conteneur principal plafonnait toutes les pages à 1400px de large quelle que soit la résolution (~500px de marges mortes sur un écran 1920px, la norme actuelle) ; remonté à 1800px, gain de place réel sur les écrans data-denses (listes, tableau de bord, baie de brassage). Suite du correctif 2.33.2 (ergonomie fine de la baie de brassage alignée sur la maquette).  
 **Dernière mise à jour** : 2026-09-11
 
 ---
@@ -146,9 +146,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Correspondance champs, détail par système d'exploitation](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-gui.exe)
-- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-Windows.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/ParcInfo-Windows.exe)
 
 ### Interface mobile (PWA)
 Accessible sur `/m` depuis un smartphone : consultation en lecture seule du
@@ -263,25 +263,25 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.33.2
+## 📥 Téléchargements v2.33.3
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger |
 |-----------|----------|
-| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-Windows.exe) |
-| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-macOS-ARM.zip) |
-| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-macOS-Intel.zip) |
-| **Docker** | `docker pull darkmind64/parcinfo:v2.33.2` |
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/ParcInfo-macOS-ARM.zip) |
+| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/ParcInfo-macOS-Intel.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.33.3` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Usage |
 |------|-----------|----------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-gui.exe) | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector.exe) | Automatisation/scripts |
-| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
-| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector.exe) | Automatisation/scripts |
+| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
+| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.3/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -315,7 +315,7 @@ python system-info-collector.py --client-id 5
 > xattr -cr ParcInfo-Collector.app   # ou : xattr -cr system-info-collector
 > ```
 
-👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.33.2)
+👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.33.3)
 
 ---
 
