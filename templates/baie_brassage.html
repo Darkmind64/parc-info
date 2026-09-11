@@ -88,6 +88,58 @@
 .eqm-typebar-actions button:hover { border-color:var(--accent); color:var(--accent); }
 .eqm-typebar-actions button.go:hover { border-color:var(--accent-orange,#f59e0b); color:var(--accent-orange,#f59e0b); }
 
+/* Inspecteur — refonte visuelle (fidèle à la maquette validée, corrigée
+   après retour utilisateur : le lot 2 avait seulement déplacé les champs
+   de l'ancienne modale sans jamais reprendre le design proposé). */
+.insp-head { display:flex; align-items:center; gap:.6rem; margin-bottom:.8rem; }
+.insp-head .insp-ic { width:32px; height:32px; border-radius:5px; display:grid; place-items:center;
+    font-size:1rem; background:var(--bg-secondary); border:1px solid var(--border); flex-shrink:0; }
+.insp-head .insp-txt { flex:1; min-width:0; }
+.insp-head .insp-kind-lbl { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:1.5px;
+    text-transform:uppercase; color:var(--text-muted); }
+.insp-head .insp-kind-nom { font-family:'Rajdhani',sans-serif; font-weight:700; font-size:1.05rem; line-height:1.15;
+    color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.insp-close { background:none; border:1px solid var(--border); color:var(--text-muted); border-radius:3px;
+    padding:.15rem .5rem; cursor:pointer; flex-shrink:0; }
+.insp-close:hover { border-color:var(--accent); color:var(--accent); }
+
+/* bloc « det » : stats réseau / bandeau / câblage — même famille visuelle
+   que .eqm-typebar mais neutre (pas d'alerte). */
+.insp-det { border:1px solid var(--border); border-radius:5px; padding:.5rem .6rem; margin-bottom:.6rem;
+    background:var(--bg-secondary); font-size:.78rem; }
+.insp-det-h { font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:1px; text-transform:uppercase;
+    color:var(--text-muted); margin-bottom:.35rem; }
+.insp-det-line { display:flex; justify-content:space-between; gap:.6rem; padding:.14rem 0; }
+.insp-det-line .k { color:var(--text-muted); }
+.insp-det-line .v { color:var(--text-primary); font-family:'Share Tech Mono',monospace; font-size:.74rem; text-align:right; }
+.insp-det-line .v.ok { color:var(--accent-green); }
+.insp-det-line .v.warn { color:var(--accent-orange); }
+
+/* Position/largeur : lecture seule dans l'inspecteur (glisser le corps /
+   bord droit dans la baie pour les changer, poignées déjà existantes) */
+.insp-ro { font-family:'Share Tech Mono',monospace; font-size:.78rem; color:var(--text-secondary);
+    background:var(--bg-secondary); border:1px dashed var(--border); border-radius:4px; padding:.34rem .5rem; }
+
+/* stepper hauteur (U) — seule dimension réglable au clic (physiquement en
+   U entiers), le reste se règle en glissant dans la baie */
+.insp-ustep { display:flex; align-items:center; border:1px solid var(--border); border-radius:4px;
+    overflow:hidden; background:var(--bg-secondary); width:100%; }
+.insp-ustep button { background:none; border:0; color:var(--text-secondary); padding:.34rem .6rem;
+    font-size:.85rem; font-weight:700; cursor:pointer; }
+.insp-ustep button:hover { color:var(--accent); }
+.insp-ustep span { flex:1; text-align:center; font-family:'Share Tech Mono',monospace; font-size:.78rem;
+    color:var(--text-primary); border-left:1px solid var(--border); border-right:1px solid var(--border); padding:.34rem 0; }
+
+/* boutons d'action groupés en bas de l'inspecteur */
+.insp-actions { display:flex; flex-direction:column; gap:.45rem; margin-top:.9rem; padding-top:.75rem;
+    border-top:1px solid var(--border); }
+.insp-abtn { display:flex; align-items:center; justify-content:center; gap:.4rem; border:1px solid var(--border);
+    background:var(--bg-secondary); color:var(--text-secondary); border-radius:4px; padding:.45rem; font-size:.78rem;
+    font-weight:600; cursor:pointer; width:100%; }
+.insp-abtn:hover { border-color:var(--border-glow); color:var(--text-primary); }
+.insp-abtn.acc { border-color:color-mix(in srgb,var(--accent) 45%,var(--border)); color:var(--accent); }
+.insp-abtn.danger { border-color:color-mix(in srgb,var(--accent-red) 40%,var(--border)); color:var(--accent-red); }
+
 @media(max-width:1100px) {
     .baie-page { grid-template-columns:minmax(0,1fr); }
     .baie-rail { position:static; }
@@ -1316,9 +1368,13 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 
             <!-- Équipement (ex-#equipment-modal) -->
             <div id="insp-equipement" style="display:none;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
-                    <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">⬛ <span id="eqm-titre">Équipement</span></h3>
-                    <button type="button" onclick="EquipmentModal.fermer()" title="Fermer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                <div class="insp-head">
+                    <span class="insp-ic" id="eqm-ic">⬛</span>
+                    <div class="insp-txt">
+                        <div class="insp-kind-lbl" id="eqm-kind-lbl">Équipement</div>
+                        <div class="insp-kind-nom" id="eqm-titre">Équipement</div>
+                    </div>
+                    <button type="button" class="insp-close" onclick="EquipmentModal.fermer()" title="Fermer">✕</button>
                 </div>
                 <!-- Bandeau « type à valider » (refonte lot 6) — voir
                      EquipmentModal.majBandeauType(), rempli seulement quand
@@ -1331,6 +1387,23 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <button type="button" onclick="EquipmentModal.ignorerType()">Ignorer</button>
                     </div>
                 </div>
+
+                <!-- Stats réseau (switch/routeur/AP…) ou bandeau RJ — voir
+                     EquipmentModal.majStats(), calculées depuis les données
+                     déjà chargées (ports, _neticDetecte, _diagErreurs). -->
+                <div id="eqm-stats" class="insp-det" style="display:none;">
+                    <div class="insp-det-h" id="eqm-stats-titre">Réseau — détecté</div>
+                    <div class="insp-det-line"><span class="k" id="eqm-stat-1-k">Ports occupés</span><span class="v" id="eqm-stat-1-v"></span></div>
+                    <div class="insp-det-line"><span class="k" id="eqm-stat-2-k">Appareils vus</span><span class="v" id="eqm-stat-2-v"></span></div>
+                    <div class="insp-det-line" id="eqm-stat-3-row" style="display:none;"><span class="k" id="eqm-stat-3-k"></span><span class="v warn" id="eqm-stat-3-v"></span></div>
+                    <div class="insp-det-line" id="eqm-stat-4-row" style="display:none;"><span class="k" id="eqm-stat-4-k">SNMP</span><span class="v ok" id="eqm-stat-4-v"></span></div>
+                </div>
+                <button type="button" id="eqm-btn-annexe" class="insp-abtn acc" style="margin-bottom:.6rem;display:none;" onclick="EquipmentModal.ouvrirAppareilsEquipement()">👁 Tous les appareils par port</button>
+
+                <div class="form-group" style="margin-bottom:.6rem;">
+                    <label>Nom affiché</label>
+                    <input type="text" id="eqm-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
+                </div>
                 <div class="form-group" style="margin-bottom:.6rem;">
                     <label>Type d'équipement</label>
                     <select id="eqm-type" onchange="couleurAuto('eqm')">
@@ -1342,31 +1415,54 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <option>PDU</option><option>Borne WiFi</option><option>Autre</option>
                     </select>
                 </div>
-                {{ ports_box('eqm') }}
                 <div class="form-row cols-2" style="margin-bottom:.6rem;">
                     <div class="form-group" style="margin-bottom:0;">
-                        <label>Position (U)</label>
-                        <input type="number" id="eqm-pos" min="1" max="{{ nb_u }}" style="font-family:'Share Tech Mono',monospace;">
+                        <label>Appareil lié (inventaire)</label>
+                        <select id="eqm-app" onchange="autoRemplir('eqm')"></select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Périphérique lié</label>
+                        <select id="eqm-periph" onchange="autoRemplirPeriph('eqm')"></select>
+                    </div>
+                </div>
+
+                <!-- Position/largeur en lecture seule — se règlent en
+                     glissant l'équipement dans la baie (corps = déplacer,
+                     bord droit = largeur, poignées déjà existantes),
+                     comme dans la maquette. Seule la hauteur reste un
+                     réglage direct ici (pas de geste de glisser pratique
+                     pour une valeur en U entiers). Champs cachés
+                     eqm-pos/-col/-largeur/-hu conservés pour
+                     lirePayloadEquipement() et mis à jour par le glisser
+                     dans la baie comme avant. -->
+                <div class="form-row cols-2" style="margin-bottom:.6rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Position</label>
+                        <div class="insp-ro" id="eqm-pos-ro">U1 · 0 % à g.</div>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
                         <label>Hauteur (U)</label>
-                        <select id="eqm-hu">
-                            {% for i in range(1,9) %}<option value="{{ i }}">{{ i }}U</option>{% endfor %}
-                        </select>
+                        <span class="insp-ustep">
+                            <button type="button" onclick="EquipmentModal.ajusterHauteur(-1)" aria-label="Réduire la hauteur">−</button>
+                            <span id="eqm-hu-affiche">1U</span>
+                            <button type="button" onclick="EquipmentModal.ajusterHauteur(1)" aria-label="Augmenter la hauteur">+</button>
+                        </span>
                     </div>
                 </div>
                 <div class="form-row cols-2" style="margin-bottom:.6rem;">
                     <div class="form-group" style="margin-bottom:0;">
-                        <label>Colonne (0-9)</label>
-                        <input type="number" id="eqm-col" min="0" max="9" style="font-family:'Share Tech Mono',monospace;">
+                        <label>Largeur</label>
+                        <div class="insp-ro" id="eqm-largeur-ro">100 % de la baie</div>
                     </div>
                     <div class="form-group" style="margin-bottom:0;">
-                        <label>Largeur</label>
-                        <select id="eqm-largeur">
-                            {% for i in range(1,11) %}<option value="{{ i }}">{{ i }}/10</option>{% endfor %}
-                        </select>
+                        <label>Couleur</label>
+                        <input type="color" id="eqm-couleur">
                     </div>
                 </div>
+                <input type="hidden" id="eqm-pos"><input type="hidden" id="eqm-col">
+                <input type="hidden" id="eqm-largeur"><input type="hidden" id="eqm-hu">
+                <div class="form-hint" style="margin:-.2rem 0 .7rem;">Dans la baie : glisser le corps = déplacer · bord droit = largeur (poignées au survol de l'équipement posé).</div>
+
                 <div class="form-group" style="margin-bottom:.6rem;">
                     <label>Orientation</label>
                     <select id="eqm-orientation" title="Verticale : le nom et les ports/prises s'affichent de haut en bas — pour un PDU/onduleur monté sur le rail latéral">
@@ -1374,42 +1470,50 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <option value="vertical">↕ Verticale</option>
                     </select>
                 </div>
-                <div class="form-group" style="margin-bottom:.6rem;">
-                    <label>Couleur</label>
-                    <input type="color" id="eqm-couleur">
-                </div>
-                <div class="form-group" style="margin-bottom:.6rem;">
-                    <label>Associer à un appareil</label>
-                    <select id="eqm-app" onchange="autoRemplir('eqm')"></select>
-                </div>
-                <div class="form-group" style="margin-bottom:.6rem;">
-                    <label>Associer à un périphérique</label>
-                    <select id="eqm-periph" onchange="autoRemplirPeriph('eqm')"></select>
-                </div>
-                <div class="form-group" style="margin-bottom:.6rem;">
-                    <label>Nom personnalisé</label>
-                    <input type="text" id="eqm-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
-                </div>
+
+                {{ ports_box('eqm') }}
+
                 <div class="form-group" style="margin-bottom:.8rem;">
-                    <label>Description / note</label>
-                    <input type="text" id="eqm-desc" placeholder="Ex: Ports 1-24 bureau...">
+                    <label>Note</label>
+                    <textarea id="eqm-desc" placeholder="Ex: Ports 1-20 bureaux · 21-24 liaisons" rows="2" style="resize:vertical;"></textarea>
                 </div>
                 <div id="eqm-ports-editor" style="display:none;margin-bottom:.8rem;padding-top:.8rem;border-top:1px solid var(--border);">
                     <div class="form-section-title" style="margin-bottom:.6rem;">&#9632; Ports</div>
                     <div id="eqm-ports-editor-list" style="display:flex;flex-direction:column;gap:.4rem;max-height:280px;overflow-y:auto;"></div>
                 </div>
-                <div style="display:flex;gap:.6rem;justify-content:space-between;margin-top:1rem;">
-                    <button type="button" class="btn btn-sm btn-danger" onclick="EquipmentModal.retirer()">🗑 Retirer</button>
-                    <button type="button" class="btn btn-success btn-sm" onclick="EquipmentModal.enregistrer()">✓ Enregistrer</button>
+
+                <div class="insp-actions">
+                    <button type="button" id="eqm-btn-fiche" class="insp-abtn" style="display:none;" onclick="EquipmentModal.ouvrirFicheAppareil()">🗂 Ouvrir la fiche appareil</button>
+                    <button type="button" class="insp-abtn acc" onclick="EquipmentModal.enregistrer()" style="border-color:color-mix(in srgb,var(--accent-green) 45%,var(--border));color:var(--accent-green);">✓ Enregistrer</button>
+                    <button type="button" class="insp-abtn danger" onclick="EquipmentModal.retirer()">✕ Retirer de la baie</button>
                 </div>
             </div>
 
             <!-- Port RJ (ex-#port-modal) -->
             <div id="insp-port" style="display:none;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
-                    <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">🔌 <span id="pom-titre">Port</span></h3>
-                    <button type="button" onclick="PortModal.fermer()" title="Fermer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                <div class="insp-head">
+                    <span class="insp-ic">🔌</span>
+                    <div class="insp-txt">
+                        <div class="insp-kind-lbl">Port</div>
+                        <div class="insp-kind-nom" id="pom-titre">Port</div>
+                    </div>
+                    <button type="button" class="insp-close" onclick="PortModal.fermer()" title="Fermer">✕</button>
                 </div>
+
+                <!-- « Ce qui est branché » / « Aperçu » — voir PortModal.ouvrir(),
+                     calculés depuis les données déjà chargées (port, _neticDetecte). -->
+                <div id="pom-det" class="insp-det" style="display:none;">
+                    <div class="insp-det-h">Ce qui est branché</div>
+                    <div class="insp-det-line" id="pom-det-equip-row" style="display:none;"><span class="k">Équipement</span><span class="v" id="pom-det-equip"></span></div>
+                    <div class="insp-det-line"><span class="k">Appareils sur le port</span><span class="v" id="pom-det-nb"></span></div>
+                    <div class="insp-det-line" id="pom-det-role-row" style="display:none;"><span class="k">Rôle</span><span class="v warn">liaison montante</span></div>
+                    <div class="insp-det-line" id="pom-det-incoh-row" style="display:none;"><span class="k">⚠</span><span class="v warn">détecté ≠ déclaré</span></div>
+                </div>
+                <div id="pom-apercu" class="insp-det" style="display:none;">
+                    <div class="insp-det-h">Aperçu</div>
+                    <div id="pom-apercu-lignes"></div>
+                </div>
+
                 <div id="pom-cible-section">
                     <div class="form-group" style="margin-bottom:.3rem;">
                         <label>Utilisation</label>
@@ -1437,17 +1541,32 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         </div>
                     </div>
                 </div>
-                <div style="display:flex;justify-content:flex-end;margin-top:1rem;">
-                    <button type="button" class="btn btn-success btn-sm" onclick="PortModal.enregistrer()">✓ Enregistrer</button>
+                <div class="insp-actions">
+                    <button type="button" id="pom-btn-appareils" class="insp-abtn acc" style="display:none;" onclick="PortModal.ouvrirAppareils()">👁 Voir les appareils du port</button>
+                    <button type="button" class="insp-abtn acc" style="border-color:color-mix(in srgb,var(--accent-green) 45%,var(--border));color:var(--accent-green);" onclick="PortModal.enregistrer()">✓ Enregistrer</button>
                 </div>
             </div>
 
             <!-- Prise murale (ex-#prise-murale-modal) -->
             <div id="insp-prise" style="display:none;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.8rem;">
-                    <h3 style="margin:0;color:var(--text-primary);font-size:.95rem;">🚪 <span id="pmm-titre">Prise murale</span></h3>
-                    <button type="button" onclick="PriseMuraleModal.fermer()" title="Fermer" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.15rem .5rem;cursor:pointer;">✕</button>
+                <div class="insp-head">
+                    <span class="insp-ic">🚪</span>
+                    <div class="insp-txt">
+                        <div class="insp-kind-lbl">Prise murale</div>
+                        <div class="insp-kind-nom" id="pmm-titre">Prise murale</div>
+                    </div>
+                    <button type="button" class="insp-close" onclick="PriseMuraleModal.fermer()" title="Fermer">✕</button>
                 </div>
+
+                <!-- « Chaîne de câblage » — voir PriseMuraleModal.ouvrir() -->
+                <div class="insp-det">
+                    <div class="insp-det-h">Chaîne de câblage</div>
+                    <div class="insp-det-line"><span class="k">Pièce du site</span><span class="v" id="pmm-det-piece">—</span></div>
+                    <div class="insp-det-line"><span class="k">Câble mur → bandeau</span><span class="v" id="pmm-det-cable">—</span></div>
+                    <div class="insp-det-line"><span class="k">Cordon → switch</span><span class="v" id="pmm-det-cordon">—</span></div>
+                    <div class="insp-det-line" id="pmm-det-appareil-row" style="display:none;"><span class="k">Appareil du bureau</span><span class="v" id="pmm-det-appareil"></span></div>
+                </div>
+
                 <div class="form-group" style="margin-bottom:.7rem;">
                     <label>Emplacement de la prise</label>
                     <input type="text" id="pmm-piece" list="dl-localisations" placeholder="Bureau, salle de réunion…">
@@ -1455,6 +1574,16 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <div class="form-group" style="margin-bottom:.7rem;">
                     <label>Identification de la prise</label>
                     <input type="text" id="pmm-identification" placeholder="Repère physique, ex. RJ 3.12…">
+                </div>
+                <div class="form-row cols-2" style="margin-bottom:.3rem;">
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Couleur câble</label>
+                        <input type="text" id="pmm-cable-couleur" placeholder="Bleu, gris…">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0;">
+                        <label>Longueur câble</label>
+                        <input type="text" id="pmm-cable-longueur" placeholder="12 m…">
+                    </div>
                 </div>
                 <div class="form-group" style="margin-bottom:.3rem;">
                     <label>Utilisation</label>
@@ -1466,8 +1595,8 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <div class="form-group" id="pmm-usage-wrap" style="display:none;margin-bottom:.7rem;">
                     <input type="text" id="pmm-usage" placeholder="Téléphonie, alarme...">
                 </div>
-                <div style="display:flex;justify-content:flex-end;margin-top:1rem;">
-                    <button type="button" class="btn btn-success btn-sm" onclick="PriseMuraleModal.enregistrer()">✓ Enregistrer</button>
+                <div class="insp-actions">
+                    <button type="button" class="insp-abtn acc" style="border-color:color-mix(in srgb,var(--accent-green) 45%,var(--border));color:var(--accent-green);" onclick="PriseMuraleModal.enregistrer()">✓ Enregistrer</button>
                 </div>
             </div>
             </div><!-- /.rail-bd -->
@@ -3020,6 +3149,7 @@ async function deplacerSlot(id, newPos, newCol) {
     slots[key(slot.position, slot.col_index || 0)] = slot;
     nbCols = Math.max(1, ...Object.values(slots).map(s => (s.col_index||0)+1));
     renderRack();
+    EquipmentModal.majPositionAffichee(slot);
 }
 
 // Dépose d'un élément de la BIBLIOTHÈQUE (refonte lot 3, voir libDragStart)
@@ -3139,6 +3269,9 @@ const GENERIC_LIB = [
     { type: 'Patch Panel', ic: '🔲' }, { type: 'Bandeau RJ', ic: '🔌' },
     { type: 'Étagère', ic: '▬' }, { type: 'Autre', ic: '⬛' },
 ];
+function iconPourType(t) {
+    return (GENERIC_LIB.find(g => g.type === t) || {}).ic || '⬛';
+}
 function libItemGeneriqueHTML(g) {
     return `<div class="lib-item lib-item-generique" draggable="true" data-nom="${escH(g.type)}" data-type="${escH(g.type)}" title="Glisser sur une case libre de la baie">
         <span class="lib-item-ic">${g.ic}</span>
@@ -3249,6 +3382,7 @@ async function redimensionnerSlot(s, nouvelleHu) {
     }
     slots[key(updated.position, updated.col_index || 0)] = updated;
     renderRack();
+    EquipmentModal.majPositionAffichee(updated);
 }
 
 // ── REDIMENSIONNEMENT EN LARGEUR (glisser la poignée de droite) ────────────────
@@ -3274,6 +3408,7 @@ async function redimensionnerLargeurSlot(s, nouvelleLargeur) {
     }
     slots[key(updated.position, updated.col_index || 0)] = updated;
     renderRack();
+    EquipmentModal.majPositionAffichee(updated);
 }
 
 // Redimensionnement diagonal (poignée du coin) : hauteur et largeur en un
@@ -3299,6 +3434,7 @@ async function redimensionnerCoinSlot(s, nouvelleHu, nouvelleLargeur) {
     }
     slots[key(updated.position, updated.col_index || 0)] = updated;
     renderRack();
+    EquipmentModal.majPositionAffichee(updated);
 }
 
 // ── TOOLTIP ───────────────────────────────────────────────────────────────────
@@ -5141,9 +5277,11 @@ const PriseMuraleModal = (() => {
         const pm = (port && port.prise_murale) || {};
         slotId = sid; numero = num;
         document.getElementById('pmm-titre').textContent =
-            `Prise murale ${num} — ${(s && nomEquipementSlot(s)) || 'Bandeau'}`;
+            `Prise B${String(num).padStart(2, '0')} — ${(s && nomEquipementSlot(s)) || 'Bandeau'}`;
         document.getElementById('pmm-piece').value = pm.piece || '';
         document.getElementById('pmm-identification').value = pm.identification || '';
+        document.getElementById('pmm-cable-couleur').value = pm.cable_couleur || '';
+        document.getElementById('pmm-cable-longueur').value = pm.cable_longueur || '';
         const valeur = pm.appareil_id ? 'a:'+pm.appareil_id
             : (pm.peripherique_id ? 'p:'+pm.peripherique_id
             : (pm.usage_libre ? 'u' : ''));
@@ -5155,6 +5293,27 @@ const PriseMuraleModal = (() => {
         sel.value = valeur;
         document.getElementById('pmm-usage').value = pm.usage_libre || '';
         document.getElementById('pmm-usage-wrap').style.display = valeur === 'u' ? '' : 'none';
+
+        // « Chaîne de câblage » (voir renderPriseInspector de la maquette) :
+        // pièce, câble mur → bandeau, cordon → switch (port RJ de même
+        // numéro, voir baie_slot_ports.lie_slot_id), appareil du bureau.
+        document.getElementById('pmm-det-piece').textContent = pm.piece || '—';
+        const cable = [pm.cable_couleur, pm.cable_longueur].filter(Boolean).join(' · ');
+        document.getElementById('pmm-det-cable').textContent = cable || '—';
+        const cordonEl = document.getElementById('pmm-det-cordon');
+        cordonEl.textContent = port && port.lie_slot_id ? ('🔗 ' + (port.nom_cible || '')) : 'non brassé';
+        cordonEl.className = 'v' + (port && port.lie_slot_id ? ' ok' : ' warn');
+        const appareilRow = document.getElementById('pmm-det-appareil-row');
+        const nomAppareil = pm.appareil_id
+            ? (document.querySelector(`#cfg-app option[value="${pm.appareil_id}"]`) || {}).dataset?.nom
+            : (pm.peripherique_id
+                ? (document.querySelector(`#cfg-periph option[value="${pm.peripherique_id}"]`) || {}).dataset?.nom
+                : (pm.usage_libre || ''));
+        if (nomAppareil) {
+            document.getElementById('pmm-det-appareil').textContent = nomAppareil;
+            appareilRow.style.display = '';
+        } else appareilRow.style.display = 'none';
+
         afficherInspecteur('prise');
     }
 
@@ -5176,6 +5335,8 @@ const PriseMuraleModal = (() => {
         const payload = {
             piece: document.getElementById('pmm-piece').value.trim(),
             identification: document.getElementById('pmm-identification').value.trim(),
+            cable_couleur: document.getElementById('pmm-cable-couleur').value.trim(),
+            cable_longueur: document.getElementById('pmm-cable-longueur').value.trim(),
             appareil_id: null, peripherique_id: null, usage_libre: '',
         };
         if (v.startsWith('a:')) payload.appareil_id = parseInt(v.slice(2));
@@ -5213,6 +5374,7 @@ document.addEventListener('keydown', e => {
 // rail de droite) — ex-modale flottante.
 const PortModal = (() => {
     let slotId = null, numero = null, valeurInitiale = '', usageInitial = '', cableInitial = ['', ''];
+    let derniereKind = null, derniereEtat = null;
 
     function ouvrir(sid, num) {
         const s = Object.values(slots).find(x => x.id === sid);
@@ -5222,6 +5384,36 @@ const PortModal = (() => {
         const estBandeau = s.type_equipement === 'Bandeau RJ';
         const titrePort = libellePortAffiche(s.type_equipement, num);
         document.getElementById('pom-titre').textContent = `${titrePort} — ${nomEquipementSlot(s) || 'Élément'}`;
+
+        // « Ce qui est branché » / « Aperçu » (voir renderPortInspector de
+        // la maquette) — depuis _neticDetecte (lot 5) et le port lui-même,
+        // aucun appel réseau supplémentaire.
+        const cle = sid + ':' + num;
+        const info = _neticDetecte[cle] || {};
+        const kindDeclare = _neticKind(port.lie_type);
+        const kind = info.detected_kind || kindDeclare;
+        derniereKind = kind;
+        derniereEtat = (info.detected_kind && kindDeclare && info.detected_kind !== kindDeclare) ? 'netic-incoherent'
+            : info.detected_kind ? 'netic-detected' : 'netic-declared';
+        const equipRow = document.getElementById('pom-det-equip-row');
+        if (kind) {
+            document.getElementById('pom-det-equip').textContent =
+                (NETIC_IC[kind] || '') + ' ' + (NETIC_LBL[kind] || 'Équipement réseau') + (info.detected_kind ? ' (détecté)' : ' (déclaré)');
+            equipRow.style.display = '';
+        } else equipRow.style.display = 'none';
+        const devs = info.devices || [];
+        document.getElementById('pom-det-nb').textContent = String(devs.length);
+        document.getElementById('pom-det-role-row').style.display = info.uplink ? '' : 'none';
+        document.getElementById('pom-det-incoh-row').style.display = derniereEtat === 'netic-incoherent' ? '' : 'none';
+        document.getElementById('pom-det').style.display = (kind || devs.length) ? '' : 'none';
+        const apercu = document.getElementById('pom-apercu');
+        if (devs.length) {
+            document.getElementById('pom-apercu-lignes').innerHTML = devs.slice(0, 4).map(d =>
+                `<div class="insp-det-line"><span class="k">${escH(d.nom || '—')}</span><span class="v">${escH(d.ip || d.mac || '')}</span></div>`
+            ).join('') + (devs.length > 4 ? `<div class="insp-det-line"><span class="k" style="opacity:.6">+ ${devs.length - 4} autre(s)…</span><span class="v"></span></div>` : '');
+            apercu.style.display = '';
+        } else apercu.style.display = 'none';
+        document.getElementById('pom-btn-appareils').style.display = devs.length ? '' : 'none';
 
         document.getElementById('pom-cible-section').style.display = estBandeau ? 'none' : '';
         valeurInitiale = ''; usageInitial = '';
@@ -5315,7 +5507,13 @@ const PortModal = (() => {
         fermer();
     }
 
-    return { ouvrir, fermer, changerCible, enregistrer };
+    // Bouton « 👁 Voir les appareils du port » — même tiroir que le clic
+    // sur l'icône réseau du port dans le rack (ouvrirAppareilsPort, lot 5).
+    function ouvrirAppareils() {
+        if (slotId && numero != null) ouvrirAppareilsPort(slotId, numero, derniereKind, derniereEtat);
+    }
+
+    return { ouvrir, fermer, changerCible, enregistrer, ouvrirAppareils };
 })();
 
 // ── INSPECTEUR D'UN ÉQUIPEMENT (clic dans le rack, refonte lot 2) ──────────────
@@ -5335,6 +5533,8 @@ const EquipmentModal = (() => {
         const s = Object.values(slots).find(x => x.id === sid);
         if (!s) return;
         slotId = sid;
+        document.getElementById('eqm-ic').textContent = iconPourType(s.type_equipement);
+        document.getElementById('eqm-kind-lbl').textContent = s.type_equipement || 'Équipement';
         document.getElementById('eqm-titre').textContent = nomEquipementSlot(s) || 'Équipement';
         document.getElementById('eqm-type').value = s.type_equipement || '';
         document.getElementById('eqm-nb-ports').value = s.nb_ports || 0;
@@ -5347,6 +5547,9 @@ const EquipmentModal = (() => {
         document.getElementById('eqm-hu').value = s.hauteur_u || 1;
         document.getElementById('eqm-col').value = s.col_index || 0;
         document.getElementById('eqm-largeur').value = s.largeur_u || 10;
+        document.getElementById('eqm-pos-ro').textContent = `U${s.position} · ${(s.col_index || 0) * 10} % à g.`;
+        document.getElementById('eqm-hu-affiche').textContent = `${s.hauteur_u || 1}U`;
+        document.getElementById('eqm-largeur-ro').textContent = `${(s.largeur_u || 10) * 10} % de la baie`;
         document.getElementById('eqm-orientation').value = s.orientation === 'vertical' ? 'vertical' : 'horizontal';
         document.getElementById('eqm-couleur').value = s.couleur || '#1e3a5f';
         // Options identiques à celles du panneau + Placer (même liste
@@ -5358,9 +5561,102 @@ const EquipmentModal = (() => {
         document.getElementById('eqm-periph').value = s.peripherique_id || '';
         document.getElementById('eqm-nom').value = nomEquipementSlot(s) || '';
         document.getElementById('eqm-desc').value = s.description || '';
+        document.getElementById('eqm-btn-fiche').style.display = s.appareil_id ? '' : 'none';
         afficherEditeurPorts(s);
         majBandeauType();
+        majStats(s);
         afficherInspecteur('equipement');
+    }
+
+    // Position/hauteur/largeur affichées en lecture seule (voir HTML) —
+    // rafraîchies après un glisser/redimensionnement dans la baie SANS
+    // fermer/rouvrir l'inspecteur (appelé par renderRack quand ce slot
+    // est celui actuellement affiché).
+    function majPositionAffichee(s) {
+        if (s.id !== slotId) return;
+        document.getElementById('eqm-pos').value = s.position;
+        document.getElementById('eqm-col').value = s.col_index || 0;
+        document.getElementById('eqm-largeur').value = s.largeur_u || 10;
+        document.getElementById('eqm-hu').value = s.hauteur_u || 1;
+        document.getElementById('eqm-pos-ro').textContent = `U${s.position} · ${(s.col_index || 0) * 10} % à g.`;
+        document.getElementById('eqm-largeur-ro').textContent = `${(s.largeur_u || 10) * 10} % de la baie`;
+        document.getElementById('eqm-hu-affiche').textContent = `${s.hauteur_u || 1}U`;
+    }
+
+    // Seule dimension réglable au clic dans l'inspecteur (par pas d'U
+    // entiers, contrainte physique de la baie) — position et largeur se
+    // règlent en glissant l'équipement dans le rack (poignées existantes),
+    // comme dans la maquette validée.
+    function ajusterHauteur(delta) {
+        const hu = document.getElementById('eqm-hu');
+        const nv = Math.max(1, Math.min(8, (parseInt(hu.value) || 1) + delta));
+        hu.value = nv;
+        document.getElementById('eqm-hu-affiche').textContent = nv + 'U';
+    }
+
+    // Bloc stats (« Réseau — détecté » ou « Bandeau RJ · prises murales »,
+    // voir renderInspector() de la maquette) — calculé à partir des
+    // données déjà chargées côté client (ports du slot, _neticDetecte du
+    // lot 5, _diagErreurs/_diagSante du diagnostic réseau), aucun appel
+    // réseau supplémentaire.
+    function majStats(s) {
+        const wrap = document.getElementById('eqm-stats');
+        const btnAnnexe = document.getElementById('eqm-btn-annexe');
+        const ports = s.ports || [];
+        if (!ports.length) { wrap.style.display = 'none'; btnAnnexe.style.display = 'none'; return; }
+        if (s.type_equipement === 'Bandeau RJ') {
+            const prises = ports.map(p => p.prise_murale).filter(Boolean);
+            const affectees = prises.filter(pm => pm.piece || pm.appareil_id || pm.peripherique_id || pm.usage_libre).length;
+            const brassees = ports.filter(p => p.lie_slot_id).length;
+            document.getElementById('eqm-stats-titre').textContent = 'Bandeau RJ · prises murales';
+            document.getElementById('eqm-stat-1-k').textContent = 'Affectées à une pièce';
+            document.getElementById('eqm-stat-1-v').textContent = `${affectees} / ${ports.length}`;
+            document.getElementById('eqm-stat-2-k').textContent = 'Brassées vers un switch';
+            document.getElementById('eqm-stat-2-v').textContent = `${brassees} / ${ports.length}`;
+            document.getElementById('eqm-stat-3-row').style.display = 'none';
+            document.getElementById('eqm-stat-4-row').style.display = 'none';
+            wrap.style.display = '';
+            btnAnnexe.style.display = 'none';
+            return;
+        }
+        let occ = 0, vus = 0, err = 0, snmpVu = false;
+        ports.forEach(p => {
+            if (p.appareil_id || p.peripherique_id || p.usage_libre || p.lie_slot_id) occ++;
+            const cle = s.id + ':' + p.numero;
+            const info = _neticDetecte[cle];
+            if (info) { snmpVu = true; vus += (info.devices || []).length; }
+            if (_diagErreurs[cle]) err++;
+        });
+        document.getElementById('eqm-stats-titre').textContent = 'Réseau — détecté';
+        document.getElementById('eqm-stat-1-k').textContent = 'Ports occupés';
+        document.getElementById('eqm-stat-1-v').textContent = `${occ} / ${ports.length}`;
+        document.getElementById('eqm-stat-2-k').textContent = 'Appareils vus';
+        document.getElementById('eqm-stat-2-v').textContent = String(vus);
+        const errRow = document.getElementById('eqm-stat-3-row');
+        if (err) {
+            document.getElementById('eqm-stat-3-k').textContent = 'Ports en erreur';
+            document.getElementById('eqm-stat-3-v').textContent = String(err);
+            errRow.style.display = '';
+        } else errRow.style.display = 'none';
+        const snmpRow = document.getElementById('eqm-stat-4-row');
+        const estEquipReseau = ['Switch', 'Routeur/Pare-feu', 'Borne WiFi'].includes(s.type_equipement);
+        if (estEquipReseau) {
+            const joignable = snmpVu || !!_diagSante[s.id];
+            const v4 = document.getElementById('eqm-stat-4-v');
+            v4.textContent = joignable ? 'joignable' : 'non testé';
+            v4.className = 'v' + (joignable ? ' ok' : '');
+            snmpRow.style.display = '';
+        } else snmpRow.style.display = 'none';
+        wrap.style.display = '';
+        btnAnnexe.style.display = '';
+    }
+
+    function ouvrirAppareilsEquipement() {
+        if (slotId) ouvrirAppareilsPortEquipement(slotId);
+    }
+    function ouvrirFicheAppareil() {
+        const s = slotCourant();
+        if (s && s.appareil_id) window.open('/appareil/' + s.appareil_id + '/fiche-systeme', '_blank');
     }
 
     function fermer() {
@@ -5437,7 +5733,8 @@ const EquipmentModal = (() => {
         }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });
     }
 
-    return { ouvrir, fermer, enregistrer, retirer, slotCourant, majBandeauType, validerType, ignorerType };
+    return { ouvrir, fermer, enregistrer, retirer, slotCourant, majBandeauType, validerType, ignorerType,
+        ajusterHauteur, ouvrirAppareilsEquipement, ouvrirFicheAppareil, majPositionAffichee };
 })();
 
 // ── MODALE D'ÉDITION D'UNE PHOTO DE BAIE (double-clic) ──────────────────────
@@ -5627,6 +5924,10 @@ function appliquerReglesType(prefix) {
     hu.disabled = estEtagere;
     hu.title = estEtagere ? 'Une étagère est toujours 1U (fine tablette, pas de hauteur ajustable)' : '';
     if (estEtagere) hu.value = '1';
+    // Affichage lecture seule de la hauteur (voir eqm-hu-affiche, stepper
+    // EquipmentModal.ajusterHauteur) — n'existe que pour l'inspecteur.
+    const huAffiche = document.getElementById(prefix + '-hu-affiche');
+    if (huAffiche) huAffiche.textContent = hu.value + 'U';
 
     // Disposition des ports RJ (1/2 lignes) : réservée aux switchs
     // (demandé) — masquée et remise à sa valeur par défaut pour tout autre
@@ -6009,6 +6310,45 @@ function ouvrirAppareilsPort(slotId, numero, kind, etat) {
                 + '<td class="mono">' + escH(d.mac || '') + '</td>'
                 + '<td><span class="pa-badge ' + (d.via === 'LLDP' ? 'ok' : '') + '">' + escH(d.via || '') + '</span></td></tr>'
               ).join('')
+            + '</tbody></table>';
+    }
+    pan.hidden = false;
+}
+
+// Bouton « 👁 Tous les appareils par port » de l'inspecteur d'équipement
+// (voir EquipmentModal.ouvrirAppareilsEquipement, maquette : openAnnex) —
+// même tiroir que ouvrirAppareilsPort ci-dessus, mais une ligne par port
+// occupé de CET équipement plutôt qu'un seul port.
+function ouvrirAppareilsPortEquipement(slotId) {
+    const pan = document.getElementById('port-appareils');
+    const s = Object.values(slots).find(x => String(x.id) === String(slotId));
+    if (!s) return;
+    const nomSlot = libelleComplet(s);
+    document.getElementById('pa-title').textContent = '👁 Appareils connectés — ' + nomSlot;
+    const ports = (s.ports || []).filter(p =>
+        p.appareil_id || p.peripherique_id || p.usage_libre || p.lie_slot_id || _neticDetecte[s.id + ':' + p.numero]);
+    document.getElementById('pa-meta').textContent =
+        `${ports.length} port(s) occupé(s) · ${(s.ports || []).length} port(s) au total`;
+    const body = document.getElementById('pa-body');
+    if (!ports.length) {
+        body.innerHTML = '<div class="pa-empty">Aucun port occupé pour l’instant.</div>';
+    } else {
+        body.innerHTML =
+            '<table class="pa-tbl"><thead><tr><th>Port</th><th>Appareil</th><th>IP</th><th>État</th></tr></thead><tbody>'
+            + ports.map(p => {
+                const cle = s.id + ':' + p.numero;
+                const info = _neticDetecte[cle] || {};
+                const dev = (info.devices || [])[0] || {};
+                const nom = dev.nom || p.nom_cible || p.nom_machine || p.usage_libre || '—';
+                const err = _diagErreurs[cle];
+                const etat = err
+                    ? '<span class="pa-badge">⚠ ' + escH(err.libelle || 'erreur') + '</span>'
+                    : (p.lie_slot_id || p.appareil_id || p.peripherique_id ? '<span class="pa-badge ok">up</span>' : '');
+                return '<tr><td>' + escH(String(numeroAffiche(p.numero))) + '</td>'
+                    + '<td>' + escH(nom) + '</td>'
+                    + '<td class="ipc">' + escH(dev.ip || '') + '</td>'
+                    + '<td>' + etat + '</td></tr>';
+            }).join('')
             + '</tbody></table>';
     }
     pan.hidden = false;
