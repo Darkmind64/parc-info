@@ -1944,6 +1944,21 @@ def init_db():
     if 'col_index' not in cols_baie:
         c.execute("ALTER TABLE baie_slots ADD COLUMN col_index INTEGER DEFAULT 0")
 
+    # Migration : grille horizontale 10 -> 1000 (voir NB_COLS_BAIE). Demandé
+    # après retour utilisateur : un redimensionnement par crans de 10 % se
+    # sentait "cassé" comparé à la maquette, qui suit la souris au pixel.
+    # Rééchelonne ×100 les valeurs existantes (9/10 -> 900/1000, 5/10 ->
+    # 500/1000…) : mêmes proportions, mêmes emplacements visuels, juste
+    # beaucoup plus de graduations disponibles pour la suite. Drapeau dans
+    # `config` (table déjà créée plus haut dans init_db) : ne joue qu'une
+    # fois, jamais une seconde fois sur des valeurs déjà à la nouvelle
+    # échelle (une ré-exécution multiplierait par 100 une deuxième fois).
+    if not c.execute("SELECT 1 FROM config WHERE cle='_baie_grille_1000'").fetchone():
+        c.execute("UPDATE baie_slots SET col_index = CAST(COALESCE(col_index, 0) AS INTEGER) * 100")
+        c.execute("UPDATE baie_slots SET largeur_u = CAST(largeur_u AS INTEGER) * 100 WHERE largeur_u IS NOT NULL")
+        c.execute("INSERT OR REPLACE INTO config (cle, valeur, date_maj) VALUES ('_baie_grille_1000', '1', ?)",
+                   (_utcnow().isoformat(),))
+
     # Migration : colonnes identifiants appareils + carte graphique
     cols_app2 = [r[1] for r in conn.execute('PRAGMA table_info(appareils)').fetchall()]
     for col in ['user_login','user_password','admin_login','admin_password','anydesk_id','anydesk_password','carte_graphique']:
@@ -6949,38 +6964,49 @@ def _reconcilier_prises_murales(conn, slot_id, nb_ports, type_equipement, prises
                 (slot_id,numero,piece,identification,appareil_id,peripherique_id,usage_libre,cable_couleur,cable_longueur,date_maj)
                 VALUES (?,?,?,?,?,?,?,?,?,?)''', (slot_id, numero, piece, ident, ap, pe, us, cc, cl, now))
 
+NB_COLS_BAIE = 1000
+"""Résolution de la grille horizontale d'un emplacement de baie. Était 10
+(dixièmes de la largeur du rack) — trop grossier pour un redimensionnement
+à la souris (crans de 10 % visibles, "cassé" comparé à la maquette qui
+suit le pixel) ; 1000 (millièmes) donne un pas <1px sur n'importe quel
+rack affiché, perçu comme continu, tout en restant un entier simple
+(aucun changement de type de colonne, aucune réécriture des comparaisons
+de chevauchement — voir _slots_en_collision). Les valeurs existantes sont
+rééchelonnées ×100 une seule fois au démarrage (voir init_db, drapeau
+config `_baie_grille_1000`)."""
+
 def _clamp_largeur_u(v, col=0):
-    """1-10 (dixièmes de la largeur du rack, position dans la grille à 10
-    colonnes du client — voir renderRack() dans baie_brassage.html). Valeur
-    manquante/invalide -> 10 (pleine largeur) : chaque emplacement a
-    désormais TOUJOURS une largeur explicite, plus de notion de "partage
-    égal automatique" entre éléments d'une même rangée (l'ancien design,
-    où largeur_u valait None tant que l'utilisateur n'avait jamais
-    redimensionné, cassait dès qu'un élément à la fois partiel en largeur
-    ET en hauteur (hauteur_u > 1) partageait sa rangée avec un autre —
-    voir le commentaire de renderRack() côté client pour le détail).
-    `col` (0-9, colonne de départ déjà bornée par l'appelant) plafonne en
-    plus la largeur à 10-col : sans ça, un slot à col=9 pourrait se voir
-    attribuer largeur_u=5, débordant de la grille à 10 colonnes (grid-column
-    créerait alors des pistes implicites au-delà de la 10e, décalant tout
-    ce qui suit dans la même rangée)."""
+    """1-NB_COLS_BAIE (position dans la grille horizontale du rack — voir
+    renderRack() dans baie_brassage.html). Valeur manquante/invalide ->
+    NB_COLS_BAIE (pleine largeur) : chaque emplacement a désormais TOUJOURS
+    une largeur explicite, plus de notion de "partage égal automatique"
+    entre éléments d'une même rangée (l'ancien design, où largeur_u valait
+    None tant que l'utilisateur n'avait jamais redimensionné, cassait dès
+    qu'un élément à la fois partiel en largeur ET en hauteur (hauteur_u > 1)
+    partageait sa rangée avec un autre — voir le commentaire de
+    renderRack() côté client pour le détail).
+    `col` (0 à NB_COLS_BAIE-1, colonne de départ déjà bornée par l'appelant)
+    plafonne en plus la largeur à NB_COLS_BAIE-col : sans ça, un slot en fin
+    de grille pourrait se voir attribuer une largeur débordant du rack
+    (grid-column créerait alors des pistes implicites au-delà de la
+    dernière, décalant tout ce qui suit dans la même rangée)."""
     if v in (None, '', 0, '0'):
-        n = 10
+        n = NB_COLS_BAIE
     else:
         try:
             n = int(v)
         except (TypeError, ValueError):
-            n = 10
-    n = min(10, max(1, n))
-    return min(n, max(1, 10 - col))
+            n = NB_COLS_BAIE
+    n = min(NB_COLS_BAIE, max(1, n))
+    return min(n, max(1, NB_COLS_BAIE - col))
 
 def _clamp_col_index(v):
-    """0-9 : position de départ dans la grille à 10 colonnes du rack."""
+    """0 à NB_COLS_BAIE-1 : position de départ dans la grille horizontale du rack."""
     try:
         n = int(v or 0)
     except (TypeError, ValueError):
         return 0
-    return min(9, max(0, n))
+    return min(NB_COLS_BAIE - 1, max(0, n))
 
 def _slots_en_collision(conn, cid, baie_nom, position, col_index, hauteur_u, largeur_u, exclude_id=None):
     """Retourne les slots de la baie dont le rectangle (rangées U × colonnes
@@ -7014,7 +7040,7 @@ def _slots_en_collision(conn, cid, baie_nom, position, col_index, hauteur_u, lar
     for r in conn.execute(sql, params).fetchall():
         s_id, s_pos, s_col, s_hu, s_lu, s_nom, s_type = r
         s_hu = s_hu or 1
-        s_lu = s_lu or 10
+        s_lu = s_lu or NB_COLS_BAIE
         s_col = s_col or 0
         s_fin_u = s_pos + s_hu - 1
         s_fin_col = s_col + s_lu - 1
@@ -7476,10 +7502,10 @@ def api_baie_deplacer_slot(id):
     if not actuel:
         conn.close()
         return jsonify({'error': 'Slot introuvable'}), 404
-    largeur_actuelle = actuel[0] or 10
+    largeur_actuelle = actuel[0] or NB_COLS_BAIE
     hauteur_actuelle = actuel[1] or 1
     baie_nom = actuel[2] or 'Baie principale'
-    new_col = min(new_col, max(0, 10 - largeur_actuelle))
+    new_col = min(new_col, max(0, NB_COLS_BAIE - largeur_actuelle))
     # Chevauchement avec un AUTRE élément (voir _slots_en_collision) — avant
     # (2.18.69), un dépôt écrasait silencieusement tout ce qui occupait
     # EXACTEMENT la case visée (jamais atteignable en pratique, on ne peut

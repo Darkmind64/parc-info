@@ -248,9 +248,10 @@
     color:#2a4a6a; padding-right:4px; flex-shrink:0;
 }
 .rack-rows { flex:1; display:flex; flex-direction:column; gap:1px; }
-/* Grille FIXE à 10 colonnes — chaque élément (occupé ou case vide) se
-   positionne via grid-column:"début / span largeur" (voir makeOccupiedCell/
-   makeEmptyCell), en dixièmes de la largeur du rack. Remplace l'ancien
+/* Grille FIXE à NB_COLS_BAIE colonnes (1000, quasi continue) — chaque
+   élément (occupé ou case vide) se positionne via grid-column:"début / span
+   largeur" (voir makeOccupiedCell/makeEmptyCell), en millièmes de la
+   largeur du rack. Remplace l'ancien
    modèle flex (col_index = index de tranche 0-4, largeur calculée par
    partage égal du flex restant) : ce dernier cassait dès qu'un élément à la
    fois partiel en largeur ET en hauteur (hauteur_u > 1) partageait sa
@@ -260,7 +261,17 @@
    rangée à l'autre. Avec une grille à positions absolues, l'alignement est
    garanti par construction : la même paire (début, largeur) produit
    toujours le même grid-column, quelle que soit la rangée. */
-.rack-row { display:grid; grid-template-columns:repeat(10, 1fr); gap:2px; position:relative; }
+/* grid-template-columns:repeat(1000, ...) — grille fine (voir NB_COLS_BAIE
+   JS / app.py) pour un redimensionnement/positionnement quasi continu.
+   gap:0 est OBLIGATOIRE à cette résolution : `gap` s'applique entre CHAQUE
+   paire de pistes adjacentes de la grille, pas seulement entre deux
+   éléments rendus séparément — à 1000 pistes, un gap de 2px aurait
+   consommé 999×2px ≈ 2000px de la largeur de la rangée avant même de
+   placer le moindre équipement. L'espacement visuel entre deux éléments
+   voisins vient maintenant de la marge posée sur .rack-cell ci-dessous
+   (appliquée à la boîte de CHAQUE cellule rendue, jamais entre pistes
+   internes qu'un même élément traverse). */
+.rack-row { display:grid; grid-template-columns:repeat(1000, 1fr); gap:0; position:relative; }
 
 /* U height constant */
 .rack-cell {
@@ -268,6 +279,7 @@
     cursor:pointer; display:flex; align-items:center; padding:0 6px; overflow:hidden;
     font-family:'Share Tech Mono',monospace; font-size:.65rem; transition:all .12s;
     position:relative; min-width:0; box-sizing:border-box;
+    margin:0 1px;
 }
 /* Case vide : pas de "plaque grise" visible au repos (fond/bordure
    transparents, se fond dans le rack) — gênant visuellement autour d'un
@@ -305,8 +317,8 @@
    en plusieurs rangées lisibles.
    Taille de port FIXE (24×22px) — colonnes en repeat(auto-fill, ...) plutôt
    qu'un nombre de colonnes fixe à largeur variable (1fr) : un élément
-   redimensionné plus étroit (largeur_u < 10, ou plusieurs éléments côte à
-   côte) doit garder des ports de la même taille et simplement en tenir
+   redimensionné plus étroit (largeur_u < NB_COLS_BAIE, ou plusieurs éléments
+   côte à côte) doit garder des ports de la même taille et simplement en tenir
    moins par rangée (repli automatique sur plusieurs lignes), jamais des
    ports rétrécis pour tous tenir sur une seule rangée. */
 .rack-cell.has-ports { flex-direction:column; align-items:stretch; padding:3px 6px; }
@@ -543,9 +555,9 @@
 .cell-resize:hover::after, .cell-resize.resizing::after { background:var(--accent); }
 
 /* Poignée de redimensionnement en LARGEUR — bord droit de l'élément, glisser
-   pour changer largeur_u par pas de 1/10 de la largeur du rack (voir
-   redimensionnerLargeurSlot()). Même logique que .cell-resize (hauteur),
-   orientée horizontalement. */
+   pour changer largeur_u au pas de la grille fine (1/NB_COLS_BAIE de la
+   largeur du rack, <1px — voir redimensionnerLargeurSlot()). Même logique
+   que .cell-resize (hauteur), orientée horizontalement. */
 .cell-resize-w {
     position:absolute; top:0; bottom:0; right:-4px; width:9px; cursor:ew-resize; z-index:6;
 }
@@ -1851,10 +1863,17 @@ const MAX_COLS = 5;
 // (1 U = 1,75 pouce ; largeur rack = 19 pouces → ratio = 1,75/19 ≈ 0,0921)
 const U_RATIO = 1.75 / 19;
 let U_H = 44;   // valeur initiale, recalculée après rendu
-// Largeur réelle (px) d'une rangée du rack — grille à 10 colonnes fractionnées
-// (voir .rack-row en CSS) : sert à convertir un span de colonnes (1-10,
-// largeur_u) en pixels pour tailleElecVertical() ci-dessous. Mesurée en même
-// temps que U_H (même conteneur, même règle de recalcul).
+// Résolution de la grille horizontale — était 10 (dixièmes de la largeur du
+// rack), trop grossier pour un redimensionnement à la souris (crans de 10 %
+// visibles, "cassé" comparé à la maquette qui suit le pixel). 1000 donne un
+// pas <1px sur n'importe quel rack affiché, perçu comme continu. Doit
+// rester identique à app.py:NB_COLS_BAIE (même grille des deux côtés).
+const NB_COLS_BAIE = 1000;
+// Largeur réelle (px) d'une rangée du rack — grille à NB_COLS_BAIE colonnes
+// fractionnées (voir .rack-row en CSS) : sert à convertir un span de
+// colonnes (1-NB_COLS_BAIE, largeur_u) en pixels pour tailleElecVertical()
+// ci-dessous. Mesurée en même temps que U_H (même conteneur, même règle de
+// recalcul).
 let RACK_ROW_W = 900;   // valeur initiale, recalculée après rendu
 
 function calcUH(rerender) {
@@ -1972,13 +1991,15 @@ function tailleElec(rowH) {
 // une colonne bien trop étroite pour les accueillir — signalé en usage
 // réel, corrigé en appliquant ici le même principe de réduction que
 // tailleElec, sur l'axe perpendiculaire.
-// largeur : span de colonnes du rack (1-10, PAS un pixel — le paramètre
-// `largeur` déjà reçu par makeOccupiedCell), converti en pixels via
-// RACK_ROW_W (grille à 10 colonnes fractionnées, voir .rack-row en CSS).
+// largeur : span de colonnes du rack (1-NB_COLS_BAIE, PAS un pixel — le
+// paramètre `largeur` déjà reçu par makeOccupiedCell), converti en pixels
+// via RACK_ROW_W (grille à NB_COLS_BAIE colonnes fractionnées, gap:0, voir
+// .rack-row en CSS — la marge de .rack-cell, constante quelle que soit la
+// largeur span née, est retirée à part).
 function tailleElecVertical(largeur) {
-    const nbColsRack = 10, gapRack = 2, paddingCellule = 10;
-    const colPx = (RACK_ROW_W - (nbColsRack - 1) * gapRack) / nbColsRack;
-    const largeurCellPx = colPx * (largeur || 10) + Math.max(0, (largeur || 10) - 1) * gapRack;
+    const paddingCellule = 10;
+    const colPx = RACK_ROW_W / NB_COLS_BAIE;
+    const largeurCellPx = colPx * (largeur || NB_COLS_BAIE) - 2;
     const dispo = largeurCellPx - paddingCellule;
     const taille = Math.max(28, Math.min(54, dispo));
     const ratio = taille / 54;
@@ -2158,7 +2179,7 @@ function elementEnCollision(position, hauteur, colDebut, largeur, excludeId) {
     const finCol = colDebut + largeur - 1;
     for (const sl of Object.values(slots)) {
         if (sl.id === excludeId) continue;
-        const slHu = sl.hauteur_u || 1, slLu = sl.largeur_u || 10, slCol = sl.col_index || 0;
+        const slHu = sl.hauteur_u || 1, slLu = sl.largeur_u || NB_COLS_BAIE, slCol = sl.col_index || 0;
         const slFinU = sl.position + slHu - 1;
         const slFinCol = slCol + slLu - 1;
         if (position <= slFinU && sl.position <= finU && colDebut <= slFinCol && slCol <= finCol) return sl;
@@ -2382,22 +2403,22 @@ function renderRack() {
         row.className = 'rack-row';
         row.style.height = rowH + 'px';
 
-        // Plages de colonnes (0-9) déjà couvertes à cette rangée, par une
+        // Plages de colonnes (0-999) déjà couvertes à cette rangée, par une
         // origine réelle ou un débordement venu d'au-dessus — le
-        // complémentaire dans [0,9] devient des cases vides. Aucune plaque
-        // grise n'est donc jamais rendue sous un élément qui déborde depuis
-        // une rangée du dessus (demandé explicitement).
+        // complémentaire dans [0,NB_COLS_BAIE) devient des cases vides.
+        // Aucune plaque grise n'est donc jamais rendue sous un élément qui
+        // déborde depuis une rangée du dessus (demandé explicitement).
         const couvert = [];
         origines.forEach(s => {
-            const debut = Math.min(9, Math.max(0, s.col_index || 0));
-            const largeur = Math.min(10 - debut, Math.max(1, s.largeur_u || 10));
+            const debut = Math.min(NB_COLS_BAIE - 1, Math.max(0, s.col_index || 0));
+            const largeur = Math.min(NB_COLS_BAIE - debut, Math.max(1, s.largeur_u || NB_COLS_BAIE));
             couvert.push({debut, fin: debut + largeur - 1});
             totalOccupied++;
             row.appendChild(makeOccupiedCell(s, u, debut, largeur, rowH));
         });
         debordent.forEach(s => {
-            const debut = Math.min(9, Math.max(0, s.col_index || 0));
-            const largeur = Math.min(10 - debut, Math.max(1, s.largeur_u || 10));
+            const debut = Math.min(NB_COLS_BAIE - 1, Math.max(0, s.col_index || 0));
+            const largeur = Math.min(NB_COLS_BAIE - debut, Math.max(1, s.largeur_u || NB_COLS_BAIE));
             couvert.push({debut, fin: debut + largeur - 1});
         });
 
@@ -2407,7 +2428,7 @@ function renderRack() {
             if (c.debut > curseur) row.appendChild(makeEmptyCell(u, curseur, c.debut - curseur, rowH));
             curseur = Math.max(curseur, c.fin + 1);
         });
-        if (curseur < 10) row.appendChild(makeEmptyCell(u, curseur, 10 - curseur, rowH));
+        if (curseur < NB_COLS_BAIE) row.appendChild(makeEmptyCell(u, curseur, NB_COLS_BAIE - curseur, rowH));
 
         rows.appendChild(row);
     }
@@ -2618,10 +2639,11 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         cell.style.height = (rowH || U_H) + 'px';
     }
 
-    // Position/largeur dans la grille à 10 colonnes du rack — debut (0-9)
-    // et largeur (1-10, largeur_u en base) sont TOUJOURS explicites
-    // (largeur_u vaut 10 par défaut côté serveur, jamais "auto"), donc la
-    // même paire produit toujours le même grid-column quelle que soit la
+    // Position/largeur dans la grille à NB_COLS_BAIE colonnes du rack —
+    // debut (0 à NB_COLS_BAIE-1) et largeur (1-NB_COLS_BAIE, largeur_u en
+    // base) sont TOUJOURS explicites (largeur_u vaut NB_COLS_BAIE par défaut
+    // côté serveur, jamais "auto"), donc la même paire produit toujours le
+    // même grid-column quelle que soit la
     // rangée : c'est ce qui garantit l'alignement des rangées "débordées"
     // par un élément haut de plusieurs U (voir renderRack()).
     cell.style.gridColumn = `${debut + 1} / span ${largeur}`;
@@ -2852,7 +2874,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // aucune poignée de redimensionnement du tout (voir toggleVerrouBaie).
     cell.innerHTML = ligneInfo + zonePorts + badgeAlimentation
         + (estEtagere || editionBloquee() ? '' : `<div class="cell-resize" title="Redimensionner en hauteur (glisser)"></div>`)
-        + (editionBloquee() ? '' : `<div class="cell-resize-w" title="Redimensionner en largeur (glisser, grille de 10)"></div>`)
+        + (editionBloquee() ? '' : `<div class="cell-resize-w" title="Redimensionner en largeur (glisser)"></div>`)
         + (estEtagere || editionBloquee() ? '' : `<div class="cell-resize-corner" title="Redimensionner en hauteur et largeur (glisser en diagonale)"></div>`);
 
     // Ports : clic = surbrillance de tout port lié à la même cible (ou, en
@@ -3006,7 +3028,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             // Chevauchement en direct (voir elementEnCollision) — rouge
             // PENDANT le geste plutôt que de découvrir le refus seulement
             // au relâchement (voir CLAUDE.md, correctif "galère souris").
-            dernierInvalide = !!elementEnCollision(s.position, nv, debut, s.largeur_u || 10, s.id);
+            dernierInvalide = !!elementEnCollision(s.position, nv, debut, s.largeur_u || NB_COLS_BAIE, s.id);
             cell.classList.toggle('invalide', dernierInvalide);
             renderCableLinks(); // suit les ports en direct pendant le geste
         };
@@ -3032,10 +3054,12 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     });
 
     // Redimensionnement en LARGEUR à la souris : glisser la poignée de
-    // droite change largeur_u par pas de 1/10 de la largeur du rack, borné
-    // pour ne jamais dépasser le bord droit de la grille (10 - debut).
-    // Absente si la baie est verrouillée (jamais rendue dans le HTML, voir
-    // plus haut) — même garde-fou que .cell-resize/.cell-resize-corner.
+    // droite change largeur_u au pas de la grille fine (1/NB_COLS_BAIE de
+    // la largeur du rack, <1px — suit la souris au pixel près, plus les
+    // crans de 10 % perceptibles d'avant), borné pour ne jamais dépasser
+    // le bord droit de la grille (NB_COLS_BAIE - debut). Absente si la
+    // baie est verrouillée (jamais rendue dans le HTML, voir plus haut) —
+    // même garde-fou que .cell-resize/.cell-resize-corner.
     const poigneeW = cell.querySelector('.cell-resize-w');
     if (poigneeW) poigneeW.addEventListener('mousedown', e => {
         e.preventDefault();
@@ -3043,13 +3067,13 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         cell.draggable = false;
         poigneeW.classList.add('resizing');
         const row = cell.parentElement;
-        const tenthPx = row.getBoundingClientRect().width / 10;
+        const unitePx = row.getBoundingClientRect().width / NB_COLS_BAIE;
         const startX = e.clientX;
-        const startLargeur = s.largeur_u || 10;
-        const maxLargeur = 10 - debut;
+        const startLargeur = s.largeur_u || NB_COLS_BAIE;
+        const maxLargeur = NB_COLS_BAIE - debut;
 
         const calculerNouvelleLargeur = clientX => {
-            const delta = Math.round((clientX - startX) / tenthPx);
+            const delta = Math.round((clientX - startX) / unitePx);
             return Math.min(maxLargeur, Math.max(1, startLargeur + delta));
         };
         let dernierInvalide = false;
@@ -3090,16 +3114,16 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         cell.draggable = false;
         poigneeC.classList.add('resizing');
         const row = cell.parentElement;
-        const tenthPx = row.getBoundingClientRect().width / 10;
+        const unitePx = row.getBoundingClientRect().width / NB_COLS_BAIE;
         const startX = e.clientX, startY = e.clientY;
         const startHu = s.hauteur_u || 1;
-        const startLargeur = s.largeur_u || 10;
+        const startLargeur = s.largeur_u || NB_COLS_BAIE;
         const maxHu = Math.min(8, nbU - s.position + 1);
-        const maxLargeur = 10 - debut;
+        const maxLargeur = NB_COLS_BAIE - debut;
 
         const calculer = (clientX, clientY) => ({
             hu: Math.min(maxHu, Math.max(1, startHu + Math.round((clientY - startY) / U_H))),
-            largeur: Math.min(maxLargeur, Math.max(1, startLargeur + Math.round((clientX - startX) / tenthPx))),
+            largeur: Math.min(maxLargeur, Math.max(1, startLargeur + Math.round((clientX - startX) / unitePx))),
         });
         let dernierInvalide = false;
         const onMove = ev => {
@@ -3167,9 +3191,9 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     cell.style.gridColumn = `${debut + 1} / span ${largeur}`;
     cell.dataset.pos = u;
     cell.dataset.col = debut;
-    cell.innerHTML = (largeur >= 10
+    cell.innerHTML = (largeur >= NB_COLS_BAIE
         ? `<span style="color:#1a2a3a;font-size:.52rem;user-select:none;">U${u}</span>`
-        : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">C${debut}</span>`)
+        : `<span style="color:#1e3a5f;font-size:.5rem;user-select:none;">${Math.round(debut / NB_COLS_BAIE * 100)}%</span>`)
         + `<div class="cell-magnet"></div>`;
 
     // Grille de positionnement INVISIBLE : cette case vide peut couvrir tout
@@ -3184,8 +3208,8 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     function colonneVisee(clientX) {
         const row = cell.parentElement;
         const r = row.getBoundingClientRect();
-        const tenthPx = r.width / 10;
-        const col = Math.floor((clientX - r.left) / tenthPx);
+        const unitePx = r.width / NB_COLS_BAIE;
+        const col = Math.floor((clientX - r.left) / unitePx);
         return Math.min(debut + largeur - 1, Math.max(debut, col));
     }
     function majMarqueur(clientX) {
@@ -3288,7 +3312,7 @@ async function deplacerSlot(id, newPos, newCol) {
     // Rebuild slots map — à partir de la réponse SERVEUR (slot.position/
     // col_index), pas des newPos/newCol demandés : le serveur peut avoir
     // recalé la colonne pour que le slot (avec sa largeur propre) ne
-    // déborde pas de la grille à 10 colonnes (voir _clamp dans
+    // déborde pas de la grille (voir _clamp dans
     // api_baie_deplacer_slot) — utiliser les valeurs demandées ici aurait
     // indexé le slot au mauvais endroit dans la carte côté client.
     Object.keys(slots).forEach(k => { if (slots[k].id === id) delete slots[k]; });
@@ -3308,7 +3332,7 @@ async function deplacerSlot(id, newPos, newCol) {
 // affiner ports/taille/type sans repasser par un second geste.
 async function placerDepuisBibliotheque(data, pos, col) {
     const payload = {
-        position: pos, col_index: col, hauteur_u: 1, largeur_u: 10,
+        position: pos, col_index: col, hauteur_u: 1, largeur_u: NB_COLS_BAIE,
         baie_nom: currentBaie,
         type_equipement: data.type || '',
         nom_custom: data.nom || '',
@@ -3486,7 +3510,7 @@ function initBibliothequeDnD() {
                 nom: el.dataset.nom || '',
                 type: el.dataset.type || '',
             }));
-            dragInfo = { id: null, hauteurU: 1, largeurU: 10, decalageU: 0, decalageCol: 0 };
+            dragInfo = { id: null, hauteurU: 1, largeurU: NB_COLS_BAIE, decalageU: 0, decalageCol: 0 };
             el.classList.add('dragging');
         });
         wrap.addEventListener('dragend', e => {
@@ -3594,7 +3618,7 @@ function afficherTooltip(e, s) {
     if (s.type_equipement) html += `<div class="tip-row"><span class="tip-key">Type</span><span class="tip-val">${escH(s.type_equipement)}</span></div>`;
     if (s.adresse_ip)     html += `<div class="tip-row"><span class="tip-key">IP</span><span class="tip-val">${escH(s.adresse_ip)}</span></div>`;
     html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${statut}</span></div>`;
-    html += `<div class="tip-row"><span class="tip-key">Position</span><span class="tip-val">U${s.position} · C${s.col_index||0} · ${s.hauteur_u||1}U${s.largeur_u ? ' · '+s.largeur_u+'/10' : ''}</span></div>`;
+    html += `<div class="tip-row"><span class="tip-key">Position</span><span class="tip-val">U${s.position} · ${Math.round((s.col_index||0)/NB_COLS_BAIE*100)}% à g. · ${s.hauteur_u||1}U${s.largeur_u ? ' · '+Math.round(s.largeur_u/NB_COLS_BAIE*100)+'%' : ''}</span></div>`;
     if (s.description)    html += `<div class="tip-row"><span class="tip-key">Note</span><span class="tip-val">${escH(s.description)}</span></div>`;
     t.innerHTML = html;
     // Le schema de cascade a besoin de plus que les 260 px par defaut.
@@ -5697,10 +5721,10 @@ const EquipmentModal = (() => {
         document.getElementById('eqm-pos').value = s.position;
         document.getElementById('eqm-hu').value = s.hauteur_u || 1;
         document.getElementById('eqm-col').value = s.col_index || 0;
-        document.getElementById('eqm-largeur').value = s.largeur_u || 10;
-        document.getElementById('eqm-pos-ro').textContent = `U${s.position} · ${(s.col_index || 0) * 10} % à g.`;
+        document.getElementById('eqm-largeur').value = s.largeur_u || NB_COLS_BAIE;
+        document.getElementById('eqm-pos-ro').textContent = `U${s.position} · ${Math.round((s.col_index || 0) / NB_COLS_BAIE * 100)} % à g.`;
         document.getElementById('eqm-hu-affiche').textContent = `${s.hauteur_u || 1}U`;
-        document.getElementById('eqm-largeur-ro').textContent = `${(s.largeur_u || 10) * 10} % de la baie`;
+        document.getElementById('eqm-largeur-ro').textContent = `${Math.round((s.largeur_u || NB_COLS_BAIE) / NB_COLS_BAIE * 100)} % de la baie`;
         document.getElementById('eqm-orientation').value = s.orientation === 'vertical' ? 'vertical' : 'horizontal';
         document.getElementById('eqm-couleur').value = s.couleur || '#1e3a5f';
         // Options identiques à celles du panneau + Placer (même liste
@@ -5727,10 +5751,10 @@ const EquipmentModal = (() => {
         if (s.id !== slotId) return;
         document.getElementById('eqm-pos').value = s.position;
         document.getElementById('eqm-col').value = s.col_index || 0;
-        document.getElementById('eqm-largeur').value = s.largeur_u || 10;
+        document.getElementById('eqm-largeur').value = s.largeur_u || NB_COLS_BAIE;
         document.getElementById('eqm-hu').value = s.hauteur_u || 1;
-        document.getElementById('eqm-pos-ro').textContent = `U${s.position} · ${(s.col_index || 0) * 10} % à g.`;
-        document.getElementById('eqm-largeur-ro').textContent = `${(s.largeur_u || 10) * 10} % de la baie`;
+        document.getElementById('eqm-pos-ro').textContent = `U${s.position} · ${Math.round((s.col_index || 0) / NB_COLS_BAIE * 100)} % à g.`;
+        document.getElementById('eqm-largeur-ro').textContent = `${Math.round((s.largeur_u || NB_COLS_BAIE) / NB_COLS_BAIE * 100)} % de la baie`;
         document.getElementById('eqm-hu-affiche').textContent = `${s.hauteur_u || 1}U`;
     }
 
@@ -6140,7 +6164,7 @@ function lirePayloadEquipement(prefix) {
 
     return {
         position: parseInt(g('pos').value) || 1,
-        col_index: Math.min(9, Math.max(0, parseInt(g('col').value) || 0)),
+        col_index: Math.min(NB_COLS_BAIE - 1, Math.max(0, parseInt(g('col').value) || 0)),
         hauteur_u: parseInt(g('hu').value) || 1,
         baie_nom: currentBaie,
         type_equipement: typeEquip,
