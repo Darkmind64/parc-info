@@ -1,25 +1,24 @@
 {
-  "version": "2.33.1",
+  "version": "2.33.2",
   "release_date": "2026-09-11",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.33.1",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.1/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.33.2",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.2/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Correctif direct de la v2.33.0 (refonte de la baie de brassage) suite a un retour utilisateur : le livre ne correspondait pas a la maquette interactive pourtant validee avant implementation. (1) Panneau de droite : l'ancien panneau + Placer/Liste avait ete GARDE en plus du nouvel inspecteur au lieu d'etre remplace -- supprime entierement, l'inspecteur est desormais le seul contenu du rail de droite. (2) Bibliotheque : nouvelle section Generique (12 types de baie, toujours presents, glisser-depose) pour ne pas perdre la capacite de creation retiree avec le panneau + Placer. (3) Icones reseau (switch/routeur/borne Wi-Fi detectes ou declares sur un port) : ne suivaient pas la regle haut/bas selon la rangee sur un switch en disposition 2 lignes -- corrige, plus deux problemes annexes trouves en revalidant le cas des deux rangees simultanement (icone qui volait le clic de la poignee de redimensionnement, couloir reserve qui pouvait deborder du conteneur sur un switch 1U deja tres rempli). (4) Panneau appareils du port : converti en vrai tiroir ancre en bas de la fenetre, au lieu d'un bloc insere dans le flux normal de la page.",
+    "new_features": "Baie de brassage : la maquette validee etait aussi le modele a suivre pour l'ergonomie fine, pas seulement le contenu de l'inspecteur (deja corrige en 2.33.1). Trois retours utilisateur traites dans cette version. (1) En-tete + barre d'outils : en-tete dedie compact (titre, client/baie, boutons Exporter/Configurer) au lieu de la grosse banniere generique -- nav globale ParcInfo conservee au-dessus. Typographie de la barre d'outils alignee sur la maquette (casse normale, densite resserree) au lieu du style CTA majuscule du reste de l'app. Poignees de redimensionnement dotees d'un repere visuel permanent. Menu Affichage complete (Sante, Cables, Hors site). (2) Redimensionnement en largeur : la grille horizontale passe de 10 crans (dixiemes) a 1000 (millièmes) -- un glisser suit desormais la souris au pixel pres au lieu de sauter par paliers de 10% perceptibles. Migration automatique au demarrage, aucune perte de position/largeur existante. (3) Deplacement d'un equipement deja pose : ne fonctionnait pas de facon fiable (suivait la souris puis retombait a sa place) -- cause identifiee, le glisser-depose HTML5 natif s'annule silencieusement des qu'un survol intermediaire ne confirme pas la cible. Remplace par le meme mecanisme que la maquette (evenements souris avec repositionnement direct), comme les poignees de redimensionnement qui n'avaient jamais eu ce probleme. Verifie par plusieurs deplacements reels consecutifs dans le navigateur.",
     "improvements": [
-      "Baie de brassage : panneau de droite (inspecteur) redevenu le seul mecanisme d'edition, sans ancien panneau de creation residuel.",
-      "Baie de brassage : bibliotheque enrichie d'une section d'equipements generiques toujours disponibles au glisser-depose.",
-      "Baie de brassage : positionnement fiable des icones reseau haut/bas sur un switch a 2 rangees de ports, y compris tres rempli.",
-      "Baie de brassage : panneau des appareils par port ancre en bas de fenetre, toujours visible sans defilement."
+      "Baie de brassage : en-tete dedie et barre d'outils alignes visuellement sur la maquette (typographie, poignees, menu Affichage complet).",
+      "Baie de brassage : redimensionnement en largeur quasi continu (grille a 1000 positions au lieu de 10).",
+      "Baie de brassage : deplacement d'un equipement fiabilise (evenements souris directs au lieu du glisser-depose HTML5 natif)."
     ]
   },
   "checksums": {
@@ -30,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.1"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.2"
 }
