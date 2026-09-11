@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.3] - 2026-09-11 🖥️
+
+### Interface : exploiter la largeur des écrans 1920px
+
+Remarque utilisateur : l'ensemble de l'interface n'utilisait pas toute la largeur disponible d'un écran 1920×1080, la norme actuelle, alors que ça permettrait d'afficher plus de détails.
+
+**Cause.** Le conteneur principal (`templates/base.html`) plafonnait `main` — donc le contenu de **toutes** les pages — à 1400px de large, quelle que soit la résolution ; la barre de navigation et la barre client, elles, étaient déjà pleine largeur. Sur un écran 1920px, ça laissait environ 500px de marges mortes de chaque côté.
+
+**Correctif.** Plafond remonté à 1800px : gain de place réel sur les écrans chargés en données (listes, tableau de bord, baie de brassage) sans devenir excessif sur un très grand écran (ultrawide). Vérifié qu'aucun gabarit (tableau de bord, liste des appareils, baie de brassage) n'a de conteneur interne plus étroit qui annulerait le gain — les formulaires gardent leur propre largeur, volontairement plus étroite pour la lisibilité, laissée inchangée.
+
+**Déploiement.** Changement CSS pur, aucune migration de données. Vérifié en navigateur à 1920×1080 sur le tableau de bord, la liste des appareils et la baie de brassage : conteneur mesuré à 1800px, zéro erreur console, mise en page toujours correcte.
+
+---
+
 ## [2.33.2] - 2026-09-11 🖱️
 
 ### Baie de brassage : ergonomie fine alignée sur la maquette
