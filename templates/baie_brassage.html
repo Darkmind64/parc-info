@@ -628,6 +628,17 @@
 }
 .cell-admin:hover { color:var(--accent); background:rgba(0,201,255,.15); }
 
+/* Boutons ARP/MAC/DNS (switch/routeur/box, demandé) — même gabarit discret
+   que .cell-admin (texte au lieu d'une icône, ces 3 lettres se suffisant à
+   elles-mêmes sans symbole dédié), regroupés juste avant le bouton
+   "retirer" pour rester parmi les actions du bandeau d'en-tête. */
+.cell-diag-btn {
+    background:none; border:1px solid var(--border); color:#64748b; cursor:pointer;
+    font-family:'Share Tech Mono',monospace; font-size:8px; letter-spacing:.5px;
+    padding:1px 4px; flex-shrink:0; transition:all .12s; line-height:1.4; border-radius:2px;
+}
+.cell-diag-btn:hover { color:var(--accent); border-color:var(--accent); background:rgba(0,201,255,.1); }
+
 /* Zones de prise agrandies (invisibles au repos, comme avant — seul le
    hover/.resizing colore) : les tailles précédentes (5px, 5px, 9x9)
    étaient signalées comme trop fines pour viser fiablement à la souris,
@@ -860,10 +871,16 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
     font-weight:700; letter-spacing:1px; text-transform:uppercase; }
 .port-appareils .pa-head-r { display:flex; align-items:center; gap:.7rem; }
 .port-appareils .pa-meta { font-family:'Share Tech Mono',monospace; font-size:.66rem; color:var(--text-muted); }
-.port-appareils .pa-body { padding:.5rem .8rem .7rem; flex:1 1 auto; overflow:auto; }
+/* max-height en plus du max-height:44vh du tiroir lui-même : sur un
+   port/équipement à beaucoup d'appareils vus (FDB), la table pouvait
+   s'étendre jusqu'à recouvrir une bonne partie du rack au-dessus — fixé à
+   ~10 lignes visibles (demandé), défilement interne pour le reste, quel
+   que soit le nombre réel d'appareils. */
+.port-appareils .pa-body { padding:.5rem .8rem .7rem; flex:1 1 auto; overflow:auto; max-height:19rem; }
 .pa-tbl { width:100%; border-collapse:collapse; font-size:.78rem; }
 .pa-tbl th { text-align:left; font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:1px;
-    text-transform:uppercase; color:var(--text-muted); padding:.3rem .5rem; border-bottom:1px solid var(--border); }
+    text-transform:uppercase; color:var(--text-muted); padding:.3rem .5rem; border-bottom:1px solid var(--border);
+    position:sticky; top:0; background:var(--bg-card); z-index:1; }
 .pa-tbl td { padding:.32rem .5rem; border-bottom:1px solid var(--border); }
 .pa-tbl td.mono, .pa-tbl td.ipc { font-family:'Share Tech Mono',monospace; font-size:.72rem; color:var(--text-secondary); }
 .pa-badge { font-family:'Share Tech Mono',monospace; font-size:8.5px; letter-spacing:.5px;
@@ -871,6 +888,8 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .pa-badge.ok { color:var(--accent-green); border-color:color-mix(in srgb,var(--accent-green) 45%,var(--border)); }
 .pa-badge.warn { color:var(--accent-orange); border-color:color-mix(in srgb,var(--accent-orange) 45%,var(--border)); }
 .pa-empty { color:var(--text-muted); font-size:.76rem; padding:.4rem .2rem; }
+.pa-presence, .pa-presence-na { display:inline-block; cursor:default; }
+.pa-presence-na { color:var(--text-muted); }
 
 /* proposition #1 : pastille de santé de l'équipement (diagnostic réseau SNMP) */
 .cell-sante { display:inline-flex; align-items:center; gap:3px; flex-shrink:0;
@@ -2936,6 +2955,11 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // Puissance de l'onduleur (VA, demandé) — purement informative, affichée
     // à côté de l'IP quand renseignée (jamais pour un autre type que UPS).
     const badgeVa = (s.type_equipement === 'UPS' && s.puissance_va) ? `<span class="cell-va" title="Puissance de l'onduleur">⚡${s.puissance_va} VA</span>` : '';
+    const estReseauInterrogeable = ip && ['Switch', 'Routeur/Pare-feu', 'Box internet (FAI)'].includes(s.type_equipement);
+    const boutonsReseau = estReseauInterrogeable ? `
+            <button class="cell-diag-btn" onclick="event.stopPropagation();ouvrirTableEquipement(${s.id},'arp')" title="Lire la table ARP de cet equipement (SNMP)">ARP</button>
+            <button class="cell-diag-btn" onclick="event.stopPropagation();ouvrirTableEquipement(${s.id},'mac')" title="Lire la table MAC (FDB) de cet equipement (SNMP)">MAC</button>
+            <button class="cell-diag-btn" onclick="event.stopPropagation();ouvrirTableEquipement(${s.id},'dns')" title="Interroger cet equipement comme serveur DNS">DNS</button>` : '';
     const ligneInfo = `
         <div class="cell-row">
             <span class="cell-led ${ledCls}"></span>
@@ -2943,6 +2967,7 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             ${ip ? `<span class="cell-ip">${escH(ip)}</span>` : ''}
             ${badgeVa}
             ${boutonAdmin}
+            ${boutonsReseau}
             <button class="cell-del" onclick="event.stopPropagation();delSlot(${s.id})" title="Retirer">✕</button>
         </div>`;
 
@@ -4224,11 +4249,18 @@ function symboleType(type, connu) {
 // Schéma d'une cascade : le port, l'équipement intermédiaire déduit (switch non
 // géré ou borne Wi-Fi), et les machines qui parlent à travers lui. Rendu en SVG
 // inline — la page n'autorise aucune dépendance externe.
+// Nombre d'appareils dessinés dans le schéma de l'infobulle (compacte par
+// nature) — voisins_detail lui-même n'est PLUS plafonné côté serveur
+// (voir _voisins_port) depuis que le tiroir « appareils du port » a besoin
+// de la liste COMPLÈTE ; le schéma, lui, doit rester court, d'où ce
+// plafond posé ICI plutôt que côté serveur.
+const SCHEMA_CASCADE_MAX = 6;
 function schemaCascade(a, numero) {
-    const det = (a.voisins_detail && a.voisins_detail.length)
+    const detComplet = (a.voisins_detail && a.voisins_detail.length)
         ? a.voisins_detail
         : (a.voisins || []).map(n => ({ nom: n, type: '', connu: true }));
-    if (det.length < 2) return '';
+    if (detComplet.length < 2) return '';
+    const det = detComplet.slice(0, SCHEMA_CASCADE_MAX);
     const c = a.cascade || {};
     const inter = { wifi:        { sym: '📶', lbl: 'Borne Wi-Fi probable' },
                     switch:      { sym: '🔀', lbl: 'Switch non géré probable' },
@@ -4240,7 +4272,7 @@ function schemaCascade(a, numero) {
     // de titre juste au-dessus le nomme déjà, et l'étiquette chevauchait le port.
     const LH = 19, X_PORT = 17, X_INTER = 62, X_SYM = 104, X_NOM = 120, W = 300;
     const yInter = 26, Y0 = 54;
-    const total = c.n_macs || a.voisins_n || det.length;
+    const total = c.n_macs || a.voisins_n || detComplet.length;
     const restants = Math.max(0, total - det.length);
     const lignes = det.length + (restants ? 1 : 0);
     const H = Y0 + Math.max(0, lignes - 1) * LH + 12;
@@ -4335,6 +4367,21 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau, typeEquipement) {
     const libellePort = libellePortAffiche(typeEquipement, p.numero);
     let html = `<div class="tip-title">${libellePort}${cible ? ' — ' + escH(cible) : ''}</div>`;
     html += `<div class="tip-row"><span class="tip-key">Élément</span><span class="tip-val">${escH(nomSlot)}</span></div>`;
+    // Statut réseau (déclaré/détecté/incohérent) — auparavant visible
+    // SEULEMENT dans le title natif de l'icône .port-netic-ic (retiré,
+    // voir appliquerNeticPorts) : l'infobulle native du navigateur
+    // apparaissait alors par-dessus cette infobulle mise en forme dès
+    // qu'on survolait l'icône, signalé en usage réel, capture à l'appui.
+    const netic = _neticEtatPour(p, p.slot_id + ':' + p.numero);
+    if (netic) {
+        const libNetic = (netic.viaTopologie ? 'détecté (SNMP)' : netic.etat === 'netic-declared' ? 'déclaré' : 'confirmé (en ligne)');
+        const coul = netic.etat === 'netic-incoherent' ? 'var(--accent-red,#ff3355)'
+            : netic.etat === 'netic-declared' ? 'var(--accent-orange,#e0952a)' : 'var(--accent-green,#22c55e)';
+        html += `<div class="tip-row"><span class="tip-key">Réseau</span><span class="tip-val">`
+            + `${NETIC_IC[netic.kind] || '🔀'} ${escH(NETIC_LBL[netic.kind] || 'Équipement réseau')}`
+            + ` <span style="color:${coul};">${netic.etat === 'netic-incoherent' ? '⚠ détecté ≠ déclaré' : libNetic}</span>`
+            + `</span></div>`;
+    }
     if (p.appareil_id) {
         html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${p.en_ligne ? '🟢 En ligne' : '🔴 Hors ligne'}</span></div>`;
     } else if (p.peripherique_id) {
@@ -4370,6 +4417,15 @@ function afficherTooltipPort(e, p, nomSlot, estBandeau, typeEquipement) {
     }
     if (p.cable_couleur || p.cable_longueur) {
         html += `<div class="tip-row"><span class="tip-key">Câble</span><span class="tip-val">${[p.cable_couleur, p.cable_longueur].filter(Boolean).map(escH).join(' · ')}</span></div>`;
+    }
+    // Erreur de diagnostic réseau (CRC, duplex…) — auparavant visible
+    // SEULEMENT dans le title natif posé directement sur .port (retiré,
+    // voir appliquerDiagErreurs), même conflit d'infobulle natif/mise en
+    // forme que pour le statut réseau ci-dessus.
+    const diagErr = _diagErreurs[p.slot_id + ':' + p.numero];
+    if (diagErr) {
+        const coul = diagErr.gravite === 'critique' ? 'var(--accent-red,#ff3355)' : 'var(--accent-orange,#e0952a)';
+        html += `<div class="tip-row"><span class="tip-key">⚠ Diagnostic</span><span class="tip-val" style="color:${coul};">${escH(diagErr.libelle || diagErr.classe || 'erreur')}</span></div>`;
     }
     html += rowsActivitePort(p.slot_id, p.numero);
     t.innerHTML = html;
@@ -5766,23 +5822,16 @@ const PortModal = (() => {
         // la maquette) — depuis _neticDetecte (lot 5) et le port lui-même,
         // aucun appel réseau supplémentaire.
         const cle = sid + ':' + num;
-        const info = _neticDetecte[cle] || {};
-        const kindDeclare = _neticKind(port.lie_type);
-        // Repli "confirmé en ligne" — même raison que dans appliquerNeticPorts :
-        // un cordon déclaré vers un équipement qui répond déjà au ping/SNMP
-        // n'a pas besoin d'attendre une cartographie de topologie complète
-        // pour afficher la confirmation.
-        const detecteKind = info.detected_kind || (port.cible_en_ligne ? kindDeclare : null);
-        const viaTopologie = !!info.detected_kind;
-        const kind = detecteKind || kindDeclare;
+        const netic = _neticEtatPour(port, cle);
+        const info = netic ? netic.info : (_neticDetecte[cle] || {});
+        const kind = netic ? netic.kind : null;
         derniereKind = kind;
-        derniereEtat = (detecteKind && kindDeclare && detecteKind !== kindDeclare) ? 'netic-incoherent'
-            : detecteKind ? 'netic-detected' : 'netic-declared';
+        derniereEtat = netic ? netic.etat : 'netic-declared';
         const equipRow = document.getElementById('pom-det-equip-row');
         if (kind) {
             document.getElementById('pom-det-equip').textContent =
                 (NETIC_IC[kind] || '') + ' ' + (NETIC_LBL[kind] || 'Équipement réseau')
-                + (viaTopologie ? ' (détecté)' : detecteKind ? ' (confirmé en ligne)' : ' (déclaré)');
+                + (netic.viaTopologie ? ' (détecté)' : netic.etat === 'netic-declared' ? ' (déclaré)' : ' (confirmé en ligne)');
             equipRow.style.display = '';
         } else equipRow.style.display = 'none';
         const devs = info.devices || [];
@@ -6536,15 +6585,16 @@ async function chargerDiagErreurs() {
 function appliquerDiagErreurs() {
     document.querySelectorAll('.port.port-diag-err').forEach(el => {
         el.classList.remove('port-diag-err', 'port-diag-crit');
-        el.removeAttribute('data-diag-title');
     });
     for (const [cle, info] of Object.entries(_diagErreurs)) {
         const [slot, num] = cle.split(':');
         document.querySelectorAll(`.port[data-slot="${slot}"][data-numero="${num}"]`).forEach(el => {
             el.classList.add('port-diag-err');
             if (info.gravite === 'critique') el.classList.add('port-diag-crit');
-            const t = 'Diagnostic réseau : ' + (info.libelle || info.classe);
-            el.title = el.title ? el.title + ' · ' + t : t;
+            // PAS de `title` natif ici (même raison que .port-netic-ic,
+            // voir appliquerNeticPorts) : l'erreur de diagnostic est
+            // reprise dans l'infobulle mise en forme du port elle-même
+            // (voir afficherTooltipPort, _diagErreurs).
         });
     }
     // pastille de santé par équipement (proposition #1)
@@ -6575,6 +6625,24 @@ function _neticKind(t) {
     if (t === 'Routeur/Pare-feu' || t === 'Box internet (FAI)') return 'router';
     if (t === 'Borne Wi-Fi' || t === 'Borne WiFi' || t === 'Pont Wi-Fi') return 'ap';
     return null;
+}
+// État réseau (déclaré/détecté/incohérent) d'UN port donné — factorisé pour
+// être partagé par PortModal.ouvrir() et afficherTooltipPort() (la ligne de
+// statut vivait auparavant SEULEMENT dans le `title` natif de l'icône
+// .port-netic-ic, ce qui faisait apparaître l'infobulle native du
+// navigateur PAR-DESSUS l'infobulle mise en forme de ParcInfo dès qu'on
+// survolait cette icône — signalé en usage réel, capture à l'appui.
+// Retourne null si ce port n'a aucun statut réseau à montrer.
+function _neticEtatPour(p, cle) {
+    const kindDeclare = _neticKind(p.lie_type);
+    const info = _neticDetecte[cle] || {};
+    // Repli "confirmé en ligne" — voir appliquerNeticPorts.
+    const detecteKind = info.detected_kind || (p.cible_en_ligne ? kindDeclare : null);
+    if (!kindDeclare && !detecteKind) return null;
+    const kind = detecteKind || kindDeclare;
+    const etat = (detecteKind && kindDeclare && detecteKind !== kindDeclare) ? 'netic-incoherent'
+        : detecteKind ? 'netic-detected' : 'netic-declared';
+    return { kind, etat, viaTopologie: !!info.detected_kind, info };
 }
 let _neticDetecte = {};   // "<slot>:<port>" -> {detected_kind, uplink, vlan, n, devices:[]}
 async function chargerTopoPorts() {
@@ -6655,12 +6723,18 @@ function appliquerNeticPorts() {
         const b = document.createElement('span');
         b.className = 'port-netic-ic';
         b.textContent = NETIC_IC[kind] || '🔀';
-        b.title = (NETIC_LBL[kind] || 'Équipement réseau')
-            + (etat === 'netic-incoherent' ? ' — ⚠ détecté ≠ déclaré'
-               : etat === 'netic-detected' ? (info.detected_kind ? ' détecté (SNMP)' : ' confirmé (en ligne)')
-               : ' déclaré')
-            + ((info.devices && info.devices.length) ? ' · ' + info.devices.length + ' appareil(s)' : '')
-            + ' — clic : voir les appareils du port';
+        // PAS de `title` ici (infobulle native du navigateur) : ce statut
+        // est maintenant dans l'infobulle mise en forme de ParcInfo elle-
+        // même (voir afficherTooltipPort), qui couvre déjà tout le port —
+        // un `title` sur cette icône, à l'intérieur du port, apparaissait
+        // PAR-DESSUS/À CÔTÉ de cette infobulle dès qu'on la survolait
+        // (signalé en usage réel, capture à l'appui). aria-label conservé
+        // pour l'accessibilité (lecteur d'écran), sans déclencher
+        // l'infobulle native du navigateur.
+        b.setAttribute('aria-label', (NETIC_LBL[kind] || 'Équipement réseau')
+            + (etat === 'netic-incoherent' ? ' — détecté différent du déclaré'
+               : etat === 'netic-detected' ? (info.detected_kind ? ' détecté en SNMP' : ' confirmé en ligne')
+               : ' déclaré'));
         b.addEventListener('click', ev => {
             ev.stopPropagation();
             ouvrirAppareilsPort(x.slot, x.num, kind, etat);
@@ -6714,16 +6788,54 @@ function ouvrirAppareilsPort(slotId, numero, kind, etat) {
             : 'Équipement déclaré au bout du cordon, mais pas encore vu en SNMP. Active le diagnostic réseau (SNMP) pour lister les appareils en aval.') + '</div>';
     } else {
         body.innerHTML =
-            '<table class="pa-tbl"><thead><tr><th>Appareil</th><th>IP</th><th>MAC</th><th>Vu par</th></tr></thead><tbody>'
+            '<table class="pa-tbl"><thead><tr><th>Appareil</th><th>IP</th><th>MAC</th><th>Vu par</th><th>Présence</th></tr></thead><tbody>'
             + devs.map(d =>
                 '<tr><td>' + escH(d.nom || '—') + '</td>'
                 + '<td class="ipc">' + escH(d.ip || '') + '</td>'
                 + '<td class="mono">' + escH(d.mac || '') + '</td>'
-                + '<td><span class="pa-badge ' + (d.via === 'LLDP' ? 'ok' : '') + '">' + escH(d.via || '') + '</span></td></tr>'
+                + '<td><span class="pa-badge ' + (d.via === 'LLDP' ? 'ok' : '') + '">' + escH(d.via || '') + '</span></td>'
+                + '<td>' + _presenceCellHTML(d.ip) + '</td></tr>'
               ).join('')
             + '</tbody></table>';
     }
     pan.hidden = false;
+    _testerPresenceTiroir();
+}
+
+// État de présence (réponse au ping) des appareils listés dans le tiroir —
+// demandé : testé EN DIRECT à l'ouverture, pas une valeur en cache pouvant
+// dater (ces appareils, souvent hors inventaire, ne sont pas couverts par
+// le watchdog périodique). ⏳ le temps du test (quelques centaines de ms à
+// ~1,5s par lot, en parallèle côté serveur, voir /api/baie/ping-adresses),
+// puis 🟢/🔴 ; — pour une ligne sans IP connue (rien à pinger).
+function _presenceCellHTML(ip) {
+    return ip
+        ? `<span class="pa-presence" data-ip="${escH(ip)}" title="Test de présence en cours…">⏳</span>`
+        : '<span class="pa-presence-na" title="Pas d’IP connue pour cet appareil">—</span>';
+}
+async function _testerPresenceTiroir() {
+    const body = document.getElementById('pa-body');
+    const cells = [...body.querySelectorAll('.pa-presence[data-ip]')];
+    const ips = [...new Set(cells.map(c => c.dataset.ip))];
+    if (!ips.length) return;
+    let resultats = {};
+    try {
+        const r = await fetch('/api/baie/ping-adresses', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ips }),
+        });
+        resultats = await r.json();
+    } catch {
+        cells.forEach(c => { c.textContent = '?'; c.title = 'Test de présence indisponible'; });
+        return;
+    }
+    cells.forEach(c => {
+        const ip = c.dataset.ip;
+        if (!(ip in resultats)) { c.textContent = '?'; c.title = 'Test de présence indisponible'; return; }
+        const ok = resultats[ip];
+        c.textContent = ok ? '🟢' : '🔴';
+        c.title = ok ? 'Répond au ping' : 'Ne répond pas au ping';
+    });
 }
 
 // Bouton « 👁 Tous les appareils par port » de l'inspecteur d'équipement
@@ -6746,7 +6858,7 @@ function ouvrirAppareilsPortEquipement(slotId) {
         body.innerHTML = '<div class="pa-empty">Aucun port occupé pour l’instant.</div>';
     } else {
         body.innerHTML =
-            '<table class="pa-tbl"><thead><tr><th>Port</th><th>Appareil</th><th>IP</th><th>État</th></tr></thead><tbody>'
+            '<table class="pa-tbl"><thead><tr><th>Port</th><th>Appareil</th><th>IP</th><th>État</th><th>Présence</th></tr></thead><tbody>'
             + ports.map(p => {
                 const cle = s.id + ':' + p.numero;
                 const info = _neticDetecte[cle] || {};
@@ -6759,12 +6871,101 @@ function ouvrirAppareilsPortEquipement(slotId) {
                 return '<tr><td>' + escH(String(numeroAffiche(p.numero))) + '</td>'
                     + '<td>' + escH(nom) + '</td>'
                     + '<td class="ipc">' + escH(dev.ip || '') + '</td>'
-                    + '<td>' + etat + '</td></tr>';
+                    + '<td>' + etat + '</td>'
+                    + '<td>' + _presenceCellHTML(dev.ip) + '</td></tr>';
             }).join('')
             + '</tbody></table>';
     }
     pan.hidden = false;
+    _testerPresenceTiroir();
 }
+
+// Tables ARP/MAC/interrogation DNS d'un équipement (switch/routeur/box,
+// boutons de .cell-row, demandé) — même tiroir que ouvrirAppareilsPort,
+// réutilisé pour ne pas dupliquer tout le mécanisme de positionnement/
+// affichage pour 3 nouveaux panneaux quasi identiques.
+const _MOTIF_TABLE_LBL = {
+    pas_ip: 'Aucune adresse IP renseignée pour cet équipement.',
+    snmp_inactif: 'Diagnostic réseau (SNMP) désactivé — active-le dans Réglages → Réseau & Scan.',
+    injoignable: 'Équipement injoignable en SNMP (hors ligne, ou communauté incorrecte).',
+    snmp_refuse: 'SNMP présent mais refusé (mauvaise communauté, ACL, ou SNMPv3 requis).',
+    erreur: 'Erreur pendant la requête — voir les journaux serveur.',
+    ne_repond_pas: 'Aucune réponse DNS de cet équipement (port 53 fermé, ou ce n’est pas un résolveur).',
+};
+const _TITRE_TABLE = { arp: '📇 Table ARP', mac: '🔀 Table MAC', dns: '🌐 Interrogation DNS' };
+async function ouvrirTableEquipement(slotId, type) {
+    const pan = document.getElementById('port-appareils');
+    _positionnerPanelAppareils();
+    const s = Object.values(slots).find(x => String(x.id) === String(slotId));
+    if (!s) return;
+    document.getElementById('pa-title').textContent = (_TITRE_TABLE[type] || 'Table') + ' — ' + libelleComplet(s);
+    document.getElementById('pa-meta').textContent = '';
+    const body = document.getElementById('pa-body');
+    body.innerHTML = '<div class="pa-empty">Interrogation en direct de l’équipement…</div>';
+    pan.hidden = false;
+    let data;
+    try {
+        data = await (await fetch(`/api/baie/slot/${slotId}/${type}`)).json();
+    } catch {
+        body.innerHTML = '<div class="pa-empty">Échec de la requête réseau.</div>';
+        return;
+    }
+    if (type === 'dns') { _rendreResultatDns(data); return; }
+    _rendreResultatTableReseau(type, data);
+}
+function _rendreResultatTableReseau(type, data) {
+    document.getElementById('pa-meta').textContent = data.tronque ? '⚠ relevé tronqué (table volumineuse)' : '';
+    const body = document.getElementById('pa-body');
+    if (!data.ok) {
+        body.innerHTML = '<div class="pa-empty">' + escH(_MOTIF_TABLE_LBL[data.motif] || 'Aucune donnée.') + '</div>';
+        return;
+    }
+    const entrees = data.entrees || [];
+    if (!entrees.length) {
+        body.innerHTML = '<div class="pa-empty">Table vide pour l’instant.</div>';
+        return;
+    }
+    let head, lignes;
+    if (type === 'arp') {
+        head = '<th>IP</th><th>MAC</th><th>Interface</th><th>Présence</th>';
+        lignes = entrees.map(e =>
+            '<tr><td class="ipc">' + escH(e.ip) + '</td>'
+            + '<td class="mono">' + escH(e.mac) + '</td>'
+            + '<td>' + escH(e.ifindex != null ? String(e.ifindex) : '') + '</td>'
+            + '<td>' + _presenceCellHTML(e.ip) + '</td></tr>'
+        ).join('');
+    } else {
+        head = '<th>MAC</th><th>Port</th><th>VLAN</th>';
+        lignes = entrees.map(e =>
+            '<tr><td class="mono">' + escH(e.mac) + '</td>'
+            + '<td>' + escH(e.port_nom || '') + '</td>'
+            + '<td>' + escH(e.vlan != null ? String(e.vlan) : '') + '</td></tr>'
+        ).join('');
+    }
+    body.innerHTML = '<table class="pa-tbl"><thead><tr>' + head + '</tr></thead><tbody>' + lignes + '</tbody></table>';
+    if (type === 'arp') _testerPresenceTiroir();
+}
+function _rendreResultatDns(data) {
+    const body = document.getElementById('pa-body');
+    if (!data.ok) {
+        body.innerHTML = '<div class="pa-empty">' + escH(_MOTIF_TABLE_LBL[data.motif] || 'Aucune réponse.') + '</div>';
+        return;
+    }
+    let html = '<div class="pa-empty" style="color:var(--text-secondary);margin-bottom:.5rem;">'
+        + 'Interroge l’équipement comme résolveur DNS (requêtes CHAOS version.bind/hostname.bind + '
+        + 'résolutions de test) — ce n’est PAS un extrait de son cache interne : aucun protocole '
+        + 'standard ne l’expose à distance sans accès administrateur.</div>';
+    html += '<table class="pa-tbl"><tbody>';
+    if (data.version) html += '<tr><td>Version (CHAOS)</td><td>' + escH(data.version) + '</td></tr>';
+    if (data.hostname) html += '<tr><td>Nom d’hôte (CHAOS)</td><td>' + escH(data.hostname) + '</td></tr>';
+    (data.resolutions || []).forEach(r => {
+        html += '<tr><td>' + escH(r.nom) + '</td><td>'
+            + (r.ok ? escH(r.valeur) : '<span class="pa-badge">pas de réponse</span>') + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    body.innerHTML = html;
+}
+
 document.getElementById('pa-close').addEventListener('click',
     () => { document.getElementById('port-appareils').hidden = true; });
 

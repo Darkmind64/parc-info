@@ -7673,6 +7673,126 @@ def api_baie_topologie_ports():
         return jsonify({})
 
 
+@app.route('/api/baie/ping-adresses', methods=['POST'])
+@login_required
+def api_baie_ping_adresses():
+    """Ping à la demande d'une liste d'adresses IP arbitraires (demandé) —
+    pour l'état de présence des appareils listés dans le tiroir « appareils
+    du port » (network_diag._voisins_port, FDB/topologie), qui ne sont pas
+    forcément dans l'inventaire (donc pas couverts par /api/ping/appareil ni
+    le watchdog périodique). Lecture réseau seule, aucune écriture — pas de
+    vérification ACL par client au-delà de la connexion : ce ne sont que des
+    IP déjà visibles par l'utilisateur dans SA propre baie.
+    Corps JSON : {"ips": ["192.168.1.10", ...]} (plafonné à 30, pings en
+    parallèle). Retourne {"<ip>": true|false}."""
+    ips = (request.get_json(silent=True) or {}).get('ips') or []
+    if not isinstance(ips, list):
+        return jsonify({'error': 'ips doit être une liste'}), 400
+    vues, adresses = set(), []
+    for ip in ips:
+        ip = (ip or '').strip()
+        if not ip or ip in vues:
+            continue
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        vues.add(ip)
+        adresses.append(ip)
+        if len(adresses) >= 30:
+            break
+    resultat = {}
+    if adresses:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, len(adresses)), thread_name_prefix='baie-ping') as ex:
+            futures = {ex.submit(_ping, ip): ip for ip in adresses}
+            for fut in concurrent.futures.as_completed(futures, timeout=5):
+                ip = futures[fut]
+                try:
+                    resultat[ip] = bool(fut.result())
+                except Exception:
+                    resultat[ip] = False
+    return jsonify(resultat)
+
+
+def _baie_slot_ip(id, cid):
+    """IP de l'appareil associé à un emplacement de baie — repli commun aux
+    routes ARP/MAC/DNS ci-dessous (demandé : boutons sur les switchs/
+    routeurs/box de la baie). Retourne `(ip, erreur_jsonify)` — `ip` vide et
+    `erreur_jsonify` posée si l'emplacement n'existe pas ou n'a pas d'IP."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT a.adresse_ip FROM baie_slots s LEFT JOIN appareils a ON a.id = s.appareil_id '
+        'WHERE s.id=? AND s.client_id=?', (id, cid)).fetchone()
+    conn.close()
+    if not row:
+        return '', (jsonify({'error': 'Emplacement introuvable'}), 404)
+    ip = (row[0] or '').strip()
+    if not ip:
+        return '', (jsonify({'ok': False, 'motif': 'pas_ip', 'entrees': []}), 200)
+    return ip, None
+
+
+@app.route('/api/baie/slot/<int:id>/arp')
+@login_required
+def api_baie_slot_arp(id):
+    """Table ARP de l'équipement (switch/routeur/box) associé à cet
+    emplacement — bouton « ARP » de la baie (demandé). Lecture SNMP en
+    direct, aucune écriture."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    ip, erreur = _baie_slot_ip(id, cid)
+    if erreur:
+        return erreur
+    if str(cfg_get('diag_snmp_actif', '0')) != '1':
+        return jsonify({'ok': False, 'motif': 'snmp_inactif', 'entrees': []})
+    try:
+        return jsonify(network_diag.arp_table_equipement(ip, network_diag._communautes_snmp()))
+    except Exception:
+        logger.exception('api_baie_slot_arp')
+        return jsonify({'ok': False, 'motif': 'erreur', 'entrees': []}), 500
+
+
+@app.route('/api/baie/slot/<int:id>/mac')
+@login_required
+def api_baie_slot_mac(id):
+    """Table MAC (bridge-MIB, FDB) de l'équipement associé à cet emplacement
+    — bouton « MAC » de la baie (demandé). Lecture SNMP en direct, aucune
+    écriture."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    ip, erreur = _baie_slot_ip(id, cid)
+    if erreur:
+        return erreur
+    if str(cfg_get('diag_snmp_actif', '0')) != '1':
+        return jsonify({'ok': False, 'motif': 'snmp_inactif', 'entrees': []})
+    try:
+        return jsonify(network_diag.mac_table_equipement(ip, network_diag._communautes_snmp()))
+    except Exception:
+        logger.exception('api_baie_slot_mac')
+        return jsonify({'ok': False, 'motif': 'erreur', 'entrees': []}), 500
+
+
+@app.route('/api/baie/slot/<int:id>/dns')
+@login_required
+def api_baie_slot_dns(id):
+    """Interroge l'équipement associé à cet emplacement COMME serveur DNS
+    (bouton « DNS » de la baie, demandé) — requête directe en UDP/53,
+    indépendante du SNMP (pas de garde diag_snmp_actif ici)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    ip, erreur = _baie_slot_ip(id, cid)
+    if erreur:
+        return erreur
+    try:
+        return jsonify(network_diag.dns_test_equipement(ip))
+    except Exception:
+        logger.exception('api_baie_slot_dns')
+        return jsonify({'ok': False, 'motif': 'erreur', 'version': '', 'hostname': '', 'resolutions': []}), 500
+
+
 @app.route('/api/baie/bibliotheque')
 @login_required
 def api_baie_bibliotheque():
