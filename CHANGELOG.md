@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.9] - 2026-09-12 📐
+
+### Baie de brassage : prises murales enfin alignées avec leurs ports RJ
+
+Signalé après coup, capture à l'appui : les prises murales du bandeau RJ ne sont toujours pas alignées ni de même largeur que les ports RJ juste en dessous.
+
+**Cause exacte**, confirmée par mesure DOM précise. Chaque prise murale a bien sa propre largeur correcte (`width:var(--pm-w)`, déjà vérifié identique à celle des ports RJ) — mais la **grille** qui les contient (`.cell-prises-murales`) gardait ses colonnes figées à `24px` en dur au lieu de suivre `var(--pm-w)`, contrairement à la grille des ports RJ (`.cell-ports`) qui suit correctement sa propre variable. Résultat mesuré : un pas de 26px pour les prises contre 29px pour les ports RJ juste en dessous (même largeur de 27px chacune) — un décalage qui s'accumule prise après prise sur toute la largeur du bandeau, exactement ce que montrait la capture.
+
+**Correctif.** `grid-template-columns` de `.cell-prises-murales` suit désormais `var(--pm-w, 24px)`, comme `.cell-ports` le fait déjà pour `var(--port-w, 24px)`.
+
+**Déploiement.** Changement CSS pur, aucune migration de données. Vérifié par mesure DOM précise sur 20 prises/ports mélangés (avec et sans icône réseau) : alignement parfait à gauche sur toute la largeur du bandeau, plus aucune dérive. Confirmé visuellement. 422 tests pytest OK.
+
+---
+
 ## [2.33.8] - 2026-09-12 🟢
 
 ### Baie de brassage : anneau réseau confirmé dès que l'équipement déclaré est en ligne

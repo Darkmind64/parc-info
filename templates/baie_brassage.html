@@ -495,9 +495,20 @@
 .cell-row-labeled { display:flex; align-items:center; gap:3px; min-width:0; }
 .row-icon { flex-shrink:0; width:12px; text-align:center; font-size:.58rem; line-height:1; opacity:.55; user-select:none; }
 .cell-prises-murales {
-    display:grid; grid-template-columns:repeat(auto-fill, 24px); gap:2px;
+    display:grid; grid-template-columns:repeat(auto-fill, var(--pm-w, 24px)); gap:2px;
     align-content:flex-start; overflow:hidden; min-width:0; flex:1;
 }
+/* La largeur de CHAQUE prise suit déjà --pm-w (voir .prise-murale plus
+   bas), mais la grille elle-même gardait des colonnes figées à 24px —
+   sans rapport avec --pm-w dès que la baie n'est pas à son ratio de
+   base (1). Une prise ne dépasse alors pas visuellement (elle a sa
+   propre largeur explicite), mais sa case dans la grille, elle, reste
+   plus étroite ou plus large que la prise qu'elle contient : l'écart
+   s'accumule prise après prise (26px de pas mesuré ici contre 29px pour
+   les ports RJ juste en dessous, même largeur de 27px chacun) au lieu de
+   suivre exactement le même pas que .cell-ports — d'où le désalignement
+   progressif avec les ports RJ signalé en usage réel, capture à l'appui,
+   qui s'aggrave à mesure qu'on avance sur la rangée. */
 /* Prise murale : cellule plus fine qu'un port RJ (13px contre 22px) — elle
    n'a besoin que d'afficher un numéro, un voyant de ping et sa couleur de
    cible, pas le badge de déliaison (pas de "lien" à détacher, la
