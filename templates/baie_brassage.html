@@ -1583,6 +1583,18 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 </div>
                 <button type="button" id="eqm-btn-annexe" class="insp-abtn acc" style="margin-bottom:.6rem;display:none;" onclick="EquipmentModal.ouvrirAppareilsEquipement()">👁 Tous les appareils par port</button>
 
+                <!-- Infos FAI (Box internet) — voir EquipmentModal.majFai(),
+                     reprises de Paramètres généraux (PARC_FAI) : aucun MIB
+                     SNMP standard n'expose les DNS externes d'une box grand
+                     public, pas de nouvelle sonde ici. -->
+                <div id="eqm-fai" class="insp-det" style="display:none;">
+                    <div class="insp-det-h">Fournisseur d'accès</div>
+                    <div class="insp-det-line" id="eqm-fai-ip-row" style="display:none;"><span class="k">IP externe</span><span class="v" id="eqm-fai-ip"></span></div>
+                    <div class="insp-det-line" id="eqm-fai-dns-row" style="display:none;"><span class="k">DNS externes</span><span class="v" id="eqm-fai-dns"></span></div>
+                    <div class="insp-det-line" id="eqm-fai-fourn-row" style="display:none;"><span class="k">Opérateur</span><span class="v" id="eqm-fai-fourn"></span></div>
+                    <div class="insp-det-line" id="eqm-fai-vide-row" style="display:none;"><span class="v" style="color:var(--text-muted);">Non renseigné — voir Paramètres généraux</span></div>
+                </div>
+
                 <div class="form-group" style="margin-bottom:.6rem;">
                     <label>Nom affiché</label>
                     <input type="text" id="eqm-nom" placeholder="Ex: SW-CORE-01, Patch Panel Cat6...">
@@ -1688,6 +1700,7 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <div id="pom-det" class="insp-det" style="display:none;">
                     <div class="insp-det-h">Ce qui est branché</div>
                     <div class="insp-det-line" id="pom-det-equip-row" style="display:none;"><span class="k">Équipement</span><span class="v" id="pom-det-equip"></span></div>
+                    <div class="insp-det-line" id="pom-det-vlan-row" style="display:none;"><span class="k">VLAN</span><span class="v" id="pom-det-vlan"></span></div>
                     <div class="insp-det-line"><span class="k">Appareils sur le port</span><span class="v" id="pom-det-nb"></span></div>
                     <div class="insp-det-line" id="pom-det-role-row" style="display:none;"><span class="k">Rôle</span><span class="v warn">liaison montante</span></div>
                     <div class="insp-det-line" id="pom-det-incoh-row" style="display:none;"><span class="k">⚠</span><span class="v warn">détecté ≠ déclaré</span></div>
@@ -1894,6 +1907,15 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 // ── DONNÉES INITIALES ─────────────────────────────────────────────────────────
 const SLOTS_INIT = {{ slots_db | tojson }};
 const APPAREILS  = {{ appareils | tojson }};
+// Infos FAI du site (Paramètres généraux → parc_general), saisies
+// manuellement — affichées dans l'inspecteur d'une Box internet (FAI) sans
+// nouvelle sonde réseau (aucun MIB SNMP standard n'expose les DNS externes
+// configurés sur une box grand public).
+const PARC_FAI = {
+    ip_publique: {{ (parc.ip_publique or '') | tojson }},
+    serveur_dns: {{ (parc.serveur_dns or '') | tojson }},
+    fournisseur_internet: {{ (parc.fournisseur_internet or '') | tojson }},
+};
 let nbU    = {{ nb_u }};
 let nbCols = 1;
 let slots  = {};  // key "pos-col" → slot
@@ -3964,6 +3986,12 @@ function afficherTooltip(e, s) {
     if (s.type_equipement) html += `<div class="tip-row"><span class="tip-key">Type</span><span class="tip-val">${escH(s.type_equipement)}</span></div>`;
     if (s.adresse_ip)     html += `<div class="tip-row"><span class="tip-key">IP</span><span class="tip-val">${escH(s.adresse_ip)}</span></div>`;
     html += `<div class="tip-row"><span class="tip-key">Statut</span><span class="tip-val">${statut}</span></div>`;
+    // Box internet (FAI) : infos du site (Paramètres généraux), pas une
+    // propriété propre à cet équipement — voir EquipmentModal.majFai().
+    if (s.type_equipement === 'Box internet (FAI)') {
+        if (PARC_FAI.ip_publique) html += `<div class="tip-row"><span class="tip-key">IP externe</span><span class="tip-val">${escH(PARC_FAI.ip_publique)}</span></div>`;
+        if (PARC_FAI.serveur_dns) html += `<div class="tip-row"><span class="tip-key">DNS externes</span><span class="tip-val">${escH(PARC_FAI.serveur_dns)}</span></div>`;
+    }
     html += `<div class="tip-row"><span class="tip-key">Position</span><span class="tip-val">U${s.position} · ${Math.round((s.col_index||0)/NB_COLS_BAIE*100)}% à g. · ${s.hauteur_u||1}U${s.largeur_u ? ' · '+Math.round(s.largeur_u/NB_COLS_BAIE*100)+'%' : ''}</span></div>`;
     if (s.description)    html += `<div class="tip-row"><span class="tip-key">Note</span><span class="tip-val">${escH(s.description)}</span></div>`;
     t.innerHTML = html;
@@ -4325,6 +4353,9 @@ function rowsActivitePort(slotId, numero) {
        + `${etats[a.etat] || a.etat} · ${deb}`
        + (a.err_delta ? ` · <span style="color:var(--accent-red,#ff3355);">${a.err_delta} err</span>` : '')
        + `</span></div>`;
+    if (a.vlan) {
+        h += `<div class="tip-row"><span class="tip-key">VLAN</span><span class="tip-val">${a.vlan}</span></div>`;
+    }
     // « Trafic vu » ne sert que quand il n'y a PAS de schéma : sinon les mêmes
     // noms seraient listés deux fois dans la même infobulle.
     const _aSchema = !!(a.voisins_detail || a.voisins || []).length
@@ -5838,7 +5869,13 @@ const PortModal = (() => {
         document.getElementById('pom-det-nb').textContent = String(devs.length);
         document.getElementById('pom-det-role-row').style.display = info.uplink ? '' : 'none';
         document.getElementById('pom-det-incoh-row').style.display = derniereEtat === 'netic-incoherent' ? '' : 'none';
-        document.getElementById('pom-det').style.display = (kind || devs.length) ? '' : 'none';
+        // VLAN d'accès : relevé live (activité SNMP) prioritaire sur celui de
+        // la topologie (potentiellement périmé, voir _neticDetecte).
+        const activitePort = _activiteInfos[sid + '-' + num];
+        const vlan = (activitePort && activitePort.vlan) || info.vlan || null;
+        document.getElementById('pom-det-vlan-row').style.display = vlan ? '' : 'none';
+        if (vlan) document.getElementById('pom-det-vlan').textContent = String(vlan);
+        document.getElementById('pom-det').style.display = (kind || devs.length || vlan) ? '' : 'none';
         const apercu = document.getElementById('pom-apercu');
         if (devs.length) {
             document.getElementById('pom-apercu-lignes').innerHTML = devs.slice(0, 4).map(d =>
@@ -5998,6 +6035,7 @@ const EquipmentModal = (() => {
         afficherEditeurPorts(s);
         majBandeauType();
         majStats(s);
+        majFai(s);
         afficherInspecteur('equipement');
     }
 
@@ -6082,6 +6120,26 @@ const EquipmentModal = (() => {
         } else snmpRow.style.display = 'none';
         wrap.style.display = '';
         btnAnnexe.style.display = '';
+    }
+
+    // Bloc « Fournisseur d'accès » pour une Box internet (FAI) — reprend les
+    // champs de Paramètres généraux (parc_general, PARC_FAI), site-wide,
+    // pas une propriété de CET équipement précis, mais c'est là que
+    // l'utilisateur veut les voir (au bon endroit dans la baie).
+    function majFai(s) {
+        const wrap = document.getElementById('eqm-fai');
+        if (s.type_equipement !== 'Box internet (FAI)') { wrap.style.display = 'none'; return; }
+        const ip = (PARC_FAI.ip_publique || '').trim();
+        const dns = (PARC_FAI.serveur_dns || '').trim();
+        const fourn = (PARC_FAI.fournisseur_internet || '').trim();
+        document.getElementById('eqm-fai-ip-row').style.display = ip ? '' : 'none';
+        if (ip) document.getElementById('eqm-fai-ip').textContent = ip;
+        document.getElementById('eqm-fai-dns-row').style.display = dns ? '' : 'none';
+        if (dns) document.getElementById('eqm-fai-dns').textContent = dns;
+        document.getElementById('eqm-fai-fourn-row').style.display = fourn ? '' : 'none';
+        document.getElementById('eqm-fai-fourn').textContent = fourn;
+        document.getElementById('eqm-fai-vide-row').style.display = (ip || dns || fourn) ? 'none' : '';
+        wrap.style.display = '';
     }
 
     function ouvrirAppareilsEquipement() {

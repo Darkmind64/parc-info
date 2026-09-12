@@ -7433,7 +7433,8 @@ def _voisins_port(macs, inv_mac):
 
 
 def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot,
-                            noms_par_ip, topo_par_ip, fdb_par_ip, inv_mac, etats_prec_get):
+                            noms_par_ip, topo_par_ip, fdb_par_ip, inv_mac, etats_prec_get,
+                            fdb_meta_par_ip=None):
     """LEDs d'activité + contrôle de câblage pour les prises murales d'un bandeau RJ.
     Une prise murale N est reliée par le cordon de brassage (baie_slot_ports.lie_*)
     à un port de switch : on réutilise l'état SNMP de ce port, déjà relevé.
@@ -7510,6 +7511,7 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
             _prec[('casc', numero)] = cascade['type'] if cascade else None
 
             meta = (noms_par_ip.get(sw_ip) or {}).get(ifindex, {})
+            _vlan_pm = ((fdb_meta_par_ip or {}).get(sw_ip) or {}).get('pvid', {}).get(ifindex)
             ports_ui.append({
                 'slot_id': b_slot_id, 'numero': numero, 'prise_murale': True,
                 'etat': led['etat'], 'blink_ms': led['blink_ms'],
@@ -7519,7 +7521,7 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
                 'voisins': (voisins or {}).get('noms', []),
                 'voisins_restants': (voisins or {}).get('restants', 0),
                 'voisins_detail': (voisins or {}).get('detail', []),
-                'cascade': cascade})
+                'cascade': cascade, 'vlan': _vlan_pm})
     return ports_ui, journal_ops
 
 
@@ -8117,6 +8119,10 @@ def _cycle_activite(clients):
                         # schéma.
                         _casc = (_classer_cascade(_macs_port, inv_mac)
                                  if _macs_port and len(_macs_port) >= 2 else None)
+                        # VLAN d'accès du port (dot1qPvid) — sous-produit du
+                        # relevé FDB live (_releve_mac_switch/_vlans_actifs,
+                        # déjà fait pour le bouton MAC), pas une sonde de plus.
+                        _vlan_port = (fdb_meta_par_ip.get(ip) or {}).get('pvid', {}).get(ifindex)
 
                         ports_ui.append({'slot_id': slot_id, 'numero': numero,
                                          'etat': led['etat'], 'blink_ms': led['blink_ms'],
@@ -8129,7 +8135,7 @@ def _cycle_activite(clients):
                                          'voisins_restants': (_vois or {}).get('restants', 0),
                                          'voisins_detail': (_vois or {}).get('detail', []),
                                          'voisins_source': (_vois or {}).get('source', 'fdb'),
-                                         'cascade': _casc,
+                                         'cascade': _casc, 'vlan': _vlan_port,
                                          'cpt_pegge': (p or {}).get('cpt_pegge', False)})
                         if led['etat'] not in ('down', 'stale'):
                             nb_up += 1
@@ -8226,7 +8232,8 @@ def _cycle_activite(clients):
                     pm_ports, pm_journal = _prises_murales_activite(
                         conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot,
                         noms_par_ip, topo_par_ip, fdb_par_ip, inv_mac,
-                        lambda sid: _activite_etat_mappe.setdefault((cid, sid), {}))
+                        lambda sid: _activite_etat_mappe.setdefault((cid, sid), {}),
+                        fdb_meta_par_ip=fdb_meta_par_ip)
                     ports_ui.extend(pm_ports)
                     journal_ops.extend(pm_journal)
             finally:

@@ -721,16 +721,18 @@ def test_api_baie_activite_route_sans_snmp_synchrone(client, conn, deux_clients,
     assert r.status_code == 200 and 'actif' in r.get_json()
 
 
-def _mock_snmp_switch(monkeypatch, ports, fdb=None):
+def _mock_snmp_switch(monkeypatch, ports, fdb=None, pvid=None):
     """ports = {ifindex: dict(oper,speed_mbps,in_oct,out_oct,in_pkts,out_pkts,in_err,out_err)}
-    fdb   = {ifindex: set(mac)} appris (FDB live) — vide par défaut."""
+    fdb   = {ifindex: set(mac)} appris (FDB live) — vide par défaut.
+    pvid  = {ifindex: vid} VLAN d'accès (dot1qPvid) — vide par défaut."""
     monkeypatch.setattr(network_diag, '_presence_baie_ok', lambda *a, **k: True)
     monkeypatch.setattr(network_diag, '_noms_interfaces',
                         lambda ip, c: {i: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True,
                                            'speed_mbps': ports[i].get('speed_mbps', 0)} for i in ports})
     monkeypatch.setattr(network_diag, '_poll_switch_ports',
                         lambda ip, c, infos=None: (dict(ports), bool(ports), True, None))
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: (dict(fdb or {}), {}))
+    monkeypatch.setattr(network_diag, '_fdb_switch',
+                        lambda ip, c: (dict(fdb or {}), {'pvid': dict(pvid or {})}))
 
 
 def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, monkeypatch):
@@ -741,14 +743,19 @@ def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, mo
     conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1)", (slot_id,))
     conn.commit()
     # port baie 1 → nom 'Gi0/1' → ifIndex 1 (mapping par nom, aucune topologie)
+    # avec_fdb=False au 1er cycle (voir _cycle_activite) : le VLAN, sous-produit
+    # du relevé FDB, n'apparaît qu'une fois « réchauffé » (_activite_rechauffe).
     _mock_snmp_switch(monkeypatch, {1: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0,
-                                            in_pkts=0, out_pkts=0, in_err=0, out_err=0)})
+                                            in_pkts=0, out_pkts=0, in_err=0, out_err=0)},
+                      pvid={1: 30})
+    monkeypatch.setattr(network_diag, '_activite_rechauffe', [1])  # avec_fdb=True
     network_diag._cycle_activite([cid])
     with network_diag._activite_lock:
         res = network_diag._activite_resultat.get(cid)
         detail = network_diag._activite_detail.get(cid)
     assert res and res['actif'] is True
     assert any(p['numero'] == 1 for p in res['ports'])
+    assert next(p for p in res['ports'] if p['numero'] == 1)['vlan'] == 30
     assert res['equipements'][0]['ip'] == '10.0.0.2'
     assert detail['switchs'][0]['compteurs_64bits'] is True
     assert detail['ports'][0]['numero'] == 1 and detail['ports'][0]['source_mapping'] == 'nom_port'
@@ -808,10 +815,14 @@ def test_prises_murales_activite(conn, deux_clients, make_appareil):
     _f = network_diag._prises_murales_activite
 
     # FDB : la bonne MAC est apprise sur l'ifIndex 42 -> câblage confirmé
+    # + VLAN d'accès (dot1qPvid) du port de switch au bout du cordon,
+    # sous-produit du relevé FDB (fdb_meta_par_ip[ip]['pvid']).
     pu, jo = _f(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot, noms_par_ip,
-                {}, {'10.0.0.2': {42: {'aa:bb:cc:00:00:01'}}}, inv_mac, lambda s: prec)
+                {}, {'10.0.0.2': {42: {'aa:bb:cc:00:00:01'}}}, inv_mac, lambda s: prec,
+                fdb_meta_par_ip={'10.0.0.2': {'pvid': {42: 20}}})
     assert len(pu) == 1 and pu[0]['prise_murale'] is True and pu[0]['numero'] == 5
     assert pu[0]['etat'] == 'traffic' and pu[0]['cable'] == 'ok' and pu[0]['cible'] == 'PC-COMPTA'
+    assert pu[0]['vlan'] == 20
     assert jo == []
 
     # FDB : le port apprend une AUTRE MAC -> incohérent, appareil vu nommé dans le journal
