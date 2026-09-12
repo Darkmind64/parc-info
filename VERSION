@@ -1,8 +1,52 @@
-PARCINFO_VERSION=2.33.9
+PARCINFO_VERSION=2.33.10
 RELEASE_DATE=2026-09-12
 BUILD_NUMBER=2026091201
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.10 - Baie de brassage : tiroir complet, infobulles natives
+# supprimées, présence en direct, boutons ARP/MAC/DNS
+#
+# Demandé (capture à l'appui) : 7 points sur le tiroir "appareils du
+# port" et les infobulles de la baie.
+#
+# (1) Liste incomplète du tiroir - network_diag._voisins_port plafonnait
+# 'detail' (liste complète) sur la même constante que 'noms' (liste
+# compacte de l'infobulle), alors que seule la 2e doit l'être. 'detail'
+# construit désormais pour CHAQUE MAC de libellé unique, sans plafond ;
+# 'noms' reste borné à _ACTIVITE_VOISINS_MAX. Même correctif appliqué au
+# repli topologie de _cycle_activite.
+#
+# (2) Infobulles natives du navigateur qui masquaient les infobulles
+# stylées ParcInfo - trouvé à 2 endroits (.port-netic-ic dans
+# appliquerNeticPorts, .port en erreur de diagnostic dans
+# appliquerDiagErreurs) : attribut title (déclenche l'infobulle native au
+# survol) remplacé par aria-label (accessibilité conservée, aucun rendu
+# visuel natif).
+#
+# (3) Tiroir pouvant recouvrir la baie - hauteur du corps du tableau
+# plafonnée (max-height:19rem, ~10 lignes), défilement interne, en-têtes
+# de colonnes collants (position:sticky).
+#
+# (4) Présence en direct - nouvelle colonne "Présence" testée au moment
+# de l'affichage : route POST /api/baie/ping-adresses (ping parallèle via
+# _ping() déjà existant), rendu 🟢/🔴 côté client (_testerPresenceTiroir).
+#
+# (5)(6)(7) Boutons ARP/MAC/DNS sur switch/routeur/box - 3 nouvelles
+# routes de lecture seule (GET /api/baie/slot/<id>/{arp,mac,dns}) :
+# network_diag.arp_table_equipement (ipNetToMediaPhysAddress),
+# mac_table_equipement (FDB bridge-MIB + noms d'interface), et
+# dns_test_equipement (requête DNS main-écrite : CHAOS version.bind/
+# hostname.bind + résolution A de 2 noms de test) - interroge
+# l'équipement COMME serveur DNS (clarifié avec l'utilisateur), pas un
+# extrait de son cache interne, capacité qu'aucun protocole standard
+# n'expose sans accès administratif (SSH, non fait). Rendu dans le même
+# tiroir via ouvrirTableEquipement().
+#
+# Vérifié en navigateur (tiroir complet au-delà de 6 appareils,
+# infobulles natives disparues, défilement à 10+ lignes, présence 🟢/🔴
+# en direct, ARP/MAC/DNS affichés) + requête DNS testée en direct contre
+# 8.8.8.8 (résolution correcte de 2 noms publics). 422 tests pytest OK.
 
 # Version 2.33.9 - Baie de brassage : prises murales enfin alignées avec
 # leurs ports RJ

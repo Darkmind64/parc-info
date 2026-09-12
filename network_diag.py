@@ -491,6 +491,131 @@ def _requete_dns_a(serveur: str, nom: str, timeout: float = 2.0) -> bool:
         return False
 
 
+def _dns_nom_encode(nom: str) -> bytes:
+    return b''.join(struct.pack('B', len(p)) + p.encode('ascii') for p in nom.split('.') if p) + b'\x00'
+
+
+def _dns_nom_decode(data: bytes, offset: int):
+    """Décode un nom DNS (avec compression par pointeur, RFC 1035 §4.1.4) à
+    partir de `offset`. Retourne `(nom, offset_apres)` — l'offset retourné
+    reste dans le flux ORIGINAL même si un pointeur a été suivi (nécessaire
+    pour continuer à parcourir les enregistrements suivants)."""
+    labels, pos, premier_saut, boucles = [], offset, None, 0
+    while boucles < 128 and pos < len(data):
+        boucles += 1
+        longueur = data[pos]
+        if longueur == 0:
+            pos += 1
+            break
+        if (longueur & 0xC0) == 0xC0:
+            if pos + 1 >= len(data):
+                break
+            ptr = ((longueur & 0x3F) << 8) | data[pos + 1]
+            if premier_saut is None:
+                premier_saut = pos + 2
+            pos = ptr
+            continue
+        pos += 1
+        labels.append(data[pos:pos + longueur].decode('ascii', errors='replace'))
+        pos += longueur
+    return '.'.join(labels), (premier_saut if premier_saut is not None else pos)
+
+
+def _requete_dns(serveur: str, nom: str, qtype: int, qclass: int = 1, timeout: float = 2.0) -> dict:
+    """Requête DNS générique construite à la main (pas de dnspython, même
+    esprit que `_requete_dns_a` et l'encodage BER SNMP fait main ailleurs
+    dans ce projet) — utilisée pour interroger un équipement de la baie
+    COMME serveur DNS (bouton « DNS », demandé). `qclass=3` = CHAOS (pour
+    `version.bind`/`hostname.bind`), `qclass=1` = IN (résolution normale).
+    Retourne `{'ok': bool, 'rcode': int|None, 'reponses': [{'nom','type',
+    'ttl','valeur'}]}` — `ok` reflète RCODE=0 (NOERROR), pas seulement une
+    réponse reçue (un NXDOMAIN reste une réponse, juste pas OK)."""
+    try:
+        tid = int.from_bytes(os.urandom(2), 'big')
+        entete = struct.pack('>HHHHHH', tid, 0x0100, 1, 0, 0, 0)
+        paquet = entete + _dns_nom_encode(nom) + struct.pack('>HH', qtype, qclass)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(timeout)
+        s.sendto(paquet, (serveur, 53))
+        data, _addr = s.recvfrom(4096)
+        s.close()
+    except Exception:
+        return {'ok': False, 'rcode': None, 'reponses': []}
+    if len(data) < 12:
+        return {'ok': False, 'rcode': None, 'reponses': []}
+    rid, flags, qdcount, ancount, _ns, _ar = struct.unpack('>HHHHHH', data[:12])
+    if rid != tid or not (flags & 0x8000):
+        return {'ok': False, 'rcode': None, 'reponses': []}
+    rcode = flags & 0x000F
+    pos = 12
+    for _ in range(qdcount):
+        _n, pos = _dns_nom_decode(data, pos)
+        pos += 4  # QTYPE + QCLASS
+    reponses = []
+    for _ in range(ancount):
+        if pos >= len(data):
+            break
+        nom_rr, pos = _dns_nom_decode(data, pos)
+        if pos + 10 > len(data):
+            break
+        rtype, _rclass, ttl, rdlength = struct.unpack('>HHIH', data[pos:pos + 10])
+        pos += 10
+        rdata = data[pos:pos + rdlength]
+        pos += rdlength
+        if rtype == 1 and len(rdata) == 4:                    # A
+            valeur = '.'.join(str(b) for b in rdata)
+        elif rtype == 16:                                     # TXT
+            morceaux, p2 = [], 0
+            while p2 < len(rdata):
+                ln = rdata[p2]
+                morceaux.append(rdata[p2 + 1:p2 + 1 + ln].decode('ascii', errors='replace'))
+                p2 += 1 + ln
+            valeur = ''.join(morceaux)
+        elif rtype == 5:                                      # CNAME
+            valeur, _ = _dns_nom_decode(data, pos - rdlength)
+        else:
+            valeur = rdata.hex()
+        reponses.append({'nom': nom_rr, 'type': rtype, 'ttl': ttl, 'valeur': valeur})
+    return {'ok': rcode == 0, 'rcode': rcode, 'reponses': reponses}
+
+
+_DNS_TEST_NOMS = ['www.google.com', 'cloudflare.com']
+
+
+def dns_test_equipement(ip: str, timeout: float = 2.0) -> dict:
+    """Interroge CET équipement comme serveur DNS — bouton « DNS » de la
+    baie (demandé : « interroger directement l'équipement comme serveur
+    DNS »). Deux volets, honnêtes sur ce qui est réellement accessible sans
+    identifiants :
+    1. `version.bind`/`hostname.bind` en classe CHAOS (RFC-supporté sans
+       authentification par la plupart des résolveurs récursifs courants —
+       BIND, dnsmasq, PowerDNS, Knot — donc plausible sur un routeur/box) ;
+    2. résolution de quelques noms publics connus, pour confirmer qu'il
+       répond effectivement comme résolveur et voir ce qu'il renvoie.
+    Ce n'est PAS un extrait du cache interne du résolveur : aucun protocole
+    standard n'expose un tel dump à distance sans accès administrateur
+    (SSH/API propriétaire selon le logiciel, hors de portée sans
+    identifiants que l'utilisateur devrait saisir lui-même) — capacités
+    réellement accessibles, pas une simulation de « table de cache ».
+    Retourne `{'ok', 'motif', 'version', 'hostname', 'resolutions':
+    [{'nom','ok','valeur'}]}`."""
+    r_version = _requete_dns(ip, 'version.bind', 16, qclass=3, timeout=timeout)
+    r_hostname = _requete_dns(ip, 'hostname.bind', 16, qclass=3, timeout=timeout)
+    repond = r_version['rcode'] is not None or r_hostname['rcode'] is not None
+    resolutions = []
+    for nom in _DNS_TEST_NOMS:
+        r = _requete_dns(ip, nom, 1, qclass=1, timeout=timeout)
+        if r['rcode'] is not None:
+            repond = True
+        ips = [x['valeur'] for x in r['reponses'] if x['type'] == 1]
+        resolutions.append({'nom': nom, 'ok': bool(ips), 'valeur': ', '.join(ips)})
+    if not repond:
+        return {'ok': False, 'motif': 'ne_repond_pas', 'version': '', 'hostname': '', 'resolutions': []}
+    version = (r_version['reponses'][0]['valeur'] if r_version['ok'] and r_version['reponses'] else '')
+    hostname = (r_hostname['reponses'][0]['valeur'] if r_hostname['ok'] and r_hostname['reponses'] else '')
+    return {'ok': True, 'motif': '', 'version': version, 'hostname': hostname, 'resolutions': resolutions}
+
+
 def detecter_dhcp_pirate(serveurs_attendus: list) -> list:
     """Best-effort : envoie un DHCPDISCOVER et collecte les DHCPOFFER.
 
@@ -3398,6 +3523,65 @@ def _ip_depuis_suffixe_arp(suffixe: str) -> str:
     if not all(0 <= o <= 255 for o in octets):
         return ''
     return '.'.join(str(o) for o in octets)
+
+
+def arp_table_equipement(ip, communautes, timeout=8.0):
+    """Table ARP (`ipNetToMediaPhysAddress`, repli IP-MIB moderne) lue EN
+    DIRECT sur CET équipement — bouton « ARP » de la baie de brassage
+    (demandé), lecture seule, aucune écriture, aucun cache (contrairement à
+    `_fdb_switch`, pensée pour le cycle d'activité périodique — ici on veut
+    la valeur du moment, pas une valeur qui peut dater de plusieurs
+    secondes). Retourne `{'ok': bool, 'motif': str, 'tronque': bool,
+    'entrees': [{'ip','mac','ifindex'}]}` triées par IP."""
+    from app import _snmp_presence
+    present, exploitable, detail = _snmp_presence(ip, communautes)
+    if not present:
+        return {'ok': False, 'motif': 'injoignable', 'detail': detail, 'entrees': []}
+    if not exploitable:
+        return {'ok': False, 'motif': 'snmp_refuse', 'detail': detail, 'entrees': []}
+    st = {}
+    brut = _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes, max_rows=1500, stats=st, timeout=timeout)
+    if not brut:
+        brut = _snmp_walk_octets(_OID_ARP_PHYS_2, ip, communautes, max_rows=1500, stats=st, timeout=timeout)
+    entrees = []
+    for suffixe, mac_brut in brut.items():
+        ip_hote = _ip_depuis_suffixe_arp(suffixe)
+        mac = _mac_octets(mac_brut)
+        if not ip_hote or not mac:
+            continue
+        try:
+            ifindex = int(suffixe.split('.')[0])
+        except ValueError:
+            ifindex = None
+        entrees.append({'ip': ip_hote, 'mac': mac, 'ifindex': ifindex})
+    entrees.sort(key=lambda e: tuple(int(x) for x in e['ip'].split('.')))
+    return {'ok': True, 'motif': '', 'tronque': bool(st.get('tronque')), 'entrees': entrees}
+
+
+def mac_table_equipement(ip, communautes, timeout=8.0):
+    """Table MAC (bridge-MIB, FDB) lue sur CET équipement — bouton « MAC »
+    de la baie de brassage (demandé). Réutilise `_fdb_switch` (même relevé
+    que la vue d'activité — bénéficie de son cache court s'il vient d'être
+    interrogé, sinon relance un walk), enrichi du nom d'interface
+    (`_noms_interfaces`). Retourne `{'ok', 'motif', 'tronque', 'entrees':
+    [{'mac','ifindex','port_nom','vlan'}]}` triées par interface puis MAC."""
+    from app import _snmp_presence
+    present, exploitable, detail = _snmp_presence(ip, communautes)
+    if not present:
+        return {'ok': False, 'motif': 'injoignable', 'detail': detail, 'entrees': []}
+    if not exploitable:
+        return {'ok': False, 'motif': 'snmp_refuse', 'detail': detail, 'entrees': []}
+    par_if, info = _fdb_switch(ip, communautes)
+    noms = _noms_interfaces(ip, communautes) or {}
+    vlans = (info or {}).get('vlans', {})
+    entrees = []
+    for ifindex, macs in (par_if or {}).items():
+        nom = (noms.get(ifindex) or {}).get('nom') or ('if%s' % ifindex)
+        for mac in sorted(macs):
+            entrees.append({'mac': mac, 'ifindex': ifindex, 'port_nom': nom,
+                             'vlan': vlans.get((ifindex, mac))})
+    entrees.sort(key=lambda e: (e['ifindex'] if isinstance(e['ifindex'], int) else 0, e['mac']))
+    return {'ok': True, 'motif': '', 'tronque': bool((info or {}).get('tronque')), 'entrees': entrees}
 
 
 _HOTES_SNMP_MAX_EQUIP = 8
@@ -7216,7 +7400,15 @@ def _voisins_port(macs, inv_mac):
     ip, connu}` : le schéma de cascade de l'infobulle a besoin du **type**
     pour choisir le symbole de chaque machine, ce que la liste de noms ne
     donnait pas ; `ip` reste vide si `inv_mac` ne la porte pas (certains
-    appelants construisent encore des tuples à 3 éléments sans IP)."""
+    appelants construisent encore des tuples à 3 éléments sans IP).
+
+    `detail` n'est PAS plafonné par `_ACTIVITE_VOISINS_MAX` (contrairement
+    à `noms`, réservé à l'infobulle compacte) — le tiroir « appareils du
+    port » (ouvrirAppareilsPort côté client) affiche la liste COMPLÈTE des
+    appareils vus, pas seulement ceux montrés dans l'infobulle ; avant ce
+    correctif, `detail` était tronqué à la même limite que `noms` et le
+    tiroir ne pouvait donc jamais montrer les appareils listés sous
+    « +N autres » dans l'infobulle (signalé en usage réel)."""
     noms, ids, detail, vus = [], set(), [], set()
     for mac in sorted(macs):
         hit = inv_mac.get(mac)
@@ -7234,8 +7426,8 @@ def _voisins_port(macs, inv_mac):
         vus.add(libelle)
         if len(noms) < _ACTIVITE_VOISINS_MAX:
             noms.append(libelle)
-            detail.append({'nom': libelle, 'type': typ, 'id': aid,
-                           'mac': mac, 'ip': ip, 'connu': bool(hit)})
+        detail.append({'nom': libelle, 'type': typ, 'id': aid,
+                       'mac': mac, 'ip': ip, 'connu': bool(hit)})
     return {'noms': noms, 'n': len(macs), 'ids': ids, 'detail': detail,
             'restants': max(0, len(macs) - len(noms))}
 
@@ -7905,11 +8097,17 @@ def _cycle_activite(clients):
                             if _tn:
                                 _lim = _tn[:_ACTIVITE_VOISINS_MAX]
                                 _vois = {
+                                    # noms/restants restent plafonnés (infobulle
+                                    # compacte) ; detail porte TOUS les appareils
+                                    # (_tn entier, pas _lim) — le tiroir « appareils
+                                    # du port » a besoin de la liste complète, pas
+                                    # seulement de ceux montrés dans l'infobulle
+                                    # (même correctif que _voisins_port ci-dessus).
                                     'noms': [n for _a, n in _lim], 'n': len(_tn),
                                     'ids': {a for a, _n in _tn},
                                     'detail': [{'nom': n, 'type': '', 'id': a, 'mac': '',
                                                 'ip': _meta_aid.get(a, ('', '', ''))[2],
-                                                'connu': True} for a, n in _lim],
+                                                'connu': True} for a, n in _tn],
                                     'restants': max(0, len(_tn) - _ACTIVITE_VOISINS_MAX),
                                     'source': 'topologie'}
                         # Plusieurs MAC sur un port d'accès = un équipement

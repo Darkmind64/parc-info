@@ -6,7 +6,7 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.33.9 ⭐ **Baie de brassage : prises murales enfin alignées avec leurs ports RJ** — chaque prise murale avait déjà sa propre largeur correcte, mais la grille qui les contient gardait ses colonnes figées à 24px en dur au lieu de suivre cette même largeur, contrairement à la grille des ports RJ juste en dessous : un pas de 26px pour les prises contre 29px pour les ports (même largeur de chacune), un décalage qui s'accumulait prise après prise sur toute la largeur du bandeau. Corrigé : la grille des prises murales suit désormais la même variable de largeur que celle des ports. Vérifié par mesure DOM précise sur 20 prises/ports mélangés : alignement parfait, plus aucune dérive. Suite du correctif 2.33.8 (anneau réseau confirmé en ligne).  
+**Version** : 2.33.10 ⭐ **Baie de brassage : tiroir d'appareils complet, présence en direct, boutons ARP/MAC/DNS** — le tiroir "appareils du port" ne listait que les appareils déjà visibles dans l'infobulle compacte, ignorant tous ceux regroupés sous "+N autres" ; corrigé à la source (la liste complète n'est plus plafonnée par erreur sur la même limite que la liste compacte). Les infobulles natives du navigateur, qui masquaient les infobulles stylées de ParcInfo sur les ports réseau, sont supprimées (remplacées par un attribut accessible sans rendu visuel). Le tiroir ne peut plus recouvrir la baie : hauteur limitée à ~10 appareils avec défilement interne et en-têtes de colonnes fixes. Chaque appareil listé affiche désormais un état de présence testé en direct (ping 🟢/🔴). Sur les switchs/routeurs/box, trois nouveaux boutons ARP/MAC/DNS interrogent l'équipement en direct pour afficher sa table ARP, sa table MAC (FDB) ou le résultat d'une requête DNS (l'équipement interrogé comme serveur DNS, pas un extrait de son cache interne). Suite du correctif 2.33.9 (prises murales alignées avec leurs ports RJ).  
 **Dernière mise à jour** : 2026-09-12
 
 ---
@@ -146,9 +146,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Correspondance champs, détail par système d'exploitation](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector-gui.exe)
-- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/ParcInfo-Windows.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/ParcInfo-Windows.exe)
 
 ### Interface mobile (PWA)
 Accessible sur `/m` depuis un smartphone : consultation en lecture seule du
@@ -263,25 +263,25 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.33.9
+## 📥 Téléchargements v2.33.10
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger |
 |-----------|----------|
-| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/ParcInfo-Windows.exe) |
-| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/ParcInfo-macOS-ARM.zip) |
-| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/ParcInfo-macOS-Intel.zip) |
-| **Docker** | `docker pull darkmind64/parcinfo:v2.33.9` |
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/ParcInfo-macOS-ARM.zip) |
+| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/ParcInfo-macOS-Intel.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.33.10` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Usage |
 |------|-----------|----------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector-gui.exe) | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector.exe) | Automatisation/scripts |
-| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
-| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector.exe) | Automatisation/scripts |
+| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
+| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -315,7 +315,7 @@ python system-info-collector.py --client-id 5
 > xattr -cr ParcInfo-Collector.app   # ou : xattr -cr system-info-collector
 > ```
 
-👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.33.9)
+👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.33.10)
 
 ---
 
