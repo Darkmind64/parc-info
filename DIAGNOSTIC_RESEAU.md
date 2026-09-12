@@ -628,14 +628,7 @@ espacée repart à froid.
     tables ARP de **tous** les équipements relevés (souvent un routeur du parc les
     porte toutes) et relance la correction (relevé SNMP en cache). **Limite** :
     sans routeur SNMP dans le parc, seuls les 4 premiers octets restent
-    exploitables — le bouton « 🔬 FDB brut » le rend visible.
-  - **Bouton « 🔬 FDB brut »** sur `/baie` (`diagnostiquer_fdb_brute`, route
-    `GET /api/baie/brassage/fdb-brut`) : relevé **brut** de la table
-    d'apprentissage de chaque switch, **sans aucune correction ni écriture** —
-    dialecte bridge-MIB, liste complète des sous-identifiants de l'index FDB,
-    octets bruts de la table ARP, MAC obtenue en gardant les 6 derniers + si elle
-    est reconnue dans l'inventaire. Sert à décider, sur pièces, si l'agent
-    préfixe (récupérable) ou tronque (perdu).
+    exploitables.
 - **Capacités SNMP (compteurs 64 bits, PoE) non condamnées sur un seul échec**
   (v2.19.13) : `_activite_hc[ip]` / `_activite_poe[ip]` ne passent à `False`
   qu'après `_ACTIVITE_NEG_CONFIRME` (2) relevés négatifs consécutifs — un paquet
