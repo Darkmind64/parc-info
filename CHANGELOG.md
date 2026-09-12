@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.11] - 2026-09-13 🏷️
+
+### Baie de brassage : VLAN dans les infobulles/inspecteur, infos FAI sur les box internet
+
+Demandé : ajouter l'information de VLAN dans les infobulles des ports et dans l'inspecteur de port ; sur les box internet, ajouter des infos comme l'IP externe et les DNS externes.
+
+**VLAN.** Le relevé SNMP d'activité de la baie calcule déjà, à chaque cycle, le VLAN d'accès (`dot1qPvid`) de chaque port — c'est un sous-produit du relevé de la table MAC (`_releve_mac_switch`/`_vlans_actifs`), déjà exploité par le bouton MAC introduit en 2.33.10, mais jusqu'ici jeté après usage. `network_diag._cycle_activite` porte désormais ce VLAN dans le dict de chaque port (boucle principale switch/routeur, et prises murales d'un bandeau RJ via `_prises_murales_activite`, qui reçoit maintenant le relevé FDB complet). Côté client, `rowsActivitePort()` — déjà partagée par l'infobulle d'un port de switch/routeur et celle d'une prise murale — affiche une ligne VLAN dès que la donnée est présente ; l'inspecteur de port (`PortModal`) affiche la même valeur, avec repli sur le VLAN connu de la cartographie de topologie (`_neticDetecte`, potentiellement périmé) si le relevé live n'a encore rien remonté ce cycle.
+
+**Box internet (FAI) : IP externe, DNS externes, opérateur.** Clarifié avant implémentation : il n'existe pas de MIB SNMP standard exposant les DNS externes configurés sur une box grand public — interroger la box elle-même aurait fait semblant d'une capacité que ParcInfo n'a pas. Les champs déjà saisis dans *Paramètres généraux* pour le site (`parc_general.ip_publique` / `serveur_dns` / `fournisseur_internet`) sont donc simplement repris, sans nouvelle sonde réseau — transmis au template sous la constante `PARC_FAI`. Affichés dans l'infobulle au survol de l'équipement et dans un nouveau bloc « Fournisseur d'accès » de l'inspecteur d'équipement (`EquipmentModal.majFai()`), visibles uniquement pour le type *Box internet (FAI)*, avec un message renvoyant vers Paramètres généraux si rien n'est encore renseigné.
+
+**Déploiement.** Changement JS/Python pur (un champ de plus dans des structures déjà calculées + lecture d'un champ déjà en base), aucune migration de schéma, aucune nouvelle route API. Vérifié en navigateur : VLAN affiché dans l'infobulle d'un port de switch, d'une prise murale et dans l'inspecteur de port ; bloc FAI affiché/masqué correctement selon le type d'équipement (masqué sur un Switch) et selon que les champs du site sont renseignés ou non. 422 tests pytest OK (2 assertions VLAN ajoutées à des tests existants de `_cycle_activite`/`_prises_murales_activite`).
+
+---
+
 ## [2.33.10] - 2026-09-12 🔌
 
 ### Baie de brassage : tiroir d'appareils complet, présence en direct, boutons ARP/MAC/DNS

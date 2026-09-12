@@ -1,17 +1,17 @@
 {
-  "version": "2.33.10",
+  "version": "2.33.11",
   "release_date": "2026-09-12",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.33.10",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.10/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.11/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.11/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.11/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.33.11",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.11/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.11/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.11/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.11/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.11/SHA256SUMS.txt"
   },
   "notes": {
     "new_features": "Baie de brassage : quatre correctifs/ajouts suite aux retours utilisateur. (1) Nettoyage de l'interface -- boutons de ping individuels par equipement supprimes (le ping global de toute la baie reste) ; bascules Sante/Cables retirees de la barre d'outils, les deux fonctionnalites sont desormais toujours actives ; releve de diagnostic interne 'FDB Brut' supprime integralement (bouton, route API, fonction, test dedie) ; bouton 'Vider' supprime ; presentation du volet Bibliotheque reprise sur le modele de la maquette (icone encadree, badge de provenance, survol avec legere elevation). (2) Le tiroir affichant les appareils vus derriere un port s'etirait sur toute la largeur de la fenetre au lieu de s'aligner sur la baie elle-meme -- corrige, recalcule desormais sur les bornes reelles de la baie. (3) Un port de switch menant a plusieurs appareils (cascade detectee) pouvait n'afficher aucune icone reseau alors que l'infobulle au survol montrait deja le detail complet -- l'icone reprend maintenant la meme donnee d'activite live en repli quand la cartographie de topologie n'a rien a offrir. (4) Les ports RJ de la baie (bandeau, disposition 1 ou 2 lignes) suivent desormais la taille d'affichage : plus grands sur un grand ecran, plus petits sur un ecran etroit, toujours sans deborder.",
@@ -30,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.10"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.11"
 }

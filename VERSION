@@ -1,8 +1,43 @@
-PARCINFO_VERSION=2.33.10
-RELEASE_DATE=2026-09-12
-BUILD_NUMBER=2026091201
+PARCINFO_VERSION=2.33.11
+RELEASE_DATE=2026-09-13
+BUILD_NUMBER=2026091301
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.11 - Baie de brassage : VLAN dans les infobulles/inspecteur,
+# infos FAI sur les box internet
+#
+# Demandé : ajouter le VLAN dans les infobulles des ports et dans
+# l'inspecteur de port ; sur les box internet, ajouter des infos comme
+# l'IP externe et les DNS externes.
+#
+# (1)(2) VLAN - le relevé SNMP d'activité de la baie calcule déjà le VLAN
+# d'accès (dot1qPvid) par port, en sous-produit du relevé FDB
+# (_releve_mac_switch/_vlans_actifs, déjà fait pour le bouton MAC) - non
+# exploité jusqu'ici. network_diag._cycle_activite : ajout de 'vlan' dans
+# le dict de chaque port (boucle principale switch/routeur ET prises
+# murales d'un bandeau RJ, via _prises_murales_activite qui reçoit
+# désormais fdb_meta_par_ip). Côté client : rowsActivitePort() (lu par les
+# infobulles de port ET de prise murale) affiche une ligne VLAN quand
+# a.vlan est présent ; PortModal.ouvrir() (inspecteur) affiche la même
+# valeur (repli sur le VLAN de la topologie, _neticDetecte, si le relevé
+# live n'a encore rien remonté).
+#
+# (3) Box internet (FAI) - IP externe / DNS externes / opérateur.
+# Clarifié avec l'utilisateur : aucun MIB SNMP standard n'expose les DNS
+# externes configurés sur une box grand public - les champs déjà saisis
+# dans Paramètres généraux (parc_general.ip_publique/serveur_dns/
+# fournisseur_internet, déjà transmis au template sous PARC_FAI) sont
+# repris tels quels, sans nouvelle sonde. Affichés dans l'infobulle de
+# l'équipement (afficherTooltip) et dans un nouveau bloc de l'inspecteur
+# d'équipement (EquipmentModal.majFai(), bloc #eqm-fai) - uniquement pour
+# le type "Box internet (FAI)", masqué (avec message renvoyant vers
+# Paramètres généraux) si rien n'est renseigné.
+#
+# Vérifié en navigateur (VLAN affiché dans l'infobulle de port, la
+# prise murale et l'inspecteur ; bloc FAI affiché/masqué selon le type
+# d'équipement et selon que les champs sont renseignés). 422 tests
+# pytest OK (2 assertions VLAN ajoutées à des tests existants).
 
 # Version 2.33.10 - Baie de brassage : tiroir complet, infobulles natives
 # supprimées, présence en direct, boutons ARP/MAC/DNS
