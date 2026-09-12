@@ -342,8 +342,18 @@
    pas tout à fait, jamais un débordement. */
 .rack-cell.has-ports { flex-direction:column; align-items:stretch; padding:3px 6px; }
 .cell-row   { display:flex; align-items:center; flex-shrink:0; height:16px; }
+/* align-items:center (pas flex-start) — demandé : les rangées de ports
+   sont désormais dimensionnées pour l'ensemble de la baie (voir calcUH),
+   souvent plus petites que la hauteur totale disponible sur cette U ;
+   collées en haut, elles laissaient un grand vide sous elles avant
+   l'équipement suivant. Centrer la BOÎTE ENTIÈRE (.cell-ports-main-switch
+   ou .cell-ports-stack) dans la hauteur restante ne rouvre pas le risque
+   de débordement déjà documenté pour l'alignement INTERNE RJ/SFP de
+   .cell-ports-main-switch (resté flex-start, voir plus bas) : chaque
+   rangée garde sa hauteur EXACTEMENT calculée, seul le bloc dans son
+   ensemble se recentre. */
 .cell-ports-wrap {
-    display:flex; align-items:flex-start; gap:.4rem; flex:1; overflow:hidden; padding-top:3px;
+    display:flex; align-items:center; gap:.4rem; flex:1; overflow:hidden; padding-top:3px;
 }
 .cell-ports {
     display:grid; grid-template-columns:repeat(auto-fill, var(--port-w, 24px)); gap:2px;
@@ -453,9 +463,16 @@
    cible, pas le badge de déliaison (pas de "lien" à détacher, la
    correspondance avec le port RJ de même numéro est automatique et fixe).
    Même mécanique de fond assombri/voyant/surbrillance que .port. */
+/* Taille suivant le MÊME ratio que les ports RJ juste en dessous (voir
+   taillePriseMurale) — --pm-w/--pm-h/--pm-fs hérités de #rack-rows par
+   défaut (posés par calcUH), ou posés en ligne sur
+   .cell-prises-murales quand ce bandeau doit rétrécir localement (voir
+   makeOccupiedCell). Sans ce partage, les prises restaient à leur taille
+   fixe d'origine pendant que les ports RJ grandissaient/rétrécissaient
+   avec la fenêtre, décalage signalé en usage réel. */
 .prise-murale {
-    position:relative; width:24px; height:13px; border-radius:2px 2px 0 0;
-    font-size:.5rem; line-height:13px; text-align:center; font-weight:700;
+    position:relative; width:var(--pm-w, 24px); height:var(--pm-h, 13px); border-radius:2px 2px 0 0;
+    font-size:var(--pm-fs, .5rem); line-height:var(--pm-h, 13px); text-align:center; font-weight:700;
     color:#0a0e14; cursor:pointer; background:#334155; user-select:none;
     border-bottom:2px solid rgba(0,0,0,.4);
     transition:transform .1s, box-shadow .15s;
@@ -709,52 +726,30 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
     line-height:1; color:#fff; background:#e0952a; border-radius:50%; padding:1px 2px; z-index:5; }
 .port.port-diag-err.port-diag-crit::after { background:#ef4444; }
 
-/* refonte baie, lot 4 : port qui dessert un équipement réseau
-   (switch / routeur-pare-feu / borne Wi-Fi), déclaré (câblage) ou détecté (SNMP).
-   Anneau coloré + icône posée HORS du port (au-dessus / au-dessous selon la
-   ligne) — n'occulte ni le voyant ni le numéro. Le rack (.rack-outer) a
-   overflow:visible, l'icône peut donc déborder de la cellule. */
+/* refonte baie, lot 4 (revu — icône LOGÉE DANS le port, coin inférieur
+   droit, plutôt que posée hors du port au-dessus/au-dessous : ce dernier
+   schéma exigeait de réserver un couloir de 14px de chaque côté
+   [has-netic-up/down] AVANT même de savoir où l'icône irait — un budget
+   quasi impossible à anticiper correctement dans le calcul de taille des
+   ports [tailleGrillePorts], source de plusieurs débordements signalés en
+   usage réel. Logée DANS le port, l'icône n'a plus besoin d'aucune
+   réserve : elle partage juste le coin déjà utilisé par le numéro,
+   symétrique au voyant de ping [top-left] et au badge de déliaison
+   [top-right, .port-lie uniquement — jamais en même temps que le netic
+   sur un port réseau]). Anneau coloré autour du port qui dessert un
+   équipement réseau (switch / routeur-pare-feu / borne Wi-Fi), déclaré
+   (câblage) ou détecté (SNMP). */
 .port.port-netic { position:relative; }
 .port.port-netic.netic-declared { box-shadow:0 0 0 2px var(--accent-orange,#e0952a); }
 .port.port-netic.netic-detected { box-shadow:0 0 0 2px #22c55e; }
 .port.port-netic.netic-incoherent { box-shadow:0 0 0 2px #ef4444, 0 0 8px #ef4444; }
 .port .port-netic-ic {
-    /* z-index:8 > .cell-resize/.cell-resize-w (6) : une icône sur la
-       rangée basse d'un switch 2 lignes tombe pile sur la poignée de
-       redimensionnement (bord bas de la cellule, pleine largeur) — sans
-       ça, la poignée récupérait le clic à sa place (trouvé en testant un
-       switch 2 lignes avec un port réseau sur la rangée basse). */
-    position:absolute; left:50%; transform:translateX(-50%);
-    font-size:12px; line-height:1; z-index:8; cursor:pointer;
-    filter:drop-shadow(0 1px 2px rgba(0,0,0,.95));
+    position:absolute; right:0; bottom:0; transform-origin:bottom right;
+    font-size:calc(var(--port-fs, .6rem) * 1.2); line-height:1; z-index:6; cursor:pointer;
+    filter:drop-shadow(0 1px 1px rgba(0,0,0,.95));
 }
-.port.netic-up   .port-netic-ic { bottom:calc(100% + 1px); }
-.port.netic-down .port-netic-ic { top:calc(100% + 1px); }
-.port .port-netic-ic:hover { transform:translateX(-50%) scale(1.3); z-index:9; }
+.port .port-netic-ic:hover { transform:scale(1.35); z-index:9; }
 .port.port-netic.netic-declared:not(.netic-detected):not(.netic-incoherent) .port-netic-ic { opacity:.6; }
-/* `.cell-ports` (et son wrap) sont overflow:hidden — on réserve un couloir
-   pour que l'icône posée hors du port ne soit pas rognée. En disposition
-   2 lignes (switch), chaque rangée est son propre .cell-ports-row SANS
-   overflow:hidden propre : c'est .cell-ports-rj-zone / .cell-ports-stack,
-   conteneur commun aux 2 rangées, qui coupe — même couloir à y réserver. */
-.cell-ports.has-netic-up,
-.cell-ports-rj-zone.has-netic-up,
-.cell-ports-stack.has-netic-up   { padding-top:14px; }
-.cell-ports.has-netic-down,
-.cell-ports-rj-zone.has-netic-down,
-.cell-ports-stack.has-netic-down { padding-bottom:14px; }
-/* Filet de sécurité (voir appliquerNeticPorts) : .cell-ports-wrap et
-   .cell-ports-main-switch ont leur propre budget de hauteur, FIXE et
-   indépendant de celui de la zone de ports qu'ils englobent (dérivé de la
-   hauteur de ligne du rack, pas du contenu) — sur un switch 1U en 2
-   lignes déjà très rempli, rétrécir les ports (tailleDeuxLignes) ne peut
-   pas toujours regagner à lui seul les 14-28px de couloir nécessaires
-   (plancher de lisibilité 9px atteint). Overflow visible ici : la vraie
-   limite reste .rack-cell (hauteur de l'U), qui a toujours la marge.
-   Sans risque de fuite visuelle : ces conteneurs sont pleine largeur, un
-   débordement ne peut être que vertical, dans la case du dessus/dessous. */
-.cell-ports-wrap.has-netic-up, .cell-ports-wrap.has-netic-down,
-.cell-ports-main-switch.has-netic-up, .cell-ports-main-switch.has-netic-down { overflow:visible; }
 
 /* Panneau annexe « appareils du port » (lot 5, corrigé après retour
    utilisateur — refonte lot 5 v1 l'insérait dans le flux normal de
@@ -1867,6 +1862,20 @@ function calcUH(rerender) {
     const newH = Math.max(22, Math.round(w * U_RATIO));
     if (newH === U_H && !rerender) return;
     U_H = newH;
+    // Taille GLOBALE des ports/prises murales (voir tailleGrillePorts) —
+    // posée une fois ici sur #rack-rows, HÉRITÉE par tous les ports/prises
+    // de la baie (une cellule ne pose son propre style en ligne, plus
+    // petit, que si sa largeur l'exige — voir makeOccupiedCell). nbRangees=1
+    // et nbPortsParRangee=0 : uniquement contrainte par la HAUTEUR de
+    // rangée, jamais par une largeur (qui varie cellule par cellule).
+    const global = tailleGrillePorts(U_H, 1, 0, 0, 0);
+    _portGlobalH = global.h;
+    _portGlobalRatio = global.ratio;
+    const prise = taillePriseMurale(global.ratio);
+    (global.style + prise.style).split(';').filter(Boolean).forEach(decl => {
+        const i = decl.indexOf(':');
+        if (i > 0) rr.style.setProperty(decl.slice(0, i).trim(), decl.slice(i + 1).trim());
+    });
     renderRack();
 }
 
@@ -1973,9 +1982,42 @@ function tailleGrillePorts(rowH, nbRangees, nbPortsParRangee, largeurZonePx, res
     const led = Math.max(4, Math.round(6 * ratio));
     const unlink = Math.max(8, Math.round(11 * ratio));
     const unlinkFs = Math.max(6, Math.round(9 * ratio));
-    return `--port-w:${w}px;--port-h:${h}px;--port-fs:${fs}px;--port-radius:${radius}px;`
-         + `--port-led:${led}px;--port-unlink:${unlink}px;--port-unlink-fs:${unlinkFs}px;`;
+    const style = `--port-w:${w}px;--port-h:${h}px;--port-fs:${fs}px;--port-radius:${radius}px;`
+                + `--port-led:${led}px;--port-unlink:${unlink}px;--port-unlink-fs:${unlinkFs}px;`;
+    // {style, h, ratio} et pas juste la chaîne CSS : h/ratio servent à (1)
+    // comparer une taille LOCALE (contrainte par un élément étroit) à la
+    // taille GLOBALE de la baie pour ne poser un style en ligne QUE si la
+    // cellule doit rétrécir en dessous (sinon elle hérite simplement de la
+    // variable posée une fois sur #rack-rows — voir calcUH), et (2) dériver
+    // la taille des prises murales sur le MÊME ratio (voir taillePriseMurale)
+    // pour qu'elles suivent exactement l'échelle des ports RJ, y compris
+    // quand une cellule étroite rétrécit localement en dessous du global.
+    return { style, h, ratio };
 }
+
+// Taille d'une prise murale (voir .prise-murale en CSS) dérivée du MÊME
+// ratio qu'un port RJ (tailleGrillePorts) — sans ce partage, les prises
+// murales d'un bandeau RJ restaient à leur taille fixe d'origine (24×13px)
+// pendant que les ports RJ juste en dessous grandissaient/rétrécissaient
+// avec la fenêtre, un décalage visuel signalé en usage réel.
+function taillePriseMurale(ratio) {
+    const w = Math.max(10, Math.round(24 * ratio));
+    const h = Math.max(6, Math.round(13 * ratio));
+    const fs = Math.round(8 * ratio * 10) / 10;
+    return { style: `--pm-w:${w}px;--pm-h:${h}px;--pm-fs:${fs}px;`, w, h };
+}
+
+// Taille GLOBALE des ports RJ / prises murales de toute la baie, posée une
+// fois sur #rack-rows (voir calcUH) : par défaut, CHAQUE port/prise de la
+// baie hérite de cette même taille (variables CSS custom, héritées comme
+// n'importe quelle propriété CSS) — l'utilisateur avait signalé des tailles
+// incohérentes d'un équipement à l'autre (bandeau/switch/routeur…), chaque
+// cellule calculant jusqu'ici sa PROPRE taille indépendamment des autres.
+// Une cellule dont la largeur ne permet pas cette taille globale (peu de
+// place, beaucoup de ports) pose son PROPRE style en ligne, plus petit,
+// qui prime sur l'hérité — jamais l'inverse (une cellule ne grandit jamais
+// au-delà du global, même si elle a localement plus de place).
+let _portGlobalH = 22, _portGlobalRatio = 1;
 
 // Taille des prises électriques (voir .port-elec en CSS) — même principe
 // que tailleDeuxLignes ci-dessus : CALCULÉE depuis la hauteur RÉELLEMENT
@@ -2699,9 +2741,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // l'éditeur de ports et les fiches appareil/périphérique. Seul le
     // bandeau RJ a ces deux rangées distinctes — les ports/prises se
     // décalent légèrement pour leur faire de la place.
-    const lignePrisesMurales = estBandeauPorts
-        ? `<div class="cell-row-labeled"><span class="row-icon" title="Prises murales (RJ)">🚪</span><div class="cell-prises-murales">${ports.map(p => priseMuraleHTML(p.prise_murale, p.numero, s.id)).join('')}</div></div>`
-        : '';
 
     // Switch : ports RJ (1 ou 2 lignes façon vrai switch, centrés dans les
     // 80% gauche) + ports SFP optionnels (20% restants) — demandé. Un
@@ -2786,30 +2825,31 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // Zone RJ = 80% de la cellule dès qu'une zone SFP lui fait face (même
     // proportion que .cell-ports-rj-zone en CSS), sinon la cellule entière.
     const largeurZoneRJ = zonesSwitchActives ? largeurCellPx * 0.8 : largeurCellPx;
-    // Un port réseau (déclaré via le câblage, ou déjà détecté en SNMP au
-    // moment de ce rendu) reçoit après coup une icône hors du port (voir
-    // appliquerNeticPorts) qui réserve un couloir de 14px (has-netic-up/down
-    // en CSS) — À PRÉVOIR ICI, avant même que cette icône existe, sinon la
-    // taille de port calculée ne laisse pas la place et le couloir posé
-    // après coup pousse la cellule en dehors de sa hauteur réservée. Une
-    // seule rangée (disposition normale ou bandeau) ne réserve jamais QUE le
-    // bas (voir appliquerNeticPorts : dir vaut toujours 'netic-down' hors
-    // disposition 2 lignes).
-    const aNetic = p => _neticKind(p.lie_type) || !!((_neticDetecte[s.id + ':' + p.numero] || {}).detected_kind);
-    const reserveNeticUneLigne = ports.some(aNetic) ? 14 : 0;
 
     let ligneRJ;
     let zonePortsPrincipale;
     if (estBandeauPorts) {
+        // reserve : place de la rangée des prises murales empilée AU-DESSUS
+        // (voir .cell-ports-stack) + son gap (2px) — sans cette réserve, le
+        // budget de hauteur du bandeau entier était compté comme si la
+        // rangée RJ était seule dans la cellule, débordant nettement dès
+        // que l'écran devient étroit. Estimée sur le ratio GLOBAL (pas
+        // encore connu localement à ce stade) : cas courant où le bandeau
+        // n'a pas besoin de rétrécir plus que le reste de la baie.
+        const reservePM = Math.round(13 * _portGlobalRatio) + 2;
         // -18 : couloir du symbole 🔌 (row-icon, 12px + gap) à gauche de la
         // grille, jamais compté dans .cell-ports lui-même.
-        // reserve=15+éventuel couloir netic : la rangée des prises murales
-        // (13px, voir .prise-murale en CSS, pas dynamique) empilée
-        // AU-DESSUS + son gap (2px, voir .cell-ports-stack) — sans cette
-        // réserve, le budget de hauteur du bandeau entier était compté
-        // comme si la rangée RJ était seule dans la cellule, débordant
-        // nettement dès que l'écran devient étroit.
-        const styleBandeau = tailleGrillePorts(rowH, 1, ports.length, largeurCellPx - 18, 15 + reserveNeticUneLigne);
+        const local = tailleGrillePorts(rowH, 1, ports.length, largeurCellPx - 18, reservePM);
+        // Taille GLOBALE de la baie (voir calcUH) héritée par défaut — un
+        // style en ligne n'est posé QUE si ce bandeau doit rétrécir en
+        // dessous (largeur trop juste pour son nombre de ports), jamais
+        // pour grandir au-delà (voir tailleGrillePorts plus haut). Prises
+        // murales alignées sur le MÊME ratio, local ou global selon le cas,
+        // pour ne jamais se désynchroniser des ports RJ juste en dessous.
+        const localise = local.h < _portGlobalH;
+        const styleBandeau = localise ? local.style : '';
+        const stylePM = localise ? taillePriseMurale(local.ratio).style : '';
+        const lignePrisesMurales = `<div class="cell-row-labeled"><span class="row-icon" title="Prises murales (RJ)">🚪</span><div class="cell-prises-murales" style="${stylePM}">${ports.map(p => priseMuraleHTML(p.prise_murale, p.numero, s.id)).join('')}</div></div>`;
         ligneRJ = `<div class="cell-row-labeled"><span class="row-icon" title="Ports RJ (interconnexion)">🔌</span><div class="cell-ports" style="${styleBandeau}">${ports.map(p => portHTML(p, false)).join('')}</div></div>`;
         zonePortsPrincipale = `<div class="cell-ports-stack">${lignePrisesMurales}${ligneRJ}</div>`;
     } else if (zonesMultiGroupesActives) {
@@ -2845,14 +2885,13 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         // de filtrer par parité plutôt que de retrier.
         const impairs = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 1);
         const pairs   = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 0);
-        // Réserve la place de l'icône réseau (aNetic, voir plus haut) dès
-        // que la rangée haute et/ou basse en porte un — ICI les deux
-        // rangées peuvent chacune réserver leur PROPRE côté (haut/bas,
-        // dir dans appliquerNeticPorts), contrairement à la disposition à
-        // une seule rangée qui ne réserve jamais que le bas.
-        const reserve = (impairs.some(aNetic) ? 14 : 0) + (pairs.some(aNetic) ? 14 : 0);
         const nbPortsParRangee = Math.max(impairs.length, pairs.length);
-        const styleDeuxLignes = tailleGrillePorts(rowH, 2, nbPortsParRangee, largeurZoneRJ, reserve);
+        const localDeuxLignes = tailleGrillePorts(rowH, 2, nbPortsParRangee, largeurZoneRJ, 0);
+        // Toujours en ligne (pas de comparaison au global ici) : 2 rangées
+        // dans la même hauteur d'U ont structurellement besoin de ports
+        // plus petits qu'une seule rangée — le global (calculé à 1 rangée)
+        // serait presque toujours plus grand, jamais la bonne taille ici.
+        const styleDeuxLignes = localDeuxLignes.style;
         ligneRJ = `<div class="cell-ports-row" style="${styleDeuxLignes}">${impairs.map(p => portHTML(p, false)).join('')}</div>`
                 + `<div class="cell-ports-row" style="${styleDeuxLignes}">${pairs.map(p => portHTML(p, false)).join('')}</div>`;
         zonePortsPrincipale = zonesSwitchActives
@@ -2863,11 +2902,17 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             : `<div class="cell-ports-stack">${ligneRJ}</div>`;
     } else {
         // styleElec (déjà proportionné, voir tailleElec/tailleElecVertical)
-        // pour une prise électrique ; sinon tailleGrillePorts pour un port RJ
-        // classique — les deux posent les mêmes variables CSS (--port-w
-        // etc. pour l'un, --elec-size etc. pour l'autre), jamais les deux à
-        // la fois sur le même élément.
-        const stylePorts = estElec ? styleElec : tailleGrillePorts(rowH, 1, basePorts.length, largeurZoneRJ, reserveNeticUneLigne);
+        // pour une prise électrique ; sinon la taille GLOBALE de la baie est
+        // héritée par défaut (voir calcUH), un style en ligne n'étant posé
+        // que si CET élément doit rétrécir en dessous (largeur trop juste
+        // pour son nombre de ports) — les deux posent les mêmes variables
+        // CSS (--port-w etc. pour l'un, --elec-size etc. pour l'autre),
+        // jamais les deux à la fois sur le même élément.
+        let stylePorts = styleElec;
+        if (!estElec) {
+            const local = tailleGrillePorts(rowH, 1, basePorts.length, largeurZoneRJ, 0);
+            stylePorts = local.h < _portGlobalH ? local.style : '';
+        }
         ligneRJ = `<div class="cell-ports${estElec ? ' cell-ports-elec' : ''}" style="${stylePorts}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
         zonePortsPrincipale = (estSwitch && zonesSwitchActives)
             ? `<div class="cell-ports-main-switch">
@@ -6329,12 +6374,10 @@ async function chargerTopoPorts() {
 }
 function appliquerNeticPorts() {
     document.querySelectorAll('.port.port-netic').forEach(el => {
-        el.classList.remove('port-netic', 'netic-declared', 'netic-detected', 'netic-incoherent', 'netic-up', 'netic-down');
+        el.classList.remove('port-netic', 'netic-declared', 'netic-detected', 'netic-incoherent');
         const ic = el.querySelector('.port-netic-ic');
         if (ic) ic.remove();
     });
-    document.querySelectorAll('.has-netic-up, .has-netic-down')
-        .forEach(el => el.classList.remove('has-netic-up', 'has-netic-down'));
 
     // union des ports concernés : déclarés (câblage) + détectés (SNMP)
     const parPort = {};   // "<slot>:<port>" -> {declared, detected, slot, num}
@@ -6386,37 +6429,6 @@ function appliquerNeticPorts() {
         const etat = (x.detected && x.declared && x.detected !== x.declared) ? 'netic-incoherent'
                    : x.detected ? 'netic-detected' : 'netic-declared';
         el.classList.add('port-netic', etat);
-        // La disposition « 2 lignes » d'un switch (ports impairs/pairs, voir
-        // portsDeuxLignesHTML) rend chaque rangée dans son PROPRE
-        // .cell-ports-row — .cell-ports ne matche alors rien et le repli sur
-        // parentElement ne voit QUE cette rangée seule, jamais l'autre :
-        // multiRangees était donc toujours faux et l'icône retombait
-        // systématiquement en bas, quelle que soit la rangée réelle (bug
-        // signalé en usage réel). .cell-ports-rj-zone/.cell-ports-stack
-        // sont les conteneurs communs aux 2 rangées, à chercher en premier.
-        const bande = el.closest('.cell-ports-rj-zone, .cell-ports-stack, .cell-ports') || el.parentElement;
-        const tops = [...bande.querySelectorAll('.port')].map(pp => Math.round(pp.getBoundingClientRect().top));
-        const multiRangees = new Set(tops).size > 1;
-        const premiereRangee = Math.round(el.getBoundingClientRect().top) === Math.min(...tops);
-        const dir = (multiRangees && premiereRangee) ? 'netic-up' : 'netic-down';
-        el.classList.add(dir);
-        const classeHas = dir === 'netic-up' ? 'has-netic-up' : 'has-netic-down';
-        bande.classList.add(classeHas);
-        // Filet de sécurité : sur un switch 1U en 2 lignes déjà très
-        // rempli (24 ports+), une icône déclarée EN HAUT et détectée EN
-        // BAS sur le même équipement (les deux couloirs de 14px réservés
-        // par tailleDeuxLignes en même temps) peut dépasser la marge
-        // regagnée en rétrécissant les ports (plancher 9px atteint,
-        // rétrécissement plus poussé impossible sans devenir illisible).
-        // .cell-ports-wrap/.cell-ports-main-switch (englobent les 2
-        // rangées + la zone SFP éventuelle) passent alors en overflow
-        // visible plutôt que de rogner l'icône : .rack-cell (limite
-        // réelle, hauteur de l'U) a toujours la marge nécessaire, vérifié
-        // en usage réel.
-        const wrap = el.closest('.cell-ports-wrap');
-        const mainSwitch = el.closest('.cell-ports-main-switch');
-        if (wrap) wrap.classList.add(classeHas);
-        if (mainSwitch) mainSwitch.classList.add(classeHas);
 
         const info = _neticDetecte[cle] || {};
         const b = document.createElement('span');
