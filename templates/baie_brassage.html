@@ -5757,14 +5757,21 @@ const PortModal = (() => {
         const cle = sid + ':' + num;
         const info = _neticDetecte[cle] || {};
         const kindDeclare = _neticKind(port.lie_type);
-        const kind = info.detected_kind || kindDeclare;
+        // Repli "confirmé en ligne" — même raison que dans appliquerNeticPorts :
+        // un cordon déclaré vers un équipement qui répond déjà au ping/SNMP
+        // n'a pas besoin d'attendre une cartographie de topologie complète
+        // pour afficher la confirmation.
+        const detecteKind = info.detected_kind || (port.cible_en_ligne ? kindDeclare : null);
+        const viaTopologie = !!info.detected_kind;
+        const kind = detecteKind || kindDeclare;
         derniereKind = kind;
-        derniereEtat = (info.detected_kind && kindDeclare && info.detected_kind !== kindDeclare) ? 'netic-incoherent'
-            : info.detected_kind ? 'netic-detected' : 'netic-declared';
+        derniereEtat = (detecteKind && kindDeclare && detecteKind !== kindDeclare) ? 'netic-incoherent'
+            : detecteKind ? 'netic-detected' : 'netic-declared';
         const equipRow = document.getElementById('pom-det-equip-row');
         if (kind) {
             document.getElementById('pom-det-equip').textContent =
-                (NETIC_IC[kind] || '') + ' ' + (NETIC_LBL[kind] || 'Équipement réseau') + (info.detected_kind ? ' (détecté)' : ' (déclaré)');
+                (NETIC_IC[kind] || '') + ' ' + (NETIC_LBL[kind] || 'Équipement réseau')
+                + (viaTopologie ? ' (détecté)' : detecteKind ? ' (confirmé en ligne)' : ' (déclaré)');
             equipRow.style.display = '';
         } else equipRow.style.display = 'none';
         const devs = info.devices || [];
@@ -6576,7 +6583,17 @@ function appliquerNeticPorts() {
     const parPort = {};   // "<slot>:<port>" -> {declared, detected, slot, num}
     Object.values(slots).forEach(s => (s.ports || []).forEach(p => {
         const d = _neticKind(p.lie_type);
-        if (d) parPort[p.slot_id + ':' + p.numero] = { slot: p.slot_id, num: p.numero, declared: d, detected: null };
+        if (!d) return;
+        // Équipement déclaré déjà confirmé EN LIGNE (dernier ping réussi,
+        // voir p.cible_en_ligne côté serveur) : anneau "détecté" tout de
+        // suite, sans attendre une cartographie de topologie complète
+        // (LLDP/FDB, plus lente et pas toujours lancée) — un cordon
+        // déclaré vers un switch/routeur qui répond déjà en SNMP/ping est
+        // une confirmation suffisante (retour utilisateur : port resté
+        // orange/"déclaré" alors que l'équipement en face est joignable).
+        // Écrasé plus bas si la topologie a une réponse plus précise
+        // (potentiellement différente = incohérence à signaler).
+        parPort[p.slot_id + ':' + p.numero] = { slot: p.slot_id, num: p.numero, declared: d, detected: p.cible_en_ligne ? d : null };
     }));
     for (const [cle, info] of Object.entries(_neticDetecte)) {
         if (!info || !info.detected_kind) continue;
@@ -6628,7 +6645,9 @@ function appliquerNeticPorts() {
         b.className = 'port-netic-ic';
         b.textContent = NETIC_IC[kind] || '🔀';
         b.title = (NETIC_LBL[kind] || 'Équipement réseau')
-            + (etat === 'netic-incoherent' ? ' — ⚠ détecté ≠ déclaré' : etat === 'netic-detected' ? ' détecté (SNMP)' : ' déclaré')
+            + (etat === 'netic-incoherent' ? ' — ⚠ détecté ≠ déclaré'
+               : etat === 'netic-detected' ? (info.detected_kind ? ' détecté (SNMP)' : ' confirmé (en ligne)')
+               : ' déclaré')
             + ((info.devices && info.devices.length) ? ' · ' + info.devices.length + ' appareil(s)' : '')
             + ' — clic : voir les appareils du port';
         b.addEventListener('click', ev => {
