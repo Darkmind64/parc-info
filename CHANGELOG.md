@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.8] - 2026-09-12 🟢
+
+### Baie de brassage : anneau réseau confirmé dès que l'équipement déclaré est en ligne
+
+Demandé : « Quand un port est entouré en orange (déclaré), si la détection le confirme, l'entourer comme détecté. »
+
+**Clarification.** La « détection » visée par l'utilisateur est le fait que l'équipement déclaré au bout du cordon (switch/routeur/borne Wi-Fi) réponde en ping/SNMP — pas nécessairement une cartographie de topologie LLDP/FDB complète, plus lente et pas toujours lancée. Le mécanisme de comparaison déclaré/détecté existait déjà et fonctionnait correctement pour les ports confirmés par topologie (vérifié par test direct) ; il manquait ce repli plus léger.
+
+**Correctif.** `app.py` : `_ports_avec_details()` expose un nouveau champ `cible_en_ligne` (bool) sur chaque port, dérivé du `en_ligne` de l'appareil/périphérique/prise murale au bout du cordon déclaré — les 3 chemins de résolution existants (port en face, prise murale, slot rack-monté) le renseignent. `baie_brassage.html` : `appliquerNeticPorts()` et `PortModal.ouvrir()` traitent désormais un port déclaré + `cible_en_ligne` comme « détecté » (anneau vert) dès le départ, sans attendre `_neticDetecte` (topologie). La topologie garde la priorité si elle répond avec un type différent (incohérence toujours signalée en rouge) ou identique (libellé « détecté (SNMP) » au lieu de « confirmé (en ligne) »).
+
+**Déploiement.** Changement JS/Python pur (nouveau champ dérivé, aucune migration de schéma). Vérifié en direct avec les 4 combinaisons possibles : déclaré seul (orange), déclaré + en ligne (vert, « confirmé en ligne »), déclaré + en ligne + topologie d'accord (vert, « détecté (SNMP) »), déclaré + en ligne + topologie en désaccord (rouge, incohérent) — chacune donne l'état attendu. 422 tests pytest OK.
+
+---
+
 ## [2.33.7] - 2026-09-12 📏
 
 ### Baie de brassage : taille de port unique pour toute la baie
