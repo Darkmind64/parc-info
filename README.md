@@ -6,7 +6,7 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.33.8 ⭐ **Baie de brassage : anneau réseau confirmé dès que l'équipement déclaré est en ligne** — un port déclaré (câblage) vers un switch/routeur/borne Wi-Fi restait orange en attendant une cartographie de topologie LLDP/FDB complète, plus lente et pas toujours lancée, alors que l'équipement au bout du cordon répondait déjà en ping/SNMP. L'anneau passe désormais au vert dès que l'équipement déclaré est confirmé en ligne — la topologie garde la priorité si elle répond avec un type différent (incohérence toujours signalée) ou identique. Vérifié en direct sur les 4 combinaisons possibles (déclaré seul / en ligne / topologie d'accord / topologie en désaccord). Suite du correctif 2.33.7 (taille de port unique).  
+**Version** : 2.33.9 ⭐ **Baie de brassage : prises murales enfin alignées avec leurs ports RJ** — chaque prise murale avait déjà sa propre largeur correcte, mais la grille qui les contient gardait ses colonnes figées à 24px en dur au lieu de suivre cette même largeur, contrairement à la grille des ports RJ juste en dessous : un pas de 26px pour les prises contre 29px pour les ports (même largeur de chacune), un décalage qui s'accumulait prise après prise sur toute la largeur du bandeau. Corrigé : la grille des prises murales suit désormais la même variable de largeur que celle des ports. Vérifié par mesure DOM précise sur 20 prises/ports mélangés : alignement parfait, plus aucune dérive. Suite du correctif 2.33.8 (anneau réseau confirmé en ligne).  
 **Dernière mise à jour** : 2026-09-12
 
 ---
@@ -146,9 +146,9 @@ system-info-collector.exe --client-id 5  # Windows
 👉 **[Correspondance champs, détail par système d'exploitation](COLLECTOR_FIELD_MAPPING.md)**
 
 **Télécharger les exécutables :** 👇
-- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/system-info-collector.exe)
-- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/system-info-collector-gui.exe)
-- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/ParcInfo-Windows.exe)
+- [system-info-collector.exe (CLI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector.exe)
+- [system-info-collector-gui.exe (GUI)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector-gui.exe)
+- [ParcInfo-Windows.exe (Serveur)](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/ParcInfo-Windows.exe)
 
 ### Interface mobile (PWA)
 Accessible sur `/m` depuis un smartphone : consultation en lecture seule du
@@ -263,25 +263,25 @@ Double-clic → navigateur s'ouvre auto. BD créée première utilisation.
 
 ---
 
-## 📥 Téléchargements v2.33.8
+## 📥 Téléchargements v2.33.9
 
 ### Exécutables Portables
 
 | Plateforme | Télécharger |
 |-----------|----------|
-| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/ParcInfo-Windows.exe) |
-| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/ParcInfo-macOS-ARM.zip) |
-| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/ParcInfo-macOS-Intel.zip) |
-| **Docker** | `docker pull darkmind64/parcinfo:v2.33.8` |
+| **Windows** | [ParcInfo-Windows.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/ParcInfo-Windows.exe) |
+| **macOS (Apple Silicon)** | [ParcInfo-macOS-ARM.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/ParcInfo-macOS-ARM.zip) |
+| **macOS (Intel)** | [ParcInfo-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/ParcInfo-macOS-Intel.zip) |
+| **Docker** | `docker pull darkmind64/parcinfo:v2.33.9` |
 
 ### Collecteurs Système (Exécutables Autonomes)
 
 | Type | Plateforme | Télécharger | Usage |
 |------|-----------|----------|-------|
-| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/system-info-collector-gui.exe) | Double-clic → interface |
-| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/system-info-collector.exe) | Automatisation/scripts |
-| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
-| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.8/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
+| **GUI** ⭐ | Windows | [system-info-collector-gui.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector-gui.exe) | Double-clic → interface |
+| **CLI** | Windows | [system-info-collector.exe](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector.exe) | Automatisation/scripts |
+| **CLI** | macOS (Intel) | [system-info-collector-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector-macOS-Intel.zip) | Dézipper → binaire en ligne de commande |
+| **GUI** | macOS (Intel) | [system-info-collector-gui-macOS-Intel.zip](https://github.com/Darkmind64/parc-info/releases/download/v2.33.9/system-info-collector-gui-macOS-Intel.zip) | Dézipper → `ParcInfo-Collector.app` |
 
 **✨ Pas besoin de Python !** Les exécutables contiennent tout ce qu'il faut.
 
@@ -315,7 +315,7 @@ python system-info-collector.py --client-id 5
 > xattr -cr ParcInfo-Collector.app   # ou : xattr -cr system-info-collector
 > ```
 
-👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.33.8)
+👉 [Voir la release complète](https://github.com/Darkmind64/parc-info/releases/tag/v2.33.9)
 
 ---
 
