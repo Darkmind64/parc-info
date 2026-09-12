@@ -49,30 +49,38 @@
 .rail-soon { font-size:.74rem; color:var(--text-muted); line-height:1.65; }
 .rail-soon b { color:var(--text-secondary); }
 
-/* Bibliothèque d'appareils à glisser-déposer (refonte lot 3) */
-.lib-filtre { width:100%; margin-bottom:0; }
-.lib-section + .lib-section { margin-top:1rem; }
-.lib-section-hd { display:flex; align-items:center; justify-content:space-between; gap:.5rem;
-    font-family:'Rajdhani',sans-serif; font-size:.72rem; font-weight:700; letter-spacing:1px;
-    text-transform:uppercase; color:var(--text-secondary); margin-bottom:.4rem; }
-.lib-count { font-family:'Share Tech Mono',monospace; color:var(--text-muted); font-weight:400;
-    text-transform:none; letter-spacing:0; }
+/* Bibliothèque d'appareils à glisser-déposer — présentation reprise de la
+   maquette (cartes ".dev" à icône encadrée + badge de provenance, en-tête
+   de section avec filet, carte qui se soulève au survol). */
+.lib-filtre { width:100%; margin-bottom:.55rem; }
+.lib-section + .lib-section { margin-top:.7rem; }
+.lib-section-hd { display:flex; align-items:center; gap:.4rem; margin-bottom:.3rem; }
+.lib-section-hd > span:first-child { display:flex; align-items:center; gap:.4rem; flex:1; min-width:0;
+    font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:1.5px;
+    text-transform:uppercase; color:var(--text-muted); white-space:nowrap; }
+.lib-section-hd > span:first-child::after { content:''; flex:1; height:1px; background:var(--border); }
+.lib-count { font-family:'Share Tech Mono',monospace; color:var(--text-muted); font-size:9px; flex-shrink:0; }
 .lib-refresh { background:var(--bg-secondary); border:1px solid var(--border); border-radius:3px;
-    color:var(--text-muted); width:22px; height:22px; line-height:1; cursor:pointer; font-size:.8rem; }
+    color:var(--text-muted); width:22px; height:22px; line-height:1; cursor:pointer; font-size:.8rem; flex-shrink:0; }
 .lib-refresh:hover:not(:disabled) { color:var(--accent); border-color:var(--accent); }
 .lib-refresh:disabled { opacity:.5; cursor:default; }
-.lib-list { display:flex; flex-direction:column; gap:.3rem; max-height:220px; overflow-y:auto; }
+.lib-list { display:flex; flex-direction:column; gap:.34rem; max-height:220px; overflow-y:auto; }
 .lib-empty { font-size:.7rem; color:var(--text-muted); padding:.4rem 0; }
-.lib-hint { line-height:1.5; }
-.lib-item { display:flex; align-items:center; gap:.4rem; background:var(--bg-secondary);
-    border:1px solid var(--border); border-radius:3px; padding:.35rem .5rem; cursor:grab;
-    font-size:.72rem; color:var(--text-secondary); user-select:none; }
-.lib-item:hover { border-color:var(--accent); color:var(--text-primary); }
+.lib-hint { line-height:1.5; margin-top:.5rem; }
+.lib-item { display:flex; align-items:center; gap:.5rem; background:var(--bg-secondary);
+    border:1px solid var(--border); border-radius:5px; padding:.4rem .5rem; cursor:grab;
+    font-size:.72rem; color:var(--text-secondary); user-select:none; transition:.12s; }
+.lib-item:hover { border-color:var(--accent); color:var(--text-primary);
+    transform:translateY(-1px); box-shadow:0 4px 10px rgba(0,0,0,.35); }
 .lib-item.dragging { opacity:.4; }
-.lib-item-ic { flex-shrink:0; }
+.lib-item-ic { flex:0 0 auto; width:26px; height:26px; border-radius:4px; display:grid; place-items:center;
+    font-size:.85rem; background:var(--bg-card); border:1px solid var(--border); }
 .lib-item-txt { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.lib-item-txt small { display:block; color:var(--text-muted); font-size:.62rem; }
-.lib-item-snmp { border-style:dashed; }
+.lib-item-txt small { display:block; color:var(--text-muted); font-size:.62rem;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lib-item-src { font-family:'Share Tech Mono',monospace; font-size:8.5px; letter-spacing:.5px;
+    padding:.08rem .3rem; border-radius:3px; flex:0 0 auto; color:var(--text-muted); border:1px solid var(--border); }
+.lib-item-src.snmp { color:var(--accent); border-color:color-mix(in srgb,var(--accent) 45%,var(--border)); }
 
 /* Bandeau « type à valider » de l'inspecteur d'équipement (refonte lot 6) */
 .eqm-typebar { border:1px solid color-mix(in srgb,var(--accent-orange,#f59e0b) 45%,var(--border));
@@ -169,7 +177,6 @@
 .baie-toolbar { display:flex; flex-wrap:wrap; align-items:flex-start; gap:.45rem .85rem; margin-bottom:.8rem; }
 .tb-group { display:flex; flex-direction:column; gap:.3rem; }
 .tb-group + .tb-group { padding-left:.85rem; border-left:1px solid var(--border); }
-.tb-group.tb-right { margin-left:auto; border-left:0; padding-left:0; }
 .tb-group-lbl { font-family:'Share Tech Mono',monospace; font-size:.53rem; letter-spacing:2px;
     text-transform:uppercase; color:var(--text-muted); padding-left:.15rem; white-space:nowrap; }
 .tb-group-items { display:flex; flex-wrap:wrap; align-items:center; gap:.32rem; }
@@ -338,8 +345,6 @@
     display:grid; grid-template-columns:repeat(auto-fill, 24px); gap:2px;
     flex:1; min-width:0; align-content:flex-start; overflow:hidden;
 }
-.cell-ping-zone { flex-shrink:0; display:flex; justify-content:flex-end; }
-
 /* Switch : ports RJ (80% gauche, 1 ou 2 lignes) + ports SFP optionnels
    (20% restants, séparés par un liseré) — demandé, sur le modèle d'un vrai
    switch/patch panel. cell-ports-main-switch remplace cell-ports-stack
@@ -506,9 +511,6 @@
     color:#d0e4f7; font-size:.72rem; font-weight:600; letter-spacing:.15px; }
 .cell-ip   { font-size:.6rem; color:#4a6a8a; flex-shrink:0; margin-left:4px; }
 .cell-desc { color:#4a6a8a; font-weight:400; }
-/* Progression du ping en cours (voir pingerPortsElement()) — affichée après
-   le nom de l'élément, masquée en dehors d'un ping actif. */
-.cell-ping-progress { font-size:.6rem; color:var(--accent); flex-shrink:0; margin-left:6px; font-family:'Share Tech Mono',monospace; }
 
 /* Progression du "Ping toute la baie" (barre d'outils) — signalé en usage
    réel : posée EN LIGNE parmi les boutons (voir pingerToutelaBaie()), son
@@ -744,9 +746,16 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
    .baie-center, au milieu de la page, au lieu d'un vrai tiroir qui se
    déplie en bas de la fenêtre comme dans la maquette validée : un rack
    haut le rendait invisible sans faire défiler la page jusqu'à lui).
-   position:fixed sur toute la largeur de la fenêtre — recouvre les rails
-   à l'ouverture, comme un tiroir/bottom-sheet, jusqu'à sa fermeture (✕). */
-.port-appareils { position:fixed; left:0; right:0; bottom:0; z-index:70;
+   position:fixed, mais SANS left/right:0 — la maquette pose ce tiroir
+   (.annex) en flux normal DANS la colonne centrale, donc pile à sa largeur ;
+   ici position:fixed est nécessaire (rester visible sans dépendre du
+   défilement de la page), mais `left`/`width` sont recalculés en JS sur les
+   bornes réelles de #rack-outer, la baie elle-même — pas plus large (voir
+   _positionnerPanelAppareils) — sans ça le tiroir s'étire sur toute la
+   fenêtre et déborde des rails gauche/droite au lieu de s'aligner avec le
+   rack, surtout visible depuis que main peut dépasser 1400px (interface
+   pleine largeur 1920px). */
+.port-appareils { position:fixed; bottom:0; z-index:70;
     border-top:2px solid var(--accent); box-shadow:0 -10px 30px rgba(0,0,0,.5);
     background:var(--bg-card); max-height:44vh; display:flex; flex-direction:column; }
 .port-appareils[hidden] { display:none; }
@@ -776,14 +785,9 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .cell-sante.cs-ok { color:#1f9d55; background:rgba(31,157,85,.14); }
 .cell-sante.cs-attention { color:#c77700; background:rgba(224,149,42,.16); }
 .cell-sante.cs-critique { color:#ef4444; background:rgba(239,68,68,.16); }
-/* bouton toolbar « 🩺 Santé » (menu Affichage, fidèle à la maquette) : masque
-   simplement les pastilles déjà posées par appliquerDiagErreurs(), sans
-   toucher au calcul ni au chargement des données. */
-body.baie-sante-off .cell-sante { display:none; }
-
-/* bouton toolbar « 🏷 Câbles » : étiquette permanente couleur/longueur du
-   cordon sur chaque lien du rack (voir renderCableLinks) — la même donnée
-   que l'infobulle et la modale de port, juste rendue visible sans survol. */
+/* Étiquette permanente couleur/longueur du cordon sur chaque lien du rack
+   (voir renderCableLinks) — toujours affichée, même donnée que l'infobulle
+   et la modale de port. */
 .cable-label { font-family:'Share Tech Mono',monospace; font-size:8px; fill:#a9c0dd;
     paint-order:stroke; stroke:#0a0e14; stroke-width:3px; stroke-linejoin:round; pointer-events:none; }
 
@@ -846,14 +850,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 }
 .port.port-lie:hover .port-unlink { display:block; }
 .port-unlink:hover { background:var(--accent-red,#ff3355); color:#fff; }
-
-.cell-ping-btn {
-    background:none; border:1px solid #334155; color:#64748b; cursor:pointer;
-    font-size:.6rem; padding:.15rem .4rem; border-radius:3px; white-space:nowrap;
-    transition:all .15s; align-self:flex-start;
-}
-.cell-ping-btn:hover:not(:disabled) { color:var(--accent); border-color:var(--accent); background:rgba(0,201,255,.08); }
-.cell-ping-btn:disabled { opacity:.55; cursor:wait; }
 
 .rack-footer {
     background:#0d1520; padding:.4rem 1.2rem; border-top:2px solid #2a3a4a;
@@ -1055,10 +1051,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
 .cell-vertical .cell-desc { writing-mode: vertical-rl; }
 .cell-vertical .cell-ip, .cell-vertical .cell-va { writing-mode: vertical-rl; margin-left: 0; margin-top: 4px; }
 .cell-vertical .cell-led { margin-right: 0; margin-bottom: 4px; }
-/* Progression de ping en cours : texte horizontal étroit peu lisible en
-   vertical (voir pingerPortsElement) — masquée plutôt que pivotée, le
-   bouton 📡 lui-même reste disponible et fonctionnel. */
-.cell-vertical .cell-ping-progress { display: none; }
 /* align-items:stretch, pas le flex-start hérité de la règle de base : en
    colonne (flex-direction ci-dessous), l'axe transverse devient la LARGEUR
    — avec flex-start, chaque zone de ports (cell-ports-main-switch/-stack)
@@ -1225,10 +1217,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                         <option value="3000">⚡ activité 3 s</option>
                         <option value="5000">⚡ activité 5 s</option>
                     </select>
-                    <button id="btn-sante" onclick="toggleSante()" class="btn btn-sm btn-neutral active" aria-pressed="true"
-                        title="Afficher/masquer la pastille de santé réseau (diagnostic SNMP) sur chaque équipement — préférence locale à ce navigateur">🩺 Santé</button>
-                    <button id="btn-cables" onclick="toggleLabelsCables()" class="btn btn-sm btn-neutral" aria-pressed="false"
-                        title="Afficher en permanence la couleur/longueur de chaque cordon sur le rack (déjà visible en survol/double-clic sur un lien) — préférence locale à ce navigateur">🏷 Câbles</button>
                     <button id="btn-offsite" onclick="toggleHorsSite()" class="btn btn-sm btn-neutral" aria-pressed="false"
                         title="Mode hors site : assombrit la baie et bloque le glisser-déposer/redimensionnement — repère visuel local à ce navigateur, aucun appel serveur, n'affecte pas les autres utilisateurs">🛰 Hors site</button>
                 </div>
@@ -1240,7 +1228,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                     <button id="btn-mode-lien" onclick="toggleModeLien()" class="btn btn-sm btn-neutral" title="Lier deux ports : cliquer sur deux ports successivement pour les relier (câblage physique)">🔗 Lier</button>
                     <button onclick="MoniteurModal.ouvrir()" class="btn btn-sm btn-neutral" title="Moniteur réseau : compteurs bruts des ports, journal d'évènements, capture de trafic — pour comprendre ce que montrent les LEDs">📊 Moniteur</button>
                     <button onclick="BrassageModal.ouvrir()" class="btn btn-sm btn-primary" title="Deviner le brassage : à partir de toutes les MAC vues sur les switchs (SNMP), corrélées à l'inventaire, propose la machine de chaque prise/port, les cordons bandeau ⇄ switch et les liens switch ⇄ éléments. Aperçu avant application.">🧠 Deviner le brassage</button>
-                    <button onclick="FdbBrut.ouvrir()" class="btn btn-sm btn-neutral" title="Relevé brut de la table d'apprentissage MAC de chaque switch — forme exacte des adresses renvoyées par l'agent SNMP. À utiliser si « Deviner le brassage » montre des MAC bizarres (00:01…, 8 octets).">🔬 FDB brut</button>
                     <a href="{{ url_for('baie_cablage') }}" class="btn btn-sm btn-neutral" title="Liste de câblage : liste imprimable/CSV de tous les liens port-à-port">🔌 Câblage</a>
                 </div>
             </div>
@@ -1253,13 +1240,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <div class="tb-group-items">
                     <button id="btn-types" onclick="cyclerTypesAValider()" class="btn btn-sm btn-warn"
                         title="Le type détecté en LLDP pour cet équipement ne correspond pas au type déclaré dans la baie — cliquer pour les vérifier un par un">⚠ <span id="types-n">0</span> type(s) à valider</button>
-                </div>
-            </div>
-
-            <div class="tb-group tb-right">
-                <span class="tb-group-lbl">&nbsp;</span>
-                <div class="tb-group-items">
-                    <button onclick="toutVider()" class="btn btn-sm btn-danger" title="Vider : retire tous les équipements de cette baie">✕ Vider</button>
                 </div>
             </div>
 </div>
@@ -1788,24 +1768,6 @@ table.mon-table td.mon-wrap select { max-width:100%; }
     </div>
 </div>
 
-<!-- RELEVÉ FDB BRUT — diagnostic d'un agent SNMP qui déforme ses adresses MAC. -->
-<div id="fdbraw-modal" class="modal-overlay" onclick="if(event.target===this)FdbBrut.fermer()">
-    <div class="mon-box">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.6rem;">
-            <h3 style="margin:0;color:var(--text-primary);font-size:1rem;">🔬 Relevé FDB brut</h3>
-            <button type="button" onclick="FdbBrut.fermer()" style="background:none;border:1px solid var(--border);color:var(--text-muted);border-radius:3px;padding:.2rem .55rem;cursor:pointer;">✕</button>
-        </div>
-        <div style="font-size:.68rem;color:var(--text-muted);margin-bottom:.6rem;">
-            Ce que chaque switch renvoie vraiment, sans aucune correction. <b>MAC (6 derniers)</b> = adresse
-            obtenue en gardant les 6 derniers octets ; un ✓ = reconnue dans l'inventaire. Si les octets bruts
-            font plus de 6 et que les 6 derniers sont ✓, l'agent ajoute juste un préfixe (récupérable). Si
-            les 6 derniers ne matchent jamais et commencent par <code>00:01</code>/<code>00:0A</code>, l'agent
-            tronque la vraie MAC (2 octets perdus).
-        </div>
-        <div class="mon-pane actif" style="max-height:60vh;font-size:.72rem;"><div id="fdbraw-corps">Chargement…</div></div>
-    </div>
-</div>
-
 <!-- LIGHTBOX -->
 <div class="lightbox" id="lightbox" onclick="fermerLightbox()">
     <button class="lightbox-close" onclick="fermerLightbox()">✕ Fermer</button>
@@ -1835,11 +1797,8 @@ let baiesList   = ['Baie principale'];
 // n'empêche ni la sélection/édition via le formulaire, ni la suppression
 // (déjà protégée par un confirm()), ni l'ajout de nouveaux éléments.
 let baieVerrouillee = false;
-// Repères visuels préférence locale (comme baieVerrouillee) : n'influent
-// que sur CE navigateur, aucun appel serveur, voir toggleSante()/
-// toggleLabelsCables()/toggleHorsSite() plus bas.
-let santeVisible = true;
-let labelsCablesVisibles = false;
+// Repère visuel préférence locale (comme baieVerrouillee) : n'influe que
+// sur CE navigateur, aucun appel serveur, voir toggleHorsSite() plus bas.
 let horsSiteActif = false;
 // Un geste d'édition (glisser, redimensionner) doit être bloqué à la fois
 // par le verrouillage explicite ET par le mode « hors site » (lecture
@@ -2106,10 +2065,12 @@ function toggleRail(which) {
     pg.dataset[which] = nv;
     try { localStorage.setItem('baie-rail-' + which, nv); } catch (e) {}
     // la largeur de la zone centrale a changé -> recalcul des proportions du rack
+    // + du tiroir « appareils du port » s'il est ouvert (voir _positionnerPanelAppareils).
     setTimeout(() => {
         calcUH(true);
         if (typeof renderCableLinks === 'function') renderCableLinks();
         if (window.BaieInfo && BaieInfo._rendre) BaieInfo._rendre();
+        _positionnerPanelAppareils();
     }, 60);
 }
 
@@ -2132,6 +2093,7 @@ async function init() {
         _resizeTimer = setTimeout(() => {
             calcUH(false); renderCableLinks();
             BaieInfo._rendre();   // ré-évalue le débordement du bandeau d'info
+            _positionnerPanelAppareils();
         }, 150);
     });
 }
@@ -2237,33 +2199,10 @@ function toggleVerrouBaie() {
 // données ni n'appelle le serveur — voir editionBloquee() pour le lien avec
 // le verrouillage.
 function chargerPrefsAffichage() {
-    try { santeVisible = localStorage.getItem('baie_sante_visible') !== '0'; } catch (e) {}
-    try { labelsCablesVisibles = localStorage.getItem('baie_labels_cables') === '1'; } catch (e) {}
     try { horsSiteActif = localStorage.getItem('baie_hors_site') === '1'; } catch (e) {}
-    const btnS = document.getElementById('btn-sante');
-    if (btnS) { btnS.classList.toggle('active', santeVisible); btnS.setAttribute('aria-pressed', String(santeVisible)); }
-    document.body.classList.toggle('baie-sante-off', !santeVisible);
-    const btnC = document.getElementById('btn-cables');
-    if (btnC) { btnC.classList.toggle('active', labelsCablesVisibles); btnC.setAttribute('aria-pressed', String(labelsCablesVisibles)); }
     const btnO = document.getElementById('btn-offsite');
     if (btnO) { btnO.classList.toggle('active', horsSiteActif); btnO.setAttribute('aria-pressed', String(horsSiteActif)); }
     document.body.classList.toggle('baie-hors-site', horsSiteActif);
-}
-
-function toggleSante() {
-    santeVisible = !santeVisible;
-    try { localStorage.setItem('baie_sante_visible', santeVisible ? '1' : '0'); } catch (e) {}
-    const btn = document.getElementById('btn-sante');
-    if (btn) { btn.classList.toggle('active', santeVisible); btn.setAttribute('aria-pressed', String(santeVisible)); }
-    document.body.classList.toggle('baie-sante-off', !santeVisible);
-}
-
-function toggleLabelsCables() {
-    labelsCablesVisibles = !labelsCablesVisibles;
-    try { localStorage.setItem('baie_labels_cables', labelsCablesVisibles ? '1' : '0'); } catch (e) {}
-    const btn = document.getElementById('btn-cables');
-    if (btn) { btn.classList.toggle('active', labelsCablesVisibles); btn.setAttribute('aria-pressed', String(labelsCablesVisibles)); }
-    renderCableLinks();
 }
 
 function toggleHorsSite() {
@@ -2526,23 +2465,21 @@ function renderCableLinks() {
         path.dataset.cle = els[0].dataset.cle;
         svg.appendChild(path);
 
-        // Étiquette permanente couleur/longueur (bouton toolbar « 🏷 Câbles »,
-        // fidèle à la maquette) — point milieu de la même courbe de Bézier
-        // cubique que le tracé visible (t=0.5), pas juste le milieu du
-        // segment droit A-B, sinon l'étiquette ne suit pas la bombe.
-        if (labelsCablesVisibles) {
-            const texte = a.dataset.cable || b.dataset.cable || '';
-            if (texte) {
-                const mx = 0.125 * x1 + 0.375 * (x1 + bombe) + 0.375 * (x2 + bombe) + 0.125 * x2;
-                const my = 0.125 * y1 + 0.375 * y1 + 0.375 * y2 + 0.125 * y2;
-                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                label.setAttribute('x', mx);
-                label.setAttribute('y', my - 4);
-                label.setAttribute('text-anchor', 'middle');
-                label.setAttribute('class', 'cable-label');
-                label.textContent = texte;
-                svg.appendChild(label);
-            }
+        // Étiquette permanente couleur/longueur — point milieu de la même
+        // courbe de Bézier cubique que le tracé visible (t=0.5), pas juste
+        // le milieu du segment droit A-B, sinon l'étiquette ne suit pas la
+        // bombe.
+        const texteCable = a.dataset.cable || b.dataset.cable || '';
+        if (texteCable) {
+            const mx = 0.125 * x1 + 0.375 * (x1 + bombe) + 0.375 * (x2 + bombe) + 0.125 * x2;
+            const my = 0.125 * y1 + 0.375 * y1 + 0.375 * y2 + 0.125 * y2;
+            const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            label.setAttribute('x', mx);
+            label.setAttribute('y', my - 4);
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('class', 'cable-label');
+            label.textContent = texteCable;
+            svg.appendChild(label);
         }
 
         // Zone de double-clic élargie et invisible, superposée (voir CSS
@@ -2690,7 +2627,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         <div class="cell-row">
             <span class="cell-led ${ledCls}"></span>
             <span class="cell-name">${nom}${desc ? `<span class="cell-desc"> — ${desc}</span>` : ''}</span>
-            <span class="cell-ping-progress" style="display:none;"></span>
             ${ip ? `<span class="cell-ip">${escH(ip)}</span>` : ''}
             ${badgeVa}
             ${boutonAdmin}
@@ -2851,17 +2787,9 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             : `<div class="cell-ports-stack">${ligneRJ}</div>`;
     }
 
-    // Bouton "Pinger les appareils reliés aux ports" — sans objet pour une
-    // prise électrique (demandé) : une prise alimente un appareil, elle ne
-    // le relie pas au réseau ; son statut réseau se consulte sur sa propre
-    // fiche, pas via l'onduleur/PDU qui l'alimente. Voir aussi portHTML
-    // (pas de voyant de ping ni de classePing sur une prise, même logique).
     const zonePorts = ports.length ? `
         <div class="cell-ports-wrap">
             ${zonePortsPrincipale}
-            ${estElec ? '' : `<div class="cell-ping-zone">
-                <button class="cell-ping-btn" title="Pinger les appareils reliés aux ports">📡</button>
-            </div>`}
         </div>` : '';
 
     // Badge d'alimentation (demandé) : coin inférieur droit d'un appareil
@@ -2982,18 +2910,6 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         el.addEventListener('mousemove', e => { e.stopPropagation(); const t = document.getElementById('rack-tooltip'); if (t.classList.contains('show')) positionnerTooltip(e); });
         el.addEventListener('mouseleave', e => { e.stopPropagation(); masquerTooltip(); });
     });
-
-    // Pas de bouton ping du tout sur une prise électrique (estElec, voir
-    // zonePorts ci-dessus) — cette recherche peut donc légitimement ne rien
-    // trouver, contrairement à avant où ports.length > 0 suffisait à
-    // garantir sa présence.
-    const btnPing = cell.querySelector('.cell-ping-btn');
-    if (btnPing) {
-        btnPing.addEventListener('click', e => {
-            e.stopPropagation();
-            pingerPortsElement(cell, ports);
-        });
-    }
 
     // Clic simple = surbrillance + ouverture de l'inspecteur contextuel de
     // l'équipement (refonte lot 2, EquipmentModal.ouvrir → onglet
@@ -3484,6 +3400,7 @@ function libItemAppareilHTML(a) {
     return `<div class="lib-item" draggable="true" data-appareil-id="${a.id}" data-nom="${escH(a.nom_machine||'')}" data-type="${escH(a.type_appareil||'')}" title="Glisser sur une case libre de la baie">
         <span class="lib-item-ic">🖥</span>
         <span class="lib-item-txt">${escH(a.nom_machine||'(sans nom)')}${sous ? `<small>${escH(sous)}</small>` : ''}</span>
+        <span class="lib-item-src">INV</span>
     </div>`;
 }
 function libItemSnmpHTML(ip, h) {
@@ -3491,9 +3408,10 @@ function libItemSnmpHTML(ip, h) {
     const nom = nomSource || h.vendor || ip;
     const sous = [h.vendor, ip].filter(Boolean).join(' · ');
     const via = nomSource ? `Vu via ${nomSource} — ` : '';
-    return `<div class="lib-item lib-item-snmp" draggable="true" data-nom="${escH(nom)}" data-type="" title="${escH(via)}glisser sur une case libre de la baie">
+    return `<div class="lib-item" draggable="true" data-nom="${escH(nom)}" data-type="" title="${escH(via)}glisser sur une case libre de la baie">
         <span class="lib-item-ic">📡</span>
         <span class="lib-item-txt">${escH(nom)}${sous ? `<small>${escH(sous)}</small>` : ''}</span>
+        <span class="lib-item-src snmp">SNMP</span>
     </div>`;
 }
 
@@ -3748,8 +3666,7 @@ function portHTML(p, estElec, typeEquipement) {
     // aucun voyant (en_ligne vaut 0 par défaut en base, indiscernable d'un
     // vrai échec sans ce champ) ; sinon vert/rouge selon en_ligne. Sans
     // objet pour une prise électrique (demandé) : elle alimente un
-    // appareil, elle ne le relie pas au réseau — voir aussi cell-ping-zone
-    // dans makeOccupiedCell (bouton 📡 masqué pour le même motif).
+    // appareil, elle ne le relie pas au réseau.
     const classePing = (estElec || !(appareilCible && p.dernier_ping)) ? '' : (p.en_ligne ? ' port-ping-ok' : ' port-ping-fail');
     // Badge de détachement (✕ rouge, coin haut-droit) — uniquement pour un
     // port câblé à un autre (lie_slot_id) : révélé au survol par CSS
@@ -4167,82 +4084,9 @@ function afficherTooltipPriseMurale(e, pm, numero, nomSlot, slotId) {
     positionnerTooltip(e);
 }
 
-// Ping des appareils reliés aux ports d'un élément — réutilise la route de
-// ping existante (/api/ping/appareil/<id>, déjà utilisée ailleurs dans
-// l'app pour le statut en ligne/hors ligne d'un appareil), un appel par
-// appareil DISTINCT (plusieurs ports peuvent pointer vers le même appareil
-// — deux cartes réseau, par exemple — inutile de le pinger deux fois).
-// Un port associé DIRECTEMENT à un appareil (p.appareil_id) ou relié par
-// câble à un port qui l'est lui-même (p.lie_appareil_id — cas standard du
-// brassage structuré, voir _ports_avec_details côté serveur) comptent tous
-// les deux. Seul un périphérique ou un usage personnalisé n'a pas d'IP
-// dans ce schéma.
-async function pingerPortsElement(cell, ports) {
-    const btn = cell.querySelector('.cell-ping-btn');
-    const progressEl = cell.querySelector('.cell-ping-progress');
-    // p.prise_murale.appareil_id compte aussi (bandeau RJ — l'appareil est
-    // désormais branché sur la prise murale, pas le port RJ lui-même).
-    const cibles = [...new Set(ports.flatMap(p => [p.appareil_id, p.lie_appareil_id, p.prise_murale && p.prise_murale.appareil_id]).filter(Boolean))];
-    if (!cibles.length) { showFlash('Aucun appareil relié à un port de cet élément.', 'info'); return; }
-    btn.disabled = true;
-    const texteInitial = btn.textContent;
-    btn.textContent = '⏳ Ping…';
-    let fait = 0;
-    const majProgress = () => { if (progressEl) progressEl.textContent = `📡 ${fait}/${cibles.length}`; };
-    if (progressEl) { progressEl.style.display = ''; majProgress(); }
-    try {
-        // On force id=<celui demandé> sur chaque résultat (au lieu de faire
-        // confiance à ce que le serveur renvoie) : une erreur 400 "Appareil
-        // sans IP" répond quand même avec un JSON valide (sans champ id), ce
-        // qui faisait échouer silencieusement le rapprochement avec le port
-        // — aucun voyant ne s'allumait ni ne s'éteignait, sans le moindre
-        // message pour expliquer pourquoi.
-        // Chaque ping met à jour SON port dès qu'il répond (pas d'attente du
-        // lot entier) : la progression et les voyants avancent au fur et à
-        // mesure plutôt qu'en un seul bloc à la toute fin.
-        let sansIp = 0, nbOnline = 0;
-        await Promise.all(cibles.map(id =>
-            fetch(`/api/ping/appareil/${id}`)
-                .then(r => r.json().then(j => ({...j, id, ok: r.ok})))
-                .catch(() => ({id, en_ligne: false, ok: false}))
-                .then(res => {
-                    if (!res.ok) sansIp++;
-                    if (res.ok && res.en_ligne) nbOnline++;
-                    ports.forEach(p => {
-                        if (p.appareil_id === res.id || p.lie_appareil_id === res.id) {
-                            p.en_ligne = !!res.en_ligne;
-                            if (res.ok) p.dernier_ping = new Date().toISOString(); // marque "pingé" pour les re-rendus suivants
-                        }
-                        if (p.prise_murale && p.prise_murale.appareil_id === res.id) {
-                            p.prise_murale.en_ligne = !!res.en_ligne;
-                            if (res.ok) p.prise_murale.dernier_ping = new Date().toISOString();
-                        }
-                    });
-                    if (res.ok) {
-                        cell.querySelectorAll(`.port[data-appareil="${res.id}"], .prise-murale[data-appareil="${res.id}"]`).forEach(el => {
-                            el.classList.remove('port-ping-ok', 'port-ping-fail', 'pm-ping-ok', 'pm-ping-fail');
-                            const cls = el.classList.contains('prise-murale')
-                                ? (res.en_ligne ? 'pm-ping-ok' : 'pm-ping-fail')
-                                : (res.en_ligne ? 'port-ping-ok' : 'port-ping-fail');
-                            el.classList.add(cls);
-                        });
-                    }
-                    fait++; majProgress();
-                })));
-        let msg = `Ping terminé : ${nbOnline}/${cibles.length} appareil(s) en ligne.`;
-        if (sansIp) msg += ` ${sansIp} sans IP renseignée (ignoré${sansIp > 1 ? 's' : ''}).`;
-        showFlash(msg, nbOnline ? 'success' : 'info');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = texteInitial;
-        if (progressEl) progressEl.style.display = 'none';
-    }
-}
-
-// Ping de TOUTE la baie affichée en un clic — même mécanique que
-// pingerPortsElement() (parallèle, progression en direct) mais sur
-// l'ensemble des appareils reliés à un port, tous éléments confondus, pas
-// un seul à la fois. Un même appareil relié à plusieurs ports (deux cartes
+// Ping de TOUTE la baie affichée en un clic — parallèle, progression en
+// direct, sur l'ensemble des appareils reliés à un port, tous éléments
+// confondus. Un même appareil relié à plusieurs ports (deux cartes
 // réseau) n'est pingé qu'une fois ; ses voyants sont tous mis à jour.
 // manuel=false (cycles du ping automatique, voir plus bas) : pas de
 // message de fin ni de changement de texte du bouton à chaque cycle —
@@ -4251,10 +4095,9 @@ async function pingerPortsElement(cell, ports) {
 async function pingerToutelaBaie(manuel = true) {
     const btn = document.getElementById('btn-ping-baie');
     const progressEl = document.getElementById('ping-baie-progress');
-    // p.lie_appareil_id (résolu au bout d'un lien port-à-port, voir
-    // pingerPortsElement plus haut) compte aussi — sans ça, un appareil
-    // uniquement atteint via un câblage structuré (bandeau RJ -> switch)
-    // n'était jamais pingé par "Ping toute la baie".
+    // p.lie_appareil_id (résolu au bout d'un lien port-à-port) compte aussi
+    // — sans ça, un appareil uniquement atteint via un câblage structuré
+    // (bandeau RJ -> switch) n'était jamais pingé par "Ping toute la baie".
     const cibles = [...new Set(Object.values(slots).flatMap(s => (s.ports || [])
         .flatMap(p => [p.appareil_id, p.lie_appareil_id, p.prise_murale && p.prise_murale.appareil_id])).filter(Boolean))];
     if (!cibles.length) { if (manuel) showFlash('Aucun appareil relié à un port dans cette baie.', 'info'); return; }
@@ -4475,6 +4318,9 @@ async function chargerActivite() {
             if (p.cable === 'incoherent') el.classList.add('pm-cable-ko');
         }
     }
+    // Une cascade nouvellement classée par l'activité (voir appliquerNeticPorts)
+    // doit poser son icône dès ce relevé, sans attendre un renderRack() complet.
+    appliquerNeticPorts();
     majBandeauActivite(d);
 }
 
@@ -4839,53 +4685,6 @@ function fmtOctets(o) {
     if (o >= 1e3) return (o / 1e3).toFixed(0) + ' ko';
     return o + ' o';
 }
-
-// ── RELEVÉ FDB BRUT (diagnostic agent SNMP) ─────────────────────────────────
-const FdbBrut = {
-    ouvrir() {
-        document.getElementById('fdbraw-modal').classList.add('open');
-        this.charger();
-    },
-    fermer() { document.getElementById('fdbraw-modal').classList.remove('open'); },
-    async charger() {
-        const corps = document.getElementById('fdbraw-corps');
-        corps.innerHTML = 'Relevé SNMP en cours…';
-        let d;
-        try { d = await (await fetch('/api/baie/brassage/fdb-brut')).json(); }
-        catch (e) { corps.innerHTML = '<span style="color:var(--accent-red);">Erreur de communication.</span>'; return; }
-        const eq = d.equipements || [];
-        if (!eq.length) { corps.innerHTML = '<span style="color:var(--text-muted);">Aucun switch avec une IP dans la baie.</span>'; return; }
-        const hist = o => Object.entries(o || {}).sort((a, b) => a[0] - b[0])
-            .map(([k, v]) => `${k} oct.×${v}`).join(', ') || '—';
-        const ok = s => s ? ` <span style="color:var(--accent-green);">✓ ${escH(s)}</span>` : '';
-        let h = `<p style="color:var(--text-muted);">Inventaire : ${d.nb_inventaire_mac} MAC connues.</p>`;
-        for (const e of eq) {
-            h += `<div style="margin:.6rem 0;border:1px solid var(--border);border-radius:5px;padding:.5rem .6rem;">`
-               + `<b>${escH(e.nom)}</b> <span class="mono" style="color:var(--text-muted);">${escH(e.ip)}</span>`;
-            if (e.snmp !== 'ok') { h += ` — <span style="color:var(--accent-red);">${escH(e.snmp)}</span></div>`; continue; }
-            h += ` — dialecte <code>${escH(e.dialecte || '?')}</code>`;
-            // FDB
-            h += `<div style="margin-top:.4rem;"><u>Table d'apprentissage (FDB)</u> — ${e.fdb.nb} entrées · longueurs d'index : ${hist(e.fdb.longueurs)}`;
-            if ((e.fdb.exemples || []).length) {
-                h += `<table style="width:100%;margin-top:.3rem;border-collapse:collapse;font-size:.68rem;"><tr style="color:var(--text-muted);"><th style="text-align:left;">index (sous-identifiants)</th><th style="text-align:left;">MAC (6 derniers)</th></tr>`;
-                for (const x of e.fdb.exemples)
-                    h += `<tr><td class="mono">${x.sous_identifiants.join('.')}</td><td class="mono">${escH(x.mac_6_derniers || '—')}${ok(x.dans_inventaire)}</td></tr>`;
-                h += `</table>`;
-            }
-            h += `</div>`;
-            // ARP
-            h += `<div style="margin-top:.4rem;"><u>Table ARP</u> — ${e.arp.nb} entrées · tailles reçues : ${hist(e.arp.longueurs_octets)}`;
-            if ((e.arp.exemples || []).length) {
-                h += `<table style="width:100%;margin-top:.3rem;border-collapse:collapse;font-size:.68rem;"><tr style="color:var(--text-muted);"><th style="text-align:left;">octets bruts</th><th style="text-align:left;">MAC (6 derniers)</th></tr>`;
-                for (const x of e.arp.exemples)
-                    h += `<tr><td class="mono">${escH(x.octets_hex)} <span style="color:var(--text-muted);">(${x.nb_octets})</span></td><td class="mono">${escH(x.mac_6_derniers || '—')}${ok(x.dans_inventaire)}</td></tr>`;
-                h += `</table>`;
-            }
-            h += `</div></div>`;
-        }
-        corps.innerHTML = h;
-    },
-};
 
 // ── DEVINER LE BRASSAGE — « carte réseau proposée » (modale) ─────────────────
 // GET /api/baie/brassage/proposer : part de TOUTES les MAC apprises sur les
@@ -6265,15 +6064,6 @@ function delSlot(id) {
     }, { title: 'Action irréversible', icon: '🗑️', ok: 'Retirer' });
 }
 
-function toutVider() {
-    appConfirm(`Vider toute la baie "${currentBaie}" ?`, async () => {
-        for (const s of Object.values(slots))
-            await fetch('/api/baie/slot/' + s.id, { method:'DELETE' });
-        slots = {}; nbCols = 1;
-        renderRack();
-    }, { title: 'Action irréversible', icon: '🗑️', ok: 'Vider' });
-}
-
 async function changerU(delta) {
     const nv = Math.max(6, Math.min(48, nbU + delta));
     if (nv === nbU) return;
@@ -6467,6 +6257,37 @@ function appliquerNeticPorts() {
         const [slot, num] = cle.split(':');
         (parPort[cle] = parPort[cle] || { slot, num, declared: null }).detected = info.detected_kind;
     }
+    // Repli « activité » : l'icône ne s'affichait jusqu'ici qu'après une
+    // cartographie de topologie (diag_topologie, alimente _neticDetecte
+    // ci-dessus — sur demande ou périodique) — alors que la vue d'activité
+    // live (FDB, à jour dès qu'elle est activée) sait DÉJÀ classer une
+    // cascade « switch non géré »/« borne Wi-Fi » sur un port qui voit
+    // plusieurs MAC (voir schemaCascade/rowsActivitePort — même donnée,
+    // déjà montrée au survol du port). Sans ce repli, un port jamais
+    // cartographié affichait la cascade détaillée dans l'infobulle mais
+    // aucune icône sur le port lui-même — signalé en usage réel. La
+    // topologie garde priorité si elle a déjà tranché (if (!obj.detected)).
+    for (const [cle, a] of Object.entries(_activiteInfos)) {
+        if (!a || !a.cascade) continue;
+        const i = cle.lastIndexOf('-');
+        if (i < 0) continue;
+        const k2 = cle.slice(0, i) + ':' + cle.slice(i + 1);
+        const obj = parPort[k2] || (parPort[k2] = { slot: cle.slice(0, i), num: cle.slice(i + 1), declared: null, detected: null });
+        if (obj.detected) continue;
+        obj.detected = a.cascade.type === 'wifi' ? 'ap' : 'switch';
+        // Alimente aussi le tiroir « appareils du port » avec les mêmes
+        // voisins déjà connus de l'infobulle, pour que le clic sur l'icône
+        // reste cohérent même sans cartographie de topologie.
+        if (!_neticDetecte[k2] || !(_neticDetecte[k2].devices || []).length) {
+            _neticDetecte[k2] = {
+                detected_kind: obj.detected, uplink: false, vlan: null,
+                n: a.cascade.n_macs || (a.voisins_detail || []).length,
+                devices: (a.voisins_detail || []).map(v => ({
+                    nom: v.nom || '', ip: '', mac: v.mac || '',
+                    via: a.voisins_source === 'topologie' ? 'LLDP' : 'FDB' })),
+            };
+        }
+    }
 
     for (const [cle, x] of Object.entries(parPort)) {
         const el = document.querySelector(`.port[data-slot="${x.slot}"][data-numero="${x.num}"]`);
@@ -6523,9 +6344,26 @@ function appliquerNeticPorts() {
     }
 }
 
+// Aligne le tiroir « appareils du port » (position:fixed, voir CSS) sur les
+// bornes réelles de la baie (#rack-outer, pas plus large — demandé), recalculées
+// à chaque ouverture et tant qu'il reste ouvert (redimensionnement de fenêtre,
+// bascule d'un rail latéral) — un simple left:0/right:0 l'étire sur toute la
+// fenêtre, qui déborde des rails et ne s'aligne plus avec le rack dès que
+// celui-ci ne prend pas toute la largeur (rails ouverts, ou main recentré
+// au-delà de sa largeur réelle sur un grand écran).
+function _positionnerPanelAppareils() {
+    const pan = document.getElementById('port-appareils');
+    const rack = document.getElementById('rack-outer');
+    if (!pan || !rack) return;
+    const r = rack.getBoundingClientRect();
+    pan.style.left = Math.round(r.left) + 'px';
+    pan.style.width = Math.round(r.width) + 'px';
+}
+
 // Panneau annexe « appareils du port » (lot 5)
 function ouvrirAppareilsPort(slotId, numero, kind, etat) {
     const pan = document.getElementById('port-appareils');
+    _positionnerPanelAppareils();
     const cle = slotId + ':' + numero;
     const info = _neticDetecte[cle] || {};
     const s = Object.values(slots).find(x => String(x.id) === String(slotId)) || {};
@@ -6569,6 +6407,7 @@ function ouvrirAppareilsPort(slotId, numero, kind, etat) {
 // occupé de CET équipement plutôt qu'un seul port.
 function ouvrirAppareilsPortEquipement(slotId) {
     const pan = document.getElementById('port-appareils');
+    _positionnerPanelAppareils();
     const s = Object.values(slots).find(x => String(x.id) === String(slotId));
     if (!s) return;
     const nomSlot = libelleComplet(s);
