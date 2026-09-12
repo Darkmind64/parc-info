@@ -37,6 +37,16 @@
     color:var(--text-muted); width:22px; height:22px; line-height:1; cursor:pointer; flex:0 0 auto; }
 .rail-x:hover { color:var(--accent); border-color:var(--accent); }
 .baie-rail .rail-bd { padding:.9rem .8rem; overflow-y:auto; overflow-x:hidden; min-height:0; }
+/* Barre de défilement fine et discrète, cohérente avec le thème sombre —
+   la maquette n'affichait pas la grosse barre grise par défaut du système
+   (retour utilisateur) ; on ne peut pas la masquer entièrement sans nuire
+   à la découvrabilité du contenu caché, donc on la réduit et on la
+   colore plutôt que de la retirer. */
+.baie-rail .rail-bd { scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+.baie-rail .rail-bd::-webkit-scrollbar { width:6px; }
+.baie-rail .rail-bd::-webkit-scrollbar-track { background:transparent; }
+.baie-rail .rail-bd::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+.baie-rail .rail-bd::-webkit-scrollbar-thumb:hover { background:var(--accent); }
 .rail-tab { display:none; writing-mode:vertical-rl; background:var(--bg-card);
     border:1px solid var(--border); border-radius:4px; color:var(--text-secondary);
     font-family:'Rajdhani',sans-serif; font-weight:700; letter-spacing:2px; text-transform:uppercase;
@@ -64,7 +74,11 @@
     color:var(--text-muted); width:22px; height:22px; line-height:1; cursor:pointer; font-size:.8rem; flex-shrink:0; }
 .lib-refresh:hover:not(:disabled) { color:var(--accent); border-color:var(--accent); }
 .lib-refresh:disabled { opacity:.5; cursor:default; }
-.lib-list { display:flex; flex-direction:column; gap:.34rem; max-height:220px; overflow-y:auto; }
+/* Pas de hauteur/défilement propres à chaque section : une seule zone de
+   défilement (celle du rail, .rail-bd ci-dessus) plutôt que 3 barres de
+   défilement imbriquées les unes dans les autres — c'était la source du
+   rendu peu soigné signalé, la maquette n'en avait qu'une seule aussi. */
+.lib-list { display:flex; flex-direction:column; gap:.34rem; }
 .lib-empty { font-size:.7rem; color:var(--text-muted); padding:.4rem 0; }
 .lib-hint { line-height:1.5; margin-top:.5rem; }
 .lib-item { display:flex; align-items:center; gap:.5rem; background:var(--bg-secondary);
@@ -6490,7 +6504,7 @@ function appliquerNeticPorts() {
                 detected_kind: obj.detected, uplink: false, vlan: null,
                 n: a.cascade.n_macs || (a.voisins_detail || []).length,
                 devices: (a.voisins_detail || []).map(v => ({
-                    nom: v.nom || '', ip: '', mac: v.mac || '',
+                    nom: v.nom || '', ip: v.ip || '', mac: v.mac || '',
                     via: a.voisins_source === 'topologie' ? 'LLDP' : 'FDB' })),
             };
         }
