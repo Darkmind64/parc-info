@@ -1,5 +1,27 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.10] - 2026-09-12 🔌
+
+### Baie de brassage : tiroir d'appareils complet, présence en direct, boutons ARP/MAC/DNS
+
+Demandé (capture à l'appui), 7 points sur le tiroir « appareils du port » et les infobulles de la baie.
+
+**Signalé.** (1) La liste des appareils vus sur un port dans le tiroir n'affiche que ceux déjà visibles dans l'infobulle compacte, ignorant tous ceux regroupés sous « +N autres ». (2) Des infobulles natives du navigateur restent actives et masquent les infobulles mises en forme de ParcInfo. (3) Le tiroir du bas peut recouvrir la baie si trop d'appareils sont à afficher. Demandé en plus : (4) un état de présence (ping) testé au moment de l'affichage, et (5)(6)(7) trois boutons ARP / MAC / DNS sur les switchs/routeurs/box pour interroger l'équipement en direct.
+
+**Cause (1).** `network_diag._voisins_port` plafonnait le tableau `detail` (liste complète, source du tiroir) sur la **même** constante `_ACTIVITE_VOISINS_MAX` que `noms` (liste compacte de l'infobulle) — une seule limite pour deux usages différents. Corrigé : `detail` est désormais construit pour chaque MAC de libellé unique sans plafond, `noms` reste borné. Même correctif appliqué au repli topologie de `_cycle_activite`. Le total « +N autres » de l'infobulle (`schemaCascade`) reste exact en comptant sur le tableau complet plutôt que sur la tranche affichée.
+
+**Cause (2).** Deux endroits posaient un attribut `title` (tooltip natif du navigateur, à retardement, superposé à l'infobulle stylée de ParcInfo dès qu'elle apparaît) : l'icône réseau d'un port (`appliquerNeticPorts`) et un port en erreur de diagnostic (`appliquerDiagErreurs`, avec en prime une ligne de code morte qui tentait de retirer un attribut jamais posé ailleurs). Remplacés par `aria-label` — accessibilité au lecteur d'écran conservée, aucun rendu visuel natif.
+
+**Correctif (3).** Hauteur du corps du tableau du tiroir plafonnée à `max-height:19rem` (~10 lignes), défilement interne, en-têtes de colonnes collants (`position:sticky`) pour rester lisibles pendant le défilement.
+
+**Fonctionnalité (4).** Nouvelle colonne « Présence » dans le tiroir, testée au moment de l'affichage (pas en continu) : `POST /api/baie/ping-adresses` (nouvelle route, ping parallèle des IP affichées via le `_ping()` déjà utilisé ailleurs dans l'app), rendu 🟢/🔴 côté client une fois la réponse reçue.
+
+**Fonctionnalité (5)(6)(7).** Sur un switch/routeur/box internet, trois nouveaux boutons discrets en bout de ligne (avant le bouton de suppression, pour ne jamais déplacer ce dernier) : **ARP** (`GET /api/baie/slot/<id>/arp`, `network_diag.arp_table_equipement` — walk SNMP `ipNetToMediaPhysAddress`), **MAC** (`GET /api/baie/slot/<id>/mac`, `network_diag.mac_table_equipement` — réutilise la FDB bridge-MIB déjà relevée pour la vue d'activité), **DNS** (`GET /api/baie/slot/<id>/dns`, `network_diag.dns_test_equipement`). Pour DNS, clarifié avec l'utilisateur : la demande visait à interroger l'équipement **comme serveur DNS** (requêtes CHAOS `version.bind`/`hostname.bind` + résolution de 2 noms publics de test), pas un extrait de son cache de résolution — aucun protocole standard n'expose cette information à distance sans accès administratif (SSH, volontairement non implémenté dans ParcInfo). Encodage/décodage DNS entièrement fait main (même philosophie que le SNMP existant), y compris la décompression de pointeurs de noms (RFC 1035 §4.1.4) — vérifiée par une requête réelle contre 8.8.8.8. Les 3 résultats s'affichent dans le même tiroir, réutilisé pour l'occasion (`ouvrirTableEquipement`).
+
+**Déploiement.** 3 nouvelles routes `/api/baie/slot/<id>/{arp,mac,dns}` + 1 route `/api/baie/ping-adresses`, toutes en lecture seule (ACL de lecture uniquement, pas d'écriture). Aucune migration de schéma. Vérifié en navigateur (tiroir complet au-delà de 6 appareils, infobulles natives disparues, défilement au-delà de 10 lignes, colonne Présence 🟢/🔴 en direct, boutons ARP/MAC/DNS affichant des tables réelles) + requête DNS vérifiée en direct contre un résolveur public (8.8.8.8). 422 tests pytest OK.
+
+---
+
 ## [2.33.9] - 2026-09-12 📐
 
 ### Baie de brassage : prises murales enfin alignées avec leurs ports RJ
