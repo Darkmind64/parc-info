@@ -330,21 +330,36 @@
    hauteur_u (voir la poignée de redimensionnement ci-dessus) : plus
    l'élément est grand, plus la grille de ports a de place pour s'organiser
    en plusieurs rangées lisibles.
-   Taille de port FIXE (24×22px) — colonnes en repeat(auto-fill, ...) plutôt
-   qu'un nombre de colonnes fixe à largeur variable (1fr) : un élément
-   redimensionné plus étroit (largeur_u < NB_COLS_BAIE, ou plusieurs éléments
-   côte à côte) doit garder des ports de la même taille et simplement en tenir
-   moins par rangée (repli automatique sur plusieurs lignes), jamais des
-   ports rétrécis pour tous tenir sur une seule rangée. */
+   Taille de port calculée dynamiquement en JS (voir tailleGrillePorts) selon
+   la place RÉELLEMENT disponible — hauteur ET largeur — plutôt que fixée
+   d'avance à 24×22px : un port grandit sur un grand écran (fenêtre large ->
+   rack plus large -> plus de place) et rétrécit sur un écran étroit, sans
+   jamais déborder (demandé). Colonnes en repeat(auto-fill, var(--port-w)) :
+   un élément redimensionné plus étroit (largeur_u < NB_COLS_BAIE, ou
+   plusieurs éléments côte à côte) garde donc des ports à la taille calculée
+   pour LUI et n'en tient que moins par rangée — repli automatique sur
+   plusieurs lignes en dernier recours si jamais l'estimation JS ne suffit
+   pas tout à fait, jamais un débordement. */
 .rack-cell.has-ports { flex-direction:column; align-items:stretch; padding:3px 6px; }
 .cell-row   { display:flex; align-items:center; flex-shrink:0; height:16px; }
 .cell-ports-wrap {
     display:flex; align-items:flex-start; gap:.4rem; flex:1; overflow:hidden; padding-top:3px;
 }
 .cell-ports {
-    display:grid; grid-template-columns:repeat(auto-fill, 24px); gap:2px;
+    display:grid; grid-template-columns:repeat(auto-fill, var(--port-w, 24px)); gap:2px;
     flex:1; min-width:0; align-content:flex-start; overflow:hidden;
 }
+/* :not(.port-elec) — une prise électrique garde .port comme classe de base
+   (voir portHTML) ; sans cette exclusion, cette règle (2 classes) prime sur
+   .port-elec (1 classe) quel que soit l'ordre des règles dans la feuille de
+   style et écrase sa taille ronde (--elec-size) par celle d'un port RJ. */
+.cell-ports .port:not(.port-elec) {
+    width:var(--port-w, 24px); height:var(--port-h, 22px); font-size:var(--port-fs, .6rem);
+    line-height:var(--port-h, 22px); border-radius:var(--port-radius, 3px);
+}
+.cell-ports .port:not(.port-elec) .port-led { width:var(--port-led, 6px); height:var(--port-led, 6px); }
+.cell-ports .port:not(.port-elec) .port-unlink { width:var(--port-unlink, 11px); height:var(--port-unlink, 11px);
+    font-size:var(--port-unlink-fs, 9px); line-height:var(--port-unlink, 11px); }
 /* Switch : ports RJ (80% gauche, 1 ou 2 lignes) + ports SFP optionnels
    (20% restants, séparés par un liseré) — demandé, sur le modèle d'un vrai
    switch/patch panel. cell-ports-main-switch remplace cell-ports-stack
@@ -1902,17 +1917,57 @@ function numeroAffiche(numero) {
 // quasi pleine taille), l'icône déborde de .rack-cell (overflow:hidden,
 // hauteur fixée à l'U) et disparaît purement et simplement, un switch 1U
 // n'ayant pas la marge du bandeau de titre comme la rangée du haut.
-function tailleDeuxLignes(rowH, reserve) {
-    // Marge de sécurité (4px) : quelques pixels de décalage constatés en
-    // pratique entre cette estimation (info-row + padding + interligne)
-    // et la position réelle de la 1re rangée — sous-pixels d'arrondi de
-    // mise en page, jamais entièrement nuls d'un navigateur à l'autre.
-    // Mieux vaut quelques px d'espace inutilisé en bas qu'un débordement.
-    const hauteurLigneInfo = 16, paddingHautZone = 3, gapEntreLignes = 2, margeSecurite = 4;
-    const dispo = (rowH || U_H) - hauteurLigneInfo - paddingHautZone - gapEntreLignes - margeSecurite - (reserve || 0);
-    const h = Math.max(9, Math.min(22, Math.floor(dispo / 2)));
+// Généralise l'ancien tailleDeuxLignes (limité au cas 2 rangées, plafonné à
+// 22px — ne pouvait donc que RÉTRÉCIR, jamais grandir) : taille d'un port RJ
+// classique calculée depuis l'espace RÉELLEMENT disponible, HAUTEUR et
+// LARGEUR, pour qu'un port grandisse sur un grand écran (fenêtre large ->
+// rack plus large -> plus de place) et rétrécisse sur un écran étroit, sans
+// jamais déborder (demandé). nbRangees=1 (rendu historique pleine largeur)
+// ou 2 (voir portsDeuxLignesHTML) ; nbPortsParRangee/largeurZonePx = la
+// contrainte de LARGEUR — sans elle, agrandir par la seule hauteur (rail
+// latéral fermé, fenêtre haute mais pas forcément large) ferait déborder les
+// ports de leur rangée : la grille CSS renverrait alors les ports en trop à
+// la ligne suivante, rognés par l'overflow:hidden du conteneur.
+function tailleGrillePorts(rowH, nbRangees, nbPortsParRangee, largeurZonePx, reserve) {
+    // Marge de sécurité : décalage constaté en pratique entre cette
+    // estimation (info-row + padding + interligne) et la position réelle de
+    // la 1re rangée — sous-pixels d'arrondi de mise en page + padding-bottom
+    // de .rack-cell (3px, jamais compté ci-dessus, seul le padding-top
+    // l'était), jamais entièrement nuls d'un navigateur à l'autre. Mieux
+    // vaut quelques px d'espace inutilisé en bas qu'un débordement —
+    // vérifié à vide (0px) jusqu'à un écran très étroit avant ce relevé.
+    const hauteurLigneInfo = 16, paddingHautZone = 3, gapEntreLignes = 2, margeSecurite = 10;
+    const n = Math.max(1, nbRangees || 1);
+    const dispoH = ((rowH || U_H) - hauteurLigneInfo - paddingHautZone
+                    - gapEntreLignes * (n - 1) - margeSecurite - (reserve || 0)) / n;
+    // Plafond de croissance : au-delà, un port RJ carré perd son sens visuel
+    // (silhouette d'une vraie prise) — même une fenêtre très large ne doit
+    // pas produire des ports démesurés.
+    const PLAFOND = 40;
+    // Largeur dispo par port (gap de 2px entre chaque port), convertie en
+    // équivalent hauteur via le ratio fixe 24×22 d'un port à taille normale,
+    // pour être comparée directement à dispoH. paddingZone=16 : padding
+    // gauche/droite de .rack-cell (6+6, voir .rack-cell.has-ports) + sa
+    // bordure (1+1) + marge de sécurité — sous-estimé à 4px au premier essai
+    // (vérifié en usage réel : un switch 24 ports plein écran repassait tout
+    // de même en 2 rangées, quelques px de trop par rapport à la largeur
+    // réellement disponible dans la cellule).
+    const paddingZone = 16;
+    let dispoLargeurEnHauteur = PLAFOND;
+    if (nbPortsParRangee > 0 && largeurZonePx) {
+        const largeurParPort = (largeurZonePx - paddingZone) / nbPortsParRangee - 2;
+        dispoLargeurEnHauteur = largeurParPort * (22 / 24);
+    }
+    const h = Math.max(9, Math.min(PLAFOND, Math.floor(Math.min(dispoH, dispoLargeurEnHauteur))));
     const ratio = h / 22;
-    const w = Math.max(14, Math.round(24 * ratio));
+    // PAS de plancher indépendant sur w (un ancien Math.max(14, ...) forçait
+    // la largeur au-delà de ce que dispoLargeurEnHauteur avait calculé comme
+    // tenant sur la rangée — la grille renvoyait alors les ports en trop à
+    // la ligne suivante malgré un calcul de largeur qui se voulait exact,
+    // trouvé en vérifiant un switch 24 ports sur un écran très étroit) : le
+    // ratio dérivé du plancher de hauteur (9px) donne déjà une largeur
+    // minimale coherente (~10px), pas besoin d'un second plancher désaccordé.
+    const w = Math.round(24 * ratio);
     const fs = Math.round(9.6 * ratio * 10) / 10;
     const radius = Math.max(2, Math.round(3 * ratio));
     const led = Math.max(4, Math.round(6 * ratio));
@@ -2721,11 +2776,41 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
     // conteneur, trouvé en vérifiant) — même principe que WAN/SFP pour un
     // routeur, une seule prise suffit largement à une petite zone.
     const zonesMultiGroupesActives = (estRouteur || estServeurMiniPC || estUPS || estPDU) && (hautPorts.length > 0 || wanPorts.length > 0 || entreePorts.length > 0);
+    // Largeur RÉELLE de la cellule (px) — même formule que tailleElecVertical
+    // — pour contraindre la taille des ports RJ classiques par la LARGEUR en
+    // plus de la hauteur (voir tailleGrillePorts) : sans elle, agrandir un
+    // port par la seule hauteur disponible pourrait le faire déborder de sa
+    // rangée sur un élément étroit (largeur_u réduite, ou rail latéral ouvert
+    // qui rétrécit la baie sans changer sa hauteur).
+    const largeurCellPx = (RACK_ROW_W / NB_COLS_BAIE) * largeur;
+    // Zone RJ = 80% de la cellule dès qu'une zone SFP lui fait face (même
+    // proportion que .cell-ports-rj-zone en CSS), sinon la cellule entière.
+    const largeurZoneRJ = zonesSwitchActives ? largeurCellPx * 0.8 : largeurCellPx;
+    // Un port réseau (déclaré via le câblage, ou déjà détecté en SNMP au
+    // moment de ce rendu) reçoit après coup une icône hors du port (voir
+    // appliquerNeticPorts) qui réserve un couloir de 14px (has-netic-up/down
+    // en CSS) — À PRÉVOIR ICI, avant même que cette icône existe, sinon la
+    // taille de port calculée ne laisse pas la place et le couloir posé
+    // après coup pousse la cellule en dehors de sa hauteur réservée. Une
+    // seule rangée (disposition normale ou bandeau) ne réserve jamais QUE le
+    // bas (voir appliquerNeticPorts : dir vaut toujours 'netic-down' hors
+    // disposition 2 lignes).
+    const aNetic = p => _neticKind(p.lie_type) || !!((_neticDetecte[s.id + ':' + p.numero] || {}).detected_kind);
+    const reserveNeticUneLigne = ports.some(aNetic) ? 14 : 0;
 
     let ligneRJ;
     let zonePortsPrincipale;
     if (estBandeauPorts) {
-        ligneRJ = `<div class="cell-row-labeled"><span class="row-icon" title="Ports RJ (interconnexion)">🔌</span><div class="cell-ports">${ports.map(p => portHTML(p, false)).join('')}</div></div>`;
+        // -18 : couloir du symbole 🔌 (row-icon, 12px + gap) à gauche de la
+        // grille, jamais compté dans .cell-ports lui-même.
+        // reserve=15+éventuel couloir netic : la rangée des prises murales
+        // (13px, voir .prise-murale en CSS, pas dynamique) empilée
+        // AU-DESSUS + son gap (2px, voir .cell-ports-stack) — sans cette
+        // réserve, le budget de hauteur du bandeau entier était compté
+        // comme si la rangée RJ était seule dans la cellule, débordant
+        // nettement dès que l'écran devient étroit.
+        const styleBandeau = tailleGrillePorts(rowH, 1, ports.length, largeurCellPx - 18, 15 + reserveNeticUneLigne);
+        ligneRJ = `<div class="cell-row-labeled"><span class="row-icon" title="Ports RJ (interconnexion)">🔌</span><div class="cell-ports" style="${styleBandeau}">${ports.map(p => portHTML(p, false)).join('')}</div></div>`;
         zonePortsPrincipale = `<div class="cell-ports-stack">${lignePrisesMurales}${ligneRJ}</div>`;
     } else if (zonesMultiGroupesActives) {
         // Zones côte à côte (même principe que le 80/20 d'un switch,
@@ -2760,15 +2845,14 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         // de filtrer par parité plutôt que de retrier.
         const impairs = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 1);
         const pairs   = basePorts.filter(p => numeroAffiche(p.numero) % 2 === 0);
-        // Réserve la place de l'icône réseau (voir tailleDeuxLignes) dès que
-        // la rangée haute et/ou basse porte un port réseau déclaré (câblage,
-        // connu dès ce rendu) ou déjà détecté en SNMP (_neticDetecte, connu
-        // si un relevé a déjà eu lieu avant ce rendu) — _neticKind/
-        // _neticDetecte sont définis plus bas dans ce script mais des
-        // function declarations, donc déjà hissées et utilisables ici.
-        const aNetic = p => _neticKind(p.lie_type) || !!((_neticDetecte[s.id + ':' + p.numero] || {}).detected_kind);
+        // Réserve la place de l'icône réseau (aNetic, voir plus haut) dès
+        // que la rangée haute et/ou basse en porte un — ICI les deux
+        // rangées peuvent chacune réserver leur PROPRE côté (haut/bas,
+        // dir dans appliquerNeticPorts), contrairement à la disposition à
+        // une seule rangée qui ne réserve jamais que le bas.
         const reserve = (impairs.some(aNetic) ? 14 : 0) + (pairs.some(aNetic) ? 14 : 0);
-        const styleDeuxLignes = tailleDeuxLignes(rowH, reserve);
+        const nbPortsParRangee = Math.max(impairs.length, pairs.length);
+        const styleDeuxLignes = tailleGrillePorts(rowH, 2, nbPortsParRangee, largeurZoneRJ, reserve);
         ligneRJ = `<div class="cell-ports-row" style="${styleDeuxLignes}">${impairs.map(p => portHTML(p, false)).join('')}</div>`
                 + `<div class="cell-ports-row" style="${styleDeuxLignes}">${pairs.map(p => portHTML(p, false)).join('')}</div>`;
         zonePortsPrincipale = zonesSwitchActives
@@ -2778,7 +2862,13 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
                </div>`
             : `<div class="cell-ports-stack">${ligneRJ}</div>`;
     } else {
-        ligneRJ = `<div class="cell-ports${estElec ? ' cell-ports-elec' : ''}" style="${styleElec}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
+        // styleElec (déjà proportionné, voir tailleElec/tailleElecVertical)
+        // pour une prise électrique ; sinon tailleGrillePorts pour un port RJ
+        // classique — les deux posent les mêmes variables CSS (--port-w
+        // etc. pour l'un, --elec-size etc. pour l'autre), jamais les deux à
+        // la fois sur le même élément.
+        const stylePorts = estElec ? styleElec : tailleGrillePorts(rowH, 1, basePorts.length, largeurZoneRJ, reserveNeticUneLigne);
+        ligneRJ = `<div class="cell-ports${estElec ? ' cell-ports-elec' : ''}" style="${stylePorts}">${basePorts.map(p => portHTML(p, estElec, s.type_equipement)).join('')}</div>`;
         zonePortsPrincipale = (estSwitch && zonesSwitchActives)
             ? `<div class="cell-ports-main-switch">
                    <div class="cell-ports-rj-zone">${ligneRJ}</div>
