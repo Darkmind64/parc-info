@@ -1,10 +1,41 @@
-PARCINFO_VERSION=2.33.3
-RELEASE_DATE=2026-09-11
-BUILD_NUMBER=2026091104
+PARCINFO_VERSION=2.33.4
+RELEASE_DATE=2026-09-12
+BUILD_NUMBER=2026091201
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.33.3 - Interface : exploiter la largeur des écrans 1920px
+# Version 2.33.4 - Baie de brassage : nettoyage UI, tiroir de port, icônes réseau, ports responsives
+#
+# Quatre lots de travail sur l'écran Baie de brassage, tous vérifiés en
+# navigateur.
+#
+# 1) Nettoyage de l'interface — boutons de ping individuels (📡 par
+#    équipement) supprimés, le ping global « toute la baie » reste ;
+#    bascules Santé/Câbles retirées de la barre d'outils, les deux
+#    fonctionnalités sont désormais toujours actives ; relevé de
+#    diagnostic interne « FDB Brut » supprimé intégralement (bouton,
+#    modale, route API, fonction, test dédié) ; bouton « Vider »
+#    supprimé ; présentation du volet Bibliothèque reprise sur le modèle
+#    de la maquette (icône encadrée, badge de provenance INV/SNMP,
+#    survol avec légère élévation).
+# 2) Tiroir « appareils du port » — s'étirait sur toute la largeur de la
+#    fenêtre au lieu de s'aligner sur la baie elle-même (#rack-outer),
+#    plus visible depuis que l'interface peut dépasser 1400px de large.
+#    `left`/`width` recalculés en JS sur les bornes réelles de la baie.
+# 3) Icône réseau manquante — un port de switch avec plusieurs appareils
+#    détectés en aval (cascade switch non géré / borne Wi-Fi) pouvait
+#    n'afficher aucune icône, alors que l'infobulle au survol montrait
+#    déjà le détail complet (même donnée, source différente : la vue
+#    d'activité live plutôt que la cartographie de topologie, peuplée
+#    seulement à la demande/périodiquement). L'icône reprend maintenant
+#    cette même donnée d'activité en repli.
+# 4) Ports proportionnels à l'affichage — les ports RJ (bandeau,
+#    disposition 1 ou 2 lignes) grandissent sur un grand écran et
+#    rétrécissent sur un petit, sans jamais déborder — généralise le
+#    mécanisme de dimensionnement dynamique déjà en place pour les
+#    switchs 2 lignes surchargés (auparavant limité au rétrécissement).
+#
+# Vérifié en navigateur à 500/893/1024/1920px. 422 tests pytest OK.
 #
 # Remarque utilisateur : l'ensemble de l'interface n'exploitait pas la
 # largeur d'un écran 1920px, la norme actuelle, alors que ça permettrait

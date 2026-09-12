@@ -1,5 +1,23 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.4] - 2026-09-12 🔌
+
+### Baie de brassage : nettoyage UI, tiroir de port, icônes réseau, ports responsives
+
+Quatre lots de travail sur l'écran Baie de brassage, tous vérifiés en navigateur.
+
+**1. Nettoyage de l'interface** (demandé). Boutons de ping individuels (📡 par équipement) supprimés — le ping global « toute la baie » reste. Bascules « 🩺 Santé » et « 🏷 Câbles » retirées de la barre d'outils : les deux fonctionnalités sont désormais **toujours actives** (pastille de santé et étiquette de cordon en permanence). Relevé de diagnostic interne « 🔬 FDB Brut » supprimé intégralement (bouton, modale, route API `/api/baie/brassage/fdb-brut`, fonction `network_diag.diagnostiquer_fdb_brute`, test dédié) — ne servait qu'aux tests de développement. Bouton « ✕ Vider » supprimé. Présentation du volet Bibliothèque reprise sur le modèle de la maquette (icône encadrée, badge de provenance INV/SNMP, survol avec légère élévation/ombre, en-tête de section avec filet séparateur).
+
+**2. Tiroir « appareils du port »** (signalé en usage réel). Le tiroir ouvert au clic sur l'icône réseau d'un port s'étirait sur toute la largeur de la fenêtre au lieu de s'aligner sur la baie elle-même (`#rack-outer`) — plus visible depuis que l'interface peut dépasser 1400px de large (v2.33.3). `left`/`width` sont désormais recalculés en JS sur les bornes réelles de la baie, à l'ouverture, au redimensionnement de la fenêtre et à la bascule d'un rail latéral.
+
+**3. Icône réseau manquante** (signalé en usage réel, capture d'écran à l'appui). Un port de switch avec plusieurs appareils détectés en aval (cascade « switch non géré » ou « borne Wi-Fi ») pouvait n'afficher aucune icône réseau sur le port, alors que l'infobulle au survol montrait déjà le détail complet (schéma + liste d'appareils). Cause : l'icône dépendait uniquement de la cartographie de topologie (`diag_topologie`, peuplée à la demande ou périodiquement), alors que l'infobulle lit la vue d'activité live (FDB, toujours à jour dès qu'elle est activée), qui avait déjà classé la cascade. `appliquerNeticPorts()` reprend maintenant cette même donnée d'activité en repli quand la topologie n'a rien à offrir, et alimente le tiroir avec les mêmes appareils que l'infobulle.
+
+**4. Ports proportionnels à l'affichage** (demandé). Les ports RJ (bandeau RJ, disposition normale à 1 ligne, disposition 2 lignes) sont désormais dimensionnés depuis l'espace réellement disponible — hauteur **et** largeur — et grandissent sur un grand écran comme rétrécissent sur un petit, sans jamais déborder. Généralise le mécanisme de dimensionnement dynamique déjà en place pour les switchs 2 lignes surchargés (`tailleDeuxLignes`, devenu `tailleGrillePorts`), auparavant limité au rétrécissement (plafonné à 24×22px) et à cette seule disposition.
+
+**Déploiement.** Changements CSS/JS purs (points 1, 2 et 4) + une route API retirée (point 1, FDB Brut). Aucune migration de données. Vérifié en navigateur à 500/893/1024/1920px (croissance/rétrécissement des ports, bandeau et dispositions 1/2 lignes, zéro débordement réel sur la plage d'utilisation réaliste) ; suite de tests complète revérifiée à chaque étape, 422 tests pytest OK.
+
+---
+
 ## [2.33.3] - 2026-09-11 🖥️
 
 ### Interface : exploiter la largeur des écrans 1920px
