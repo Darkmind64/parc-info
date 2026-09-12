@@ -190,6 +190,13 @@
    Les boutons gardent leur id/onclick ; seul le conteneur change. */
 .baie-toolbar { display:flex; flex-wrap:wrap; align-items:flex-start; gap:.45rem .85rem; margin-bottom:.8rem; }
 .tb-group { display:flex; flex-direction:column; gap:.3rem; }
+/* Sans ce couple, l'attribut `hidden` de #tb-grp-types (voir plus bas) reste
+   sans effet : `.tb-group{display:flex}` est une règle d'AUTEUR, elle
+   l'emporte sur le `[hidden]{display:none}` de l'agent utilisateur à
+   spécificité égale — le bandeau « 0 type(s) à valider » restait affiché en
+   permanence au lieu de disparaître (même piège déjà corrigé ailleurs pour
+   `.port-appareils[hidden]`, oublié ici). */
+.tb-group[hidden] { display:none; }
 .tb-group + .tb-group { padding-left:.85rem; border-left:1px solid var(--border); }
 .tb-group-lbl { font-family:'Share Tech Mono',monospace; font-size:.53rem; letter-spacing:2px;
     text-transform:uppercase; color:var(--text-muted); padding-left:.15rem; white-space:nowrap; }
@@ -684,6 +691,13 @@
    le bouton lui-même (voir ping-progress-badge plus haut) — l'état "busy"
    se voit ici, sans jamais changer sa largeur. */
 #btn-ping-baie:disabled { opacity:.55; cursor:wait; }
+/* Bouton désactivé générique de cette page (« Appliquer la sélection » de
+   Deviner le brassage, capture du Moniteur, etc.) : `.btn`/`.btn-primary`/
+   `.btn-warn` redéfinissent leur propre fond/couleur, ce qui écrase aussi le
+   grisé "disabled" natif du navigateur — sans cette règle, un bouton
+   désactivé restait visuellement identique à un bouton actif (curseur
+   pointer, pleine opacité), aucun indice qu'il ne fait rien au clic. */
+.btn:disabled { opacity:.5; cursor:not-allowed; pointer-events:none; }
 
 /* Voyant de ping — coin supérieur gauche du port, visible seulement une fois
    un ping tenté (au chargement si un statut est déjà connu côté serveur —
@@ -6367,6 +6381,15 @@ function afficherInspecteur(which) {
         if (el) el.style.display = (w === which) ? '' : 'none';
     });
     ouvrirRailInspecteur();
+    // Sous 1100px de large, .baie-page empile bibliothèque/rack/inspecteur
+    // au lieu de les mettre côte à côte (voir @media plus haut) : le rail
+    // était déjà "ouvert" (dataset.insp) mais s'affichait tout en bas, sous
+    // toute la baie, sans qu'aucun scroll n'y mène — signalé en usage réel.
+    // `block:'nearest'` ne bouge rien quand l'inspecteur est déjà visible
+    // (disposition large 3 colonnes), donc sans effet de bord là où ça
+    // marchait déjà.
+    const rail = document.getElementById('rail-insp');
+    if (rail) rail.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 function viderInspecteur() {
     ['equipement', 'port', 'prise'].forEach(w => {
