@@ -1,8 +1,42 @@
-PARCINFO_VERSION=2.33.6
+PARCINFO_VERSION=2.33.7
 RELEASE_DATE=2026-09-12
 BUILD_NUMBER=2026091201
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.7 - Baie de brassage : taille de port unique pour toute la baie
+#
+# Signalé après coup, capture à l'appui, malgré 2.33.6 : port WAN du
+# routeur plus petit que les ports du switch, ports du routeur/de la box
+# plus gros que les ports du switch, prises murales non alignées avec
+# leurs ports RJ.
+#
+# Cause racine (2.33.5/2.33.6 ne l'avaient pas identifiée) : chaque
+# équipement calculait sa PROPRE taille de port indépendamment des
+# autres, et ne rétrécissait localement que si SA disposition l'exigeait
+# — un plafond basé sur la seule hauteur de rangée, sans tenir compte du
+# nombre de ports ni des autres équipements. Un switch chargé rétrécissait
+# localement pendant qu'un routeur à 3 ports gardait ce plafond, plus
+# grand. En creusant : la zone WAN d'un routeur et la zone SFP d'un switch
+# (ports rendus en enfants directs de .cell-ports-sfp-zone, jamais
+# enveloppés dans .cell-ports) n'étaient couvertes par AUCUNE règle CSS de
+# taille — repli sur la taille fixe 24x22 codée en dur, jamais
+# synchronisée avec le reste de la baie.
+#
+# Correctif : le calcul est inversé. zonesPortsSlot() décrit, pour chaque
+# équipement de la baie, les zones de ports RJ à prendre en compte (zone
+# principale, SFP/WAN/Fibre, rangée de bandeau) et leurs contraintes ;
+# calcUH() balaie TOUS les équipements avant de choisir une taille, retient
+# le minimum sur l'ensemble de la baie, et l'applique UNIFORMÉMENT — plus
+# aucune cellule ne pose son propre style local. Règle CSS manquante
+# ajoutée pour les zones SFP/WAN.
+#
+# Vérifié par mesure DOM directe (pas seulement visuelle) en reproduisant
+# la configuration exacte signalée (switch 2 lignes + SFP, routeur
+# LAN+WAN séparés, bandeau, borne Wi-Fi) : tous les ports, dans toutes les
+# zones, mesurent exactement la même taille en pixels, à 500px/1920px et
+# entre les deux. Prises murales alignées en largeur avec leurs ports RJ
+# associés. 422 tests pytest OK.
 
 # Version 2.33.6 - Baie de brassage : cohérence des tailles de ports
 #

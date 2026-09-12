@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.7] - 2026-09-12 📏
+
+### Baie de brassage : taille de port unique pour toute la baie
+
+Signalé après coup, capture à l'appui, malgré le correctif 2.33.6 : port WAN du routeur plus petit que les ports du switch, ports du routeur/de la box plus gros que les ports du switch, prises murales non alignées avec leurs ports RJ.
+
+**Cause racine** (que 2.33.5/2.33.6 n'avaient pas identifiée). Chaque équipement calculait sa **propre** taille de port indépendamment des autres, et ne rétrécissait localement que si **sa** disposition l'exigeait — un plafond basé sur la seule hauteur de rangée, sans tenir compte du nombre de ports ni des autres équipements de la baie. Un switch chargé (beaucoup de ports, disposition 2 lignes) rétrécissait donc localement, pendant qu'un routeur à 3 ports gardait ce plafond — plus grand, faute de raison de rétrécir. En creusant plus loin : la zone WAN d'un routeur et la zone SFP d'un switch (ports rendus en enfants directs de `.cell-ports-sfp-zone`, jamais enveloppés dans `.cell-ports`) n'étaient couvertes par **aucune règle CSS de taille** — repli silencieux sur la taille fixe 24×22 codée en dur dans la règle de base `.port`, jamais synchronisée avec le reste de la baie.
+
+**Correctif.** Le sens du calcul est inversé. Nouvelle fonction `zonesPortsSlot()` : décrit, pour **chaque** équipement de la baie, les zones de ports RJ à prendre en compte (zone principale, zone SFP/WAN/Fibre, rangée de bandeau) et leurs contraintes (nombre de rangées, ports par rangée, largeur disponible). `calcUH()` balaie désormais **tous** les équipements réellement posés avant de choisir quoi que ce soit, et retient le **minimum** sur l'ensemble de la baie — cette taille unique est appliquée partout via les variables CSS globales, aucune cellule n'ayant plus besoin (ni la permission) de poser son propre style local. Règle CSS manquante ajoutée pour que les zones SFP/WAN héritent enfin de cette taille comme tout le monde.
+
+**Déploiement.** Changement JS/CSS pur, aucune migration de données. Vérifié par **mesure DOM directe** (pas seulement visuelle) en reproduisant la configuration exacte signalée : switch en disposition 2 lignes avec zone SFP, routeur avec ports LAN et WAN séparés, bandeau RJ, borne Wi-Fi — tous les ports, dans toutes les zones de tous ces équipements, mesurent exactement la même taille en pixels, à 500px et 1920px de large et entre les deux, sans débordement. Prises murales confirmées alignées en largeur avec leurs ports RJ associés. 422 tests pytest OK.
+
+---
+
 ## [2.33.6] - 2026-09-12 💍
 
 ### Baie de brassage : cohérence des tailles de ports
