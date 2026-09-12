@@ -6532,6 +6532,15 @@ def _ports_avec_details(conn, slot_id):
         d = row_to_dict(r)
         d['cible_finale'] = ''
         d['cible_hors_ligne'] = None
+        # Équipement réseau déclaré (lie_type, voir plus bas) confirmé EN
+        # LIGNE (dernier ping réussi) — sert de repli léger côté client pour
+        # afficher l'anneau "détecté" sans attendre une cartographie de
+        # topologie complète (LLDP/FDB, plus lente et pas toujours lancée) :
+        # si l'équipement déclaré au bout du cordon répond, c'est déjà une
+        # confirmation suffisante que ce port dessert bien un équipement
+        # réseau réel (retour utilisateur : un port resté orange/"déclaré"
+        # alors que le switch en face est joignable en SNMP/ping).
+        d['cible_en_ligne'] = False
         d['lie_appareil_id'] = None
         lie_type_appareil = None
         lie_p_categorie = None
@@ -6588,6 +6597,7 @@ def _ports_avec_details(conn, slot_id):
                 # appareil simplement JAMAIS pingé s'affichait à tort comme
                 # "⚠️ hors ligne" dans la bulle du port relié.
                 d['cible_hors_ligne'] = bool(far_port[8]) and (far_port[3] == 0)
+                d['cible_en_ligne'] = bool(far_port[3])
                 d['lie_appareil_id'] = far_port[0]
                 lie_type_appareil = far_port[4]
             elif far_port and far_port[1]:
@@ -6596,6 +6606,7 @@ def _ports_avec_details(conn, slot_id):
             elif far_pm and far_pm[0]:
                 d['cible_finale'] = far_pm[2] or ('Appareil #%d' % far_pm[0])
                 d['cible_hors_ligne'] = bool(far_pm[8]) and (far_pm[3] == 0)
+                d['cible_en_ligne'] = bool(far_pm[3])
                 d['lie_appareil_id'] = far_pm[0]
                 lie_type_appareil = far_pm[4]
             elif far_pm and far_pm[1]:
@@ -6610,6 +6621,7 @@ def _ports_avec_details(conn, slot_id):
                 if far_app:
                     d['cible_finale'] = far_app[0] or ('Appareil #%d' % cible[2])
                     d['cible_hors_ligne'] = bool(far_app[3]) and (far_app[1] == 0)
+                    d['cible_en_ligne'] = bool(far_app[1])
                     d['lie_appareil_id'] = cible[2]
                     lie_type_appareil = far_app[2]
         else:
