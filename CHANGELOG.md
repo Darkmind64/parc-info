@@ -1,5 +1,29 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.5] - 2026-09-12 🧲
+
+### Baie de brassage : tailles de ports unifiées, magnétisme, ergonomie
+
+Suite directe de 2.33.4, sur `templates/baie_brassage.html` et `network_diag.py`. Tous les points vérifiés en navigateur, 422 tests pytest OK à chaque étape.
+
+**1. Tailles de ports unifiées.** Une taille de port était calculée séparément pour chaque disposition (bandeau, 1 ligne, 2 lignes), au point que les prises murales d'un bandeau RJ ne suivaient pas les ports RJ de la même rangée. Une taille GLOBALE est désormais calculée une seule fois par rendu (`calcUH`, hauteur disponible) et appliquée à toute la baie via des variables CSS sur `#rack-rows` — une cellule ne rétrécit localement que si sa propre disposition (switch 2 lignes surchargé, bandeau étroit) l'exige, jamais au-delà de ce plafond commun. Les prises murales dérivent leur taille du même ratio que leur rangée de ports RJ (`taillePriseMurale`). Rangées de ports centrées verticalement dans leur U (`align-items:center`). Icône réseau déplacée du couloir réservé au-dessus/en-dessous du port vers son coin inférieur droit, à l'intérieur même de la case — élimine tout le mécanisme de réservation de couloir (~40 lignes retirées).
+
+**2. Chevauchement bloquant à tort deux éléments contigus** (signalé en usage réel : « dès qu'on s'approche trop de l'élément d'à côté, on a une alerte de chevauchement »). Cause confirmée par test direct : `elementEnCollision` autorise bien la stricte adjacence, mais la grille compte 1000 colonnes (chacune sub-pixel), rendant un alignement pile au pixel impossible à la souris. Magnétisme ajouté (`bordsVoisins`/`aimanterCol`/`aimanterLargeur`, seuil ~6px) : la position/largeur visée s'accroche sur les bords des éléments voisins (dans les rangées U qui se recoupent) et sur les bords de la baie, dans les gestes de déplacement et de redimensionnement (largeur, coin).
+
+**3. Reliquat de l'ancien système de positionnement au clic** (signalé en usage réel : « surbrillance de l'unité sur laquelle est le pointeur de souris et une ligne verticale de position »). Confirmé en navigateur : une case vide s'allumait en cyan avec une ligne verticale au moindre survol de souris — même sans rien glisser, y compris pendant le déplacement d'un équipement déjà posé (mousedown, pas un glisser HTML5). Deux causes cumulées : un couple `mouseenter`/`mousemove`/`mouseleave` JS et une règle CSS `:hover` indépendante, tous deux hérités de l'ancien placement au clic (retiré en 2.33.1). Les deux retirés ; seul un glisser réel depuis la bibliothèque (`dragover`) déclenche encore ce repère.
+
+**4. Icône réseau recouvrant le numéro de port** (signalé : « il faudrait veiller à ce que les icônes dans les ports ne recouvrent pas le numéro »). Le numéro était centré sur toute la hauteur du port (`line-height`), donc en plein sur l'icône ajoutée en bas-droite par le point 1 ci-dessus. Numéro sorti du flux et remonté en haut-centre quand une icône réseau est présente (le haut-gauche restant réservé au voyant de ping/activité). Overlap mesuré : ~21-30px² avant correctif, 0px² sur un grand port (1920px) et sous-pixel (~1px²) en petite taille après.
+
+**5. Défilement de la bibliothèque d'appareils** (signalé : « la maquette était plus agréable, notamment au niveau du défilement »). Chaque section (Inventaire/SNMP/Générique) avait sa propre zone de défilement plafonnée à 220px, imbriquée dans celle du rail — jusqu'à 3 barres de défilement dans le même panneau, avec le rendu gris par défaut du système. Scroll individuel retiré (une seule zone, celle du rail) et barre de défilement fine/thématisée (accent cyan au survol) à la place du rendu système.
+
+**6. Adresses IP jamais affichées dans le tiroir « appareils du port »** (signalé : « les adresses IP des appareils ne sont jamais affichées »). Bug de fond côté serveur : pour les ports alimentés par le repli d'activité live ajouté en 2.33.4, `network_diag._voisins_port()` et l'`inv_mac` qui l'alimente (`_cycle_activite`) ne portaient jamais l'adresse IP (seulement nom/MAC/type) — et côté template, le mapping JS écrasait même le champ en dur (`ip: ''`). IP propagée de bout en bout : requête SQL (`adresse_ip` ajoutée), tuples `inv_mac`, `_voisins_port`, repli topologie, mapping JS.
+
+**7. Trois points relevés en revue d'interface** (à la demande explicite). Bandeau « ⚠ N type(s) à valider » resté affiché en permanence avec « 0 » au lieu de disparaître : `.tb-group{display:flex}` (règle d'auteur) l'emportait sur le `[hidden]{display:none}` de l'agent utilisateur à spécificité égale — même piège déjà corrigé ailleurs pour `.port-appareils[hidden]`, oublié ici. Boutons désactivés de cette page visuellement identiques à un bouton actif (curseur pointer, pleine opacité) faute de style `:disabled` propre — `.btn:disabled` ajouté. Sous 1100px de large, `.baie-page` empile bibliothèque/rack/inspecteur au lieu de les mettre côte à côte : ouvrir l'inspecteur depuis un clic sur un équipement l'affichait tout en bas, sous toute la baie, sans aucun scroll pour l'atteindre — `afficherInspecteur()` fait désormais défiler la page jusqu'au rail (`block:'nearest'`, sans effet en disposition large où il est déjà visible).
+
+**Déploiement.** Changements CSS/JS (points 1 à 5, 7) + un enrichissement de requête SQL sans migration de schéma (point 6, `appareils.adresse_ip` déjà présente). Vérifié en navigateur à 500/893/1024/1920px, magnétisme et collision vérifiés par test direct des fonctions pures en console, suite de tests complète revérifiée à chaque étape, 422 tests pytest OK.
+
+---
+
 ## [2.33.4] - 2026-09-12 🔌
 
 ### Baie de brassage : nettoyage UI, tiroir de port, icônes réseau, ports responsives
