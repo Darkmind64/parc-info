@@ -292,16 +292,20 @@
    transparents, se fond dans le rack) — gênant visuellement autour d'un
    élément haut de plusieurs U et étroit, qui laisse plusieurs cases vides
    sur les rangées qu'il traverse. Reste pleinement cliquable/receveuse de
-   glisser-déposer ; seul le SURVOL (ou le survol pendant un glisser)
+   glisser-déposer ; seul un glisser RÉEL depuis la bibliothèque (dragover)
    révèle un repère "aimanté" sur la case exacte visée, qui fait alors
-   office de grille — visible seulement quand on interagit, pas en
-   permanence. */
+   office de grille — visible seulement pendant ce glisser. Un simple
+   survol de la souris (rien en cours de glisser) ne déclenche plus cette
+   surbrillance depuis 2.33.4 : elle s'allumait alors sans raison sur
+   n'importe quel passage de souris — y compris pendant le déplacement
+   d'un équipement DÉJÀ posé (mousedown/mousemove, pas un glisser HTML5),
+   reliquat de l'ancien système de positionnement au clic (retiré lot 3,
+   voir plus bas) resté visuellement actif après coup. */
 .rack-cell.empty { background:transparent; border-color:transparent; }
-.rack-cell.empty:hover  { border-color:var(--accent); background:rgba(0,201,255,.06); box-shadow:0 0 0 1px var(--accent) inset; }
 /* Repère "aimant" : matérialise la colonne EXACTE visée par le curseur à
    l'intérieur d'une case vide qui couvre plusieurs colonnes — recalculé en
-   JS (majMarqueur) à chaque déplacement de souris/glisser, jamais figé sur
-   le début de la case. Masqué par défaut, affiché via style.display. */
+   JS (majMarqueur) à chaque glisser (dragover), jamais figé sur le début
+   de la case. Masqué par défaut, affiché via style.display. */
 .cell-magnet { position:absolute; top:0; bottom:0; display:none; background:rgba(0,201,255,.22); border-left:1px solid var(--accent); border-right:1px solid var(--accent); pointer-events:none; }
 /* Case cible invalide (chevauchement détecté EN DIRECT, voir
    elementEnCollision) : rouge au lieu du cyan habituel — visible PENDANT
@@ -750,6 +754,18 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 }
 .port .port-netic-ic:hover { transform:scale(1.35); z-index:9; }
 .port.port-netic.netic-declared:not(.netic-detected):not(.netic-incoherent) .port-netic-ic { opacity:.6; }
+/* Le numéro reste centré normalement (comportement inchangé pour tous les
+   autres ports) ; sorti du flux et remonté en haut-centre seulement quand
+   une icône réseau occupe le coin bas-droit (voir .port-netic-ic ci-dessus)
+   — un simple décalage ne suffisait pas : line-height:22px (hérité de
+   .port) centre le chiffre sur toute la hauteur du port, donc en plein
+   sur l'icône dès qu'un port est petit (retour utilisateur, refonte
+   2.33.4). Haut-CENTRE plutôt que haut-gauche : le coin haut-gauche est
+   déjà pris par .port-led (voyant de ping/activité) quand il est visible. */
+.port.port-netic .port-num {
+    position:absolute; top:1px; left:50%; transform:translateX(-50%);
+    line-height:1;
+}
 
 /* Panneau annexe « appareils du port » (lot 5, corrigé après retour
    utilisateur — refonte lot 5 v1 l'insérait dans le flux normal de
@@ -2254,6 +2270,54 @@ function elementEnCollision(position, hauteur, colDebut, largeur, excludeId) {
     return null;
 }
 
+// Magnétisme horizontal : accroche la colonne visée sur le bord d'un
+// élément voisin (dans une rangée U qui se recoupe avec la cible) ou sur
+// les bords de la baie, dès qu'on est à quelques pixels — NB_COLS_BAIE
+// (1000) rend chaque colonne SUBPIXEL, un alignement pile au pixel près
+// est donc mathématiquement hors de portée de la souris sans ça (signalé
+// en usage réel : "impossible de coller" deux éléments pourtant voisins,
+// alors que elementEnCollision() autorise bien la stricte adjacence).
+const SEUIL_AIMANT_PX = 6;
+function bordsVoisins(posDebut, hauteur, excludeId) {
+    const finU = posDebut + hauteur - 1;
+    const bords = new Set([0, NB_COLS_BAIE]);
+    for (const sl of Object.values(slots)) {
+        if (sl.id === excludeId) continue;
+        const slHu = sl.hauteur_u || 1, slCol = sl.col_index || 0, slLu = sl.largeur_u || NB_COLS_BAIE;
+        const slFinU = sl.position + slHu - 1;
+        if (posDebut <= slFinU && sl.position <= finU) {
+            bords.add(slCol);
+            bords.add(slCol + slLu);
+        }
+    }
+    return bords;
+}
+// Accroche le bord GAUCHE (déplacement) : col = position visée, largeur
+// fixe — teste aussi le bord droit résultant (col+largeur) contre chaque
+// bord candidat, pour se coller par la droite comme par la gauche.
+function aimanterCol(col, largeur, unitePx, posDebut, hauteur, excludeId) {
+    const bords = bordsVoisins(posDebut, hauteur, excludeId);
+    let meilleur = null, meilleurDist = SEUIL_AIMANT_PX;
+    for (const b of bords) {
+        const distGauche = Math.abs(col - b) * unitePx;
+        if (distGauche < meilleurDist) { meilleurDist = distGauche; meilleur = b; }
+        const distDroite = Math.abs((col + largeur) - b) * unitePx;
+        if (distDroite < meilleurDist) { meilleurDist = distDroite; meilleur = b - largeur; }
+    }
+    return meilleur === null ? col : meilleur;
+}
+// Accroche le bord DROIT (redimensionnement en largeur, coin gauche fixe).
+function aimanterLargeur(nv, debut, unitePx, posDebut, hauteur, excludeId) {
+    const bords = bordsVoisins(posDebut, hauteur, excludeId);
+    const droite = debut + nv;
+    let meilleur = null, meilleurDist = SEUIL_AIMANT_PX;
+    for (const b of bords) {
+        const dist = Math.abs(droite - b) * unitePx;
+        if (dist < meilleurDist) { meilleurDist = dist; meilleur = b; }
+    }
+    return meilleur === null ? nv : (meilleur - debut);
+}
+
 // ── VERROUILLAGE ─────────────────────────────────────────────────────────────
 // Une clé par baie (currentBaie) : verrouiller "Baie principale" ne doit
 // pas verrouiller une autre baie du même client.
@@ -3128,7 +3192,9 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
 
         const calculerNouvelleLargeur = clientX => {
             const delta = Math.round((clientX - startX) / unitePx);
-            return Math.min(maxLargeur, Math.max(1, startLargeur + delta));
+            let nv = Math.min(maxLargeur, Math.max(1, startLargeur + delta));
+            nv = aimanterLargeur(nv, debut, unitePx, s.position, s.hauteur_u || 1, s.id);
+            return Math.min(maxLargeur, Math.max(1, nv));
         };
         let dernierInvalide = false;
         const onMove = ev => {
@@ -3173,10 +3239,12 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
         const maxHu = Math.min(8, nbU - s.position + 1);
         const maxLargeur = NB_COLS_BAIE - debut;
 
-        const calculer = (clientX, clientY) => ({
-            hu: Math.min(maxHu, Math.max(1, startHu + Math.round((clientY - startY) / U_H))),
-            largeur: Math.min(maxLargeur, Math.max(1, startLargeur + Math.round((clientX - startX) / unitePx))),
-        });
+        const calculer = (clientX, clientY) => {
+            const hu = Math.min(maxHu, Math.max(1, startHu + Math.round((clientY - startY) / U_H)));
+            let largeur = Math.min(maxLargeur, Math.max(1, startLargeur + Math.round((clientX - startX) / unitePx)));
+            largeur = Math.min(maxLargeur, Math.max(1, aimanterLargeur(largeur, debut, unitePx, s.position, hu, s.id)));
+            return { hu, largeur };
+        };
         let dernierInvalide = false;
         const onMove = ev => {
             const {hu, largeur} = calculer(ev.clientX, ev.clientY);
@@ -3249,7 +3317,9 @@ function makeOccupiedCell(s, u, debut, largeur, rowH) {
             const rowRef = rows.children[u - 1] || cell.parentElement;
             const unitePx = rowRef.getBoundingClientRect().width / NB_COLS_BAIE;
             cible.pos = Math.max(1, Math.min(nbU - hu + 1, u + Math.round(dy / U_H)));
-            cible.col = Math.max(0, Math.min(NB_COLS_BAIE - largeur, debut + Math.round(dx / unitePx)));
+            let colVise = Math.max(0, Math.min(NB_COLS_BAIE - largeur, debut + Math.round(dx / unitePx)));
+            colVise = aimanterCol(colVise, largeur, unitePx, cible.pos, hu, s.id);
+            cible.col = Math.max(0, Math.min(NB_COLS_BAIE - largeur, colVise));
             invalide = !!elementEnCollision(cible.pos, hu, cible.col, largeur, s.id);
             cell.classList.toggle('invalide', invalide);
             majApercuDeplacement(cible.pos, cible.col, largeur, hu, invalide);
@@ -3382,11 +3452,15 @@ function makeEmptyCell(u, debut, largeur, rowH) {
     // Une case libre n'a plus de comportement au clic (l'ancien panneau
     // "+ Placer" qu'il préremplissait a disparu, refonte lot 3 corrigée
     // après retour utilisateur) — seule la bibliothèque en glisser-déposer
-    // y place un équipement (voir plus bas, dragover/drop).
-    cell.addEventListener('mouseenter', e => { cell.classList.add('drag-over'); majMarqueur(e.clientX); });
-    cell.addEventListener('mousemove', e => { majMarqueur(e.clientX); });
-    cell.addEventListener('mouseleave', () => { cell.classList.remove('drag-over'); masquerMarqueur(); });
-
+    // y place un équipement (voir plus bas, dragover/drop). Repère et
+    // surbrillance affichés UNIQUEMENT pendant ce glisser (dragover), donc
+    // pas de mouseenter/mousemove/mouseleave ici : ce couple existait pour
+    // l'ancien système de positionnement au clic (case survolée = candidate)
+    // et, une fois celui-ci retiré, ne faisait plus que surligner en cyan +
+    // afficher une ligne verticale sur n'importe quel survol de case vide,
+    // y compris un simple passage de souris sans rien glisser du tout —
+    // signalé en usage réel comme un reliquat visuel confus.
+    //
     // Drop target — même repère magnétique pendant le glisser (dragover
     // est le pendant de mousemove pour un glisser HTML5 natif).
     cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('drag-over'); majMarqueur(e.clientX); });
@@ -3825,7 +3899,7 @@ function portHTML(p, estElec, typeEquipement) {
     // Symbole de prise (demandé, voir symbolePrise) — affiché même libre,
     // comme la sérigraphie d'un vrai onduleur sur toutes ses prises.
     const symbole = estEntree ? '🔌' : (estElec ? symbolePrise(typeEquipement, p.numero) : '');
-    const contenuNumero = estEntree ? '' : (estElec ? `<span class="port-elec-num">${numeroAffiche(p.numero)}</span>` : numeroAffiche(p.numero));
+    const contenuNumero = estEntree ? '' : (estElec ? `<span class="port-elec-num">${numeroAffiche(p.numero)}</span>` : `<span class="port-num">${numeroAffiche(p.numero)}</span>`);
     // Voyant de ping omis pour une prise électrique (demandé, voir
     // classePing ci-dessus) — jamais de statut réseau à montrer dessus.
     const voyant = estElec ? '' : '<span class="port-led"></span>';
