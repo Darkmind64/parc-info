@@ -747,13 +747,17 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
 .prise-murale.pm-act-err     .port-led { background:#ef4444; box-shadow:0 0 6px #ef4444;
     animation:baie-led-blink 250ms steps(1,end) infinite; }
 .prise-murale.pm-act-stale   .port-led { background:#64748b; box-shadow:none; opacity:.7; }
-/* câblage incohérent : le switch voit un autre appareil que celui déclaré */
-.prise-murale.pm-cable-ko { position:relative; box-shadow:inset 0 0 0 999px rgba(8,10,16,0), 0 0 0 2px #ef4444 !important; }
+/* câblage incohérent : le switch voit un autre appareil que celui déclaré.
+   `inset` sur l'anneau — même raison que .port-netic ci-dessous : un halo
+   posé à l'extérieur de la prise gonflait sa taille apparente d'autant
+   plus qu'elle est petite. */
+.prise-murale.pm-cable-ko { position:relative; box-shadow:inset 0 0 0 999px rgba(8,10,16,0), inset 0 0 0 2px #ef4444 !important; }
 .prise-murale.pm-cable-ko::after { content:'⚠'; position:absolute; top:-6px; right:-5px; font-size:9px;
     line-height:1; color:#fff; background:#ef4444; border-radius:50%; padding:1px 2px; z-index:5; }
-/* refonte diag réseau Lot 5 : port avec une erreur de trafic active (CRC, duplex…) */
-.port.port-diag-err { position:relative; box-shadow:0 0 0 2px #e0952a !important; }
-.port.port-diag-err.port-diag-crit { box-shadow:0 0 0 2px #ef4444 !important; }
+/* refonte diag réseau Lot 5 : port avec une erreur de trafic active (CRC, duplex…) —
+   `inset` pour la même raison. */
+.port.port-diag-err { position:relative; box-shadow:inset 0 0 0 2px #e0952a !important; }
+.port.port-diag-err.port-diag-crit { box-shadow:inset 0 0 0 2px #ef4444 !important; }
 .port.port-diag-err::after { content:'⚠'; position:absolute; top:-6px; right:-5px; font-size:9px;
     line-height:1; color:#fff; background:#e0952a; border-radius:50%; padding:1px 2px; z-index:5; }
 .port.port-diag-err.port-diag-crit::after { background:#ef4444; }
@@ -772,12 +776,23 @@ body.baie-activite-on .prise-murale.pm-act .port-led { display:block; border-col
    équipement réseau (switch / routeur-pare-feu / borne Wi-Fi), déclaré
    (câblage) ou détecté (SNMP). */
 .port.port-netic { position:relative; }
-.port.port-netic.netic-declared { box-shadow:0 0 0 2px var(--accent-orange,#e0952a); }
-.port.port-netic.netic-detected { box-shadow:0 0 0 2px #22c55e; }
-.port.port-netic.netic-incoherent { box-shadow:0 0 0 2px #ef4444, 0 0 8px #ef4444; }
+/* `inset` — jamais un simple `box-shadow:0 0 0 2px` (halo posé À
+   L'EXTÉRIEUR du port) : ce halo est de taille FIXE (2px) quelle que soit
+   la taille du port, donc négligeable sur un grand port mais ~40% de
+   surface EN PLUS sur un petit (10-12px, cas courant d'un rack chargé) —
+   les ports avec un anneau réseau paraissaient alors nettement plus gros
+   que leurs voisins, à tort (retour utilisateur : "problème de cohérence
+   des tailles des ports RJ", dépendant de la résolution d'affichage —
+   confirmé : getBoundingClientRect identique pour tous les ports d'une
+   même rangée, seul le halo peint en dehors de la boîte différait).
+   `inset` peint l'anneau DANS la boîte existante : empreinte visuelle
+   identique au port lui-même, à n'importe quelle taille. */
+.port.port-netic.netic-declared { box-shadow:inset 0 0 0 2px var(--accent-orange,#e0952a); }
+.port.port-netic.netic-detected { box-shadow:inset 0 0 0 2px #22c55e; }
+.port.port-netic.netic-incoherent { box-shadow:inset 0 0 0 2px #ef4444, 0 0 6px #ef4444; }
 .port .port-netic-ic {
     position:absolute; right:0; bottom:0; transform-origin:bottom right;
-    font-size:calc(var(--port-fs, .6rem) * 1.2); line-height:1; z-index:6; cursor:pointer;
+    font-size:calc(var(--port-fs, .6rem) * .95); line-height:1; z-index:6; cursor:pointer;
     filter:drop-shadow(0 1px 1px rgba(0,0,0,.95));
 }
 .port .port-netic-ic:hover { transform:scale(1.35); z-index:9; }

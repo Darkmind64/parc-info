@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.6] - 2026-09-12 💍
+
+### Baie de brassage : cohérence des tailles de ports
+
+Correctif direct de 2.33.5, signalé après coup : « il y a toujours un problème de cohérence des tailles des ports RJ (peut-être que c'est bon avec une certaine résolution d'affichage mais pas avec toutes...) ».
+
+**Diagnostic.** Confirmé par mesure DOM directe (`getBoundingClientRect`) avant toute correction : tous les ports d'une même rangée ont bien la même taille de boîte, et une prise murale fait déjà exactement la même largeur que son port RJ associé — ce n'était donc **pas** un bug de calcul de taille. La vraie cause : l'anneau coloré signalant un port réseau (déclaré/détecté/incohérent), l'anneau d'erreur de trafic (`.port-diag-err`) et celui de câblage incohérent d'une prise murale (`.pm-cable-ko`) étaient tous peints via un `box-shadow` classique — donc **à l'extérieur** de la boîte du port — avec un halo de taille **fixe** (2px) quelle que soit la taille du port. Sur un grand port ce halo est négligeable ; sur un petit port (10-12px, cas courant sur un rack chargé) il ajoute ~30-40 % de surface peinte en plus, d'où l'incohérence dépendant de la résolution d'affichage.
+
+**Correctif.** Tous ces anneaux passent en `inset` (peints à l'intérieur de la boîte déjà existante) — empreinte visuelle strictement identique à la taille réelle du port, à n'importe quelle échelle. Icône réseau réduite au passage (facteur 1.2× → 0.95× la taille du texte du port, signalée comme « un peu trop grande »).
+
+**Déploiement.** Changement CSS pur, aucune migration de données. Vérifié en navigateur par mesure directe à petite (10-12px) et grande (28px) taille de port : le ring ne dépasse plus jamais la boîte du port. 422 tests pytest OK.
+
+---
+
 ## [2.33.5] - 2026-09-12 🧲
 
 ### Baie de brassage : tailles de ports unifiées, magnétisme, ergonomie
