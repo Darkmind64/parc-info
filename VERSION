@@ -1,8 +1,60 @@
-PARCINFO_VERSION=2.33.4
+PARCINFO_VERSION=2.33.5
 RELEASE_DATE=2026-09-12
 BUILD_NUMBER=2026091201
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.5 - Baie de brassage : tailles de ports unifiées, magnétisme, ergonomie
+#
+# Suite directe de 2.33.4, sur templates/baie_brassage.html et
+# network_diag.py, tous les points vérifiés en navigateur (422 tests
+# pytest OK à chaque étape).
+#
+# 1) Tailles de ports unifiées — une taille de port calculée UNE fois par
+#    rendu (hauteur disponible) et appliquée à toute la baie (variables
+#    CSS sur #rack-rows) ; une cellule ne rétrécit localement que si sa
+#    disposition (switch 2 lignes surchargé, bandeau étroit) l'exige, ne
+#    grandit jamais au-delà. Les prises murales d'un bandeau RJ suivent
+#    le même ratio que leur rangée de ports RJ. Rangées de ports
+#    centrées verticalement dans leur U. Icône réseau déplacée du
+#    couloir au-dessus/en-dessous du port vers son coin inférieur droit
+#    (fini les couloirs réservés, ~40 lignes de mécanique en moins).
+# 2) Chevauchement bloquant à tort deux éléments contigus — la grille
+#    compte 1000 colonnes (chacune < 1px), rendant un alignement pile au
+#    pixel impossible à la souris. Magnétisme ajouté (accroche sur les
+#    bords des voisins et de la baie, ~6px de seuil) dans les gestes de
+#    déplacement et de redimensionnement (largeur, coin).
+# 3) Reliquat de l'ancien système de positionnement au clic — une case
+#    vide s'allumait en cyan avec une ligne verticale au moindre survol
+#    de souris, même sans rien glisser (mouseenter/mousemove JS + règle
+#    CSS :hover indépendante). Retiré ; seul un glisser réel depuis la
+#    bibliothèque déclenche encore ce repère.
+# 4) Icône réseau recouvrant le numéro de port — le numéro était centré
+#    sur toute la hauteur du port, donc en plein sur l'icône ajoutée en
+#    bas-droite (2.33.4). Numéro remonté en haut-centre quand une icône
+#    réseau est présente.
+# 5) Défilement de la bibliothèque d'appareils — chaque section
+#    (Inventaire/SNMP/Générique) avait sa propre zone de défilement
+#    imbriquée dans celle du rail, avec le rendu par défaut du système.
+#    Scroll individuel retiré (une seule zone, celle du rail) et barre
+#    de défilement fine/thématisée à la place du rendu système.
+# 6) Adresses IP jamais affichées dans le tiroir « appareils du port »
+#    pour les ports alimentés par la vue d'activité live (repli ajouté
+#    en 2.33.4) — network_diag._voisins_port() et l'inv_mac qui
+#    l'alimente ne portaient jamais l'IP, et le mapping JS l'écrasait
+#    même en dur. IP propagée de bout en bout (requête SQL, tuples
+#    inv_mac, _voisins_port, repli topologie, mapping JS).
+# 7) Trois points relevés en revue d'interface, à la demande : bandeau
+#    « ⚠ N type(s) à valider » resté affiché en permanence avec « 0 »
+#    (`.tb-group{display:flex}` l'emportait sur `[hidden]{display:none}`
+#    à spécificité égale) ; boutons désactivés visuellement identiques à
+#    un bouton actif (`.btn:disabled` sans styles propres) ; sous 1100px
+#    de large, l'inspecteur s'ouvrait hors champ tout en bas de la page
+#    empilée, sans scroll pour l'atteindre (ajouté, sans effet en
+#    disposition large où il est déjà visible).
+#
+# Vérifié en navigateur à 500/893/1024/1920px et à la souris (drag/resize
+# réels + tests unitaires JS des fonctions de magnétisme/collision).
 
 # Version 2.33.4 - Baie de brassage : nettoyage UI, tiroir de port, icônes réseau, ports responsives
 #

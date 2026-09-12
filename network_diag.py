@@ -7213,9 +7213,10 @@ def _voisins_port(macs, inv_mac):
     'ids': set(appareil_id connus), 'detail': [...]}`.
 
     `detail` porte, pour chacun des appareils listés, `{nom, type, id, mac,
-    connu}` : le schéma de cascade de l'infobulle a besoin du **type** pour
-    choisir le symbole de chaque machine, ce que la liste de noms ne donnait
-    pas."""
+    ip, connu}` : le schéma de cascade de l'infobulle a besoin du **type**
+    pour choisir le symbole de chaque machine, ce que la liste de noms ne
+    donnait pas ; `ip` reste vide si `inv_mac` ne la porte pas (certains
+    appelants construisent encore des tuples à 3 éléments sans IP)."""
     noms, ids, detail, vus = [], set(), [], set()
     for mac in sorted(macs):
         hit = inv_mac.get(mac)
@@ -7223,17 +7224,18 @@ def _voisins_port(macs, inv_mac):
             ids.add(hit[0])
             libelle = hit[1] or _vendor(mac) or mac
             typ = (hit[2] or '') if len(hit) > 2 else ''
+            ip = (hit[3] or '') if len(hit) > 3 else ''
             aid = hit[0]
         else:
             libelle = _vendor(mac) or mac
-            typ, aid = '', None
+            typ, ip, aid = '', '', None
         if libelle in vus:
             continue
         vus.add(libelle)
         if len(noms) < _ACTIVITE_VOISINS_MAX:
             noms.append(libelle)
             detail.append({'nom': libelle, 'type': typ, 'id': aid,
-                           'mac': mac, 'connu': bool(hit)})
+                           'mac': mac, 'ip': ip, 'connu': bool(hit)})
     return {'noms': noms, 'n': len(macs), 'ids': ids, 'detail': detail,
             'restants': max(0, len(macs) - len(noms))}
 
@@ -7662,18 +7664,18 @@ def _cycle_activite(clients):
                 ip_par_slot = {}      # slot_id switch -> ip
                 fdb_par_ip = {}       # ip -> {ifindex: set(mac)} : FDB live (câblage + voisins)
                 fdb_meta_par_ip = {}  # ip -> meta du relevé FDB (tronque_taille, fusionne, tronquee…)
-                inv_mac = {}          # mac normalisée -> (appareil_id, nom_machine, type_appareil)
+                inv_mac = {}          # mac normalisée -> (appareil_id, nom_machine, type_appareil, adresse_ip)
                 if switchs:
                     _meta_aid = {}
-                    for _aid, _nom, _mac, _typ in conn.execute(
-                            "SELECT id, nom_machine, adresse_mac, type_appareil FROM appareils "
+                    for _aid, _nom, _mac, _typ, _ip in conn.execute(
+                            "SELECT id, nom_machine, adresse_mac, type_appareil, adresse_ip FROM appareils "
                             "WHERE client_id=?", (cid,)):
-                        _meta_aid[_aid] = (_nom, _typ)
+                        _meta_aid[_aid] = (_nom, _typ, _ip or '')
                         if _mac:
-                            inv_mac[_norm_mac(_mac)] = (_aid, _nom, _typ)
+                            inv_mac[_norm_mac(_mac)] = (_aid, _nom, _typ, _ip or '')
                     for _m, _aid in _macs_secondaires(conn, cid).items():
                         if _m not in inv_mac and _aid in _meta_aid:
-                            inv_mac[_m] = (_aid, _meta_aid[_aid][0], _meta_aid[_aid][1])
+                            inv_mac[_m] = (_aid, _meta_aid[_aid][0], _meta_aid[_aid][1], _meta_aid[_aid][2])
 
                 # ── amorçage depuis le dernier snapshot persisté ──
                 # À froid (app relancée, ou retour sur /baie après > 2 min), la
@@ -7906,6 +7908,7 @@ def _cycle_activite(clients):
                                     'noms': [n for _a, n in _lim], 'n': len(_tn),
                                     'ids': {a for a, _n in _tn},
                                     'detail': [{'nom': n, 'type': '', 'id': a, 'mac': '',
+                                                'ip': _meta_aid.get(a, ('', '', ''))[2],
                                                 'connu': True} for a, n in _lim],
                                     'restants': max(0, len(_tn) - _ACTIVITE_VOISINS_MAX),
                                     'source': 'topologie'}
