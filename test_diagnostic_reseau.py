@@ -611,7 +611,7 @@ _c.commit(); _c.close()
 N._activite_noms.pop('10.8.0.1', None)
 N._noms_interfaces = lambda ip, comm: dict(_infos)
 N._fdb_switch = lambda ip, comm: ({}, {})
-N._poll_switch_ports = lambda ip, comm, infos=None: (
+N._poll_switch_ports = lambda ip, comm, infos=None, force_err=False: (
     {44: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0),
      49: dict(oper=2, speed_mbps=0, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0, in_err=0, out_err=0)},
     True, True, None)
