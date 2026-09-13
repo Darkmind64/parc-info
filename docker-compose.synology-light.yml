@@ -1,0 +1,41 @@
+# ============================================================================
+# ParcInfo — Docker Compose Override, profil LÉGER (petit NAS)
+#
+# Pour : petit NAS (2-4 cores CPU, 512MB-2GB RAM), ex. DS218, DS419.
+#
+# Usage :
+#   docker-compose -f docker-compose.yml -f docker-compose.synology-light.yml up -d
+#
+# Voir docker-compose.synology.yml pour le profil standard et les notes sur
+# ce que ces overrides changent réellement (limites Docker) vs. ce qui se
+# règle dans l'application elle-même (écran Réglages).
+# ============================================================================
+
+version: '3.8'
+
+services:
+  parcinfo:
+    deploy:
+      resources:
+        limits:
+          cpus: '1'          # 1 core max
+          memory: 256M       # 256MB max (minimum recommandé)
+        reservations:
+          cpus: '0.25'       # 0.25 cores minimum
+          memory: 128M       # 128MB minimum
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"       # Rotation fichiers log plus agressive
+        max-file: "2"        # Garder moins de fichiers
+
+    # Health check plus tolérant (plus de délai de démarrage sur petit NAS)
+    # curl n'existe pas dans l'image (python:3.11-slim) — même sonde que le
+    # HEALTHCHECK du Dockerfile, pas de dépendance supplémentaire à installer.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3456/', timeout=5)"]
+      interval: 60s          # Vérification moins fréquente
+      timeout: 15s           # Plus de timeout
+      retries: 3
+      start_period: 60s      # Plus de temps au démarrage

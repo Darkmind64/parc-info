@@ -14,7 +14,6 @@ from __future__ import annotations
 import json as _json
 import logging
 import re as _re
-import time
 from datetime import datetime, timezone
 
 logger = logging.getLogger('parcinfo')

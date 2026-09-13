@@ -1,5 +1,50 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.14] - 2026-09-13 🔒
+
+### Audit de sécurité multi-client : 7 endpoints vulnérables à un accès cross-tenant, corrigés et testés
+
+Demande directe : un audit complet du projet à la recherche d'erreurs, de code mort et d'incohérences. La relecture systématique (pyflakes + revue manuelle) a fait remonter, en creusant deux variables signalées comme « inutilisées » plutôt que de les supprimer aveuglément, une véritable faille de sécurité plutôt qu'un simple défaut de style.
+
+**La faille.** `/api/droit/<id>` (PUT/DELETE) ne filtrait par **aucun** `client_id` : un utilisateur avec un accès `'ecriture'` sur son propre client pouvait modifier ou supprimer un droit d'un **autre** client en devinant l'id (IDOR classique). En reprenant systématiquement tous les appels `can_write()` **sans argument** du fichier — qui vérifient le client *actif* de la session, pas forcément le propriétaire réel de la ligne visée — 7 endpoints se sont révélés touchés, à des degrés divers :
+
+- `api_droit` / `api_ajouter_droit` / `api_type_droit` / `api_creer_type_droit` : aucune vérification `can_write()` **ni** filtre `client_id` sur les requêtes SQL.
+- `api_garantie_ignorer` : vérifiait bien l'accès au client actif, mais mettait à jour n'importe quel `id` d'appareil sans vérifier qu'il appartenait à ce client.
+- `supprimer_utilisateur` : suppression par `id` seul, sans filtre `client_id`.
+- `editer_peripherique` / `editer_contrat` / `editer_intervention` / `api_baie_slot` (DELETE) : la fiche elle-même était bien protégée (`WHERE id=? AND client_id=?`), mais les tables de liaison (`peripheriques_appareils`, `contrats_appareils`, `contrats_peripheriques`, `interventions_appareils`, `interventions_peripheriques`, `baie_slot_ports`, `baie_prises_murales`) étaient vidées **sans condition**, avant toute vérification d'appartenance — un attaquant pouvait effacer les liaisons d'un autre client sans pouvoir toucher à sa fiche.
+
+Chaque correctif a été vérifié par une attaque cross-tenant simulée (attaquant actif sur un client A, victime sur un client B, aucun partage entre les deux) avant d'être formalisé en test de régression permanent — `tests/test_acl.py` gagne 8 nouveaux tests couvrant les 7 endpoints.
+
+**Revue `/ultrareview` sur cette même PR : 5 failles voisines de plus, ratées par le premier passage.** Le même schéma (`can_write()` sans argument + écriture non re-scopée) s'est révélé plus répandu que le premier passage ne l'avait détecté :
+
+- `supprimer_contrat` : le `SELECT`/`DELETE` du contrat étaient bien scopés, mais les 3 `UPDATE appareils SET av/edr/rmm_contrat_id=NULL` qui nettoient les références ne l'étaient pas — un attaquant pouvait effacer ces références sur les appareils d'un **autre** client.
+- `api_type_droit` (PUT) : l'`UPDATE` était bien scopé par `client_id`, mais le `SELECT` de retour (utilisé pour la réponse JSON) ne l'était pas — fuite d'information (`categorie`/`nom`/`description`/`icone`/`ordre`) sur un type de droit d'un autre client.
+- `api_ajouter_droit` : `can_write(cid)` vérifié, mais `utilisateur_id` du payload n'était jamais confronté à `cid` — un droit pouvait être attribué à un utilisateur d'un **autre** client (visible ensuite sur sa fiche, invisible/impossible à supprimer depuis ce client puisque la lecture et la suppression sont bien scopées, elles). Corrigé par une vérification d'appartenance avant insertion, et un filtre `client_id` ajouté à la lecture des droits d'un utilisateur (`droits_utilisateur()`) en défense en profondeur.
+- `supprimer_peripherique` / `supprimer_utilisateur` : le `SELECT` initial (nom à journaliser) n'était pas scopé, et `log_history()` s'exécutait **avant** toute vérification — un attaquant obtenait une fausse entrée « Suppression » dans son propre journal (avec le nom de la victime) et un message de succès trompeur, alors que le `DELETE`, lui, était déjà correctement scopé et n'affectait aucune ligne.
+
+5 nouveaux tests de régression (`tests/test_acl.py`, 17 au total dans ce fichier).
+
+**Nit de performance relevé au passage.** `_auteur_courant()` (nouvelle fonction introduite pour l'attribution utilisateur) faisait une requête SQL de plus à **chacun** des ~65 appels de `log_history()`. Le login est désormais mis en cache dans la session à la connexion (`session['auth_user_login']`, aux côtés de `auth_user_nom`/`auth_user_role` déjà présents) — `_auteur_courant()` le lit directement, avec repli sur la requête SQL pour une session ouverte avant ce changement.
+
+**Bug trouvé en écrivant les tests de non-régression.** `docker-compose.synology-light.yml`/`-heavy.yml` (introduits plus haut dans cette même PR) déclaraient un healthcheck `curl` — absent de l'image `python:3.11-slim`, qui n'installe jamais ce paquet. Le conteneur restait donc marqué `unhealthy` en permanence sur ces deux profils, même quand l'application répondait normalement. Remplacé par la même sonde Python que le `HEALTHCHECK` du `Dockerfile` (`urllib.request`), sans dépendance supplémentaire.
+
+### Autres correctifs trouvés au passage
+
+- **Chiffrement partagé Turso jamais utilisé en pratique.** `_build_crypto_shared()` référençait `get_local_db()` sans l'avoir importé dans cette fonction → `NameError` avalé silencieusement par un `except Exception` générique qui loguait à tort *« Turso inaccessible, fallback local »*. Conséquence réelle : chaque instance générait sa propre clé locale au lieu de partager la clé Turso — un identifiant chiffré par une instance pouvait devenir illisible depuis une autre en synchro multi-instance.
+- **Wake-on-LAN cassé à chaque utilisation.** `log_history()` était appelé avec une signature totalement différente (une chaîne à la place de la connexion DB) → la route renvoyait systématiquement une erreur au frontend, alors que le paquet magique avait déjà été envoyé avec succès juste avant.
+- **Table fabricants (OUI) embarquée : 40 préfixes MAC en conflit**, vérifiés un par un contre le registre IEEE officiel (Dell/HP/Lenovo/Intel/Cisco confondus sur certains préfixes) et corrigés — 5 prefixes sans mapping fiable ont été retirés plutôt que ré-attribués au hasard, 2 nouveaux (ASUS) ajoutés.
+- **Historique sans attribution d'auteur.** La table `historique` gagne une colonne `auteur` (migration automatique, idempotente) ; `log_history()` la déduit désormais de la session courante sans qu'aucun de ses ~65 points d'appel n'ait besoin d'être modifié — un job de fond peut toujours passer un `auteur` explicite (`'scheduler'`, etc.).
+
+### Nettoyage
+
+Fonction dupliquée supprimée (`collector_core._report_filename`, la première définition était déjà totalement écrasée par la seconde), fonctions mortes retirées (`client_helpers.get_client_with_acces`, `crypto_utils.encrypt_password`/`decrypt_password`, trois décorateurs de cache jamais branchés dans `cache_utils.py`), `pyproject.toml` corrigé (dépendance `Flask-SQLAlchemy` fantôme retirée, section `[tool.setuptools]` cassée — pointait vers un dossier `parc_info/` qui n'existe pas — supprimée), `.env.example` entièrement réécrit (ne documentait quasiment que des variables sans aucun effet réel — le vrai réglage passe par l'écran *Réglages*), `docker-compose.synology.yml` éclaté en fichiers réels et fonctionnels (l'ancien fichier concaténait 4 profils en un seul YAML multi-documents que Compose ne peut pas lire au-delà du premier, avec des noms de service qui ne correspondaient de toute façon pas au service de base), et 37 `except:` nus uniformisés en `except Exception:`.
+
+### Déploiement
+
+Migration de schéma automatique au démarrage (`ALTER TABLE historique ADD COLUMN auteur`, idempotente — rien à faire manuellement). **442 tests pytest OK** (429 existants + 13 nouveaux dans `tests/test_acl.py`, 17 au total dans ce fichier), plus une dizaine de scripts de vérification ciblés (ACL, isolation client, liens appareil/périphérique/baie).
+
+---
+
 ## [2.33.13] - 2026-09-13 🔄
 
 ### Sync Turso : client_instantane (« Changements depuis la dernière visite ») entre dans la synchronisation multi-instance

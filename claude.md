@@ -111,7 +111,7 @@
 ├─ parc_info.db (SQLite local, créée auto au 1er run)           ║
 ├─ Tables principales : clients, auth_users, appareils,         ║
 │  contrats, peripheriques, utilisateurs, identifiants,         ║
-│  services, documents, histories, configurations               ║
+│  services, documents, historique, configurations               ║
 └─ Stockage : uploads/ (documents joints, images)               ║
 ╚════════════════════════════════════════════════════════════════╝
 ```
@@ -135,7 +135,7 @@
 4. **Modifications & Audit**
    - Chaque POST/PUT validé : CSRF, auth, ACL
    - Exécution DB en transaction
-   - log_history() → enregistre dans table `histories`
+   - log_history() → enregistre dans table `historique` (auteur déduit de la session)
 
 5. **Scan Réseau (async)**
    - Thread séparé : ping → arp → port scan
@@ -532,15 +532,17 @@ CREATE TABLE documents_appareil (
 ### Groupe 5 : Audit & Configuration
 
 ```sql
--- Historique (audit trail)
-CREATE TABLE histories (
-    id INTEGER PRIMARY KEY,
-    action TEXT,                   -- 'CREATE_APPAREIL' | 'UPDATE_*' | 'DELETE_*'
-    user_id INTEGER,
-    client_id INTEGER,
-    timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-    details JSON,                  -- {'field': old_val, 'field': new_val}
-    ip_address TEXT
+-- Historique (audit trail) — nom réel de la table : `historique` (pas `histories`)
+CREATE TABLE historique (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL,
+    entite TEXT NOT NULL,          -- 'appareil' | 'contrat' | 'utilisateur' | ...
+    entite_id INTEGER NOT NULL,
+    entite_nom TEXT DEFAULT '',
+    action TEXT NOT NULL,          -- 'Création' | 'Modification' | 'Suppression' | ...
+    date_action TEXT NOT NULL,
+    details TEXT DEFAULT '',       -- JSON encodé en texte : {'field': old_val, 'field': new_val}
+    auteur TEXT DEFAULT ''         -- login de l'utilisateur (déduit de la session par log_history())
 );
 
 -- Configuration persistée (clé/valeur JSON)
@@ -695,7 +697,7 @@ def update_appareil(id):
         (request.form['nom'], id, client_id)  # ← Paramètres
     )
     conn.commit()
-    log_history('UPDATE_APPAREIL', user['login'], client_id, {...})
+    log_history(conn, client_id, 'appareil', id, request.form['nom'], 'UPDATE_APPAREIL', {...})
     conn.close()
     return jsonify({'ok': True})
 ```
@@ -835,7 +837,7 @@ from config_helpers import (
 )
 from client_helpers import (
     paginate, get_client_access, can_write,
-    get_client_with_acces, get_client_id, get_clients,
+    get_client_id, get_clients,
     log_history, log_error, garantie_active, human_size,
     fmt_appareils, fmt_garantie_periph, fmt_contrat
 )
@@ -884,10 +886,9 @@ from client_helpers import (
 | `get_client_access(cid)` | `(int) → 'proprietaire'\|'ecriture'\|'lecture'\|None` | Niveau accès |
 | `can_write(client_id)` | `(int) → bool` | Peut modifier ? |
 | `get_client_id()` | `() → int\|None` | Client actif session |
-| `get_client_with_acces(cid)` | `(int) → dict` | Client + son accès |
 | `get_clients()` | `() → list[dict]` | Tous clients accessibles user |
-| `log_history(action, user, cid, details)` | `(str, str, int, dict)` | Audit trail |
-| `log_error(action, user, cid, error)` | `(str, str, int, str)` | Erreur audit |
+| `log_history(conn, cid, entite, entite_id, entite_nom, action, details='', auteur=None)` | `(...) ` | Audit trail — `auteur` déduit de la session si omis |
+| `log_error(conn, cid, url, exc, trace='')` | `(...)` | Erreur audit (délègue à `log_history`) |
 | `paginate(query, params, page)` | `(str, tuple, int) → (rows, dict)` | Pagination |
 | `garantie_active(date_fin)` | `(str) → bool` | Garantie valide ? |
 | `human_size(bytes)` | `(int) → str` | '1.5 MB' au lieu de 1572864 |
@@ -942,7 +943,7 @@ def appareil_handler(id):
             (request.form['nom'], request.form.get('ip'), id, client_id)
         )
         conn.commit()
-        log_history('UPDATE_APPAREIL', user['login'], client_id,
+        log_history(conn, client_id, 'appareil', id, request.form['nom'], 'UPDATE_APPAREIL',
                     {'id': id, 'nom': request.form['nom']})
     except Exception as e:
         conn.rollback()
@@ -1215,7 +1216,7 @@ def create_type_equipement():
             (nom, request.form.get('categorie'))
         )
         conn.commit()
-        log_history('CREATE_TYPE_EQUIPEMENT', user['login'], None, {'nom': nom})
+        log_history(conn, 0, 'type_equipement', 0, nom, 'CREATE_TYPE_EQUIPEMENT', {'nom': nom})
     except sqlite3.IntegrityError:
         return jsonify({'error': 'Nom déjà existant'}), 409
     except Exception as e:
@@ -1342,7 +1343,7 @@ sqlite3 parc_info.db
 > .schema appareils                 # Voir structure
 > SELECT COUNT(*) FROM appareils;  # Compter
 > SELECT * FROM auth_users LIMIT 1; # Premier user
-> SELECT * FROM histories WHERE action LIKE 'CREATE%' LIMIT 5; # Audit
+> SELECT * FROM historique WHERE action LIKE 'Cr%' LIMIT 5; # Audit
 > .quit
 ```
 
@@ -1536,7 +1537,9 @@ acces = get_client_access(client_id)  # 'proprietaire' | 'ecriture' | 'lecture' 
 ### Audit & Logging
 ```python
 from client_helpers import log_history
-log_history('CREATE_APPAREIL', user['login'], client_id, {'id': 123})
+# auteur déduit automatiquement de la session (login de l'utilisateur connecté) ;
+# passer auteur='scheduler' (ou similaire) depuis un job de fond sans requête.
+log_history(conn, client_id, 'appareil', 123, nom_appareil, 'Création', {'id': 123})
 
 import logging
 logger = logging.getLogger('parcinfo')

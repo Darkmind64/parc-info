@@ -1,0 +1,40 @@
+# ============================================================================
+# ParcInfo — Docker Compose Override, profil LOURD (NAS puissant)
+#
+# Pour : NAS puissant (8+ cores CPU, 4GB+ RAM), ex. DS1621, RS1221.
+#
+# Usage :
+#   docker-compose -f docker-compose.yml -f docker-compose.synology-heavy.yml up -d
+#
+# Voir docker-compose.synology.yml pour le profil standard et les notes sur
+# ce que ces overrides changent réellement (limites Docker) vs. ce qui se
+# règle dans l'application elle-même (écran Réglages).
+# ============================================================================
+
+version: '3.8'
+
+services:
+  parcinfo:
+    deploy:
+      resources:
+        limits:
+          cpus: '4'          # 4 cores max
+          memory: 1024M      # 1 GB max
+        reservations:
+          cpus: '2'          # 2 cores minimum
+          memory: 512M       # 512MB minimum
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"      # Fichiers plus gros
+        max-file: "5"        # Garder plus de fichiers
+
+    # curl n'existe pas dans l'image (python:3.11-slim) — même sonde que le
+    # HEALTHCHECK du Dockerfile, pas de dépendance supplémentaire à installer.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3456/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

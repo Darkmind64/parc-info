@@ -32,7 +32,6 @@ classifiers = [
 dependencies = [
     "Flask>=3.0.0",
     "Werkzeug>=3.0.0",
-    "Flask-SQLAlchemy>=3.1.0",
 ]
 
 [project.optional-dependencies]
@@ -49,16 +48,6 @@ Documentation = "https://github.com/USERNAME/parc-info#documentation"
 Repository = "https://github.com/USERNAME/parc-info.git"
 Issues = "https://github.com/USERNAME/parc-info/issues"
 Changelog = "https://github.com/USERNAME/parc-info/blob/main/CHANGELOG.md"
-
-[tool.setuptools]
-packages = ["parc_info"]
-
-[tool.setuptools.package-data]
-parc_info = [
-    "templates/*.html",
-    "static/js/*.js",
-    "static/css/*.css",
-]
 
 [tool.black]
 line-length = 100

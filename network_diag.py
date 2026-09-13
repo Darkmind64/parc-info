@@ -3500,7 +3500,7 @@ def decouvrir_reseaux_actif(client_id: int, budget_s: float = _ACTIF_BUDGET_S) -
     # ── 2. SNMP sur la passerelle par défaut, même hors inventaire ──
     if gw and gw not in ips_inv:
         try:
-            from app import _snmp_presence, _SNMP_COMMUNAUTES_COURANTES
+            from app import _snmp_presence
             comms = list(dict.fromkeys(list(_communautes_snmp())
                                        + ['public', 'private', 'community']))
             present, exploitable, _d = _snmp_presence(gw, comms, timeout=1.0)
@@ -6778,7 +6778,6 @@ def _poll_switch_ports(ip, communautes, infos=None, force_err=False):
                 _activite_hc[ip] = False
                 _activite_capa_neg.get(ip, {}).pop('hc', None)
                 _activite_capa_reprobe.setdefault(ip, {})['hc'] = _activite_cyc[0] + _ACTIVITE_REPROBE_CYCLES
-    hc_mode = _activite_hc.get(ip) is True or a_du_hc
 
     if not oper and not cols.get(_OID_IF_HCIN) and not cols.get(_OID_IF_IN_OCTETS):
         return {}, False, bool(a_hc), sysuptime
@@ -8105,7 +8104,6 @@ def _cycle_activite(clients):
                     if not ok and ip not in ips_muets:
                         ips_muets.add(ip)
                         nb_muets += 1
-                    dt_def = dt_switch or _ACTIVITE_INTERVAL
 
                     ip_par_slot[slot_id] = ip
                     mapping, sources, calibre, divergences = _mapping_baie_ifindex(

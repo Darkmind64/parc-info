@@ -441,7 +441,7 @@ def migrate_db(source, target):
 
         return True, stats, None
 
-    except Exception as e:
+    except Exception:
         import traceback
         return False, {}, traceback.format_exc()
 

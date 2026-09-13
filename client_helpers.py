@@ -121,18 +121,6 @@ def can_write(client_id=None) -> bool:
     return get_client_access(client_id) in ('proprietaire', 'ecriture')
 
 
-def get_client_with_acces(cid) -> dict:
-    from database import get_db, row_to_dict
-    conn = get_db()
-    try:
-        cl = row_to_dict(conn.execute('SELECT * FROM clients WHERE id=?', (cid,)).fetchone() or {})
-        if cl:
-            cl['acces'] = get_client_access(cid) or 'lecture'
-        return cl
-    finally:
-        conn.close()
-
-
 def get_client_id():
     """Retourne le client_id actif depuis la session, parmi les clients accessibles."""
     from database import get_db
@@ -239,13 +227,46 @@ def get_clients_for_filter(clients_selection=None) -> list:
 
 # ─── AUDIT ────────────────────────────────────────────────────────────────────
 
-def log_history(conn, client_id, entite, entite_id, entite_nom, action, details=''):
-    """Enregistre une entrée dans le journal d'historique."""
+def _auteur_courant(conn) -> str:
+    """Login de l'utilisateur de la requête en cours, pour l'audit trail.
+    Retourne '' hors contexte requête (job de fond, scheduler) — jamais
+    d'exception : l'attribution de l'auteur ne doit jamais faire échouer
+    l'action auditée elle-même.
+
+    log_history() est appelée à ~65 endroits d'app.py : le login est mis en
+    cache dans la session à la connexion (session['auth_user_login']) pour
+    éviter une requête SQL de plus à chaque écriture auditée. Repli sur une
+    lecture DB pour une session ouverte avant l'introduction de ce cache."""
+    try:
+        login_cache = session.get('auth_user_login')
+        uid = session.get('auth_user_id')
+    except RuntimeError:
+        return ''
+    if login_cache:
+        return login_cache
+    if not uid:
+        return ''
+    try:
+        row = conn.execute('SELECT login FROM auth_users WHERE id=?', (uid,)).fetchone()
+        return row[0] if row else ''
+    except Exception:
+        return ''
+
+
+def log_history(conn, client_id, entite, entite_id, entite_nom, action, details='', auteur=None):
+    """Enregistre une entrée dans le journal d'historique.
+
+    `auteur` (audit 2026-09) : login de l'utilisateur à l'origine de l'action.
+    Déduit automatiquement de la session courante si omis — un appel depuis
+    un job de fond (scheduler, sync) peut passer un `auteur` explicite
+    ('scheduler', 'sync', ...) pour ne pas attribuer l'action à personne."""
+    if auteur is None:
+        auteur = _auteur_courant(conn)
     conn.execute(
-        '''INSERT INTO historique (client_id,entite,entite_id,entite_nom,action,date_action,details)
-           VALUES (?,?,?,?,?,?,?)''',
+        '''INSERT INTO historique (client_id,entite,entite_id,entite_nom,action,date_action,details,auteur)
+           VALUES (?,?,?,?,?,?,?,?)''',
         (client_id, entite, entite_id, str(entite_nom), action,
-         _utcnow().isoformat(), str(details)))
+         _utcnow().isoformat(), str(details), str(auteur or '')))
     # Nettoyage automatique selon les paramètres de rétention (lignes ET/OU durée)
     try:
         from config_helpers import cfg_get

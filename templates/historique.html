@@ -183,6 +183,9 @@
         <div class="hist-meta">
             <span class="badge badge-action-{{ h.action|lower }}" style="font-size:.62rem;">{{ h.action }}</span>
             <span>{{ h.entite|capitalize }}</span>
+            {% if h.auteur %}
+            <span style="color:var(--text-muted);font-size:.68rem;" title="Auteur de l'action">👤 {{ h.auteur }}</span>
+            {% endif %}
             {% if h.action == 'Annulation' and h.details and h.details[:1] == '{' %}
                 {% set msg_data = h.details|tojson %}
                 <span style="color:var(--text-muted);font-style:italic;font-size:.68rem;">

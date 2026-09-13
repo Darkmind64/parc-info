@@ -1,0 +1,37 @@
+# ============================================================================
+# ParcInfo — Docker Compose Override, profil DÉVELOPPEMENT
+#
+# À utiliser UNIQUEMENT pour développement/test, PAS en production.
+#
+# Usage :
+#   docker-compose -f docker-compose.yml -f docker-compose.synology-dev.yml up -d
+#
+# Voir docker-compose.synology.yml pour le profil standard et les notes sur
+# ce que ces overrides changent réellement (limites Docker, variables lues
+# par l'app) vs. ce qui se règle dans l'application elle-même (écran
+# Réglages).
+# ============================================================================
+
+version: '3.8'
+
+services:
+  parcinfo:
+    environment:
+      - FLASK_DEBUG=1        # active le mode debug Flask (rechargement, tracebacks)
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        # Pas de reservations pour dev
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"      # logs verbeux
+        max-file: "10"
+
+    # Pas de healthcheck en dev (trop strict pendant les redémarrages fréquents)
+    healthcheck:
+      disable: true

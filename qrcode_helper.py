@@ -7,18 +7,14 @@ Provides utilities to:
 3. Generate PDF sheets (A4, 3×8 grid) for printing on AVERY J8159 labels
 """
 
-import json
 import qrcode
 import io
 import os
 import tempfile
 import logging
-from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
-from reportlab.lib import colors
 
 logger = logging.getLogger('parcinfo')
 
@@ -34,7 +30,7 @@ def hex_to_rgb(hex_color: str) -> tuple:
 
     try:
         return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    except:
+    except Exception:
         return (255, 255, 255)  # default white if conversion fails
 
 
@@ -197,7 +193,7 @@ def create_label_image(
         try:
             ttf_name = font_map.get(font_name, 'arial.ttf')
             return ImageFont.truetype(ttf_name, size_pt)
-        except:
+        except Exception:
             return ImageFont.load_default()
 
     # Header text settings
@@ -222,10 +218,6 @@ def create_label_image(
     footer_font_name = template.get('footerFont', 'arial')
     footer_align = template.get('footerAlign', 'left')
     footer_font = load_font(footer_font_name, footer_size_pt)
-
-    # For compatibility with existing code that might reference font_size
-    font_size = asset_size_pt
-    line_height = int(asset_size_pt * 1.3)
 
     # Position QR code based on template
     qr_position = template.get('qrPosition', 'center')
@@ -367,7 +359,7 @@ def create_label_image(
             if text_y + asset_line_height < label_height - margin - footer_size_pt - margin:
                 draw_aligned_text(draw, display_text, text_x, text_y, asset_color, asset_font, asset_align, label_width)
                 text_y += asset_line_height
-        except:
+        except Exception:
             # Skip field if error rendering it
             pass
 
@@ -436,11 +428,10 @@ def create_pdf_sheet(
     c = canvas.Canvas(pdf_buffer, pagesize=A4)
     page_width, page_height = A4
 
-    # AVERY J8159 specifications (in mm)
+    # AVERY J8159 specifications (in mm) — 3 colonnes x 8 rangées (24 étiquettes/feuille)
     label_width_mm = 63.5
     label_height_mm = 33.9
     cols = 3
-    rows = 8
 
     # Convert to points (1 point = 1/72 inch ≈ 0.353 mm)
     mm_to_pt = 72 / 25.4
@@ -480,7 +471,7 @@ def create_pdf_sheet(
         # Clean up temporary file
         try:
             os.remove(temp_img_path)
-        except:
+        except Exception:
             pass
 
     # Save PDF
