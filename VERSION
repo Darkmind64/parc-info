@@ -1,8 +1,37 @@
-PARCINFO_VERSION=2.33.14
+PARCINFO_VERSION=2.33.15
 RELEASE_DATE=2026-09-13
-BUILD_NUMBER=2026091304
+BUILD_NUMBER=2026091305
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.15 - Baie de brassage : LED de port vert/rouge des
+# l'ouverture, sans attendre un clic sur "Ping toute la baie"
+#
+# Demande directe : au demarrage de la baie de brassage, vouloir que tous
+# les ports dont l'appareil branche repond au ping affichent tout de
+# suite la LED verte, pour reperer immediatement les ports connectes.
+#
+# Le mecanisme de ping existait deja entierement (bouton manuel "Ping
+# toute la baie", ping automatique optionnel a intervalle configurable,
+# classes CSS port-ping-ok/port-ping-fail deja stylees vert/rouge) : il
+# n'etait simplement jamais declenche au chargement de la page. La LED
+# au demarrage ne refletait donc que le dernier ping connu en base,
+# potentiellement ancien. Un seul appel ajoute dans init() (juste apres
+# le chargement initial de la baie) : pingerToutelaBaie(false) - ping
+# immediat de tous les ports occupes, independant du reglage "Ping
+# auto" (qui ne pilote que les repetitions).
+#
+# Second point demande (LED rouge si l'appareil ne repond pas) : deja
+# couvert symetriquement par le meme mecanisme existant, verifie en
+# simulant une reponse d'echec cote client (l'environnement de test
+# repondait a toute IP, y compris une plage reservee documentation,
+# rendant impossible un vrai test d'echec reseau).
+#
+# Verifie en navigateur : appel /api/ping/appareil/<id> declenche
+# automatiquement au chargement, LED verte confirmee au niveau DOM
+# (classe port-ping-ok, fond #22c55e) pour un appareil qui repond, LED
+# rouge confirmee (classe port-ping-fail, fond #ef4444) pour un
+# appareil simule en echec.
 
 # Version 2.33.14 - Audit de securite multi-client : 7 endpoints
 # vulnerables a un acces cross-tenant, corriges et testes

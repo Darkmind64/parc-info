@@ -1,5 +1,19 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.15] - 2026-09-13 🟢
+
+### Baie de brassage : LED de port vert/rouge dès l'ouverture, sans attendre un clic sur « Ping toute la baie »
+
+Demande directe : au démarrage de la baie de brassage, que tous les ports dont l'appareil branché répond au ping affichent tout de suite la LED verte, pour repérer immédiatement les ports connectés.
+
+Le mécanisme de ping existait déjà entièrement — bouton manuel « 📡 Ping toute la baie », ping automatique optionnel à intervalle configurable, classes CSS `port-ping-ok`/`port-ping-fail` déjà stylées vert/rouge — il n'était simplement jamais déclenché au chargement de la page. La LED au démarrage ne reflétait donc que le dernier ping connu en base (`appareils.dernier_ping`), potentiellement ancien. Un seul appel ajouté dans `init()`, juste après le chargement initial de la baie : `pingerToutelaBaie(false)` — ping immédiat de tous les ports occupés, indépendant du réglage « Ping auto » (qui ne pilote que les répétitions).
+
+**Second point demandé** (LED rouge si l'appareil ne répond pas) : déjà couvert symétriquement par ce même mécanisme existant — vérifié en simulant une réponse d'échec côté client (l'environnement de test répondait à toute IP interrogée, y compris une plage réservée à la documentation, rendant impossible un vrai test d'échec réseau depuis ce poste).
+
+Vérifié en navigateur : appel `/api/ping/appareil/<id>` déclenché automatiquement au chargement, LED verte confirmée au niveau DOM (classe `port-ping-ok`, fond `#22c55e`) pour un appareil qui répond, LED rouge confirmée (classe `port-ping-fail`, fond `#ef4444`) pour un appareil simulé en échec.
+
+---
+
 ## [2.33.14] - 2026-09-13 🔒
 
 ### Audit de sécurité multi-client : 7 endpoints vulnérables à un accès cross-tenant, corrigés et testés
