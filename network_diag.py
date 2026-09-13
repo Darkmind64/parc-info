@@ -491,6 +491,131 @@ def _requete_dns_a(serveur: str, nom: str, timeout: float = 2.0) -> bool:
         return False
 
 
+def _dns_nom_encode(nom: str) -> bytes:
+    return b''.join(struct.pack('B', len(p)) + p.encode('ascii') for p in nom.split('.') if p) + b'\x00'
+
+
+def _dns_nom_decode(data: bytes, offset: int):
+    """Décode un nom DNS (avec compression par pointeur, RFC 1035 §4.1.4) à
+    partir de `offset`. Retourne `(nom, offset_apres)` — l'offset retourné
+    reste dans le flux ORIGINAL même si un pointeur a été suivi (nécessaire
+    pour continuer à parcourir les enregistrements suivants)."""
+    labels, pos, premier_saut, boucles = [], offset, None, 0
+    while boucles < 128 and pos < len(data):
+        boucles += 1
+        longueur = data[pos]
+        if longueur == 0:
+            pos += 1
+            break
+        if (longueur & 0xC0) == 0xC0:
+            if pos + 1 >= len(data):
+                break
+            ptr = ((longueur & 0x3F) << 8) | data[pos + 1]
+            if premier_saut is None:
+                premier_saut = pos + 2
+            pos = ptr
+            continue
+        pos += 1
+        labels.append(data[pos:pos + longueur].decode('ascii', errors='replace'))
+        pos += longueur
+    return '.'.join(labels), (premier_saut if premier_saut is not None else pos)
+
+
+def _requete_dns(serveur: str, nom: str, qtype: int, qclass: int = 1, timeout: float = 2.0) -> dict:
+    """Requête DNS générique construite à la main (pas de dnspython, même
+    esprit que `_requete_dns_a` et l'encodage BER SNMP fait main ailleurs
+    dans ce projet) — utilisée pour interroger un équipement de la baie
+    COMME serveur DNS (bouton « DNS », demandé). `qclass=3` = CHAOS (pour
+    `version.bind`/`hostname.bind`), `qclass=1` = IN (résolution normale).
+    Retourne `{'ok': bool, 'rcode': int|None, 'reponses': [{'nom','type',
+    'ttl','valeur'}]}` — `ok` reflète RCODE=0 (NOERROR), pas seulement une
+    réponse reçue (un NXDOMAIN reste une réponse, juste pas OK)."""
+    try:
+        tid = int.from_bytes(os.urandom(2), 'big')
+        entete = struct.pack('>HHHHHH', tid, 0x0100, 1, 0, 0, 0)
+        paquet = entete + _dns_nom_encode(nom) + struct.pack('>HH', qtype, qclass)
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(timeout)
+        s.sendto(paquet, (serveur, 53))
+        data, _addr = s.recvfrom(4096)
+        s.close()
+    except Exception:
+        return {'ok': False, 'rcode': None, 'reponses': []}
+    if len(data) < 12:
+        return {'ok': False, 'rcode': None, 'reponses': []}
+    rid, flags, qdcount, ancount, _ns, _ar = struct.unpack('>HHHHHH', data[:12])
+    if rid != tid or not (flags & 0x8000):
+        return {'ok': False, 'rcode': None, 'reponses': []}
+    rcode = flags & 0x000F
+    pos = 12
+    for _ in range(qdcount):
+        _n, pos = _dns_nom_decode(data, pos)
+        pos += 4  # QTYPE + QCLASS
+    reponses = []
+    for _ in range(ancount):
+        if pos >= len(data):
+            break
+        nom_rr, pos = _dns_nom_decode(data, pos)
+        if pos + 10 > len(data):
+            break
+        rtype, _rclass, ttl, rdlength = struct.unpack('>HHIH', data[pos:pos + 10])
+        pos += 10
+        rdata = data[pos:pos + rdlength]
+        pos += rdlength
+        if rtype == 1 and len(rdata) == 4:                    # A
+            valeur = '.'.join(str(b) for b in rdata)
+        elif rtype == 16:                                     # TXT
+            morceaux, p2 = [], 0
+            while p2 < len(rdata):
+                ln = rdata[p2]
+                morceaux.append(rdata[p2 + 1:p2 + 1 + ln].decode('ascii', errors='replace'))
+                p2 += 1 + ln
+            valeur = ''.join(morceaux)
+        elif rtype == 5:                                      # CNAME
+            valeur, _ = _dns_nom_decode(data, pos - rdlength)
+        else:
+            valeur = rdata.hex()
+        reponses.append({'nom': nom_rr, 'type': rtype, 'ttl': ttl, 'valeur': valeur})
+    return {'ok': rcode == 0, 'rcode': rcode, 'reponses': reponses}
+
+
+_DNS_TEST_NOMS = ['www.google.com', 'cloudflare.com']
+
+
+def dns_test_equipement(ip: str, timeout: float = 2.0) -> dict:
+    """Interroge CET équipement comme serveur DNS — bouton « DNS » de la
+    baie (demandé : « interroger directement l'équipement comme serveur
+    DNS »). Deux volets, honnêtes sur ce qui est réellement accessible sans
+    identifiants :
+    1. `version.bind`/`hostname.bind` en classe CHAOS (RFC-supporté sans
+       authentification par la plupart des résolveurs récursifs courants —
+       BIND, dnsmasq, PowerDNS, Knot — donc plausible sur un routeur/box) ;
+    2. résolution de quelques noms publics connus, pour confirmer qu'il
+       répond effectivement comme résolveur et voir ce qu'il renvoie.
+    Ce n'est PAS un extrait du cache interne du résolveur : aucun protocole
+    standard n'expose un tel dump à distance sans accès administrateur
+    (SSH/API propriétaire selon le logiciel, hors de portée sans
+    identifiants que l'utilisateur devrait saisir lui-même) — capacités
+    réellement accessibles, pas une simulation de « table de cache ».
+    Retourne `{'ok', 'motif', 'version', 'hostname', 'resolutions':
+    [{'nom','ok','valeur'}]}`."""
+    r_version = _requete_dns(ip, 'version.bind', 16, qclass=3, timeout=timeout)
+    r_hostname = _requete_dns(ip, 'hostname.bind', 16, qclass=3, timeout=timeout)
+    repond = r_version['rcode'] is not None or r_hostname['rcode'] is not None
+    resolutions = []
+    for nom in _DNS_TEST_NOMS:
+        r = _requete_dns(ip, nom, 1, qclass=1, timeout=timeout)
+        if r['rcode'] is not None:
+            repond = True
+        ips = [x['valeur'] for x in r['reponses'] if x['type'] == 1]
+        resolutions.append({'nom': nom, 'ok': bool(ips), 'valeur': ', '.join(ips)})
+    if not repond:
+        return {'ok': False, 'motif': 'ne_repond_pas', 'version': '', 'hostname': '', 'resolutions': []}
+    version = (r_version['reponses'][0]['valeur'] if r_version['ok'] and r_version['reponses'] else '')
+    hostname = (r_hostname['reponses'][0]['valeur'] if r_hostname['ok'] and r_hostname['reponses'] else '')
+    return {'ok': True, 'motif': '', 'version': version, 'hostname': hostname, 'resolutions': resolutions}
+
+
 def detecter_dhcp_pirate(serveurs_attendus: list) -> list:
     """Best-effort : envoie un DHCPDISCOVER et collecte les DHCPOFFER.
 
@@ -2174,6 +2299,21 @@ _OID_ENT_NAME         = '1.3.6.1.2.1.47.1.1.1.1.7'      # entPhysicalName
 _OID_ENT_SERIAL       = '1.3.6.1.2.1.47.1.1.1.1.11'     # entPhysicalSerialNum
 _OID_ENT_MODEL        = '1.3.6.1.2.1.47.1.1.1.1.13'     # entPhysicalModelName
 _ENT_CLASSE_CHASSIS   = 3
+
+# ENTITY-SENSOR-MIB (RFC 3433), audit 2026-09 : température/ventilateurs,
+# jamais interrogés jusqu'ici (seule l'identité ENTITY-MIB ci-dessus l'était).
+# Générique et assez largement implémenté sur du matériel administrable ; un
+# agent qui ne l'expose pas répond simplement une table vide (repli
+# silencieux, même philosophie que le PoE : jamais de valeur fabriquée).
+_OID_ENT_SENSOR_TYPE   = '1.3.6.1.2.1.99.1.1.1.1'   # entPhySensorType (8 = celsius, 10 = rpm)
+_OID_ENT_SENSOR_SCALE  = '1.3.6.1.2.1.99.1.1.1.2'   # entPhySensorScale (exposant décimal)
+_OID_ENT_SENSOR_VALUE  = '1.3.6.1.2.1.99.1.1.1.4'   # entPhySensorValue
+_OID_ENT_SENSOR_STATUS = '1.3.6.1.2.1.99.1.1.1.5'   # entPhySensorOperStatus (1 = ok)
+_ENT_SENSOR_TYPE_CELSIUS = 8
+_ENT_SENSOR_TYPE_RPM     = 10
+_ENT_SENSOR_SCALE_DIV = {1: 1e-24, 2: 1e-21, 3: 1e-18, 4: 1e-15, 5: 1e-12, 6: 1e-9,
+                         7: 1e-6, 8: 1e-3, 9: 1.0, 10: 1e3, 11: 1e6, 12: 1e9,
+                         13: 1e12, 14: 1e15, 15: 1e18, 16: 1e21, 17: 1e24}
 # ── HOST-RESOURCES-MIB : inventaire logiciel gratuit, sans collecteur (#24)
 _OID_HR_STORAGE_DESCR = '1.3.6.1.2.1.25.2.3.1.3'        # hrStorageDescr
 _OID_HR_STORAGE_ALLOC = '1.3.6.1.2.1.25.2.3.1.4'        # hrStorageAllocationUnits (octets/unité)
@@ -2396,6 +2536,58 @@ def _stp_switch(ip, communautes, baseport_if):
         d.setdefault('etat', '')
         d.setdefault('pont_amont', '')
     return ports, {'racine': racine, 'port_racine': port_racine}
+
+
+def _capteurs_switch(ip, communautes):
+    """Température/ventilateurs via ENTITY-SENSOR-MIB (audit 2026-09, voir les
+    OID plus haut). `{}` si l'agent ne l'expose pas — repli silencieux, aucune
+    valeur fabriquée. Caché comme `_entite_physique` (quasi statique/lent à
+    changer, pas la peine de re-sonder à chaque cycle d'activité)."""
+    c = _activite_capteurs.get(ip)
+    if c and time.time() - c[0] < _ACTIVITE_SYSINFO_TTL:
+        return c[1]
+    types = _snmp_walk(_OID_ENT_SENSOR_TYPE, ip, communautes, max_vars=200)
+    if not types:
+        _activite_capteurs[ip] = (time.time(), {})
+        return {}
+    scales = _snmp_walk(_OID_ENT_SENSOR_SCALE, ip, communautes, max_vars=200)
+    valeurs = _snmp_walk(_OID_ENT_SENSOR_VALUE, ip, communautes, max_vars=200)
+    statuts = _snmp_walk(_OID_ENT_SENSOR_STATUS, ip, communautes, max_vars=200)
+
+    def _valeur(suf):
+        try:
+            v = float(valeurs.get(suf))
+        except (TypeError, ValueError):
+            return None
+        try:
+            echelle = int(statuts and scales.get(suf, 9) or 9)
+        except (TypeError, ValueError):
+            echelle = 9
+        return v * _ENT_SENSOR_SCALE_DIV.get(echelle, 1.0)
+
+    temps, ventilos = [], []
+    for suf, t in types.items():
+        try:
+            t = int(t)
+        except (TypeError, ValueError):
+            continue
+        if str(statuts.get(suf, '1')) != '1':   # pas "ok" (unavailable/nonoperational) -> ignoré
+            continue
+        v = _valeur(suf)
+        if v is None:
+            continue
+        if t == _ENT_SENSOR_TYPE_CELSIUS:
+            temps.append(v)
+        elif t == _ENT_SENSOR_TYPE_RPM:
+            ventilos.append(v)
+    res = {}
+    if temps:
+        res['temp_max_c'] = round(max(temps), 1)
+    if ventilos:
+        res['ventilos_rpm'] = sorted(round(v) for v in ventilos)
+        res['ventilo_arrete'] = any(v <= 0 for v in ventilos)
+    _activite_capteurs[ip] = (time.time(), res)
+    return res
 
 
 def _entite_physique(ip, communautes):
@@ -3400,6 +3592,65 @@ def _ip_depuis_suffixe_arp(suffixe: str) -> str:
     return '.'.join(str(o) for o in octets)
 
 
+def arp_table_equipement(ip, communautes, timeout=8.0):
+    """Table ARP (`ipNetToMediaPhysAddress`, repli IP-MIB moderne) lue EN
+    DIRECT sur CET équipement — bouton « ARP » de la baie de brassage
+    (demandé), lecture seule, aucune écriture, aucun cache (contrairement à
+    `_fdb_switch`, pensée pour le cycle d'activité périodique — ici on veut
+    la valeur du moment, pas une valeur qui peut dater de plusieurs
+    secondes). Retourne `{'ok': bool, 'motif': str, 'tronque': bool,
+    'entrees': [{'ip','mac','ifindex'}]}` triées par IP."""
+    from app import _snmp_presence
+    present, exploitable, detail = _snmp_presence(ip, communautes)
+    if not present:
+        return {'ok': False, 'motif': 'injoignable', 'detail': detail, 'entrees': []}
+    if not exploitable:
+        return {'ok': False, 'motif': 'snmp_refuse', 'detail': detail, 'entrees': []}
+    st = {}
+    brut = _snmp_walk_octets(_OID_ARP_PHYS, ip, communautes, max_rows=1500, stats=st, timeout=timeout)
+    if not brut:
+        brut = _snmp_walk_octets(_OID_ARP_PHYS_2, ip, communautes, max_rows=1500, stats=st, timeout=timeout)
+    entrees = []
+    for suffixe, mac_brut in brut.items():
+        ip_hote = _ip_depuis_suffixe_arp(suffixe)
+        mac = _mac_octets(mac_brut)
+        if not ip_hote or not mac:
+            continue
+        try:
+            ifindex = int(suffixe.split('.')[0])
+        except ValueError:
+            ifindex = None
+        entrees.append({'ip': ip_hote, 'mac': mac, 'ifindex': ifindex})
+    entrees.sort(key=lambda e: tuple(int(x) for x in e['ip'].split('.')))
+    return {'ok': True, 'motif': '', 'tronque': bool(st.get('tronque')), 'entrees': entrees}
+
+
+def mac_table_equipement(ip, communautes, timeout=8.0):
+    """Table MAC (bridge-MIB, FDB) lue sur CET équipement — bouton « MAC »
+    de la baie de brassage (demandé). Réutilise `_fdb_switch` (même relevé
+    que la vue d'activité — bénéficie de son cache court s'il vient d'être
+    interrogé, sinon relance un walk), enrichi du nom d'interface
+    (`_noms_interfaces`). Retourne `{'ok', 'motif', 'tronque', 'entrees':
+    [{'mac','ifindex','port_nom','vlan'}]}` triées par interface puis MAC."""
+    from app import _snmp_presence
+    present, exploitable, detail = _snmp_presence(ip, communautes)
+    if not present:
+        return {'ok': False, 'motif': 'injoignable', 'detail': detail, 'entrees': []}
+    if not exploitable:
+        return {'ok': False, 'motif': 'snmp_refuse', 'detail': detail, 'entrees': []}
+    par_if, info = _fdb_switch(ip, communautes)
+    noms = _noms_interfaces(ip, communautes) or {}
+    vlans = (info or {}).get('vlans', {})
+    entrees = []
+    for ifindex, macs in (par_if or {}).items():
+        nom = (noms.get(ifindex) or {}).get('nom') or ('if%s' % ifindex)
+        for mac in sorted(macs):
+            entrees.append({'mac': mac, 'ifindex': ifindex, 'port_nom': nom,
+                             'vlan': vlans.get((ifindex, mac))})
+    entrees.sort(key=lambda e: (e['ifindex'] if isinstance(e['ifindex'], int) else 0, e['mac']))
+    return {'ok': True, 'motif': '', 'tronque': bool((info or {}).get('tronque')), 'entrees': entrees}
+
+
 _HOTES_SNMP_MAX_EQUIP = 8
 _HOTES_SNMP_BUDGET_S = 10.0
 
@@ -4397,6 +4648,208 @@ def _json_charge(s):
         return json.loads(s or '{}')
     except Exception:
         return {}
+
+
+def _netic_kind_de(caps, hotes, nb_macs, est_uplink, app_types):
+    """Type d'équipement réseau détecté sur un port : d'abord les capacités
+    LLDP du voisin, sinon le type d'inventaire d'un appareil vu, sinon un
+    uplink / plusieurs MAC = équipement intermédiaire non identifié."""
+    c = set((caps or '').split(','))
+    if 'wlan' in c:
+        return 'ap'
+    if 'router' in c:
+        return 'router'
+    if 'bridge' in c:
+        return 'switch'
+    for h in hotes:
+        t = app_types.get(h.get('appareil_id'), '')
+        if t in ('Switch', 'Switch/AP'):
+            return 'switch'
+        if t in ('Routeur/Pare-feu', 'Box internet (FAI)'):
+            return 'router'
+        if t in ('Borne Wi-Fi', 'Pont Wi-Fi'):
+            return 'ap'
+    if est_uplink or (nb_macs and nb_macs > 3):
+        return 'switch'
+    return None
+
+
+def appareils_par_port_baie(client_id: int) -> dict:
+    """Projette la topologie L2 relevée en SNMP sur les ports de la baie de
+    brassage (refonte baie, lot 5) — lecture seule, données persistées
+    (`diag_topologie` + `diag_etat_port`), aucun SNMP synchrone.
+
+    Retourne `{"<baie_slot_id>:<baie_port>": {detected_kind, uplink, vlan,
+    n, devices: [{nom, ip, mac, via}]}}` :
+      - pour un port de switch/routeur monté en baie et calibré ;
+      - propagé au port de bandeau RJ qui aboutit sur ce port de switch
+        (cordon `lie_slot_id`/`lie_port_numero`).
+    """
+    from database import get_db
+    try:
+        topo = etat_topologie(client_id)
+    except Exception:
+        logger.debug('appareils_par_port_baie : etat_topologie a échoué', exc_info=True)
+        return {}
+    conn = get_db()
+    try:
+        maps = {}                       # (ip, port_index) -> (baie_slot_id, baie_port)
+        for r in conn.execute(
+                "SELECT equipement_ip, port_index, baie_slot_id, baie_port "
+                "FROM diag_etat_port WHERE client_id=? "
+                "AND baie_slot_id IS NOT NULL AND baie_port IS NOT NULL", (client_id,)):
+            maps[(r[0], r[1])] = (r[2], r[3])
+        liens = []                      # [((slot, port), (slot_switch, port_switch))]
+        for r in conn.execute(
+                "SELECT bp.slot_id, bp.numero, bp.lie_slot_id, bp.lie_port_numero "
+                "FROM baie_slot_ports bp JOIN baie_slots s ON s.id=bp.slot_id "
+                "WHERE s.client_id=? AND bp.lie_slot_id IS NOT NULL "
+                "AND bp.lie_port_numero IS NOT NULL", (client_id,)):
+            liens.append(((r[0], r[1]), (r[2], r[3])))
+        app = {r[0]: {'nom': r[1] or '', 'ip': r[2] or '', 'type': r[3] or ''}
+               for r in conn.execute(
+                   "SELECT id, nom_machine, adresse_ip, type_appareil "
+                   "FROM appareils WHERE client_id=?", (client_id,))}
+    except Exception:
+        logger.debug('appareils_par_port_baie : lecture DB', exc_info=True)
+        conn.close()
+        return {}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    app_types = {i: v['type'] for i, v in app.items()}
+    out = {}
+    for eq in topo.get('equipements', []):
+        ip = eq.get('ip')
+        # Âge de la cartographie de CET équipement (audit 2026-09) : diag_topologie
+        # n'est rafraîchi que manuellement/périodiquement — sans cette date, un
+        # VLAN/uplink de repli affiché hors du moniteur ne dit jamais depuis
+        # quand il date, contrairement à l'activité live qui a toujours un âge.
+        _topo_ts = None
+        try:
+            if eq.get('horodatage'):
+                _topo_ts = datetime.fromisoformat(
+                    str(eq['horodatage']).replace('Z', '+00:00')).timestamp()
+        except (TypeError, ValueError):
+            _topo_ts = None
+        for p in eq.get('ports', []):
+            cible = maps.get((ip, p.get('port_index')))
+            if not cible:
+                continue
+            slot, port = cible
+            devs, seen = [], set()
+            for h in p.get('hotes', []):
+                a = app.get(h.get('appareil_id')) or {}
+                nom = h.get('appareil_nom') or a.get('nom') or ''
+                mac = h.get('mac') or ''
+                if (nom, mac) in seen:
+                    continue
+                seen.add((nom, mac))
+                devs.append({'nom': nom or '(MAC inconnue)', 'ip': a.get('ip', ''),
+                             'mac': mac,
+                             'via': 'LLDP' if (p.get('voisin_caps') and h.get('appareil_id')) else 'FDB'})
+            info = {'detected_kind': _netic_kind_de(p.get('voisin_caps'), p.get('hotes', []),
+                                                    p.get('nb_macs'), p.get('est_uplink'), app_types),
+                    'uplink': bool(p.get('est_uplink')),
+                    'vlan': p.get('vlan') or None,
+                    'n': p.get('nb_macs') or len(devs),
+                    'devices': devs,
+                    # État du port au sens STP (audit 2026-09) — déjà relevé et
+                    # persisté (dot1dStpPortState) mais jamais propagé jusqu'ici :
+                    # un port "bloquant" est une redondance délibérément coupée
+                    # par le protocole, pas une panne, utile à distinguer d'un
+                    # port simplement down.
+                    'stp_etat': p.get('stp') or None,
+                    'stp_amont': bool(p.get('stp_amont')),
+                    'topo_age_ts': _topo_ts}
+            out[f"{slot}:{port}"] = info
+            for (bs, bp), (ss, sp) in liens:
+                if ss == slot and sp == port:
+                    out[f"{bs}:{bp}"] = dict(info, devices=list(devs))
+    return out
+
+
+# Capacité LLDP détectée -> type de baie proposé (refonte baie, lot 6) : même
+# principe que le `retypage` d'`analyser_brassage_baie` (capacités LLDP du
+# voisin contre le type déclaré), mais appliqué au `type_equipement` d'un
+# SLOT de la baie plutôt qu'au `type_appareil` de l'inventaire — les deux
+# listes de types se recoupent sur ces 3 valeurs, jamais exactement ailleurs.
+_CAP_TYPE_BAIE = (
+    (('wlan',), (), ('Borne WiFi',), 'Borne WiFi'),
+    (('router',), ('bridge', 'wlan'), ('Routeur/Pare-feu',), 'Routeur/Pare-feu'),
+    (('bridge',), ('router', 'wlan'), ('Switch',), 'Switch'),
+)
+
+
+def types_a_valider(client_id: int) -> dict:
+    """Types d'équipement de la baie à valider (refonte baie, lot 6) —
+    lecture seule, aucun SNMP synchrone (même profil que
+    `appareils_par_port_baie`, données déjà persistées par le relevé de
+    topologie continu).
+
+    Pour chaque slot dont l'appareil associé (`baie_slots.appareil_id`, MAC
+    principale ou secondaire via `appareil_macs`) a été vu comme VOISIN LLDP
+    d'un switch/routeur du client (`diag_topologie.voisin_mac`/`voisin_caps`),
+    compare la capacité détectée (pont→Switch, routeur→Routeur/Pare-feu,
+    wlan→Borne WiFi, voir `_CAP_TYPE_BAIE`) au `type_equipement` DÉCLARÉ sur
+    le slot — ne propose que si celui-ci ne correspond pas déjà.
+
+    Retourne `{"<slot_id>": {detected, source, current}}`, à titre indicatif
+    seulement (aucune écriture) : côté appelant, "Valider" réutilise la route
+    normale de modification du slot."""
+    from database import get_db
+    conn = get_db()
+    try:
+        appareil_slot = {r[0]: r[1] for r in conn.execute(
+            "SELECT appareil_id, id FROM baie_slots WHERE client_id=? AND appareil_id IS NOT NULL",
+            (client_id,))}
+        if not appareil_slot:
+            return {}
+        mac_slot = {}
+        for aid, mac in conn.execute(
+                "SELECT id, adresse_mac FROM appareils WHERE client_id=?", (client_id,)):
+            sid = appareil_slot.get(aid)
+            if sid and mac:
+                m = _norm_mac(mac)
+                if m:
+                    mac_slot[m] = sid
+        for m, aid in _macs_secondaires(conn, client_id).items():
+            sid = appareil_slot.get(aid)
+            if sid:
+                mac_slot.setdefault(m, sid)
+        if not mac_slot:
+            return {}
+
+        types_actuels = {r[0]: (r[1] or '') for r in conn.execute(
+            "SELECT id, type_equipement FROM baie_slots WHERE client_id=?", (client_id,))}
+
+        resultat, vus = {}, set()
+        for voisin_mac, voisin_caps in conn.execute(
+                "SELECT voisin_mac, voisin_caps FROM diag_topologie "
+                "WHERE client_id=? AND COALESCE(voisin_caps,'')!='' AND COALESCE(voisin_mac,'')!=''",
+                (client_id,)):
+            sid = mac_slot.get(_norm_mac(voisin_mac))
+            if not sid or sid in vus:
+                continue
+            caps = set((voisin_caps or '').lower().split(','))
+            actuel = types_actuels.get(sid, '')
+            for need, interdits, oks, propose in _CAP_TYPE_BAIE:
+                if all(n in caps for n in need) and not any(i in caps for i in interdits) and actuel not in oks:
+                    resultat[str(sid)] = {
+                        'detected': propose, 'current': actuel or '(non renseigné)',
+                        'source': 'LLDP : ' + ', '.join(sorted(caps)),
+                    }
+                    vus.add(sid)
+                    break
+        return resultat
+    except Exception:
+        logger.debug('network_diag: types_a_valider', exc_info=True)
+        return {}
+    finally:
+        conn.close()
 
 
 def proposer_topologie_baie(client_id: int) -> dict:
@@ -5746,6 +6199,17 @@ _ACTIVITE_FDB_TIMEOUT   = 3.0     # s — délai par datagramme du walk FDB/ARP 
 _ACTIVITE_VOISINS_MAX   = 6       # noms d'appareils listés dans l'infobulle d'un port (au-delà : « +N »)
 _CPT_SENTINELLE_32      = {2**31 - 1, 2**32 - 1}   # valeurs "compteur indisponible" de certains agents
 
+# Cadence des compteurs d'erreur/duplex (audit 2026-09) : normalement 1 cycle
+# sur 8 (`avec_err`, plus bas), pour ne pas alourdir chaque cycle de 3 s d'une
+# colonne de plus rarement utile. Mais un switch où une erreur vient d'être
+# vue reste en relevé d'erreur À CHAQUE cycle pendant `_ACTIVITE_ERR_WATCH_S`,
+# pour ne pas laisser un pic d'erreurs mettre jusqu'à 8 cycles (~4 min à la
+# cadence adaptative haute) à apparaître à l'écran.
+_ACTIVITE_ERR_WATCH_S   = 180.0
+_activite_err_watch     = {}   # ip -> epoch jusqu'à laquelle on force le relevé d'erreur chaque cycle
+_activite_err_prev      = {}   # (cid, ip, ifindex) -> {align_err, fcs_err, late_coll, exc_coll, in_disc, out_disc}
+_ACTIVITE_FLAP_FENETRE_S = 3600.0   # s — fenêtre de comptage des coupures récentes par port (_etats_prec[('flap', n)])
+
 # OIDs PoE (POWER-ETHERNET-MIB, RFC 3621) — table pethPsePortTable indexée
 # groupe.port (PAS l'ifIndex ; le composant « port » = le port physique, qu'on
 # recoupe donc directement au numéro de port de la baie).
@@ -5791,6 +6255,7 @@ _activite_sut        = {}   # (client_id, ip) -> (sysUpTime_ticks, epoch) : dt e
 _activite_fdb        = {}   # ip -> (epoch, {ifindex: set(mac normalisée)}, info) : FDB bridge-MIB + VLAN, cache _ACTIVITE_FDB_TTL
 _activite_pvid       = {}   # ip -> (epoch, [vid ordonnés par charge], {dot1dBasePort: vid}) : dot1qPvid
 _activite_entite     = {}   # ip -> (epoch, {modele, serie, descr, membres}) : ENTITY-MIB
+_activite_capteurs   = {}   # ip -> (epoch, {temp_max_c, ventilos_rpm, ventilo_arrete}) : ENTITY-SENSOR-MIB
 _activite_hostres    = {}   # ip -> (epoch, {logiciels, processus, stockage}) : HOST-RESOURCES-MIB
 _activite_fdb_baseport = {} # ip -> (epoch, {bridge_port: ifIndex}) : dot1dBasePortIfIndex, quasi statique
 _activite_fdb_dialecte = {} # ip -> 'dot1q' | 'dot1d' | 'dot1q-vlan' : quel jeu FDB répond
@@ -5843,14 +6308,19 @@ _TYPES_EQUIP_BAIE_RESEAU = ('Switch', 'Switch/AP', 'Routeur/Pare-feu')
 _TYPES_BANDEAU = ('Bandeau RJ', 'Patch Panel')
 
 
-def _switchs_baie(conn, client_id):
+def _switchs_baie(conn, client_id, nb_total_out=None):
     """Slots de baie interrogeables en SNMP : un slot associé à un appareil doté
     d'une IP. On accepte soit un `type_appareil` réseau connu, soit un slot dont
     le `type_equipement` (étiquette de la baie) dit « Switch »/« Routeur » même
     si l'appareil lié est typé autrement — le seul vrai prérequis SNMP est l'IP.
     UN slot par entrée (un switch 48 ports affiché en deux éléments de rack de
     24 → deux entrées, même IP) ; l'appelant mutualise le relevé SNMP par IP.
-    Limité à `_ACTIVITE_MAX_SWITCHS` IP distinctes."""
+    Limité à `diag_baie_max_switchs` (défaut `_ACTIVITE_MAX_SWITCHS`) IP
+    distinctes, pour ne pas marteler un site avec des dizaines de switchs à
+    chaque cycle de 3 s. `nb_total_out`, si fourni (liste à 1 élément), reçoit
+    le nombre RÉEL d'IP éligibles avant troncature — permet à l'appelant de
+    signaler « N/M switchs suivis » plutôt que de tronquer en silence."""
+    max_switchs = _cfg_int('diag_baie_max_switchs', _ACTIVITE_MAX_SWITCHS)
     ph = ','.join('?' * len(_TYPES_EQUIP_SNMP))
     ph2 = ','.join('?' * len(_TYPES_EQUIP_BAIE_RESEAU))
     rows = conn.execute(
@@ -5860,10 +6330,12 @@ def _switchs_baie(conn, client_id):
         f"AND (a.type_appareil IN ({ph}) OR s.type_equipement IN ({ph2})) "
         f"ORDER BY s.position",
         (client_id, *_TYPES_EQUIP_SNMP, *_TYPES_EQUIP_BAIE_RESEAU)).fetchall()
+    if nb_total_out is not None:
+        nb_total_out.append(len({r[2] for r in rows}))
     ips, switchs = [], []
     for slot_id, aid, ip, nom in rows:
         if ip not in ips:
-            if len(ips) >= _ACTIVITE_MAX_SWITCHS:
+            if len(ips) >= max_switchs:
                 continue
             ips.append(ip)
         switchs.append({'slot_id': slot_id, 'appareil_id': aid, 'ip': ip, 'nom': nom or ip})
@@ -6255,19 +6727,22 @@ def _poll_poe(ip, communautes):
             'total_w': _w(scal.get(_OID_POE_CONS_W, {}))}
 
 
-def _poll_switch_ports(ip, communautes, infos=None):
+def _poll_switch_ports(ip, communautes, infos=None, force_err=False):
     """Relevé SNMP des compteurs de TOUS les ports du switch, en UNE requête
     GETBULK multi-colonnes (auto-descriptif : chaque varbind porte son OID —
     pas d'hypothèse d'ordre). MINIMUM vital pour les LEDs : oper + octets +
     paquets = 5 colonnes (les erreurs, plus coûteuses, ne sont relevées qu'1
     cycle sur 8 — l'état « rouge » reste surtout du ressort du palier 3).
+    `force_err` (audit 2026-09, voir `_activite_err_watch`) : relève les
+    erreurs/duplex à CE cycle même hors du 1/8, pour un switch où une erreur
+    vient d'être vue récemment — évite jusqu'à 4 min de retard d'affichage.
     nom/type/vitesse viennent de `_noms_interfaces` (caché). Retourne
     ({ifindex: {...}}, ok, hc, sysuptime_ticks).
     NB : requêtes SÉRIE, jamais parallèles — un agent SNMP de switch bas de
     gamme est mono-thread et *drop* les requêtes concurrentes."""
     infos = infos or {}
     _activite_cyc[0] += 1
-    avec_err = (_activite_cyc[0] % 8 == 1)
+    avec_err = force_err or (_activite_cyc[0] % 8 == 1)
     a_hc = _activite_hc.get(ip)
     reprobe = (a_hc is False
                and _activite_cyc[0] >= _activite_capa_reprobe.get(ip, {}).get('hc', 0))
@@ -6279,7 +6754,9 @@ def _poll_switch_ports(ip, communautes, infos=None):
     if veut_32:
         oct_cols += [_OID_IF_IN_OCTETS, _OID_IF_OUT_OCTETS, _OID_IF_IN_UCAST, _OID_IF_OUT_UCAST]
     demandes = ([_OID_SYS_UPTIME, _OID_IF_OPER] + oct_cols
-                + ([_OID_IF_IN_ERRORS, _OID_IF_OUT_ERRORS] if avec_err else []))
+                + ([_OID_IF_IN_ERRORS, _OID_IF_OUT_ERRORS, _OID_IF_IN_DISCARDS, _OID_IF_OUT_DISCARDS,
+                    _OID_DOT3_ALIGN, _OID_DOT3_FCS, _OID_DOT3_LATECOLL, _OID_DOT3_EXCCOLL,
+                    _OID_DOT3_DUPLEX] if avec_err else []))
     cols = _snmp_bulk(ip, demandes, communautes)
 
     try:
@@ -6359,6 +6836,16 @@ def _poll_switch_ports(ip, communautes, infos=None):
         if avec_err:      # sinon : clés absentes → l'appelant conserve la valeur connue
             d['in_err'] = _i(_OID_IF_IN_ERRORS, suf)
             d['out_err'] = _i(_OID_IF_OUT_ERRORS, suf)
+            d['in_disc'] = _i(_OID_IF_IN_DISCARDS, suf)
+            d['out_disc'] = _i(_OID_IF_OUT_DISCARDS, suf)
+            d['align_err'] = _i(_OID_DOT3_ALIGN, suf)
+            d['fcs_err'] = _i(_OID_DOT3_FCS, suf)
+            d['late_coll'] = _i(_OID_DOT3_LATECOLL, suf)
+            d['exc_coll'] = _i(_OID_DOT3_EXCCOLL, suf)
+            # dot3StatsDuplexStatus : 1 inconnu, 2 half, 3 full (0/absent -> None,
+            # agent qui n'expose pas cette colonne, cas courant hors dot3 pur).
+            _dup = _i(_OID_DOT3_DUPLEX, suf, 0)
+            d['duplex'] = _dup if _dup in (2, 3) else None
         res[ifx] = d
     return res, bool(res), hc_seen, sysuptime
 
@@ -6825,94 +7312,6 @@ def _macs_infra_switch(ip, communautes):
     return macs
 
 
-def diagnostiquer_fdb_brute(client_id: int, max_exemples: int = 12) -> dict:
-    """Relevé BRUT de la table d'apprentissage MAC de chaque switch de la baie,
-    pour comprendre comment un agent SNMP défectueux formate ses MAC (retour
-    terrain : MAC préfixées `00:01` / `00:0A`, chaînes de 8 ou 10 octets…).
-
-    Aucune correction, aucune écriture : on montre exactement ce que le switch
-    renvoie. Par équipement :
-      - le dialecte bridge-MIB qui répond (dot1q / dot1d / contexte VLAN) ;
-      - pour un échantillon d'entrées FDB : la liste complète des
-        sous-identifiants de l'index, la MAC obtenue en gardant les 6 derniers,
-        et si elle est dans l'inventaire ;
-      - même chose pour la table ARP (`ipNetToMediaPhysAddress`), où la MAC est
-        une valeur OCTET STRING : nombre d'octets réellement reçus + hex.
-    """
-    from database import get_db
-    try:
-        from app import _snmp_presence
-    except Exception:
-        _snmp_presence = None
-    communautes = _communautes_snmp()
-    conn = get_db()
-    try:
-        inv = {}
-        for aid, nom, mac in conn.execute(
-                "SELECT id, nom_machine, adresse_mac FROM appareils "
-                "WHERE client_id=? AND COALESCE(adresse_mac,'')<>''", (client_id,)):
-            inv[_norm_mac(mac)] = nom or f"#{aid}"
-        for m, aid in _macs_secondaires(conn, client_id).items():
-            inv.setdefault(m, f"#{aid}")
-        switchs = _switchs_baie(conn, client_id)
-    finally:
-        conn.close()
-
-    vus_ip = {}
-    for sw in switchs:
-        vus_ip.setdefault(sw['ip'], sw['nom'])
-    equipements = []
-    for ip, nom in vus_ip.items():
-        e = {'ip': ip, 'nom': nom, 'snmp': 'ok', 'dialecte': '',
-             'fdb': {'nb': 0, 'longueurs': {}, 'exemples': []},
-             'arp': {'nb': 0, 'longueurs_octets': {}, 'exemples': []}}
-        if _snmp_presence:
-            present, exploitable, detail = _snmp_presence(ip, communautes)
-            if not exploitable:
-                e['snmp'] = detail or ('présent mais refusé' if present else 'aucune réponse SNMP')
-                equipements.append(e)
-                continue
-
-        # ── FDB : MAC dans l'index de l'OID ──
-        for dial, oid in (('dot1q', _OID_FDB_DOT1Q_PORT), ('dot1d', _OID_FDB_DOT1D_PORT)):
-            f = _snmp_walk(oid, ip, communautes, max_vars=600)
-            if not f:
-                continue
-            e['dialecte'] = dial
-            e['fdb']['nb'] = len(f)
-            for suf in f:
-                parts = str(suf).split('.')
-                n = len(parts)
-                e['fdb']['longueurs'][str(n)] = e['fdb']['longueurs'].get(str(n), 0) + 1
-                if len(e['fdb']['exemples']) < max_exemples:
-                    mac6 = _mac_depuis_suffixe(suf, 6)
-                    e['fdb']['exemples'].append({
-                        'sous_identifiants': [int(x) for x in parts if x.isdigit()],
-                        'mac_6_derniers': mac6,
-                        'dans_inventaire': inv.get(_norm_mac(mac6), '')})
-            break
-
-        # ── ARP : MAC en valeur OCTET STRING ──
-        for oid in (_OID_ARP_PHYS, _OID_ARP_PHYS_2):
-            a = _snmp_walk_octets(oid, ip, communautes, max_rows=400)
-            if not a:
-                continue
-            e['arp']['nb'] = len(a)
-            for suf, brut in a.items():
-                lb = len(brut or b'')
-                e['arp']['longueurs_octets'][str(lb)] = e['arp']['longueurs_octets'].get(str(lb), 0) + 1
-                if len(e['arp']['exemples']) < max_exemples:
-                    hexs = ':'.join('%02x' % b for b in (brut or b''))
-                    mac6 = _mac_octets(brut)
-                    e['arp']['exemples'].append({
-                        'octets_hex': hexs, 'nb_octets': lb,
-                        'mac_6_derniers': mac6,
-                        'dans_inventaire': inv.get(_norm_mac(mac6), '')})
-            break
-        equipements.append(e)
-    return {'equipements': equipements, 'nb_inventaire_mac': len(inv)}
-
-
 def _releve_mac_switch(ip, communautes, inv_mac, reference=None):
     """Point d'entrée unique : `_fdb_switch` (bridge + ARP + VLAN) puis
     `_fdb_corriger` (hypothèses de forme, réglage `diag_fdb_mode:<ip>`).
@@ -7118,9 +7517,18 @@ def _voisins_port(macs, inv_mac):
     'ids': set(appareil_id connus), 'detail': [...]}`.
 
     `detail` porte, pour chacun des appareils listés, `{nom, type, id, mac,
-    connu}` : le schéma de cascade de l'infobulle a besoin du **type** pour
-    choisir le symbole de chaque machine, ce que la liste de noms ne donnait
-    pas."""
+    ip, connu}` : le schéma de cascade de l'infobulle a besoin du **type**
+    pour choisir le symbole de chaque machine, ce que la liste de noms ne
+    donnait pas ; `ip` reste vide si `inv_mac` ne la porte pas (certains
+    appelants construisent encore des tuples à 3 éléments sans IP).
+
+    `detail` n'est PAS plafonné par `_ACTIVITE_VOISINS_MAX` (contrairement
+    à `noms`, réservé à l'infobulle compacte) — le tiroir « appareils du
+    port » (ouvrirAppareilsPort côté client) affiche la liste COMPLÈTE des
+    appareils vus, pas seulement ceux montrés dans l'infobulle ; avant ce
+    correctif, `detail` était tronqué à la même limite que `noms` et le
+    tiroir ne pouvait donc jamais montrer les appareils listés sous
+    « +N autres » dans l'infobulle (signalé en usage réel)."""
     noms, ids, detail, vus = [], set(), [], set()
     for mac in sorted(macs):
         hit = inv_mac.get(mac)
@@ -7128,23 +7536,25 @@ def _voisins_port(macs, inv_mac):
             ids.add(hit[0])
             libelle = hit[1] or _vendor(mac) or mac
             typ = (hit[2] or '') if len(hit) > 2 else ''
+            ip = (hit[3] or '') if len(hit) > 3 else ''
             aid = hit[0]
         else:
             libelle = _vendor(mac) or mac
-            typ, aid = '', None
+            typ, ip, aid = '', '', None
         if libelle in vus:
             continue
         vus.add(libelle)
         if len(noms) < _ACTIVITE_VOISINS_MAX:
             noms.append(libelle)
-            detail.append({'nom': libelle, 'type': typ, 'id': aid,
-                           'mac': mac, 'connu': bool(hit)})
+        detail.append({'nom': libelle, 'type': typ, 'id': aid,
+                       'mac': mac, 'ip': ip, 'connu': bool(hit)})
     return {'noms': noms, 'n': len(macs), 'ids': ids, 'detail': detail,
             'restants': max(0, len(macs) - len(noms))}
 
 
 def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot,
-                            noms_par_ip, topo_par_ip, fdb_par_ip, inv_mac, etats_prec_get):
+                            noms_par_ip, topo_par_ip, fdb_par_ip, inv_mac, etats_prec_get,
+                            fdb_meta_par_ip=None):
     """LEDs d'activité + contrôle de câblage pour les prises murales d'un bandeau RJ.
     Une prise murale N est reliée par le cordon de brassage (baie_slot_ports.lie_*)
     à un port de switch : on réutilise l'état SNMP de ce port, déjà relevé.
@@ -7221,6 +7631,7 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
             _prec[('casc', numero)] = cascade['type'] if cascade else None
 
             meta = (noms_par_ip.get(sw_ip) or {}).get(ifindex, {})
+            _vlan_pm = ((fdb_meta_par_ip or {}).get(sw_ip) or {}).get('pvid', {}).get(ifindex)
             ports_ui.append({
                 'slot_id': b_slot_id, 'numero': numero, 'prise_murale': True,
                 'etat': led['etat'], 'blink_ms': led['blink_ms'],
@@ -7230,7 +7641,7 @@ def _prises_murales_activite(conn, cid, ip_par_slot, etats_par_ip, mapping_par_s
                 'voisins': (voisins or {}).get('noms', []),
                 'voisins_restants': (voisins or {}).get('restants', 0),
                 'voisins_detail': (voisins or {}).get('detail', []),
-                'cascade': cascade})
+                'cascade': cascade, 'vlan': _vlan_pm})
     return ports_ui, journal_ops
 
 
@@ -7269,7 +7680,7 @@ def _presence_baie_ok(cid, ip, communautes):
 
 
 def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
-                             avec_fdb=True, double_froid=False):
+                             avec_fdb=True, double_froid=False, force_err=False):
     """Relevé SNMP complet d'un switch pour le cycle d'activité de la baie
     (FDB + interfaces + ports + PoE + sysinfo). Thread-safe : chaque helper SNMP
     est verrouillé par IP (`_fdb_lock`, verrou d'interfaces, cache sysinfo…), donc
@@ -7331,7 +7742,7 @@ def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
         t0 = time.time()
         infos = _noms_interfaces(ip, communautes)
         _t_poll = time.time()
-        cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos)
+        cur_ports, ok, hc, sut = _poll_switch_ports(ip, communautes, infos, force_err=force_err)
         _poll1_ms = (time.time() - _t_poll) * 1000
 
         # 1er cycle à froid, aucune référence : 2 relevés rapprochés → débit
@@ -7364,6 +7775,7 @@ def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
 
         poe = _poll_poe(ip, communautes) if ok else {}
         sysinfo = _lire_sysinfo(ip, communautes) if ok else {'sysname': '', 'sysdescr': ''}
+        capteurs = _capteurs_switch(ip, communautes) if ok else {}
         dms = int((time.time() - t0) * 1000)
         now = time.time()
 
@@ -7393,7 +7805,7 @@ def _relever_switch_activite(cid, ip, slot_id, nom, communautes, inv_mac,
         _activite_switch_ok[(cid, ip)] = ok
 
         calib = _maj_assistant_calibration(cid, slot_id, ip, cur_ports) if ok else None
-        return {'ip': ip, 'fdb': fdb, 'fdb_meta': fdb_meta,
+        return {'ip': ip, 'fdb': fdb, 'fdb_meta': fdb_meta, 'capteurs': capteurs,
                 'poll': (infos, cur_ports, ok, hc, dt_switch, reboot, poe, sysinfo, uptime_s),
                 'journal': journal, 'calib': calib, 'dms': dms}
     except Exception:
@@ -7545,6 +7957,7 @@ def _clients_avec_switch_baie():
 
 def _cycle_activite(clients):
     from database import get_local_db
+    from netdiag import analyse as _analyse
     communautes = _communautes_snmp()
     seuils = {'err': _cfg_int('diag_baie_activite_seuil_err', 20),
               'sat_pct': _cfg_float('diag_snmp_seuil_saturation_pct', 90),
@@ -7556,29 +7969,32 @@ def _cycle_activite(clients):
         try:
             conn = get_local_db()
             try:
-                switchs = _switchs_baie(conn, cid)
+                _nb_total = []
+                switchs = _switchs_baie(conn, cid, nb_total_out=_nb_total)
+                nb_switchs_total = _nb_total[0] if _nb_total else len(switchs)
                 equipements, ports_ui, detail_sw, detail_ports, detail_ifs = [], [], [], [], []
                 nb_muets = 0
                 ips_muets = set()  # dédup par IP : un switch sur 2 emplacements ne compte qu'une fois
                 poll_par_ip = {}   # ip -> (infos, cur_ports, ok, hc, dt_switch, reboot, poe, sysinfo, uptime_s)
                 dms_par_ip = {}    # ip -> durée du relevé SNMP de ce switch, en ms (bandeau d'info)
+                capteurs_par_ip = {}  # ip -> {temp_max_c, ventilos_rpm, ventilo_arrete} (ENTITY-SENSOR-MIB)
                 etats_par_ip = {}     # ip -> {ifindex: led}  (pour les prises murales d'un bandeau)
                 mapping_par_slot = {} # slot_id switch -> {numero: ifindex}
                 ip_par_slot = {}      # slot_id switch -> ip
                 fdb_par_ip = {}       # ip -> {ifindex: set(mac)} : FDB live (câblage + voisins)
                 fdb_meta_par_ip = {}  # ip -> meta du relevé FDB (tronque_taille, fusionne, tronquee…)
-                inv_mac = {}          # mac normalisée -> (appareil_id, nom_machine, type_appareil)
+                inv_mac = {}          # mac normalisée -> (appareil_id, nom_machine, type_appareil, adresse_ip)
                 if switchs:
                     _meta_aid = {}
-                    for _aid, _nom, _mac, _typ in conn.execute(
-                            "SELECT id, nom_machine, adresse_mac, type_appareil FROM appareils "
+                    for _aid, _nom, _mac, _typ, _ip in conn.execute(
+                            "SELECT id, nom_machine, adresse_mac, type_appareil, adresse_ip FROM appareils "
                             "WHERE client_id=?", (cid,)):
-                        _meta_aid[_aid] = (_nom, _typ)
+                        _meta_aid[_aid] = (_nom, _typ, _ip or '')
                         if _mac:
-                            inv_mac[_norm_mac(_mac)] = (_aid, _nom, _typ)
+                            inv_mac[_norm_mac(_mac)] = (_aid, _nom, _typ, _ip or '')
                     for _m, _aid in _macs_secondaires(conn, cid).items():
                         if _m not in inv_mac and _aid in _meta_aid:
-                            inv_mac[_m] = (_aid, _meta_aid[_aid][0], _meta_aid[_aid][1])
+                            inv_mac[_m] = (_aid, _meta_aid[_aid][0], _meta_aid[_aid][1], _meta_aid[_aid][2])
 
                 # ── amorçage depuis le dernier snapshot persisté ──
                 # À froid (app relancée, ou retour sur /baie après > 2 min), la
@@ -7618,7 +8034,8 @@ def _cycle_activite(clients):
                         r = _relever_switch_activite(
                             cid, kv[0], kv[1]['slot_id'], kv[1]['nom'],
                             communautes, inv_mac, avec_fdb,
-                            double_froid=(froid and (cid, kv[0]) not in _activite_sut))
+                            double_froid=(froid and (cid, kv[0]) not in _activite_sut),
+                            force_err=(time.time() < _activite_err_watch.get(kv[0], 0)))
                         with _prog_lock, _activite_lock:
                             p = _activite_progres.get(cid)
                             if p and p.get('phase') == 'releve':
@@ -7637,6 +8054,7 @@ def _cycle_activite(clients):
                         dms_par_ip[_r['ip']] = int(_r.get('dms', 0) or 0)
                         fdb_par_ip[_r['ip']] = _r['fdb']
                         fdb_meta_par_ip[_r['ip']] = _r.get('fdb_meta') or {}
+                        capteurs_par_ip[_r['ip']] = _r.get('capteurs') or {}
                         journal_ops.extend(_r['journal'])
                         if _r['calib']:
                             calib_a_appliquer.append(_r['calib'])
@@ -7701,8 +8119,18 @@ def _cycle_activite(clients):
 
                     _etats_prec = _activite_etat_mappe.setdefault((cid, slot_id), {})
 
+                    # VLAN tagués vus par port (audit 2026-09) : sous-produit du
+                    # même relevé FDB que le VLAN d'accès (_vlan_port plus bas) —
+                    # `vlans` = {(ifIndex, mac): vid}, on ne garde que l'ensemble
+                    # des vid par ifIndex. Un port qui porte plusieurs VLAN est un
+                    # trunk, pas juste un port d'accès sur le VLAN natif.
+                    _vlans_par_ifx = {}
+                    for (_ifx_v, _mac_v), _vid in ((fdb_meta_par_ip.get(ip) or {}).get('vlans') or {}).items():
+                        if _vid:
+                            _vlans_par_ifx.setdefault(_ifx_v, set()).add(_vid)
+
                     # ── état LED de CHAQUE port poll (mappé ou non) ──
-                    etats = {}
+                    etats, errs_par_ifindex = {}, {}
                     for ifindex, p in cur_ports.items():
                         if not p.get('oper_ok', True):
                             # ifOperStatus pas relevé ce cycle (réponse partielle) :
@@ -7726,6 +8154,28 @@ def _cycle_activite(clients):
                             'etat_pending': led_all.get('etat_pending'),
                             'etat_pending_n': led_all.get('etat_pending_n', 0)}
                         etats[ifindex] = led_all
+
+                        # Détail des erreurs physiques (CRC/FCS, collisions) et
+                        # duplex (audit 2026-09) : réutilise TEL QUEL le classement
+                        # pur de netdiag.analyse (déjà utilisé par le diagnostic
+                        # périodique), pour rester cohérent avec les mêmes classes
+                        # plutôt que d'inventer une 2e logique ici. `in_err`/etc ne
+                        # sont présents que sur un cycle « avec_err » (1/8, ou plus
+                        # souvent si `_activite_err_watch` force ce switch).
+                        err_classe = None
+                        if 'align_err' in p:
+                            pr_err = _activite_err_prev.get(cle_all)
+                            if pr_err:
+                                d_err = _analyse.deltas_port(p, pr_err, hc=bool(p.get('hc')))
+                                classe = _analyse.classer_erreur(p, d_err)
+                                if classe.get('classe'):
+                                    err_classe = classe
+                                    _activite_err_watch[ip] = time.time() + _ACTIVITE_ERR_WATCH_S
+                            _activite_err_prev[cle_all] = {
+                                k: p.get(k, 0) for k in (
+                                    'in_oct', 'out_oct', 'in_err', 'out_err', 'in_disc', 'out_disc',
+                                    'align_err', 'fcs_err', 'late_coll', 'exc_coll')}
+                        errs_par_ifindex[ifindex] = {'classe': err_classe, 'duplex': p.get('duplex')}
                         meta = infos.get(ifindex, {})
                         if meta.get('ethernet', True):
                             _pp = _port_physique_depuis_nom(meta.get('nom'))
@@ -7788,6 +8238,15 @@ def _cycle_activite(clients):
                                 journal_ops.append((f"{sw['nom']} port {numero} — redevient calme", 'info', ip))
                             elif _a and _a != 'down' and _b == 'down':
                                 journal_ops.append((f"{sw['nom']} port {numero} — lien coupé", 'warn', ip))
+                                # Historique de coupures (audit 2026-09) : un port
+                                # « up » au moment où on le consulte peut avoir
+                                # flappé plusieurs fois récemment sans que rien ne
+                                # le montre dans la vue d'activité live (seul le
+                                # palier 3, périodique, comptait ça jusqu'ici).
+                                _flaps = _etats_prec.setdefault(('flap', numero), collections.deque())
+                                _flaps.append(now)
+                                while _flaps and now - _flaps[0] > _ACTIVITE_FLAP_FENETRE_S:
+                                    _flaps.popleft()
                         _etats_prec[numero] = led['etat']
 
                         # historique (sparkline) : uniquement pour les ports mappés
@@ -7808,10 +8267,17 @@ def _cycle_activite(clients):
                             if _tn:
                                 _lim = _tn[:_ACTIVITE_VOISINS_MAX]
                                 _vois = {
+                                    # noms/restants restent plafonnés (infobulle
+                                    # compacte) ; detail porte TOUS les appareils
+                                    # (_tn entier, pas _lim) — le tiroir « appareils
+                                    # du port » a besoin de la liste complète, pas
+                                    # seulement de ceux montrés dans l'infobulle
+                                    # (même correctif que _voisins_port ci-dessus).
                                     'noms': [n for _a, n in _lim], 'n': len(_tn),
                                     'ids': {a for a, _n in _tn},
                                     'detail': [{'nom': n, 'type': '', 'id': a, 'mac': '',
-                                                'connu': True} for a, n in _lim],
+                                                'ip': _meta_aid.get(a, ('', '', ''))[2],
+                                                'connu': True} for a, n in _tn],
                                     'restants': max(0, len(_tn) - _ACTIVITE_VOISINS_MAX),
                                     'source': 'topologie'}
                         # Plusieurs MAC sur un port d'accès = un équipement
@@ -7821,6 +8287,19 @@ def _cycle_activite(clients):
                         # schéma.
                         _casc = (_classer_cascade(_macs_port, inv_mac)
                                  if _macs_port and len(_macs_port) >= 2 else None)
+                        # VLAN d'accès du port (dot1qPvid) — sous-produit du
+                        # relevé FDB live (_releve_mac_switch/_vlans_actifs,
+                        # déjà fait pour le bouton MAC), pas une sonde de plus.
+                        _vlan_port = (fdb_meta_par_ip.get(ip) or {}).get('pvid', {}).get(ifindex)
+                        # VLAN tagués (trunk) vus sur ce port, hors VLAN d'accès.
+                        _vlan_tagues = sorted((_vlans_par_ifx.get(ifindex) or set()) - {_vlan_port}) \
+                            if _vlan_port else sorted(_vlans_par_ifx.get(ifindex) or set())
+                        # Duplex + classe d'erreur physique (audit 2026-09) —
+                        # voir errs_par_ifindex ci-dessus, calculé une fois par
+                        # ifIndex dans la boucle `etats`.
+                        _erx = errs_par_ifindex.get(ifindex) or {}
+                        _erx_classe = _erx.get('classe') or {}
+                        _nb_coupures = len(_etats_prec.get(('flap', numero), ()))
 
                         ports_ui.append({'slot_id': slot_id, 'numero': numero,
                                          'etat': led['etat'], 'blink_ms': led['blink_ms'],
@@ -7833,7 +8312,11 @@ def _cycle_activite(clients):
                                          'voisins_restants': (_vois or {}).get('restants', 0),
                                          'voisins_detail': (_vois or {}).get('detail', []),
                                          'voisins_source': (_vois or {}).get('source', 'fdb'),
-                                         'cascade': _casc,
+                                         'cascade': _casc, 'vlan': _vlan_port, 'vlan_tagues': _vlan_tagues,
+                                         'duplex': _erx.get('duplex'),
+                                         'err_classe': _erx_classe.get('classe') or None,
+                                         'err_libelle': _erx_classe.get('libelle') or '',
+                                         'nb_coupures_1h': _nb_coupures,
                                          'cpt_pegge': (p or {}).get('cpt_pegge', False)})
                         if led['etat'] not in ('down', 'stale'):
                             nb_up += 1
@@ -7859,6 +8342,11 @@ def _cycle_activite(clients):
                             'manques': pr.get('manques', 0),
                             'cpt_pegge': (p or {}).get('cpt_pegge', False),
                             'poe': poe_ports.get(numero),
+                            'duplex': _erx.get('duplex'),
+                            'err_classe': _erx_classe.get('classe') or None,
+                            'err_libelle': _erx_classe.get('libelle') or '',
+                            'err_conseil': _erx_classe.get('conseil') or '',
+                            'nb_coupures_1h': _nb_coupures,
                             'hist': [[t, b, pp] for t, b, pp in list(h)],   # [ts, bps, pps]
                             'voisins': (_vois or {}).get('noms', []),
                             'voisins_n': (_vois or {}).get('n', 0),
@@ -7886,6 +8374,7 @@ def _cycle_activite(clients):
                                  f"({poe['total_w']}/{poe['budget_w']} W)", 'warn', ip))
                         _etats_prec['_poe_budget'] = poe_alerte
 
+                    _capt = capteurs_par_ip.get(ip) or {}
                     equipements.append({
                         'ip': ip, 'nom': sw['nom'], 'appareil_id': sw['appareil_id'],
                         'calibre': calibre, 'debit_total_bps': round(debit_total),
@@ -7893,7 +8382,9 @@ def _cycle_activite(clients):
                         'muet': not ok, 'poll_ms': dms_par_ip.get(ip, 0),
                         'compteurs_64bits': hc,
                         'nb_ports_mappes': len(mapping), 'nb_divergences': len(divergences),
-                        'fdb_nb_macs': sum(len(v) for v in (fdb_par_ip.get(ip) or {}).values())})
+                        'fdb_nb_macs': sum(len(v) for v in (fdb_par_ip.get(ip) or {}).values()),
+                        'temp_max_c': _capt.get('temp_max_c'),
+                        'ventilo_arrete': bool(_capt.get('ventilo_arrete'))})
                     detail_sw.append({
                         'ip': ip, 'nom': sw['nom'], 'appareil_id': sw['appareil_id'],
                         'slot_id': slot_id,
@@ -7911,6 +8402,9 @@ def _cycle_activite(clients):
                         'poe': bool(poe_ports), 'poe_alerte': poe_alerte,
                         'poe_total_w': poe.get('total_w'), 'poe_budget_w': poe.get('budget_w'),
                         'poe_nb_alimentes': sum(1 for x in poe_ports.values() if x['statut'] == 3),
+                        'temp_max_c': _capt.get('temp_max_c'),
+                        'ventilos_rpm': _capt.get('ventilos_rpm') or [],
+                        'ventilo_arrete': bool(_capt.get('ventilo_arrete')),
                         'fdb_nb_macs': sum(len(v) for v in (fdb_par_ip.get(ip) or {}).values()),
                         'fdb_incomplet': bool(fdb_meta_par_ip.get(ip, {}).get('tronque_taille')),
                         'fdb_fusionne': bool(fdb_meta_par_ip.get(ip, {}).get('fusionne')),
@@ -7930,7 +8424,8 @@ def _cycle_activite(clients):
                     pm_ports, pm_journal = _prises_murales_activite(
                         conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot,
                         noms_par_ip, topo_par_ip, fdb_par_ip, inv_mac,
-                        lambda sid: _activite_etat_mappe.setdefault((cid, sid), {}))
+                        lambda sid: _activite_etat_mappe.setdefault((cid, sid), {}),
+                        fdb_meta_par_ip=fdb_meta_par_ip)
                     ports_ui.extend(pm_ports)
                     journal_ops.extend(pm_journal)
             finally:
@@ -7944,6 +8439,7 @@ def _cycle_activite(clients):
             with _activite_lock:
                 _activite_resultat[cid] = {
                     'actif': True, 'ts': time.time(), 'nb_switchs': len({s['ip'] for s in switchs}),
+                    'nb_switchs_total': nb_switchs_total,
                     'nb_muets': nb_muets, 'motif': motif, 'cadence_s': round(_cadence[0]),
                     'calibre': bool(equipements) and all(e['calibre'] for e in equipements),
                     'equipements': equipements, 'ports': ports_ui}
@@ -8155,10 +8651,18 @@ def activite_baie(client_id: int) -> dict:
 
 # ── Moniteur (modale au-dessus de la baie) ──────────────────────────────────
 
-def moniteur_baie(client_id: int) -> dict:
+def moniteur_baie(client_id: int, since: float | None = None) -> dict:
     """Données du panneau moniteur : journal, détail par switch/port, liste des
     interfaces (pour la calibration), ports de baie à calibrer, état de la
-    capture. Enregistre aussi un battement (comme activite_baie)."""
+    capture. Enregistre aussi un battement (comme activite_baie).
+
+    `since` (audit 2026-09) : si fourni, l'historique de sparkline de chaque
+    port (`hist`, jusqu'à `_ACTIVITE_HIST_MAX` points) n'inclut QUE les points
+    plus récents que cet horodatage, au lieu de la fenêtre complète à chaque
+    poll de 2 s — le client (déjà en possession des points précédents) fusionne
+    lui-même. Réduit nettement la charge utile sur une baie à plusieurs
+    switchs bien remplis, sans rien perdre (le client redemande tout, `since`
+    omis, s'il n'a pas encore d'historique local pour un port)."""
     with _activite_lock:
         nouveau = client_id not in _activite_heartbeat
         _activite_heartbeat[client_id] = time.time()
@@ -8217,12 +8721,18 @@ def moniteur_baie(client_id: int) -> dict:
                          'restant_s': max(0, round(_CALIB_FENETRE - (time.time() - a['debut'])))}
             break
 
+    ports_out = detail.get('ports', [])
+    if since:
+        ports_out = [
+            {**p, 'hist': [h for h in p.get('hist', []) if h[0] > since]}
+            for p in ports_out]
+
     return {
         'ts': detail.get('ts'),
         'cadence_s': round(_cadence[0]),
         'calibration_assistant': calib,
         'switchs': detail.get('switchs', []),
-        'ports': detail.get('ports', []),
+        'ports': ports_out,
         'interfaces': detail.get('interfaces', []),
         'ports_baie': ports_baie,
         'journal': journal,
@@ -8859,6 +9369,57 @@ def _run_analyse_brassage(client_id: int):
     with _brassage_lock:
         _brassage_status.update({'running': False, 'progress': 100,
                                  'resultat': res, 'ts': time.time()})
+
+
+# ── Requêtes ponctuelles ARP/MAC/DNS d'un emplacement de baie (audit 2026-09) :
+# tâche de fond + statut interrogeable, même schéma que lancer_analyse_brassage
+# ci-dessus — un équipement lent ou injoignable (ARP jusqu'à 8 s de timeout,
+# DNS jusqu'à ~4 s) ne doit ni bloquer un thread de requête Flask, ni figer le
+# tiroir de la baie sur un spinner sans fin. Clé par (slot_id, type) plutôt
+# qu'un verrou global unique comme le brassage : ce sont des requêtes légères
+# et indépendantes (un seul équipement, pas tout le rack), plusieurs peuvent
+# tourner de front sans se gêner.
+_slot_query_lock    = threading.Lock()
+_slot_query_status  = {}      # (slot_id, type) -> {'running', 'resultat', 'ts'}
+_SLOT_QUERY_CACHE_S = 15.0    # court : donnée « de l'instant » (ARP/DNS), pas un confort de cache
+
+
+def lancer_requete_slot(slot_id: int, type_: str, fn) -> dict:
+    """Démarre `fn()` (sans argument, renvoie un dict jsonifiable) en thread
+    détaché pour ce (slot, type) si rien n'est déjà en cours pour cette même
+    clé. Retourne toujours l'état à afficher tout de suite (voir
+    `statut_requete_slot`) — le client reste sur la MÊME route pour poller,
+    comme `/api/baie/brassage/proposer`."""
+    cle = (slot_id, type_)
+    with _slot_query_lock:
+        deja = bool(_slot_query_status.get(cle, {}).get('running'))
+        if not deja:
+            ancien = _slot_query_status.get(cle) or {}
+            _slot_query_status[cle] = {'running': True, 'resultat': ancien.get('resultat'),
+                                       'ts': ancien.get('ts', 0)}
+    if not deja:
+        def _run():
+            try:
+                res = fn()
+            except Exception:
+                logger.exception('network_diag: requete_slot %s/%s', slot_id, type_)
+                res = {'ok': False, 'motif': 'erreur'}
+            with _slot_query_lock:
+                _slot_query_status[cle] = {'running': False, 'resultat': res, 'ts': time.time()}
+        threading.Thread(target=_run, daemon=True, name=f'BaieSlot-{type_}-{slot_id}').start()
+    return statut_requete_slot(slot_id, type_)
+
+
+def statut_requete_slot(slot_id: int, type_: str) -> dict:
+    """État de la requête ARP/MAC/DNS de ce (slot, type). `resultat` n'est
+    renvoyé que si le relevé est terminé ET frais (< `_SLOT_QUERY_CACHE_S`)."""
+    with _slot_query_lock:
+        st = dict(_slot_query_status.get((slot_id, type_)) or {})
+    if not st:
+        return {'en_cours': False, 'resultat': None}
+    frais = st.get('resultat') is not None and (time.time() - st.get('ts', 0)) < _SLOT_QUERY_CACHE_S
+    return {'en_cours': bool(st.get('running')),
+            'resultat': st['resultat'] if (frais and not st.get('running')) else None}
 
 
 # ── Capture de trafic à la demande (onglet « Trafic capturé ») ──────────────

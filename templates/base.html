@@ -312,7 +312,10 @@
         .topbar-gear:active { transform: rotate(30deg); }
 
         /* ── LAYOUT ── */
-        main { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem 2rem; }
+        /* 1400px laissait ~500px de marges mortes sur un écran 1920px (la norme
+           aujourd'hui) — remonté pour exploiter la largeur réelle tout en
+           gardant un plafond raisonnable sur un très grand écran (ultrawide). */
+        main { max-width: 1800px; margin: 0 auto; padding: 1.5rem 2rem 2rem; }
 
         /* ══════════════════════════════════════════════════════════════
            NAV VERTICAL (sidebar gauche)

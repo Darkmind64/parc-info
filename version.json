@@ -1,22 +1,25 @@
 {
-  "version": "2.32.11",
-  "release_date": "2026-09-10",
+  "version": "2.33.12",
+  "release_date": "2026-09-12",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.32.11",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.32.11/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.12/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.12/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.12/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.33.12",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.12/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.12/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.12/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.12/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.12/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Synchronisation Turso -- le rapport \"Changements depuis la derniere visite\" (table client_instantane) est desormais partage entre instances. Une photo de l'inventaire prise en fin de scan SUR SITE devient consultable depuis l'instance de bureau -- c'est tout l'objet de la fonctionnalite. Comme cette table entre dans la sync alors que des instantanes existent deja (id 1, 2, 3... identiques d'une instance a l'autre), un decalage anti-collision d'id est applique une seule fois par base au demarrage (_reclef_client_instantane) : les instantanes existants sont re-indexes dans une plage propre a la machine (~2^48), sans passer par les declencheurs de journal, sqlite_sequence recale. Sur : aucune table ne reference client_instantane.id et la colonne `reference` est un drapeau 0/1, pas un id. La copie initiale vers Turso est ensuite geree par _seed_tables_vides_sur_turso (v2.32.10). Suite de 2.32.9 (modifs qui revenaient en arriere) et 2.32.10 (regression + copie initiale). NON synchronisees : les tables diag_* (topologie, evenements reseau, metriques, diag_baie_snapshot) -- caches/series temporelles reconstruits localement par SNMP sur site, volontairement locaux.",
+    "new_features": "Baie de brassage : quatre correctifs/ajouts suite aux retours utilisateur. (1) Nettoyage de l'interface -- boutons de ping individuels par equipement supprimes (le ping global de toute la baie reste) ; bascules Sante/Cables retirees de la barre d'outils, les deux fonctionnalites sont desormais toujours actives ; releve de diagnostic interne 'FDB Brut' supprime integralement (bouton, route API, fonction, test dedie) ; bouton 'Vider' supprime ; presentation du volet Bibliotheque reprise sur le modele de la maquette (icone encadree, badge de provenance, survol avec legere elevation). (2) Le tiroir affichant les appareils vus derriere un port s'etirait sur toute la largeur de la fenetre au lieu de s'aligner sur la baie elle-meme -- corrige, recalcule desormais sur les bornes reelles de la baie. (3) Un port de switch menant a plusieurs appareils (cascade detectee) pouvait n'afficher aucune icone reseau alors que l'infobulle au survol montrait deja le detail complet -- l'icone reprend maintenant la meme donnee d'activite live en repli quand la cartographie de topologie n'a rien a offrir. (4) Les ports RJ de la baie (bandeau, disposition 1 ou 2 lignes) suivent desormais la taille d'affichage : plus grands sur un grand ecran, plus petits sur un ecran etroit, toujours sans deborder.",
     "improvements": [
-      "Sync Turso : le rapport \"Changements depuis la derniere visite\" est consultable depuis toutes les instances (client_instantane synchronisee, avec decalage anti-collision d'id)."
+      "Baie de brassage : interface allegee (ping par equipement, bascules Sante/Cables et FDB Brut retires, toujours actifs ou plus necessaires).",
+      "Baie de brassage : tiroir des appareils du port aligne sur la largeur reelle de la baie.",
+      "Baie de brassage : icone reseau fiabilisee sur les ports menant a plusieurs appareils.",
+      "Baie de brassage : taille des ports RJ proportionnelle a la fenetre, sans debordement."
     ]
   },
   "checksums": {
@@ -27,5 +30,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.32.11"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.12"
 }

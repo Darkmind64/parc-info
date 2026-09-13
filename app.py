@@ -2010,6 +2010,21 @@ def init_db():
     if 'col_index' not in cols_baie:
         c.execute("ALTER TABLE baie_slots ADD COLUMN col_index INTEGER DEFAULT 0")
 
+    # Migration : grille horizontale 10 -> 1000 (voir NB_COLS_BAIE). Demandé
+    # après retour utilisateur : un redimensionnement par crans de 10 % se
+    # sentait "cassé" comparé à la maquette, qui suit la souris au pixel.
+    # Rééchelonne ×100 les valeurs existantes (9/10 -> 900/1000, 5/10 ->
+    # 500/1000…) : mêmes proportions, mêmes emplacements visuels, juste
+    # beaucoup plus de graduations disponibles pour la suite. Drapeau dans
+    # `config` (table déjà créée plus haut dans init_db) : ne joue qu'une
+    # fois, jamais une seconde fois sur des valeurs déjà à la nouvelle
+    # échelle (une ré-exécution multiplierait par 100 une deuxième fois).
+    if not c.execute("SELECT 1 FROM config WHERE cle='_baie_grille_1000'").fetchone():
+        c.execute("UPDATE baie_slots SET col_index = CAST(COALESCE(col_index, 0) AS INTEGER) * 100")
+        c.execute("UPDATE baie_slots SET largeur_u = CAST(largeur_u AS INTEGER) * 100 WHERE largeur_u IS NOT NULL")
+        c.execute("INSERT OR REPLACE INTO config (cle, valeur, date_maj) VALUES ('_baie_grille_1000', '1', ?)",
+                   (_utcnow().isoformat(),))
+
     # Migration : colonnes identifiants appareils + carte graphique
     cols_app2 = [r[1] for r in conn.execute('PRAGMA table_info(appareils)').fetchall()]
     for col in ['user_login','user_password','admin_login','admin_password','anydesk_id','anydesk_password','carte_graphique']:
@@ -6587,9 +6602,19 @@ def _ports_avec_details(conn, slot_id):
         d = row_to_dict(r)
         d['cible_finale'] = ''
         d['cible_hors_ligne'] = None
+        # Équipement réseau déclaré (lie_type, voir plus bas) confirmé EN
+        # LIGNE (dernier ping réussi) — sert de repli léger côté client pour
+        # afficher l'anneau "détecté" sans attendre une cartographie de
+        # topologie complète (LLDP/FDB, plus lente et pas toujours lancée) :
+        # si l'équipement déclaré au bout du cordon répond, c'est déjà une
+        # confirmation suffisante que ce port dessert bien un équipement
+        # réseau réel (retour utilisateur : un port resté orange/"déclaré"
+        # alors que le switch en face est joignable en SNMP/ping).
+        d['cible_en_ligne'] = False
         d['lie_appareil_id'] = None
         lie_type_appareil = None
         lie_p_categorie = None
+        cible = None
         if d['appareil_id']:
             nom = d['nom_machine'] or ('Appareil #%d' % d['appareil_id'])
         elif d['peripherique_id']:
@@ -6642,6 +6667,7 @@ def _ports_avec_details(conn, slot_id):
                 # appareil simplement JAMAIS pingé s'affichait à tort comme
                 # "⚠️ hors ligne" dans la bulle du port relié.
                 d['cible_hors_ligne'] = bool(far_port[8]) and (far_port[3] == 0)
+                d['cible_en_ligne'] = bool(far_port[3])
                 d['lie_appareil_id'] = far_port[0]
                 lie_type_appareil = far_port[4]
             elif far_port and far_port[1]:
@@ -6650,6 +6676,7 @@ def _ports_avec_details(conn, slot_id):
             elif far_pm and far_pm[0]:
                 d['cible_finale'] = far_pm[2] or ('Appareil #%d' % far_pm[0])
                 d['cible_hors_ligne'] = bool(far_pm[8]) and (far_pm[3] == 0)
+                d['cible_en_ligne'] = bool(far_pm[3])
                 d['lie_appareil_id'] = far_pm[0]
                 lie_type_appareil = far_pm[4]
             elif far_pm and far_pm[1]:
@@ -6664,6 +6691,7 @@ def _ports_avec_details(conn, slot_id):
                 if far_app:
                     d['cible_finale'] = far_app[0] or ('Appareil #%d' % cible[2])
                     d['cible_hors_ligne'] = bool(far_app[3]) and (far_app[1] == 0)
+                    d['cible_en_ligne'] = bool(far_app[1])
                     d['lie_appareil_id'] = cible[2]
                     lie_type_appareil = far_app[2]
         else:
@@ -6676,6 +6704,10 @@ def _ports_avec_details(conn, slot_id):
         else:
             d['couleur'] = _couleur_port(d.get('type_appareil'), d.get('p_categorie'), d.get('usage_libre'), bool(d['lie_slot_id']))
         d['prise_murale'] = prises_par_numero.get(d['numero'])
+        # Type de l'équipement au bout du cordon (appareil lié, sinon
+        # type_equipement du slot en face) — sert au marqueur « équipement
+        # réseau déclaré sur ce port » côté client (refonte baie, lot 4).
+        d['lie_type'] = lie_type_appareil or (cible[1] if d['lie_slot_id'] and cible else '') or ''
         ports.append(d)
     return ports
 
@@ -7014,38 +7046,49 @@ def _reconcilier_prises_murales(conn, slot_id, nb_ports, type_equipement, prises
                 (slot_id,numero,piece,identification,appareil_id,peripherique_id,usage_libre,cable_couleur,cable_longueur,date_maj)
                 VALUES (?,?,?,?,?,?,?,?,?,?)''', (slot_id, numero, piece, ident, ap, pe, us, cc, cl, now))
 
+NB_COLS_BAIE = 1000
+"""Résolution de la grille horizontale d'un emplacement de baie. Était 10
+(dixièmes de la largeur du rack) — trop grossier pour un redimensionnement
+à la souris (crans de 10 % visibles, "cassé" comparé à la maquette qui
+suit le pixel) ; 1000 (millièmes) donne un pas <1px sur n'importe quel
+rack affiché, perçu comme continu, tout en restant un entier simple
+(aucun changement de type de colonne, aucune réécriture des comparaisons
+de chevauchement — voir _slots_en_collision). Les valeurs existantes sont
+rééchelonnées ×100 une seule fois au démarrage (voir init_db, drapeau
+config `_baie_grille_1000`)."""
+
 def _clamp_largeur_u(v, col=0):
-    """1-10 (dixièmes de la largeur du rack, position dans la grille à 10
-    colonnes du client — voir renderRack() dans baie_brassage.html). Valeur
-    manquante/invalide -> 10 (pleine largeur) : chaque emplacement a
-    désormais TOUJOURS une largeur explicite, plus de notion de "partage
-    égal automatique" entre éléments d'une même rangée (l'ancien design,
-    où largeur_u valait None tant que l'utilisateur n'avait jamais
-    redimensionné, cassait dès qu'un élément à la fois partiel en largeur
-    ET en hauteur (hauteur_u > 1) partageait sa rangée avec un autre —
-    voir le commentaire de renderRack() côté client pour le détail).
-    `col` (0-9, colonne de départ déjà bornée par l'appelant) plafonne en
-    plus la largeur à 10-col : sans ça, un slot à col=9 pourrait se voir
-    attribuer largeur_u=5, débordant de la grille à 10 colonnes (grid-column
-    créerait alors des pistes implicites au-delà de la 10e, décalant tout
-    ce qui suit dans la même rangée)."""
+    """1-NB_COLS_BAIE (position dans la grille horizontale du rack — voir
+    renderRack() dans baie_brassage.html). Valeur manquante/invalide ->
+    NB_COLS_BAIE (pleine largeur) : chaque emplacement a désormais TOUJOURS
+    une largeur explicite, plus de notion de "partage égal automatique"
+    entre éléments d'une même rangée (l'ancien design, où largeur_u valait
+    None tant que l'utilisateur n'avait jamais redimensionné, cassait dès
+    qu'un élément à la fois partiel en largeur ET en hauteur (hauteur_u > 1)
+    partageait sa rangée avec un autre — voir le commentaire de
+    renderRack() côté client pour le détail).
+    `col` (0 à NB_COLS_BAIE-1, colonne de départ déjà bornée par l'appelant)
+    plafonne en plus la largeur à NB_COLS_BAIE-col : sans ça, un slot en fin
+    de grille pourrait se voir attribuer une largeur débordant du rack
+    (grid-column créerait alors des pistes implicites au-delà de la
+    dernière, décalant tout ce qui suit dans la même rangée)."""
     if v in (None, '', 0, '0'):
-        n = 10
+        n = NB_COLS_BAIE
     else:
         try:
             n = int(v)
         except (TypeError, ValueError):
-            n = 10
-    n = min(10, max(1, n))
-    return min(n, max(1, 10 - col))
+            n = NB_COLS_BAIE
+    n = min(NB_COLS_BAIE, max(1, n))
+    return min(n, max(1, NB_COLS_BAIE - col))
 
 def _clamp_col_index(v):
-    """0-9 : position de départ dans la grille à 10 colonnes du rack."""
+    """0 à NB_COLS_BAIE-1 : position de départ dans la grille horizontale du rack."""
     try:
         n = int(v or 0)
     except (TypeError, ValueError):
         return 0
-    return min(9, max(0, n))
+    return min(NB_COLS_BAIE - 1, max(0, n))
 
 def _slots_en_collision(conn, cid, baie_nom, position, col_index, hauteur_u, largeur_u, exclude_id=None):
     """Retourne les slots de la baie dont le rectangle (rangées U × colonnes
@@ -7079,7 +7122,7 @@ def _slots_en_collision(conn, cid, baie_nom, position, col_index, hauteur_u, lar
     for r in conn.execute(sql, params).fetchall():
         s_id, s_pos, s_col, s_hu, s_lu, s_nom, s_type = r
         s_hu = s_hu or 1
-        s_lu = s_lu or 10
+        s_lu = s_lu or NB_COLS_BAIE
         s_col = s_col or 0
         s_fin_u = s_pos + s_hu - 1
         s_fin_col = s_col + s_lu - 1
@@ -7541,10 +7584,10 @@ def api_baie_deplacer_slot(id):
     if not actuel:
         conn.close()
         return jsonify({'error': 'Slot introuvable'}), 404
-    largeur_actuelle = actuel[0] or 10
+    largeur_actuelle = actuel[0] or NB_COLS_BAIE
     hauteur_actuelle = actuel[1] or 1
     baie_nom = actuel[2] or 'Baie principale'
-    new_col = min(new_col, max(0, 10 - largeur_actuelle))
+    new_col = min(new_col, max(0, NB_COLS_BAIE - largeur_actuelle))
     # Chevauchement avec un AUTRE élément (voir _slots_en_collision) — avant
     # (2.18.69), un dépôt écrasait silencieusement tout ce qui occupait
     # EXACTEMENT la case visée (jamais atteignable en pratique, on ne peut
@@ -7577,8 +7620,9 @@ def api_baie_deplacer_slot(id):
 @login_required
 def api_baie_supprimer():
     """Supprime une baie entière (tous ses emplacements) — pas un simple
-    « vider » côté client (toutVider(), qui garde la baie mais efface son
-    contenu) : ici la baie elle-même disparaît. Une baie n'existe
+    retrait d'équipements un par un (voir api_baie_slot, DELETE par id, qui
+    garde la baie mais efface son contenu emplacement par emplacement) : ici
+    la baie elle-même disparaît. Une baie n'existe
     qu'implicitement, comme valeur distincte de baie_slots.baie_nom (voir
     api_baie_slots ci-dessous) — la supprimer revient donc à supprimer tous
     les emplacements qui portent ce nom, y compris les emplacements
@@ -7682,15 +7726,211 @@ def api_baie_diag_erreurs():
     })
 
 
+@app.route('/api/baie/topologie-ports')
+@login_required
+def api_baie_topologie_ports():
+    """Topologie SNMP projetée sur les ports de la baie (refonte baie, lot 5) :
+    `{"<slot>:<port>": {detected_kind, uplink, vlan, n, devices:[...]}}`.
+    Alimente l'anneau « équipement réseau détecté » et le panneau
+    « appareils du port ». Lecture seule, aucun SNMP synchrone."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        return jsonify(network_diag.appareils_par_port_baie(cid))
+    except Exception:
+        logger.debug('api_baie_topologie_ports', exc_info=True)
+        return jsonify({})
+
+
+@app.route('/api/baie/ping-adresses', methods=['POST'])
+@login_required
+def api_baie_ping_adresses():
+    """Ping à la demande d'une liste d'adresses IP arbitraires (demandé) —
+    pour l'état de présence des appareils listés dans le tiroir « appareils
+    du port » (network_diag._voisins_port, FDB/topologie), qui ne sont pas
+    forcément dans l'inventaire (donc pas couverts par /api/ping/appareil ni
+    le watchdog périodique). Lecture réseau seule, aucune écriture — pas de
+    vérification ACL par client au-delà de la connexion : ce ne sont que des
+    IP déjà visibles par l'utilisateur dans SA propre baie.
+    Corps JSON : {"ips": ["192.168.1.10", ...]} (plafonné à 30, pings en
+    parallèle). Retourne {"<ip>": true|false}."""
+    ips = (request.get_json(silent=True) or {}).get('ips') or []
+    if not isinstance(ips, list):
+        return jsonify({'error': 'ips doit être une liste'}), 400
+    vues, adresses = set(), []
+    for ip in ips:
+        ip = (ip or '').strip()
+        if not ip or ip in vues:
+            continue
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        vues.add(ip)
+        adresses.append(ip)
+        if len(adresses) >= 30:
+            break
+    resultat = {}
+    if adresses:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(16, len(adresses)), thread_name_prefix='baie-ping') as ex:
+            futures = {ex.submit(_ping, ip): ip for ip in adresses}
+            for fut in concurrent.futures.as_completed(futures, timeout=5):
+                ip = futures[fut]
+                try:
+                    resultat[ip] = bool(fut.result())
+                except Exception:
+                    resultat[ip] = False
+    return jsonify(resultat)
+
+
+def _baie_slot_ip(id, cid):
+    """IP de l'appareil associé à un emplacement de baie — repli commun aux
+    routes ARP/MAC/DNS ci-dessous (demandé : boutons sur les switchs/
+    routeurs/box de la baie). Retourne `(ip, erreur_jsonify)` — `ip` vide et
+    `erreur_jsonify` posée si l'emplacement n'existe pas ou n'a pas d'IP."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT a.adresse_ip FROM baie_slots s LEFT JOIN appareils a ON a.id = s.appareil_id '
+        'WHERE s.id=? AND s.client_id=?', (id, cid)).fetchone()
+    conn.close()
+    if not row:
+        return '', (jsonify({'error': 'Emplacement introuvable'}), 404)
+    ip = (row[0] or '').strip()
+    if not ip:
+        return '', (jsonify({'ok': False, 'motif': 'pas_ip', 'entrees': []}), 200)
+    return ip, None
+
+
+def _lancer_baie_slot_requete(id, cid, type_, motif_vide, fn_requete, garder_snmp=True):
+    """Commun aux 3 routes ARP/MAC/DNS ci-dessous (audit 2026-09) : ces
+    requêtes bloquaient le thread Flask jusqu'à 8 s sur un équipement lent ou
+    injoignable — passées en tâche de fond + statut interrogeable
+    (`network_diag.lancer_requete_slot`), même schéma que « Deviner le
+    brassage ». Le client reste sur la MÊME route pour poller (comme
+    /api/baie/brassage/proposer), pas de route séparée à retenir."""
+    ip, erreur = _baie_slot_ip(id, cid)
+    if erreur:
+        return erreur
+    if garder_snmp and str(cfg_get('diag_snmp_actif', '0')) != '1':
+        return jsonify({'en_cours': False, 'resultat': {'ok': False, 'motif': 'snmp_inactif', **motif_vide}})
+    return jsonify(network_diag.lancer_requete_slot(id, type_, lambda: fn_requete(ip)))
+
+
+@app.route('/api/baie/slot/<int:id>/arp')
+@login_required
+def api_baie_slot_arp(id):
+    """Table ARP de l'équipement (switch/routeur/box) associé à cet
+    emplacement — bouton « ARP » de la baie (demandé). Lecture SNMP en
+    direct, aucune écriture."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return _lancer_baie_slot_requete(
+        id, cid, 'arp', {'entrees': []},
+        lambda ip: network_diag.arp_table_equipement(ip, network_diag._communautes_snmp()))
+
+
+@app.route('/api/baie/slot/<int:id>/mac')
+@login_required
+def api_baie_slot_mac(id):
+    """Table MAC (bridge-MIB, FDB) de l'équipement associé à cet emplacement
+    — bouton « MAC » de la baie (demandé). Lecture SNMP en direct, aucune
+    écriture."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return _lancer_baie_slot_requete(
+        id, cid, 'mac', {'entrees': []},
+        lambda ip: network_diag.mac_table_equipement(ip, network_diag._communautes_snmp()))
+
+
+@app.route('/api/baie/slot/<int:id>/dns')
+@login_required
+def api_baie_slot_dns(id):
+    """Interroge l'équipement associé à cet emplacement COMME serveur DNS
+    (bouton « DNS » de la baie, demandé) — requête directe en UDP/53,
+    indépendante du SNMP (pas de garde diag_snmp_actif ici)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    return _lancer_baie_slot_requete(
+        id, cid, 'dns', {'version': '', 'hostname': '', 'resolutions': []},
+        lambda ip: network_diag.dns_test_equipement(ip), garder_snmp=False)
+
+
+@app.route('/api/baie/bibliotheque')
+@login_required
+def api_baie_bibliotheque():
+    """Bibliothèque d'appareils à glisser dans la baie (refonte baie, lot 3) :
+    les appareils de l'inventaire du client pas encore placés dans UNE baie
+    (toutes les baies de ce client confondues — un appareil physique n'existe
+    qu'à un seul endroit, quel que soit le nom de la baie affichée) et, sur
+    demande explicite (`?snmp=1` — coûteux, sonde SNMP EN DIRECT, voir
+    network_diag.hotes_vus_snmp), les hôtes vus dans la table ARP des
+    équipements réseau SNMP du client mais absents de l'inventaire (IP ou MAC
+    déjà connue du client écartée : un doublon de ce qui figure déjà côté
+    inventaire n'apporterait rien de plus ici)."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    conn = get_db()
+    tous = [row_to_dict(r) for r in conn.execute(
+        'SELECT id, nom_machine, type_appareil, adresse_ip, adresse_mac, marque, modele '
+        'FROM appareils WHERE client_id=? ORDER BY nom_machine COLLATE NOCASE', (cid,)).fetchall()]
+    deja_places = {r[0] for r in conn.execute(
+        'SELECT appareil_id FROM baie_slots WHERE client_id=? AND appareil_id IS NOT NULL',
+        (cid,)).fetchall()}
+    a_placer = [a for a in tous if a['id'] not in deja_places]
+
+    resultat = {'appareils': a_placer, 'snmp': None}
+    if request.args.get('snmp') == '1':
+        ips_connues = {a['adresse_ip'] for a in tous if a.get('adresse_ip')}
+        macs_connues = {network_diag._norm_mac(a['adresse_mac']) for a in tous if a.get('adresse_mac')}
+        macs_connues |= set(network_diag._macs_secondaires(conn, cid).keys())
+        try:
+            snmp = network_diag.hotes_vus_snmp(cid)
+        except Exception:
+            logger.debug('api_baie_bibliotheque: hotes_vus_snmp', exc_info=True)
+            snmp = {'ok': False, 'motif': 'erreur', 'hotes': {}}
+        hotes = {ip: h for ip, h in (snmp.get('hotes') or {}).items()
+                 if ip not in ips_connues and network_diag._norm_mac(h.get('mac')) not in macs_connues}
+        resultat['snmp'] = {'ok': snmp.get('ok'), 'motif': snmp.get('motif'), 'hotes': hotes}
+    conn.close()
+    return jsonify(resultat)
+
+
+@app.route('/api/baie/types-a-valider')
+@login_required
+def api_baie_types_a_valider():
+    """Types d'équipement de la baie que la LLDP contredit (refonte baie,
+    lot 6) : `{"<slot_id>": {detected, source, current}}`. Lecture seule,
+    aucun SNMP synchrone — voir network_diag.types_a_valider."""
+    cid = get_client_id()
+    if not get_client_access(cid):
+        return jsonify({'error': 'Forbidden'}), 403
+    try:
+        return jsonify(network_diag.types_a_valider(cid))
+    except Exception:
+        logger.debug('api_baie_types_a_valider', exc_info=True)
+        return jsonify({})
+
+
 @app.route('/api/baie/activite/moniteur')
 @login_required
 def api_baie_activite_moniteur():
     """Panneau moniteur : journal + détail par switch/port + état capture.
-    Lecture seule, aucun SNMP synchrone (données calculées en tâche de fond)."""
+    Lecture seule, aucun SNMP synchrone (données calculées en tâche de fond).
+    `?since=<epoch>` (audit 2026-09) : ne renvoie que les points de sparkline
+    plus récents que cet horodatage (le client fusionne avec ce qu'il a déjà)."""
     cid = get_client_id()
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    return jsonify(network_diag.moniteur_baie(cid))
+    try:
+        since = float(request.args.get('since', '') or 0) or None
+    except ValueError:
+        since = None
+    return jsonify(network_diag.moniteur_baie(cid, since=since))
 
 
 @app.route('/api/baie/activite/capture', methods=['POST'])
@@ -7826,23 +8066,6 @@ def api_baie_brassage_fdb_mode():
         return jsonify({'error': 'Mode invalide'}), 400
     cfg_set(f'diag_fdb_mode:{ip}', '' if mode in ('', 'auto') else mode)
     return jsonify({'ok': True})
-
-
-@app.route('/api/baie/brassage/fdb-brut')
-@login_required
-def api_baie_brassage_fdb_brut():
-    """Relevé BRUT de la table MAC de chaque switch de la baie (aucune
-    correction, aucune écriture) : forme exacte des MAC renvoyées par l'agent
-    SNMP (sous-identifiants de l'index FDB, octets bruts de la table ARP) pour
-    diagnostiquer un agent défectueux. Relevé SNMP synchrone → action explicite."""
-    cid = get_client_id()
-    if not get_client_access(cid):
-        return jsonify({'error': 'Forbidden'}), 403
-    try:
-        return jsonify(network_diag.diagnostiquer_fdb_brute(cid))
-    except Exception:
-        logger.exception('fdb-brut')
-        return jsonify({'equipements': [], 'erreur': 'relevé impossible'})
 
 
 def _liste_cablage(conn, cid):

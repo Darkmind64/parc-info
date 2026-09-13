@@ -9,6 +9,8 @@ Contrôle :
   - l'isolation multi-client : les évènements d'un client ne fuient pas
 """
 import json
+import threading
+import time
 
 import pytest
 
@@ -721,16 +723,119 @@ def test_api_baie_activite_route_sans_snmp_synchrone(client, conn, deux_clients,
     assert r.status_code == 200 and 'actif' in r.get_json()
 
 
-def _mock_snmp_switch(monkeypatch, ports, fdb=None):
+def test_lancer_requete_slot_thread_de_fond(monkeypatch):
+    """audit 2026-09 : les boutons ARP/MAC/DNS de la baie bloquaient le thread
+    Flask jusqu'à 8 s sur un équipement lent — lancer_requete_slot doit rendre
+    la main immédiatement (en_cours=True, resultat=None) puis livrer le
+    résultat une fois le thread de fond terminé, sans jamais relancer un 2e
+    thread tant que le premier tourne encore (même clé slot/type)."""
+    network_diag._slot_query_status.clear()
+    debut, fin = threading.Event(), threading.Event()
+    appels = []
+
+    def _lente():
+        appels.append(1)
+        debut.set()
+        fin.wait(5)
+        return {'ok': True, 'entrees': ['résultat']}
+
+    d1 = network_diag.lancer_requete_slot(42, 'arp', _lente)
+    assert d1 == {'en_cours': True, 'resultat': None}
+    assert debut.wait(2), "le thread de fond n'a pas démarré"
+
+    # un 2e appel pendant que le 1er tourne encore ne relance PAS fn()
+    d2 = network_diag.lancer_requete_slot(42, 'arp', _lente)
+    assert d2 == {'en_cours': True, 'resultat': None}
+    assert len(appels) == 1
+
+    fin.set()
+    for _ in range(50):
+        st = network_diag.statut_requete_slot(42, 'arp')
+        if not st['en_cours']:
+            break
+        time.sleep(0.05)
+    assert st == {'en_cours': False, 'resultat': {'ok': True, 'entrees': ['résultat']}}
+
+    # une fois terminé, un nouvel appel relance bien un relevé frais (nouveaux
+    # Event : le précédent `fin` reste signalé, un 3e appel qui le réutiliserait
+    # rendrait la main tout de suite sans prouver qu'un thread neuf a démarré)
+    debut2, fin2 = threading.Event(), threading.Event()
+
+    def _lente2():
+        appels.append(2)
+        debut2.set()
+        fin2.wait(5)
+        return {'ok': True, 'entrees': ['résultat 2']}
+
+    d3 = network_diag.lancer_requete_slot(42, 'arp', _lente2)
+    assert d3 == {'en_cours': True, 'resultat': None}
+    assert debut2.wait(2), "le 2e thread de fond n'a pas démarré"
+    assert len(appels) == 2
+    fin2.set()
+
+
+def test_lancer_requete_slot_erreur_capturee(monkeypatch):
+    """Une exception dans fn() ne doit jamais rester coincée en 'running' pour
+    toujours — capturée, renvoyée comme un motif d'erreur exploitable."""
+    network_diag._slot_query_status.clear()
+
+    def _casse():
+        raise RuntimeError('agent injoignable')
+
+    network_diag.lancer_requete_slot(7, 'dns', _casse)
+    for _ in range(50):
+        st = network_diag.statut_requete_slot(7, 'dns')
+        if not st['en_cours']:
+            break
+        time.sleep(0.05)
+    assert st == {'en_cours': False, 'resultat': {'ok': False, 'motif': 'erreur'}}
+
+
+def test_api_baie_slot_arp_route_non_bloquante(client, conn, deux_clients, make_appareil, monkeypatch):
+    """Les routes /api/baie/slot/<id>/{arp,mac,dns} (audit 2026-09) rendent la
+    main tout de suite (thread de fond) — le client poll la MÊME route,
+    comme /api/baie/brassage/proposer."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.0.9')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.commit()
+    from config_helpers import cfg_set
+    cfg_set('diag_snmp_actif', '1')
+    network_diag._slot_query_status.clear()
+    fin = threading.Event()
+    monkeypatch.setattr(network_diag, 'arp_table_equipement',
+                        lambda ip, comm: (fin.wait(5), {'ok': True, 'entrees': [{'ip': ip}]})[1])
+    login_session(client, deux_clients['proprio'], cid)
+
+    r1 = client.get(f'/api/baie/slot/{slot_id}/arp')
+    assert r1.status_code == 200
+    d1 = r1.get_json()
+    assert d1['en_cours'] is True and d1['resultat'] is None
+
+    fin.set()
+    d2 = None
+    for _ in range(50):
+        d2 = client.get(f'/api/baie/slot/{slot_id}/arp').get_json()
+        if not d2['en_cours']:
+            break
+        time.sleep(0.05)
+    assert d2['en_cours'] is False
+    assert d2['resultat']['ok'] is True and d2['resultat']['entrees'] == [{'ip': '10.0.0.9'}]
+
+
+def _mock_snmp_switch(monkeypatch, ports, fdb=None, pvid=None):
     """ports = {ifindex: dict(oper,speed_mbps,in_oct,out_oct,in_pkts,out_pkts,in_err,out_err)}
-    fdb   = {ifindex: set(mac)} appris (FDB live) — vide par défaut."""
+    fdb   = {ifindex: set(mac)} appris (FDB live) — vide par défaut.
+    pvid  = {ifindex: vid} VLAN d'accès (dot1qPvid) — vide par défaut."""
     monkeypatch.setattr(network_diag, '_presence_baie_ok', lambda *a, **k: True)
     monkeypatch.setattr(network_diag, '_noms_interfaces',
                         lambda ip, c: {i: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True,
                                            'speed_mbps': ports[i].get('speed_mbps', 0)} for i in ports})
     monkeypatch.setattr(network_diag, '_poll_switch_ports',
-                        lambda ip, c, infos=None: (dict(ports), bool(ports), True, None))
-    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: (dict(fdb or {}), {}))
+                        lambda ip, c, infos=None, force_err=False: (dict(ports), bool(ports), True, None))
+    monkeypatch.setattr(network_diag, '_fdb_switch',
+                        lambda ip, c: (dict(fdb or {}), {'pvid': dict(pvid or {})}))
 
 
 def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, monkeypatch):
@@ -741,18 +846,66 @@ def test_cycle_activite_peuple_le_resultat(conn, deux_clients, make_appareil, mo
     conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1)", (slot_id,))
     conn.commit()
     # port baie 1 → nom 'Gi0/1' → ifIndex 1 (mapping par nom, aucune topologie)
+    # avec_fdb=False au 1er cycle (voir _cycle_activite) : le VLAN, sous-produit
+    # du relevé FDB, n'apparaît qu'une fois « réchauffé » (_activite_rechauffe).
     _mock_snmp_switch(monkeypatch, {1: dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0,
-                                            in_pkts=0, out_pkts=0, in_err=0, out_err=0)})
+                                            in_pkts=0, out_pkts=0, in_err=0, out_err=0)},
+                      pvid={1: 30})
+    monkeypatch.setattr(network_diag, '_activite_rechauffe', [1])  # avec_fdb=True
     network_diag._cycle_activite([cid])
     with network_diag._activite_lock:
         res = network_diag._activite_resultat.get(cid)
         detail = network_diag._activite_detail.get(cid)
     assert res and res['actif'] is True
     assert any(p['numero'] == 1 for p in res['ports'])
+    assert next(p for p in res['ports'] if p['numero'] == 1)['vlan'] == 30
     assert res['equipements'][0]['ip'] == '10.0.0.2'
     assert detail['switchs'][0]['compteurs_64bits'] is True
     assert detail['ports'][0]['numero'] == 1 and detail['ports'][0]['source_mapping'] == 'nom_port'
     assert any(i['ifindex'] == 1 for i in detail['interfaces'])   # liste complète des interfaces
+
+
+def test_cycle_activite_duplex_et_err_classe(conn, deux_clients, make_appareil, monkeypatch):
+    """audit 2026-09 : duplex + classe d'erreur physique (CRC/FCS, collisions)
+    apparaissent sur l'écran baie en réutilisant TEL QUEL netdiag.analyse
+    (classer_erreur), donc les mêmes classes que le diagnostic périodique.
+    Nécessite 2 cycles « avec erreurs » pour calculer un delta ; le 1er cycle
+    n'a rien à comparer donc ne classe rien."""
+    cid = deux_clients['cid_a']
+    sw = make_appareil(cid, nom_machine='SW', type_appareil='Switch', adresse_ip='10.0.2.2')
+    conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,1,?)", (cid, sw))
+    slot_id = conn.execute("SELECT id FROM baie_slots WHERE appareil_id=?", (sw,)).fetchone()[0]
+    conn.execute("INSERT INTO baie_slot_ports (slot_id, numero) VALUES (?,1)", (slot_id,))
+    conn.commit()
+    fcs = [0]
+
+    def _poll(ip, c, infos=None, force_err=False):
+        fcs[0] += 50   # compteur cumulatif qui grimpe à chaque cycle
+        port = dict(oper=1, speed_mbps=1000, in_oct=0, out_oct=0, in_pkts=0, out_pkts=0,
+                    in_err=0, out_err=0, in_disc=0, out_disc=0, align_err=0,
+                    fcs_err=fcs[0], late_coll=0, exc_coll=0, duplex=2)   # half-duplex
+        return ({1: port}, True, True, None)
+
+    monkeypatch.setattr(network_diag, '_presence_baie_ok', lambda *a, **k: True)
+    monkeypatch.setattr(network_diag, '_noms_interfaces',
+                        lambda ip, c: {1: {'nom': 'Gi0/1', 'alias': '', 'ethernet': True, 'speed_mbps': 1000}})
+    monkeypatch.setattr(network_diag, '_poll_switch_ports', _poll)
+    monkeypatch.setattr(network_diag, '_fdb_switch', lambda ip, c: ({}, {}))
+    monkeypatch.setattr(network_diag, '_activite_rechauffe', [1])
+
+    network_diag._cycle_activite([cid])   # 1er cycle : rien à comparer encore
+    with network_diag._activite_lock:
+        p1 = next(p for p in network_diag._activite_resultat[cid]['ports'] if p['numero'] == 1)
+    assert p1['duplex'] == 2 and p1['err_classe'] is None
+
+    network_diag._cycle_activite([cid])   # 2e cycle : fcs_err a grimpé -> classé
+    with network_diag._activite_lock:
+        p2 = next(p for p in network_diag._activite_resultat[cid]['ports'] if p['numero'] == 1)
+    # half-duplex sur un lien >=100 Mb/s est classé "duplex" en priorité par
+    # classer_erreur (voir netdiag/analyse.py), avant même le CRC/FCS.
+    assert p2['duplex'] == 2
+    assert p2['err_classe'] == 'duplex'
+    assert p2['err_libelle'] == 'Duplex mismatch'
 
 
 def test_cycle_activite_repli_topologie_quand_fdb_vide(conn, deux_clients, make_appareil, monkeypatch):
@@ -808,10 +961,14 @@ def test_prises_murales_activite(conn, deux_clients, make_appareil):
     _f = network_diag._prises_murales_activite
 
     # FDB : la bonne MAC est apprise sur l'ifIndex 42 -> câblage confirmé
+    # + VLAN d'accès (dot1qPvid) du port de switch au bout du cordon,
+    # sous-produit du relevé FDB (fdb_meta_par_ip[ip]['pvid']).
     pu, jo = _f(conn, cid, ip_par_slot, etats_par_ip, mapping_par_slot, noms_par_ip,
-                {}, {'10.0.0.2': {42: {'aa:bb:cc:00:00:01'}}}, inv_mac, lambda s: prec)
+                {}, {'10.0.0.2': {42: {'aa:bb:cc:00:00:01'}}}, inv_mac, lambda s: prec,
+                fdb_meta_par_ip={'10.0.0.2': {'pvid': {42: 20}}})
     assert len(pu) == 1 and pu[0]['prise_murale'] is True and pu[0]['numero'] == 5
     assert pu[0]['etat'] == 'traffic' and pu[0]['cable'] == 'ok' and pu[0]['cible'] == 'PC-COMPTA'
+    assert pu[0]['vlan'] == 20
     assert jo == []
 
     # FDB : le port apprend une AUTRE MAC -> incohérent, appareil vu nommé dans le journal
@@ -1225,7 +1382,8 @@ def test_cycle_activite_stale_apres_echecs(conn, deux_clients, make_appareil, mo
                                             in_pkts=1, out_pkts=0, in_err=0, out_err=0)})
     network_diag._cycle_activite([cid])
 
-    monkeypatch.setattr(network_diag, '_poll_switch_ports', lambda ip, c, infos=None: ({}, False, False, None))
+    monkeypatch.setattr(network_diag, '_poll_switch_ports',
+                        lambda ip, c, infos=None, force_err=False: ({}, False, False, None))
     for _ in range(2):
         network_diag._cycle_activite([cid])
         with network_diag._activite_lock:
@@ -1427,12 +1585,49 @@ def test_moniteur_baie_forme(conn, deux_clients):
     assert isinstance(d['journal'], list) and isinstance(d['interfaces'], list)
 
 
+def test_moniteur_baie_since_filtre_hist(conn, deux_clients, monkeypatch):
+    """audit 2026-09 : `since` ne renvoie que les points de sparkline plus
+    récents que cet horodatage — le moniteur (poll 2 s) n'a plus besoin de
+    retransmettre les 60 points d'historique à chaque tick."""
+    cid = deux_clients['cid_a']
+    hist = [[100, 1000, 10], [101, 1100, 11], [102, 1200, 12]]
+    monkeypatch.setattr(network_diag, '_activite_detail',
+                        {cid: {'ts': '2026-09-13T00:00:00Z', 'switchs': [],
+                               'ports': [{'ip': '10.0.0.2', 'numero': 1, 'hist': list(hist)}],
+                               'interfaces': []}})
+    complet = network_diag.moniteur_baie(cid)
+    assert complet['ports'][0]['hist'] == hist   # sans `since` : tout, comme avant
+
+    partiel = network_diag.moniteur_baie(cid, since=101)
+    assert partiel['ports'][0]['hist'] == [[102, 1200, 12]]
+
+    vide = network_diag.moniteur_baie(cid, since=200)
+    assert vide['ports'][0]['hist'] == []
+
+
 def test_route_moniteur_forme_et_acl(client, deux_clients):
     cid = deux_clients['cid_a']
     login_session(client, deux_clients['lecteur'], cid)          # lecture seule suffit
     r = client.get('/api/baie/activite/moniteur')
     assert r.status_code == 200
     assert set(r.get_json()) >= {'switchs', 'ports', 'interfaces', 'ports_baie', 'journal', 'capture', 'snmp_actif'}
+
+
+def test_route_moniteur_transmet_since(client, deux_clients, monkeypatch):
+    """`?since=` (audit 2026-09) doit être lu et transmis à moniteur_baie —
+    valeur absente/invalide -> None, sans lever d'erreur 400/500."""
+    cid = deux_clients['cid_a']
+    login_session(client, deux_clients['lecteur'], cid)
+    captes = []
+    monkeypatch.setattr(network_diag, 'moniteur_baie',
+                        lambda c, since=None: captes.append(since) or {'switchs': [], 'ports': [],
+                            'interfaces': [], 'ports_baie': {}, 'journal': [], 'capture': {}, 'snmp_actif': False})
+    assert client.get('/api/baie/activite/moniteur').status_code == 200
+    assert captes[-1] is None
+    assert client.get('/api/baie/activite/moniteur?since=123.5').status_code == 200
+    assert captes[-1] == 123.5
+    assert client.get('/api/baie/activite/moniteur?since=pas-un-nombre').status_code == 200
+    assert captes[-1] is None
 
 
 def test_capturer_trafic_indisponible(monkeypatch):
@@ -1489,6 +1684,28 @@ def test_switchs_baie_repli_type_equipement(conn, deux_clients, make_appareil):
     conn.commit()
     ips = [s['ip'] for s in network_diag._switchs_baie(conn, cid)]
     assert '10.0.0.7' in ips
+
+
+def test_switchs_baie_plafond_configurable_et_total(conn, deux_clients, make_appareil):
+    """audit 2026-09 : le plafond de switchs suivis en direct par cycle est
+    paramétrable (diag_baie_max_switchs) et `nb_total_out` rapporte le nombre
+    RÉEL de switchs éligibles avant troncature, pour que l'UI puisse signaler
+    « N/M switchs suivis » au lieu de tronquer en silence."""
+    from config_helpers import cfg_set
+    cid = deux_clients['cid_a']
+    for i in range(3):
+        aid = make_appareil(cid, nom_machine=f'SW{i}', type_appareil='Switch', adresse_ip=f'10.0.1.{i}')
+        conn.execute("INSERT INTO baie_slots (client_id, position, appareil_id) VALUES (?,?,?)",
+                     (cid, i + 1, aid))
+    conn.commit()
+    cfg_set('diag_baie_max_switchs', '2')
+    total = []
+    switchs = network_diag._switchs_baie(conn, cid, nb_total_out=total)
+    assert len(switchs) == 2
+    assert total == [3]
+    cfg_set('diag_baie_max_switchs', '10')  # remis à une valeur large pour les autres tests du module
+    switchs2 = network_diag._switchs_baie(conn, cid)
+    assert len(switchs2) == 3
 
 
 def test_cycle_activite_motif_sans_switch(conn, deux_clients):

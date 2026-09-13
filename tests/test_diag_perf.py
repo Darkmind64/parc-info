@@ -117,7 +117,7 @@ def test_relever_switch_activite_sans_fdb_saute_le_walk(monkeypatch):
     monkeypatch.setattr(N, '_releve_mac_switch',
                         lambda *a, **k: appels.__setitem__('fdb', appels['fdb'] + 1) or ({}, {}))
     monkeypatch.setattr(N, '_noms_interfaces', lambda ip, c: {})
-    monkeypatch.setattr(N, '_poll_switch_ports', lambda ip, c, infos=None: ({}, True, False, None))
+    monkeypatch.setattr(N, '_poll_switch_ports', lambda ip, c, infos=None, force_err=False: ({}, True, False, None))
     monkeypatch.setattr(N, '_poll_poe', lambda ip, c: {})
     monkeypatch.setattr(N, '_lire_sysinfo', lambda ip, c: {'sysname': 'SW', 'sysdescr': ''})
     monkeypatch.setattr(N, '_maj_assistant_calibration', lambda *a, **k: None)

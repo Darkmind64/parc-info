@@ -1,40 +1,485 @@
-PARCINFO_VERSION=2.32.11
-RELEASE_DATE=2026-09-10
-BUILD_NUMBER=2026091003
+PARCINFO_VERSION=2.33.12
+RELEASE_DATE=2026-09-13
+BUILD_NUMBER=2026091302
 GIT_BRANCH=master
 STATUS=STABLE
 
-# Version 2.32.11 - Sync Turso : « Changements depuis la dernière visite » partagé
+# Version 2.33.12 - Baie de brassage : duplex, erreurs physiques, capteurs,
+# coupures, STP, VLAN trunk, age de la topologie (audit complet, 13 lots)
 #
-# La table client_instantane (photo compacte de l'inventaire prise en fin de
-# scan, base du rapport « Changements depuis la dernière visite ») entre dans
-# la synchronisation Turso : une photo prise SUR SITE devient consultable
-# depuis l'instance de bureau.
+# Demande : audit complet du mecanisme de collecte SNMP de la baie (ce qui
+# est collecte, comment, comment c'est affiche) + ameliorations proposees
+# via un artefact de decision (14 pistes, 13 validees, 1 discutee puis
+# abandonnee). Tout implemente en un seul lot.
 #
-# Anti-collision d'id. Cette table est ajoutée au suivi alors que des
-# instantanés existent déjà sur les bases en production — avec des id 1, 2,
-# 3… IDENTIQUES d'une instance à l'autre. Un simple UPSERT de sync
-# (_seed_tables_vides_sur_turso, v2.32.10) les écraserait. app.init_db() appelle
-# donc _reclef_client_instantane() une seule fois par base (drapeau `config`
-# _client_instantane_reclef_v1) : les instantanés existants sont ré-indexés
-# dans la plage propre à la machine (offset ~2^48, le même que
-# l'anti-collision sqlite_sequence), triggers _trg_journal_* suspendus le
-# temps de l'opération, sqlite_sequence recalé sur le nouveau max.
-#   Sûr sans re-mapping : aucune table ne référence client_instantane.id, et
-#   la colonne `reference` est un drapeau 0/1 (« photo épinglée »), pas un id.
-# La copie initiale vers Turso enchaîne ensuite via _seed_tables_vides_sur_turso.
+# MECANISME DE COLLECTE
+# (1) Plafond diag_baie_max_switchs (defaut 8, avant fige en dur) -
+# _switchs_baie rapporte le nombre total eligible, bandeau #baie-infob
+# signale "N/M switchs suivis" des que le plafond tronque.
+# (2) _activite_err_watch (par IP, fenetre 180 s) : un switch ou une
+# erreur vient d'etre vue reste sonde chaque cycle au lieu d'attendre le
+# prochain cycle 1/8 (jusqu'a 4 min de retard avant).
+# (3) lancer_requete_slot/statut_requete_slot (thread de fond + statut
+# pollable, meme schema que "Deviner le brassage") : les boutons ARP/MAC/
+# DNS ne bloquent plus le thread Flask jusqu'a 8 s.
+# (4) moniteur_baie(cid, since=) ne renvoie que les nouveaux points de
+# sparkline ; le client (MoniteurModal._fusionnerHist) les fusionne dans
+# un cache local au lieu de retransmettre 60 points a chaque poll de 2 s.
 #
-# Laissé LOCAL volontairement : les tables diag_* (diag_topologie,
-# diag_reseau_evenements, diag_metriques, diag_baie_snapshot…) — caches et
-# séries temporelles reconstruits par le SNMP sur site, sans intérêt à
-# distance (diag_baie_snapshot est réécrit toutes les ~5 min → tempête de
-# sync pour rien).
+# NOUVELLES DONNEES (SNMP deja relevees ailleurs dans l'app ou colonnes
+# standard jamais interrogees)
+# (6)(7) Duplex + classe d'erreur physique (CRC/FCS, collisions) : colonnes
+# dot3 relevees dans _poll_switch_ports, classees en reutilisant TEL QUEL
+# netdiag.analyse.deltas_port/classer_erreur (meme classification que le
+# diagnostic periodique). Affiche dans l'infobulle, l'inspecteur, le
+# moniteur.
+# (8) Temperature/ventilateurs via ENTITY-SENSOR-MIB (_capteurs_switch,
+# jamais interroge jusqu'ici), repli silencieux si l'agent ne l'expose pas
+# - meme philosophie que le PoE. Nouveau bloc "Capteurs" dans l'inspecteur
+# d'equipement + en-tete du moniteur.
+# (9) Historique de coupures (flapping) sur 1 h par port, accumule dans
+# _etats_prec, affiche partout ou l'activite live l'est deja.
+# (10) Etat STP (bloquant/apprentissage/transmission) + "vers la racine",
+# deja persiste mais jete avant d'atteindre l'ecran baie - propage jusqu'a
+# l'inspecteur de port.
+# (11) Violation de port-security/limite MAC : decision de NE PAS
+# implementer (MIB majoritairement proprietaire, ROI incertain).
 #
-# À déployer sur TOUTES les instances. Tests test_sync_client_instantane.py
-# (10 vérifs). 428 tests pytest + tests racine OK.
+# AFFICHAGE
+# (12) VLAN tagues d'un trunk (au-dela du seul VLAN d'acces deja affiche
+# en 2.33.11), deduits de la meme FDB.
+# (13) Age de la cartographie de topologie (appareils_par_port_baie),
+# affiche "detecte il y a 3 j" dans l'inspecteur quand la source est la
+# topologie plutot que le relevé live.
+# (14) PoE deja correctement libelle ("plafond de classe, pas une
+# mesure"), verifie n'apparaitre qu'au bon endroit (moniteur) - aucun
+# changement necessaire.
 #
-# ---------------------------------------------------------------------------
+# NON RETENU
+# (5) Pre-chauffe de fond non filtree par activite du site - explique en
+# detail (regression 2.24.0 documentee), la piste "client archive"
+# proposee ne correspond a aucun champ existant sur la table clients ;
+# creer cette notion juste pour cette optimisation (cout reseau deja
+# negligeable) serait disproportionne. Abandonne, aucun code change.
 #
+# Verifie en navigateur pour chaque ajout (infobulle port/prise murale,
+# inspecteur, moniteur, bandeau d'info). 429 tests pytest OK (422 + 7
+# nouveaux : lancer_requete_slot, route ARP non bloquante, plafond
+# configurable, duplex+classe d'erreur, filtre since du moniteur).
+
+# Version 2.33.11 - Baie de brassage : VLAN dans les infobulles/inspecteur,
+# infos FAI sur les box internet
+#
+# Demandé : ajouter le VLAN dans les infobulles des ports et dans
+# l'inspecteur de port ; sur les box internet, ajouter des infos comme
+# l'IP externe et les DNS externes.
+#
+# (1)(2) VLAN - le relevé SNMP d'activité de la baie calcule déjà le VLAN
+# d'accès (dot1qPvid) par port, en sous-produit du relevé FDB
+# (_releve_mac_switch/_vlans_actifs, déjà fait pour le bouton MAC) - non
+# exploité jusqu'ici. network_diag._cycle_activite : ajout de 'vlan' dans
+# le dict de chaque port (boucle principale switch/routeur ET prises
+# murales d'un bandeau RJ, via _prises_murales_activite qui reçoit
+# désormais fdb_meta_par_ip). Côté client : rowsActivitePort() (lu par les
+# infobulles de port ET de prise murale) affiche une ligne VLAN quand
+# a.vlan est présent ; PortModal.ouvrir() (inspecteur) affiche la même
+# valeur (repli sur le VLAN de la topologie, _neticDetecte, si le relevé
+# live n'a encore rien remonté).
+#
+# (3) Box internet (FAI) - IP externe / DNS externes / opérateur.
+# Clarifié avec l'utilisateur : aucun MIB SNMP standard n'expose les DNS
+# externes configurés sur une box grand public - les champs déjà saisis
+# dans Paramètres généraux (parc_general.ip_publique/serveur_dns/
+# fournisseur_internet, déjà transmis au template sous PARC_FAI) sont
+# repris tels quels, sans nouvelle sonde. Affichés dans l'infobulle de
+# l'équipement (afficherTooltip) et dans un nouveau bloc de l'inspecteur
+# d'équipement (EquipmentModal.majFai(), bloc #eqm-fai) - uniquement pour
+# le type "Box internet (FAI)", masqué (avec message renvoyant vers
+# Paramètres généraux) si rien n'est renseigné.
+#
+# Vérifié en navigateur (VLAN affiché dans l'infobulle de port, la
+# prise murale et l'inspecteur ; bloc FAI affiché/masqué selon le type
+# d'équipement et selon que les champs sont renseignés). 422 tests
+# pytest OK (2 assertions VLAN ajoutées à des tests existants).
+
+# Version 2.33.10 - Baie de brassage : tiroir complet, infobulles natives
+# supprimées, présence en direct, boutons ARP/MAC/DNS
+#
+# Demandé (capture à l'appui) : 7 points sur le tiroir "appareils du
+# port" et les infobulles de la baie.
+#
+# (1) Liste incomplète du tiroir - network_diag._voisins_port plafonnait
+# 'detail' (liste complète) sur la même constante que 'noms' (liste
+# compacte de l'infobulle), alors que seule la 2e doit l'être. 'detail'
+# construit désormais pour CHAQUE MAC de libellé unique, sans plafond ;
+# 'noms' reste borné à _ACTIVITE_VOISINS_MAX. Même correctif appliqué au
+# repli topologie de _cycle_activite.
+#
+# (2) Infobulles natives du navigateur qui masquaient les infobulles
+# stylées ParcInfo - trouvé à 2 endroits (.port-netic-ic dans
+# appliquerNeticPorts, .port en erreur de diagnostic dans
+# appliquerDiagErreurs) : attribut title (déclenche l'infobulle native au
+# survol) remplacé par aria-label (accessibilité conservée, aucun rendu
+# visuel natif).
+#
+# (3) Tiroir pouvant recouvrir la baie - hauteur du corps du tableau
+# plafonnée (max-height:19rem, ~10 lignes), défilement interne, en-têtes
+# de colonnes collants (position:sticky).
+#
+# (4) Présence en direct - nouvelle colonne "Présence" testée au moment
+# de l'affichage : route POST /api/baie/ping-adresses (ping parallèle via
+# _ping() déjà existant), rendu 🟢/🔴 côté client (_testerPresenceTiroir).
+#
+# (5)(6)(7) Boutons ARP/MAC/DNS sur switch/routeur/box - 3 nouvelles
+# routes de lecture seule (GET /api/baie/slot/<id>/{arp,mac,dns}) :
+# network_diag.arp_table_equipement (ipNetToMediaPhysAddress),
+# mac_table_equipement (FDB bridge-MIB + noms d'interface), et
+# dns_test_equipement (requête DNS main-écrite : CHAOS version.bind/
+# hostname.bind + résolution A de 2 noms de test) - interroge
+# l'équipement COMME serveur DNS (clarifié avec l'utilisateur), pas un
+# extrait de son cache interne, capacité qu'aucun protocole standard
+# n'expose sans accès administratif (SSH, non fait). Rendu dans le même
+# tiroir via ouvrirTableEquipement().
+#
+# Vérifié en navigateur (tiroir complet au-delà de 6 appareils,
+# infobulles natives disparues, défilement à 10+ lignes, présence 🟢/🔴
+# en direct, ARP/MAC/DNS affichés) + requête DNS testée en direct contre
+# 8.8.8.8 (résolution correcte de 2 noms publics). 422 tests pytest OK.
+
+# Version 2.33.9 - Baie de brassage : prises murales enfin alignées avec
+# leurs ports RJ
+#
+# Signalé après coup, capture à l'appui : les prises murales du bandeau
+# RJ ne sont toujours pas alignées ni de même largeur que les ports RJ
+# juste en dessous.
+#
+# Cause exacte, confirmée par mesure DOM précise : chaque prise murale a
+# bien sa propre largeur correcte (width:var(--pm-w), déjà vérifié
+# identique à celle des ports RJ) — mais la GRILLE qui les contient
+# (.cell-prises-murales) gardait ses colonnes figées à 24px en dur au
+# lieu de suivre var(--pm-w), contrairement à la grille des ports RJ
+# (.cell-ports) qui suit correctement sa propre variable. Résultat
+# mesuré : pas de 26px pour les prises contre 29px pour les ports RJ
+# juste en dessous (même largeur de 27px chacun) — un décalage qui
+# s'accumule prise après prise sur toute la largeur du bandeau.
+#
+# Correctif : grid-template-columns de .cell-prises-murales suit
+# désormais var(--pm-w, 24px), comme .cell-ports le fait déjà pour
+# var(--port-w, 24px).
+#
+# Vérifié par mesure DOM précise sur 20 prises/ports mélangés (avec et
+# sans icône réseau) : alignement parfait à gauche sur toute la largeur
+# du bandeau, plus aucune dérive. Confirmé visuellement. 422 tests
+# pytest OK.
+
+# Version 2.33.8 - Baie de brassage : anneau réseau confirmé dès que
+# l'équipement déclaré est en ligne
+#
+# Demandé : "Quand un port est entouré en orange (déclaré), si la
+# détection le confirme, l'entourer comme détecté."
+#
+# Clarifié avec l'utilisateur : la "détection" visée est le fait que
+# l'équipement déclaré au bout du cordon (switch/routeur/borne Wi-Fi)
+# réponde en ping/SNMP — pas nécessairement une cartographie de
+# topologie LLDP/FDB complète, plus lente et pas toujours lancée.
+#
+# app.py : _ports_avec_details() expose un nouveau champ cible_en_ligne
+# (bool) sur chaque port, dérivé du en_ligne de l'appareil/périphérique/
+# prise murale au bout du cordon déclaré — les 3 chemins de résolution
+# existants (port en face, prise murale, slot rack-monté) le renseignent.
+#
+# baie_brassage.html : appliquerNeticPorts() et PortModal.ouvrir()
+# traitent désormais un port déclaré + cible_en_ligne comme "détecté"
+# (anneau vert) dès le départ, sans attendre _neticDetecte (topologie).
+# La topologie garde la priorité si elle répond avec un type différent
+# (incohérence toujours signalée en rouge) ou identique (libellé
+# "détecté (SNMP)" au lieu de "confirmé (en ligne)").
+#
+# Vérifié en direct avec les 4 combinaisons (déclaré seul, déclaré+en
+# ligne, déclaré+en ligne+topologie d'accord, déclaré+en ligne+
+# topologie en désaccord) — chacune donne l'état attendu (orange/vert/
+# vert/rouge). 422 tests pytest OK.
+
+# Version 2.33.7 - Baie de brassage : taille de port unique pour toute la baie
+#
+# Signalé après coup, capture à l'appui, malgré 2.33.6 : port WAN du
+# routeur plus petit que les ports du switch, ports du routeur/de la box
+# plus gros que les ports du switch, prises murales non alignées avec
+# leurs ports RJ.
+#
+# Cause racine (2.33.5/2.33.6 ne l'avaient pas identifiée) : chaque
+# équipement calculait sa PROPRE taille de port indépendamment des
+# autres, et ne rétrécissait localement que si SA disposition l'exigeait
+# — un plafond basé sur la seule hauteur de rangée, sans tenir compte du
+# nombre de ports ni des autres équipements. Un switch chargé rétrécissait
+# localement pendant qu'un routeur à 3 ports gardait ce plafond, plus
+# grand. En creusant : la zone WAN d'un routeur et la zone SFP d'un switch
+# (ports rendus en enfants directs de .cell-ports-sfp-zone, jamais
+# enveloppés dans .cell-ports) n'étaient couvertes par AUCUNE règle CSS de
+# taille — repli sur la taille fixe 24x22 codée en dur, jamais
+# synchronisée avec le reste de la baie.
+#
+# Correctif : le calcul est inversé. zonesPortsSlot() décrit, pour chaque
+# équipement de la baie, les zones de ports RJ à prendre en compte (zone
+# principale, SFP/WAN/Fibre, rangée de bandeau) et leurs contraintes ;
+# calcUH() balaie TOUS les équipements avant de choisir une taille, retient
+# le minimum sur l'ensemble de la baie, et l'applique UNIFORMÉMENT — plus
+# aucune cellule ne pose son propre style local. Règle CSS manquante
+# ajoutée pour les zones SFP/WAN.
+#
+# Vérifié par mesure DOM directe (pas seulement visuelle) en reproduisant
+# la configuration exacte signalée (switch 2 lignes + SFP, routeur
+# LAN+WAN séparés, bandeau, borne Wi-Fi) : tous les ports, dans toutes les
+# zones, mesurent exactement la même taille en pixels, à 500px/1920px et
+# entre les deux. Prises murales alignées en largeur avec leurs ports RJ
+# associés. 422 tests pytest OK.
+
+# Version 2.33.6 - Baie de brassage : cohérence des tailles de ports
+#
+# Correctif direct de 2.33.5, signalé après coup : "il y a toujours un
+# problème de cohérence des tailles des ports RJ (peut-être que c'est bon
+# avec une certaine résolution d'affichage mais pas avec toutes...)".
+#
+# Diagnostic confirmé par mesure DOM directe (getBoundingClientRect) :
+# tous les ports d'une même rangée ont bien la même taille de boîte, et
+# une prise murale fait déjà exactement la même largeur que son port RJ
+# associé — ce n'était donc PAS un bug de calcul de taille. La vraie
+# cause : l'anneau coloré signalant un port réseau (déclaré/détecté/
+# incohérent, network_diag), l'anneau d'erreur de trafic
+# (.port-diag-err) et celui de câblage incohérent d'une prise murale
+# (.pm-cable-ko) étaient tous peints via un box-shadow classique — donc
+# À L'EXTÉRIEUR de la boîte du port, avec un halo de taille FIXE (2px)
+# quelle que soit la taille du port. Sur un grand port ce halo est
+# négligeable, mais sur un petit port (10-12px, cas courant sur un rack
+# chargé) il ajoute ~30-40% de surface peinte en plus — d'où
+# l'incohérence dépendant de la résolution.
+#
+# Correctif : tous ces anneaux passent en `inset` (peints À L'INTÉRIEUR
+# de la boîte déjà existante) — empreinte visuelle strictement identique
+# à la taille réelle du port, à n'importe quelle échelle. Icône réseau
+# réduite au passage (facteur 1.2× → 0.95× la taille du texte du port,
+# signalé comme "un peu trop grande").
+#
+# Vérifié en navigateur par mesure directe à petite (10-12px) et grande
+# (28px) taille de port : le ring ne dépasse plus jamais la boîte du
+# port. 422 tests pytest OK.
+
+# Version 2.33.5 - Baie de brassage : tailles de ports unifiées, magnétisme, ergonomie
+#
+# Suite directe de 2.33.4, sur templates/baie_brassage.html et
+# network_diag.py, tous les points vérifiés en navigateur (422 tests
+# pytest OK à chaque étape).
+#
+# 1) Tailles de ports unifiées — une taille de port calculée UNE fois par
+#    rendu (hauteur disponible) et appliquée à toute la baie (variables
+#    CSS sur #rack-rows) ; une cellule ne rétrécit localement que si sa
+#    disposition (switch 2 lignes surchargé, bandeau étroit) l'exige, ne
+#    grandit jamais au-delà. Les prises murales d'un bandeau RJ suivent
+#    le même ratio que leur rangée de ports RJ. Rangées de ports
+#    centrées verticalement dans leur U. Icône réseau déplacée du
+#    couloir au-dessus/en-dessous du port vers son coin inférieur droit
+#    (fini les couloirs réservés, ~40 lignes de mécanique en moins).
+# 2) Chevauchement bloquant à tort deux éléments contigus — la grille
+#    compte 1000 colonnes (chacune < 1px), rendant un alignement pile au
+#    pixel impossible à la souris. Magnétisme ajouté (accroche sur les
+#    bords des voisins et de la baie, ~6px de seuil) dans les gestes de
+#    déplacement et de redimensionnement (largeur, coin).
+# 3) Reliquat de l'ancien système de positionnement au clic — une case
+#    vide s'allumait en cyan avec une ligne verticale au moindre survol
+#    de souris, même sans rien glisser (mouseenter/mousemove JS + règle
+#    CSS :hover indépendante). Retiré ; seul un glisser réel depuis la
+#    bibliothèque déclenche encore ce repère.
+# 4) Icône réseau recouvrant le numéro de port — le numéro était centré
+#    sur toute la hauteur du port, donc en plein sur l'icône ajoutée en
+#    bas-droite (2.33.4). Numéro remonté en haut-centre quand une icône
+#    réseau est présente.
+# 5) Défilement de la bibliothèque d'appareils — chaque section
+#    (Inventaire/SNMP/Générique) avait sa propre zone de défilement
+#    imbriquée dans celle du rail, avec le rendu par défaut du système.
+#    Scroll individuel retiré (une seule zone, celle du rail) et barre
+#    de défilement fine/thématisée à la place du rendu système.
+# 6) Adresses IP jamais affichées dans le tiroir « appareils du port »
+#    pour les ports alimentés par la vue d'activité live (repli ajouté
+#    en 2.33.4) — network_diag._voisins_port() et l'inv_mac qui
+#    l'alimente ne portaient jamais l'IP, et le mapping JS l'écrasait
+#    même en dur. IP propagée de bout en bout (requête SQL, tuples
+#    inv_mac, _voisins_port, repli topologie, mapping JS).
+# 7) Trois points relevés en revue d'interface, à la demande : bandeau
+#    « ⚠ N type(s) à valider » resté affiché en permanence avec « 0 »
+#    (`.tb-group{display:flex}` l'emportait sur `[hidden]{display:none}`
+#    à spécificité égale) ; boutons désactivés visuellement identiques à
+#    un bouton actif (`.btn:disabled` sans styles propres) ; sous 1100px
+#    de large, l'inspecteur s'ouvrait hors champ tout en bas de la page
+#    empilée, sans scroll pour l'atteindre (ajouté, sans effet en
+#    disposition large où il est déjà visible).
+#
+# Vérifié en navigateur à 500/893/1024/1920px et à la souris (drag/resize
+# réels + tests unitaires JS des fonctions de magnétisme/collision).
+
+# Version 2.33.4 - Baie de brassage : nettoyage UI, tiroir de port, icônes réseau, ports responsives
+#
+# Quatre lots de travail sur l'écran Baie de brassage, tous vérifiés en
+# navigateur.
+#
+# 1) Nettoyage de l'interface — boutons de ping individuels (📡 par
+#    équipement) supprimés, le ping global « toute la baie » reste ;
+#    bascules Santé/Câbles retirées de la barre d'outils, les deux
+#    fonctionnalités sont désormais toujours actives ; relevé de
+#    diagnostic interne « FDB Brut » supprimé intégralement (bouton,
+#    modale, route API, fonction, test dédié) ; bouton « Vider »
+#    supprimé ; présentation du volet Bibliothèque reprise sur le modèle
+#    de la maquette (icône encadrée, badge de provenance INV/SNMP,
+#    survol avec légère élévation).
+# 2) Tiroir « appareils du port » — s'étirait sur toute la largeur de la
+#    fenêtre au lieu de s'aligner sur la baie elle-même (#rack-outer),
+#    plus visible depuis que l'interface peut dépasser 1400px de large.
+#    `left`/`width` recalculés en JS sur les bornes réelles de la baie.
+# 3) Icône réseau manquante — un port de switch avec plusieurs appareils
+#    détectés en aval (cascade switch non géré / borne Wi-Fi) pouvait
+#    n'afficher aucune icône, alors que l'infobulle au survol montrait
+#    déjà le détail complet (même donnée, source différente : la vue
+#    d'activité live plutôt que la cartographie de topologie, peuplée
+#    seulement à la demande/périodiquement). L'icône reprend maintenant
+#    cette même donnée d'activité en repli.
+# 4) Ports proportionnels à l'affichage — les ports RJ (bandeau,
+#    disposition 1 ou 2 lignes) grandissent sur un grand écran et
+#    rétrécissent sur un petit, sans jamais déborder — généralise le
+#    mécanisme de dimensionnement dynamique déjà en place pour les
+#    switchs 2 lignes surchargés (auparavant limité au rétrécissement).
+#
+# Vérifié en navigateur à 500/893/1024/1920px. 422 tests pytest OK.
+#
+# Remarque utilisateur : l'ensemble de l'interface n'exploitait pas la
+# largeur d'un écran 1920px, la norme actuelle, alors que ça permettrait
+# d'afficher plus de détails. Cause : le conteneur principal
+# (templates/base.html) plafonnait TOUTES les pages à 1400px de large,
+# quelle que soit la résolution — la nav et la barre client, elles,
+# étaient déjà pleine largeur. Sur 1920px ça laissait ~500px de marges
+# mortes de chaque côté. Plafond remonté à 1800px : gain de place réel
+# sur les écrans data-denses (listes, tableau de bord, baie de brassage)
+# sans devenir excessif sur un ultrawide. Vérifié qu'aucun gabarit n'a de
+# conteneur interne plus étroit qui annulerait le gain (les formulaires
+# gardent leur propre largeur, volontairement plus étroite pour la
+# lisibilité). Vérifié en navigateur à 1920x1080 sur le tableau de bord,
+# la liste des appareils et la baie de brassage — aucune erreur console,
+# mise en page toujours correcte.
+
+# Version 2.33.2 - Baie de brassage : ergonomie fine alignée sur la maquette
+#
+# Suite du correctif 2.33.1 (contenu de l'inspecteur) : trois nouveaux
+# retours utilisateur montrant que la maquette validée faisait aussi foi
+# pour l'ergonomie fine, pas seulement le contenu.
+#
+# 1) En-tête + barre d'outils — en-tête dédié compact (titre, client/baie,
+#    boutons Exporter/Configurer) à la place de la grosse bannière
+#    générique de l'application (la nav globale ParcInfo reste au-dessus,
+#    décision utilisateur). Typographie de la barre d'outils alignée sur
+#    la maquette (casse normale, densité resserrée) au lieu du style CTA
+#    majuscule très espacé du reste de l'app. Poignées de redimensionnement
+#    dotées d'un repère visuel permanent (pastille), auparavant invisibles
+#    au repos. Menu « Affichage » complété (🩺 Santé, 🏷 Câbles, 🛰 Hors
+#    site), ce dernier bloquant aussi le déplacement/redimensionnement.
+# 2) Redimensionnement en largeur — la grille horizontale passe de 10
+#    crans (dixièmes de la largeur du rack) à 1000 (millièmes) : un
+#    glisser de la poignée de largeur suit désormais la souris au pixel
+#    près, au lieu de sauter par paliers de 10 % nettement perceptibles.
+#    Migration automatique et unique au démarrage (drapeau
+#    config._baie_grille_1000), aucune perte de position/largeur
+#    existante — mêmes proportions, juste plus de graduations.
+# 3) Déplacement d'un équipement déjà posé — signalé comme ne fonctionnant
+#    pas de façon fiable (suit la souris puis retombe systématiquement à
+#    sa place). Cause identifiée après investigation : le glisser-déposer
+#    HTML5 natif (draggable/dragstart/dragover/drop) s'annule
+#    silencieusement dès qu'un survol intermédiaire ne confirme pas
+#    explicitement la cible juste avant le relâchement — aucune erreur ne
+#    remonte. Signe qui aurait dû alerter plus tôt : les poignées de
+#    redimensionnement du même écran avaient toujours dû désactiver
+#    cell.draggable pendant leur propre geste pour ne pas se faire voler
+#    par un déplacement natif accidentel. Remplacé par le même mécanisme
+#    que la maquette (événements souris avec repositionnement direct de
+#    l'élément), identique au schéma déjà utilisé par les poignées de
+#    redimensionnement — qui n'ont, elles, jamais eu ce problème. Le
+#    glisser-déposer natif reste utilisé pour le dépôt depuis la
+#    bibliothèque (un geste court à sens unique, jamais concerné).
+#
+# Vérifié en navigateur : plusieurs déplacements réels consécutifs réussis
+# dans les deux sens (contre un échec systématique avant), sélection au
+# clic simple et redimensionnement revérifiés intacts, dépôt depuis la
+# bibliothèque revérifié fonctionnel. Suite de tests baie revérifiée
+# (56 passed sur les fichiers concernés), aucun changement côté serveur
+# pour le déplacement (uniquement le redimensionnement en largeur touche
+# app.py, migration testée sur une base existante).
+
+# Version 2.33.1 - Baie de brassage : le rendu recale sur la maquette validée
+#
+# Correctif direct suite à un retour utilisateur sur la v2.33.0 : le livré
+# ne correspondait pas à la maquette interactive pourtant validée avant
+# implémentation. Quatre écarts corrigés.
+#
+# 1) Panneau de droite — l'ancien panneau "+ Placer"/"Liste" avait été
+#    GARDÉ en plus du nouvel inspecteur (lot 2), au lieu d'être remplacé.
+#    Supprimé entièrement (formulaire de création, showTab, renderList,
+#    groupe toolbar "Ajouter", clic sur case vide) : l'inspecteur est
+#    désormais le seul contenu du rail de droite, état vide compris,
+#    fidèle à la maquette.
+# 2) Bibliothèque — nouvelle section "Générique" (12 types de baie,
+#    toujours présents, glisser-déposer) pour ne pas perdre la capacité
+#    de créer un Bandeau RJ/une Étagère/un équipement générique une fois
+#    le panneau "+ Placer" retiré.
+# 3) Icônes réseau (switch/routeur/borne Wi-Fi détectés ou déclarés sur
+#    un port) — ne suivaient pas la règle « au-dessus pour la rangée du
+#    haut, en dessous pour celle du bas » sur un switch en disposition
+#    2 lignes : le sélecteur de détection de rangée ne matchait rien pour
+#    cette disposition, l'icône retombait donc toujours en bas. Corrigé,
+#    puis 2 problèmes supplémentaires trouvés en revérifiant le cas des
+#    deux rangées simultanément sur un switch 1U déjà bien rempli :
+#    l'icône basse tombait sur la poignée de redimensionnement (z-index
+#    corrigé), et le couloir réservé pouvait dépasser le budget de
+#    hauteur de son conteneur avant même d'atteindre le bord réel de la
+#    cellule (rétrécissement des ports + repli overflow visible).
+# 4) Panneau "appareils du port" — converti en vrai tiroir ancré en bas
+#    de la fenêtre (position fixe), au lieu d'un bloc inséré dans le flux
+#    normal de la page, invisible sans faire défiler tout un rack haut.
+#
+# Vérifié en navigateur à chaque correctif (inspecteur seul, placement
+# générique, icônes haut/bas isolées et combinées, tiroir bas de page) +
+# suite de tests baie (121 passed), zéro régression.
+
+# Version 2.33.0 - Refonte de l'écran Baie de brassage (6 lots)
+#
+# Demande directe : l'ancienne interface de /baie n'était « pas ergonomique
+# ni intuitive » — panneau de droite peu clair, boutons disparates au-dessus
+# du rack, aucune bibliothèque d'appareils, aucune mise en évidence des
+# équipements réseau détectés, aucune validation du type déclaré. Maquette
+# interactive validée avec l'utilisateur avant toute implémentation réelle.
+#
+# Lot 1 — barre d'outils regroupée par groupes nommés (.baie-toolbar/
+#   .tb-group) + coquille 3 zones rétractables (bibliothèque | rack |
+#   inspecteur), état mémorisé par navigateur (initRails/toggleRail).
+# Lot 2 — les 3 modales flottantes d'édition (équipement/port/prise murale)
+#   fusionnées dans un onglet « Inspecteur » du rail de droite ; clic simple
+#   = sélection + ouverture (double-clic conservé en plus).
+# Lot 3 — bibliothèque d'appareils à glisser-déposer : inventaire du client
+#   pas déjà placé dans une baie + (sur demande, sonde SNMP en direct)
+#   appareils vus en SNMP mais absents de l'inventaire ; glisser sur une
+#   case libre crée l'équipement puis ouvre aussitôt son inspecteur.
+# Lot 4 — ports où un switch/routeur/borne Wi-Fi est DÉCLARÉ mis en
+#   évidence (icône hors du port, cliquable).
+# Lot 5 — ces mêmes ports enrichis de ce que le diagnostic réseau y voit
+#   RÉELLEMENT (topologie SNMP projetée sur la baie) : anneau vert si
+#   confirmé, rouge si incohérent avec le déclaré, panneau listant les
+#   appareils vus/déclarés au clic sur l'icône.
+# Lot 6 — validation du type d'équipement : compare, pour chaque
+#   équipement vu comme voisin LLDP d'un switch/routeur du client, la
+#   capacité détectée (pont/routeur/wlan) au type déclaré dans la baie —
+#   bouton « type(s) à valider » dans la barre d'outils, bandeau dans
+#   l'inspecteur pour valider ou ignorer. Lecture seule, aucun SNMP
+#   synchrone (données déjà relevées en continu par le diagnostic réseau).
+#
+# Vérifié en navigateur à chaque lot (chargement, glisser-déposer,
+# sauvegarde réelle, collision, incohérences LLDP synthétiques) + suites de
+# tests baie/diagnostic réseau revérifiées à chaque étape, zéro régression.
+
 # Version 2.32.10 - Sync Turso : suite de 2.32.9 (régression + copie initiale)
 #
 # 1) RÉGRESSION 2.32.9 — « les modifs d'appareils ne se synchronisent plus

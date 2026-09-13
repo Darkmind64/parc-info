@@ -12,7 +12,7 @@ def _mock_snmp_switch(monkeypatch, ports):
                         lambda ip, c: {i: {'nom': f'Gi0/{i}', 'alias': '', 'ethernet': True,
                                            'speed_mbps': ports[i].get('speed_mbps', 0)} for i in ports})
     monkeypatch.setattr(N, '_poll_switch_ports',
-                        lambda ip, c, infos=None: (dict(ports), bool(ports), True, None))
+                        lambda ip, c, infos=None, force_err=False: (dict(ports), bool(ports), True, None))
     monkeypatch.setattr(N, '_fdb_switch', lambda ip, c: {})
 
 
@@ -134,7 +134,7 @@ def test_double_releve_a_froid_anime_sans_snapshot(conn, make_client, make_appar
     # 2 relevés successifs : +2 Mo entre les deux → ~... Mbit/s sur l'écart
     etat_appels = {'n': 0}
 
-    def _poll(ip, c, infos=None):
+    def _poll(ip, c, infos=None, force_err=False):
         etat_appels['n'] += 1
         base = 1_000_000 if etat_appels['n'] == 1 else 3_000_000
         return ({1: dict(oper=1, oper_ok=True, speed_mbps=1000, in_oct=base, out_oct=0,
@@ -171,7 +171,7 @@ def test_switch_injoignable_ne_bloque_pas_le_cycle(conn, make_client, make_appar
                         lambda cid, ip, c: ip == '10.0.0.10')
     poll_ips = []
 
-    def _poll(ip, c, infos=None):
+    def _poll(ip, c, infos=None, force_err=False):
         poll_ips.append(ip)
         return ({1: dict(oper=1, oper_ok=True, speed_mbps=1000, in_oct=5_000_000, out_oct=0,
                          in_pkts=4000, out_pkts=0, in_err=0, out_err=0)}, True, True, 1234)
