@@ -1,24 +1,29 @@
 {
-  "version": "2.33.13",
+  "version": "2.33.14",
   "release_date": "2026-09-13",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.13/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.13/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.13/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.33.13",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.13/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.13/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.13/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.13/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.13/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.14/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.14/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.14/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.33.14",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.14/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.14/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.14/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.14/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.14/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Sync Turso : la table client_instantane (photo compacte de l'inventaire prise en fin de scan, base du rapport « Changements depuis la derniere visite ») entre dans la synchronisation multi-instance -- une photo prise sur site devient consultable depuis l'instance de bureau. Anti-collision d'id : les instantanes deja en production sur chaque instance, avec des id identiques (1, 2, 3...), sont re-indexes une seule fois par base (meme mecanisme que l'anti-collision sqlite_sequence existante) avant d'etre suivis, pour ne jamais s'ecraser mutuellement au premier seed vers Turso. Les tables diag_* (topologie, evenements, metriques, snapshot baie) restent volontairement locales -- caches et series temporelles reconstruits par le SNMP sur site, sans interet a distance.",
+    "new_features": "Audit de securite : 7 endpoints laissaient un utilisateur avec acces 'ecriture' sur son propre client modifier ou supprimer des donnees d'un AUTRE client en devinant un id (droits utilisateurs, types de droits, alerte garantie, suppression utilisateur, liaisons peripheriques/contrats/interventions, suppression d'emplacement de baie) -- tous corriges et couverts par des tests de regression. Corrige aussi : la cle de chiffrement partagee Turso n'etait en realite jamais utilisee (NameError avale silencieusement), le reveil Wake-on-LAN renvoyait systematiquement une erreur apres avoir pourtant reveille l'appareil, et 40 prefixes MAC de la table fabricants embarquee etaient mal attribues (verifies contre le registre IEEE officiel). L'historique enregistre desormais l'auteur de chaque action (deduit automatiquement de la session).",
     "improvements": [
-      "Sync Turso : client_instantane (photos d'inventaire) synchronisee entre toutes les instances.",
-      "Sync Turso : re-indexation anti-collision automatique des instantanes deja en production, une seule fois par base.",
-      "Sync Turso : copie initiale vers Turso pour les instantanes existants (mecanisme de seed reutilise)."
+      "Securite : ACL (can_write + filtre client_id) ajoutee sur 7 endpoints vulnerables a un acces cross-tenant.",
+      "Historique : nouvelle colonne 'auteur', deduite automatiquement de la session courante par log_history().",
+      "Chiffrement : la cle partagee Turso est desormais reellement chargee (import manquant corrige).",
+      "Wake-on-LAN : la route ne renvoie plus une erreur apres un reveil pourtant reussi.",
+      "Table fabricants (OUI) : 40 prefixes MAC corriges contre le registre IEEE officiel.",
+      "docker-compose.synology.yml : les profils leger/lourd/dev sont desormais des fichiers reels et fonctionnels (l'ancien fichier multi-documents n'etait pas utilisable tel quel).",
+      ".env.example : reecrit pour ne lister que les variables reellement lues par le code.",
+      "Nettoyage : code mort supprime (fonctions dupliquees ou jamais appelees), pyproject.toml corrige (dependance fantome retiree)."
     ]
   },
   "checksums": {
@@ -29,5 +34,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.13"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.14"
 }

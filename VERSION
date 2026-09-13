@@ -1,8 +1,72 @@
-PARCINFO_VERSION=2.33.13
+PARCINFO_VERSION=2.33.14
 RELEASE_DATE=2026-09-13
-BUILD_NUMBER=2026091303
+BUILD_NUMBER=2026091304
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.14 - Audit de securite multi-client : 7 endpoints
+# vulnerables a un acces cross-tenant, corriges et testes
+#
+# Demande directe : audit complet du projet a la recherche d'erreurs,
+# code mort, incoherences. La relecture systematique (pyflakes + revue
+# manuelle) a fait remonter, en creusant deux variables signalees comme
+# "inutilisees", une faille de securite reelle plutot qu'un simple defaut
+# de style.
+#
+# FAILLE : ISOLATION MULTI-CLIENT (ACL)
+# /api/droit/<id> (PUT/DELETE) ne filtrait par AUCUN client_id : un
+# utilisateur avec un acces 'ecriture' sur son propre client pouvait
+# modifier/supprimer un droit d'un AUTRE client en devinant l'id. En
+# reprenant systematiquement tous les appels can_write() sans argument
+# (qui verifient le client ACTIF de la session, pas forcement le
+# proprietaire de la ligne visee), 7 endpoints corriges au total :
+# api_droit / api_ajouter_droit / api_type_droit / api_creer_type_droit
+# (aucune verification can_write() ni filtre client_id), api_garantie_
+# ignorer (verifiait le client actif mais modifiait n'importe quel id
+# d'appareil), supprimer_utilisateur (suppression par id seul), et
+# editer_peripherique / editer_contrat / editer_intervention / api_baie_
+# slot (DELETE) : la fiche elle-meme etait bien protegee, mais les
+# tables de liaison (peripheriques_appareils, contrats_appareils,
+# contrats_peripheriques, interventions_appareils, interventions_
+# peripheriques, baie_slot_ports, baie_prises_murales) etaient videes
+# SANS CONDITION, avant toute verification d'appartenance.
+#
+# Chaque correctif verifie par une attaque cross-tenant simulee
+# (attaquant sur un client A, victime sur un client B, aucun partage
+# entre les deux) puis couvert par un test de regression permanent
+# (tests/test_acl.py, 8 nouveaux tests).
+#
+# AUTRES CORRECTIFS
+# - Chiffrement partage Turso jamais utilise en pratique :
+#   _build_crypto_shared() referencait get_local_db() sans l'importer ->
+#   NameError avale silencieusement par un except generique qui loguait
+#   a tort "Turso inaccessible". Chaque instance generait donc sa propre
+#   cle locale au lieu de partager la cle Turso.
+# - Wake-on-LAN : log_history() etait appele avec une signature
+#   completement differente (chaine a la place de la connexion DB) ->
+#   la route renvoyait toujours une erreur au frontend, alors que le
+#   paquet magique avait deja ete envoye avec succes.
+# - Table fabricants (OUI) embarquee : 40 prefixes MAC en conflit
+#   (ex. Dell/HP/Lenovo/Intel confondus) verifies un par un contre le
+#   registre IEEE officiel et corriges.
+# - Historique : nouvelle colonne 'auteur' (migration automatique),
+#   deduite de la session courante par log_history() sans avoir a
+#   modifier ses ~65 points d'appel.
+#
+# NETTOYAGE
+# Code mort supprime (fonction dupliquee dans collector_core.py,
+# fonctions jamais appelees), pyproject.toml corrige (dependance
+# Flask-SQLAlchemy fantome, section packaging cassee retiree),
+# .env.example reecrit (ne liste plus que les variables reellement
+# lues par le code), docker-compose.synology.yml eclate en fichiers
+# reels et fonctionnels (l'ancien fichier multi-documents avec des
+# noms de service incorrects n'etait pas utilisable tel quel), 37
+# except: nus uniformises en except Exception:.
+#
+# DEPLOIEMENT
+# Migration de schema automatique (ALTER TABLE historique ADD COLUMN
+# auteur, idempotent). 437 tests pytest OK (429 + 8 nouveaux dans
+# tests/test_acl.py).
 
 # Version 2.33.13 - Sync Turso : client_instantane (« Changements depuis
 # la derniere visite ») entre dans la synchronisation multi-instance
