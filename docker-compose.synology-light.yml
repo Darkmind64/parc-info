@@ -31,8 +31,10 @@ services:
         max-file: "2"        # Garder moins de fichiers
 
     # Health check plus tolérant (plus de délai de démarrage sur petit NAS)
+    # curl n'existe pas dans l'image (python:3.11-slim) — même sonde que le
+    # HEALTHCHECK du Dockerfile, pas de dépendance supplémentaire à installer.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3456/"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3456/', timeout=5)"]
       interval: 60s          # Vérification moins fréquente
       timeout: 15s           # Plus de timeout
       retries: 3

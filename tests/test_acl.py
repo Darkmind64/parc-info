@@ -120,8 +120,8 @@ def test_droit_dun_autre_client_non_modifiable(client, make_user, make_client):
 
     login_session(client, attaquant_id, client_a)
     token = get_csrf_token(client)
-    client.put(f'/api/droit/900', json={'categorie': 'HACKED'}, headers={'X-CSRF-Token': token})
-    client.delete(f'/api/droit/900', headers={'X-CSRF-Token': token})
+    client.put('/api/droit/900', json={'categorie': 'HACKED'}, headers={'X-CSRF-Token': token})
+    client.delete('/api/droit/900', headers={'X-CSRF-Token': token})
 
     conn = app.get_db()
     row = conn.execute('SELECT categorie FROM droits_utilisateurs WHERE id=900').fetchone()
@@ -276,3 +276,128 @@ def test_baie_slot_dun_autre_client_non_supprimable(client, make_user, make_clie
     row = conn.execute('SELECT 1 FROM baie_slots WHERE id=900').fetchone()
     conn.close()
     assert row is not None
+
+
+# ─── Trouvé par /ultrareview sur la PR ci-dessus : failles voisines, même
+# schéma, ratées par le premier passage ──────────────────────────────────────
+
+def test_suppression_contrat_dun_autre_client_appareils_intacts(client, make_user, make_client, make_appareil):
+    """supprimer_contrat filtrait bien SELECT/DELETE par client_id, mais les
+    3 UPDATE appareils SET av/edr/rmm_contrat_id=NULL n'étaient pas scopés :
+    ils s'appliquaient à n'importe quel appareil référençant ce contrat,
+    même chez un autre client."""
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    appareil_b = make_appareil(client_b, nom_machine='POSTE-B', av_contrat_id=910)
+    conn = app.get_db()
+    conn.execute("INSERT INTO contrats (id, client_id, titre) VALUES (910, ?, 'Contrat B')", (client_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    client.post('/contrat/910/supprimer', data={'csrf_token': token})
+
+    conn = app.get_db()
+    ctr = conn.execute('SELECT 1 FROM contrats WHERE id=910').fetchone()
+    av = conn.execute('SELECT av_contrat_id FROM appareils WHERE id=?', (appareil_b,)).fetchone()[0]
+    conn.close()
+    assert ctr is not None
+    assert av == 910
+
+
+def test_type_droit_put_ne_fuit_pas_un_autre_client(client, make_user, make_client):
+    """api_type_droit (PUT) scopait bien l'UPDATE par client_id, mais la
+    SELECT de retour utilisée pour la réponse JSON ne l'était pas : un id
+    d'un autre client renvoyait quand même ses categorie/nom/description."""
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    conn = app.get_db()
+    conn.execute("INSERT INTO types_droits (id, client_id, nom) VALUES (911, ?, 'Secret-B')", (client_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    resp = client.put('/api/type-droit/911', json={'nom': 'HACKED'}, headers={'X-CSRF-Token': token})
+
+    assert resp.get_json() == {}
+    conn = app.get_db()
+    nom = conn.execute('SELECT nom FROM types_droits WHERE id=911').fetchone()[0]
+    conn.close()
+    assert nom == 'Secret-B'
+
+
+def test_ajout_droit_refuse_pour_un_utilisateur_dun_autre_client(client, make_user, make_client):
+    """api_ajouter_droit vérifiait can_write() sur le client actif mais
+    acceptait n'importe quel utilisateur_id du payload sans vérifier qu'il
+    appartenait à ce client — un droit pouvait être attribué à un
+    utilisateur d'un AUTRE client (visible ensuite sur sa fiche)."""
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    conn = app.get_db()
+    conn.execute("INSERT INTO utilisateurs (id, client_id, prenom, nom) VALUES (912, ?, 'Marie', 'Martin')", (client_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    resp = client.post('/api/droit', json={'utilisateur_id': 912, 'nom_droit': 'HACKED'},
+                        headers={'X-CSRF-Token': token})
+
+    assert resp.status_code == 404
+    conn = app.get_db()
+    row = conn.execute('SELECT 1 FROM droits_utilisateurs WHERE utilisateur_id=912').fetchone()
+    conn.close()
+    assert row is None
+
+
+def test_suppression_peripherique_dun_autre_client_pas_de_faux_journal(client, make_user, make_client):
+    """supprimer_peripherique lisait marque/modele sans filtre client_id et
+    les journalisait quand même comme 'Suppression' dans l'historique de
+    l'attaquant, alors que rien n'avait été supprimé (DELETE déjà scopé)."""
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    conn = app.get_db()
+    conn.execute("INSERT INTO peripheriques (id, client_id, categorie, marque, modele) "
+                 "VALUES (913, ?, 'Ecran', 'Dell', 'Secret-B')", (client_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    client.post('/peripherique/913/supprimer', data={'csrf_token': token})
+
+    conn = app.get_db()
+    row = conn.execute('SELECT 1 FROM peripheriques WHERE id=913').fetchone()
+    faux_journal = conn.execute(
+        "SELECT 1 FROM historique WHERE client_id=? AND entite='peripherique' AND entite_nom LIKE '%Secret-B%'",
+        (client_a,)).fetchone()
+    conn.close()
+    assert row is not None
+    assert faux_journal is None
+
+
+def test_suppression_utilisateur_dun_autre_client_pas_de_faux_journal(client, make_user, make_client):
+    """Même défaut que ci-dessus sur supprimer_utilisateur : une entrée
+    'Suppression' était journalisée côté attaquant même quand la ligne
+    visée n'appartenait pas à son client (donc jamais réellement supprimée)."""
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    conn = app.get_db()
+    conn.execute("INSERT INTO utilisateurs (id, client_id, prenom, nom) VALUES (914, ?, 'Marie', 'Martin')", (client_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    client.post('/utilisateur/914/supprimer', data={'csrf_token': token})
+
+    conn = app.get_db()
+    row = conn.execute('SELECT 1 FROM utilisateurs WHERE id=914').fetchone()
+    faux_journal = conn.execute(
+        "SELECT 1 FROM historique WHERE client_id=? AND entite='utilisateur' AND entite_id=914",
+        (client_a,)).fetchone()
+    conn.close()
+    assert row is not None
+    assert faux_journal is None

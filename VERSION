@@ -36,6 +36,32 @@ STATUS=STABLE
 # entre les deux) puis couvert par un test de regression permanent
 # (tests/test_acl.py, 8 nouveaux tests).
 #
+# REVUE /ultrareview SUR CETTE MEME PR : 5 FAILLES VOISINES DE PLUS
+# Le meme schema (can_write() sans argument + ecriture non re-scopee)
+# s'est revele plus repandu que le premier passage ne l'avait detecte :
+# supprimer_contrat (3 UPDATE appareils SET av/edr/rmm_contrat_id=NULL
+# non scopes), api_type_droit PUT (SELECT de retour non scope -> fuite
+# d'info categorie/nom/description d'un autre client), api_ajouter_droit
+# (utilisateur_id du payload jamais confronte a cid -> droit attribuable
+# a un utilisateur d'un autre client), supprimer_peripherique /
+# supprimer_utilisateur (SELECT initial non scope + log_history() execute
+# AVANT toute verification -> fausse entree "Suppression" journalisee
+# cote attaquant avec le nom de la victime, message de succes trompeur,
+# alors que le DELETE etait deja correctement scope). 5 nouveaux tests
+# de regression (tests/test_acl.py, 17 au total).
+#
+# Nit de performance releve au passage : _auteur_courant() faisait une
+# requete SQL de plus a CHACUN des ~65 appels de log_history(). Login
+# desormais mis en cache dans la session a la connexion
+# (session['auth_user_login']), repli sur la requete SQL pour une
+# session ouverte avant ce changement.
+#
+# Bug trouve en ecrivant les tests : docker-compose.synology-light.yml/
+# -heavy.yml declaraient un healthcheck curl, absent de l'image
+# python:3.11-slim -> conteneur marque unhealthy en permanence sur ces
+# 2 profils. Remplace par la meme sonde Python que le HEALTHCHECK du
+# Dockerfile (urllib.request), sans dependance supplementaire.
+#
 # AUTRES CORRECTIFS
 # - Chiffrement partage Turso jamais utilise en pratique :
 #   _build_crypto_shared() referencait get_local_db() sans l'importer ->
@@ -65,8 +91,8 @@ STATUS=STABLE
 #
 # DEPLOIEMENT
 # Migration de schema automatique (ALTER TABLE historique ADD COLUMN
-# auteur, idempotent). 437 tests pytest OK (429 + 8 nouveaux dans
-# tests/test_acl.py).
+# auteur, idempotent). 442 tests pytest OK (429 + 13 nouveaux dans
+# tests/test_acl.py, 17 au total dans ce fichier).
 
 # Version 2.33.13 - Sync Turso : client_instantane (« Changements depuis
 # la derniere visite ») entre dans la synchronisation multi-instance

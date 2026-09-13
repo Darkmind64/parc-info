@@ -14,14 +14,15 @@
     "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.14/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Audit de securite : 7 endpoints laissaient un utilisateur avec acces 'ecriture' sur son propre client modifier ou supprimer des donnees d'un AUTRE client en devinant un id (droits utilisateurs, types de droits, alerte garantie, suppression utilisateur, liaisons peripheriques/contrats/interventions, suppression d'emplacement de baie) -- tous corriges et couverts par des tests de regression. Corrige aussi : la cle de chiffrement partagee Turso n'etait en realite jamais utilisee (NameError avale silencieusement), le reveil Wake-on-LAN renvoyait systematiquement une erreur apres avoir pourtant reveille l'appareil, et 40 prefixes MAC de la table fabricants embarquee etaient mal attribues (verifies contre le registre IEEE officiel). L'historique enregistre desormais l'auteur de chaque action (deduit automatiquement de la session).",
+    "new_features": "Audit de securite : 12 endpoints au total laissaient un utilisateur avec acces 'ecriture' sur son propre client modifier, supprimer ou lire des donnees d'un AUTRE client en devinant un id (droits utilisateurs, types de droits, alerte garantie, suppression utilisateur/peripherique/contrat, liaisons peripheriques/contrats/interventions, suppression d'emplacement de baie) -- tous corriges et couverts par 13 tests de regression (relecture initiale + revue /ultrareview sur la meme PR). Corrige aussi : la cle de chiffrement partagee Turso n'etait en realite jamais utilisee (NameError avale silencieusement), le reveil Wake-on-LAN renvoyait systematiquement une erreur apres avoir pourtant reveille l'appareil, et 40 prefixes MAC de la table fabricants embarquee etaient mal attribues (verifies contre le registre IEEE officiel). L'historique enregistre desormais l'auteur de chaque action (deduit automatiquement de la session, mis en cache pour eviter une requete SQL de plus a chaque ecriture auditee).",
     "improvements": [
-      "Securite : ACL (can_write + filtre client_id) ajoutee sur 7 endpoints vulnerables a un acces cross-tenant.",
-      "Historique : nouvelle colonne 'auteur', deduite automatiquement de la session courante par log_history().",
+      "Securite : ACL (can_write + filtre client_id) ajoutee/completee sur 12 endpoints vulnerables a un acces cross-tenant.",
+      "Securite : deux endpoints ne journalisaient plus une fausse entree 'Suppression' quand la cible n'appartenait pas au client actif.",
+      "Historique : nouvelle colonne 'auteur', deduite automatiquement de la session courante par log_history() (mise en cache, pas de requete SQL supplementaire).",
       "Chiffrement : la cle partagee Turso est desormais reellement chargee (import manquant corrige).",
       "Wake-on-LAN : la route ne renvoie plus une erreur apres un reveil pourtant reussi.",
       "Table fabricants (OUI) : 40 prefixes MAC corriges contre le registre IEEE officiel.",
-      "docker-compose.synology.yml : les profils leger/lourd/dev sont desormais des fichiers reels et fonctionnels (l'ancien fichier multi-documents n'etait pas utilisable tel quel).",
+      "docker-compose.synology.yml : les profils leger/lourd/dev sont desormais des fichiers reels et fonctionnels (l'ancien fichier multi-documents n'etait pas utilisable tel quel) ; healthcheck corrige (curl absent de l'image).",
       ".env.example : reecrit pour ne lister que les variables reellement lues par le code.",
       "Nettoyage : code mort supprime (fonctions dupliquees ou jamais appelees), pyproject.toml corrige (dependance fantome retiree)."
     ]

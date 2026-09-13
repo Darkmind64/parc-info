@@ -15,6 +15,19 @@ Demande directe : un audit complet du projet à la recherche d'erreurs, de code 
 
 Chaque correctif a été vérifié par une attaque cross-tenant simulée (attaquant actif sur un client A, victime sur un client B, aucun partage entre les deux) avant d'être formalisé en test de régression permanent — `tests/test_acl.py` gagne 8 nouveaux tests couvrant les 7 endpoints.
 
+**Revue `/ultrareview` sur cette même PR : 5 failles voisines de plus, ratées par le premier passage.** Le même schéma (`can_write()` sans argument + écriture non re-scopée) s'est révélé plus répandu que le premier passage ne l'avait détecté :
+
+- `supprimer_contrat` : le `SELECT`/`DELETE` du contrat étaient bien scopés, mais les 3 `UPDATE appareils SET av/edr/rmm_contrat_id=NULL` qui nettoient les références ne l'étaient pas — un attaquant pouvait effacer ces références sur les appareils d'un **autre** client.
+- `api_type_droit` (PUT) : l'`UPDATE` était bien scopé par `client_id`, mais le `SELECT` de retour (utilisé pour la réponse JSON) ne l'était pas — fuite d'information (`categorie`/`nom`/`description`/`icone`/`ordre`) sur un type de droit d'un autre client.
+- `api_ajouter_droit` : `can_write(cid)` vérifié, mais `utilisateur_id` du payload n'était jamais confronté à `cid` — un droit pouvait être attribué à un utilisateur d'un **autre** client (visible ensuite sur sa fiche, invisible/impossible à supprimer depuis ce client puisque la lecture et la suppression sont bien scopées, elles). Corrigé par une vérification d'appartenance avant insertion, et un filtre `client_id` ajouté à la lecture des droits d'un utilisateur (`droits_utilisateur()`) en défense en profondeur.
+- `supprimer_peripherique` / `supprimer_utilisateur` : le `SELECT` initial (nom à journaliser) n'était pas scopé, et `log_history()` s'exécutait **avant** toute vérification — un attaquant obtenait une fausse entrée « Suppression » dans son propre journal (avec le nom de la victime) et un message de succès trompeur, alors que le `DELETE`, lui, était déjà correctement scopé et n'affectait aucune ligne.
+
+5 nouveaux tests de régression (`tests/test_acl.py`, 17 au total dans ce fichier).
+
+**Nit de performance relevé au passage.** `_auteur_courant()` (nouvelle fonction introduite pour l'attribution utilisateur) faisait une requête SQL de plus à **chacun** des ~65 appels de `log_history()`. Le login est désormais mis en cache dans la session à la connexion (`session['auth_user_login']`, aux côtés de `auth_user_nom`/`auth_user_role` déjà présents) — `_auteur_courant()` le lit directement, avec repli sur la requête SQL pour une session ouverte avant ce changement.
+
+**Bug trouvé en écrivant les tests de non-régression.** `docker-compose.synology-light.yml`/`-heavy.yml` (introduits plus haut dans cette même PR) déclaraient un healthcheck `curl` — absent de l'image `python:3.11-slim`, qui n'installe jamais ce paquet. Le conteneur restait donc marqué `unhealthy` en permanence sur ces deux profils, même quand l'application répondait normalement. Remplacé par la même sonde Python que le `HEALTHCHECK` du `Dockerfile` (`urllib.request`), sans dépendance supplémentaire.
+
 ### Autres correctifs trouvés au passage
 
 - **Chiffrement partagé Turso jamais utilisé en pratique.** `_build_crypto_shared()` référençait `get_local_db()` sans l'avoir importé dans cette fonction → `NameError` avalé silencieusement par un `except Exception` générique qui loguait à tort *« Turso inaccessible, fallback local »*. Conséquence réelle : chaque instance générait sa propre clé locale au lieu de partager la clé Turso — un identifiant chiffré par une instance pouvait devenir illisible depuis une autre en synchro multi-instance.
@@ -28,7 +41,7 @@ Fonction dupliquée supprimée (`collector_core._report_filename`, la première 
 
 ### Déploiement
 
-Migration de schéma automatique au démarrage (`ALTER TABLE historique ADD COLUMN auteur`, idempotente — rien à faire manuellement). **437 tests pytest OK** (429 existants + 8 nouveaux dans `tests/test_acl.py`), plus une dizaine de scripts de vérification ciblés (ACL, isolation client, liens appareil/périphérique/baie).
+Migration de schéma automatique au démarrage (`ALTER TABLE historique ADD COLUMN auteur`, idempotente — rien à faire manuellement). **442 tests pytest OK** (429 existants + 13 nouveaux dans `tests/test_acl.py`, 17 au total dans ce fichier), plus une dizaine de scripts de vérification ciblés (ACL, isolation client, liens appareil/périphérique/baie).
 
 ---
 

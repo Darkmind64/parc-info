@@ -30,8 +30,10 @@ services:
         max-size: "20m"      # Fichiers plus gros
         max-file: "5"        # Garder plus de fichiers
 
+    # curl n'existe pas dans l'image (python:3.11-slim) — même sonde que le
+    # HEALTHCHECK du Dockerfile, pas de dépendance supplémentaire à installer.
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3456/"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3456/', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3

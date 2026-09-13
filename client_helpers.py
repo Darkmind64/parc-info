@@ -231,11 +231,19 @@ def _auteur_courant(conn) -> str:
     """Login de l'utilisateur de la requête en cours, pour l'audit trail.
     Retourne '' hors contexte requête (job de fond, scheduler) — jamais
     d'exception : l'attribution de l'auteur ne doit jamais faire échouer
-    l'action auditée elle-même."""
+    l'action auditée elle-même.
+
+    log_history() est appelée à ~65 endroits d'app.py : le login est mis en
+    cache dans la session à la connexion (session['auth_user_login']) pour
+    éviter une requête SQL de plus à chaque écriture auditée. Repli sur une
+    lecture DB pour une session ouverte avant l'introduction de ce cache."""
     try:
+        login_cache = session.get('auth_user_login')
         uid = session.get('auth_user_id')
     except RuntimeError:
         return ''
+    if login_cache:
+        return login_cache
     if not uid:
         return ''
     try:

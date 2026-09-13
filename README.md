@@ -6,7 +6,7 @@
 
 Application web **Python/Flask** pour la gestion d'inventaire informatique avec **support multi-client**, **authentification sécurisée**, **scan réseau automatisé**, et **exécutable portable** (Windows/macOS).
 
-**Version** : 2.33.14 🔒 **Audit de sécurité multi-client** — 7 endpoints laissaient un utilisateur avec accès « écriture » sur son propre client modifier ou supprimer des données d'un **autre** client en devinant un id (droits, alerte garantie, suppression utilisateur, liaisons périphériques/contrats/interventions, baie) : tous corrigés et couverts par des tests de régression. Corrigé aussi : la clé de chiffrement partagée Turso n'était en réalité jamais chargée, le réveil Wake-on-LAN renvoyait une erreur après avoir pourtant réveillé l'appareil, et 40 préfixes MAC de la table fabricants embarquée étaient mal attribués. L'historique enregistre désormais l'auteur de chaque action.  
+**Version** : 2.33.14 🔒 **Audit de sécurité multi-client** — 12 endpoints laissaient un utilisateur avec accès « écriture » sur son propre client modifier, supprimer ou lire des données d'un **autre** client en devinant un id (droits, alerte garantie, suppression utilisateur/périphérique/contrat, liaisons périphériques/contrats/interventions, baie) : tous corrigés et couverts par 13 tests de régression. Corrigé aussi : la clé de chiffrement partagée Turso n'était en réalité jamais chargée, le réveil Wake-on-LAN renvoyait une erreur après avoir pourtant réveillé l'appareil, et 40 préfixes MAC de la table fabricants embarquée étaient mal attribués. L'historique enregistre désormais l'auteur de chaque action.  
 **Dernière mise à jour** : 2026-09-13
 
 ---

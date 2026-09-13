@@ -5293,7 +5293,7 @@ def api_type_droit(id):
         (f.get('categorie',''), f.get('nom',''), f.get('description',''),
          f.get('icone','🔑'), int(f.get('ordre',0) or 0), id, cid))
     conn.commit()
-    row = row_to_dict(conn.execute('SELECT * FROM types_droits WHERE id=?', (id,)).fetchone() or {})
+    row = row_to_dict(conn.execute('SELECT * FROM types_droits WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     return jsonify(row)
 
@@ -5397,6 +5397,9 @@ def supprimer_utilisateur(id):
     cid = get_client_id()
     conn = get_db()
     u = row_to_dict(conn.execute('SELECT prenom,nom FROM utilisateurs WHERE id=? AND client_id=?',(id, cid)).fetchone() or {})
+    if not u:
+        conn.close()
+        return redirect(url_for('liste_utilisateurs'))
     nom = (u.get('prenom','') + ' ' + u.get('nom','')).strip() or '?'
     log_history(conn, cid, 'utilisateur', id, nom, 'Suppression')
     # appareils.utilisateur_id / identifiants.utilisateur_id : colonnes
@@ -5424,8 +5427,8 @@ def droits_utilisateur(id):
         'SELECT u.*, s.nom as service_nom, s.couleur as service_couleur FROM utilisateurs u LEFT JOIN services s ON u.service_id=s.id WHERE u.id=? AND u.client_id=?',
         (id, cid)).fetchone() or {})
     droits = [row_to_dict(r) for r in conn.execute(
-        'SELECT d.*, t.icone, t.categorie as t_categorie FROM droits_utilisateurs d LEFT JOIN types_droits t ON d.type_droit_id=t.id WHERE d.utilisateur_id=? ORDER BY d.categorie, d.nom_droit',
-        (id,)).fetchall()]
+        'SELECT d.*, t.icone, t.categorie as t_categorie FROM droits_utilisateurs d LEFT JOIN types_droits t ON d.type_droit_id=t.id WHERE d.utilisateur_id=? AND d.client_id=? ORDER BY d.categorie, d.nom_droit',
+        (id, cid)).fetchall()]
     types = get_types_droits(cid)
     appareils_affectes = [row_to_dict(r) for r in conn.execute(
         'SELECT id, nom_machine, type_appareil FROM appareils WHERE utilisateur_id=? AND client_id=? ORDER BY nom_machine',
@@ -5456,6 +5459,9 @@ def api_ajouter_droit():
     uid = f.get('utilisateur_id')
     now = _utcnow().isoformat()
     conn = get_db()
+    if uid and not conn.execute('SELECT 1 FROM utilisateurs WHERE id=? AND client_id=?', (uid, cid)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Utilisateur introuvable'}), 404
     c = conn.execute('''INSERT INTO droits_utilisateurs
         (utilisateur_id, client_id, categorie, type_droit_id, nom_droit, valeur, niveau, notes, date_attribution)
         VALUES (?,?,?,?,?,?,?,?,?)''',
@@ -13694,7 +13700,10 @@ def supprimer_peripherique(id):
     cid = get_client_id()
     conn = get_db()
     conn.execute('PRAGMA foreign_keys = ON')
-    p = row_to_dict(conn.execute('SELECT marque,modele FROM peripheriques WHERE id=?',(id,)).fetchone() or {})
+    p = row_to_dict(conn.execute('SELECT marque,modele FROM peripheriques WHERE id=? AND client_id=?',(id, cid)).fetchone() or {})
+    if not p:
+        conn.close()
+        return redirect(url_for('liste_peripheriques'))
     nom_p = (p.get('marque','') + ' ' + p.get('modele','')).strip() or '?'
     log_history(conn, cid, 'peripherique', id, nom_p, 'Suppression')
     # Tables sans FK déclarée (ajoutées via ALTER TABLE) — non couvertes par le
@@ -13960,15 +13969,21 @@ def supprimer_contrat(id):
     conn = get_db()
     conn.execute('PRAGMA foreign_keys = ON')
     c = row_to_dict(conn.execute('SELECT titre FROM contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+    if not c:
+        conn.close()
+        return redirect(url_for('liste_contrats'))
     log_history(conn, cid, 'contrat', id, c.get('titre','?'), 'Suppression')
     # av_contrat_id/edr_contrat_id/rmm_contrat_id ont été ajoutées via ALTER TABLE
     # (SQLite ne permet pas d'y déclarer de FK) — nettoyage manuel nécessaire.
+    # Scopées par client_id : id déjà vérifié appartenir à cid ci-dessus, mais
+    # sans ce filtre elles toucheraient les appareils d'un AUTRE client si ce
+    # garde-fou venait à être retiré par erreur.
     conn.execute(
-        'UPDATE appareils SET av_contrat_id=NULL WHERE av_contrat_id=?', (id,))
+        'UPDATE appareils SET av_contrat_id=NULL WHERE av_contrat_id=? AND client_id=?', (id, cid))
     conn.execute(
-        'UPDATE appareils SET edr_contrat_id=NULL WHERE edr_contrat_id=?', (id,))
+        'UPDATE appareils SET edr_contrat_id=NULL WHERE edr_contrat_id=? AND client_id=?', (id, cid))
     conn.execute(
-        'UPDATE appareils SET rmm_contrat_id=NULL WHERE rmm_contrat_id=?', (id,))
+        'UPDATE appareils SET rmm_contrat_id=NULL WHERE rmm_contrat_id=? AND client_id=?', (id, cid))
     conn.execute('DELETE FROM contrats WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
     flash('Contrat supprimé', 'info')
@@ -18170,6 +18185,7 @@ def page_login():
                               (_hash_pwd(pwd), u['id']))
                 conn2.commit(); conn2.close()
             session['auth_user_id'] = u['id']
+            session['auth_user_login'] = u['login']
             session['auth_user_nom'] = (u.get('prenom','') + ' ' + u.get('nom','')).strip() or u['login']
             session['auth_user_role'] = u.get('role','user')
             session['login_time'] = _utcnow().isoformat()
