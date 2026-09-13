@@ -7732,6 +7732,21 @@ def _baie_slot_ip(id, cid):
     return ip, None
 
 
+def _lancer_baie_slot_requete(id, cid, type_, motif_vide, fn_requete, garder_snmp=True):
+    """Commun aux 3 routes ARP/MAC/DNS ci-dessous (audit 2026-09) : ces
+    requêtes bloquaient le thread Flask jusqu'à 8 s sur un équipement lent ou
+    injoignable — passées en tâche de fond + statut interrogeable
+    (`network_diag.lancer_requete_slot`), même schéma que « Deviner le
+    brassage ». Le client reste sur la MÊME route pour poller (comme
+    /api/baie/brassage/proposer), pas de route séparée à retenir."""
+    ip, erreur = _baie_slot_ip(id, cid)
+    if erreur:
+        return erreur
+    if garder_snmp and str(cfg_get('diag_snmp_actif', '0')) != '1':
+        return jsonify({'en_cours': False, 'resultat': {'ok': False, 'motif': 'snmp_inactif', **motif_vide}})
+    return jsonify(network_diag.lancer_requete_slot(id, type_, lambda: fn_requete(ip)))
+
+
 @app.route('/api/baie/slot/<int:id>/arp')
 @login_required
 def api_baie_slot_arp(id):
@@ -7741,16 +7756,9 @@ def api_baie_slot_arp(id):
     cid = get_client_id()
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    ip, erreur = _baie_slot_ip(id, cid)
-    if erreur:
-        return erreur
-    if str(cfg_get('diag_snmp_actif', '0')) != '1':
-        return jsonify({'ok': False, 'motif': 'snmp_inactif', 'entrees': []})
-    try:
-        return jsonify(network_diag.arp_table_equipement(ip, network_diag._communautes_snmp()))
-    except Exception:
-        logger.exception('api_baie_slot_arp')
-        return jsonify({'ok': False, 'motif': 'erreur', 'entrees': []}), 500
+    return _lancer_baie_slot_requete(
+        id, cid, 'arp', {'entrees': []},
+        lambda ip: network_diag.arp_table_equipement(ip, network_diag._communautes_snmp()))
 
 
 @app.route('/api/baie/slot/<int:id>/mac')
@@ -7762,16 +7770,9 @@ def api_baie_slot_mac(id):
     cid = get_client_id()
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    ip, erreur = _baie_slot_ip(id, cid)
-    if erreur:
-        return erreur
-    if str(cfg_get('diag_snmp_actif', '0')) != '1':
-        return jsonify({'ok': False, 'motif': 'snmp_inactif', 'entrees': []})
-    try:
-        return jsonify(network_diag.mac_table_equipement(ip, network_diag._communautes_snmp()))
-    except Exception:
-        logger.exception('api_baie_slot_mac')
-        return jsonify({'ok': False, 'motif': 'erreur', 'entrees': []}), 500
+    return _lancer_baie_slot_requete(
+        id, cid, 'mac', {'entrees': []},
+        lambda ip: network_diag.mac_table_equipement(ip, network_diag._communautes_snmp()))
 
 
 @app.route('/api/baie/slot/<int:id>/dns')
@@ -7783,14 +7784,9 @@ def api_baie_slot_dns(id):
     cid = get_client_id()
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    ip, erreur = _baie_slot_ip(id, cid)
-    if erreur:
-        return erreur
-    try:
-        return jsonify(network_diag.dns_test_equipement(ip))
-    except Exception:
-        logger.exception('api_baie_slot_dns')
-        return jsonify({'ok': False, 'motif': 'erreur', 'version': '', 'hostname': '', 'resolutions': []}), 500
+    return _lancer_baie_slot_requete(
+        id, cid, 'dns', {'version': '', 'hostname': '', 'resolutions': []},
+        lambda ip: network_diag.dns_test_equipement(ip), garder_snmp=False)
 
 
 @app.route('/api/baie/bibliotheque')
@@ -7854,11 +7850,17 @@ def api_baie_types_a_valider():
 @login_required
 def api_baie_activite_moniteur():
     """Panneau moniteur : journal + détail par switch/port + état capture.
-    Lecture seule, aucun SNMP synchrone (données calculées en tâche de fond)."""
+    Lecture seule, aucun SNMP synchrone (données calculées en tâche de fond).
+    `?since=<epoch>` (audit 2026-09) : ne renvoie que les points de sparkline
+    plus récents que cet horodatage (le client fusionne avec ce qu'il a déjà)."""
     cid = get_client_id()
     if not get_client_access(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    return jsonify(network_diag.moniteur_baie(cid))
+    try:
+        since = float(request.args.get('since', '') or 0) or None
+    except ValueError:
+        since = None
+    return jsonify(network_diag.moniteur_baie(cid, since=since))
 
 
 @app.route('/api/baie/activite/capture', methods=['POST'])

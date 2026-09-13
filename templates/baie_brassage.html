@@ -1583,6 +1583,15 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 </div>
                 <button type="button" id="eqm-btn-annexe" class="insp-abtn acc" style="margin-bottom:.6rem;display:none;" onclick="EquipmentModal.ouvrirAppareilsEquipement()">👁 Tous les appareils par port</button>
 
+                <!-- Capteurs (température/ventilateurs) — voir
+                     EquipmentModal.majCapteurs(), ENTITY-SENSOR-MIB (audit
+                     2026-09). Masqué si l'agent ne les expose pas. -->
+                <div id="eqm-capteurs" class="insp-det" style="display:none;">
+                    <div class="insp-det-h">Capteurs</div>
+                    <div class="insp-det-line" id="eqm-capt-temp-row" style="display:none;"><span class="k">Température</span><span class="v" id="eqm-capt-temp"></span></div>
+                    <div class="insp-det-line" id="eqm-capt-vent-row" style="display:none;"><span class="k">Ventilateur(s)</span><span class="v" id="eqm-capt-vent"></span></div>
+                </div>
+
                 <!-- Infos FAI (Box internet) — voir EquipmentModal.majFai(),
                      reprises de Paramètres généraux (PARC_FAI) : aucun MIB
                      SNMP standard n'expose les DNS externes d'une box grand
@@ -1700,10 +1709,15 @@ table.mon-table td.mon-wrap select { max-width:100%; }
                 <div id="pom-det" class="insp-det" style="display:none;">
                     <div class="insp-det-h">Ce qui est branché</div>
                     <div class="insp-det-line" id="pom-det-equip-row" style="display:none;"><span class="k">Équipement</span><span class="v" id="pom-det-equip"></span></div>
+                    <div class="insp-det-line" id="pom-det-age-row" style="display:none;"><span class="k">Détecté</span><span class="v" id="pom-det-age"></span></div>
                     <div class="insp-det-line" id="pom-det-vlan-row" style="display:none;"><span class="k">VLAN</span><span class="v" id="pom-det-vlan"></span></div>
+                    <div class="insp-det-line" id="pom-det-stp-row" style="display:none;"><span class="k">STP</span><span class="v" id="pom-det-stp"></span></div>
                     <div class="insp-det-line"><span class="k">Appareils sur le port</span><span class="v" id="pom-det-nb"></span></div>
                     <div class="insp-det-line" id="pom-det-role-row" style="display:none;"><span class="k">Rôle</span><span class="v warn">liaison montante</span></div>
                     <div class="insp-det-line" id="pom-det-incoh-row" style="display:none;"><span class="k">⚠</span><span class="v warn">détecté ≠ déclaré</span></div>
+                    <div class="insp-det-line" id="pom-det-duplex-row" style="display:none;"><span class="k">Duplex</span><span class="v warn">half-duplex</span></div>
+                    <div class="insp-det-line" id="pom-det-err-row" style="display:none;"><span class="k">⚠ Erreur</span><span class="v warn" id="pom-det-err"></span></div>
+                    <div class="insp-det-line" id="pom-det-coupures-row" style="display:none;"><span class="k">Coupures</span><span class="v warn" id="pom-det-coupures"></span></div>
                 </div>
                 <div id="pom-apercu" class="insp-det" style="display:none;">
                     <div class="insp-det-h">Aperçu</div>
@@ -4354,7 +4368,22 @@ function rowsActivitePort(slotId, numero) {
        + (a.err_delta ? ` · <span style="color:var(--accent-red,#ff3355);">${a.err_delta} err</span>` : '')
        + `</span></div>`;
     if (a.vlan) {
-        h += `<div class="tip-row"><span class="tip-key">VLAN</span><span class="tip-val">${a.vlan}</span></div>`;
+        const tagues = (a.vlan_tagues || []).length
+            ? ` <span style="color:var(--text-muted);">+ trunk : VLAN ${a.vlan_tagues.join(', ')} tagués</span>` : '';
+        h += `<div class="tip-row"><span class="tip-key">VLAN</span><span class="tip-val">${a.vlan} (natif)${tagues}</span></div>`;
+    } else if ((a.vlan_tagues || []).length) {
+        h += `<div class="tip-row"><span class="tip-key">VLAN</span><span class="tip-val">trunk : VLAN ${a.vlan_tagues.join(', ')} tagués</span></div>`;
+    }
+    // Duplex + classe d'erreur physique (audit 2026-09) — voir
+    // network_diag._cycle_activite, réutilise netdiag.analyse.classer_erreur.
+    if (a.duplex === 2) {
+        h += `<div class="tip-row"><span class="tip-key">Duplex</span><span class="tip-val" style="color:var(--accent-red,#ff3355);">⚠ half-duplex</span></div>`;
+    }
+    if (a.err_classe) {
+        h += `<div class="tip-row"><span class="tip-key">⚠ Erreur</span><span class="tip-val" style="color:var(--accent-red,#ff3355);">${escH(a.err_libelle || a.err_classe)}</span></div>`;
+    }
+    if (a.nb_coupures_1h) {
+        h += `<div class="tip-row"><span class="tip-key">Coupures</span><span class="tip-val" style="color:var(--accent-orange,#f59e0b);">${a.nb_coupures_1h} dans la dernière heure</span></div>`;
     }
     // « Trafic vu » ne sert que quand il n'y a PAS de schéma : sinon les mêmes
     // noms seraient listés deux fois dans la même infobulle.
@@ -4610,6 +4639,7 @@ function initPingAuto() {
 // réglage serveur. Nécessite le SNMP activé côté diagnostic réseau.
 let _activiteTimer = null;
 let _activiteInfos = {};   // "slotId-numero" -> dernier relevé du port (lu par les infobulles riches)
+let _activiteEquip = {};   // adresse IP -> dernier relevé équipement (temp_max_c, ventilo_arrete...)
 
 function fmtDebit(bps) {
     if (!bps) return '0 b/s';
@@ -4647,6 +4677,18 @@ function _ageTxt(ts) {
     if (!ts) return '';
     const s = Math.max(0, Math.round(Date.now() / 1000 - ts));
     return s < 90 ? `${s} s` : `${Math.round(s / 60)} min`;
+}
+
+// Âge d'une donnée qui peut dater de plusieurs jours (topologie, audit
+// 2026-09) — _ageTxt ci-dessus plafonne aux minutes, trop court pour
+// diag_topologie qui n'est rafraîchie que manuellement/périodiquement.
+function _ageTxtLong(tsSec) {
+    if (!tsSec) return '';
+    const s = Math.max(0, Math.round(Date.now() / 1000 - tsSec));
+    if (s < 90) return `${s} s`;
+    if (s < 5400) return `${Math.round(s / 60)} min`;
+    if (s < 86400) return `${Math.round(s / 3600)} h`;
+    return `${Math.round(s / 86400)} j`;
 }
 
 function majBandeauActivite(d) {
@@ -4703,6 +4745,12 @@ function majBandeauActivite(d) {
     const LIM = 6;
     eqs.slice(0, LIM).forEach(e => parts.push(_segSwitch(e)));
     if (eqs.length > LIM) parts.push({ txt: `+${eqs.length - LIM} switch(s)…`, ton: 'muted' });
+    // Plafond de switchs suivis en direct (audit 2026-09) : au-delà de
+    // diag_baie_max_switchs, des switchs de la baie n'ont ni LED ni VLAN en
+    // direct sans que rien ne le dise — désormais signalé explicitement.
+    if (d.nb_switchs_total && d.nb_switchs_total > eqs.length) {
+        parts.push({ txt: `⚠ ${eqs.length}/${d.nb_switchs_total} switchs suivis en direct (plafond diag_baie_max_switchs)`, ton: 'warn' });
+    }
     // ports non calibrés : nomme les switchs concernés
     const nonCal = eqs.filter(e => !e.muet && !e.calibre).map(e => e.nom);
     if (nonCal.length) parts.push({ txt: `⚙ non calibré : ${nonCal.join(', ')} — assistant dans le 📊 Moniteur`, ton: 'warn' });
@@ -4721,6 +4769,10 @@ async function chargerActivite() {
     if (leg) leg.style.display = (d.actif === true) ? '' : 'none';
     _viderActivite();
     _activiteInfos = {};
+    // Températures/ventilateurs par IP (audit 2026-09) — lu par
+    // EquipmentModal.majStats(), voir _activiteEquip plus bas.
+    _activiteEquip = {};
+    for (const eq of (d.equipements || [])) _activiteEquip[eq.ip] = eq;
     if (d.actif === true) {
         for (const p of (d.ports || [])) {
             _activiteInfos[p.slot_id + '-' + p.numero] = p;   // lu par les infobulles riches
@@ -4752,6 +4804,7 @@ function demarrerActivite(ms) {
         document.body.classList.remove('baie-activite-on');
         _viderActivite();
         _activiteInfos = {};
+        _activiteEquip = {};
         majBandeauActivite(null);
     }
 }
@@ -4788,8 +4841,11 @@ const MoniteurModal = {
     _ongletActif: 'ports',
     _capPollTimer: null,
     _selInteract: 0,   // dernier contact souris/clavier avec un <select> de calibration
+    _histCache: {},    // "ip|numero" -> historique [ts,bps,pps] fusionné (audit 2026-09)
+    _histSince: 0,     // dernier horodatage déjà reçu, envoyé en ?since= au poll suivant
 
     ouvrir() {
+        this._histCache = {}; this._histSince = 0;   // fenêtre complète au 1er relevé
         document.getElementById('moniteur-modal').classList.add('open');
         const ports = document.getElementById('mon-ports');
         if (ports && !ports._monWired) {
@@ -4823,9 +4879,36 @@ const MoniteurModal = {
     async rafraichir() {
         if (document.hidden) return;   // onglet en arrière-plan : inutile d'entretenir le relevé SNMP
         let d;
-        try { d = await (await fetch('/api/baie/activite/moniteur')).json(); }
+        try {
+            const q = this._histSince ? `?since=${this._histSince}` : '';
+            d = await (await fetch('/api/baie/activite/moniteur' + q)).json();
+        }
         catch (e) { return; }
+        this._fusionnerHist(d);
         this._maj(d);
+    },
+
+    // Sparkline sans retransmettre 60 points à chaque poll de 2 s (audit
+    // 2026-09) : le serveur ne renvoie QUE les points plus récents que
+    // `_histSince` (voir network_diag.moniteur_baie) ; on les fusionne dans
+    // le cache local par port et on remplace `p.hist` par la fenêtre
+    // complète reconstituée, pour que le reste du rendu (sparkline()) ne
+    // change pas.
+    _fusionnerHist(d) {
+        let dernier = this._histSince;
+        for (const p of (d.ports || [])) {
+            const cle = `${p.ip}|${p.numero}`;
+            const nouv = p.hist || [];
+            const cache = this._histCache[cle] || [];
+            const fusion = this._histSince ? cache.concat(nouv) : nouv;
+            fusion.sort((a, b) => a[0] - b[0]);
+            const dedoublonne = fusion.filter((h, i) => i === 0 || h[0] !== fusion[i - 1][0]);
+            const bornee = dedoublonne.slice(-60);
+            this._histCache[cle] = bornee;
+            p.hist = bornee;
+            if (bornee.length) dernier = Math.max(dernier, bornee[bornee.length - 1][0]);
+        }
+        this._histSince = dernier;
     },
 
     _maj(d) {
@@ -4902,7 +4985,13 @@ const MoniteurModal = {
                     const src = SRC_LABEL[srcRaw] || srcRaw;
                     const div = p && p.divergence
                         ? ' <span style="color:var(--accent-orange,#f59e0b);" title="la topologie et le nom d\'interface ne s\'accordent pas sur ce port">⚠</span>' : '';
-                    const etat = p ? `<span class="mon-dot mon-dot-${p.etat}"></span> ${p.cpt_pegge ? (p.pps || 0).toFixed(0) + ' pkt/s' : fmtDebit(p.bps)}` : '—';
+                    // Duplex/erreur physique/coupures (audit 2026-09) — badge
+                    // compact à côté du débit plutôt qu'une colonne de plus.
+                    let alerteP = '';
+                    if (p && p.duplex === 2) alerteP += ` <span style="color:var(--accent-red);" title="half-duplex">⚠D</span>`;
+                    if (p && p.err_classe) alerteP += ` <span style="color:var(--accent-red);" title="${escH(p.err_libelle || p.err_classe)}${p.err_conseil ? ' — ' + escH(p.err_conseil) : ''}">⚠${escH(p.err_classe)}</span>`;
+                    if (p && p.nb_coupures_1h) alerteP += ` <span style="color:var(--accent-orange,#f59e0b);" title="${p.nb_coupures_1h} coupure(s) dans la dernière heure">⚠${p.nb_coupures_1h}×</span>`;
+                    const etat = p ? `<span class="mon-dot mon-dot-${p.etat}"></span> ${p.cpt_pegge ? (p.pps || 0).toFixed(0) + ' pkt/s' : fmtDebit(p.bps)}${alerteP}` : '—';
                     // « Appareil branché » : l'affectation déclarée, sinon ce que
                     // la table MAC du switch voit passer sur ce port. On borne
                     // l'affichage (2 noms + « +N ») : au-delà, c'est un switch non
@@ -4944,6 +5033,11 @@ const MoniteurModal = {
                 if (sw.modele) ctx.push(escH(sw.modele));
                 if (sw.redemarre) ctx.push('<span style="color:var(--accent-orange,#f59e0b);">vient de redémarrer</span>');
                 else if (sw.uptime_s != null) ctx.push(fmtUptime(sw.uptime_s));
+                // Capteurs ENTITY-SENSOR-MIB (audit 2026-09) — repli silencieux
+                // côté serveur si l'agent ne les expose pas (rien à afficher ici).
+                if (sw.temp_max_c != null) ctx.push(`<span${sw.temp_max_c >= 60 ? ' style="color:var(--accent-red);"' : ''}>🌡 ${sw.temp_max_c} °C</span>`);
+                if ((sw.ventilos_rpm || []).length) ctx.push(sw.ventilo_arrete
+                    ? '<span style="color:var(--accent-red);">⚠ ventilateur arrêté</span>' : `${sw.ventilos_rpm.join('/')} tr/min`);
                 const ctxHead = ctx.length ? ' · ' + ctx.join(' · ') : '';
                 const fdbTxt = sw.fdb_nb_macs != null
                     ? ` · table MAC ${sw.fdb_nb_macs}${sw.fdb_fusionne ? ' (fusionnée)' : sw.fdb_incomplet ? ' (INCOMPLÈTE)' : ''}`
@@ -5874,8 +5968,45 @@ const PortModal = (() => {
         const activitePort = _activiteInfos[sid + '-' + num];
         const vlan = (activitePort && activitePort.vlan) || info.vlan || null;
         document.getElementById('pom-det-vlan-row').style.display = vlan ? '' : 'none';
-        if (vlan) document.getElementById('pom-det-vlan').textContent = String(vlan);
-        document.getElementById('pom-det').style.display = (kind || devs.length || vlan) ? '' : 'none';
+        if (vlan) {
+            const tagues = (activitePort && activitePort.vlan_tagues) || [];
+            document.getElementById('pom-det-vlan').textContent =
+                String(vlan) + (tagues.length ? ` (natif) + trunk : VLAN ${tagues.join(', ')} tagués` : '');
+        }
+        // Âge de la détection (audit 2026-09) — seulement pertinent quand la
+        // source est la topologie (diag_topologie, potentiellement vieille de
+        // plusieurs jours) : le relevé live, lui, a toujours un âge de
+        // quelques secondes, jamais montré nulle part de la même façon.
+        const ageRow = document.getElementById('pom-det-age-row');
+        if (netic && netic.viaTopologie && info.topo_age_ts) {
+            document.getElementById('pom-det-age').textContent = `il y a ${_ageTxtLong(info.topo_age_ts)}`;
+            ageRow.style.display = '';
+        } else ageRow.style.display = 'none';
+        // STP (audit 2026-09) : un port "bloquant" est une redondance coupée
+        // délibérément par le protocole, pas une panne — utile à distinguer.
+        const stpRow = document.getElementById('pom-det-stp-row');
+        if (info.stp_etat) {
+            document.getElementById('pom-det-stp').textContent =
+                info.stp_etat + (info.stp_amont ? ' · vers la racine' : '');
+            stpRow.style.display = '';
+        } else stpRow.style.display = 'none';
+        // Duplex + classe d'erreur physique + coupures récentes (audit 2026-09)
+        // — depuis le relevé live uniquement (_activiteInfos).
+        document.getElementById('pom-det-duplex-row').style.display =
+            (activitePort && activitePort.duplex === 2) ? '' : 'none';
+        const errRow = document.getElementById('pom-det-err-row');
+        if (activitePort && activitePort.err_classe) {
+            document.getElementById('pom-det-err').textContent = activitePort.err_libelle || activitePort.err_classe;
+            errRow.style.display = '';
+        } else errRow.style.display = 'none';
+        const coupRow = document.getElementById('pom-det-coupures-row');
+        if (activitePort && activitePort.nb_coupures_1h) {
+            document.getElementById('pom-det-coupures').textContent = `${activitePort.nb_coupures_1h} dans la dernière heure`;
+            coupRow.style.display = '';
+        } else coupRow.style.display = 'none';
+        const activiteAlerte = activitePort && (activitePort.duplex === 2 || activitePort.err_classe || activitePort.nb_coupures_1h);
+        document.getElementById('pom-det').style.display =
+            (kind || devs.length || vlan || info.stp_etat || activiteAlerte) ? '' : 'none';
         const apercu = document.getElementById('pom-apercu');
         if (devs.length) {
             document.getElementById('pom-apercu-lignes').innerHTML = devs.slice(0, 4).map(d =>
@@ -6035,6 +6166,7 @@ const EquipmentModal = (() => {
         afficherEditeurPorts(s);
         majBandeauType();
         majStats(s);
+        majCapteurs(s);
         majFai(s);
         afficherInspecteur('equipement');
     }
@@ -6120,6 +6252,34 @@ const EquipmentModal = (() => {
         } else snmpRow.style.display = 'none';
         wrap.style.display = '';
         btnAnnexe.style.display = '';
+    }
+
+    // Température / ventilateur(s) (audit 2026-09) — ENTITY-SENSOR-MIB, relevé
+    // en même temps que l'activité live (_activiteEquip, par IP), caché en
+    // silence si l'agent ne l'expose pas (repli déjà fait côté serveur).
+    function majCapteurs(s) {
+        const wrap = document.getElementById('eqm-capteurs');
+        const eq = s.adresse_ip ? _activiteEquip[s.adresse_ip] : null;
+        if (!eq || (eq.temp_max_c == null && !(eq.ventilos_rpm || []).length)) {
+            wrap.style.display = 'none';
+            return;
+        }
+        const tempRow = document.getElementById('eqm-capt-temp-row');
+        if (eq.temp_max_c != null) {
+            const v = document.getElementById('eqm-capt-temp');
+            v.textContent = `${eq.temp_max_c} °C`;
+            v.className = 'v' + (eq.temp_max_c >= 60 ? ' warn' : '');
+            tempRow.style.display = '';
+        } else tempRow.style.display = 'none';
+        const ventRow = document.getElementById('eqm-capt-vent-row');
+        if ((eq.ventilos_rpm || []).length) {
+            const v = document.getElementById('eqm-capt-vent');
+            v.textContent = eq.ventilo_arrete ? `⚠ arrêté (${eq.ventilos_rpm.join(', ')} tr/min)`
+                                              : `${eq.ventilos_rpm.join(', ')} tr/min`;
+            v.className = 'v' + (eq.ventilo_arrete ? ' warn' : '');
+            ventRow.style.display = '';
+        } else ventRow.style.display = 'none';
+        wrap.style.display = '';
     }
 
     // Bloc « Fournisseur d'accès » pour une Box internet (FAI) — reprend les
@@ -6961,11 +7121,24 @@ async function ouvrirTableEquipement(slotId, type) {
     const body = document.getElementById('pa-body');
     body.innerHTML = '<div class="pa-empty">Interrogation en direct de l’équipement…</div>';
     pan.hidden = false;
+    // Relevé en tâche de fond (audit 2026-09, comme "Deviner le brassage") :
+    // ARP jusqu'à 8 s, DNS quelques secondes — on poll la MÊME route plutôt
+    // que de bloquer le thread Flask et de figer ce tiroir sur un spinner.
     let data;
-    try {
-        data = await (await fetch(`/api/baie/slot/${slotId}/${type}`)).json();
-    } catch {
-        body.innerHTML = '<div class="pa-empty">Échec de la requête réseau.</div>';
+    for (let i = 0; i < 24; i++) {
+        let d;
+        try {
+            d = await (await fetch(`/api/baie/slot/${slotId}/${type}`)).json();
+        } catch {
+            body.innerHTML = '<div class="pa-empty">Échec de la requête réseau.</div>';
+            return;
+        }
+        if (!d.en_cours && d.resultat) { data = d.resultat; break; }
+        if (!d.en_cours && !d.resultat && i > 0) { data = { ok: false, motif: 'erreur' }; break; }
+        await new Promise(r => setTimeout(r, 500));
+    }
+    if (!data) {
+        body.innerHTML = '<div class="pa-empty">Relevé trop long — réessaie dans un moment.</div>';
         return;
     }
     if (type === 'dns') { _rendreResultatDns(data); return; }
