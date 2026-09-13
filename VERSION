@@ -1,8 +1,44 @@
-PARCINFO_VERSION=2.33.12
+PARCINFO_VERSION=2.33.13
 RELEASE_DATE=2026-09-13
-BUILD_NUMBER=2026091302
+BUILD_NUMBER=2026091303
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.13 - Sync Turso : client_instantane (« Changements depuis
+# la derniere visite ») entre dans la synchronisation multi-instance
+#
+# Suite de la fonctionnalite "Changements depuis la derniere visite"
+# (2.22.1+) : la table client_instantane, qui porte la photo compacte de
+# l'inventaire prise en fin de scan, n'etait jusqu'ici jamais synchronisee
+# entre les instances - une photo prise SUR SITE restait invisible depuis
+# l'instance de bureau, alors que c'est l'objet meme de la fonctionnalite.
+#
+# ANTI-COLLISION D'ID
+# La table rejoint _TRACKED_JOURNAL alors que des instantanes existent DEJA
+# en production, avec des id 1, 2, 3... identiques d'une instance a
+# l'autre - _seed_tables_vides_sur_turso (v2.32.10) les aurait ecrases au
+# premier seed. Nouveau app._reclef_client_instantane(c, id_offset), appele
+# dans le bloc anti-collision d'init_db(), une seule fois par base
+# (drapeau config _client_instantane_reclef_v1) : UPDATE client_instantane
+# SET id = id + offset (meme offset ~2^48 que l'anti-collision
+# sqlite_sequence existante), triggers _trg_journal_* suspendus le temps
+# de l'operation, sqlite_sequence recale sur MAX(id).
+#
+# Sur sans re-mapping : aucune table ne reference client_instantane.id, et
+# la colonne reference est un drapeau 0/1 (photo epinglee), pas un id.
+#
+# client_instantane CREATE TABLE deplace avant la boucle des triggers
+# (comme dhcp_baux). Copie initiale vers Turso ensuite via
+# _seed_tables_vides_sur_turso (mecanisme reutilise tel quel).
+#
+# LAISSE LOCAL VOLONTAIREMENT
+# Les tables diag_* (diag_topologie, diag_reseau_evenements,
+# diag_metriques, diag_baie_snapshot...) restent non synchronisees : caches
+# et series temporelles reconstruits par le SNMP sur site, sans interet a
+# distance (diag_baie_snapshot reecrit toutes les ~5 min - tempete de sync
+# pour rien).
+#
+# A installer sur toutes les instances.
 
 # Version 2.33.12 - Baie de brassage : duplex, erreurs physiques, capteurs,
 # coupures, STP, VLAN trunk, age de la topologie (audit complet, 13 lots)
