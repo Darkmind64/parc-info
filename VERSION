@@ -1,8 +1,71 @@
-PARCINFO_VERSION=2.33.11
+PARCINFO_VERSION=2.33.12
 RELEASE_DATE=2026-09-13
-BUILD_NUMBER=2026091301
+BUILD_NUMBER=2026091302
 GIT_BRANCH=master
 STATUS=STABLE
+
+# Version 2.33.12 - Baie de brassage : duplex, erreurs physiques, capteurs,
+# coupures, STP, VLAN trunk, age de la topologie (audit complet, 13 lots)
+#
+# Demande : audit complet du mecanisme de collecte SNMP de la baie (ce qui
+# est collecte, comment, comment c'est affiche) + ameliorations proposees
+# via un artefact de decision (14 pistes, 13 validees, 1 discutee puis
+# abandonnee). Tout implemente en un seul lot.
+#
+# MECANISME DE COLLECTE
+# (1) Plafond diag_baie_max_switchs (defaut 8, avant fige en dur) -
+# _switchs_baie rapporte le nombre total eligible, bandeau #baie-infob
+# signale "N/M switchs suivis" des que le plafond tronque.
+# (2) _activite_err_watch (par IP, fenetre 180 s) : un switch ou une
+# erreur vient d'etre vue reste sonde chaque cycle au lieu d'attendre le
+# prochain cycle 1/8 (jusqu'a 4 min de retard avant).
+# (3) lancer_requete_slot/statut_requete_slot (thread de fond + statut
+# pollable, meme schema que "Deviner le brassage") : les boutons ARP/MAC/
+# DNS ne bloquent plus le thread Flask jusqu'a 8 s.
+# (4) moniteur_baie(cid, since=) ne renvoie que les nouveaux points de
+# sparkline ; le client (MoniteurModal._fusionnerHist) les fusionne dans
+# un cache local au lieu de retransmettre 60 points a chaque poll de 2 s.
+#
+# NOUVELLES DONNEES (SNMP deja relevees ailleurs dans l'app ou colonnes
+# standard jamais interrogees)
+# (6)(7) Duplex + classe d'erreur physique (CRC/FCS, collisions) : colonnes
+# dot3 relevees dans _poll_switch_ports, classees en reutilisant TEL QUEL
+# netdiag.analyse.deltas_port/classer_erreur (meme classification que le
+# diagnostic periodique). Affiche dans l'infobulle, l'inspecteur, le
+# moniteur.
+# (8) Temperature/ventilateurs via ENTITY-SENSOR-MIB (_capteurs_switch,
+# jamais interroge jusqu'ici), repli silencieux si l'agent ne l'expose pas
+# - meme philosophie que le PoE. Nouveau bloc "Capteurs" dans l'inspecteur
+# d'equipement + en-tete du moniteur.
+# (9) Historique de coupures (flapping) sur 1 h par port, accumule dans
+# _etats_prec, affiche partout ou l'activite live l'est deja.
+# (10) Etat STP (bloquant/apprentissage/transmission) + "vers la racine",
+# deja persiste mais jete avant d'atteindre l'ecran baie - propage jusqu'a
+# l'inspecteur de port.
+# (11) Violation de port-security/limite MAC : decision de NE PAS
+# implementer (MIB majoritairement proprietaire, ROI incertain).
+#
+# AFFICHAGE
+# (12) VLAN tagues d'un trunk (au-dela du seul VLAN d'acces deja affiche
+# en 2.33.11), deduits de la meme FDB.
+# (13) Age de la cartographie de topologie (appareils_par_port_baie),
+# affiche "detecte il y a 3 j" dans l'inspecteur quand la source est la
+# topologie plutot que le relevé live.
+# (14) PoE deja correctement libelle ("plafond de classe, pas une
+# mesure"), verifie n'apparaitre qu'au bon endroit (moniteur) - aucun
+# changement necessaire.
+#
+# NON RETENU
+# (5) Pre-chauffe de fond non filtree par activite du site - explique en
+# detail (regression 2.24.0 documentee), la piste "client archive"
+# proposee ne correspond a aucun champ existant sur la table clients ;
+# creer cette notion juste pour cette optimisation (cout reseau deja
+# negligeable) serait disproportionne. Abandonne, aucun code change.
+#
+# Verifie en navigateur pour chaque ajout (infobulle port/prise murale,
+# inspecteur, moniteur, bandeau d'info). 429 tests pytest OK (422 + 7
+# nouveaux : lancer_requete_slot, route ARP non bloquante, plafond
+# configurable, duplex+classe d'erreur, filtre since du moniteur).
 
 # Version 2.33.11 - Baie de brassage : VLAN dans les infobulles/inspecteur,
 # infos FAI sur les box internet

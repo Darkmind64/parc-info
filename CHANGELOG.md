@@ -1,5 +1,21 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.12] - 2026-09-13 🔬
+
+### Baie de brassage : audit complet du mécanisme de collecte SNMP, 13 améliorations
+
+Demande directe : un audit complet de ce qui est collecté sur l'écran Baie de brassage, comment, et comment c'est affiché — avec les pistes d'amélioration possibles pour l'interface, le mécanisme de collecte, et les performances. La relecture a produit 14 pistes concrètes présentées via un artefact de décision ; 13 ont été validées et implémentées d'un coup, 1 a été expliquée en détail puis abandonnée.
+
+**Mécanisme de collecte.** Le plafond de switchs suivis en direct par cycle (8, jusqu'ici figé en dur) est désormais paramétrable (`diag_baie_max_switchs`) et signalé à l'écran (« ⚠ N/M switchs suivis en direct ») quand un site en a davantage — auparavant, les switchs excédentaires n'avaient tout simplement ni LED ni VLAN en direct, sans que rien ne le dise. Les compteurs d'erreurs, relevés seulement 1 cycle sur 8 pour limiter la charge SNMP, restent désormais sondés à chaque cycle sur un switch où une erreur vient d'être vue (`_activite_err_watch`, fenêtre de 3 minutes) — avant, un pic d'erreurs pouvait mettre jusqu'à 4 minutes à s'afficher. Les boutons ARP/MAC/DNS de la baie, jusqu'ici des requêtes Flask bloquantes (jusqu'à 8 s sur un équipement lent), passent en tâche de fond avec statut interrogeable (`lancer_requete_slot`/`statut_requete_slot`), même schéma que « Deviner le brassage ». Le moniteur, qui retransmettait jusqu'à 60 points de sparkline par port à chaque rafraîchissement de 2 s, ne renvoie plus que les points nouveaux (`moniteur_baie(since=)`) ; le client les fusionne dans un cache local.
+
+**Nouvelles données affichées.** Le duplex et la classe d'erreur physique (CRC/FCS, collisions) d'un port sont désormais relevés en direct et affichés explicitement (avant : un badge « ⚠ Diagnostic » générique sans détail) — la classification réutilise telle quelle `netdiag.analyse.classer_erreur`, déjà utilisée par le diagnostic périodique, pour rester cohérente avec les mêmes catégories partout dans l'app. La température et l'état des ventilateurs d'un équipement sont relevés via ENTITY-SENSOR-MIB (jamais interrogé jusqu'ici), avec repli silencieux sur un agent qui ne l'expose pas, même philosophie que le PoE. Un compteur de coupures récentes (dernière heure) apparaît par port. L'état STP d'un port (bloquant/apprentissage/transmission), déjà relevé et persisté mais jamais propagé jusqu'à l'écran, est maintenant visible dans l'inspecteur. Un port en mode trunk affiche désormais tous les VLAN tagués qu'il transporte, pas seulement le VLAN d'accès. L'inspecteur affiche l'âge de la détection quand elle vient de la cartographie de topologie plutôt que du relevé live.
+
+**Décisions documentées sans changement de code.** La détection de violation de port-security / limite de MAC n'a pas été implémentée (MIB majoritairement propriétaire, ROI incertain comparé aux autres pistes). Le libellé du PoE (« plafond de classe, pas une mesure ») a été vérifié déjà correct et présent au seul endroit où il apparaît (le moniteur) — rien à harmoniser ailleurs. La piste consistant à filtrer la pré-chauffe de fond par activité du site a été expliquée en détail à l'utilisateur puis abandonnée : elle proposait de sauter les clients « archivés », une notion qui ne correspond à aucun champ existant sur la table `clients` — la créer juste pour cette optimisation (coût réseau déjà négligeable) aurait été disproportionné.
+
+**Déploiement.** Nouvelle clé de configuration `diag_baie_max_switchs`. Aucune migration de schéma, aucune route API supprimée (les 3 routes ARP/MAC/DNS gardent leur URL, juste leur comportement passe en tâche de fond ; le client poll la même route, comme `/api/baie/brassage/proposer`). Vérifié en navigateur pour chaque ajout (infobulle de port, de prise murale, inspecteur de port et d'équipement, moniteur, bandeau d'information). 429 tests pytest OK (422 + 7 nouveaux : démarrage/single-flight/capture d'erreur du thread de fond, route ARP non bloquante bout en bout, plafond de switchs configurable, classification duplex/erreur sur 2 cycles, filtre `since` du moniteur).
+
+---
+
 ## [2.33.11] - 2026-09-13 🏷️
 
 ### Baie de brassage : VLAN dans les infobulles/inspecteur, infos FAI sur les box internet
