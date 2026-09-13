@@ -2400,6 +2400,11 @@ async function init() {
     await chargerBaie('Baie principale');
     // Calcul des proportions après chargement initial
     setTimeout(() => calcUH(true), 50);
+    // Ping immédiat au chargement (indépendant du réglage "Ping auto", qui ne
+    // pilote que les répétitions) : sans ça, la LED de port au démarrage ne
+    // reflète que le dernier ping connu en base, potentiellement ancien —
+    // demandé pour repérer tout de suite les ports réellement connectés.
+    pingerToutelaBaie(false);
     initPingAuto();
     initActivite();
     // Recalcul si la fenêtre est redimensionnée — calcUH() ne redessine
