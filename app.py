@@ -5,12 +5,11 @@ import sqlite3, subprocess, re, socket, ipaddress, threading, os, platform, conc
 from PIL import Image
 from io import BytesIO
 try:
-    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import mm, inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     from reportlab.lib import colors
-    from reportlab.pdfgen import canvas
     REPORTLAB_AVAILABLE = True
 except ImportError:
     REPORTLAB_AVAILABLE = False
@@ -127,12 +126,12 @@ from config_helpers import (LISTE_DEFAULTS, CFG_DEFAULTS,
                              get_port_config, get_port_icon)
 from client_helpers import (paginate, get_client_access, can_write,
                              get_client_id, get_clients,
-                             log_history, log_error, garantie_active, human_size,
+                             log_history, log_error, human_size,
                              fmt_appareils, fmt_garantie_periph, fmt_contrat, fmt_intervention,
                              get_clients_for_filter, _format_date_field)
 from uploads_sync import start_sync_thread
 from crypto_utils   import get_crypto_manager
-from cache_utils    import get_cache_manager, cache_result, invalidate_cache_pattern
+from cache_utils    import get_cache_manager, invalidate_cache_pattern
 from search_utils   import search_global, search_autocomplete
 from app_update_routes import register_update_routes
 import network_diag  # module de diagnostic réseau (démarre son thread de surveillance)
@@ -215,7 +214,6 @@ else:
         _f.write(_generated_key)
     app.config['SECRET_KEY'] = _generated_key
 # ── Configuration de sécurité des sessions ───────────────────────────────────
-from datetime import timedelta
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=8)
 app.config['SESSION_COOKIE_HTTPONLY']    = True   # inaccessible depuis JS
 app.config['SESSION_COOKIE_SAMESITE']    = 'Lax'  # protection CSRF additionnelle
@@ -673,7 +671,7 @@ def port_badge_filter(port):
         icon = cfg.get('icon', '◈')
         color = cfg.get('color', '#64748b')
         return f'<span style="background:rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},.15);color:{color};border:1.5px solid {color};padding:3px 6px;border-radius:3px;font-size:0.75em;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;gap:2px;">{icon} {port}</span>'
-    except:
+    except Exception:
         return f'<span>{port}</span>'
 
 @app.template_filter('port_name')
@@ -681,7 +679,7 @@ def port_name_filter(port):
     """Retourne uniquement le nom du service pour un port (ex: 'SSH', 'HTTP')."""
     try:
         return get_port_config(int(port)).get('name', str(port))
-    except:
+    except Exception:
         return str(port)
 
 @app.template_filter('port_class')
@@ -693,7 +691,7 @@ def port_class_filter(port):
 def port_icon_filter(port):
     try:
         return get_port_icon(int(port))
-    except:
+    except Exception:
         return '◈'
 
 @app.template_filter('port_info')
@@ -708,7 +706,7 @@ def port_info_filter(port):
             return f"{name} — {desc}"
         else:
             return f"{name} — Service TCP"
-    except:
+    except Exception:
         return 'Port TCP ouvert'
 
 @app.template_filter('port_action')
@@ -777,6 +775,7 @@ def _build_crypto_shared(cursor=None):
             url_row   = cursor.execute("SELECT valeur FROM config WHERE cle='turso_url'").fetchone()
             token_row = cursor.execute("SELECT valeur FROM config WHERE cle='turso_token'").fetchone()
         else:
+            from database import get_local_db
             _c = get_local_db()
             url_row   = _c.execute("SELECT valeur FROM config WHERE cle='turso_url'").fetchone()
             token_row = _c.execute("SELECT valeur FROM config WHERE cle='turso_token'").fetchone()
@@ -1596,7 +1595,15 @@ def init_db():
         entite_nom TEXT DEFAULT '',
         action TEXT NOT NULL,
         date_action TEXT NOT NULL,
-        details TEXT DEFAULT '')''')
+        details TEXT DEFAULT '',
+        auteur TEXT DEFAULT '')''')
+
+    # Migration : attribution de l'auteur (audit 2026-09) — jusqu'ici
+    # l'historique enregistrait quoi/où mais jamais qui, malgré les
+    # nombreux appels qui rechargeaient déjà l'utilisateur pour rien.
+    cols_historique = [r[1] for r in c.execute('PRAGMA table_info(historique)').fetchall()]
+    if 'auteur' not in cols_historique:
+        c.execute("ALTER TABLE historique ADD COLUMN auteur TEXT DEFAULT ''")
 
     # TABLE DOCUMENTS PÉRIPHÉRIQUES
     c.execute('''CREATE TABLE IF NOT EXISTS documents_peripheriques (
@@ -3014,7 +3021,7 @@ def _bg_sync_loop():
 
 
 def _start_sync_thread():
-    global _sync_thread, _sync_stop
+    global _sync_thread
     if _sync_thread and _sync_thread.is_alive():
         return
     _sync_stop.clear()
@@ -3618,7 +3625,7 @@ def _compute_device_age(conn, cid, today):
                 age_groups['3-5_years'].append(d)
             else:
                 age_groups['5plus_years'].append(d)
-        except:
+        except Exception:
             age_groups['unknown'].append(d)
 
     return {
@@ -4105,7 +4112,6 @@ def index():
     - Un client: affiche le dashboard single-client classique
     - Plusieurs clients: affiche le dashboard multi-client avec vue d'ensemble
     """
-    user = get_auth_user()
     clients = get_clients()  # Récupère tous les clients accessibles (respects ACL)
 
     # Cas 1: Pas de clients accessibles
@@ -5258,8 +5264,9 @@ def liste_types_droits():
 @login_required
 def api_creer_type_droit():
     cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
     f = request.json or {}
-    now = _utcnow().isoformat()
     conn = get_db()
     c = conn.execute('INSERT INTO types_droits (client_id,categorie,nom,description,icone,ordre) VALUES (?,?,?,?,?,?)',
         (cid, f.get('categorie','Autre'), f.get('nom',''), f.get('description',''),
@@ -5274,6 +5281,8 @@ def api_creer_type_droit():
 @login_required
 def api_type_droit(id):
     cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
     conn = get_db()
     if request.method == 'DELETE':
         conn.execute('DELETE FROM types_droits WHERE id=? AND client_id=?', (id, cid))
@@ -5387,7 +5396,7 @@ def supprimer_utilisateur(id):
         return redirect(url_for('liste_utilisateurs'))
     cid = get_client_id()
     conn = get_db()
-    u = row_to_dict(conn.execute('SELECT prenom,nom FROM utilisateurs WHERE id=?',(id,)).fetchone() or {})
+    u = row_to_dict(conn.execute('SELECT prenom,nom FROM utilisateurs WHERE id=? AND client_id=?',(id, cid)).fetchone() or {})
     nom = (u.get('prenom','') + ' ' + u.get('nom','')).strip() or '?'
     log_history(conn, cid, 'utilisateur', id, nom, 'Suppression')
     # appareils.utilisateur_id / identifiants.utilisateur_id : colonnes
@@ -5400,7 +5409,7 @@ def supprimer_utilisateur(id):
     conn.execute('UPDATE appareils SET utilisateur_id=NULL WHERE utilisateur_id=? AND client_id=?', (id, cid))
     conn.execute('UPDATE identifiants SET utilisateur_id=NULL WHERE utilisateur_id=? AND client_id=?', (id, cid))
     conn.execute('UPDATE peripheriques SET utilisateur_id=NULL WHERE utilisateur_id=? AND client_id=?', (id, cid))
-    conn.execute('DELETE FROM utilisateurs WHERE id=?', (id,))
+    conn.execute('DELETE FROM utilisateurs WHERE id=? AND client_id=?', (id, cid))
     conn.commit(); conn.close()
     flash('Utilisateur supprimé', 'info')
     return redirect(url_for('liste_utilisateurs'))
@@ -5441,6 +5450,8 @@ def droits_utilisateur(id):
 @login_required
 def api_ajouter_droit():
     cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
     f = request.json or {}
     uid = f.get('utilisateur_id')
     now = _utcnow().isoformat()
@@ -5461,17 +5472,19 @@ def api_ajouter_droit():
 @login_required
 def api_droit(id):
     cid = get_client_id()
+    if not can_write(cid):
+        return jsonify({'error': 'Forbidden'}), 403
     conn = get_db()
     if request.method == 'DELETE':
-        conn.execute('DELETE FROM droits_utilisateurs WHERE id=?', (id,))
+        conn.execute('DELETE FROM droits_utilisateurs WHERE id=? AND client_id=?', (id, cid))
         conn.commit(); conn.close()
         return jsonify({'ok': True})
     f = request.json or {}
-    conn.execute('UPDATE droits_utilisateurs SET categorie=?,nom_droit=?,valeur=?,niveau=?,notes=? WHERE id=?',
+    conn.execute('UPDATE droits_utilisateurs SET categorie=?,nom_droit=?,valeur=?,niveau=?,notes=? WHERE id=? AND client_id=?',
         (f.get('categorie',''), f.get('nom_droit',''), f.get('valeur',''),
-         f.get('niveau','lecture'), f.get('notes',''), id))
+         f.get('niveau','lecture'), f.get('notes',''), id, cid))
     conn.commit()
-    row = row_to_dict(conn.execute('SELECT * FROM droits_utilisateurs WHERE id=?', (id,)).fetchone() or {})
+    row = row_to_dict(conn.execute('SELECT * FROM droits_utilisateurs WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
     conn.close()
     return jsonify(row)
 
@@ -6185,7 +6198,7 @@ def supprimer_document(id):
         conn.commit()
         try:
             os.remove(os.path.join(UPLOAD_FOLDER, doc['nom_fichier']))
-        except:
+        except Exception:
             pass
     conn.close()
     next_url = request.args.get('next') or url_for('editer_appareil', id=appareil_id)
@@ -6238,18 +6251,22 @@ def api_reveiller_appareil(id):
     if not can_write(client_id):
         return jsonify({'error': 'Accès en lecture seule'}), 403
     conn = get_db()
-    row = conn.execute('SELECT adresse_mac FROM appareils WHERE id=? AND client_id=?',
+    row = conn.execute('SELECT nom_machine, adresse_mac FROM appareils WHERE id=? AND client_id=?',
                        (id, client_id)).fetchone()
-    conn.close()
     if not row:
+        conn.close()
         return jsonify({'error': 'Appareil introuvable'}), 404
-    mac = (row[0] or '').strip()
+    nom, mac = row[0], (row[1] or '').strip()
     if not mac:
+        conn.close()
         return jsonify({'error': "Cet appareil n'a pas d'adresse MAC enregistrée"}), 400
     ok, motif = network_diag.reveiller_appareil(mac)
     if not ok:
+        conn.close()
         return jsonify({'error': motif or 'Envoi impossible'}), 500
-    log_history('REVEIL_APPAREIL', get_auth_user()['login'], client_id, {'id': id, 'mac': mac})
+    log_history(conn, client_id, 'appareil', id, nom, 'Réveil (Wake-on-LAN)', {'mac': mac})
+    conn.commit()
+    conn.close()
     return jsonify({'ok': True})
 
 
@@ -6297,13 +6314,14 @@ def api_appareil_diag_reseau(id):
 @login_required
 def api_garantie_ignorer(id):
     """Active ou désactive le flag 'ignorer alerte garantie' sur un appareil."""
-    if not can_write():
+    cid = get_client_id()
+    if not can_write(cid):
         return jsonify({'error': 'Accès en lecture seule'}), 403
     ignorer = (request.json or {}).get('ignorer', True)
     now = _utcnow().isoformat()
     conn = get_db()
-    conn.execute('UPDATE appareils SET garantie_alerte_ignoree=?, date_maj=? WHERE id=?',
-                 (1 if ignorer else 0, now, id))
+    conn.execute('UPDATE appareils SET garantie_alerte_ignoree=?, date_maj=? WHERE id=? AND client_id=?',
+                 (1 if ignorer else 0, now, id, cid))
     conn.commit()
     conn.close()
     return jsonify({'ok': True, 'garantie_alerte_ignoree': bool(ignorer)})
@@ -7265,14 +7283,16 @@ def api_baie_slot(id):
         avant = row_to_dict(conn.execute(
             'SELECT nom_custom, type_equipement, position, col_index, baie_nom FROM baie_slots '
             'WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        if not avant:
+            conn.close()
+            return jsonify({'error': 'Slot introuvable'}), 404
         _detacher_liens_vers(conn, id)
         conn.execute('DELETE FROM baie_slot_ports WHERE slot_id=?', (id,))
         conn.execute('DELETE FROM baie_prises_murales WHERE slot_id=?', (id,))
         conn.execute('DELETE FROM baie_slots WHERE id=? AND client_id=?', (id, cid))
-        if avant:
-            nom_slot = avant.get('nom_custom') or avant.get('type_equipement') or f'Emplacement #{id}'
-            log_history(conn, cid, 'baie_slot', id, nom_slot, 'Retrait',
-                        f"{avant.get('baie_nom') or 'Baie principale'} · U{avant.get('position')}·C{avant.get('col_index', 0)}")
+        nom_slot = avant.get('nom_custom') or avant.get('type_equipement') or f'Emplacement #{id}'
+        log_history(conn, cid, 'baie_slot', id, nom_slot, 'Retrait',
+                    f"{avant.get('baie_nom') or 'Baie principale'} · U{avant.get('position')}·C{avant.get('col_index', 0)}")
         conn.commit(); conn.close()
         return jsonify({'ok': True})
     f = request.json or {}
@@ -8344,7 +8364,7 @@ _OUI = {
     "70:11:24":"Apple","70:cd:60":"Apple","78:7b:8a":"Apple","7c:f0:5f":"Apple",
     "88:19:08":"Apple","88:e8:7f":"Apple","8c:00:6d":"Apple","8c:58:77":"Apple",
     "90:72:40":"Apple","98:01:a7":"Apple","98:03:d8":"Apple","a4:b1:97":"Apple",
-    "a4:c3:f0":"Apple","a8:20:66":"Apple","ac:bc:32":"Apple","b4:18:d1":"Apple",
+    "a8:20:66":"Apple","ac:bc:32":"Apple","b4:18:d1":"Apple",
     "b8:09:8a":"Apple","b8:8d:12":"Apple","b8:c7:5d":"Apple","bc:52:b7":"Apple",
     "c8:69:cd":"Apple","c8:b5:b7":"Apple","cc:29:f5":"Apple","d0:23:db":"Apple",
     "d4:61:9d":"Apple","d8:bb:c1":"Apple","dc:2b:2a":"Apple","e0:ac:cb":"Apple",
@@ -8353,7 +8373,7 @@ _OUI = {
     # ── Microsoft ────────────────────────────────────────────────────────────
     "00:03:ff":"Microsoft","00:12:5a":"Microsoft","00:15:5d":"Microsoft (Hyper-V)",
     "00:17:fa":"Microsoft","00:50:f2":"Microsoft","28:18:78":"Microsoft",
-    "48:b0:2d":"Microsoft","50:1a:c5":"Microsoft","7c:1e:52":"Microsoft",
+    "48:b0:2d":"Microsoft","50:1a:c5":"Microsoft","7c:1e:52":"Microsoft","2c:54:91":"Microsoft",
     # ── Dell ─────────────────────────────────────────────────────────────────
     "00:06:5b":"Dell","00:08:74":"Dell","00:0b:db":"Dell","00:0d:56":"Dell",
     "00:0f:1f":"Dell","00:11:43":"Dell","00:12:3f":"Dell","00:13:72":"Dell",
@@ -8367,14 +8387,14 @@ _OUI = {
     "34:17:eb":"Dell","34:e6:d7":"Dell","38:63:bb":"Dell","3c:a8:2a":"Dell",
     "44:a8:42":"Dell","48:4d:7e":"Dell","4c:d9:8f":"Dell","50:9a:4c":"Dell",
     "54:9f:13":"Dell","58:8a:5a":"Dell","5c:f9:dd":"Dell","60:57:18":"Dell",
-    "6c:2b:59":"Dell","70:10:6f":"Dell","74:86:e2":"Dell","78:45:c4":"Dell",
+    "6c:2b:59":"Dell","74:86:e2":"Dell","78:45:c4":"Dell",
     "7c:b1:1c":"Dell","84:8f:69":"Dell","8c:04:ba":"Dell","90:b1:1c":"Dell",
-    "98:90:96":"Dell","9c:eb:e8":"Dell","a0:36:9f":"Dell","a4:1f:72":"Dell",
-    "a4:ba:db":"Dell","a8:9d:21":"Dell","b0:83:fe":"Dell","b4:96:91":"Dell",
+    "98:90:96":"Dell","a0:36:9f":"Dell","a4:1f:72":"Dell",
+    "a4:ba:db":"Dell","a8:9d:21":"Dell","b0:83:fe":"Dell",
     "b8:ca:3a":"Dell","bc:30:5b":"Dell","c8:1f:66":"Dell","d4:ae:52":"Dell",
     "d4:be:d9":"Dell","d8:9e:f3":"Dell","e0:db:55":"Dell","e4:43:4b":"Dell",
     "e8:b0:c3":"Dell","ec:f4:bb":"Dell","f0:1f:af":"Dell","f4:02:70":"Dell",
-    "f8:db:88":"Dell","f8:bc:12":"Dell","fc:aa:14":"Dell",
+    "f8:db:88":"Dell","f8:bc:12":"Dell","fc:aa:14":"Dell","8c:ec:4b":"Dell",
     # ── HP / HPE ──────────────────────────────────────────────────────────────
     "00:01:e6":"HP","00:04:ea":"HP","00:08:02":"HP","00:0b:cd":"HP",
     "00:0e:7f":"HP","00:10:83":"HP","00:11:0a":"HP","00:12:79":"HP",
@@ -8390,17 +8410,17 @@ _OUI = {
     "a0:b3:cc":"HP","a4:5d:36":"HP","b8:af:67":"HP","bc:ea:fa":"HP",
     "c4:34:6b":"HP","c8:d3:ff":"HP","d4:85:64":"HP","d8:9d:67":"HP",
     "dc:4a:3e":"HP","e4:11:5b":"HP","e8:39:35":"HP","ec:b1:d7":"HP",
-    "f0:92:1c":"HP","f4:ce:46":"HP","f8:b1:56":"HP","fc:15:b4":"HP",
+    "f0:92:1c":"HP","f4:ce:46":"HP","f8:b1:56":"HP","fc:15:b4":"HP","00:0b:86":"HP",
     # ── Lenovo ────────────────────────────────────────────────────────────────
     "00:1a:6b":"Lenovo","18:56:80":"Lenovo","28:d2:44":"Lenovo","40:8d:5c":"Lenovo",
-    "40:f0:2f":"Lenovo","48:0f:cf":"Lenovo","4c:79:6e":"Lenovo","50:7b:9d":"Lenovo",
-    "54:ee:75":"Lenovo","58:8f:c7":"Lenovo","5c:f3:70":"Lenovo","60:67:20":"Lenovo",
-    "70:72:3c":"Lenovo","70:f3:95":"Lenovo","74:df:bf":"Lenovo","78:92:9c":"Lenovo",
+    "40:f0:2f":"Lenovo","4c:79:6e":"Lenovo","50:7b:9d":"Lenovo",
+    "54:ee:75":"Lenovo","58:8f:c7":"Lenovo","5c:f3:70":"Lenovo",
+    "70:72:3c":"Lenovo","70:f3:95":"Lenovo","74:df:bf":"Lenovo",
     "80:5e:c0":"Lenovo","84:2b:2b":"Lenovo","88:70:8c":"Lenovo","8c:d5:d9":"Lenovo",
-    "8c:ec:4b":"Lenovo","90:2b:34":"Lenovo","98:41:5c":"Lenovo","9c:93:4e":"Lenovo",
+    "90:2b:34":"Lenovo","98:41:5c":"Lenovo","9c:93:4e":"Lenovo",
     "a4:4c:c8":"Lenovo","ac:b3:13":"Lenovo","b8:ae:ed":"Lenovo","c4:65:16":"Lenovo",
     "c8:5b:76":"Lenovo","cc:f9:54":"Lenovo","d0:37:45":"Lenovo","d4:81:d7":"Lenovo",
-    "d4:c9:ef":"Lenovo","e8:6a:64":"Lenovo","ec:f4:bb":"Lenovo","f8:16:54":"Lenovo",
+    "d4:c9:ef":"Lenovo","e8:6a:64":"Lenovo","f8:16:54":"Lenovo",
     # ── Cisco ─────────────────────────────────────────────────────────────────
     "00:00:0c":"Cisco","00:00:7f":"Cisco","00:01:42":"Cisco","00:01:43":"Cisco",
     "00:01:63":"Cisco","00:01:64":"Cisco","00:01:96":"Cisco","00:01:97":"Cisco",
@@ -8418,14 +8438,14 @@ _OUI = {
     "00:60:70":"Cisco","00:90:21":"Cisco","00:90:6d":"Cisco","00:90:86":"Cisco",
     "04:62:73":"Cisco","08:96:ad":"Cisco","10:bd:18":"Cisco","14:f1:08":"Cisco",
     "18:33:9d":"Cisco","1c:de:a7":"Cisco","20:37:06":"Cisco","24:e9:b3":"Cisco",
-    "28:94:0f":"Cisco","2c:54:91":"Cisco","30:37:a6":"Cisco","34:a8:4e":"Cisco",
+    "28:94:0f":"Cisco","30:37:a6":"Cisco","34:a8:4e":"Cisco",
     "38:ed:18":"Cisco","3c:08:f6":"Cisco","40:f4:ec":"Cisco","44:d3:ca":"Cisco",
     "48:39:50":"Cisco","4c:4e:35":"Cisco","50:61:84":"Cisco","54:75:d0":"Cisco",
     "58:97:bd":"Cisco","5c:71:0d":"Cisco","60:73:5c":"Cisco","64:14:13":"Cisco",
     "68:86:a7":"Cisco","6c:20:56":"Cisco","70:69:5a":"Cisco","74:26:ac":"Cisco",
     "78:ba:f9":"Cisco","7c:69:f6":"Cisco","80:e0:1d":"Cisco","84:b8:02":"Cisco",
-    "88:75:56":"Cisco","8c:60:4f":"Cisco","90:e2:ba":"Cisco","94:d4:69":"Cisco",
-    "98:90:96":"Cisco","9c:57:ad":"Cisco","a0:55:4f":"Cisco","a4:4c:11":"Cisco",
+    "88:75:56":"Cisco","8c:60:4f":"Cisco","94:d4:69":"Cisco",
+    "9c:57:ad":"Cisco","a0:55:4f":"Cisco","a4:4c:11":"Cisco",
     "a8:b4:56":"Cisco","ac:17:c8":"Cisco","b0:aa:77":"Cisco","b4:a4:e3":"Cisco",
     "b8:38:61":"Cisco","bc:16:f5":"Cisco","c0:62:6b":"Cisco","c4:72:95":"Cisco",
     "c8:9c:1d":"Cisco","cc:d8:c1":"Cisco","d0:72:dc":"Cisco","d4:8c:b5":"Cisco",
@@ -8441,25 +8461,25 @@ _OUI = {
     "00:21:6a":"Intel","00:22:fa":"Intel","00:23:14":"Intel","00:24:d7":"Intel",
     "00:27:10":"Intel","04:0e:3c":"Intel","08:11:96":"Intel","0c:8b:fd":"Intel",
     "10:02:b5":"Intel","10:f0:05":"Intel","18:67:b0":"Intel","1c:69:7a":"Intel",
-    "24:77:03":"Intel","28:d2:44":"Intel","2c:41:38":"Intel","34:13:e8":"Intel",
+    "24:77:03":"Intel","2c:41:38":"Intel","34:13:e8":"Intel",
     "34:de:1a":"Intel","38:2c:4a":"Intel","40:a5:ef":"Intel","44:85:00":"Intel",
     "48:51:b7":"Intel","4c:eb:42":"Intel","54:27:1e":"Intel","5c:51:4f":"Intel",
     "60:67:20":"Intel","60:f6:77":"Intel","64:00:6a":"Intel","68:05:ca":"Intel",
     "6c:29:95":"Intel","70:1a:04":"Intel","74:d4:35":"Intel","78:92:9c":"Intel",
     "7c:5c:f8":"Intel","80:19:34":"Intel","80:86:f2":"Intel","84:3a:4b":"Intel",
-    "88:53:2e":"Intel","8c:8d:28":"Intel","8c:ec:4b":"Intel","90:e2:ba":"Intel",
-    "94:65:9c":"Intel","98:4b:e1":"Intel","9c:eb:e8":"Intel","a0:88:b4":"Intel",
+    "88:53:2e":"Intel","8c:8d:28":"Intel","90:e2:ba":"Intel",
+    "94:65:9c":"Intel","98:4b:e1":"Intel","a0:88:b4":"Intel",
     "a4:c3:f0":"Intel","a8:6b:ad":"Intel","ac:72:89":"Intel","b4:96:91":"Intel",
-    "b8:08:cf":"Intel","bc:ee:7b":"Intel","c0:3f:d5":"Intel","c4:d9:87":"Intel",
+    "b8:08:cf":"Intel","c0:3f:d5":"Intel","c4:d9:87":"Intel",
     "c8:d9:d2":"Intel","cc:3d:82":"Intel","d0:50:99":"Intel","d4:3d:7e":"Intel",
-    "d8:fc:93":"Intel","dc:53:60":"Intel","e0:d5:5e":"Intel","e4:b3:18":"Intel",
-    "e8:b4:70":"Intel","ec:b1:d7":"Intel","f0:4d:a2":"Intel","f4:8e:38":"Intel",
+    "d8:fc:93":"Intel","dc:53:60":"Intel","e4:b3:18":"Intel",
+    "e8:b4:70":"Intel","f0:4d:a2":"Intel","f4:8e:38":"Intel",
     # ── TP-Link ───────────────────────────────────────────────────────────────
     "00:23:cd":"TP-Link","08:57:00":"TP-Link","10:fe:ed":"TP-Link","14:cc:20":"TP-Link",
     "18:a6:f7":"TP-Link","18:d6:c7":"TP-Link","1c:61:b4":"TP-Link","20:dc:e6":"TP-Link",
-    "24:69:68":"TP-Link","28:2c:b2":"TP-Link","2c:54:91":"TP-Link","30:b5:c2":"TP-Link",
+    "24:69:68":"TP-Link","28:2c:b2":"TP-Link","30:b5:c2":"TP-Link",
     "34:60:f9":"TP-Link","38:94:ed":"TP-Link","3c:52:82":"TP-Link","40:16:9f":"TP-Link",
-    "44:94:fc":"TP-Link","48:8f:5a":"TP-Link","4c:e1:73":"TP-Link","50:c7:bf":"TP-Link",
+    "4c:e1:73":"TP-Link","50:c7:bf":"TP-Link",
     "54:a7:03":"TP-Link","5c:89:9a":"TP-Link","60:a4:b7":"TP-Link","64:70:02":"TP-Link",
     "68:ff:7b":"TP-Link","6c:5a:b0":"TP-Link","70:4f:57":"TP-Link","74:da:38":"TP-Link",
     "78:44:fd":"TP-Link","7c:8b:ca":"TP-Link","80:8f:1d":"TP-Link","84:16:f9":"TP-Link",
@@ -8476,11 +8496,10 @@ _OUI = {
     "18:e8:29":"Ubiquiti","24:a4:3c":"Ubiquiti","2c:27:d7":"Ubiquiti","34:1a:35":"Ubiquiti",
     "44:d9:e7":"Ubiquiti","4c:e9:e4":"Ubiquiti","60:22:32":"Ubiquiti","68:72:51":"Ubiquiti",
     "6e:27:d3":"Ubiquiti","70:a7:41":"Ubiquiti","74:83:c8":"Ubiquiti","78:8a:20":"Ubiquiti",
-    "78:d2:94":"Ubiquiti","7c:dd:90":"Ubiquiti","80:2a:a8":"Ubiquiti","b4:fb:e4":"Ubiquiti",
+    "78:d2:94":"Ubiquiti","80:2a:a8":"Ubiquiti","b4:fb:e4":"Ubiquiti",
     "b6:fb:e4":"Ubiquiti","d8:21:e8":"Ubiquiti","d8:b3:70":"Ubiquiti","dc:9f:db":"Ubiquiti",
-    "e0:63:da":"Ubiquiti","e4:38:83":"Ubiquiti","e6:38:83":"Ubiquiti","e8:48:b8":"Ubiquiti",
+    "e0:63:da":"Ubiquiti","e4:38:83":"Ubiquiti","e6:38:83":"Ubiquiti",
     "f0:9f:c2":"Ubiquiti","f4:92:bf":"Ubiquiti","f4:e2:c6":"Ubiquiti","fc:ec:da":"Ubiquiti",
-    "a4:4c:11":"Ubiquiti",
     # ── Netgear ───────────────────────────────────────────────────────────────
     "00:09:5b":"Netgear","00:0f:b5":"Netgear","00:14:6c":"Netgear","00:18:4d":"Netgear",
     "00:1b:2f":"Netgear","00:1e:2a":"Netgear","00:1f:33":"Netgear","00:22:3f":"Netgear",
@@ -8491,26 +8510,27 @@ _OUI = {
     "9c:3d:cf":"Netgear","9c:d3:6d":"Netgear","a0:21:b7":"Netgear","a0:40:a0":"Netgear",
     "a4:2b:8c":"Netgear","b0:7f:b9":"Netgear","c0:3f:0e":"Netgear","c4:04:15":"Netgear",
     "c4:3d:c7":"Netgear","c8:d7:19":"Netgear","cc:40:d0":"Netgear","e0:46:9a":"Netgear",
-    "e0:91:f5":"Netgear","e4:f4:c6":"Netgear","e8:fc:af":"Netgear","f8:1a:67":"Netgear",
+    "e0:91:f5":"Netgear","e4:f4:c6":"Netgear","e8:fc:af":"Netgear",
     # ── D-Link ────────────────────────────────────────────────────────────────
     "00:05:5d":"D-Link","00:0d:88":"D-Link","00:0f:3d":"D-Link","00:11:95":"D-Link",
     "00:13:46":"D-Link","00:15:e9":"D-Link","00:17:9a":"D-Link","00:19:5b":"D-Link",
     "00:1b:11":"D-Link","00:1c:f0":"D-Link","00:1e:58":"D-Link","00:21:91":"D-Link",
     "00:22:b0":"D-Link","00:24:01":"D-Link","00:26:5a":"D-Link","1c:7e:e5":"D-Link",
     "28:10:7b":"D-Link","2c:b0:5d":"D-Link","2c:d0:5a":"D-Link","34:08:04":"D-Link",
-    "34:31:c4":"D-Link","5c:d9:98":"D-Link","64:70:02":"D-Link","78:54:2e":"D-Link",
+    "34:31:c4":"D-Link","5c:d9:98":"D-Link","78:54:2e":"D-Link",
     "84:c9:b2":"D-Link","90:94:e4":"D-Link","9c:72:b9":"D-Link","a0:ab:1b":"D-Link",
     "b4:c7:99":"D-Link","bc:f6:85":"D-Link","c0:a0:bb":"D-Link","c8:be:19":"D-Link",
     "cc:b2:55":"D-Link","d8:eb:97":"D-Link","e4:6f:13":"D-Link","f0:7d:68":"D-Link",
-    "f8:1a:67":"D-Link","fc:75:16":"D-Link",
+    "fc:75:16":"D-Link",
     # ── Synology ─────────────────────────────────────────────────────────────
-    "00:11:32":"Synology","2c:fd:a1":"Synology",  # 00:11:32 is also Synology
-    "bc:ee:7b":"Synology",
+    "00:11:32":"Synology",
+    # ── ASUS ──────────────────────────────────────────────────────────────────
+    "bc:ee:7b":"ASUS","2c:fd:a1":"ASUS",
     # ── QNAP ─────────────────────────────────────────────────────────────────
-    "00:08:9b":"QNAP","00:08:9b":"QNAP","24:5e:be":"QNAP","68:63:7c":"QNAP",
+    "24:5e:be":"QNAP","68:63:7c":"QNAP",
     "d8:29:f8":"QNAP","00:90:a9":"QNAP",
     # ── Fortinet ─────────────────────────────────────────────────────────────
-    "00:09:0f":"Fortinet","00:0b:86":"Fortinet","00:78:88":"Fortinet",
+    "00:09:0f":"Fortinet","00:78:88":"Fortinet",
     "70:4c:a5":"Fortinet","90:6c:ac":"Fortinet",
     # ── Palo Alto Networks ────────────────────────────────────────────────────
     "00:1b:17":"Palo Alto","3c:4a:92":"HP",  # HP overrides Palo Alto for this prefix
@@ -8524,7 +8544,7 @@ _OUI = {
     "cc:e1:7f":"Juniper","f0:1c:2d":"Juniper","f4:a7:39":"Juniper",
     "fc:2f:40":"Juniper",
     # ── Aruba / HP Networking ─────────────────────────────────────────────────
-    "00:0b:86":"Aruba","00:1a:1e":"Aruba","00:24:6c":"Aruba","04:bd:88":"Aruba",
+    "00:1a:1e":"Aruba","00:24:6c":"Aruba","04:bd:88":"Aruba",
     "08:26:97":"Aruba","0c:f8:93":"Aruba","18:64:72":"Aruba","1c:28:af":"Aruba",
     "20:4c:03":"Aruba","20:a6:cd":"Aruba","24:de:c6":"Aruba","2c:a8:35":"Aruba",
     "34:fc:b9":"Aruba","40:e3:d6":"Aruba","4c:6d:7f":"Aruba","58:8b:f3":"Aruba",
@@ -8537,22 +8557,21 @@ _OUI = {
     "00:24:81":"HP","18:a9:05":"HP","1c:c1:de":"HP","28:92:4a":"HP",
     "30:8d:99":"HP","38:ea:a7":"HP","3c:d9:2b":"HP","40:b8:9a":"HP",
     "48:0f:cf":"HP","70:5a:0f":"HP","78:ac:c0":"HP","94:57:a5":"HP",
-    "a4:5d:36":"HP","b4:99:ba":"HP","d8:9d:67":"HP","e8:04:0b":"HP",
+    "a4:5d:36":"HP","b4:99:ba":"HP","d8:9d:67":"HP",
     # ── Canon ─────────────────────────────────────────────────────────────────
     "00:00:85":"Canon","00:1e:8f":"Canon","00:80:92":"Canon","3c:43:8e":"Canon",
     "4c:49:e3":"Canon","74:d0:2b":"Canon","90:ca:fa":"Canon","ac:41:76":"Canon",
     "b4:75:0e":"Canon","c4:ac:59":"Canon","d4:20:b0":"Canon","f4:81:39":"Canon",
     # ── Epson ─────────────────────────────────────────────────────────────────
-    "00:00:48":"Epson","00:26:ab":"Epson","08:00:46":"Epson","3c:3a:ef":"Epson",
+    "00:00:48":"Epson","00:26:ab":"Epson","3c:3a:ef":"Epson",
     "4c:f6:08":"Epson","60:55:f9":"Epson","64:eb:8c":"Epson","ac:18:26":"Epson",
     # ── Brother ───────────────────────────────────────────────────────────────
-    "00:00:74":"Brother","00:1b:a9":"Brother","00:80:77":"Brother","00:c0:97":"Brother",
+    "00:1b:a9":"Brother","00:80:77":"Brother","00:c0:97":"Brother",
     "0c:98:38":"Brother","30:05:5c":"Brother","34:56:fe":"Brother","3c:56:a6":"Brother",
     "40:49:0f":"Brother","5c:96:9d":"Brother","70:77:81":"Brother","b8:2a:72":"Brother",
     "c8:47:0d":"Brother","d4:11:a3":"Brother","d8:9b:3b":"Brother","e0:06:e6":"Brother",
     # ── Kyocera ───────────────────────────────────────────────────────────────
-    "00:60:67":"Kyocera","00:c0:ee":"Kyocera","08:00:46":"Kyocera","0c:7e:d2":"Kyocera",
-    "a4:1f:72":"Kyocera",
+    "00:60:67":"Kyocera","00:c0:ee":"Kyocera","0c:7e:d2":"Kyocera",
     # ── Ricoh ────────────────────────────────────────────────────────────────
     "00:00:74":"Ricoh","00:00:78":"Ricoh","00:60:b0":"Ricoh","08:00:48":"Ricoh",
     "00:26:73":"Ricoh","2c:5b:e1":"Ricoh","ac:de:48":"Ricoh",
@@ -8560,12 +8579,12 @@ _OUI = {
     "00:00:aa":"Xerox","00:00:6b":"Xerox","00:00:f4":"Xerox","34:9c:cd":"Xerox",
     "38:1a:52":"Xerox","3c:6f:6c":"Xerox","44:1e:a1":"Xerox","60:f4:45":"Xerox",
     # ── Lexmark ───────────────────────────────────────────────────────────────
-    "00:04:00":"Lexmark","00:04:00":"Lexmark","00:0d:87":"Lexmark","34:60:f9":"Lexmark",
+    "00:04:00":"Lexmark","00:0d:87":"Lexmark",
     # ── Samsung ──────────────────────────────────────────────────────────────
     "00:00:f0":"Samsung","00:02:78":"Samsung","00:12:47":"Samsung","00:15:b9":"Samsung",
     "00:16:32":"Samsung","00:17:c9":"Samsung","00:1d:25":"Samsung","00:1e:7d":"Samsung",
     "00:21:19":"Samsung","00:23:99":"Samsung","00:24:54":"Samsung","00:26:37":"Samsung",
-    "04:18:d6":"Samsung","08:08:c2":"Samsung","08:d4:2b":"Samsung","10:30:47":"Samsung",
+    "08:08:c2":"Samsung","08:d4:2b":"Samsung","10:30:47":"Samsung",
     "10:d5:42":"Samsung","14:49:e0":"Samsung","18:3a:2d":"Samsung","1c:af:f7":"Samsung",
     "20:13:e0":"Samsung","24:4b:81":"Samsung","28:27:bf":"Samsung","2c:ae:2b":"Samsung",
     "30:19:66":"Samsung","34:14:5f":"Samsung","38:01:97":"Samsung","3c:8b:fe":"Samsung",
@@ -8582,17 +8601,16 @@ _OUI = {
     "e4:e0:c5":"Samsung","e8:03:9a":"Samsung","ec:1f:72":"Samsung","f0:25:b7":"Samsung",
     "f4:7b:5e":"Samsung","f8:04:2e":"Samsung","fc:a1:3e":"Samsung",
     # ── Realtek ───────────────────────────────────────────────────────────────
-    "00:e0:4c":"Realtek","52:54:00":"Realtek","54:ab:3a":"Realtek","e0:d5:5e":"Realtek",
+    "00:e0:4c":"Realtek","54:ab:3a":"Realtek",
     # ── APC / Schneider ───────────────────────────────────────────────────────
     "00:c0:b7":"APC","00:60:26":"APC","c8:cb:9e":"APC",
     # ── Supermicro ────────────────────────────────────────────────────────────
-    "00:25:90":"Supermicro","00:30:48":"Supermicro","18:66:da":"Supermicro",
+    "00:25:90":"Supermicro","00:30:48":"Supermicro",
     # ── IBM ───────────────────────────────────────────────────────────────────
     "00:04:ac":"IBM","00:06:29":"IBM","00:09:6b":"IBM","00:0d:60":"IBM",
     "00:11:25":"IBM","00:14:5e":"IBM","00:17:ef":"IBM","00:21:5e":"IBM",
-    "00:26:55":"IBM",
     # ── Google ────────────────────────────────────────────────────────────────
-    "00:1a:11":"Google","3c:5a:b4":"Google","3c:61:04":"Google",
+    "00:1a:11":"Google","3c:5a:b4":"Google",
     "54:60:09":"Google","94:eb:cd":"Google","a4:77:33":"Google",
     "f4:f5:d8":"Google","f4:f5:e8":"Google",
     # ── Amazon ────────────────────────────────────────────────────────────────
@@ -8600,15 +8618,15 @@ _OUI = {
     "4c:ef:c0":"Amazon","50:dc:e7":"Amazon","68:37:e9":"Amazon","74:c2:46":"Amazon",
     "84:d6:d0":"Amazon","a0:02:dc":"Amazon","ac:63:be":"Amazon","b4:7c:9c":"Amazon",
     "cc:f7:35":"Amazon","d0:04:01":"Amazon","d0:f8:8c":"Amazon","e4:80:45":"Amazon",
-    "f0:27:2d":"Amazon","f8:04:2e":"Amazon","fc:65:de":"Amazon",
+    "f0:27:2d":"Amazon","fc:65:de":"Amazon",
     # ── Buffalo ───────────────────────────────────────────────────────────────
-    "00:07:40":"Buffalo","00:08:9b":"Buffalo","00:0d:0b":"Buffalo",
+    "00:07:40":"Buffalo","00:0d:0b":"Buffalo",
     "00:16:01":"Buffalo","00:1d:73":"Buffalo","00:24:a5":"Buffalo",
     "10:6f:3f":"Buffalo","18:c0:4d":"Buffalo","1c:87:2c":"Buffalo",
-    "28:3b:82":"Buffalo","2c:fd:a1":"Buffalo","30:85:a9":"Buffalo",
+    "28:3b:82":"Buffalo","30:85:a9":"Buffalo",
     "40:f2:01":"Buffalo","48:5b:39":"Buffalo","5c:57:c8":"Buffalo",
-    "7c:dd:90":"Buffalo","80:35:c1":"Buffalo","90:f6:52":"Buffalo",
-    "a8:92:0e":"Buffalo","c4:e9:84":"Buffalo","d8:50:e6":"Buffalo",
+    "80:35:c1":"Buffalo",
+    "a8:92:0e":"Buffalo","d8:50:e6":"Buffalo",
     # ── Linksys / Belkin ──────────────────────────────────────────────────────
     "00:06:25":"Linksys","00:0c:41":"Linksys","00:0f:66":"Linksys",
     "00:12:17":"Linksys","00:13:10":"Linksys","00:14:bf":"Linksys",
@@ -8645,7 +8663,6 @@ def _oui_vendor(mac):
     if len(prefix) < 8: return ""
     
     # 1. Essayer la table IEEE complète si chargée
-    global _OUI_FULL
     if _OUI_FULL is None:
         _oui_load_full()
     if _OUI_FULL:
@@ -8896,7 +8913,6 @@ def _netbios_name(ip_str):
                 if offset + 18 > len(data):
                     break
                 raw_name = data[offset:offset+15]
-                flags    = data[offset+15:offset+18]
                 name     = raw_name.decode('ascii', 'ignore').strip()
                 # Flag byte: bit 7 = group name, on veut les noms individuels (type 0x00 = workstation)
                 name_type = data[offset+15] if offset+15 < len(data) else 0xFF
@@ -11772,7 +11788,6 @@ def api_diag_resoudre(id):
     cid = get_client_id()
     if not can_write(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    user = get_auth_user()
     conn = get_db()
     row = conn.execute('SELECT titre FROM diag_reseau_evenements WHERE id=? AND client_id=?',
                        (id, cid)).fetchone()
@@ -11796,7 +11811,6 @@ def api_diag_surveillance():
     cid = get_client_id()
     if not can_write(cid):
         return jsonify({'error': 'Forbidden'}), 403
-    user = get_auth_user()
     actif = '1' if (request.json or {}).get('actif') else '0'
     cfg_set('diag_surveillance_active', actif)
     conn = get_db()
@@ -12791,7 +12805,6 @@ def api_device_info():
         os_version = data.get('os_version', '').strip()
         ram_gb = data.get('ram_gb', '')
         cpu = data.get('cpu', '')
-        cpu_cores = data.get('cpu_cores', '')
         disk_gb = data.get('disk_total_gb', '')
         antivirus = data.get('antivirus', '')
         gpu = data.get('gpu', '')
@@ -13608,13 +13621,16 @@ def editer_peripherique(id):
     if request.method == 'POST':
         now = datetime.now().isoformat()
         _old = row_to_dict(conn.execute('SELECT * FROM peripheriques WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        if not _old:
+            conn.close()
+            return redirect(url_for('liste_peripheriques'))
         vals = _extract_periph(cid, request.form)
         conn.execute(("UPDATE peripheriques SET"
             " client_id=?,utilisateur_id=?,categorie=?,marque=?,modele=?,numero_serie=?,"
             "description=?,localisation=?,statut=?,date_achat=?,duree_garantie=?,date_fin_garantie=?,"
             "fournisseur=?,prix_achat=?,numero_commande=?,notes=?,date_maj=? WHERE id=? AND client_id=?"),
             vals + (now, id, cid))
-        # Mettre à jour les liens appareils N:N
+        # Mettre à jour les liens appareils N:N (id déjà vérifié appartenir à cid ci-dessus)
         app_ids = request.form.getlist('appareil_ids')
         conn.execute("DELETE FROM peripheriques_appareils WHERE peripherique_id=?", (id,))
         for aid in app_ids:
@@ -13714,12 +13730,12 @@ def _extract_periph(cid, f):
     prix = None
     try:
         prix = float(f['prix_achat']) if f.get('prix_achat') else None
-    except:
+    except Exception:
         pass
     duree = 0
     try:
         duree = int(f['duree_garantie']) if f.get('duree_garantie') else 0
-    except:
+    except Exception:
         pass
     return (cid, user_id,
             f.get('categorie',''), f.get('marque',''), f.get('modele',''),
@@ -13897,6 +13913,9 @@ def editer_contrat(id):
             return redirect(request.url)
         f = request.form; now = datetime.now().isoformat()
         _old = row_to_dict(conn.execute('SELECT * FROM contrats WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        if not _old:
+            conn.close()
+            return redirect(url_for('liste_contrats'))
         conn.execute("""UPDATE contrats SET titre=?,type_contrat=?,fournisseur=?,contact_fournisseur=?,
             email_fournisseur=?,telephone_fournisseur=?,numero_contrat=?,date_debut=?,date_fin=?,
             reconduction_auto=?,preavis_jours=?,montant_ht=?,periodicite=?,description=?,notes=?,
@@ -13995,7 +14014,7 @@ def upload_doc_contrat(id):
                 _diff_json({}, {'nom': nom, 'fichier': unique, 'type_doc': request.form.get('type_doc','')}))
 
     conn.commit(); conn.close()
-    flash(f'Document ajouté', 'success')
+    flash('Document ajouté', 'success')
     return redirect(url_for('detail_contrat', id=id))
 
 @app.route('/contrat/document/<int:id>/supprimer', methods=['POST'])
@@ -14194,7 +14213,7 @@ def _generate_maintenance_series(conn, maint_id, cid, date_planifiee, recurrence
     try:
         start_date = datetime.strptime(date_planifiee, '%Y-%m-%d')
         end_date = datetime.strptime(date_fin_recurrence, '%Y-%m-%d') if date_fin_recurrence else None
-    except:
+    except Exception:
         logger.warning(f"Erreur parsing dates pour récurrence: {date_planifiee}, {date_fin_recurrence}")
         return
 
@@ -14205,7 +14224,7 @@ def _generate_maintenance_series(conn, maint_id, cid, date_planifiee, recurrence
     if lookahead_date:
         try:
             cutoff_date = datetime.strptime(lookahead_date, '%Y-%m-%d') if isinstance(lookahead_date, str) else lookahead_date
-        except:
+        except Exception:
             cutoff_date = end_date
     else:
         cutoff_date = end_date
@@ -14496,7 +14515,6 @@ def _executer_scan_planifie(cid, plages, libelle, declencheur='auto'):
     """Lance un scan complet pour un client, l'importe (origine ``scan_auto``),
     déclenche l'alerte si nécessaire. **Bloquant** — à appeler depuis un thread
     de fond (scheduler ou route ``/executer``). Renvoie un dict résumé."""
-    global scan_status
     if not _scan_planifie_run_lock.acquire(blocking=False):
         # un autre scan planifié tourne déjà (double-clic « lancer maintenant »,
         # ou scheduler + manuel en même temps) — le moteur `_run_scan` est
@@ -15073,19 +15091,19 @@ def nouveau_intervention():
         contrat_id = None
         try:
             contrat_id = int(f.get('contrat_id')) if f.get('contrat_id') else None
-        except:
+        except Exception:
             pass
 
         cout_ht = None
         try:
             cout_ht = float(f.get('cout_ht')) if f.get('cout_ht') else None
-        except:
+        except Exception:
             pass
 
         duree_minutes = 0
         try:
             duree_minutes = int(f.get('duree_minutes')) if f.get('duree_minutes') else 0
-        except:
+        except Exception:
             pass
 
         cur.execute("""INSERT INTO interventions
@@ -15108,7 +15126,7 @@ def nouveau_intervention():
             try:
                 conn.execute('INSERT INTO interventions_appareils (intervention_id, appareil_id) VALUES (?,?)',
                            (intv_id, int(app_id)))
-            except:
+            except Exception:
                 pass
 
         # Link peripheriques
@@ -15116,7 +15134,7 @@ def nouveau_intervention():
             try:
                 conn.execute('INSERT INTO interventions_peripheriques (intervention_id, peripherique_id) VALUES (?,?)',
                            (intv_id, int(per_id)))
-            except:
+            except Exception:
                 pass
 
         log_history(conn, cid, 'intervention', intv_id, f.get('titre', '') or f'Intervention #{intv_id}', 'Création')
@@ -15211,28 +15229,30 @@ def editer_intervention(id):
             return redirect(request.url)
 
         f = request.form
-        user = get_auth_user()
         now = datetime.now().isoformat()
 
         # Fetch old values for comparison
         _old = row_to_dict(conn.execute('SELECT * FROM interventions WHERE id=? AND client_id=?', (id, cid)).fetchone() or {})
+        if not _old:
+            conn.close()
+            return redirect(url_for('liste_interventions'))
 
         contrat_id = None
         try:
             contrat_id = int(f.get('contrat_id')) if f.get('contrat_id') else None
-        except:
+        except Exception:
             pass
 
         cout_ht = None
         try:
             cout_ht = float(f.get('cout_ht')) if f.get('cout_ht') else None
-        except:
+        except Exception:
             pass
 
         duree_minutes = 0
         try:
             duree_minutes = int(f.get('duree_minutes')) if f.get('duree_minutes') else 0
-        except:
+        except Exception:
             pass
 
         conn.execute("""UPDATE interventions SET
@@ -15255,14 +15275,14 @@ def editer_intervention(id):
             try:
                 conn.execute('INSERT INTO interventions_appareils (intervention_id, appareil_id) VALUES (?,?)',
                            (id, int(app_id)))
-            except:
+            except Exception:
                 pass
 
         for per_id in request.form.getlist('peripheriques_lies'):
             try:
                 conn.execute('INSERT INTO interventions_peripheriques (intervention_id, peripherique_id) VALUES (?,?)',
                            (id, int(per_id)))
-            except:
+            except Exception:
                 pass
 
         # Record change details
@@ -15336,7 +15356,6 @@ def upload_doc_intervention(id):
          unique, os.path.getsize(save_path), now))
 
     # Log document upload
-    user = get_auth_user()
     intv_title = conn.execute('SELECT titre FROM interventions WHERE id=? AND client_id=?', (id, cid)).fetchone()
     intv_name = intv_title[0] if intv_title else f'Intervention #{id}'
     log_history(conn, cid, 'intervention', id, intv_name, 'Ajout de document',
@@ -15372,7 +15391,7 @@ def supprimer_doc_intervention(id):
         conn.commit()
         try:
             os.remove(os.path.join(UPLOAD_FOLDER, doc['nom_fichier']))
-        except:
+        except Exception:
             pass
 
     conn.close()
@@ -15578,7 +15597,6 @@ def nouveau_maintenance():
             return redirect(request.url)
 
         f = request.form
-        now = datetime.now().isoformat()
 
         params = _extract_maintenance(cid, f, user['id'])
 
@@ -15672,15 +15690,15 @@ def editer_maintenance(id):
 
         try:
             appareil_id = int(f.get('appareil_id')) if f.get('appareil_id') else None
-        except:
+        except Exception:
             appareil_id = None
         try:
             peripherique_id = int(f.get('peripherique_id')) if f.get('peripherique_id') else None
-        except:
+        except Exception:
             peripherique_id = None
         try:
             contrat_id = int(f.get('contrat_id')) if f.get('contrat_id') else None
-        except:
+        except Exception:
             contrat_id = None
 
         cur = conn.cursor()
@@ -17590,7 +17608,7 @@ def import_appareils_csv():
                 
                 if existing:
                     conn.execute(
-                        f"""UPDATE appareils SET
+                        """UPDATE appareils SET
                             nom_machine=?,type_appareil=?,marque=?,modele=?,numero_serie=?,
                             adresse_ip=?,adresse_mac=?,nom_dns=?,utilisateur=?,service=?,localisation=?,
                             date_achat=?,duree_garantie=?,date_fin_garantie=?,fournisseur=?,prix_achat=?,
@@ -17604,7 +17622,7 @@ def import_appareils_csv():
                                 {'source': 'import-csv'})
                 else:
                     conn.execute(
-                        f"""INSERT INTO appareils
+                        """INSERT INTO appareils
                             (nom_machine,type_appareil,marque,modele,numero_serie,
                             adresse_ip,adresse_mac,nom_dns,utilisateur,service,localisation,
                             date_achat,duree_garantie,date_fin_garantie,fournisseur,prix_achat,
@@ -17620,7 +17638,8 @@ def import_appareils_csv():
                                 {'source': 'import-csv'})
             except Exception as e:
                 errors += 1
-        
+                logger.warning(f"Import CSV appareils : ligne ignorée ({e})")
+
         conn.commit(); conn.close()
         msg = f'Import terminé : {inserted} ajouté(s), {updated} mis à jour'
         if errors: msg += f', {errors} erreur(s)'
@@ -17719,7 +17738,8 @@ def import_peripheriques_csv():
                                 'Création (import CSV)', {'source': 'import-csv'})
             except Exception as e:
                 errors += 1
-        
+                logger.warning(f"Import CSV périphériques : ligne ignorée ({e})")
+
         conn.commit(); conn.close()
         msg = f'Import terminé : {inserted} ajouté(s), {updated} mis à jour'
         if errors: msg += f', {errors} erreur(s)'
@@ -17729,7 +17749,7 @@ def import_peripheriques_csv():
     return redirect(url_for('liste_peripheriques'))
 
 
-import json as _json, zipfile as _zipfile, tempfile as _tempfile, shutil as _shutil, io as _io2
+import json as _json, zipfile as _zipfile, io as _io2
 
 
 # ─── KNOWLEDGE BASE ──────────────────────────────────────────────────────────
@@ -18711,12 +18731,12 @@ def qrcode_fields():
     if 'user_password' in asset and asset['user_password']:
         try:
             asset['user_password'] = crypto.decrypt(asset['user_password'])
-        except:
+        except Exception:
             asset['user_password'] = ''
     if 'admin_password' in asset and asset['admin_password']:
         try:
             asset['admin_password'] = crypto.decrypt(asset['admin_password'])
-        except:
+        except Exception:
             asset['admin_password'] = ''
 
     # Return available fields
@@ -18739,7 +18759,6 @@ def qrcode_preview():
     if not cid:
         return jsonify({'error': 'Not authenticated'}), 403
 
-    import json
     asset_type = request.form.get('asset_type', 'appareil')
     asset_id = request.form.get('asset_id', '', type=int)
     selected_fields = request.form.getlist('selected_fields')
@@ -18810,7 +18829,7 @@ def qrcode_preview():
             if field in ['user_password', 'admin_password'] and value:
                 try:
                     value = crypto.decrypt(value)
-                except:
+                except Exception:
                     value = ''
             filtered_asset[field] = value
 
@@ -18820,7 +18839,7 @@ def qrcode_preview():
         try:
             _, logo_path = tempfile.mkstemp(suffix='.png')
             logo_file.save(logo_path)
-        except:
+        except Exception:
             logo_path = None
 
     # Generate label image
@@ -18833,13 +18852,13 @@ def qrcode_preview():
         if isinstance(label_img, str):
             logger.error(f"CRITICAL: create_label_image returned string: {label_img}")
     except Exception as e:
-        logger.exception(f"Exception in create_label_image")
+        logger.exception("Exception in create_label_image")
         return jsonify({'error': f"Label creation failed: {str(e)}"}), 500
     finally:
         if logo_path:
             try:
                 os.remove(logo_path)
-            except:
+            except Exception:
                 pass
 
     # Verify we have an image
@@ -18922,7 +18941,7 @@ def qrcode_generate():
         selected_fields = json.loads(selected_fields_json)
         positions_dict = json.loads(positions_json)
         positions_dict = {int(k): int(v) for k, v in positions_dict.items()}
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid parameters'}), 400
 
     # Validate positions
@@ -18957,7 +18976,7 @@ def qrcode_generate():
             if field in ['user_password', 'admin_password'] and value:
                 try:
                     value = crypto.decrypt(value)
-                except:
+                except Exception:
                     value = ''
             filtered_asset[field] = value
 
@@ -18967,7 +18986,7 @@ def qrcode_generate():
         try:
             _, logo_path = tempfile.mkstemp(suffix='.png')
             logo_file.save(logo_path)
-        except:
+        except Exception:
             logo_path = None
 
     # Generate label image
@@ -18980,11 +18999,10 @@ def qrcode_generate():
         if logo_path:
             try:
                 os.remove(logo_path)
-            except:
+            except Exception:
                 pass
 
     # Log action
-    user = get_auth_user()
     log_conn = get_db()
     try:
         asset_name = asset.get('nom_machine') or asset.get('nom') or f'{asset_type}#{asset_id}'
@@ -19065,7 +19083,6 @@ def _register_mdns(port=3456):
 
 def _unregister_mdns(port=3456):
     """Unregister mDNS service on shutdown"""
-    global _mdns_instance
     if _mdns_instance:
         try:
             _mdns_instance.unregister_service(ServiceInfo(
@@ -19480,10 +19497,10 @@ if __name__ == '__main__':
     if os.environ.get('RUNNING_IN_DOCKER'):
         # En Docker, utiliser Werkzeug directement (plus stable que Gunicorn)
         print("🚀 Lancement avec Werkzeug (multi-threaded)")
-        print(f"   Host: 0.0.0.0:3456")
-        print(f"   Threaded: True")
+        print("   Host: 0.0.0.0:3456")
+        print("   Threaded: True")
         print(f"   Debug: {debug}")
-        print(f"   Reloader: False")
+        print("   Reloader: False")
         try:
             app.run(debug=debug, host='0.0.0.0', port=3456,
                    use_reloader=False, threaded=True)

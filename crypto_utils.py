@@ -144,20 +144,3 @@ def get_crypto_manager(secret_key_file='secret.key', shared_key=None):
     Si shared_key est fourni, l'utilise directement (prioritaire sur secret_key_file).
     """
     return CryptoManager(secret_key_file=secret_key_file, shared_key=shared_key)
-
-
-# Fonctions de commodité
-def encrypt_password(password, secret_key_file='secret.key'):
-    """Chiffre un mot de passe."""
-    if not password:
-        return None
-    crypto = get_crypto_manager(secret_key_file)
-    return crypto.encrypt(password)
-
-
-def decrypt_password(encrypted_password, secret_key_file='secret.key'):
-    """Déchiffre un mot de passe."""
-    if not encrypted_password:
-        return None
-    crypto = get_crypto_manager(secret_key_file)
-    return crypto.decrypt(encrypted_password)

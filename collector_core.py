@@ -8112,14 +8112,6 @@ def build_summary_lines(info):
 # RAPPORTS
 # ════════════════════════════════════════════════════════════════════════════
 
-def _report_filename(info, extension):
-    """Nom de fichier normalisé : system-info-report_HOST_MAC_HORODATAGE.ext."""
-    timestamp = _utcnow().strftime("%Y%m%d_%H%M%S")
-    hostname = info.get('hostname', 'unknown')
-    mac = (info.get('mac_address') or 'unknown').replace(':', '').replace('/', '')[:8]
-    return f"system-info-report_{hostname}_{mac}_{timestamp}.{extension}"
-
-
 PORT_CATALOG = {
     20:   ('FTP-DATA', 'FTP — canal de données', 'danger'),
     21:   ('FTP', 'FTP — transfert de fichiers en clair', 'danger'),

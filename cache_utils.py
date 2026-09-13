@@ -148,23 +148,6 @@ def invalidate_cache_pattern(pattern: str = ''):
         logger.info(f'🗑️ Cache invalidé: {len(keys_to_delete)} entrées ({pattern})')
 
 
-# Fonctions de commodité pour les cas courants
-
-def cache_get_liste(list_name: str, ttl: int = 600):
-    """Cache pour get_liste() - 10 min par défaut."""
-    return f"liste:{list_name}"
-
-
-def cache_get_clients(ttl: int = 600):
-    """Cache pour get_clients() - 10 min par défaut."""
-    return "clients_list"
-
-
-def cache_config(key: str, ttl: int = 900):
-    """Cache pour cfg_get() - 15 min par défaut."""
-    return f"config:{key}"
-
-
 # Export
 __all__ = [
     'CacheManager',

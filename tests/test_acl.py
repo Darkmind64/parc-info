@@ -79,3 +79,200 @@ def test_admin_a_acces_a_tous_les_clients(client, make_user, make_client, make_a
     resp = client.get(f'/appareil/{aid}/editer')
     assert resp.status_code == 200
     assert 'POSTE-VU-PAR-ADMIN' in resp.get_data(as_text=True)
+
+
+# ─── Audit 2026-09 : faille cross-tenant sur 7 endpoints ────────────────────
+#
+# Constat : plusieurs endpoints vérifiaient can_write() sur le CLIENT ACTIF
+# de la session, puis modifiaient/supprimaient une ligne identifiée par un
+# simple id d'URL, sans jamais vérifier que cette ligne appartenait bien à
+# ce client actif (IDOR). Un utilisateur avec un accès 'ecriture' sur son
+# propre client A pouvait ainsi tamponner les données d'un client B en
+# devinant/énumérant des id. Chaque test ci-dessous établit un attaquant
+# actif sur le client A et une victime sur le client B, sans aucun partage
+# entre les deux, puis vérifie que l'action cross-tenant est refusée ET que
+# la donnée de la victime n'a pas bougé.
+
+def _attaquant_sur_client_a(make_user, make_client):
+    """Un utilisateur avec accès 'ecriture' sur son PROPRE client A — jamais
+    partagé avec le client B de la victime."""
+    proprietaire_a, _l, _p = make_user(role='admin')
+    attaquant_id, _l2, _p2 = make_user(role='user')
+    client_a = make_client(auth_user_id=proprietaire_a)
+    conn = app.get_db()
+    conn.execute(
+        "INSERT INTO client_partages (client_id, auth_user_id, niveau) VALUES (?,?,'ecriture')",
+        (client_a, attaquant_id))
+    conn.commit(); conn.close()
+    return attaquant_id, client_a
+
+
+def test_droit_dun_autre_client_non_modifiable(client, make_user, make_client):
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+
+    conn = app.get_db()
+    conn.execute("INSERT INTO utilisateurs (id, client_id, prenom, nom) VALUES (900, ?, 'Marie', 'Martin')", (client_b,))
+    conn.execute("INSERT INTO droits_utilisateurs (id, utilisateur_id, client_id, categorie, nom_droit, valeur) "
+                 "VALUES (900, 900, ?, 'Test', 'DroitB', 'secret')", (client_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    client.put(f'/api/droit/900', json={'categorie': 'HACKED'}, headers={'X-CSRF-Token': token})
+    client.delete(f'/api/droit/900', headers={'X-CSRF-Token': token})
+
+    conn = app.get_db()
+    row = conn.execute('SELECT categorie FROM droits_utilisateurs WHERE id=900').fetchone()
+    conn.close()
+    assert row is not None and row[0] == 'Test'
+
+
+def test_type_droit_ecriture_requise(client, make_user, make_client):
+    """api_type_droit / api_creer_type_droit n'avaient aucune vérification
+    can_write() — un accès 'lecture' pouvait créer/modifier un type de
+    droit sur son propre client."""
+    proprietaire_id, _l, _p = make_user(role='admin')
+    lecteur_id, _l2, _p2 = make_user(role='user')
+    cid = make_client(auth_user_id=proprietaire_id)
+    conn = app.get_db()
+    conn.execute("INSERT INTO client_partages (client_id, auth_user_id, niveau) VALUES (?,?,'lecture')", (cid, lecteur_id))
+    conn.commit(); conn.close()
+
+    login_session(client, lecteur_id, cid)
+    token = get_csrf_token(client)
+    resp = client.post('/api/type-droit', json={'nom': 'HACKED'}, headers={'X-CSRF-Token': token})
+    assert resp.status_code == 403
+
+    conn = app.get_db()
+    row = conn.execute("SELECT 1 FROM types_droits WHERE client_id=? AND nom='HACKED'", (cid,)).fetchone()
+    conn.close()
+    assert row is None
+
+
+def test_garantie_ignoree_dun_autre_client_non_modifiable(client, make_user, make_client, make_appareil):
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    appareil_b = make_appareil(client_b, nom_machine='POSTE-B')
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    client.post(f'/api/appareil/{appareil_b}/garantie-ignorer', json={'ignorer': True},
+                headers={'X-CSRF-Token': token})
+
+    conn = app.get_db()
+    row = conn.execute('SELECT garantie_alerte_ignoree FROM appareils WHERE id=?', (appareil_b,)).fetchone()
+    conn.close()
+    assert not row[0]
+
+
+def test_utilisateur_dun_autre_client_non_supprimable(client, make_user, make_client):
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    conn = app.get_db()
+    conn.execute("INSERT INTO utilisateurs (id, client_id, prenom, nom) VALUES (901, ?, 'Marie', 'Martin')", (client_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    client.post('/utilisateur/901/supprimer', data={'csrf_token': token})
+
+    conn = app.get_db()
+    row = conn.execute('SELECT 1 FROM utilisateurs WHERE id=901').fetchone()
+    conn.close()
+    assert row is not None
+
+
+def test_peripherique_dun_autre_client_liens_intacts(client, make_user, make_client, make_appareil):
+    """La fiche périphérique elle-même était déjà protégée (WHERE id=? AND
+    client_id=?) ; mais le nettoyage de la table pivot
+    peripheriques_appareils s'exécutait AVANT toute vérification —
+    supprimant les liens d'un autre client sans pouvoir modifier sa fiche."""
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    appareil_b = make_appareil(client_b, nom_machine='POSTE-B')
+    conn = app.get_db()
+    conn.execute("INSERT INTO peripheriques (id, client_id, categorie, marque, modele) "
+                 "VALUES (900, ?, 'Ecran', 'Dell', 'X')", (client_b,))
+    conn.execute("INSERT INTO peripheriques_appareils (peripherique_id, appareil_id) VALUES (900, ?)", (appareil_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    client.post('/peripherique/900/editer', data={'csrf_token': token, 'marque': 'HACKED'})
+
+    conn = app.get_db()
+    lien = conn.execute('SELECT 1 FROM peripheriques_appareils WHERE peripherique_id=900').fetchone()
+    marque = conn.execute('SELECT marque FROM peripheriques WHERE id=900').fetchone()[0]
+    conn.close()
+    assert lien is not None
+    assert marque == 'Dell'
+
+
+def test_contrat_dun_autre_client_liens_intacts(client, make_user, make_client, make_appareil):
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    appareil_b = make_appareil(client_b, nom_machine='POSTE-B')
+    conn = app.get_db()
+    conn.execute("INSERT INTO contrats (id, client_id, titre) VALUES (900, ?, 'Contrat B')", (client_b,))
+    conn.execute("INSERT INTO contrats_appareils (contrat_id, appareil_id) VALUES (900, ?)", (appareil_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    client.post('/contrat/900/editer', data={'csrf_token': token, 'titre': 'HACKED'})
+
+    conn = app.get_db()
+    lien = conn.execute('SELECT 1 FROM contrats_appareils WHERE contrat_id=900').fetchone()
+    titre = conn.execute('SELECT titre FROM contrats WHERE id=900').fetchone()[0]
+    conn.close()
+    assert lien is not None
+    assert titre == 'Contrat B'
+
+
+def test_intervention_dun_autre_client_liens_intacts(client, make_user, make_client, make_appareil):
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    appareil_b = make_appareil(client_b, nom_machine='POSTE-B')
+    conn = app.get_db()
+    conn.execute("INSERT INTO interventions (id, client_id, titre, date_intervention) "
+                 "VALUES (900, ?, 'Interv B', '2026-01-01')", (client_b,))
+    conn.execute("INSERT INTO interventions_appareils (intervention_id, appareil_id) VALUES (900, ?)", (appareil_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    client.post('/intervention/900/editer', data={'csrf_token': token, 'titre': 'HACKED'})
+
+    conn = app.get_db()
+    lien = conn.execute('SELECT 1 FROM interventions_appareils WHERE intervention_id=900').fetchone()
+    titre = conn.execute('SELECT titre FROM interventions WHERE id=900').fetchone()[0]
+    conn.close()
+    assert lien is not None
+    assert titre == 'Interv B'
+
+
+def test_baie_slot_dun_autre_client_non_supprimable(client, make_user, make_client):
+    attaquant_id, client_a = _attaquant_sur_client_a(make_user, make_client)
+    proprietaire_b, _l, _p = make_user(role='admin')
+    client_b = make_client(auth_user_id=proprietaire_b)
+    conn = app.get_db()
+    conn.execute("INSERT INTO baie_slots (id, client_id, baie_nom, position, col_index, hauteur_u, nb_ports) "
+                 "VALUES (900, ?, 'Baie principale', 1, 0, 1, 0)", (client_b,))
+    conn.commit(); conn.close()
+
+    login_session(client, attaquant_id, client_a)
+    token = get_csrf_token(client)
+    resp = client.delete('/api/baie/slot/900', headers={'X-CSRF-Token': token})
+
+    assert resp.status_code == 404
+    conn = app.get_db()
+    row = conn.execute('SELECT 1 FROM baie_slots WHERE id=900').fetchone()
+    conn.close()
+    assert row is not None

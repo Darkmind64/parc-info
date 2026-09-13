@@ -18,7 +18,6 @@ Usage:
 
 import argparse
 import logging
-import os
 import platform
 import shutil
 import subprocess
@@ -149,7 +148,7 @@ class Installer:
             self._create_data_directory()
 
             self.success = True
-            logger.info(f"✓ Installation completed successfully!")
+            logger.info("✓ Installation completed successfully!")
             return True
 
         except Exception as e:
@@ -173,7 +172,7 @@ class Installer:
                 if dest_support.exists():
                     shutil.rmtree(dest_support)
                 shutil.copytree(support_dir, dest_support)
-                logger.info(f"✓ Copied support files")
+                logger.info("✓ Copied support files")
 
         # Create shortcuts
         self._create_windows_shortcuts(dest_exe)
@@ -233,7 +232,7 @@ class Installer:
                 shortcut.TargetPath = str(exe_path)
                 shortcut.IconLocation = str(exe_path)
                 shortcut.Save()
-                logger.info(f"✓ Created Start Menu shortcut")
+                logger.info("✓ Created Start Menu shortcut")
 
                 # Desktop shortcut
                 desktop = Path.home() / "Desktop"
@@ -242,7 +241,7 @@ class Installer:
                 shortcut.TargetPath = str(exe_path)
                 shortcut.IconLocation = str(exe_path)
                 shortcut.Save()
-                logger.info(f"✓ Created Desktop shortcut")
+                logger.info("✓ Created Desktop shortcut")
 
             except ImportError:
                 # Fallback: use PowerShell
@@ -458,7 +457,7 @@ def main():
 
     # GUI installation
     root = tk.Tk()
-    gui = InstallerGUI(root, installer)
+    InstallerGUI(root, installer)
     root.mainloop()
 
 

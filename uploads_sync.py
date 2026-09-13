@@ -123,7 +123,7 @@ def _push_documents_to_turso(table_name: str, upload_folder: str, turso=None) ->
         if result['pushed']:
             logger.info(f"uploads_sync push: {result['pushed']} fichier(s) envoyé(s) vers Turso ({table_name})")
 
-    except Exception as e:
+    except Exception:
         result['errors'] += 1
         logger.exception(f"_push_documents_to_turso({table_name}) a échoué")
     finally:
