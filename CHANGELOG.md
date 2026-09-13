@@ -1,5 +1,21 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.13] - 2026-09-13 🔄
+
+### Sync Turso : client_instantane (« Changements depuis la dernière visite ») entre dans la synchronisation multi-instance
+
+Suite de #48/#49. La table `client_instantane` (photo compacte de l'inventaire prise en fin de scan, base du rapport *« Changements depuis la dernière visite »*) entre dans la synchronisation Turso : **une photo prise sur site devient consultable depuis l'instance de bureau** — c'est l'objet même de la fonctionnalité, jusqu'ici jamais couverte par la sync.
+
+**Anti-collision d'id.** La table rejoint `_TRACKED_JOURNAL` alors que des instantanés existent **déjà en production**, avec des `id` 1, 2, 3… identiques d'une instance à l'autre. `_seed_tables_vides_sur_turso` (v2.32.10) les écraserait au premier seed. Nouveau `app._reclef_client_instantane(c, id_offset)`, appelé dans le bloc anti-collision d'`init_db()`, une seule fois par base (drapeau `config` `_client_instantane_reclef_v1`) : `UPDATE client_instantane SET id = id + offset` (offset ~2⁴⁸, le même que l'anti-collision `sqlite_sequence`) ; triggers `_trg_journal_*` suspendus (`_sync_applying`) le temps de l'opération ; `sqlite_sequence` recalé sur `MAX(id)`. Sûr sans re-mapping : aucune table ne référence `client_instantane.id`, et la colonne `reference` est un drapeau 0/1 (« photo épinglée »), pas un id — `donnees_json` ne contient pas d'id d'instantané non plus.
+
+`client_instantane` `CREATE TABLE` déplacé avant la boucle des triggers (comme `dhcp_baux`). Copie initiale vers Turso ensuite via `_seed_tables_vides_sur_turso`, réutilisé tel quel.
+
+**Laissé local volontairement.** Les tables `diag_*` (`diag_topologie`, `diag_reseau_evenements`, `diag_metriques`, `diag_baie_snapshot`…) restent non synchronisées : caches et séries temporelles reconstruits par le SNMP sur site, sans intérêt à distance (`diag_baie_snapshot` réécrit toutes les ~5 min → tempête de sync pour rien).
+
+**Déploiement.** À installer sur toutes les instances. `test_sync_client_instantane.py` nouveau (10 vérifications : ré-indexation, idempotence, `sqlite_sequence`, `_sync_applying` revidé, drapeau, suivi + seed). Suites sync existantes inchangées.
+
+---
+
 ## [2.33.12] - 2026-09-13 🔬
 
 ### Baie de brassage : audit complet du mécanisme de collecte SNMP, 13 améliorations
