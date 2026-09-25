@@ -254,14 +254,36 @@ class TursoConnection:
         }
         conn = self._get_conn()
         try:
+            # Une requête volumineuse (rapports de collecte) a besoin de plus que
+            # le délai des petites requêtes, sinon elle échoue à chaque cycle.
+            delai = max(self._timeout, 60) if len(payload) > 200_000 else self._timeout
+            conn.timeout = delai
+            sock = getattr(conn, 'sock', None)
+            if sock is not None:
+                sock.settimeout(delai)
             conn.request("POST", "/v2/pipeline", body=payload, headers=headers)
             resp = conn.getresponse()
-            data = _json.loads(resp.read())
+            brut = resp.read()
+            statut = resp.status
         except Exception:
             # Connexion brisée → reset pour le prochain appel
             self.close()
             raise
-        results = data.get("results", [])
+        try:
+            data = _json.loads(brut)
+        except ValueError:
+            data = {}
+        # Un refus HTTP (corps trop gros, jeton rejeté, erreur serveur) renvoie
+        # un JSON SANS « results » : traité comme un succès vide, la sync purgeait
+        # alors le journal local alors que rien n'avait été écrit sur Turso —
+        # les grosses lignes (rapport du collecteur) disparaissaient sans erreur.
+        results = data.get("results") if isinstance(data, dict) else None
+        if statut >= 400 or not isinstance(results, list) or len(results) < len(statements):
+            detail = ''
+            if isinstance(data, dict):
+                err = data.get("error")
+                detail = (err.get("message") if isinstance(err, dict) else err) or ''
+            raise Exception("Turso HTTP %s%s" % (statut, (': ' + str(detail)[:200]) if detail else ''))
         # Last item is the "close" response — ignore it
         return results[: len(statements)]
 
@@ -305,13 +327,16 @@ class TursoConnection:
         dont les enregistrements orphelins existent en local (SQLite FK désactivées).
         """
         _fk_off = {"type": "execute", "stmt": {"sql": "PRAGMA foreign_keys = OFF", "args": []}}
-        reqs = [_fk_off] + [{
-            "type": "execute",
-            "stmt": {"sql": s, "args": [_t_enc(p) for p in (par or [])]}
-        } for s, par in statements]
-        results = self._pipeline(reqs)
-        # Ignorer le résultat du PRAGMA (premier élément)
-        return [self._parse_result(r) for r in results[1:]]
+        sortie = []
+        for lot in _lots_par_taille(statements):
+            reqs = [_fk_off] + [{
+                "type": "execute",
+                "stmt": {"sql": s, "args": [_t_enc(p) for p in (par or [])]}
+            } for s, par in lot]
+            results = self._pipeline(reqs)
+            # Ignorer le résultat du PRAGMA (premier élément)
+            sortie.extend(self._parse_result(r) for r in results[1:])
+        return sortie
 
     def cursor(self):
         """Retourne self pour compatibilité avec le pattern conn.cursor().execute()."""
@@ -345,6 +370,40 @@ def test_turso(url: str, token: str):
 # ─── MIGRATION ───────────────────────────────────────────────────────────────
 
 _BATCH_SIZE = 150   # lignes par requête pipeline Turso
+
+# Taille maximale (approximative, en octets) d'une requête pipeline. Le nombre
+# de lignes seul ne suffit pas : une fiche appareil porte le rapport complet du
+# collecteur (jusqu'à 1 Mo) — 150 fiches pouvaient former une requête de
+# plusieurs dizaines de Mo, refusée par Turso.
+_MAX_PIPELINE_BYTES = 1_000_000
+
+
+def _taille_stmt(sql: str, par) -> int:
+    n = len(sql)
+    for p in (par or ()):
+        if isinstance(p, (bytes, bytearray)):
+            n += len(p) * 4 // 3 + 32
+        elif isinstance(p, str):
+            n += len(p) + 32
+        else:
+            n += 32
+    return n
+
+
+def _lots_par_taille(statements: list, max_bytes: int = _MAX_PIPELINE_BYTES):
+    """Découpe des instructions (sql, params) en lots de taille bornée.
+
+    Une instruction plus grosse que la limite part seule (jamais scindée)."""
+    lot, taille = [], 0
+    for stmt in statements:
+        t = _taille_stmt(stmt[0], stmt[1])
+        if lot and taille + t > max_bytes:
+            yield lot
+            lot, taille = [], 0
+        lot.append(stmt)
+        taille += t
+    if lot:
+        yield lot
 
 def migrate_db(source, target):
     """
@@ -788,11 +847,18 @@ def _apply_table_changes(source, target, tbl: str, pk_col: str, changes: dict):
     to_turso = isinstance(target, TursoConnection)
 
     upsert_ids = changes.get('INSERT', set()) | changes.get('UPDATE', set())
-    if upsert_ids:
+    # Lecture par paquets quand la source est Turso : une fiche appareil porte
+    # le rapport complet du collecteur (jusqu'à 1 Mo) ; ramener des dizaines de
+    # fiches dans UNE réponse HTTP dépassait le délai imparti et faisait
+    # échouer le pull de toute la table (les données n'arrivaient jamais).
+    ids_liste = list(upsert_ids)
+    pas_lecture = 20 if isinstance(source, TursoConnection) else max(1, len(ids_liste))
+    for debut in range(0, len(ids_liste), pas_lecture):
+        paquet = ids_liste[debut: debut + pas_lecture]
         rows = source.execute(
             f"SELECT {col_list_br} FROM [{tbl}] WHERE [{pk_col}] IN "
-            f"({','.join('?' * len(upsert_ids))})",
-            list(upsert_ids)
+            f"({','.join('?' * len(paquet))})",
+            paquet
         ).fetchall()
 
         if rows:

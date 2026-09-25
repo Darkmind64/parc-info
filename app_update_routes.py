@@ -93,6 +93,13 @@ def register_update_routes(app):
             rattraper_sync_baie_slot_ports()
         except Exception:
             pass
+        # Résultats de collecte jamais parvenus aux autres instances (voir
+        # rattraper_sync_collectes) — même raison d'être ici.
+        try:
+            from app import rattraper_sync_collectes
+            rattraper_sync_collectes()
+        except Exception:
+            pass
         # Idem pour baie_prises_murales (prises murales issues de la
         # migration piece/appareil/périphérique d'un port de bandeau RJ,
         # voir init_db()) — même raison d'être.

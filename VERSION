@@ -1,9 +1,34 @@
-PARCINFO_VERSION=2.33.15
-RELEASE_DATE=2026-09-13
-BUILD_NUMBER=2026091305
+PARCINFO_VERSION=2.33.16
+RELEASE_DATE=2026-09-25
+BUILD_NUMBER=2026092501
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.33.16 - Synchronisation : les resultats de collecte arrivent
+# enfin sur les autres instances
+#
+# Signale : un client cree par un utilisateur, scanne et collecte, puis
+# partage a un autre utilisateur : la liste des appareils arrivait, mais
+# pas les resultats de la collecte. Aucun defaut de droits d'acces (la
+# lecture passe par le client actif), la cause est dans la synchro Turso :
+# une fiche avec son rapport (jusqu'a 1 Mo) pouvait ne jamais l'atteindre.
+#
+# - Un refus HTTP de Turso (corps trop gros...) etait pris pour un succes :
+#   la modification quittait la file d'envoi sans rien avoir ete ecrite.
+#   Il leve maintenant une erreur, visible dans le journal de synchro.
+# - Envois decoupes par taille (~1 Mo) au lieu de 150 fiches par requete,
+#   lecture des fiches par paquets de 20, delai de 60 s pour les grosses
+#   requetes.
+# - /api/device-info met a jour date_maj : sans cela, le rapport collecte
+#   paraissait aussi vieux que la version de la fiche d'une autre instance
+#   (scan initial + ping en attente), qui l'emportait et l'ecrasait.
+# - Rattrapage unique : les collectes deja recues sont renvoyees vers Turso
+#   (fiches, releves, cles BitLocker, licences, MAC secondaires).
+# - Partage de client : le changement de niveau met a jour la meme ligne
+#   (INSERT OR REPLACE recreait la ligne avec un nouvel id), niveau limite
+#   a lecture/ecriture.
+#
+# Tests : test_sync_collecte_partage.py (nouveau), 442 tests pytest OK.
 # Version 2.33.15 - Baie de brassage : LED de port vert/rouge des
 # l'ouverture, sans attendre un clic sur "Ping toute la baie"
 #
