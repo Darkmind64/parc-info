@@ -1,9 +1,34 @@
-PARCINFO_VERSION=2.33.16
+PARCINFO_VERSION=2.33.17
 RELEASE_DATE=2026-09-25
-BUILD_NUMBER=2026092501
+BUILD_NUMBER=2026092502
 GIT_BRANCH=master
 STATUS=STABLE
 
+# Version 2.33.17 - Synchronisation : la collecte n'est plus ecrasee par
+# une fiche retouchee ailleurs
+#
+# Suite de 2.33.16. Constat : chez un utilisateur consultant depuis une
+# autre instance, les licences et le rapport PDF (tables a part) arrivent
+# mais pas la fiche systeme ni la plupart des champs collectes, qui vivent
+# dans la ligne appareils.
+#
+# Cause : la ligne appareils est repliquee en entier et date_maj decide
+# de la version gagnante. Une instance qui retouche la fiche APRES la
+# collecte (scan, modification, ping en attente) l'emporte, et repousse sa
+# ligne sans rapport sur Turso, donc partout ; la collecte reste seulement
+# sur l'instance qui l'a recue.
+#
+# Correction (database.py) : les colonnes de collecte (rapport, logiciels,
+# os, cpu, ram, stockage, antivirus, GPU, IP publique...) ont leur propre
+# horloge, derniere_synchro, independante de date_maj :
+# - avant un PUSH d'appareils, la collecte plus recente presente sur Turso
+#   est reprise localement (_integrer_collecte_distante) ;
+# - apres un PULL, une collecte locale plus recente que celle de la ligne
+#   recue est remise et renvoyee (_sauver/_restaurer_collecte_locale).
+# Les autres champs suivent toujours date_maj.
+#
+# Tests : test_sync_collecte_partage.py (scenarios 2bis/2ter/2quater),
+# suites de synchro et pytest OK.
 # Version 2.33.16 - Synchronisation : les resultats de collecte arrivent
 # enfin sur les autres instances
 #

@@ -1,26 +1,24 @@
 {
-  "version": "2.33.16",
+  "version": "2.33.17",
   "release_date": "2026-09-25",
   "github_repo": "Darkmind64/parc-info",
   "downloads": {
-    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.16/ParcInfo-Windows.exe",
-    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.16/ParcInfo-macOS-ARM.zip",
-    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.16/ParcInfo-macOS-Intel.zip",
-    "docker": "docker pull darkmind64/parcinfo:v2.33.16",
-    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.16/system-info-collector-gui.exe",
-    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.16/system-info-collector.exe",
-    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.16/system-info-collector-macOS-Intel.zip",
-    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.16/system-info-collector-gui-macOS-Intel.zip",
-    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.16/SHA256SUMS.txt"
+    "windows_installer": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.17/ParcInfo-Windows.exe",
+    "macos_app": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.17/ParcInfo-macOS-ARM.zip",
+    "macos_app_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.17/ParcInfo-macOS-Intel.zip",
+    "docker": "docker pull darkmind64/parcinfo:v2.33.17",
+    "collector_gui": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.17/system-info-collector-gui.exe",
+    "collector_cli": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.17/system-info-collector.exe",
+    "collector_cli_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.17/system-info-collector-macOS-Intel.zip",
+    "collector_gui_macos_intel": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.17/system-info-collector-gui-macOS-Intel.zip",
+    "sha256sums": "https://github.com/Darkmind64/parc-info/releases/download/v2.33.17/SHA256SUMS.txt"
   },
   "notes": {
-    "new_features": "Synchronisation multi-instance : les resultats de collecte (rapport systeme, historique, cles BitLocker, licences) n'arrivaient pas sur les autres instances, par exemple chez un utilisateur a qui un client est partage. Un refus HTTP de Turso (requete trop grosse) etait traite comme un succes et la modification quittait la file d'envoi. Erreurs desormais remontees, envois et lectures par paquets bornes en taille, collecte consideree comme modification recente, et renvoi automatique, une seule fois, des collectes deja concernees. Le changement de niveau d'un partage met a jour la meme ligne au lieu de la recreer.",
+    "new_features": "Synchronisation multi-instance : le rapport systeme et les champs collectes (OS, CPU, RAM, stockage, antivirus, logiciels, IP publique) n'apparaissaient pas chez un utilisateur consultant depuis une autre instance, alors que licences et rapport PDF arrivaient. La fiche appareil est repliquee en entier et la plus recente d'apres date_maj l'emportait : une instance qui retouchait la fiche apres la collecte effacait le rapport, y compris sur Turso. Les champs de collecte ont maintenant leur propre horloge (derniere_synchro) : la collecte la plus recente est reprise avant chaque envoi vers Turso et remise apres chaque reception.",
     "improvements": [
-      "Turso : un refus HTTP ou une reponse sans resultats leve maintenant une erreur au lieu d'etre pris pour un succes.",
-      "Turso : envois limites a environ 1 Mo par requete, lecture des fiches par paquets de 20, delai de 60 s pour les grosses requetes.",
-      "Collecteur : la mise a jour d'une fiche par /api/device-info met a jour date_maj (base de la decision de synchro).",
-      "Rattrapage unique au demarrage : les fiches collectees, leurs releves, cles de recuperation, licences et MAC secondaires sont renvoyes vers Turso.",
-      "Partage de client : changement de niveau par UPDATE de la meme ligne (plus de nouvel id), niveau limite a lecture/ecriture."
+      "Synchro : avant d'envoyer une fiche appareil, la collecte plus recente presente sur Turso est reprise localement (plus d'ecrasement du rapport par une fiche sans collecte).",
+      "Synchro : apres une reception, une collecte locale plus recente que celle de la ligne recue est remise et renvoyee a Turso.",
+      "Les autres champs de la fiche continuent de suivre la regle date_maj."
     ]
   },
   "checksums": {
@@ -31,5 +29,5 @@
     "windows_installer_bytes": 0,
     "macos_app_bytes": 0
   },
-  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.16"
+  "release_notes_url": "https://github.com/Darkmind64/parc-info/releases/tag/v2.33.17"
 }

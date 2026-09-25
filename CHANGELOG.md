@@ -1,5 +1,23 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.17] - 2026-09-25 🔄
+
+### Synchronisation : la collecte n'est plus écrasée par une fiche retouchée ailleurs
+
+Suite de 2.33.16. Constat en usage réel : chez l'utilisateur qui consulte depuis une autre instance, les licences et le rapport PDF (tables séparées) arrivent, mais ni la fiche système ni la plupart des champs collectés (OS, CPU, RAM…), qui vivent dans la ligne `appareils`. Pas de défaut de droits d'accès.
+
+**Cause.** La ligne `appareils` est répliquée en entier et `date_maj` décide de la version gagnante (`_proteger_versions_locales`). Une instance qui retouche la fiche APRÈS la collecte (scan, modification, ping en attente de push) l'emporte : elle garde sa version sans rapport et la repousse sur Turso, donc partout. La collecte ne subsiste que sur l'instance qui l'a reçue.
+
+**Correction (`database.py`).** Les colonnes de collecte (`_COLONNES_COLLECTE` : rapport, logiciels, OS, version, RAM, CPU, stockage, antivirus, carte graphique, IP publique, opérateur, `derniere_synchro`) ont leur propre horloge, `derniere_synchro`, indépendante de `date_maj` :
+- avant un PUSH de fiches appareils, `_integrer_collecte_distante` reprend de Turso la collecte si elle est plus récente que la locale (lecture par petits paquets, sans effet et sans erreur si Turso est injoignable) ;
+- autour d'un PULL, `_sauver_collecte_locale` / `_restaurer_collecte_locale` remettent la collecte locale si elle est plus récente que celle de la ligne reçue, et la re-journalisent pour corriger Turso.
+Les autres champs de la fiche suivent toujours la règle `date_maj`. Nouvelles clés de statistiques de synchro : `collectes_locales_restaurees` et `collectes_distantes_reprises`.
+
+**À faire.** Installer sur TOUTES les instances ; la première à se lancer renvoie sa collecte à Turso (rattrapage de 2.33.16), les autres la reprennent au cycle de synchro suivant.
+
+Tests : `test_sync_collecte_partage.py` (scénarios 2bis, 2ter, 2quater : fiche retouchée plus tard ailleurs, ligne distante périmée, collecte plus récente d'une autre instance) ; suites de synchro et pytest OK.
+
+---
 ## [2.33.16] - 2026-09-25 🔄
 
 ### Synchronisation : les résultats de collecte arrivent enfin sur les autres instances
