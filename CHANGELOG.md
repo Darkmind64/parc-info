@@ -1,5 +1,23 @@
 # CHANGELOG - ParcInfo
 
+## [2.33.16] - 2026-09-25 🔄
+
+### Synchronisation : les résultats de collecte arrivent enfin sur les autres instances
+
+Signalé en usage réel : un client créé par un utilisateur (Stéphane), scanné et collecté, puis partagé à un autre utilisateur (Davy) — la liste des appareils arrivait, mais pas les résultats de la collecte (fiche système, historique, clés BitLocker…). Ces données existaient bien sur l'instance de collecte. Aucun défaut de droits d'accès n'a été trouvé (fiche système, historique, documents et clés passent tous par le client actif et `get_client_access`) : la cause est dans la synchronisation Turso.
+
+**Cause.** Une fiche appareil porte le rapport complet du collecteur (jusqu'à 1 Mo). `TursoConnection._pipeline` traitait un refus HTTP (corps trop gros, erreur serveur) comme un succès vide : le journal local était purgé alors que rien n'avait été écrit sur Turso. Les appareils issus du scan (lignes légères) passaient, pas les mises à jour lourdes de la collecte. En parallèle, `/api/device-info` ne mettait pas à jour `appareils.date_maj` alors que `_proteger_versions_locales` s'en sert pour décider quelle version d'une fiche garder : une autre instance (fiche du scan + ping en attente) pouvait l'emporter et repousser sa version périmée sur Turso.
+
+**Corrections.**
+- `database.py` : `_pipeline` lève une erreur sur un statut HTTP ≥ 400, un corps non JSON ou une réponse sans « results » ; `pipeline_exec` découpe par taille (`_MAX_PIPELINE_BYTES` ≈ 1 Mo, `_lots_par_taille`) ; `_apply_table_changes` lit les fiches Turso par paquets de 20 ; délai de 60 s pour les requêtes > 200 Ko.
+- `app.py` : `/api/device-info` et `completer_fiches_existantes` mettent à jour `date_maj` ; nouveau rattrapage unique `rattraper_sync_collectes` (branché dans `app_update_routes.py`) qui ramène `date_maj` à la date de la collecte quand elle est plus récente puis re-journalise fiches collectées, `collectes`, `cles_recuperation`, `licences_appareils` et `appareil_macs`.
+- `partager_client` : le changement de niveau fait un `UPDATE` de la ligne existante au lieu d'un `INSERT OR REPLACE` (qui recréait la ligne avec un nouvel id, qu'une instance en retard pouvait relire et annuler) ; niveau limité à `lecture`/`ecriture`.
+
+**À faire.** Installer cette version sur TOUTES les instances (la première à se lancer renvoie ses collectes), attendre un ou deux cycles de synchro, puis rouvrir une fiche système depuis l'autre compte. Si des résultats manquent encore, la dernière erreur du « Journal de synchronisation » nomme désormais l'erreur Turso exacte.
+
+Tests : `test_sync_collecte_partage.py` (nouveau, bout en bout collecte → date_maj, rattrapage, ping en attente, partage et changement de droits répliqués, refus HTTP, découpage par taille) ; 442 tests pytest OK.
+
+---
 ## [2.33.15] - 2026-09-13 🟢
 
 ### Baie de brassage : LED de port vert/rouge dès l'ouverture, sans attendre un clic sur « Ping toute la baie »

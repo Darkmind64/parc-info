@@ -12524,9 +12524,9 @@ def completer_fiches_existantes():
                 conn, appareil.get('client_id'), rapport, appareil)
             if not deduits:
                 continue
-            conn.execute('UPDATE appareils SET %s WHERE id=?'
+            conn.execute('UPDATE appareils SET %s, date_maj=? WHERE id=?'
                          % ', '.join('%s=?' % c for c in deduits),
-                         list(deduits.values()) + [appareil['id']])
+                         list(deduits.values()) + [_utcnow().isoformat(), appareil['id']])
             completes += 1
 
         conn.commit()
@@ -12537,6 +12537,74 @@ def completer_fiches_existantes():
         return completes
     except Exception:
         logger.exception('Rattrapage des fiches appareils (sans conséquence)')
+        return 0
+    finally:
+        conn.close()
+
+
+#: Rattrapage des collectes jamais parvenues aux autres instances : avant la
+#: correction du transport Turso (refus HTTP traité comme un succès) et du
+#: bump de `date_maj` par la collecte, les grosses fiches (rapport système)
+#: pouvaient ne jamais atteindre Turso tout en ayant été retirées du journal
+#: local — les résultats existaient sur l'instance de collecte, mais restaient
+#: invisibles partout ailleurs (un utilisateur qui consulte depuis une autre
+#: instance ne voyait que la fiche issue du scan).
+_CLE_RATTRAPAGE_COLLECTES = '_collectes_journalisees_v1'
+_rattrapage_collectes_fait = False
+
+
+def rattraper_sync_collectes():
+    """Renvoie (une seule fois par base) les résultats de collecte vers Turso.
+
+    1. `date_maj` des fiches collectées est ramené à la date de la collecte
+       quand celle-ci est plus récente : c'est ce que la collecte aurait dû
+       faire, et c'est ce qui fait primer ce rapport sur une version plus
+       ancienne de la même fiche détenue par une autre instance.
+    2. Les fiches portant un rapport, leurs relevés historisés, clés de
+       récupération, licences et MAC secondaires sont (re)journalisés : la
+       synchronisation habituelle les pousse au cycle suivant.
+    Sans effet sur une instance qui n'a jamais reçu de collecte.
+    """
+    global _rattrapage_collectes_fait
+    if _rattrapage_collectes_fait:
+        return 0
+    _rattrapage_collectes_fait = True
+
+    conn = get_db()
+    try:
+        if (cfg_get(_CLE_RATTRAPAGE_COLLECTES, '') or '').strip():
+            return 0
+
+        conn.execute(
+            "UPDATE appareils SET date_maj=derniere_synchro "
+            "WHERE rapport_systeme_json IS NOT NULL AND rapport_systeme_json != '' "
+            "AND derniere_synchro IS NOT NULL AND derniere_synchro != '' "
+            "AND derniere_synchro > COALESCE(date_maj, '')")
+
+        now = _utcnow().isoformat()
+        total = 0
+        sources = [
+            ('appareils', 'id', "SELECT id FROM appareils WHERE rapport_systeme_json IS NOT NULL "
+                                "AND rapport_systeme_json != ''"),
+            ('collectes', 'cle', 'SELECT cle FROM collectes'),
+            ('cles_recuperation', 'cle', 'SELECT cle FROM cles_recuperation'),
+            ('licences_appareils', 'id', 'SELECT id FROM licences_appareils'),
+            ('appareil_macs', 'id', 'SELECT id FROM appareil_macs'),
+        ]
+        for tbl, _pk, requete in sources:
+            for (rid,) in conn.execute(requete).fetchall():
+                conn.execute("DELETE FROM _sync_journal WHERE tbl=? AND record_id=? AND action='UPDATE'",
+                             (tbl, str(rid)))
+                conn.execute("INSERT INTO _sync_journal (tbl, record_id, action, timestamp) "
+                             "VALUES (?, ?, 'UPDATE', ?)", (tbl, str(rid), now))
+                total += 1
+        conn.commit()
+        cfg_set(_CLE_RATTRAPAGE_COLLECTES, _utcnow().isoformat(timespec='seconds'))
+        if total:
+            logger.info('Rattrapage sync collectes : %d enregistrement(s) journalisé(s)', total)
+        return total
+    except Exception:
+        logger.exception('Rattrapage sync collectes (sans conséquence)')
         return 0
     finally:
         conn.close()
@@ -13016,6 +13084,15 @@ def api_device_info():
 
             # Toujours mettre à jour la date de dernière synchronisation
             updates.append('derniere_synchro=?')
+            params.append(now)
+
+            # `date_maj` fait autorité pour la synchronisation multi-instance
+            # (database._proteger_versions_locales) : sans ce bump, le rapport
+            # collecté paraît « aussi vieux » que la version de la même fiche
+            # détenue par une autre instance (scan initial, ping en attente de
+            # push) — celle-ci gagnait alors, repoussait sa ligne périmée sur
+            # Turso et effaçait partout les résultats de la collecte.
+            updates.append('date_maj=?')
             params.append(now)
 
             if updates:
@@ -18515,9 +18592,24 @@ def partager_client(cid):
         if action == 'ajouter':
             target_uid = request.form.get('user_id')
             niveau     = request.form.get('niveau','lecture')
+            if niveau not in ('lecture', 'ecriture'):
+                niveau = 'lecture'
             if target_uid:
-                conn.execute('INSERT OR REPLACE INTO client_partages (client_id,auth_user_id,niveau,date_partage) VALUES (?,?,?,?)',
-                    (cid, int(target_uid), niveau, now))
+                # UPDATE sur la ligne existante plutôt que INSERT OR REPLACE :
+                # ce dernier supprime la ligne et en recrée une avec un NOUVEL id.
+                # Pour la synchro multi-instance, l'ancien id reste alors connu
+                # des autres instances (jamais journalisé comme supprimé) ; une
+                # instance en retard qui le relit écrase en local le changement
+                # de droits qu'on vient de faire (conflit sur UNIQUE(client,user)).
+                existant = conn.execute(
+                    'SELECT id FROM client_partages WHERE client_id=? AND auth_user_id=?',
+                    (cid, int(target_uid))).fetchone()
+                if existant:
+                    conn.execute('UPDATE client_partages SET niveau=?, date_partage=? WHERE id=?',
+                                 (niveau, now, existant[0]))
+                else:
+                    conn.execute('INSERT INTO client_partages (client_id,auth_user_id,niveau,date_partage) VALUES (?,?,?,?)',
+                        (cid, int(target_uid), niveau, now))
                 conn.commit()
                 flash('Partage ajouté', 'success')
         elif action == 'supprimer':
