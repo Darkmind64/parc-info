@@ -110,7 +110,8 @@ _JOURNAL = """CREATE TABLE _sync_journal (
 def _db():
     c = sqlite3.connect(':memory:')
     c.execute("CREATE TABLE appareils (id INTEGER PRIMARY KEY, client_id INTEGER, "
-              "nom_machine TEXT, en_ligne INTEGER, rapport_systeme_json TEXT, date_maj TEXT)")
+              "nom_machine TEXT, en_ligne INTEGER, rapport_systeme_json TEXT, date_maj TEXT, "
+              "derniere_synchro TEXT, os TEXT, localisation TEXT)")
     c.execute("CREATE TABLE collectes (cle TEXT PRIMARY KEY, appareil_id INTEGER, "
               "client_id INTEGER, horodatage TEXT, date_maj TEXT)")
     c.execute("CREATE TABLE cles_recuperation (cle TEXT PRIMARY KEY, appareil_id INTEGER, "
@@ -133,12 +134,14 @@ def _jrn(c, tbl, rid, action='UPDATE', ts='2026-09-10T08:14:00'):
 print('\n=== 2. Un ping en attente sur l\'autre instance n\'efface plus la collecte ===')
 inst_b, turso = _db(), _db()
 # B connaît la fiche telle que créée par le scan (T0), et un ping est en attente.
-inst_b.execute("INSERT INTO appareils VALUES (42, 1, 'POSTE-01', 1, NULL, '2026-09-10T08:00:00')")
+inst_b.execute("INSERT INTO appareils (id, client_id, nom_machine, en_ligne, rapport_systeme_json, date_maj) "
+               "VALUES (42, 1, 'POSTE-01', 1, NULL, '2026-09-10T08:00:00')")
 inst_b.commit()
 _jrn(inst_b, 'appareils', 42, ts='2026-09-10T08:30:00')
 # La collecte (instance A) a poussé sur Turso, avec date_maj bumpé.
-turso.execute("INSERT INTO appareils VALUES (42, 1, 'POSTE-01', 1, '{\"cpu\":\"Intel\"}', "
-              "'2026-09-10T09:00:00')")
+turso.execute("INSERT INTO appareils (id, client_id, nom_machine, en_ligne, rapport_systeme_json, date_maj, "
+              "derniere_synchro) VALUES (42, 1, 'POSTE-01', 1, '{\"cpu\":\"Intel\"}', "
+              "'2026-09-10T09:00:00', '2026-09-10T09:00:00')")
 turso.commit()
 _jrn(turso, 'appareils', 42, ts='2026-09-10T09:00:05')
 
@@ -148,6 +151,70 @@ verifier(inst_b.execute("SELECT rapport_systeme_json FROM appareils WHERE id=42"
          'le rapport collecté arrive sur l\'instance B')
 verifier(turso.execute("SELECT rapport_systeme_json FROM appareils WHERE id=42").fetchone()[0],
          'et n\'est pas effacé sur Turso par la ligne périmée de B')
+
+
+def _rapport(c, rid):
+    r = c.execute("SELECT rapport_systeme_json FROM appareils WHERE id=?", (rid,)).fetchone()
+    return r[0] if r else None
+
+
+def _loc(c, rid):
+    r = c.execute("SELECT localisation FROM appareils WHERE id=?", (rid,)).fetchone()
+    return r[0] if r else None
+
+
+print('\n=== 2bis. Fiche retouchée plus tard ailleurs (date_maj plus récent) : la collecte survit ===')
+# Cas du signalement : l'autre instance a modifié la fiche APRÈS la collecte
+# (scan, édition, ping) → date_maj plus récent, mais aucun rapport.
+inst_b, turso = _db(), _db()
+inst_b.execute("INSERT INTO appareils (id, client_id, nom_machine, en_ligne, date_maj, localisation) "
+               "VALUES (44, 1, 'POSTE-02', 1, '2026-09-10T12:00:00', 'Bureau B')")
+inst_b.commit()
+_jrn(inst_b, 'appareils', 44, ts='2026-09-10T12:00:00')
+turso.execute("INSERT INTO appareils (id, client_id, nom_machine, en_ligne, rapport_systeme_json, date_maj, "
+              "derniere_synchro, os) VALUES (44, 1, 'POSTE-02', 1, '{\"cpu\":\"AMD\"}', "
+              "'2026-09-10T09:00:00', '2026-09-10T09:00:00', 'Windows')")
+turso.commit()
+_jrn(turso, 'appareils', 44, ts='2026-09-10T09:00:05')
+stats, errors = D._sync_using_journal(inst_b, turso)
+verifier(not errors, 'sync sans erreur', str(errors))
+verifier(_rapport(inst_b, 44) == '{"cpu":"AMD"}', 'la collecte est reprise sur l\'instance qui a retouché la fiche')
+verifier(_loc(inst_b, 44) == 'Bureau B', 'sa modification locale est conservée')
+verifier(_rapport(turso, 44) == '{"cpu":"AMD"}', 'Turso ne perd pas le rapport')
+verifier(_loc(turso, 44) == 'Bureau B', 'et reçoit la modification locale')
+verifier(inst_b.execute("SELECT os FROM appareils WHERE id=44").fetchone()[0] == 'Windows',
+         'les colonnes système (os…) arrivent aussi')
+
+print('\n=== 2ter. Ligne distante périmée plus récente : la collecte locale est remise ===')
+inst_a, turso = _db(), _db()
+inst_a.execute("INSERT INTO appareils (id, client_id, nom_machine, en_ligne, rapport_systeme_json, date_maj, "
+               "derniere_synchro) VALUES (45, 1, 'POSTE-03', 1, '{\"cpu\":\"Intel\"}', "
+               "'2026-09-10T09:00:00', '2026-09-10T09:00:00')")
+inst_a.commit()
+turso.execute("INSERT INTO appareils (id, client_id, nom_machine, en_ligne, date_maj, localisation) "
+              "VALUES (45, 1, 'POSTE-03', 1, '2026-09-10T12:00:00', 'Salle 2')")
+turso.commit()
+_jrn(turso, 'appareils', 45, ts='2026-09-10T12:00:05')
+stats, errors = D._sync_using_journal(inst_a, turso)
+verifier(not errors, 'sync sans erreur', str(errors))
+verifier(_loc(inst_a, 45) == 'Salle 2', 'la modification distante plus récente est appliquée')
+verifier(_rapport(inst_a, 45) == '{"cpu":"Intel"}', 'sans effacer la collecte locale')
+verifier(_rapport(turso, 45) == '{"cpu":"Intel"}', 'et la collecte est renvoyée sur Turso')
+
+print('\n=== 2quater. Une collecte plus récente d\'une autre instance n\'est pas écrasée par une plus ancienne ===')
+inst_b, turso = _db(), _db()
+inst_b.execute("INSERT INTO appareils (id, client_id, nom_machine, rapport_systeme_json, date_maj, "
+               "derniere_synchro) VALUES (46, 1, 'POSTE-04', '{\"v\":1}', '2026-09-10T08:00:00', "
+               "'2026-09-10T08:00:00')")
+inst_b.commit()
+_jrn(inst_b, 'appareils', 46, ts='2026-09-10T08:30:00')
+turso.execute("INSERT INTO appareils (id, client_id, nom_machine, rapport_systeme_json, date_maj, "
+              "derniere_synchro) VALUES (46, 1, 'POSTE-04', '{\"v\":2}', '2026-09-10T08:00:00', "
+              "'2026-09-10T11:00:00')")
+turso.commit()
+D._sync_using_journal(inst_b, turso)
+verifier(_rapport(turso, 46) == '{"v":2}', 'la collecte la plus récente reste sur Turso', str(_rapport(turso, 46)))
+verifier(_rapport(inst_b, 46) == '{"v":2}', 'et est reprise localement', str(_rapport(inst_b, 46)))
 
 
 # ── 3. Partage + tables de collecte à clé texte ─────────────────────────────

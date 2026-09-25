@@ -989,6 +989,117 @@ def _proteger_versions_locales(local, remote, tbl: str, pk_col: str, changes: di
     return filtre, len(garder)
 
 
+# Colonnes de `appareils` alimentées par le collecteur. La réplication se fait
+# par ligne entière et `date_maj` décide de la version gagnante : une fiche
+# retouchée plus tard sur une autre instance (scan, édition, ping) l'emportait
+# donc sur la collecte, y compris en la repoussant sur Turso. Ces colonnes ont
+# leur propre horloge — `derniere_synchro` — qui prime, indépendamment de
+# `date_maj`.
+_COLONNES_COLLECTE = (
+    'rapport_systeme_json', 'logiciels_installes_json', 'derniere_synchro',
+    'os', 'version_os', 'ram', 'cpu', 'stockage', 'antivirus', 'carte_graphique',
+    'adresse_ip_publique', 'operateur_ip_publique',
+)
+
+
+def _colonnes_collecte(local) -> list:
+    cols = set(_get_cols(local, 'appareils'))
+    if 'derniere_synchro' not in cols:
+        return []
+    return [c for c in _COLONNES_COLLECTE if c in cols]
+
+
+def _journaliser_maj(local, tbl, rid) -> None:
+    local.execute(
+        "INSERT INTO _sync_journal (tbl, record_id, action, timestamp) "
+        "VALUES (?, ?, 'UPDATE', datetime('now')) "
+        "ON CONFLICT(tbl, record_id, action) DO NOTHING", (tbl, str(rid)))
+
+
+def _sauver_collecte_locale(local, ids) -> dict:
+    """Instantané des colonnes de collecte des fiches locales déjà collectées,
+    pris AVANT qu'un pull ne remplace la ligne."""
+    cols = _colonnes_collecte(local)
+    if not cols or not ids:
+        return {}
+    snap = {}
+    ids = list(ids)
+    for i in range(0, len(ids), 200):
+        paquet = ids[i:i + 200]
+        for r in local.execute(
+                f"SELECT id, {', '.join(f'[{c}]' for c in cols)} FROM appareils "
+                f"WHERE id IN ({','.join('?' * len(paquet))}) "
+                f"AND COALESCE(derniere_synchro,'') != ''", paquet).fetchall():
+            snap[str(r[0])] = dict(zip(cols, list(r)[1:]))
+    return snap
+
+
+def _restaurer_collecte_locale(local, snap) -> int:
+    """Après un pull : si la fiche locale portait une collecte plus récente que
+    celle de la ligne distante qui vient de la remplacer, la remet et la
+    re-journalise (le PUSH corrige alors Turso)."""
+    if not snap:
+        return 0
+    cols = _colonnes_collecte(local)
+    n = 0
+    for rid, vals in snap.items():
+        row = local.execute("SELECT COALESCE(derniere_synchro,'') FROM appareils WHERE id=?",
+                            (rid,)).fetchone()
+        if row is None or (vals.get('derniere_synchro') or '') <= row[0]:
+            continue
+        local.execute(
+            f"UPDATE appareils SET {', '.join(f'[{c}]=?' for c in cols)} WHERE id=?",
+            [vals.get(c) for c in cols] + [rid])
+        _journaliser_maj(local, 'appareils', rid)
+        n += 1
+    if n:
+        local.commit()
+    return n
+
+
+def _integrer_collecte_distante(local, turso, ids) -> int:
+    """Avant un PUSH : pour les fiches sur le point d'être envoyées, reprend de
+    Turso la collecte quand celle-ci est plus récente que la locale — sans quoi
+    la ligne locale (sans le rapport) écraserait la collecte sur Turso."""
+    cols = _colonnes_collecte(local)
+    ids = [str(i) for i in ids]
+    if not cols or not ids:
+        return 0
+    n = 0
+    a_reprendre = []
+    for i in range(0, len(ids), 200):
+        paquet = ids[i:i + 200]
+        ph = ','.join('?' * len(paquet))
+        try:
+            distant = {str(k): (v or '') for k, v in turso.execute(
+                f"SELECT id, derniere_synchro FROM appareils WHERE id IN ({ph})", paquet).fetchall()}
+        except Exception:
+            return n          # Turso sans la colonne / injoignable : ne rien tenter
+        local_ds = {str(k): (v or '') for k, v in local.execute(
+            f"SELECT id, derniere_synchro FROM appareils WHERE id IN ({ph})", paquet).fetchall()}
+        a_reprendre += [k for k, dv in distant.items() if dv and dv > local_ds.get(k, '')]
+    if not a_reprendre:
+        return 0
+    local.execute("INSERT OR IGNORE INTO _sync_applying (id) VALUES (1)")
+    local.commit()
+    try:
+        for i in range(0, len(a_reprendre), 5):     # lignes lourdes : petits paquets
+            paquet = a_reprendre[i:i + 5]
+            for r in turso.execute(
+                    f"SELECT id, {', '.join(f'[{c}]' for c in cols)} FROM appareils "
+                    f"WHERE id IN ({','.join('?' * len(paquet))})", paquet).fetchall():
+                vals = list(r)
+                local.execute(
+                    f"UPDATE appareils SET {', '.join(f'[{c}]=?' for c in cols)} WHERE id=?",
+                    vals[1:] + [vals[0]])
+                n += 1
+        local.commit()
+    finally:
+        local.execute("DELETE FROM _sync_applying")
+        local.commit()
+    return n
+
+
 def _tables_suivies(conn) -> list:
     """Tables couvertes par un trigger `_trg_journal_upd_*` — miroir de
     `_TRACKED_JOURNAL` (app.py), dérivé du schéma pour éviter l'import croisé."""
@@ -1163,9 +1274,18 @@ def _sync_using_journal(local, turso) -> tuple:
                 ids_tbl = ids_by_table[tbl]
                 try:
                     pk_col = _pk_column(local, tbl)
+                    # Collecte locale plus récente que celle de la ligne distante
+                    # qui va peut-être la remplacer : à remettre après le pull.
+                    snap_collecte = (_sauver_collecte_locale(
+                        local, changes['INSERT'] | changes['UPDATE'])
+                        if tbl == 'appareils' else None)
                     changes, nb_locaux = _proteger_versions_locales(
                         local, turso, tbl, pk_col, changes)
                     _apply_table_changes(turso, local, tbl, pk_col, changes)
+                    if snap_collecte:
+                        nb_col = _restaurer_collecte_locale(local, snap_collecte)
+                        if nb_col:
+                            stats.setdefault(tbl, {})['collectes_locales_restaurees'] = nb_col
                     stats.setdefault(tbl, {})['pulled'] = len(changes['INSERT'] | changes['UPDATE'])
                     stats[tbl]['pulled_deletes'] = len(changes['DELETE'])
                     if nb_locaux:
@@ -1210,6 +1330,23 @@ def _sync_using_journal(local, turso) -> tuple:
     # ── PUSH : journal local → Turso ──────────────────────────────────────
     # Après le pull ci-dessus, pas avant : voir la note sur l'ordre en tête de
     # fonction (résurrection d'un appareil supprimé ailleurs).
+    #
+    # Avant d'envoyer des fiches appareils (un simple ping suffit à en journaliser
+    # une), reprendre de Turso la collecte si elle y est plus récente : envoyer
+    # la ligne locale telle quelle effacerait sur Turso, donc partout, le rapport
+    # système remonté par le collecteur.
+    try:
+        ids_app = [r[0] for r in local.execute(
+            "SELECT record_id FROM _sync_journal WHERE tbl='appareils' "
+            "AND action IN ('INSERT','UPDATE')").fetchall()]
+        if ids_app:
+            nb_col = _integrer_collecte_distante(local, turso, ids_app)
+            if nb_col:
+                stats.setdefault('appareils', {})['collectes_distantes_reprises'] = nb_col
+    except Exception:
+        # Étape de protection : ne doit jamais faire échouer ni masquer le PUSH.
+        __import__('logging').getLogger('parcinfo').debug(
+            'Reprise de collecte avant push ignorée', exc_info=True)
     try:
         journal_entries = local.execute(
             "SELECT id, tbl, record_id, action FROM _sync_journal ORDER BY id"
